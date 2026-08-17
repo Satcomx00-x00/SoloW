@@ -1,6 +1,7 @@
 import "server-only";
 import { secretRefDto, setSecretInput } from "@gatecontrol/contracts";
-import { setSecret } from "../dal/secret.js";
+import { z } from "zod";
+import { listSecretRefs, setSecret } from "../dal/secret.js";
 import { ownerProcedure, rateLimit, router, unwrap } from "../trpc.js";
 
 export const secretRouter = router({
@@ -11,4 +12,11 @@ export const secretRouter = router({
     .input(setSecretInput)
     .output(secretRefDto)
     .mutation(async ({ ctx, input }) => unwrap(await setSecret(ctx.rctx, input))),
+
+  /** List Secret metadata (id/name/kind) — never the value. */
+  list: ownerProcedure
+    .meta({ openapi: { method: "GET", path: "/secret.list", tags: ["secret"], protect: true } })
+    .input(z.object({}))
+    .output(z.array(secretRefDto))
+    .query(async ({ ctx }) => unwrap(await listSecretRefs(ctx.rctx))),
 });

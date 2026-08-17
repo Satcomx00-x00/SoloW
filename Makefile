@@ -31,8 +31,8 @@ typecheck: ## Typecheck every workspace package
 build: install lint typecheck db-generate openapi-check ## Install, lint, typecheck, migrations, OpenAPI
 	@echo "build complete (lint + typecheck + migrations + openapi). SPA bundling arrives with Phase 4."
 
-test: ## Run all unit tests (bun test)
-	bun test
+test: ## Run all unit tests (per-package, picks up each bunfig preload)
+	bun run test
 
 smoke: ## Run the end-to-end smoke test (in-memory DB, fake agent, temp git repo)
 	bun run scripts/smoke.ts

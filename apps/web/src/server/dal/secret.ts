@@ -8,9 +8,19 @@ import {
   type SetSecretInput,
 } from "@gatecontrol/contracts";
 import { encryptSecret, secret } from "@gatecontrol/db";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
 import { secretToRef } from "./mappers.js";
+
+/** List Secret *metadata* (id/name/kind) — never the value (Principle IV). */
+export async function listSecretRefs(ctx: RequestContext): Promise<Result<SecretRefDto[]>> {
+  const rows = await ctx.db
+    .select({ id: secret.id, name: secret.name, kind: secret.kind })
+    .from(secret)
+    .where(eq(secret.workspaceId, ctx.workspaceId))
+    .orderBy(desc(secret.createdAt));
+  return ok(rows.map(secretToRef));
+}
 
 /**
  * Set (create or replace) a Secret. The value is encrypted before storage and the

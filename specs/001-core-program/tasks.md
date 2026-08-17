@@ -138,6 +138,28 @@ Phase 4 vertical slice (sixth `/speckit-implement`) — **VERIFIED** (build unde
 **Still not started:** TASK-022 review workspace (xterm + diff), TASK-023 settings, TASK-024 client
 tests, Phase 5 E2E (TASK-025/026), TASK-029 gitleaks/dep-audit.
 
+Phase 4 settings pass (seventh `/speckit-implement`) — **VERIFIED** (build + live write path):
+- ✅ **TASK-023** Settings — `/settings` page + four sections (`components/features/settings/*`):
+  Secrets (write-only set + metadata list), Agent Profiles (auth mode + secret select + cap),
+  Executor Profiles, Repositories (local path / remote URL). tRPC mutations with query
+  invalidation; accessible labelled forms; submit disabled while pending; "add a secret first"
+  guard. Live-smoked: `secret.set` creates without echoing the value; `secret.list` shows the
+  new secret's metadata but **never the value** (Principle IV holds through the real stack).
+- ➕ **`secret.list`** procedure added (metadata only — id/name/kind) + DAL `listSecretRefs`;
+  OpenAPI now **18 paths**.
+- ◑ **TASK-024** client tests — board rendering tests (`board-view.test.tsx`, 3) via happy-dom +
+  Testing Library (empty-state per column, cards land in the matching column, failure reason
+  shown). *Settings-form and review-interaction tests follow once those flows settle.*
+- ➕ Board refactored to a pure `BoardView` (prop-driven) behind the tRPC `Board`; `/board` and
+  `/settings` cross-link. `make test` now runs the per-package script (picks up the happy-dom
+  preload).
+
+**Verified with:** `bun --bun run build` (✓ /board + /settings) → live `secret.set`/`secret.list`
+(no value leak) → typecheck 6/6 → **110 tests pass** → Biome clean → `openapi:check` (18 paths).
+
+**Still not started:** TASK-021 full (dnd + live WS), TASK-022 review workspace (needs WS client),
+board create-Issue/Task actions, Phase 5 E2E (TASK-025/026), TASK-029 gitleaks/dep-audit.
+
 ---
 
 ## Phase 1 — Foundation (unblocks everything)
@@ -391,9 +413,12 @@ tests, Phase 5 E2E (TASK-025/026), TASK-029 gitleaks/dep-audit.
 - Create Agent Profile (authMode + concurrency cap), Executor Profile (local), connect
   Repository (local path / remote URL), set Secret (write-only).
 **Acceptance criteria**:
-- [ ] Agent Profile lets the Owner choose Subscription or API Key and set the cap (default 3).
-- [ ] A set Secret is never displayed after entry.
-- [ ] Queuing more parallel subscription Tasks than the cap warns the user.
+- [X] Agent Profile lets the Owner choose Subscription or API Key and set the cap (default 3).
+- [X] A set Secret is never displayed after entry (write-only; only id/name/kind listed — verified
+      live that the value never appears in `secret.list`).
+- [ ] Queuing more parallel subscription Tasks than the cap warns the user — deferred to the launch
+      flow (the cap is *enforced* server-side today via `withinConcurrencyCap`; the pre-launch UI
+      warning lands with the board launch action).
 **Directives**: IV.
 
 ### TASK-024 — [P] Client component tests
@@ -482,13 +507,13 @@ tests, Phase 5 E2E (TASK-025/026), TASK-029 gitleaks/dep-audit.
 | TASK-029 | Quality gates | P1 | Critical | ☐ |
 | TASK-016 | Billing guard | P2 | Critical | ✅ verified |
 | TASK-021 | Kanban board | P2 | High | ◑ (slice: live board; dnd+WS follow-up) |
-| TASK-023 | Settings (profiles/secrets) | P2 | High | ☐ |
+| TASK-023 | Settings (profiles/secrets) | P2 | High | ✅ verified |
 | TASK-025 | E2E happy path | P2 | High | ☐ |
 | TASK-027 | Observability | P2 | Medium | ✅ verified |
 | TASK-028 | Retry a failed Task | P3 | Medium | ✅ verified |
 | TASK-005 | Seed (two Workspaces) | P1 | High | ✅ verified |
 | TASK-008/012/020 | DAL + tRPC + orchestrator test suites | P1 | High | ✅ verified |
-| TASK-010/017/024 | Services + billing + client test suites | P1–P2 | High | ◑ (010/017 done; 024 needs SPA) |
+| TASK-010/017/024 | Services + billing + client test suites | P1–P2 | High | ◑ (010/017 done; 024 board tests done, settings/review follow) |
 
 ---
 
