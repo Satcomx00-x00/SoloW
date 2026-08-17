@@ -6,4 +6,5 @@ export * from "./profile.js";
 export * from "./repository.js";
 export * from "./review.js";
 export * from "./secret.js";
+export * from "./session.js";
 export * from "./task.js";

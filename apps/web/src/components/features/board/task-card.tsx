@@ -1,4 +1,5 @@
 import type { TaskDto } from "@gatecontrol/contracts";
+import Link from "next/link";
 import type { ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -6,9 +7,14 @@ import { Card, CardContent } from "@/components/ui/card";
 /** A single Task card on the board. `actions` (optional) renders lifecycle controls. */
 export function TaskCard({ task, actions }: { task: TaskDto; actions?: ReactNode }) {
   return (
-    <Card className="gap-0 py-3 shadow-xs">
+    <Card className="gap-0 py-3 shadow-xs transition-colors hover:border-ring/50">
       <CardContent className="px-3">
-        <p className="font-medium text-sm leading-snug">{task.title}</p>
+        <Link
+          href={`/task/${task.id}`}
+          className="font-medium text-sm leading-snug hover:underline"
+        >
+          {task.title}
+        </Link>
         {task.failureReason ? (
           <Badge variant="destructive" className="mt-2">
             {task.failureReason}

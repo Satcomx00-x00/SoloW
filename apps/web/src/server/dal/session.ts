@@ -31,6 +31,19 @@ export async function getLatestSession(
   return row ? ok(row) : err(CommonErrorCode.NotFound);
 }
 
+/** List a Task's Sessions, newest first (scoped to the Workspace). */
+export async function listSessionsForTask(
+  ctx: RequestContext,
+  taskId: string,
+): Promise<Result<SessionRow[]>> {
+  const rows = await ctx.db
+    .select()
+    .from(session)
+    .where(and(eq(session.workspaceId, ctx.workspaceId), eq(session.taskId, taskId)))
+    .orderBy(desc(session.startedAt));
+  return ok(rows);
+}
+
 /** Fetch a Session by id, scoped to the Workspace (ownership check). */
 export async function getSessionById(
   ctx: RequestContext,

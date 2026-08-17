@@ -520,7 +520,7 @@ TASK-029 gitleaks/dep-audit. (Review + real-time need the WS client + a running 
 | TASK-015 | Worktree manager | P1 | Critical | ✅ verified |
 | TASK-018 | WebSocket hub | P1 | High | ✅ verified |
 | TASK-019 | Inngest task-run | P1 | Critical | ✅ verified |
-| TASK-022 | Review workspace | P1 | Critical | ☐ |
+| TASK-022 | Review workspace | P1 | Critical | ◑ (IDE view: terminal/changes/conversation + review gate; live WS follow-up) |
 | TASK-026 | @critical isolation | P1 | **Critical — blocks merge** | ☐ |
 | TASK-029 | Quality gates | P1 | Critical | ☐ |
 | TASK-016 | Billing guard | P2 | Critical | ✅ verified |

@@ -1,16 +1,25 @@
 import "server-only";
-import { CommonErrorCode, reviewDecisionInput, reviewDto } from "@gatecontrol/contracts";
-import { TRPCError } from "@trpc/server";
+import { reviewDecisionInput, reviewDto } from "@gatecontrol/contracts";
 import { recordReview } from "../dal/review.js";
-import { getSessionById } from "../dal/session.js";
+import { getSessionById, setSessionState } from "../dal/session.js";
+import { updateTaskState } from "../dal/task.js";
+import { devOwnerMode } from "../env.js";
 import { orchestrator } from "../orchestrator-client.js";
 import { ownerProcedure, router, unwrap } from "../trpc.js";
 
+/** Review → resulting Task state (mirrors the orchestrator's integrate step, plan §9). */
+const DECISION_TASK_STATE = {
+  approve: "done",
+  reject: "ready",
+  request_changes: "running",
+} as const;
+
 export const reviewRouter = router({
   /**
-   * Record a human decision on a Session's diff (Principle I). The Task is finalized by
-   * the orchestrator's durable workflow once the decision is released (plan §9): approve →
-   * commit + Done; reject → discard; request_changes → resume the agent.
+   * Record a human decision on a Session's diff (Principle I). In a real deployment the
+   * orchestrator's durable workflow finalizes the Task (approve → commit + Done; reject →
+   * discard; request_changes → resume). In dev-owner mode the durable service isn't running,
+   * so the transition is applied here so the local loop is demonstrable end-to-end.
    */
   decide: ownerProcedure
     .meta({ openapi: { method: "POST", path: "/review.decide", tags: ["review"], protect: true } })
@@ -18,7 +27,7 @@ export const reviewRouter = router({
     .output(reviewDto)
     .mutation(async ({ ctx, input }) => {
       // Ownership: the Session must belong to this Workspace before we record a decision.
-      unwrap(await getSessionById(ctx.rctx, input.sessionId));
+      const session = unwrap(await getSessionById(ctx.rctx, input.sessionId));
 
       const review = unwrap(
         await recordReview(ctx.rctx, {
@@ -28,20 +37,24 @@ export const reviewRouter = router({
         }),
       );
 
-      try {
-        await orchestrator.resumeReview({
-          workspaceId: ctx.rctx.workspaceId,
-          sessionId: input.sessionId,
-          decision: input.decision,
-          feedback: input.feedback ?? null,
-        });
-      } catch {
-        // Orchestrator not wired yet (Phase 3); the review is recorded and will be picked
-        // up once the workflow is live.
-        throw new TRPCError({
-          code: "NOT_IMPLEMENTED",
-          message: `${CommonErrorCode.ValidationFailed}: orchestrator resume not wired (Phase 3)`,
-        });
+      // Release the decision to the durable workflow (dev: logs-and-returns).
+      await orchestrator.resumeReview({
+        workspaceId: ctx.rctx.workspaceId,
+        sessionId: input.sessionId,
+        decision: input.decision,
+        feedback: input.feedback ?? null,
+      });
+
+      // Dev stand-in for the orchestrator's integrate step: apply the resulting Task state
+      // and close the session on a terminal decision.
+      if (devOwnerMode()) {
+        const nextState = DECISION_TASK_STATE[input.decision];
+        unwrap(await updateTaskState(ctx.rctx, session.taskId, nextState));
+        if (input.decision !== "request_changes") {
+          await setSessionState(ctx.rctx, input.sessionId, "closed", {
+            endedAt: new Date().toISOString(),
+          });
+        }
       }
 
       return review;
