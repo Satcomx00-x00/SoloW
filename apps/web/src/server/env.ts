@@ -16,7 +16,7 @@ const webEnvSchema = z.object({
   /** Base URL the SPA is served from. */
   GATECONTROL_WEB_URL: z.string().url().default("http://localhost:3000"),
   /** WebSocket endpoint exposed by the orchestrator service. */
-  GATECONTROL_WS_URL: z.string().url().default("ws://localhost:3001"),
+  GATECONTROL_WS_URL: z.string().url().default("ws://localhost:5000"),
 });
 
 export type WebEnv = z.infer<typeof webEnvSchema>;

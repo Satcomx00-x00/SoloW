@@ -33,8 +33,8 @@ smoke: ## Run the end-to-end smoke test (in-memory DB, fake agent, temp git repo
 start: ## Start the orchestrator (WebSocket hub + workflow host)
 	bun run apps/orchestrator/src/main.ts
 
-dev: ## Start the orchestrator in watch mode
-	bun --watch run apps/orchestrator/src/main.ts
+dev: ## Start the orchestrator with hot reload
+	bun run dev
 
 update: ## Update dependencies to the latest allowed versions
 	bun update

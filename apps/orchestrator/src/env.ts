@@ -2,7 +2,7 @@ import { z } from "zod";
 
 /** Validated orchestrator env (no bare process.env). */
 const schema = z.object({
-  GATECONTROL_WS_PORT: z.coerce.number().int().default(3001),
+  GATECONTROL_WS_PORT: z.coerce.number().int().default(5000),
   GATECONTROL_WORKTREE_ROOT: z.string().min(1).default(".gatecontrol/worktrees"),
   GATECONTROL_REPO_CACHE_ROOT: z.string().min(1).default(".gatecontrol/repos"),
 });
