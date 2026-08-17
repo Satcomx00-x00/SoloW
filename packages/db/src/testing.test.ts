@@ -1,8 +1,8 @@
 /// <reference types="bun-types" />
 import { beforeAll, describe, expect, it } from "bun:test";
 import { eq } from "drizzle-orm";
-import { createTestDb, type TestDb } from "./testing.js";
 import { workspace } from "./schema.js";
+import { createTestDb, type TestDb } from "./testing.js";
 
 /**
  * createTestDb builds an in-memory SQLite with every migration applied. A trivial insert/select
@@ -28,11 +28,7 @@ describe("createTestDb", () => {
     expect(inserted.ownerUserId).toBe("user-1");
     expect(inserted.createdAt).toBeTruthy();
 
-    const found = db
-      .select()
-      .from(workspace)
-      .where(eq(workspace.id, inserted.id))
-      .all();
+    const found = db.select().from(workspace).where(eq(workspace.id, inserted.id)).all();
 
     expect(found).toHaveLength(1);
     expect(found[0]).toEqual(inserted);

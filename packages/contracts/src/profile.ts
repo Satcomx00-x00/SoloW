@@ -35,9 +35,7 @@ export const createExecutorProfileInput = z.object({
   name: z.string().min(1).max(120),
   kind: executorKindSchema.default("local"),
 });
-export type CreateExecutorProfileInput = z.infer<
-  typeof createExecutorProfileInput
->;
+export type CreateExecutorProfileInput = z.infer<typeof createExecutorProfileInput>;
 
 export const executorProfileDto = z
   .object({

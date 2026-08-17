@@ -78,9 +78,7 @@ describe("secret store", () => {
   });
 
   it("throws on a malformed ciphertext with missing segments", () => {
-    expect(() => decryptForAgentRun("only-one-segment")).toThrow(
-      /malformed secret ciphertext/,
-    );
+    expect(() => decryptForAgentRun("only-one-segment")).toThrow(/malformed secret ciphertext/);
     expect(() => decryptForAgentRun("iv.tag")).toThrow(/malformed secret ciphertext/);
     expect(() => decryptForAgentRun("")).toThrow(/malformed secret ciphertext/);
   });

@@ -13,9 +13,7 @@ export type AgentStreamEvent =
   | { kind: "stdout"; text: string }
   | { kind: "tool_use"; name: string };
 
-export type AgentOutcome =
-  | { kind: "completed" }
-  | { kind: "failed"; signal: FailureSignal };
+export type AgentOutcome = { kind: "completed" } | { kind: "failed"; signal: FailureSignal };
 
 export interface AgentStartOpts {
   command: string;

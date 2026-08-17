@@ -1,16 +1,28 @@
 import "server-only";
-import { desc, eq } from "drizzle-orm";
 import {
-  type ConnectRepositoryInput,
-  type RepositoryDto,
-  type Result,
   CommonErrorCode,
+  type ConnectRepositoryInput,
   err,
   ok,
+  type RepositoryDto,
+  type Result,
 } from "@gatecontrol/contracts";
 import { repository } from "@gatecontrol/db";
+import { and, desc, eq } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
 import { repositoryToDto } from "./mappers.js";
+
+export async function getRepository(
+  ctx: RequestContext,
+  id: string,
+): Promise<Result<RepositoryDto, typeof CommonErrorCode.NotFound>> {
+  const [row] = await ctx.db
+    .select()
+    .from(repository)
+    .where(and(eq(repository.workspaceId, ctx.workspaceId), eq(repository.id, id)))
+    .limit(1);
+  return row ? ok(repositoryToDto(row)) : err(CommonErrorCode.NotFound);
+}
 
 export async function connectRepository(
   ctx: RequestContext,
@@ -28,9 +40,7 @@ export async function connectRepository(
   return row ? ok(repositoryToDto(row)) : err(CommonErrorCode.ValidationFailed);
 }
 
-export async function listRepositories(
-  ctx: RequestContext,
-): Promise<Result<RepositoryDto[]>> {
+export async function listRepositories(ctx: RequestContext): Promise<Result<RepositoryDto[]>> {
   const rows = await ctx.db
     .select()
     .from(repository)

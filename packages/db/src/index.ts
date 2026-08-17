@@ -24,7 +24,7 @@ export function createDb() {
 
 export type Db = ReturnType<typeof createDb>;
 
-export { schema } from "./schema.js";
-export * from "./schema.js";
-export { encryptSecret, decryptForAgentRun } from "./secret-store.js";
 export { dbEnv } from "./env.js";
+export * from "./schema.js";
+export { schema } from "./schema.js";
+export { decryptForAgentRun, encryptSecret } from "./secret-store.js";

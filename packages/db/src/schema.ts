@@ -1,6 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { sql } from "drizzle-orm";
-import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 import type {
   AgentKind,
   AuthMode,
@@ -12,6 +10,8 @@ import type {
   SessionState,
   TaskState,
 } from "@gatecontrol/contracts";
+import { sql } from "drizzle-orm";
+import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 /**
  * GateControl data model — SQLite dialect (local-first primary store, Decision 0008).

@@ -28,21 +28,11 @@ export const taskStateSchema = z.enum([
 export type TaskState = z.infer<typeof taskStateSchema>;
 
 /** Issue lifecycle states. */
-export const issueStatusSchema = z.enum([
-  "open",
-  "in_progress",
-  "resolved",
-  "closed",
-]);
+export const issueStatusSchema = z.enum(["open", "in_progress", "resolved", "closed"]);
 export type IssueStatus = z.infer<typeof issueStatusSchema>;
 
 /** Session states. */
-export const sessionStateSchema = z.enum([
-  "active",
-  "awaiting_review",
-  "resumable",
-  "closed",
-]);
+export const sessionStateSchema = z.enum(["active", "awaiting_review", "resumable", "closed"]);
 export type SessionState = z.infer<typeof sessionStateSchema>;
 
 /** Agent authentication / billing mode (spec F06). */
@@ -50,11 +40,7 @@ export const authModeSchema = z.enum(["subscription", "api_key"]);
 export type AuthMode = z.infer<typeof authModeSchema>;
 
 /** Review decisions (spec F10). */
-export const reviewDecisionSchema = z.enum([
-  "approve",
-  "reject",
-  "request_changes",
-]);
+export const reviewDecisionSchema = z.enum(["approve", "reject", "request_changes"]);
 export type ReviewDecision = z.infer<typeof reviewDecisionSchema>;
 
 /** Repository source (clarified 2026-08-17: local path OR remote URL). */

@@ -7,7 +7,12 @@ describe("EventHub", () => {
     const hub = new EventHub();
     const got: TaskEvent[] = [];
     const unsub = hub.subscribe("c1", (m) => got.push(m));
-    const evt: TaskEvent = { kind: "status", taskId: "t", state: "running", at: new Date().toISOString() };
+    const evt: TaskEvent = {
+      kind: "status",
+      taskId: "t",
+      state: "running",
+      at: new Date().toISOString(),
+    };
     hub.publish("c1", evt);
     hub.publish("other", evt); // different channel, ignored
     unsub();

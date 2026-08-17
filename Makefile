@@ -3,7 +3,8 @@
 
 SHELL := bash
 .DEFAULT_GOAL := help
-.PHONY: help install clean build typecheck test smoke start dev update db-generate db-migrate
+.PHONY: help install clean build lint format typecheck test smoke start dev update \
+	db-generate db-migrate db-seed openapi openapi-check
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -18,11 +19,17 @@ clean: ## Remove node_modules and all build/output artifacts
 	find . -type f -name '*.tsbuildinfo' -delete 2>/dev/null || true
 	@echo "cleaned node_modules + build artifacts"
 
+lint: ## Lint + format-check with Biome
+	bun run lint
+
+format: ## Auto-format the codebase with Biome
+	bun run format
+
 typecheck: ## Typecheck every workspace package
 	bun run typecheck
 
-build: install typecheck db-generate ## Install, typecheck, and generate DB migrations
-	@echo "build complete (typecheck + migrations). SPA bundling arrives with Phase 4."
+build: install lint typecheck db-generate openapi-check ## Install, lint, typecheck, migrations, OpenAPI
+	@echo "build complete (lint + typecheck + migrations + openapi). SPA bundling arrives with Phase 4."
 
 test: ## Run all unit tests (bun test)
 	bun test
@@ -45,3 +52,12 @@ db-generate: ## Generate the SQLite migration from the Drizzle schema
 
 db-migrate: ## Apply migrations to the local SQLite database
 	bun run db:migrate
+
+db-seed: ## Seed the local database with the two-Workspace fixture
+	bun run db:seed
+
+openapi: ## Generate openapi.json from the tRPC routers
+	bun run openapi:gen
+
+openapi-check: ## Fail if openapi.json is stale (CI gate)
+	bun run openapi:check

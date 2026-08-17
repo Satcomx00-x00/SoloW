@@ -5,7 +5,10 @@
   "description": "Self-hostable control plane for orchestrating AI coding agents in parallel under human review.",
   "license": "AGPL-3.0-only",
   "packageManager": "bun@1.3.14",
-  "workspaces": ["apps/*", "packages/*"],
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "engines": {
     "bun": ">=1.3"
   },
@@ -13,10 +16,17 @@
     "dev": "bun --hot run apps/orchestrator/src/main.ts",
     "typecheck": "bun run --filter '*' typecheck",
     "test": "bun run --filter '*' test",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "check": "biome check --write .",
     "db:generate": "bun run --filter @gatecontrol/db db:generate",
-    "db:migrate": "bun run --filter @gatecontrol/db db:migrate"
+    "db:migrate": "bun run --filter @gatecontrol/db db:migrate",
+    "db:seed": "bun run --filter @gatecontrol/db db:seed",
+    "openapi:gen": "bun run --filter @gatecontrol/web openapi:gen",
+    "openapi:check": "bun run --filter @gatecontrol/web openapi:check"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.5.8",
     "typescript": "^5.6.0"
   }
 }

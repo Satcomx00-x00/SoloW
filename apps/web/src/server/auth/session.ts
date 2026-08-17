@@ -14,9 +14,7 @@ export interface ResolvedSession {
   userId: string;
 }
 
-export async function resolveSession(
-  _headers: Headers,
-): Promise<ResolvedSession | null> {
+export async function resolveSession(_headers: Headers): Promise<ResolvedSession | null> {
   // Placeholder: real implementation validates the BetterAuth session cookie and looks
   // up the Owner's Workspace. Returns null until wired.
   return null;

@@ -1,8 +1,8 @@
-import { describe, it, expect } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import {
+  connectRepositoryInput,
   createIssueInput,
   createTaskInput,
-  connectRepositoryInput,
   reviewDecisionInput,
   setSecretInput,
   taskEventSchema,

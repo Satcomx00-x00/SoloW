@@ -1,12 +1,7 @@
+import { type AuthMode, BillingErrorCode, err, type Result } from "@gatecontrol/contracts";
 import {
-  type AuthMode,
-  type Result,
-  BillingErrorCode,
-  err,
-} from "@gatecontrol/contracts";
-import {
-  type FailureSignal,
   classifyRunFailure,
+  type FailureSignal,
   resolveAgentRunEnv,
   withinConcurrencyCap,
 } from "@gatecontrol/core";
@@ -34,5 +29,5 @@ export function canStart(cap: number, running: number): boolean {
   return withinConcurrencyCap(cap, running);
 }
 
-export { classifyRunFailure };
 export type { FailureSignal };
+export { classifyRunFailure };

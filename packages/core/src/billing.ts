@@ -1,10 +1,4 @@
-import {
-  type AuthMode,
-  type Result,
-  BillingErrorCode,
-  err,
-  ok,
-} from "@gatecontrol/contracts";
+import { type AuthMode, BillingErrorCode, err, ok, type Result } from "@gatecontrol/contracts";
 
 /**
  * Billing & credential shaping (constitution Principle IV — NON-NEGOTIABLE; spec F06).

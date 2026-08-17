@@ -10,8 +10,6 @@ if (!process.env.GATECONTROL_SECRET_KEY) {
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { $ } from "bun";
-
 import { BillingErrorCode } from "@gatecontrol/contracts";
 import {
   agentProfile,
@@ -25,16 +23,16 @@ import {
   workspace,
 } from "@gatecontrol/db";
 import { createTestDb } from "@gatecontrol/db/testing";
-
-import { loadTaskRunContext, setTaskState } from "../apps/orchestrator/src/data.js";
+import { $ } from "bun";
+import { FakeAgentRunner } from "../apps/orchestrator/src/agent/runner.js";
 import { prepareAgentEnv } from "../apps/orchestrator/src/billing/guard.js";
+import { loadTaskRunContext, setTaskState } from "../apps/orchestrator/src/data.js";
 import {
   cleanupWorktree,
   commitWorktree,
   hasChanges,
   provisionWorktree,
 } from "../apps/orchestrator/src/worktree/manager.js";
-import { FakeAgentRunner } from "../apps/orchestrator/src/agent/runner.js";
 
 function assert(cond: unknown, msg: string): asserts cond {
   if (!cond) throw new Error(`SMOKE FAILED: ${msg}`);
@@ -203,10 +201,7 @@ async function main(): Promise<void> {
     assert(outcome.kind === "completed", "fake agent run completed");
     assert(events.includes("tool_use") && events.includes("stdout"), "runner streamed events");
 
-    writeFileSync(
-      join(wt.path, "SMOKE_CHANGE.txt"),
-      `edited by smoke run for task ${taskId}\n`,
-    );
+    writeFileSync(join(wt.path, "SMOKE_CHANGE.txt"), `edited by smoke run for task ${taskId}\n`);
 
     // 8. The edit must show up as a diff, then get committed onto the task branch.
     assert(await hasChanges(wt.path), "worktree has the agent's uncommitted changes");

@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeAll } from "bun:test";
+import { beforeAll, describe, expect, it } from "bun:test";
 
 beforeAll(() => {
   process.env.GATECONTROL_SECRET_KEY = Buffer.alloc(32, 7).toString("base64");

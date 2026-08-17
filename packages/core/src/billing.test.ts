@@ -1,10 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { BillingErrorCode } from "@gatecontrol/contracts";
-import {
-  classifyRunFailure,
-  resolveAgentRunEnv,
-  withinConcurrencyCap,
-} from "./billing.js";
+import { classifyRunFailure, resolveAgentRunEnv, withinConcurrencyCap } from "./billing.js";
 
 describe("resolveAgentRunEnv — billing integrity (Principle IV)", () => {
   it("subscription mode injects the OAuth token and STRIPS ANTHROPIC_API_KEY", () => {
@@ -59,8 +55,6 @@ describe("classifyRunFailure", () => {
     expect(classifyRunFailure({ credentialInvalid: true })).toBe("credential_expired");
     expect(classifyRunFailure({})).toBe("fail");
     // quota takes precedence over other signals
-    expect(classifyRunFailure({ quotaExhausted: true, credentialInvalid: true })).toBe(
-      "park",
-    );
+    expect(classifyRunFailure({ quotaExhausted: true, credentialInvalid: true })).toBe("park");
   });
 });

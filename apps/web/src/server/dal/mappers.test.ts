@@ -4,9 +4,9 @@ import { beforeEach, describe, expect, it } from "bun:test";
 // so setting it before the first encryptSecret call is sufficient. 32 bytes, base64.
 process.env.GATECONTROL_SECRET_KEY = Buffer.alloc(32, 7).toString("base64");
 
-import { and, eq } from "drizzle-orm";
-import { encryptSecret, issue, secret, workspace } from "@gatecontrol/db";
+import { encryptSecret, type issue, secret, workspace } from "@gatecontrol/db";
 import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
+import { and, eq } from "drizzle-orm";
 import { issueToDto, repositoryToDto, secretToRef, taskToDto } from "./mappers.js";
 
 type IssueRow = typeof issue.$inferSelect;

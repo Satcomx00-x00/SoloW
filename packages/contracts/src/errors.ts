@@ -11,8 +11,7 @@ export const CommonErrorCode = {
   FlagDisabled: "FLAG_DISABLED",
   RateLimited: "TOO_MANY_REQUESTS",
 } as const;
-export type CommonErrorCode =
-  (typeof CommonErrorCode)[keyof typeof CommonErrorCode];
+export type CommonErrorCode = (typeof CommonErrorCode)[keyof typeof CommonErrorCode];
 
 export const TaskErrorCode = {
   IllegalTransition: "TASK_ILLEGAL_TRANSITION",
@@ -21,20 +20,17 @@ export const TaskErrorCode = {
   RepositoryUnreachable: "TASK_REPOSITORY_UNREACHABLE",
   AgentUnavailable: "TASK_AGENT_UNAVAILABLE",
 } as const;
-export type TaskErrorCode =
-  (typeof TaskErrorCode)[keyof typeof TaskErrorCode];
+export type TaskErrorCode = (typeof TaskErrorCode)[keyof typeof TaskErrorCode];
 
 export const BillingErrorCode = {
   QuotaExhausted: "BILLING_QUOTA_EXHAUSTED",
   CredentialExpired: "BILLING_CREDENTIAL_EXPIRED",
   MissingCredential: "BILLING_MISSING_CREDENTIAL",
 } as const;
-export type BillingErrorCode =
-  (typeof BillingErrorCode)[keyof typeof BillingErrorCode];
+export type BillingErrorCode = (typeof BillingErrorCode)[keyof typeof BillingErrorCode];
 
 export const ReviewErrorCode = {
   NotInReview: "REVIEW_TASK_NOT_IN_REVIEW",
   AlreadyDecided: "REVIEW_ALREADY_DECIDED",
 } as const;
-export type ReviewErrorCode =
-  (typeof ReviewErrorCode)[keyof typeof ReviewErrorCode];
+export type ReviewErrorCode = (typeof ReviewErrorCode)[keyof typeof ReviewErrorCode];

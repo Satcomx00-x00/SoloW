@@ -1,10 +1,12 @@
 import "server-only";
-import { initTRPC, TRPCError } from "@trpc/server";
-import superjson from "superjson";
 import { CommonErrorCode, type Result } from "@gatecontrol/contracts";
 import type { Db } from "@gatecontrol/db";
-import { isEnabled } from "./flags.js";
+import { initTRPC, TRPCError } from "@trpc/server";
+import superjson from "superjson";
+import type { OpenApiMeta } from "trpc-to-openapi";
 import type { RequestContext } from "./dal/context.js";
+import { isEnabled } from "./flags.js";
+import { checkRateLimit, RATE_LIMITS, type RateLimitedProcedure } from "./rate-limit.js";
 
 /**
  * tRPC setup (Decision 0011). Procedures enforce the constitution discipline:
@@ -19,7 +21,7 @@ export interface BaseContext {
   flagOverrides?: Partial<Record<"ff-core-program", boolean>>;
 }
 
-const t = initTRPC.context<BaseContext>().create({ transformer: superjson });
+const t = initTRPC.meta<OpenApiMeta>().context<BaseContext>().create({ transformer: superjson });
 
 export const router = t.router;
 export const publicProcedure = t.procedure;
@@ -54,6 +56,24 @@ const requireCoreFlag = t.middleware(({ ctx, next }) => {
 
 /** The procedure every core-program endpoint uses. */
 export const ownerProcedure = publicProcedure.use(requireSession).use(requireCoreFlag);
+
+/**
+ * Per-Owner rate limit for a sensitive write. Returns a middleware to chain after
+ * `ownerProcedure` (session already required), tripping `TOO_MANY_REQUESTS` past the window
+ * limit (plan §12).
+ */
+export function rateLimit(name: RateLimitedProcedure) {
+  return t.middleware(({ ctx, next }) => {
+    const workspaceId = ctx.session?.workspaceId;
+    if (!workspaceId) {
+      throw new TRPCError({ code: "UNAUTHORIZED", message: CommonErrorCode.Unauthorized });
+    }
+    if (!checkRateLimit(`${name}:${workspaceId}`, RATE_LIMITS[name])) {
+      throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: CommonErrorCode.RateLimited });
+    }
+    return next();
+  });
+}
 
 /** Map a DAL/service Result error into a TRPCError, or return the data. */
 export function unwrap<T>(result: Result<T, string>): T {

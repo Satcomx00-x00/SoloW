@@ -1,16 +1,16 @@
 import "server-only";
-import { and, desc, eq } from "drizzle-orm";
 import {
   type AgentProfileDto,
+  CommonErrorCode,
   type CreateAgentProfileInput,
   type CreateExecutorProfileInput,
   type ExecutorProfileDto,
-  type Result,
-  CommonErrorCode,
   err,
   ok,
+  type Result,
 } from "@gatecontrol/contracts";
 import { agentProfile, executorProfile } from "@gatecontrol/db";
+import { and, desc, eq } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
 
 export async function createAgentProfile(
@@ -31,9 +31,7 @@ export async function createAgentProfile(
   return row ? ok(row) : err(CommonErrorCode.ValidationFailed);
 }
 
-export async function listAgentProfiles(
-  ctx: RequestContext,
-): Promise<Result<AgentProfileDto[]>> {
+export async function listAgentProfiles(ctx: RequestContext): Promise<Result<AgentProfileDto[]>> {
   const rows = await ctx.db
     .select()
     .from(agentProfile)
@@ -74,4 +72,16 @@ export async function listExecutorProfiles(
     .where(eq(executorProfile.workspaceId, ctx.workspaceId))
     .orderBy(desc(executorProfile.createdAt));
   return ok(rows);
+}
+
+export async function getExecutorProfile(
+  ctx: RequestContext,
+  id: string,
+): Promise<Result<ExecutorProfileDto, typeof CommonErrorCode.NotFound>> {
+  const [row] = await ctx.db
+    .select()
+    .from(executorProfile)
+    .where(and(eq(executorProfile.workspaceId, ctx.workspaceId), eq(executorProfile.id, id)))
+    .limit(1);
+  return row ? ok(row) : err(CommonErrorCode.NotFound);
 }

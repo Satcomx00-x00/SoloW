@@ -1,10 +1,10 @@
 import {
   type CreateTaskInput,
-  type Result,
-  type TaskState,
-  TaskErrorCode,
   err,
   ok,
+  type Result,
+  TaskErrorCode,
+  type TaskState,
 } from "@gatecontrol/contracts";
 
 /**
@@ -27,9 +27,7 @@ export function canTransitionTask(
   from: TaskState,
   to: TaskState,
 ): Result<void, typeof TaskErrorCode.IllegalTransition> {
-  return TRANSITIONS[from].includes(to)
-    ? ok(undefined)
-    : err(TaskErrorCode.IllegalTransition);
+  return TRANSITIONS[from].includes(to) ? ok(undefined) : err(TaskErrorCode.IllegalTransition);
 }
 
 export interface TaskCreatePayload extends CreateTaskInput {

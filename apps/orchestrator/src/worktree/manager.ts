@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 import { join } from "node:path";
-import { $ } from "bun";
 import type { RepositorySource } from "@gatecontrol/contracts";
+import { $ } from "bun";
 
 /**
  * Git worktree manager (spec F08 / task TASK-015). Each Task gets an isolated worktree so
@@ -35,9 +35,7 @@ export interface Worktree {
 }
 
 /** The main repository path a worktree is added onto (local path, or a cached clone). */
-async function resolveRepoPath(
-  params: ProvisionParams,
-): Promise<string> {
+async function resolveRepoPath(params: ProvisionParams): Promise<string> {
   if (params.repository.source === "local_path") return params.repository.location;
   // remote_url: clone into the cache once (idempotent), then add worktrees from it.
   const cachePath = join(params.repoCacheRoot, encodeURIComponent(params.repository.location));

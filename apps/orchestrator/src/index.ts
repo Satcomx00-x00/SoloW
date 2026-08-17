@@ -1,9 +1,9 @@
 /// <reference types="bun-types" />
 import type { TaskEvent } from "@gatecontrol/contracts";
 import { orchestratorEnv } from "./env.js";
-import { hub } from "./ws/hub.js";
 import { inngest } from "./inngest/client.js";
 import { taskRun } from "./inngest/functions/task-run.js";
+import { hub } from "./ws/hub.js";
 
 export { inngest };
 export const functions = [taskRun];

@@ -11,9 +11,10 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "lint": "eslint .",
+    "lint": "biome check .",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate"
+    "db:migrate": "drizzle-kit migrate",
+    "db:seed": "bun run src/seed.ts"
   },
   "dependencies": {
     "@gatecontrol/contracts": "workspace:*",

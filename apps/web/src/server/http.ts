@@ -1,7 +1,7 @@
 import "server-only";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
-import { appRouter } from "./routers/index.js";
 import { createContext } from "./context.js";
+import { appRouter } from "./routers/index.js";
 
 /**
  * Framework-agnostic fetch handler for the tRPC API (Decision 0011). The Next.js Route

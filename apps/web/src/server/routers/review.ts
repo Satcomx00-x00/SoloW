@@ -1,10 +1,10 @@
 import "server-only";
+import { CommonErrorCode, reviewDecisionInput, reviewDto } from "@gatecontrol/contracts";
 import { TRPCError } from "@trpc/server";
-import { CommonErrorCode, reviewDecisionInput } from "@gatecontrol/contracts";
-import { ownerProcedure, router, unwrap } from "../trpc.js";
 import { recordReview } from "../dal/review.js";
 import { getSessionById } from "../dal/session.js";
 import { orchestrator } from "../orchestrator-client.js";
+import { ownerProcedure, router, unwrap } from "../trpc.js";
 
 export const reviewRouter = router({
   /**
@@ -12,34 +12,38 @@ export const reviewRouter = router({
    * the orchestrator's durable workflow once the decision is released (plan §9): approve →
    * commit + Done; reject → discard; request_changes → resume the agent.
    */
-  decide: ownerProcedure.input(reviewDecisionInput).mutation(async ({ ctx, input }) => {
-    // Ownership: the Session must belong to this Workspace before we record a decision.
-    unwrap(await getSessionById(ctx.rctx, input.sessionId));
+  decide: ownerProcedure
+    .meta({ openapi: { method: "POST", path: "/review.decide", tags: ["review"], protect: true } })
+    .input(reviewDecisionInput)
+    .output(reviewDto)
+    .mutation(async ({ ctx, input }) => {
+      // Ownership: the Session must belong to this Workspace before we record a decision.
+      unwrap(await getSessionById(ctx.rctx, input.sessionId));
 
-    const review = unwrap(
-      await recordReview(ctx.rctx, {
-        sessionId: input.sessionId,
-        decision: input.decision,
-        feedback: input.feedback ?? null,
-      }),
-    );
+      const review = unwrap(
+        await recordReview(ctx.rctx, {
+          sessionId: input.sessionId,
+          decision: input.decision,
+          feedback: input.feedback ?? null,
+        }),
+      );
 
-    try {
-      await orchestrator.resumeReview({
-        workspaceId: ctx.rctx.workspaceId,
-        sessionId: input.sessionId,
-        decision: input.decision,
-        feedback: input.feedback ?? null,
-      });
-    } catch {
-      // Orchestrator not wired yet (Phase 3); the review is recorded and will be picked
-      // up once the workflow is live.
-      throw new TRPCError({
-        code: "NOT_IMPLEMENTED",
-        message: `${CommonErrorCode.ValidationFailed}: orchestrator resume not wired (Phase 3)`,
-      });
-    }
+      try {
+        await orchestrator.resumeReview({
+          workspaceId: ctx.rctx.workspaceId,
+          sessionId: input.sessionId,
+          decision: input.decision,
+          feedback: input.feedback ?? null,
+        });
+      } catch {
+        // Orchestrator not wired yet (Phase 3); the review is recorded and will be picked
+        // up once the workflow is live.
+        throw new TRPCError({
+          code: "NOT_IMPLEMENTED",
+          message: `${CommonErrorCode.ValidationFailed}: orchestrator resume not wired (Phase 3)`,
+        });
+      }
 
-    return review;
-  }),
+      return review;
+    }),
 });

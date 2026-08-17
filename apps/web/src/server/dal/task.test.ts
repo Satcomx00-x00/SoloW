@@ -1,10 +1,5 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import {
-  agentProfile,
-  executorProfile,
-  repository,
-  workspace,
-} from "@gatecontrol/db";
+import { agentProfile, executorProfile, repository, workspace } from "@gatecontrol/db";
 import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
 import type { RequestContext } from "./context.js";
 import { createIssueRecord, getIssueById } from "./issue.js";

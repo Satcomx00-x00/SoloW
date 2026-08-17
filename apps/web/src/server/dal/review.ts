@@ -1,14 +1,8 @@
 import "server-only";
-import { and, eq } from "drizzle-orm";
-import {
-  type ReviewDto,
-  type Result,
-  CommonErrorCode,
-  err,
-  ok,
-} from "@gatecontrol/contracts";
 import type { ReviewDecision } from "@gatecontrol/contracts";
+import { CommonErrorCode, err, ok, type Result, type ReviewDto } from "@gatecontrol/contracts";
 import { review } from "@gatecontrol/db";
+import { and, eq } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
 
 /** Record a human review decision (Principle I — recorded human approval). */

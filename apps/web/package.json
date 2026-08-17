@@ -6,7 +6,9 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "lint": "eslint ."
+    "lint": "biome check .",
+    "openapi:gen": "bun --preload ./scripts/stub-server-only.ts scripts/gen-openapi.ts",
+    "openapi:check": "bun --preload ./scripts/stub-server-only.ts scripts/gen-openapi.ts --check"
   },
   "dependencies": {
     "@gatecontrol/contracts": "workspace:*",
@@ -18,7 +20,8 @@
     "server-only": "^0.0.1",
     "superjson": "^2.2.1",
     "trpc-to-openapi": "^2.1.0",
-    "zod": "^3.23.8"
+    "zod": "^3.23.8",
+    "zod-openapi": "4.2.4"
   },
   "devDependencies": {
     "typescript": "^5.6.0",

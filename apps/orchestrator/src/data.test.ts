@@ -1,5 +1,4 @@
 import { beforeAll, describe, expect, it } from "bun:test";
-import { and, eq } from "drizzle-orm";
 import {
   agentProfile,
   encryptSecret,
@@ -11,6 +10,7 @@ import {
   workspace,
 } from "@gatecontrol/db";
 import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
+import { and, eq } from "drizzle-orm";
 import { loadTaskRunContext, setTaskState } from "./data.js";
 
 // The secret store reads GATECONTROL_SECRET_KEY lazily; set it before any encryptSecret call.
