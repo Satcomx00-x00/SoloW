@@ -1,5 +1,5 @@
 {
-  "name": "@gatecontrol/contracts",
+  "name": "@gatecontrol/core",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -8,11 +8,10 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "bun test",
-    "lint": "eslint ."
+    "test": "bun test"
   },
   "dependencies": {
-    "zod": "^3.23.8"
+    "@gatecontrol/contracts": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.6.0",

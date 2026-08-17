@@ -1,26 +1,25 @@
 {
-  "name": "@gatecontrol/web",
+  "name": "@gatecontrol/orchestrator",
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "bun test",
-    "lint": "eslint ."
+    "test": "bun test"
   },
   "dependencies": {
     "@gatecontrol/contracts": "workspace:*",
-    "@gatecontrol/core": "workspace:*",
     "@gatecontrol/db": "workspace:*",
-    "@trpc/server": "^11.0.0",
-    "better-auth": "^1.2.0",
     "drizzle-orm": "^0.36.0",
-    "server-only": "^0.0.1",
-    "superjson": "^2.2.1",
-    "trpc-to-openapi": "^2.1.0",
-    "zod": "^3.23.8"
+    "inngest": "^4.18.0",
+    "zod": "^3.23.8",
+    "@gatecontrol/core": "workspace:*"
   },
   "devDependencies": {
+    "bun-types": "^1.1.0",
     "typescript": "^5.6.0",
     "vitest": "^2.1.0"
   }

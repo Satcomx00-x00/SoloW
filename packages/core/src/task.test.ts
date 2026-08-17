@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { TaskErrorCode, type TaskState } from "@gatecontrol/contracts";
 import { buildCreateTaskPayload, canTransitionTask, isLaunchable } from "./task.js";
 

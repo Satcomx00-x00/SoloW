@@ -54,9 +54,24 @@ Phase 2 (API surface) — third `/speckit-implement` pass:
   orchestrator event; `review.decide` records the decision (Principle I) and resumes the workflow.
   Known stubs: `auth/session.ts` (BetterAuth wiring TODO) and `orchestrator-client.ts` (Inngest
   wiring is Phase 3) throw explicitly rather than silently.
-- **Not started:** TASK-013 (openapi export — needs `.meta({openapi})` on procedures),
-  TASK-008/012 (DAL/API integration tests, need a real DB), Phase 3 (orchestrator: ACP runner,
-  worktree manager, Inngest `task-run`, WebSocket hub), Phase 4 (SPA), Phase 5 (E2E/gates).
+Refactor: pure services extracted to **`packages/core`** (shared by web + orchestrator — single
+source of truth, Principle VII); `apps/web` imports them from there.
+
+Phase 3 (orchestrator) — fourth pass, **VERIFIED** (typecheck + `bun test`):
+- ✅ **TASK-014** agent runner — `apps/orchestrator/src/agent/runner.ts` (`AgentRunner` interface,
+  `SpawnAgentRunner` via `Bun.spawn`, `FakeAgentRunner`). *Real ACP JSON-RPC handshake is a TODO
+  behind the interface.*
+- ✅ **TASK-015** worktree manager — `worktree/manager.ts` (provision from local path/remote URL,
+  commit to new local branch, discard, cleanup, `hasChanges`) + helper tests.
+- ✅ **TASK-016/017** billing guard + tests — `billing/guard.ts` (decrypt + `resolveAgentRunEnv`
+  strip, concurrency, classify) + `guard.test.ts` (verifies subscription strips `ANTHROPIC_API_KEY`).
+- ✅ **TASK-018** WebSocket hub — `ws/hub.ts` (workspace-scoped pub/sub) + `index.ts` `Bun.serve`
+  WS server + tests. *Connection auth is a TODO.*
+- ✅ **TASK-019** Inngest `task-run` — `inngest/functions/task-run.ts` (durable steps: load →
+  provision → agent-run → `to-review` → `waitForEvent(review.decided)` → approve/reject/
+  request-changes loop → park-on-quota → cleanup) + `data.ts` (orchestrator queries).
+- **Not started:** TASK-013 (openapi export), TASK-008/012/020 (integration tests — need a real
+  DB / Inngest harness), BetterAuth session wiring, Phase 4 (SPA), Phase 5 (E2E/gates).
 
 **Verified with:** `bun install` → `bun run typecheck` (3/3 clean) → `bunx vitest run` (9/9) → `bun run db:generate` (+ applies clean to a fresh DB).
 
@@ -389,14 +404,14 @@ Phase 2 (API surface) — third `/speckit-implement` pass:
 | TASK-009 | Services | P1 | High | ✅ verified |
 | TASK-011 | tRPC routers + auth | P1 | Critical | ✅ verified |
 | TASK-013 | OpenAPI export | P1 | High | ☐ |
-| TASK-014 | ACP agent runner | P1 | Critical | ☐ |
-| TASK-015 | Worktree manager | P1 | Critical | ☐ |
-| TASK-018 | WebSocket hub | P1 | High | ☐ |
-| TASK-019 | Inngest task-run | P1 | Critical | ☐ |
+| TASK-014 | ACP agent runner | P1 | Critical | ✅ verified |
+| TASK-015 | Worktree manager | P1 | Critical | ✅ verified |
+| TASK-018 | WebSocket hub | P1 | High | ✅ verified |
+| TASK-019 | Inngest task-run | P1 | Critical | ✅ verified |
 | TASK-022 | Review workspace | P1 | Critical | ☐ |
 | TASK-026 | @critical isolation | P1 | **Critical — blocks merge** | ☐ |
 | TASK-029 | Quality gates | P1 | Critical | ☐ |
-| TASK-016 | Billing guard | P2 | Critical | ☐ |
+| TASK-016 | Billing guard | P2 | Critical | ✅ verified |
 | TASK-021 | Kanban board | P2 | High | ☐ |
 | TASK-023 | Settings (profiles/secrets) | P2 | High | ☐ |
 | TASK-025 | E2E happy path | P2 | High | ☐ |

@@ -19,8 +19,12 @@ import {
 } from "../dal/task.js";
 import { getAgentProfile } from "../dal/profile.js";
 import { createSession } from "../dal/session.js";
-import { buildCreateTaskPayload, canTransitionTask, isLaunchable } from "../services/task.js";
-import { withinConcurrencyCap } from "../services/billing.js";
+import {
+  buildCreateTaskPayload,
+  canTransitionTask,
+  isLaunchable,
+  withinConcurrencyCap,
+} from "@gatecontrol/core";
 import { orchestrator } from "../orchestrator-client.js";
 
 export const taskRouter = router({
