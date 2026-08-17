@@ -1,0 +1,26 @@
+{
+  "name": "@gatecontrol/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@gatecontrol/contracts": "workspace:*",
+    "@gatecontrol/db": "workspace:*",
+    "@trpc/server": "^11.0.0",
+    "better-auth": "^1.2.0",
+    "drizzle-orm": "^0.36.0",
+    "server-only": "^0.0.1",
+    "superjson": "^2.2.1",
+    "trpc-to-openapi": "^2.1.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}
