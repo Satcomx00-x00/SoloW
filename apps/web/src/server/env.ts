@@ -28,3 +28,17 @@ export function webEnv(): WebEnv {
   cached = webEnvSchema.parse(process.env);
   return cached;
 }
+
+/**
+ * Local single-user dev mode. When `GATECONTROL_DEV_OWNER=on`, the API resolves a fixed local
+ * Owner bound to the seeded Workspace and enables `ff-core-program` — a stand-in for BetterAuth
+ * so the SPA slice can read live data before auth is wired. Never enable in production.
+ * Parsed separately so it does not require the full (auth-secret-bearing) web env.
+ */
+const devEnvSchema = z.object({
+  GATECONTROL_DEV_OWNER: z.enum(["on", "off"]).default("off"),
+});
+
+export function devOwnerMode(): boolean {
+  return devEnvSchema.parse(process.env).GATECONTROL_DEV_OWNER === "on";
+}

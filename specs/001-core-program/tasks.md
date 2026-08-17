@@ -110,6 +110,34 @@ Backend-completion pass (fifth `/speckit-implement`) — **VERIFIED** (biome + t
 E2E (TASK-025 happy, TASK-026 @critical isolation — need the SPA + Playwright), and TASK-029 final
 gates (lint/typecheck/tests/openapi pass now; `gitleaks` + dep-audit + E2E still pending).
 
+Phase 4 vertical slice (sixth `/speckit-implement`) — **VERIFIED** (build under Bun + live data):
+- ◑ **TASK-021** Kanban board — *vertical slice done*: Next.js 15 App-Router SPA (`apps/web/src/app`),
+  tRPC React client (`src/trpc/react.ts` + `app/providers.tsx`), tRPC HTTP route handler
+  (`app/api/trpc/[trpc]/route.ts` → existing `http.ts`), and a **board reading live data** —
+  lifecycle columns from `task.list` with loading/error/empty states and accessible markup
+  (`components/features/board/*`). *Follow-up for full TASK-021: dnd-kit drag + live WebSocket
+  status updates + richer empty-state CTA.*
+- ➕ **Next-under-Bun proven**: `bun --bun run build` compiles (bun:sqlite kept external via
+  `serverExternalPackages` + webpack externals; NodeNext `.js` specifiers resolved via
+  `resolve.extensionAlias`; Next's duplicate type/lint pass disabled — we gate with tsc + Biome).
+  Running server verified: `task.list`/`issue.list` return the seeded WS_A rows only (WS_B not
+  leaked — tenancy holds through SPA→tRPC→DAL→bun:sqlite); `/board`→200, `/`→307→`/board`.
+- ➕ **Local dev-owner path**: `GATECONTROL_DEV_OWNER=on` → `context.ts` resolves a fixed Owner on
+  the seeded Workspace with `ff-core-program` enabled (stand-in until BetterAuth is wired).
+- ➕ **Fixed `db:migrate`**: replaced the broken `drizzle-kit migrate` (better-sqlite3 native binding
+  fails under Bun) with a `bun:sqlite` migrator (`packages/db/src/migrate.ts`).
+
+**Run the SPA locally** (from repo root):
+`GATECONTROL_SQLITE_PATH=./.gatecontrol/dev.db GATECONTROL_SECRET_KEY=$(openssl rand -base64 32) \
+ bun run db:migrate && … db:seed`, then in `apps/web`:
+`GATECONTROL_DEV_OWNER=on GATECONTROL_AUTH_SECRET=dev … bun --bun run dev` → http://localhost:3000/board
+
+**Verified with:** `bun --bun run build` (✓ compiled) → live `task.list` scoped to WS_A →
+`bun run typecheck` (6/6) → `bun run test` (107 pass) → `bunx biome check .` (clean) → `openapi:check`.
+
+**Still not started:** TASK-022 review workspace (xterm + diff), TASK-023 settings, TASK-024 client
+tests, Phase 5 E2E (TASK-025/026), TASK-029 gitleaks/dep-audit.
+
 ---
 
 ## Phase 1 — Foundation (unblocks everything)
@@ -453,7 +481,7 @@ gates (lint/typecheck/tests/openapi pass now; `gitleaks` + dep-audit + E2E still
 | TASK-026 | @critical isolation | P1 | **Critical — blocks merge** | ☐ |
 | TASK-029 | Quality gates | P1 | Critical | ☐ |
 | TASK-016 | Billing guard | P2 | Critical | ✅ verified |
-| TASK-021 | Kanban board | P2 | High | ☐ |
+| TASK-021 | Kanban board | P2 | High | ◑ (slice: live board; dnd+WS follow-up) |
 | TASK-023 | Settings (profiles/secrets) | P2 | High | ☐ |
 | TASK-025 | E2E happy path | P2 | High | ☐ |
 | TASK-027 | Observability | P2 | Medium | ✅ verified |

@@ -13,7 +13,7 @@
     "test": "bun test",
     "lint": "biome check .",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
+    "db:migrate": "bun run src/migrate.ts",
     "db:seed": "bun run src/seed.ts"
   },
   "dependencies": {

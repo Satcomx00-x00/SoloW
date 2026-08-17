@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "dev": "next dev --port 3000",
+    "build": "next build",
+    "start": "next start --port 3000",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "lint": "biome check .",
@@ -14,9 +17,15 @@
     "@gatecontrol/contracts": "workspace:*",
     "@gatecontrol/core": "workspace:*",
     "@gatecontrol/db": "workspace:*",
+    "@tanstack/react-query": "^5",
+    "@trpc/client": "^11",
+    "@trpc/react-query": "^11",
     "@trpc/server": "^11.0.0",
     "better-auth": "^1.2.0",
     "drizzle-orm": "^0.36.0",
+    "next": "^15",
+    "react": "^19",
+    "react-dom": "^19",
     "server-only": "^0.0.1",
     "superjson": "^2.2.1",
     "trpc-to-openapi": "^2.1.0",
@@ -24,8 +33,11 @@
     "zod-openapi": "4.2.4"
   },
   "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "bun-types": "^1.1.0",
     "typescript": "^5.6.0",
-    "vitest": "^2.1.0",
-    "bun-types": "^1.1.0"
+    "vitest": "^2.1.0"
   }
 }

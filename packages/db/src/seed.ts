@@ -20,8 +20,11 @@ import { encryptSecret } from "./secret-store.js";
  */
 
 // Stable ids make the seed idempotent (fixed PKs → onConflictDoNothing is a no-op on re-run).
-const WS_A = "11111111-1111-4111-8111-111111111111";
-const WS_B = "22222222-2222-4222-8222-222222222222";
+// Exported so the local dev-owner session (apps/web) can bind to a seeded Workspace.
+export const SEED_WORKSPACE_A = "11111111-1111-4111-8111-111111111111";
+export const SEED_WORKSPACE_B = "22222222-2222-4222-8222-222222222222";
+const WS_A = SEED_WORKSPACE_A;
+const WS_B = SEED_WORKSPACE_B;
 
 const A = {
   secret: "a1000000-0000-4000-8000-000000000001",
