@@ -14,9 +14,9 @@ const webEnvSchema = z.object({
   /** BetterAuth session secret. */
   GATECONTROL_AUTH_SECRET: z.string().min(1),
   /** Base URL the SPA is served from. */
-  GATECONTROL_WEB_URL: z.string().url().default("http://localhost:3000"),
+  GATECONTROL_WEB_URL: z.string().url().default("http://localhost:5000"),
   /** WebSocket endpoint exposed by the orchestrator service. */
-  GATECONTROL_WS_URL: z.string().url().default("ws://localhost:5000"),
+  GATECONTROL_WS_URL: z.string().url().default("ws://localhost:5001"),
 });
 
 export type WebEnv = z.infer<typeof webEnvSchema>;

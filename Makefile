@@ -3,8 +3,8 @@
 
 SHELL := bash
 .DEFAULT_GOAL := help
-.PHONY: help install clean build lint format typecheck test smoke start dev update \
-	db-generate db-migrate db-seed openapi openapi-check
+.PHONY: help install clean build lint format typecheck test smoke dev dev-web \
+	dev-orchestrator update db-generate db-migrate db-seed openapi openapi-check
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -37,11 +37,14 @@ test: ## Run all unit tests (per-package, picks up each bunfig preload)
 smoke: ## Run the end-to-end smoke test (in-memory DB, fake agent, temp git repo)
 	bun run scripts/smoke.ts
 
-start: ## Start the orchestrator (WebSocket hub + workflow host)
-	bun run apps/orchestrator/src/main.ts
-
-dev: ## Start the orchestrator with hot reload
+dev: ## Start ALL services (web :5000 + orchestrator :5001) with hot reload; auto-migrates+seeds
 	bun run dev
+
+dev-web: ## Start only the web app (SPA + API) on :5000
+	bun run dev:web
+
+dev-orchestrator: ## Start only the orchestrator (WebSocket hub) on :5001
+	bun run dev:orchestrator
 
 update: ## Update dependencies to the latest allowed versions
 	bun update

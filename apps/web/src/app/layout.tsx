@@ -10,7 +10,8 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    // Dark by default for the VS-Code-style dashboard; still the shadcn default (neutral) palette.
+    <html lang="en" className="dark">
       <body>
         <Providers>{children}</Providers>
       </body>

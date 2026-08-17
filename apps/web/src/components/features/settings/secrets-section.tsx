@@ -2,6 +2,17 @@
 
 import type { SecretKind } from "@gatecontrol/contracts";
 import { useState } from "react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { trpc } from "@/trpc/react";
 
 /** Set (write-only) Secrets and list their metadata — the value is never shown after entry. */
@@ -21,54 +32,64 @@ export function SecretsSection() {
   });
 
   return (
-    <section className="panel" aria-labelledby="secrets-heading">
-      <h2 id="secrets-heading">Secrets</h2>
-      <form
-        className="form-row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          setSecret.mutate({ name, kind, value });
-        }}
-      >
-        <input
-          aria-label="Secret name"
-          placeholder="e.g. anthropic-api-key"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          required
-        />
-        <select
-          aria-label="Secret kind"
-          value={kind}
-          onChange={(e) => setKind(e.target.value as SecretKind)}
+    <Card id="secrets" className="scroll-mt-16">
+      <CardHeader>
+        <CardTitle>Secrets</CardTitle>
+        <CardDescription>
+          Write-only credentials. The value is never shown after entry.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <form
+          className="flex flex-wrap items-center gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            setSecret.mutate({ name, kind, value });
+          }}
         >
-          <option value="api_key">API key</option>
-          <option value="subscription_token">Subscription token</option>
-        </select>
-        <input
-          aria-label="Secret value"
-          type="password"
-          placeholder="value (write-only)"
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          required
-        />
-        <button type="submit" disabled={setSecret.isPending}>
-          {setSecret.isPending ? "Saving…" : "Save secret"}
-        </button>
-      </form>
-      {setSecret.error && (
-        <p className="error" role="alert">
-          {setSecret.error.message}
-        </p>
-      )}
-      <ul className="chips">
-        {(secrets.data ?? []).map((s) => (
-          <li key={s.id}>
-            {s.name} <span className="tag">{s.kind}</span>
-          </li>
-        ))}
-      </ul>
-    </section>
+          <Input
+            aria-label="Secret name"
+            placeholder="e.g. anthropic-api-key"
+            className="max-w-48"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+          />
+          <Select value={kind} onValueChange={(v) => setKind(v as SecretKind)}>
+            <SelectTrigger aria-label="Secret kind" className="w-44">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="api_key">API key</SelectItem>
+              <SelectItem value="subscription_token">Subscription token</SelectItem>
+            </SelectContent>
+          </Select>
+          <Input
+            aria-label="Secret value"
+            type="password"
+            placeholder="value"
+            className="max-w-48"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            required
+          />
+          <Button type="submit" disabled={setSecret.isPending}>
+            {setSecret.isPending ? "Saving…" : "Save secret"}
+          </Button>
+        </form>
+        {setSecret.error && (
+          <p className="text-destructive text-sm" role="alert">
+            {setSecret.error.message}
+          </p>
+        )}
+        <div className="flex flex-wrap gap-2">
+          {(secrets.data ?? []).map((s) => (
+            <Badge key={s.id} variant="secondary">
+              {s.name} · {s.kind}
+            </Badge>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
   );
 }

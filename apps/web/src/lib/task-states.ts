@@ -23,3 +23,14 @@ export const STATE_LABELS: Record<TaskState, string> = {
   failed: "Failed",
   done: "Done",
 };
+
+/** Badge variant per lifecycle state (shadcn Badge variants). */
+export const STATE_BADGE: Record<TaskState, "default" | "secondary" | "destructive" | "outline"> = {
+  backlog: "outline",
+  ready: "secondary",
+  running: "default",
+  review: "default",
+  parked: "outline",
+  failed: "destructive",
+  done: "secondary",
+};

@@ -13,7 +13,9 @@
     "bun": ">=1.3"
   },
   "scripts": {
-    "dev": "bun --hot run apps/orchestrator/src/main.ts",
+    "dev": "sh scripts/dev.sh",
+    "dev:web": "cd apps/web && bun --bun run dev",
+    "dev:orchestrator": "bun --hot run apps/orchestrator/src/main.ts",
     "typecheck": "bun run --filter '*' typecheck",
     "test": "bun run --filter '*' test",
     "lint": "biome check .",

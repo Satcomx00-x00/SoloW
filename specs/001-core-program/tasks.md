@@ -160,6 +160,24 @@ Phase 4 settings pass (seventh `/speckit-implement`) — **VERIFIED** (build + l
 **Still not started:** TASK-021 full (dnd + live WS), TASK-022 review workspace (needs WS client),
 board create-Issue/Task actions, Phase 5 E2E (TASK-025/026), TASK-029 gitleaks/dep-audit.
 
+Phase 4 interactive-board pass (eighth `/speckit-implement`) — **VERIFIED** (build + live loop):
+- ◑ **TASK-021** — board is now **interactive**: create-Issue + create-Task forms (`board-toolbar.tsx`,
+  selectors from issue/agent/executor/repo lists), and per-card lifecycle actions (Backlog→Ready
+  via `task.move`, Launch via `task.launch`). Live-smoked the whole chain: create issue → create
+  task (backlog) → move (ready) → launch (**running**). *Remaining for full TASK-021: dnd-kit drag
+  + live WebSocket status.*
+- ➕ **Orchestrator-client dev degradation**: `enqueueTaskRun`/`resumeReview` log-and-return under
+  `GATECONTROL_DEV_OWNER=on` (so the SPA launch/review flow is demonstrable without the durable
+  service) and still **throw** in non-dev (missing wiring never silent).
+- ➕ **TASK-024**: added a board-actions rendering test (`renderActions` wired through
+  BoardView→Column→TaskCard).
+
+**Verified with:** `bun --bun run build` ✓ → live create-issue→create-task→move→**launch=running** →
+typecheck 6/6 → **111 tests pass** → Biome clean → `openapi:check`.
+
+**Still not started:** TASK-021 dnd + live WS, TASK-022 review workspace, Phase 5 E2E (TASK-025/026),
+TASK-029 gitleaks/dep-audit. (Review + real-time need the WS client + a running orchestrator/agent.)
+
 ---
 
 ## Phase 1 — Foundation (unblocks everything)
@@ -506,7 +524,7 @@ board create-Issue/Task actions, Phase 5 E2E (TASK-025/026), TASK-029 gitleaks/d
 | TASK-026 | @critical isolation | P1 | **Critical — blocks merge** | ☐ |
 | TASK-029 | Quality gates | P1 | Critical | ☐ |
 | TASK-016 | Billing guard | P2 | Critical | ✅ verified |
-| TASK-021 | Kanban board | P2 | High | ◑ (slice: live board; dnd+WS follow-up) |
+| TASK-021 | Kanban board | P2 | High | ◑ (live board + create/move/launch; dnd+WS follow-up) |
 | TASK-023 | Settings (profiles/secrets) | P2 | High | ✅ verified |
 | TASK-025 | E2E happy path | P2 | High | ☐ |
 | TASK-027 | Observability | P2 | Medium | ✅ verified |

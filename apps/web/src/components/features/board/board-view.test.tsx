@@ -60,6 +60,16 @@ describe("BoardView", () => {
         tasks={[makeTask({ id: "3", state: "failed", failureReason: "credential_expired" })]}
       />,
     );
-    expect(screen.getByText("⚠ credential_expired")).toBeDefined();
+    expect(screen.getByText("credential_expired")).toBeDefined();
+  });
+
+  it("renders per-Task actions supplied by renderActions", () => {
+    render(
+      <BoardView
+        tasks={[makeTask({ id: "4", state: "ready", title: "Launchable" })]}
+        renderActions={(t) => <button type="button">act-{t.id}</button>}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "act-4" })).toBeDefined();
   });
 });

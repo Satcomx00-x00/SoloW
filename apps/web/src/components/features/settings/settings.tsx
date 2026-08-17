@@ -11,7 +11,7 @@ import { SecretsSection } from "./secrets-section";
  */
 export function Settings() {
   return (
-    <div className="settings">
+    <div className="grid gap-4 md:grid-cols-2">
       <SecretsSection />
       <AgentProfilesSection />
       <ExecutorProfilesSection />

@@ -1,14 +1,16 @@
 import "server-only";
 import type { ReviewDecision } from "@gatecontrol/contracts";
+import { devOwnerMode } from "./env.js";
 
 /**
  * Thin client the API uses to hand work to the orchestrator service (Decision 0002).
  * The API never runs agents itself; it emits events the durable `task-run` workflow
  * consumes (plan §9).
  *
- * TODO(Phase 3): wire to Inngest — `enqueueTaskRun` sends `task.launch.requested`;
- * `resumeReview` sends `review.decided` to release the workflow's `waitForEvent`.
- * Kept as a stable interface so routers are complete now.
+ * TODO(Phase 3 wiring): send real Inngest events — `enqueueTaskRun` → `task.launch.requested`;
+ * `resumeReview` → `review.decided` (releases the workflow's `waitForEvent`). Until then, dev
+ * mode logs-and-returns so the SPA flow is demonstrable, and non-dev throws so the missing
+ * wiring is never silent in a real deployment.
  */
 export interface OrchestratorClient {
   enqueueTaskRun(input: { workspaceId: string; taskId: string; sessionId: string }): Promise<void>;
@@ -20,12 +22,21 @@ export interface OrchestratorClient {
   }): Promise<void>;
 }
 
-/** Placeholder until Phase 3 wires Inngest; makes the boundary explicit, not silent. */
+const UNWIRED = "orchestrator not wired (Phase 3)";
+
 export const orchestrator: OrchestratorClient = {
-  async enqueueTaskRun() {
-    throw new Error("orchestrator not wired (Phase 3): task-run enqueue unavailable");
+  async enqueueTaskRun(input) {
+    if (devOwnerMode()) {
+      console.info(`[orchestrator:dev] would enqueue task-run for task ${input.taskId}`);
+      return;
+    }
+    throw new Error(`${UNWIRED}: task-run enqueue unavailable`);
   },
-  async resumeReview() {
-    throw new Error("orchestrator not wired (Phase 3): review resume unavailable");
+  async resumeReview(input) {
+    if (devOwnerMode()) {
+      console.info(`[orchestrator:dev] would resume review for session ${input.sessionId}`);
+      return;
+    }
+    throw new Error(`${UNWIRED}: review resume unavailable`);
   },
 };

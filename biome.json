@@ -10,7 +10,9 @@
       "!specs",
       "!.specify",
       "!.claude",
-      "!apps/web/openapi.json"
+      "!apps/web/openapi.json",
+      "!apps/web/src/components/ui",
+      "!apps/web/src/app/globals.css"
     ]
   },
   "formatter": {

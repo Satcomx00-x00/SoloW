@@ -2,6 +2,17 @@
 
 import type { AuthMode } from "@gatecontrol/contracts";
 import { useState } from "react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { trpc } from "@/trpc/react";
 
 /** Create Agent Profiles (auth mode + concurrency cap) bound to a stored Secret. */
@@ -24,79 +35,86 @@ export function AgentProfilesSection() {
   const secretOptions = secrets.data ?? [];
 
   return (
-    <section className="panel" aria-labelledby="agents-heading">
-      <h2 id="agents-heading">Agent profiles</h2>
-      <form
-        className="form-row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          create.mutate({
-            name,
-            agentKind: "claude_code",
-            authMode,
-            secretId,
-            concurrencyCap: cap,
-          });
-        }}
-      >
-        <input
-          aria-label="Profile name"
-          placeholder="e.g. Claude Code (subscription)"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          required
-        />
-        <select
-          aria-label="Auth mode"
-          value={authMode}
-          onChange={(e) => setAuthMode(e.target.value as AuthMode)}
+    <Card id="agent-profiles" className="scroll-mt-16">
+      <CardHeader>
+        <CardTitle>Agent profiles</CardTitle>
+        <CardDescription>Auth mode + concurrency cap, bound to a stored secret.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <form
+          className="flex flex-wrap items-center gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            create.mutate({
+              name,
+              agentKind: "claude_code",
+              authMode,
+              secretId,
+              concurrencyCap: cap,
+            });
+          }}
         >
-          <option value="subscription">Subscription</option>
-          <option value="api_key">API key</option>
-        </select>
-        <select
-          aria-label="Secret"
-          value={secretId}
-          onChange={(e) => setSecretId(e.target.value)}
-          required
-        >
-          <option value="" disabled>
-            Select a secret…
-          </option>
-          {secretOptions.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name} ({s.kind})
-            </option>
+          <Input
+            aria-label="Profile name"
+            placeholder="e.g. Claude Code"
+            className="max-w-48"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+          />
+          <Select value={authMode} onValueChange={(v) => setAuthMode(v as AuthMode)}>
+            <SelectTrigger aria-label="Auth mode" className="w-40">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="subscription">Subscription</SelectItem>
+              <SelectItem value="api_key">API key</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={secretId} onValueChange={setSecretId}>
+            <SelectTrigger aria-label="Secret" className="w-44">
+              <SelectValue placeholder="Secret…" />
+            </SelectTrigger>
+            <SelectContent>
+              {secretOptions.map((s) => (
+                <SelectItem key={s.id} value={s.id}>
+                  {s.name} ({s.kind})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Input
+            aria-label="Concurrency cap"
+            type="number"
+            min={1}
+            max={20}
+            className="w-20"
+            value={cap}
+            onChange={(e) => setCap(Number(e.target.value))}
+          />
+          <Button
+            type="submit"
+            disabled={create.isPending || secretOptions.length === 0 || !secretId}
+          >
+            Add profile
+          </Button>
+        </form>
+        {secretOptions.length === 0 && (
+          <p className="text-muted-foreground text-xs">Add a secret first to create a profile.</p>
+        )}
+        {create.error && (
+          <p className="text-destructive text-sm" role="alert">
+            {create.error.message}
+          </p>
+        )}
+        <div className="flex flex-wrap gap-2">
+          {(profiles.data ?? []).map((p) => (
+            <Badge key={p.id} variant="secondary">
+              {p.name} · {p.authMode} · cap {p.concurrencyCap}
+            </Badge>
           ))}
-        </select>
-        <input
-          aria-label="Concurrency cap"
-          type="number"
-          min={1}
-          max={20}
-          value={cap}
-          onChange={(e) => setCap(Number(e.target.value))}
-        />
-        <button type="submit" disabled={create.isPending || secretOptions.length === 0}>
-          {create.isPending ? "Creating…" : "Add profile"}
-        </button>
-      </form>
-      {secretOptions.length === 0 && (
-        <p className="hint">Add a secret first to create a profile.</p>
-      )}
-      {create.error && (
-        <p className="error" role="alert">
-          {create.error.message}
-        </p>
-      )}
-      <ul className="chips">
-        {(profiles.data ?? []).map((p) => (
-          <li key={p.id}>
-            {p.name} <span className="tag">{p.authMode}</span>
-            <span className="tag">cap {p.concurrencyCap}</span>
-          </li>
-        ))}
-      </ul>
-    </section>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
