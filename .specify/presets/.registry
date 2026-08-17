@@ -1,0 +1,29 @@
+{
+  "schema_version": "1.0",
+  "presets": {
+    "nextjs": {
+      "version": "0.2.0",
+      "source": "local",
+      "manifest_hash": "sha256:59a3c594167efcfc62c05bbd1f1e56f3eed566ccebfbe4e151856423aefa8cd1",
+      "enabled": true,
+      "priority": 10,
+      "registered_commands": {
+        "claude": [
+          "speckit.audit",
+          "speckit.plan",
+          "speckit.tasks",
+          "speckit.handoff",
+          "speckit.help"
+        ]
+      },
+      "registered_skills": [
+        "speckit-audit",
+        "speckit-plan",
+        "speckit-tasks",
+        "speckit-handoff",
+        "speckit-help"
+      ],
+      "installed_at": "2026-08-17T15:56:16.766323+00:00"
+    }
+  }
+}
