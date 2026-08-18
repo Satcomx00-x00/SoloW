@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -39,40 +40,47 @@ export function SecretsSection() {
           Write-only credentials. The value is never shown after entry.
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-3">
+      <CardContent className="space-y-4">
         <form
-          className="flex flex-wrap items-center gap-2"
+          className="space-y-4"
           onSubmit={(e) => {
             e.preventDefault();
             setSecret.mutate({ name, kind, value });
           }}
         >
-          <Input
-            aria-label="Secret name"
-            placeholder="e.g. anthropic-api-key"
-            className="max-w-48"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            required
-          />
-          <Select value={kind} onValueChange={(v) => setKind(v as SecretKind)}>
-            <SelectTrigger aria-label="Secret kind" className="w-44">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="api_key">API key</SelectItem>
-              <SelectItem value="subscription_token">Subscription token</SelectItem>
-            </SelectContent>
-          </Select>
-          <Input
-            aria-label="Secret value"
-            type="password"
-            placeholder="value"
-            className="max-w-48"
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            required
-          />
+          <div className="grid gap-2">
+            <Label htmlFor="secret-name">Name</Label>
+            <Input
+              id="secret-name"
+              placeholder="e.g. anthropic-api-key"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="secret-kind">Kind</Label>
+            <Select value={kind} onValueChange={(v) => setKind(v as SecretKind)}>
+              <SelectTrigger id="secret-kind" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="api_key">API key</SelectItem>
+                <SelectItem value="subscription_token">Subscription token</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="secret-value">Value</Label>
+            <Input
+              id="secret-value"
+              type="password"
+              placeholder="Paste the secret value"
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              required
+            />
+          </div>
           <Button type="submit" disabled={setSecret.isPending}>
             {setSecret.isPending ? "Saving…" : "Save secret"}
           </Button>
@@ -82,13 +90,15 @@ export function SecretsSection() {
             {setSecret.error.message}
           </p>
         )}
-        <div className="flex flex-wrap gap-2">
-          {(secrets.data ?? []).map((s) => (
-            <Badge key={s.id} variant="secondary">
-              {s.name} · {s.kind}
-            </Badge>
-          ))}
-        </div>
+        {(secrets.data?.length ?? 0) > 0 && (
+          <div className="flex flex-wrap gap-2 border-t pt-4">
+            {(secrets.data ?? []).map((s) => (
+              <Badge key={s.id} variant="secondary">
+                {s.name} · {s.kind}
+              </Badge>
+            ))}
+          </div>
+        )}
       </CardContent>
     </Card>
   );

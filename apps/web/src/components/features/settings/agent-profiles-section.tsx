@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -29,6 +30,7 @@ export function AgentProfilesSection() {
     onSuccess: () => {
       utils.profile.agent.list.invalidate();
       setName("");
+      setSecretId("");
     },
   });
 
@@ -40,9 +42,9 @@ export function AgentProfilesSection() {
         <CardTitle>Agent profiles</CardTitle>
         <CardDescription>Auth mode + concurrency cap, bound to a stored secret.</CardDescription>
       </CardHeader>
-      <CardContent className="space-y-3">
+      <CardContent className="space-y-4">
         <form
-          className="flex flex-wrap items-center gap-2"
+          className="space-y-4"
           onSubmit={(e) => {
             e.preventDefault();
             create.mutate({
@@ -54,66 +56,82 @@ export function AgentProfilesSection() {
             });
           }}
         >
-          <Input
-            aria-label="Profile name"
-            placeholder="e.g. Claude Code"
-            className="max-w-48"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            required
-          />
-          <Select value={authMode} onValueChange={(v) => setAuthMode(v as AuthMode)}>
-            <SelectTrigger aria-label="Auth mode" className="w-40">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="subscription">Subscription</SelectItem>
-              <SelectItem value="api_key">API key</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select value={secretId} onValueChange={setSecretId}>
-            <SelectTrigger aria-label="Secret" className="w-44">
-              <SelectValue placeholder="Secret…" />
-            </SelectTrigger>
-            <SelectContent>
-              {secretOptions.map((s) => (
-                <SelectItem key={s.id} value={s.id}>
-                  {s.name} ({s.kind})
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Input
-            aria-label="Concurrency cap"
-            type="number"
-            min={1}
-            max={20}
-            className="w-20"
-            value={cap}
-            onChange={(e) => setCap(Number(e.target.value))}
-          />
+          <div className="grid gap-2">
+            <Label htmlFor="agent-name">Name</Label>
+            <Input
+              id="agent-name"
+              placeholder="e.g. Claude Code"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+            />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-2">
+              <Label htmlFor="agent-authmode">Auth mode</Label>
+              <Select value={authMode} onValueChange={(v) => setAuthMode(v as AuthMode)}>
+                <SelectTrigger id="agent-authmode" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="subscription">Subscription</SelectItem>
+                  <SelectItem value="api_key">API key</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="agent-cap">Concurrency cap</Label>
+              <Input
+                id="agent-cap"
+                type="number"
+                min={1}
+                max={20}
+                value={cap}
+                onChange={(e) => setCap(Number(e.target.value))}
+              />
+            </div>
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="agent-secret">Secret</Label>
+            <Select value={secretId} onValueChange={setSecretId}>
+              <SelectTrigger id="agent-secret" className="w-full">
+                <SelectValue placeholder="Select a secret" />
+              </SelectTrigger>
+              <SelectContent>
+                {secretOptions.map((s) => (
+                  <SelectItem key={s.id} value={s.id}>
+                    {s.name} ({s.kind})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {secretOptions.length === 0 && (
+              <p className="text-muted-foreground text-xs">
+                Add a secret first to create a profile.
+              </p>
+            )}
+          </div>
           <Button
             type="submit"
             disabled={create.isPending || secretOptions.length === 0 || !secretId}
           >
-            Add profile
+            {create.isPending ? "Creating…" : "Add profile"}
           </Button>
         </form>
-        {secretOptions.length === 0 && (
-          <p className="text-muted-foreground text-xs">Add a secret first to create a profile.</p>
-        )}
         {create.error && (
           <p className="text-destructive text-sm" role="alert">
             {create.error.message}
           </p>
         )}
-        <div className="flex flex-wrap gap-2">
-          {(profiles.data ?? []).map((p) => (
-            <Badge key={p.id} variant="secondary">
-              {p.name} · {p.authMode} · cap {p.concurrencyCap}
-            </Badge>
-          ))}
-        </div>
+        {(profiles.data?.length ?? 0) > 0 && (
+          <div className="flex flex-wrap gap-2 border-t pt-4">
+            {(profiles.data ?? []).map((p) => (
+              <Badge key={p.id} variant="secondary">
+                {p.name} · {p.authMode} · cap {p.concurrencyCap}
+              </Badge>
+            ))}
+          </div>
+        )}
       </CardContent>
     </Card>
   );
