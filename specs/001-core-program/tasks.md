@@ -524,7 +524,7 @@ TASK-029 gitleaks/dep-audit. (Review + real-time need the WS client + a running 
 | TASK-026 | @critical isolation | P1 | **Critical — blocks merge** | ☐ |
 | TASK-029 | Quality gates | P1 | Critical | ☐ |
 | TASK-016 | Billing guard | P2 | Critical | ✅ verified |
-| TASK-021 | Kanban board | P2 | High | ◑ (live board + create/move/launch; dnd+WS follow-up) |
+| TASK-021 | Kanban board | P2 | High | ◑ (live board + create/move/launch + dnd-kit drag; live WS follow-up) |
 | TASK-023 | Settings (profiles/secrets) | P2 | High | ✅ verified |
 | TASK-025 | E2E happy path | P2 | High | ☐ |
 | TASK-027 | Observability | P2 | Medium | ✅ verified |

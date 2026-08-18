@@ -14,6 +14,7 @@
     "openapi:check": "bun --preload ./scripts/stub-server-only.ts scripts/gen-openapi.ts --check"
   },
   "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
     "@gatecontrol/contracts": "workspace:*",
     "@gatecontrol/core": "workspace:*",
     "@gatecontrol/db": "workspace:*",
