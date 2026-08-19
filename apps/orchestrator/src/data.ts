@@ -7,6 +7,7 @@ import {
   secret,
   session,
   sessionEvent,
+  sessionUsage,
   task,
 } from "@gatecontrol/db";
 import { and, asc, desc, eq, gt, inArray } from "drizzle-orm";
@@ -130,6 +131,86 @@ export async function appendSessionEvent(
       payload: input.payload,
     })
     .onConflictDoNothing();
+}
+
+/**
+ * Record one turn's token usage (issue #14).
+ *
+ * Keyed on `(sessionId, seq)` like the event log and inserted with `onConflictDoNothing`, so a
+ * durable step that replays after an orchestrator restart re-records the same turn as a no-op
+ * rather than double-counting it (Principle III).
+ *
+ * Counts and model only. Nothing derived from the prompt or the completion is stored here.
+ */
+export async function recordSessionUsage(
+  db: Db,
+  workspaceId: string,
+  input: {
+    sessionId: string;
+    taskId: string;
+    agentProfileId: string;
+    /** The assistant turn. Repeats for the same turn are ignored — see the schema comment. */
+    messageId: string;
+    seq: number;
+    model: string | null;
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens: number;
+    cacheWriteTokens: number;
+    reported: boolean;
+  },
+): Promise<void> {
+  await db
+    .insert(sessionUsage)
+    .values({
+      workspaceId,
+      sessionId: input.sessionId,
+      taskId: input.taskId,
+      agentProfileId: input.agentProfileId,
+      messageId: input.messageId,
+      seq: input.seq,
+      model: input.model,
+      inputTokens: input.inputTokens,
+      outputTokens: input.outputTokens,
+      cacheReadTokens: input.cacheReadTokens,
+      cacheWriteTokens: input.cacheWriteTokens,
+      reported: input.reported,
+    })
+    .onConflictDoNothing();
+}
+
+/**
+ * The next usage `seq` for a Session — an ordering hint, read from the database because a
+ * Session spans review rounds and each round re-enters the durable step with a fresh closure.
+ *
+ * Identity lives on `messageId`, not here: a repeated or replayed turn is rejected by the
+ * unique index regardless of what sequence number it arrives with.
+ */
+export async function nextSessionUsageSeq(
+  db: Db,
+  workspaceId: string,
+  sessionId: string,
+): Promise<number> {
+  const [row] = await db
+    .select({ seq: sessionUsage.seq })
+    .from(sessionUsage)
+    .where(and(eq(sessionUsage.workspaceId, workspaceId), eq(sessionUsage.sessionId, sessionId)))
+    .orderBy(desc(sessionUsage.seq))
+    .limit(1);
+  return row ? row.seq + 1 : 0;
+}
+
+/** Every usage row for a Session, oldest turn first. */
+export async function listSessionUsage(
+  db: Db,
+  workspaceId: string,
+  sessionId: string,
+): Promise<(typeof sessionUsage.$inferSelect)[]> {
+  return db
+    .select()
+    .from(sessionUsage)
+    .where(and(eq(sessionUsage.workspaceId, workspaceId), eq(sessionUsage.sessionId, sessionId)))
+    .orderBy(sessionUsage.seq);
 }
 
 /** The next free `seq` for a Session (resumes correctly after an orchestrator restart). */

@@ -56,6 +56,15 @@ jobs:
       - name: Unit tests
         run: make test
 
+      # Executes the real lifecycle against an in-memory DB, a fake agent and a temp git repo.
+      # It is what would have caught #111 breaking scripts/smoke.ts — but only by running it:
+      # `scripts/` is listed in the root tsconfig, yet `bun run typecheck` fans out per package
+      # and never invokes that config, so a stale call signature there still compiles. This
+      # gate catches the ones the smoke path exercises; typechecking `scripts/` is the
+      # remaining, separate gap.
+      - name: Smoke (end-to-end lifecycle)
+        run: make smoke
+
       - name: OpenAPI freshness
         run: make openapi-check
 
@@ -71,6 +80,9 @@ jobs:
 
       - name: Dependency audit
         run: make audit
+
+      - name: Executor boundary
+        run: make audit-executor-boundary
 
   secretscan:
     name: Secret scan

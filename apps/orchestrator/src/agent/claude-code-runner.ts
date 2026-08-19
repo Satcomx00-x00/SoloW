@@ -125,6 +125,17 @@ export function toStreamEvent(update: ClaudeUpdate): AgentStreamEvent | null {
   switch (update.kind) {
     case "tool_use":
       return { kind: "tool_use", name: update.name };
+    case "usage":
+      return {
+        kind: "usage",
+        messageId: update.messageId,
+        reported: update.reported,
+        model: update.model,
+        inputTokens: update.inputTokens,
+        outputTokens: update.outputTokens,
+        cacheReadTokens: update.cacheReadTokens,
+        cacheWriteTokens: update.cacheWriteTokens,
+      };
     case "text": {
       // Thinking is shown, marked, rather than dropped: a reviewer judging the work wants the
       // agent's reasoning, and hiding it would make the terminal disagree with the transcript.

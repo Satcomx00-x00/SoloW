@@ -55,7 +55,7 @@ audit-executor-boundary: ## No direct host access (Bun.spawn/$/fs) outside the l
 secretscan: ## Scan the repository and its history for committed secrets
 	bun run secretscan
 
-verify: lint typecheck test openapi-check audit audit-executor-boundary secretscan e2e ## Every quality gate, in order
+verify: lint typecheck test smoke openapi-check audit audit-executor-boundary secretscan e2e ## Every quality gate, in order
 	@echo "all quality gates passed"
 
 dev: ## Start ALL services (web :5000 + orchestrator :5001) with hot reload; auto-migrates+seeds

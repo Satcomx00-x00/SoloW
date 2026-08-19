@@ -6,12 +6,19 @@ import {
   issue,
   repository,
   secret,
+  session,
   task,
   workspace,
 } from "@gatecontrol/db";
 import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
 import { and, eq } from "drizzle-orm";
-import { loadTaskRunContext, setTaskState } from "./data.js";
+import {
+  listSessionUsage,
+  loadTaskRunContext,
+  nextSessionUsageSeq,
+  recordSessionUsage,
+  setTaskState,
+} from "./data.js";
 
 // The secret store reads GATECONTROL_SECRET_KEY lazily; set it before any encryptSecret call.
 beforeAll(() => {
@@ -177,5 +184,153 @@ describe("setTaskState", () => {
       .from(task)
       .where(and(eq(task.workspaceId, WS), eq(task.id, "task-1")));
     expect(row?.state).toBe("ready");
+  });
+});
+
+describe("recordSessionUsage (issue #14)", () => {
+  async function seedSession(db: TestDb) {
+    await seed(db);
+    await db.insert(session).values({ id: "sess-1", workspaceId: WS, taskId: "task-1" });
+  }
+
+  const turn = (over: Partial<Parameters<typeof recordSessionUsage>[2]> = {}) => ({
+    sessionId: "sess-1",
+    taskId: "task-1",
+    agentProfileId: "ap-1",
+    // Identity follows the turn, so distinct turns need distinct ids by default.
+    messageId: `msg-${over.seq ?? 0}`,
+    seq: 0,
+    model: "claude-sonnet-4-20250514",
+    inputTokens: 100,
+    outputTokens: 20,
+    cacheReadTokens: 5,
+    cacheWriteTokens: 1,
+    reported: true,
+    ...over,
+  });
+
+  it("records a turn's counts and model", async () => {
+    const db = createTestDb();
+    await seedSession(db);
+
+    await recordSessionUsage(db, WS, turn());
+
+    const rows = await listSessionUsage(db, WS, "sess-1");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      model: "claude-sonnet-4-20250514",
+      inputTokens: 100,
+      outputTokens: 20,
+      cacheReadTokens: 5,
+      cacheWriteTokens: 1,
+      reported: true,
+      agentProfileId: "ap-1",
+    });
+  });
+
+  it("is idempotent per turn, so a replay or a repeated block never double-counts", async () => {
+    const db = createTestDb();
+    await seedSession(db);
+
+    // Principle III: the same step re-runs after an orchestrator restart. And the CLI
+    // repeats one turn's usage on every content block, arriving with a different seq.
+    await recordSessionUsage(db, WS, turn());
+    await recordSessionUsage(db, WS, turn());
+    await recordSessionUsage(db, WS, turn({ seq: 7, messageId: "msg-0" }));
+
+    const rows = await listSessionUsage(db, WS, "sess-1");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.inputTokens).toBe(100);
+  });
+
+  it("records an unreported turn rather than omitting it, so coverage gaps stay visible", async () => {
+    const db = createTestDb();
+    await seedSession(db);
+
+    await recordSessionUsage(
+      db,
+      WS,
+      turn({ seq: 0, reported: false, model: null, inputTokens: 0, outputTokens: 0 }),
+    );
+
+    const rows = await listSessionUsage(db, WS, "sess-1");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.reported).toBe(false);
+  });
+
+  it("orders turns by seq", async () => {
+    const db = createTestDb();
+    await seedSession(db);
+
+    await recordSessionUsage(db, WS, turn({ seq: 1, inputTokens: 2 }));
+    await recordSessionUsage(db, WS, turn({ seq: 0, inputTokens: 1 }));
+
+    const rows = await listSessionUsage(db, WS, "sess-1");
+    expect(rows.map((r) => r.inputTokens)).toEqual([1, 2]);
+  });
+
+  it("does not return another Workspace's usage (Principle V)", async () => {
+    const db = createTestDb();
+    await seedSession(db);
+    await recordSessionUsage(db, WS, turn());
+
+    expect(await listSessionUsage(db, OTHER_WS, "sess-1")).toHaveLength(0);
+  });
+});
+
+describe("nextSessionUsageSeq — turn numbering survives a review round (issue #14)", () => {
+  async function seedSession(db: TestDb) {
+    await seed(db);
+    await db.insert(session).values({ id: "sess-1", workspaceId: WS, taskId: "task-1" });
+  }
+
+  const turn = (seq: number, inputTokens: number) => ({
+    sessionId: "sess-1",
+    taskId: "task-1",
+    agentProfileId: "ap-1",
+    messageId: `msg-${seq}`,
+    seq,
+    model: "claude-sonnet-4-20250514",
+    inputTokens,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    reported: true,
+  });
+
+  it("starts at 0 for a fresh Session", async () => {
+    const db = createTestDb();
+    await seedSession(db);
+    expect(await nextSessionUsageSeq(db, WS, "sess-1")).toBe(0);
+  });
+
+  it("continues after the previous round rather than colliding with it", async () => {
+    const db = createTestDb();
+    await seedSession(db);
+
+    // Round 0: two turns, numbered from a fresh session.
+    let seq = await nextSessionUsageSeq(db, WS, "sess-1");
+    await recordSessionUsage(db, WS, turn(seq++, 10));
+    await recordSessionUsage(db, WS, turn(seq++, 20));
+
+    // Round 1 — a reviewer asked for changes. The durable step re-enters with a fresh
+    // closure; numbering must resume from the database, not restart at 0. A counter that
+    // restarted here would collide on the unique index and onConflictDoNothing would
+    // discard this round's usage in silence.
+    seq = await nextSessionUsageSeq(db, WS, "sess-1");
+    expect(seq).toBe(2);
+    await recordSessionUsage(db, WS, turn(seq++, 30));
+
+    const rows = await listSessionUsage(db, WS, "sess-1");
+    expect(rows.map((r) => r.inputTokens)).toEqual([10, 20, 30]);
+  });
+
+  it("counts each Session separately", async () => {
+    const db = createTestDb();
+    await seedSession(db);
+    await db.insert(session).values({ id: "sess-2", workspaceId: WS, taskId: "task-1" });
+
+    await recordSessionUsage(db, WS, turn(0, 10));
+    expect(await nextSessionUsageSeq(db, WS, "sess-2")).toBe(0);
   });
 });

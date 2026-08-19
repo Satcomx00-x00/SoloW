@@ -15,6 +15,13 @@
       "when": 1787077979267,
       "tag": "0001_stiff_gambit",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1787146163030,
+      "tag": "0002_brave_silhouette",
+      "breakpoints": true
     }
   ]
 }

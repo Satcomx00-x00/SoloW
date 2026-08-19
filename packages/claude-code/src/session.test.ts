@@ -110,7 +110,8 @@ describe("startClaudeSession", () => {
     });
 
     expect(await s.outcome).toEqual({ ok: true, subtype: "success", text: "done" });
-    expect(updates.filter((u) => u.kind !== "session")).toEqual([
+    // Usage accompanies every block of a turn (see events.test.ts) and is asserted there.
+    expect(updates.filter((u) => u.kind !== "session" && u.kind !== "usage")).toEqual([
       { kind: "tool_use", name: "Edit" },
       { kind: "text", channel: "assistant", text: "patched " },
       { kind: "text", channel: "assistant", text: "latch.ts" },

@@ -18,6 +18,8 @@ import {
   appendSessionEvent,
   loadTaskRunContext,
   nextSessionEventSeq,
+  nextSessionUsageSeq,
+  recordSessionUsage,
   setSessionState,
   setTaskState,
   type TaskRunContext,
@@ -214,6 +216,50 @@ export async function runTaskLifecycle(
       // chained to keep log order identical to stream order.
       let seq = await nextSessionEventSeq(db, workspaceId, sessionId);
       let writes: Promise<unknown> = Promise.resolve();
+      // Usage is recorded per turn as it is reported (issue #14) — the agent states it once,
+      // in its own stream, and nothing else in the system can reconstruct it afterwards.
+      //
+      // The CLI emits one event per *content block* of a turn and repeats that turn's usage on
+      // every one, so the turn id is the identity: a repeat is dropped here rather than
+      // multiplying the turn's counts by its block count. `seq` only orders, and is read back
+      // from the database because a Session outlives a single durable step (review rounds).
+      let usageSeq = await nextSessionUsageSeq(db, workspaceId, sessionId);
+      const seenTurns = new Set<string>();
+      const recordUsage = (u: {
+        messageId: string | null;
+        reported: boolean;
+        model: string | null;
+        inputTokens: number;
+        outputTokens: number;
+        cacheReadTokens: number;
+        cacheWriteTokens: number;
+      }) => {
+        const seq = usageSeq;
+        // A CLI that reports no turn id gets one derived from position — still stable under
+        // replay, because the sequence itself is read back from the database each round.
+        const messageId = u.messageId ?? `seq:${seq}`;
+        if (seenTurns.has(messageId)) return;
+        seenTurns.add(messageId);
+        usageSeq += 1;
+        writes = writes
+          .then(() =>
+            recordSessionUsage(db, workspaceId, {
+              sessionId,
+              taskId,
+              agentProfileId: ctx.agentProfile.id,
+              messageId,
+              seq,
+              reported: u.reported,
+              model: u.model,
+              inputTokens: u.inputTokens,
+              outputTokens: u.outputTokens,
+              cacheReadTokens: u.cacheReadTokens,
+              cacheWriteTokens: u.cacheWriteTokens,
+            }),
+          )
+          .catch((cause) => captureException(log, cause, { stage: "session-usage-record" }));
+      };
+
       const emit = (kind: "stdout" | "tool_use", payload: Record<string, unknown>) => {
         const at = seq++;
         deps.hub.publish(channel, { kind, taskId, sessionId, seq: at, ...payload });
@@ -237,7 +283,8 @@ export async function runTaskLifecycle(
         prompt: brief,
         onEvent: (e) => {
           if (e.kind === "stdout") emit("stdout", { text: e.text });
-          else emit("tool_use", { name: e.name });
+          else if (e.kind === "tool_use") emit("tool_use", { name: e.name });
+          else recordUsage(e);
         },
       });
       // Publish the handle for the lifetime of the run so the hub can deliver the operator's
@@ -252,8 +299,11 @@ export async function runTaskLifecycle(
         outcome = await handle.outcome;
       } finally {
         deregister();
+        // Drain queued log and usage writes even when the run threw. Usage in particular
+        // cannot be re-obtained — the agent reports it once — so abandoning the chain on a
+        // mid-turn failure would lose it permanently rather than merely delay it.
+        await writes;
       }
-      await writes;
 
       // Confirm with git that the reported path really is a worktree of this repository. An
       // agent working somewhere else has not been isolated, and committing from wherever it

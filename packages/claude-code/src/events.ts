@@ -36,10 +36,39 @@ export const initEventSchema = z
   })
   .passthrough();
 
+/**
+ * Token usage, as the CLI reports it on each assistant message.
+ *
+ * Every field is optional: usage is the CLI's to report, not ours to require, and a release
+ * that renames or drops one must not stop a run. A turn whose usage cannot be read is still
+ * recorded — as a turn with nothing reported — so a coverage gap is visible rather than
+ * indistinguishable from a turn that genuinely cost nothing.
+ */
+export const usageSchema = z
+  .object({
+    input_tokens: z.number().optional(),
+    output_tokens: z.number().optional(),
+    cache_read_input_tokens: z.number().optional(),
+    cache_creation_input_tokens: z.number().optional(),
+  })
+  .passthrough();
+
 export const assistantEventSchema = z
   .object({
     type: z.literal("assistant"),
-    message: z.object({ content: z.array(contentBlockSchema).optional() }).passthrough(),
+    message: z
+      .object({
+        /**
+         * Identifies the *turn*. The CLI emits one assistant event per content block and
+         * repeats the whole message's usage on each, so this — not the event — is the unit
+         * a usage record corresponds to.
+         */
+        id: z.string().optional(),
+        content: z.array(contentBlockSchema).optional(),
+        model: z.string().optional(),
+        usage: usageSchema.optional(),
+      })
+      .passthrough(),
   })
   .passthrough();
 
@@ -81,6 +110,35 @@ export type ClaudeUpdate =
   | { kind: "session"; cwd: string | null; sessionId: string | null }
   | { kind: "text"; channel: "assistant" | "thinking"; text: string }
   | { kind: "tool_use"; name: string }
+  /**
+   * One completed assistant turn's token usage (issue #14).
+   *
+   * Deliberately carries counts and a model, never content, and no monetary figure: cost is
+   * derived from these at query time so a price change can never rewrite recorded history.
+   */
+  | {
+      kind: "usage";
+      /**
+       * The assistant message this usage belongs to. The CLI repeats identical usage on every
+       * content block of one turn, so consumers MUST deduplicate on this: summing per event
+       * over-counts a multi-block turn by its block count.
+       */
+      messageId: string | null;
+      /**
+       * False when the CLI completed a turn but stated no usage for it.
+       *
+       * The turn still happened and still cost something, so it is reported as a turn with
+       * nothing known rather than omitted — an omitted turn is indistinguishable from a free
+       * one, and a provider that quietly stops reporting usage would otherwise make a whole
+       * session look costless.
+       */
+      reported: boolean;
+      model: string | null;
+      inputTokens: number;
+      outputTokens: number;
+      cacheReadTokens: number;
+      cacheWriteTokens: number;
+    }
   | { kind: "result"; ok: boolean; subtype: string | null; text: string | null };
 
 /** Parse one stdout line. Returns null for blank lines and anything unparseable. */
@@ -129,6 +187,23 @@ export function toUpdates(event: StreamEvent): ClaudeUpdate[] {
       const tool = toolUseBlockSchema.safeParse(block);
       if (tool.success) updates.push({ kind: "tool_use", name: tool.data.name });
     }
+    // Usage last: it belongs to the turn these blocks just completed, and ordering it after
+    // them keeps the event log readable as a narrative.
+    //
+    // Emitted whether or not the CLI stated usage. A turn it said nothing about is reported
+    // with `reported: false` and zero counts, so the gap is visible downstream instead of
+    // looking like a turn that cost nothing.
+    const usage = parsed.data.message.usage;
+    updates.push({
+      kind: "usage",
+      messageId: parsed.data.message.id ?? null,
+      reported: usage !== undefined,
+      model: parsed.data.message.model ?? null,
+      inputTokens: usage?.input_tokens ?? 0,
+      outputTokens: usage?.output_tokens ?? 0,
+      cacheReadTokens: usage?.cache_read_input_tokens ?? 0,
+      cacheWriteTokens: usage?.cache_creation_input_tokens ?? 0,
+    });
     return updates;
   }
 

@@ -56,7 +56,8 @@ describe("ClaudeCodeRunner", () => {
     });
 
     expect(await h.outcome).toEqual({ kind: "completed" });
-    expect(events).toEqual([
+    // Usage rides alongside each block and is asserted separately, below.
+    expect(events.filter((e) => e.kind !== "usage")).toEqual([
       { kind: "tool_use", name: "Edit" },
       { kind: "stdout", text: "patched latch.ts" },
       { kind: "stdout", text: "\ndone\n" },
@@ -77,7 +78,9 @@ describe("ClaudeCodeRunner", () => {
 
     expect(await h.send("also add a regression test")).toBe(true);
     expect(await h.outcome).toEqual({ kind: "completed" });
-    expect(events.map((e) => (e.kind === "stdout" ? e.text : e.name))).toContain("added the test");
+    expect(events.flatMap((e) => (e.kind === "stdout" ? [e.text] : []))).toContain(
+      "added the test",
+    );
   });
 
   it("refuses input once the run has finished rather than swallowing it", async () => {
@@ -151,5 +154,37 @@ describe("toStreamEvent", () => {
 
   it("says nothing for a result that carried no closing text", () => {
     expect(toStreamEvent({ kind: "result", ok: true, subtype: "success", text: null })).toBeNull();
+  });
+});
+
+describe("usage reaches the orchestrator once per turn (issue #14)", () => {
+  it("reports one usage event per turn, not one per content block", async () => {
+    // Two content blocks in a single turn: a tool call and a line of text. The CLI repeats the
+    // turn's usage on both; the consumer must be able to tell they are the same turn.
+    const { handle: h, events } = await run({
+      turns: [{ tools: ["edit_file"], text: ["applied the change"] }],
+    });
+    await h.outcome;
+
+    const usage = events.flatMap((e) => (e.kind === "usage" ? [e] : []));
+    expect(usage.length).toBeGreaterThan(1);
+    expect(new Set(usage.map((u) => u.messageId)).size).toBe(1);
+    // Every repeat carries identical counts — which is exactly why summing them is wrong.
+    expect(new Set(usage.map((u) => u.inputTokens)).size).toBe(1);
+    expect(usage[0]?.reported).toBe(true);
+    expect(usage[0]?.model).toBe("test-model");
+  });
+
+  it("distinguishes turns, so a steered run records both", async () => {
+    const { handle: h, events } = await run({
+      turns: [{ text: ["first"] }, { text: ["second"] }],
+    });
+    await h.send("keep going");
+    await h.outcome;
+
+    const ids = new Set(
+      events.flatMap((e) => (e.kind === "usage" && e.messageId ? [e.messageId] : [])),
+    );
+    expect(ids.size).toBe(2);
   });
 });
