@@ -1,51 +1,69 @@
 import { describe, expect, it } from "bun:test";
 import {
+  connectIntegrationInput,
   connectRepositoryInput,
-  createIssueInput,
   createTaskInput,
+  importIssuesInput,
   reviewDecisionInput,
   setSecretInput,
   taskEventSchema,
 } from "./index.js";
 
-describe("createIssueInput", () => {
-  it("accepts a valid issue", () => {
-    const res = createIssueInput.safeParse({
-      title: "Broken gate sensor",
-      description: "The east gate sensor stopped reporting.",
-    });
+describe("connectIntegrationInput (issue #15)", () => {
+  it("accepts a GitHub connection with no baseUrl (public SaaS)", () => {
+    const res = connectIntegrationInput.safeParse({ provider: "github", secretId: "sec_1" });
     expect(res.success).toBe(true);
     if (res.success) {
-      expect(res.data.title).toBe("Broken gate sensor");
-      expect(res.data.description).toBe("The east gate sensor stopped reporting.");
+      expect(res.data.baseUrl).toBeUndefined();
+      // Write-back defaults off — AC-4 is opt-in, never implicit.
+      expect(res.data.writeBackEnabled).toBe(false);
     }
   });
 
-  it("accepts an issue without a description (optional)", () => {
-    const res = createIssueInput.safeParse({ title: "No description" });
+  it("accepts a GitLab connection with a self-managed baseUrl", () => {
+    const res = connectIntegrationInput.safeParse({
+      provider: "gitlab",
+      secretId: "sec_1",
+      baseUrl: "https://gitlab.internal.example.com",
+    });
     expect(res.success).toBe(true);
-    if (res.success) expect(res.data.description).toBeUndefined();
   });
 
-  it("rejects an empty title", () => {
-    const res = createIssueInput.safeParse({ title: "" });
+  it("rejects an unknown provider", () => {
+    const res = connectIntegrationInput.safeParse({ provider: "bitbucket", secretId: "sec_1" });
     expect(res.success).toBe(false);
-    if (!res.success) {
-      expect(res.error.issues.some((i) => i.path.join(".") === "title")).toBe(true);
-    }
   });
 
-  it("rejects a title longer than 200 chars", () => {
-    const res = createIssueInput.safeParse({ title: "x".repeat(201) });
+  it("rejects a baseUrl that is not a URL", () => {
+    const res = connectIntegrationInput.safeParse({
+      provider: "github",
+      secretId: "sec_1",
+      baseUrl: "not-a-url",
+    });
     expect(res.success).toBe(false);
-    if (!res.success) {
-      expect(res.error.issues.some((i) => i.path.join(".") === "title")).toBe(true);
-    }
   });
 
-  it("accepts a title of exactly 200 chars (boundary)", () => {
-    const res = createIssueInput.safeParse({ title: "x".repeat(200) });
+  it("never accepts a token value — only a secretId reference (Principle IV)", () => {
+    // There is no "token" or "value" field on this schema at all; passing one is simply an
+    // unrecognised key that Zod strips, proving the shape cannot carry a credential in place.
+    const res = connectIntegrationInput.safeParse({
+      provider: "github",
+      secretId: "sec_1",
+      token: "ghp_shouldNotExist",
+    });
+    expect(res.success && "token" in res.data).toBe(false);
+  });
+});
+
+describe("importIssuesInput (issue #15 AC-2)", () => {
+  it("accepts a repository id and a non-empty list of external ids", () => {
+    const res = importIssuesInput.safeParse({ repositoryId: "repo_1", externalIds: ["101"] });
     expect(res.success).toBe(true);
+  });
+
+  it("rejects an empty externalIds list — nothing to import is not a valid import", () => {
+    const res = importIssuesInput.safeParse({ repositoryId: "repo_1", externalIds: [] });
+    expect(res.success).toBe(false);
   });
 });
 

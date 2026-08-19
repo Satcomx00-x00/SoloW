@@ -27,8 +27,9 @@ Rules for this log ([per our conventions](../CONVENTIONS.md)):
 | [0006](./0006-kanban-scoped-to-issues.md) | Administer Tasks on a Kanban board scoped under Issues | Accepted |
 | [0007](./0007-reactflow-workflow-visualisation.md) | Visualise Workflows as an interactive node graph (ReactFlow) | Accepted |
 | [0008](./0008-data-store-strategy.md) | One data model, two stores (embedded local, shared hosted) | Accepted |
-| [0009](./0009-cli-based-source-integrations.md) | Drive source-host integrations through official CLIs (gh, glab) | Accepted |
+| [0009](./0009-cli-based-source-integrations.md) | Drive source-host integrations through official CLIs (gh, glab) | Superseded by 0014 (GitHub/GitLab) |
 | [0010](./0010-spa-interactive-application.md) | Deliver the Interactive Application as a Single Page Application (SPA) | Accepted |
 | [0011](./0011-frontend-backend-protocol.md) | Front↔back protocol: tRPC (with OpenAPI export) plus WebSocket | Accepted |
 | [0012](./0012-spa-build-stack.md) | Build the SPA with Vite + React; standalone API/orchestrator backend | Superseded by 0013 |
 | [0013](./0013-nextjs-web-framework.md) | Use Next.js (App Router) as the web framework, delivering a SPA-style client | Accepted |
+| [0014](./0014-direct-api-source-integrations.md) | Drive GitHub/GitLab integrations through their REST APIs directly, not gh/glab | Accepted |

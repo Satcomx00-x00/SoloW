@@ -2,6 +2,7 @@ import {
   agentCatalog,
   agentProfile,
   executorProfile,
+  issue,
   repository,
   workspace,
 } from "@gatecontrol/db";
@@ -69,4 +70,23 @@ export async function seedWorkspaceGraph(db: TestDb, name: string) {
 
 export function ctxFor(db: TestDb, workspaceId: string): RequestContext {
   return { db, workspaceId, userId: "user-1" };
+}
+
+/**
+ * Insert an Issue directly (issue #15 product decision, 2026-08-19): there is no
+ * `issue.create` procedure any more — every real Issue comes from `integration.importIssues`.
+ * Tests that only need *an* Issue to exist, without exercising the import flow itself, insert
+ * one straight into the table, the same way `seedWorkspaceGraph` seeds every other row here.
+ */
+export async function seedIssue(
+  db: TestDb,
+  workspaceId: string,
+  overrides: Partial<typeof issue.$inferInsert> = {},
+) {
+  const [row] = await db
+    .insert(issue)
+    .values({ workspaceId, title: "Fixture issue", ...overrides })
+    .returning();
+  if (!row) throw new Error("failed to seed issue");
+  return row;
 }

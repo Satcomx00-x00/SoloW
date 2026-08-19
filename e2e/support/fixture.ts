@@ -29,6 +29,13 @@ export const PATHS = {
 
 export const PORTS = { web: 5050, orchestrator: 5051, ws: 5052 } as const;
 
+/**
+ * Spelled out rather than imported from `@gatecontrol/db` — the Playwright runner is Node, and
+ * that package pulls in `bun:sqlite`. Kept in step with `packages/db/src/seed.ts`.
+ */
+export const SEED_WORKSPACE_A = "11111111-1111-4111-8111-111111111111";
+export const SEED_WORKSPACE_B = "22222222-2222-4222-8222-222222222222";
+
 /** Deterministic test-only values — never used by a real deployment. */
 export const E2E_ENV = {
   GATECONTROL_SQLITE_PATH: PATHS.db,

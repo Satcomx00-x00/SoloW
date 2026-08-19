@@ -20,6 +20,13 @@ describe("mappers", () => {
         title: "Latch fix",
         description: "sticks in rain",
         status: "open",
+        source: "local",
+        integrationId: null,
+        repositoryId: null,
+        externalId: null,
+        externalNumber: null,
+        externalUrl: null,
+        syncedAt: null,
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-02T00:00:00.000Z",
       };
@@ -31,24 +38,44 @@ describe("mappers", () => {
         description: "sticks in rain",
         status: "open",
         taskCount: 3,
+        source: "local",
+        repositoryId: null,
+        externalNumber: null,
+        externalUrl: null,
+        syncedAt: null,
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-02T00:00:00.000Z",
       });
-      // workspaceId (tenant key) is deliberately NOT part of the DTO.
+      // workspaceId (tenant key) and the internal integrationId FK are deliberately NOT part of
+      // the DTO — the client sees the provider-facing externalNumber/externalUrl instead.
       expect(Object.keys(dto)).not.toContain("workspaceId");
+      expect(Object.keys(dto)).not.toContain("integrationId");
     });
 
-    it("preserves a null description", () => {
+    it("preserves a null description, and carries an imported Issue's provider reference", () => {
       const row: IssueRow = {
         id: "issue-2",
         workspaceId: "ws-1",
         title: "No details",
         description: null,
         status: "closed",
+        source: "github",
+        integrationId: "int-1",
+        repositoryId: "repo-1",
+        externalId: "9001",
+        externalNumber: 42,
+        externalUrl: "https://github.com/acme/gate/issues/42",
+        syncedAt: "2026-01-03T00:00:00.000Z",
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
       };
-      expect(issueToDto(row, 0).description).toBeNull();
+      const dto = issueToDto(row, 0);
+      expect(dto.description).toBeNull();
+      expect(dto.source).toBe("github");
+      expect(dto.repositoryId).toBe("repo-1");
+      expect(dto.externalNumber).toBe(42);
+      expect(dto.externalUrl).toBe("https://github.com/acme/gate/issues/42");
+      expect(dto.syncedAt).toBe("2026-01-03T00:00:00.000Z");
     });
   });
 
@@ -83,6 +110,8 @@ describe("mappers", () => {
         name: "gatecontrol",
         source: "local_path",
         location: "/srv/repos/gatecontrol",
+        integrationId: null,
+        externalFullName: null,
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
       });
@@ -91,6 +120,8 @@ describe("mappers", () => {
         name: "gatecontrol",
         source: "local_path",
         location: "/srv/repos/gatecontrol",
+        integrationId: null,
+        externalFullName: null,
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
       });

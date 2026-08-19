@@ -30,6 +30,6 @@ export { dbEnv } from "./env.js";
 export { listWorkspaceFlags, setWorkspaceFlag, type WorkspaceFlags } from "./flags.js";
 export * from "./schema.js";
 export { schema } from "./schema.js";
-export { decryptForAgentRun, encryptSecret } from "./secret-store.js";
+export { decryptForAgentRun, decryptForScmSync, encryptSecret } from "./secret-store.js";
 export { SEED_WORKSPACE_A, SEED_WORKSPACE_B, seed } from "./seed.js";
 export { allTables } from "./tables.js";

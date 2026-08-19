@@ -15,7 +15,7 @@ export async function createContext({ req }: { req: Request }): Promise<BaseCont
     return {
       db,
       session: { workspaceId: SEED_WORKSPACE_A, userId: "local-owner" },
-      flagOverrides: { "ff-core-program": true },
+      flagOverrides: { "ff-core-program": true, "ff-integrations": true },
     };
   }
 

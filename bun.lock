@@ -36,6 +36,7 @@
         "@gatecontrol/contracts": "workspace:*",
         "@gatecontrol/core": "workspace:*",
         "@gatecontrol/db": "workspace:*",
+        "@gatecontrol/scm": "workspace:*",
         "@hookform/resolvers": "^5.9.1",
         "@tanstack/react-query": "^5",
         "@trpc/client": "^11",
@@ -142,6 +143,17 @@
       "version": "0.1.0",
       "dependencies": {
         "pino": "^9.5.0",
+      },
+      "devDependencies": {
+        "bun-types": "^1.1.0",
+        "typescript": "^5.6.0",
+      },
+    },
+    "packages/scm": {
+      "name": "@gatecontrol/scm",
+      "version": "0.1.0",
+      "dependencies": {
+        "@gatecontrol/contracts": "workspace:*",
       },
       "devDependencies": {
         "bun-types": "^1.1.0",
@@ -277,6 +289,8 @@
     "@gatecontrol/observability": ["@gatecontrol/observability@workspace:packages/observability"],
 
     "@gatecontrol/orchestrator": ["@gatecontrol/orchestrator@workspace:apps/orchestrator"],
+
+    "@gatecontrol/scm": ["@gatecontrol/scm@workspace:packages/scm"],
 
     "@gatecontrol/web": ["@gatecontrol/web@workspace:apps/web"],
 

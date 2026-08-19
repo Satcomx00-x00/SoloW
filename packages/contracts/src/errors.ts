@@ -34,3 +34,11 @@ export const ReviewErrorCode = {
   AlreadyDecided: "REVIEW_ALREADY_DECIDED",
 } as const;
 export type ReviewErrorCode = (typeof ReviewErrorCode)[keyof typeof ReviewErrorCode];
+
+export const IntegrationErrorCode = {
+  /** The provider rejected the credential at connect time (issue #15 AC-1). */
+  AuthenticationFailed: "INTEGRATION_AUTHENTICATION_FAILED",
+  /** A Repository has no linked Integration to sync from. */
+  NotLinked: "INTEGRATION_NOT_LINKED",
+} as const;
+export type IntegrationErrorCode = (typeof IntegrationErrorCode)[keyof typeof IntegrationErrorCode];

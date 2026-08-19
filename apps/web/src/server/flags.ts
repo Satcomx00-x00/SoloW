@@ -6,7 +6,7 @@
  * start. Granularity is per-Workspace (v1: single Workspace → effectively local-global).
  */
 
-export type FlagKey = "ff-core-program";
+export type FlagKey = "ff-core-program" | "ff-integrations";
 
 export interface FlagDefinition {
   key: FlagKey;
@@ -19,6 +19,13 @@ export const FLAGS: Record<FlagKey, FlagDefinition> = {
   "ff-core-program": {
     key: "ff-core-program",
     description: "Core end-to-end Task loop (Issue → run agent → review → approve).",
+    default: false,
+    granularity: "workspace",
+  },
+  "ff-integrations": {
+    key: "ff-integrations",
+    description:
+      "GitHub/GitLab integrations — connect, import Issues, sync branches and change requests (issue #15).",
     default: false,
     granularity: "workspace",
   },

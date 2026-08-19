@@ -67,6 +67,7 @@ export function SecretsSection() {
               <SelectContent>
                 <SelectItem value="api_key">API key</SelectItem>
                 <SelectItem value="subscription_token">Subscription token</SelectItem>
+                <SelectItem value="scm_pat">Personal access token (GitHub/GitLab)</SelectItem>
               </SelectContent>
             </Select>
           </div>

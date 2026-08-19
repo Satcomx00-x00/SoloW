@@ -2,7 +2,8 @@ import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { PATHS } from "../support/fixture.js";
+import { PATHS, SEED_WORKSPACE_A } from "../support/fixture.js";
+import { seedIssue } from "../support/seed.js";
 
 /**
  * Happy-path E2E (task TASK-025): an Owner takes an Issue all the way to a reviewed, approved
@@ -31,14 +32,6 @@ async function ensureRepository(page: import("@playwright/test").Page): Promise<
   await page.getByLabel("Location").fill(PATHS.repo);
   await page.getByRole("button", { name: "Connect repository" }).click();
   await expect(badge).toBeVisible();
-}
-
-async function createIssue(page: import("@playwright/test").Page, title: string): Promise<void> {
-  await page.getByRole("button", { name: "New issue" }).click();
-  const dialog = page.getByRole("dialog", { name: "New issue" });
-  await dialog.getByLabel("Title").fill(title);
-  await dialog.getByRole("button", { name: "Create issue" }).click();
-  await expect(dialog).toBeHidden();
 }
 
 async function pickOption(
@@ -105,7 +98,7 @@ test.describe("steering a running agent", () => {
 
     await ensureRepository(page);
     await page.goto("/board");
-    await createIssue(page, issueTitle);
+    seedIssue(SEED_WORKSPACE_A, issueTitle);
     await createTask(page, { title: taskTitle, issue: issueTitle });
 
     const card = page.getByLabel("Backlog column").locator("li", { hasText: taskTitle });
@@ -143,7 +136,7 @@ test.describe("core program happy path", () => {
 
     await ensureRepository(page);
     await page.goto("/board");
-    await createIssue(page, issueTitle);
+    seedIssue(SEED_WORKSPACE_A, issueTitle);
     await createTask(page, { title: taskTitle, issue: issueTitle });
     await expect(cardIn(page, "Backlog", taskTitle)).toBeVisible();
 
@@ -192,7 +185,7 @@ test.describe("core program happy path", () => {
 
     await ensureRepository(page);
     await page.goto("/board");
-    await createIssue(page, issueTitle);
+    seedIssue(SEED_WORKSPACE_A, issueTitle);
     await createTask(page, { title: taskTitle, issue: issueTitle });
 
     const taskId = await launchToReview(page, taskTitle);

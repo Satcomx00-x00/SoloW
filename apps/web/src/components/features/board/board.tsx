@@ -12,7 +12,6 @@ import { Button } from "@/components/ui/button";
 import { BOARD_COLUMNS, STATE_LABELS } from "@/lib/task-states";
 import { trpc } from "@/trpc/react";
 import { Column } from "./column";
-import { CreateIssueDialog } from "./create-issue-dialog";
 import { CreateTaskDialog } from "./create-task-dialog";
 import { DndBoard } from "./dnd-board";
 
@@ -204,7 +203,6 @@ export function Board() {
   return (
     <>
       <HeaderActions>
-        <CreateIssueDialog />
         <CreateTaskDialog />
       </HeaderActions>
       {errorMessage ? (

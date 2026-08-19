@@ -2,7 +2,7 @@
 
 import { beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { verifyStreamTicket } from "@gatecontrol/core/stream";
-import { ensureDefaultAgentCatalog, workspace } from "@gatecontrol/db";
+import { ensureDefaultAgentCatalog, issue as issueTable, workspace } from "@gatecontrol/db";
 import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
 import { RATE_LIMITS, resetRateLimits } from "../rate-limit.js";
 import type { BaseContext } from "../trpc.js";
@@ -72,7 +72,13 @@ async function taskFixtures(db: TestDb, wsId: string) {
     source: "local_path",
     location: "/srv/repo",
   });
-  const issue = await c.issue.create({ title: "Fix latch" });
+  // Issue #15 removed issue.create — every real Issue is imported, so a fixture inserts one
+  // directly rather than going through the (now nonexistent) tRPC mutation.
+  const [issue] = await db
+    .insert(issueTable)
+    .values({ workspaceId: wsId, title: "Fix latch" })
+    .returning();
+  if (!issue) throw new Error("failed to seed issue");
   return { c, agentId: agent.id, executorId: executor.id, repoId: repo.id, issueId: issue.id };
 }
 
@@ -101,25 +107,35 @@ describe("tRPC router integration", () => {
     expect(await errCode(() => c.issue.list({}))).toBe("FORBIDDEN");
   });
 
-  it("creates and reads an issue through the full pipeline", async () => {
+  it("reads a seeded issue through issue.get (no issue.create — issue #15)", async () => {
     const wsId = await seedWs(db, "acme");
-    const c = caller(db, wsId);
-    const created = await c.issue.create({ title: "Gate motor whines" });
-    const fetched = await c.issue.get({ id: created.id });
+    const [row] = await db
+      .insert(issueTable)
+      .values({ workspaceId: wsId, title: "Gate motor whines" })
+      .returning();
+    if (!row) throw new Error("failed to seed issue");
+
+    const fetched = await caller(db, wsId).issue.get({ id: row.id });
     expect(fetched.title).toBe("Gate motor whines");
     expect(fetched.taskCount).toBe(0);
+    expect(fetched.source).toBe("local");
   });
 
-  it("rejects invalid input with BAD_REQUEST (Zod parse)", async () => {
+  it("rejects invalid input with BAD_REQUEST (Zod parse) — via issue.get, not create", async () => {
     const wsId = await seedWs(db, "acme");
     const c = caller(db, wsId);
-    expect(await errCode(() => c.issue.create({ title: "" }))).toBe("BAD_REQUEST");
+    // idSchema requires a non-empty string; issue.create no longer exists to validate instead.
+    expect(await errCode(() => c.issue.get({ id: "" }))).toBe("BAD_REQUEST");
   });
 
   it("enforces cross-Workspace isolation — B cannot read A's issue", async () => {
     const wsA = await seedWs(db, "workspace-a");
     const wsB = await seedWs(db, "workspace-b");
-    const issueA = await caller(db, wsA).issue.create({ title: "A only" });
+    const [issueA] = await db
+      .insert(issueTable)
+      .values({ workspaceId: wsA, title: "A only" })
+      .returning();
+    if (!issueA) throw new Error("failed to seed issue");
     expect(await errCode(() => caller(db, wsB).issue.get({ id: issueA.id }))).toBe("NOT_FOUND");
     // A still sees its own.
     expect((await caller(db, wsA).issue.get({ id: issueA.id })).title).toBe("A only");

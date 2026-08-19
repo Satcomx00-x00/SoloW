@@ -139,8 +139,8 @@ lucide-react, TanStack Query, Tailwind 4.
 
 | # | kandev capability | GateControl today | Status | Best implementation — and what it unlocks | UI shape & components |
 |---|---|---|---|---|---|
-| 68 | GitHub — import issues, link PRs, review activity | `F12` spec only | 📄 | One `integration` table plus a **provider interface** (authenticate, list issues, create PR, comment, read checks), with GitHub as the reference driver. Import must be **idempotent on an external id unique per workspace**, and status write-back opt-in. → unlocks 41, 87 and gives 17 its real inbox | Settings → Integrations: provider `existing` Cards with connect / disconnect and a scope list; an import `existing` Dialog wrapping a searchable multi-select **new** Table; linked-issue `existing` Badge on cards |
-| 69 | GitLab | `F12` spec only | 📄 | A driver over 68's interface. If GitLab needs anything the interface cannot express, the interface is wrong — treat it as the design test for 68 | Same provider card; no bespoke surface |
+| 68 | GitHub — import issues, link PRs, review activity | `integration` + `change_request` + `repository_branch` tables, `ChangeProvider` interface (#15) | ✅ | Shipped: idempotent import on `(integrationId, externalId)`, PAT-authenticated, contract-tested against a fixture server, no live API in CI. Change requests and branches sync on demand (v1: manual, not scheduled/webhook). `createChangeRequest`/write-back are explicitly not built — that's #71, gated on #7 | Settings → Integrations: a connect form + linked-repository list with a `new` Sync-now action; the Issues page's Import dialog (`new` Checkbox rows in a `existing` ScrollArea, not a full TanStack Table) |
+| 69 | GitLab | `GitlabProvider` over the same `ChangeProvider` interface (#15) | ✅ | Shipped alongside 68 rather than after it — the interface held with no changes: GitLab's `opened`/`merged`/`locked` states and `iid` numbering map onto the same neutral shape a GitHub PR does, proving the abstraction rather than assuming it | Same connect form (provider `existing` Select), same linked-repository list; no bespoke surface |
 | 70 | Jira | Closed as `wont-do` (#79) | 🚫 | Dropped with the scope decision. Jira was the driver that would have forced **status and field mapping** into the provider interface — every customer's Jira defines its own status model. With it gone that layer is unnecessary, and #15's interface stays narrower than originally planned | None |
 | 71 | Linear | Closed as `wont-do` (#80) | 🚫 | Dropped with the scope decision. Linear was push-native and would have forced **webhook sync** into the interface. That requirement did not leave with it — it moved onto #15, since GitHub and GitLab both offer webhooks and polling leaves imported issues permanently stale | None |
 | 72 | Sentry | Closed as `wont-do` (#98) | 🚫 | Dropped with the scope decision. Sentry was always a different shape — an **event source that creates tasks from errors**, not an issue source. If error-driven task creation is ever wanted it belongs on the notification dispatcher as a trigger direction, never on the issue importer | None |
@@ -189,14 +189,15 @@ lucide-react, TanStack Query, Tailwind 4.
 
 | | Count | Share |
 |---|---|---|
-| ✅ Built | 33 | 31% |
+| ✅ Built | 35 | 33% |
 | 🟡 Partial | 12 | 11% |
-| 📄 Specified only (no code) | 11 | 10% |
+| 📄 Specified only (no code) | 9 | 9% |
 | ❌ Absent | 45 | 43% |
 | 🚫 Out of scope | 4 | 4% |
 
-Of the **101 rows still in scope**, GateControl covers **45%** at some level (built or
-partial) — concentrated entirely in the core review-first loop. The four out-of-scope
+Of the **101 rows still in scope**, GateControl covers **47%** at some level (built or
+partial) — no longer concentrated entirely in the core review-first loop, now that GitHub
+and GitLab import stand alongside it. The four out-of-scope
 rows are counted separately rather than dropped: a capability declined is not a
 capability held, and a parity table that quietly deletes what it decided against
 flatters itself.

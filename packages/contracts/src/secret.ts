@@ -2,13 +2,16 @@ import { z } from "zod";
 import { idSchema } from "./common.js";
 
 /**
- * `ssh_key` and `cloud_credential` exist so an Executor Profile can *reference* the credential
- * its runtime needs instead of carrying it inline (issue #73, AC-3). A reference to a secret the
- * product cannot store is not a satisfied criterion.
+ * `scm_pat` holds a GitHub/GitLab Personal Access Token (issue #15) — same write-only shape as
+ * every other credential; the value never comes back out of a read. `ssh_key` and
+ * `cloud_credential` exist so an Executor Profile can *reference* the credential its runtime
+ * needs instead of carrying it inline (issue #73, AC-3). A reference to a secret the product
+ * cannot store is not a satisfied criterion.
  */
 export const secretKindSchema = z.enum([
   "subscription_token",
   "api_key",
+  "scm_pat",
   "ssh_key",
   "cloud_credential",
 ]);

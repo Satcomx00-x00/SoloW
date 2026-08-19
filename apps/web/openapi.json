@@ -11,138 +11,6 @@
     }
   ],
   "paths": {
-    "/issue.create": {
-      "post": {
-        "operationId": "issue-create",
-        "tags": [
-          "issue"
-        ],
-        "security": [
-          {
-            "session": []
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "title": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 200
-                  },
-                  "description": {
-                    "type": "string",
-                    "maxLength": 10000
-                  }
-                },
-                "required": [
-                  "title"
-                ]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "id": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "title": {
-                      "type": "string"
-                    },
-                    "description": {
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "status": {
-                      "type": "string",
-                      "enum": [
-                        "open",
-                        "in_progress",
-                        "resolved",
-                        "closed"
-                      ]
-                    },
-                    "taskCount": {
-                      "type": "integer",
-                      "minimum": 0
-                    },
-                    "createdAt": {
-                      "type": "string",
-                      "format": "date-time"
-                    },
-                    "updatedAt": {
-                      "type": "string",
-                      "format": "date-time"
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "title",
-                    "description",
-                    "status",
-                    "taskCount",
-                    "createdAt",
-                    "updatedAt"
-                  ]
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid input data",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/error.BAD_REQUEST"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Authorization not provided",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Insufficient access",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/error.FORBIDDEN"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Internal server error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/issue.list": {
       "get": {
         "operationId": "issue-list",
@@ -211,6 +79,31 @@
                         "type": "integer",
                         "minimum": 0
                       },
+                      "source": {
+                        "type": "string",
+                        "enum": [
+                          "local",
+                          "github",
+                          "gitlab"
+                        ]
+                      },
+                      "repositoryId": {
+                        "type": "string",
+                        "nullable": true,
+                        "minLength": 1
+                      },
+                      "externalNumber": {
+                        "type": "integer",
+                        "nullable": true
+                      },
+                      "externalUrl": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "syncedAt": {
+                        "type": "string",
+                        "nullable": true
+                      },
                       "createdAt": {
                         "type": "string",
                         "format": "date-time"
@@ -226,6 +119,11 @@
                       "description",
                       "status",
                       "taskCount",
+                      "source",
+                      "repositoryId",
+                      "externalNumber",
+                      "externalUrl",
+                      "syncedAt",
                       "createdAt",
                       "updatedAt"
                     ]
@@ -341,6 +239,31 @@
                       "type": "integer",
                       "minimum": 0
                     },
+                    "source": {
+                      "type": "string",
+                      "enum": [
+                        "local",
+                        "github",
+                        "gitlab"
+                      ]
+                    },
+                    "repositoryId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
+                    "externalNumber": {
+                      "type": "integer",
+                      "nullable": true
+                    },
+                    "externalUrl": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "syncedAt": {
+                      "type": "string",
+                      "nullable": true
+                    },
                     "createdAt": {
                       "type": "string",
                       "format": "date-time"
@@ -356,6 +279,11 @@
                     "description",
                     "status",
                     "taskCount",
+                    "source",
+                    "repositoryId",
+                    "externalNumber",
+                    "externalUrl",
+                    "syncedAt",
                     "createdAt",
                     "updatedAt"
                   ]
@@ -399,6 +327,902 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/error.NOT_FOUND"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/integration.connect": {
+      "post": {
+        "operationId": "integration-connect",
+        "tags": [
+          "integration"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "enum": [
+                      "github",
+                      "gitlab"
+                    ]
+                  },
+                  "secretId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "baseUrl": {
+                    "type": "string",
+                    "format": "uri",
+                    "maxLength": 500
+                  },
+                  "writeBackEnabled": {
+                    "type": "boolean",
+                    "default": false
+                  }
+                },
+                "required": [
+                  "provider",
+                  "secretId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "provider": {
+                      "type": "string",
+                      "enum": [
+                        "github",
+                        "gitlab"
+                      ]
+                    },
+                    "secretId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "baseUrl": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "writeBackEnabled": {
+                      "type": "boolean"
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "provider",
+                    "secretId",
+                    "baseUrl",
+                    "writeBackEnabled",
+                    "createdAt",
+                    "updatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/integration.list": {
+      "get": {
+        "operationId": "integration-list",
+        "tags": [
+          "integration"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "provider": {
+                        "type": "string",
+                        "enum": [
+                          "github",
+                          "gitlab"
+                        ]
+                      },
+                      "secretId": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "baseUrl": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "writeBackEnabled": {
+                        "type": "boolean"
+                      },
+                      "createdAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "updatedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "provider",
+                      "secretId",
+                      "baseUrl",
+                      "writeBackEnabled",
+                      "createdAt",
+                      "updatedAt"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.NOT_FOUND"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/integration.linkRepository": {
+      "post": {
+        "operationId": "integration-linkRepository",
+        "tags": [
+          "integration"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "repositoryId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "integrationId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "externalFullName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 300
+                  }
+                },
+                "required": [
+                  "repositoryId",
+                  "integrationId",
+                  "externalFullName"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string",
+                      "enum": [
+                        "local_path",
+                        "remote_url"
+                      ]
+                    },
+                    "location": {
+                      "type": "string"
+                    },
+                    "integrationId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
+                    "externalFullName": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "source",
+                    "location",
+                    "integrationId",
+                    "externalFullName",
+                    "createdAt",
+                    "updatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/integration.listExternalIssues": {
+      "get": {
+        "operationId": "integration-listExternalIssues",
+        "tags": [
+          "integration"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "repositoryId",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "externalId": {
+                        "type": "string"
+                      },
+                      "number": {
+                        "type": "integer"
+                      },
+                      "title": {
+                        "type": "string"
+                      },
+                      "description": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "state": {
+                        "type": "string",
+                        "enum": [
+                          "open",
+                          "closed"
+                        ]
+                      },
+                      "url": {
+                        "type": "string"
+                      },
+                      "alreadyImported": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "externalId",
+                      "number",
+                      "title",
+                      "description",
+                      "state",
+                      "url",
+                      "alreadyImported"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.NOT_FOUND"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/integration.importIssues": {
+      "post": {
+        "operationId": "integration-importIssues",
+        "tags": [
+          "integration"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "repositoryId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "externalIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "maxItems": 200
+                  }
+                },
+                "required": [
+                  "repositoryId",
+                  "externalIds"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "title": {
+                        "type": "string"
+                      },
+                      "description": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "open",
+                          "in_progress",
+                          "resolved",
+                          "closed"
+                        ]
+                      },
+                      "taskCount": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "source": {
+                        "type": "string",
+                        "enum": [
+                          "local",
+                          "github",
+                          "gitlab"
+                        ]
+                      },
+                      "repositoryId": {
+                        "type": "string",
+                        "nullable": true,
+                        "minLength": 1
+                      },
+                      "externalNumber": {
+                        "type": "integer",
+                        "nullable": true
+                      },
+                      "externalUrl": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "syncedAt": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "createdAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "updatedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "title",
+                      "description",
+                      "status",
+                      "taskCount",
+                      "source",
+                      "repositoryId",
+                      "externalNumber",
+                      "externalUrl",
+                      "syncedAt",
+                      "createdAt",
+                      "updatedAt"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/integration.syncRepositorySignals": {
+      "post": {
+        "operationId": "integration-syncRepositorySignals",
+        "tags": [
+          "integration"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "repositoryId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "repositoryId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "changeRequests": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "repositoryId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "number": {
+                            "type": "integer"
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": [
+                              "open",
+                              "closed",
+                              "merged"
+                            ]
+                          },
+                          "url": {
+                            "type": "string"
+                          },
+                          "headRef": {
+                            "type": "string"
+                          },
+                          "baseRef": {
+                            "type": "string"
+                          },
+                          "authorLogin": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "syncedAt": {
+                            "type": "string"
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "updatedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "repositoryId",
+                          "number",
+                          "title",
+                          "state",
+                          "url",
+                          "headRef",
+                          "baseRef",
+                          "authorLogin",
+                          "syncedAt",
+                          "createdAt",
+                          "updatedAt"
+                        ]
+                      }
+                    },
+                    "branches": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "repositoryId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "isDefault": {
+                            "type": "boolean"
+                          },
+                          "headSha": {
+                            "type": "string"
+                          },
+                          "headCommittedAt": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "syncedAt": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "repositoryId",
+                          "name",
+                          "isDefault",
+                          "headSha",
+                          "headCommittedAt",
+                          "syncedAt"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "changeRequests",
+                    "branches"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
                 }
               }
             }
@@ -3229,6 +4053,15 @@
                     "location": {
                       "type": "string"
                     },
+                    "integrationId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
+                    "externalFullName": {
+                      "type": "string",
+                      "nullable": true
+                    },
                     "createdAt": {
                       "type": "string",
                       "format": "date-time"
@@ -3243,6 +4076,8 @@
                     "name",
                     "source",
                     "location",
+                    "integrationId",
+                    "externalFullName",
                     "createdAt",
                     "updatedAt"
                   ]
@@ -3331,6 +4166,15 @@
                       "location": {
                         "type": "string"
                       },
+                      "integrationId": {
+                        "type": "string",
+                        "nullable": true,
+                        "minLength": 1
+                      },
+                      "externalFullName": {
+                        "type": "string",
+                        "nullable": true
+                      },
                       "createdAt": {
                         "type": "string",
                         "format": "date-time"
@@ -3345,6 +4189,8 @@
                       "name",
                       "source",
                       "location",
+                      "integrationId",
+                      "externalFullName",
                       "createdAt",
                       "updatedAt"
                     ]
@@ -3574,6 +4420,7 @@
                     "enum": [
                       "subscription_token",
                       "api_key",
+                      "scm_pat",
                       "ssh_key",
                       "cloud_credential"
                     ]
@@ -3613,6 +4460,7 @@
                       "enum": [
                         "subscription_token",
                         "api_key",
+                        "scm_pat",
                         "ssh_key",
                         "cloud_credential"
                       ]
@@ -3703,6 +4551,7 @@
                         "enum": [
                           "subscription_token",
                           "api_key",
+                          "scm_pat",
                           "ssh_key",
                           "cloud_credential"
                         ]
@@ -4404,48 +5253,6 @@
           "issues": []
         }
       },
-      "error.INTERNAL_SERVER_ERROR": {
-        "type": "object",
-        "properties": {
-          "message": {
-            "type": "string",
-            "description": "The error message",
-            "example": "Internal server error"
-          },
-          "code": {
-            "type": "string",
-            "description": "The error code",
-            "example": "INTERNAL_SERVER_ERROR"
-          },
-          "issues": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "message": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "message"
-              ]
-            },
-            "description": "An array of issues that were responsible for the error",
-            "example": []
-          }
-        },
-        "required": [
-          "message",
-          "code"
-        ],
-        "title": "Internal server error error (500)",
-        "description": "The error information",
-        "example": {
-          "code": "INTERNAL_SERVER_ERROR",
-          "message": "Internal server error",
-          "issues": []
-        }
-      },
       "error.NOT_FOUND": {
         "type": "object",
         "properties": {
@@ -4485,6 +5292,48 @@
         "example": {
           "code": "NOT_FOUND",
           "message": "Not found",
+          "issues": []
+        }
+      },
+      "error.INTERNAL_SERVER_ERROR": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "The error message",
+            "example": "Internal server error"
+          },
+          "code": {
+            "type": "string",
+            "description": "The error code",
+            "example": "INTERNAL_SERVER_ERROR"
+          },
+          "issues": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "message"
+              ]
+            },
+            "description": "An array of issues that were responsible for the error",
+            "example": []
+          }
+        },
+        "required": [
+          "message",
+          "code"
+        ],
+        "title": "Internal server error error (500)",
+        "description": "The error information",
+        "example": {
+          "code": "INTERNAL_SERVER_ERROR",
+          "message": "Internal server error",
           "issues": []
         }
       }

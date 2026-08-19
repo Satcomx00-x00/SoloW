@@ -1,7 +1,8 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
-import { PATHS } from "../support/fixture.js";
+import { PATHS, SEED_WORKSPACE_A, SEED_WORKSPACE_B } from "../support/fixture.js";
+import { seedIssue, seedTask } from "../support/seed.js";
 
 /**
  * @critical isolation E2E (task TASK-026 — blocks merge).
@@ -14,14 +15,12 @@ import { PATHS } from "../support/fixture.js";
  */
 
 const REPO_NAME = "e2e-fixture-repo";
-/**
- * Seeded in Workspace B; the session under test belongs to Workspace A. Spelled out rather
- * than imported from `@gatecontrol/db` — the Playwright runner is Node, and that package pulls
- * in `bun:sqlite`. Kept in step with `packages/db/src/seed.ts`.
- */
-const OTHER_WORKSPACE = "22222222-2222-4222-8222-222222222222";
-const OTHER_WORKSPACE_TASK = "b6000000-0000-4000-8000-000000000006";
+const OTHER_WORKSPACE = SEED_WORKSPACE_B;
 const OTHER_WORKSPACE_TASK_TITLE = "Add debounce to the keypad backlight driver";
+// Seeded once, at module load — the session under test belongs to Workspace A, this Task
+// belongs to B (issue #15: there is no `issue.create` any more, so this is test-only seeding
+// via `seed-cli.ts`, the same as `packages/db/src/seed.ts` and every unit test's fixtures).
+const OTHER_WORKSPACE_TASK = seedTask(OTHER_WORKSPACE, OTHER_WORKSPACE_TASK_TITLE).id;
 
 type Page = import("@playwright/test").Page;
 
@@ -91,11 +90,7 @@ test.describe("@critical isolation", () => {
 
     await ensureRepository(page);
     await page.goto("/board");
-    await page.getByRole("button", { name: "New issue" }).click();
-    const issueDialog = page.getByRole("dialog", { name: "New issue" });
-    await issueDialog.getByLabel("Title").fill(issueTitle);
-    await issueDialog.getByRole("button", { name: "Create issue" }).click();
-    await expect(issueDialog).toBeHidden();
+    seedIssue(SEED_WORKSPACE_A, issueTitle);
 
     await createTask(page, titleA, issueTitle);
     await createTask(page, titleB, issueTitle);

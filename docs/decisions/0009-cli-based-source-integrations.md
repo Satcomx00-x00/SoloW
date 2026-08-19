@@ -1,6 +1,13 @@
 # 0009 — Drive source-host integrations through official CLIs (gh, glab)
 
-**Status:** Accepted · **Date:** 2026-08-17 · **Deciders:** Product, Architecture
+**Status:** Superseded by [0014](./0014-direct-api-source-integrations.md) for GitHub and GitLab · **Date:** 2026-08-17 · **Deciders:** Product, Architecture
+
+> **2026-08-19:** For GitHub and GitLab specifically, this decision is superseded by
+> [0014](./0014-direct-api-source-integrations.md) — a direct REST API client authenticated by
+> a stored Secret, not the `gh`/`glab` CLIs. The reasoning below is kept for the record; see
+> 0014 for why it changed. This record's pattern (drive the official CLI) may still be the
+> right call for a future integration whose credential model doesn't already fit GateControl's
+> Secret store — it just turned out not to fit GitHub/GitLab once issue #15 was built out.
 
 ## Context
 

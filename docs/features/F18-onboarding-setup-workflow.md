@@ -40,9 +40,9 @@ work share one mental model.
   [Workflows](./F03-workflow-designer.md) where it aids clarity.
 - **FR-3** The Setup Workflow covers, at minimum, these steps:
   1. Name and confirm the **Workspace**.
-  2. Connect **source hosts** using their official command-line tools — `gh` for GitHub and
-     `glab` for GitLab — guiding the user through authenticating each (see
-     [F12](./F12-integrations.md), [Decision 0009](../decisions/0009-cli-based-source-integrations.md)).
+  2. Connect **source hosts** (GitHub, GitLab) with a stored Personal Access Token,
+     verified against the provider before it is stored as connected (see
+     [F12](./F12-integrations.md), [Decision 0014](../decisions/0014-direct-api-source-integrations.md)).
   3. Connect one or more **Repositories** (see [F08](./F08-workspaces-repositories.md)).
   4. Configure optional **Integrations** (issue trackers, chat) (see [F12](./F12-integrations.md)).
   5. Create at least one **Agent Profile**, including its **Authentication & Billing Mode** —
@@ -55,9 +55,10 @@ work share one mental model.
 - **FR-5** The Setup Workflow is resumable: a user can leave and return without losing
   progress.
 - **FR-6** The Setup Workflow can be re-run at any time from Settings to add or reconfigure.
-- **FR-7** The Setup Workflow surfaces prerequisites — for example, that the required
-  command-line tools (`gh`, `glab`, and the chosen agent tools) are available and
-  authenticated — and guides the user to satisfy them, without ever displaying secrets.
+- **FR-7** The Setup Workflow surfaces prerequisites — for example, that a GitHub/GitLab
+  Personal Access Token authenticates successfully, and that the chosen agent tools are
+  available and authenticated — and guides the user to satisfy them, without ever
+  displaying secrets.
 - **FR-8** Completing the Setup Workflow leaves the Workspace ready to create Issues and
   Tasks.
 
@@ -101,4 +102,4 @@ work share one mental model.
 - [F05 — Agent & Executor Profiles](./F05-agent-executor-profiles.md)
 - [F06 — Authentication & Billing Modes](./F06-authentication-billing.md)
 - [F12 — External Integrations](./F12-integrations.md)
-- [Decision 0009 — CLI-based source-host integrations (gh, glab)](../decisions/0009-cli-based-source-integrations.md)
+- [Decision 0014 — Direct API GitHub/GitLab integrations](../decisions/0014-direct-api-source-integrations.md)
