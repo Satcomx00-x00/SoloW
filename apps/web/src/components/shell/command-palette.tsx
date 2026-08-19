@@ -94,11 +94,12 @@ export function CommandPalette() {
   );
 
   /**
-   * The create dialogs live on the board, so get there first and then ask. Already-on-board is
+   * The create dialog lives on the board, so get there first and then ask. Already-on-board is
    * the common case and `push` to the current route is a no-op, so the dialog opens at once.
+   * Issues have no create dialog any more (issue #15) — only Tasks do.
    */
   const create = useCallback(
-    (kind: "task" | "issue") => {
+    (kind: "task") => {
       setOpen(false);
       router.push("/board");
       openCreateDialog(kind);
@@ -137,10 +138,6 @@ export function CommandPalette() {
               <CommandItem onSelect={() => create("task")}>
                 <Plus className="text-muted-foreground" />
                 New task
-              </CommandItem>
-              <CommandItem onSelect={() => create("issue")}>
-                <Plus className="text-muted-foreground" />
-                New issue
               </CommandItem>
             </CommandGroup>
             <CommandSeparator />

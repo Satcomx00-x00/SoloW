@@ -3,9 +3,9 @@ import type { TaskState } from "@gatecontrol/contracts";
 import { workspace } from "@gatecontrol/db";
 import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
 import type { RequestContext } from "./context.js";
-import { createIssueRecord, getIssueById, listIssues } from "./issue.js";
+import { getIssueById, listIssues } from "./issue.js";
 import { createTaskRecord } from "./task.js";
-import { seedWorkspaceGraph } from "./test-fixtures.js";
+import { seedIssue, seedWorkspaceGraph } from "./test-fixtures.js";
 
 /** Insert a workspace row (Issues FK-reference it) and return its id. */
 async function seedWorkspace(db: TestDb, name: string): Promise<string> {
@@ -28,35 +28,31 @@ describe("issue DAL", () => {
     db = createTestDb();
   });
 
-  it("createIssueRecord then getIssueById returns it with taskCount 0", async () => {
+  it("getIssueById reads back an Issue with taskCount 0", async () => {
     const wsId = await seedWorkspace(db, "acme");
     const ctx = ctxFor(db, wsId);
-
-    const created = await createIssueRecord(ctx, {
+    const created = await seedIssue(db, wsId, {
       title: "Fix the gate latch",
       description: "The latch sticks in the rain",
     });
-    expect(created.ok).toBe(true);
-    if (!created.ok) return;
 
-    expect(created.data.title).toBe("Fix the gate latch");
-    expect(created.data.description).toBe("The latch sticks in the rain");
-    expect(created.data.status).toBe("open");
-    expect(created.data.taskCount).toBe(0);
-
-    const fetched = await getIssueById(ctx, created.data.id);
+    const fetched = await getIssueById(ctx, created.id);
     expect(fetched.ok).toBe(true);
     if (!fetched.ok) return;
-    expect(fetched.data).toEqual(created.data);
+    expect(fetched.data.title).toBe("Fix the gate latch");
+    expect(fetched.data.description).toBe("The latch sticks in the rain");
+    expect(fetched.data.status).toBe("open");
     expect(fetched.data.taskCount).toBe(0);
+    // Nothing seeded a source explicitly, so it reads back "local" — the value existing rows
+    // (and every direct-DB fixture like this one) carry.
+    expect(fetched.data.source).toBe("local");
   });
 
-  it("createIssueRecord persists a null description when omitted", async () => {
-    const ctx = ctxFor(db, await seedWorkspace(db, "acme"));
-    const created = await createIssueRecord(ctx, { title: "No details" });
-    expect(created.ok).toBe(true);
-    if (!created.ok) return;
-    expect(created.data.description).toBeNull();
+  it("an Issue with no description reads back null, not undefined", async () => {
+    const wsId = await seedWorkspace(db, "acme");
+    const created = await seedIssue(db, wsId, { title: "No details" });
+    const fetched = await getIssueById(ctxFor(db, wsId), created.id);
+    expect(fetched.ok && fetched.data.description).toBeNull();
   });
 
   it("getIssueById returns NOT_FOUND for an unknown id", async () => {
@@ -67,13 +63,12 @@ describe("issue DAL", () => {
     expect(res.error).toBe("NOT_FOUND");
   });
 
-  it("listIssues returns the created issues for the workspace", async () => {
-    const ctx = ctxFor(db, await seedWorkspace(db, "acme"));
-    const a = await createIssueRecord(ctx, { title: "First" });
-    const b = await createIssueRecord(ctx, { title: "Second" });
-    expect(a.ok && b.ok).toBe(true);
+  it("listIssues returns the seeded issues for the workspace", async () => {
+    const wsId = await seedWorkspace(db, "acme");
+    await seedIssue(db, wsId, { title: "First" });
+    await seedIssue(db, wsId, { title: "Second" });
 
-    const res = await listIssues(ctx, {});
+    const res = await listIssues(ctxFor(db, wsId), {});
     expect(res.ok).toBe(true);
     if (!res.ok) return;
     expect(res.data.length).toBe(2);
@@ -83,11 +78,11 @@ describe("issue DAL", () => {
   });
 
   it("listIssues filters by title query", async () => {
-    const ctx = ctxFor(db, await seedWorkspace(db, "acme"));
-    await createIssueRecord(ctx, { title: "Gate motor whines" });
-    await createIssueRecord(ctx, { title: "Keypad unresponsive" });
+    const wsId = await seedWorkspace(db, "acme");
+    await seedIssue(db, wsId, { title: "Gate motor whines" });
+    await seedIssue(db, wsId, { title: "Keypad unresponsive" });
 
-    const res = await listIssues(ctx, { query: "motor" });
+    const res = await listIssues(ctxFor(db, wsId), { query: "motor" });
     expect(res.ok).toBe(true);
     if (!res.ok) return;
     expect(res.data.length).toBe(1);
@@ -99,31 +94,26 @@ describe("issue DAL", () => {
   it("enforces cross-workspace isolation for getIssueById", async () => {
     const wsA = await seedWorkspace(db, "workspace-a");
     const wsB = await seedWorkspace(db, "workspace-b");
-    const ctxA = ctxFor(db, wsA);
-    const ctxB = ctxFor(db, wsB);
-
-    const issueA = await createIssueRecord(ctxA, { title: "A's issue" });
-    const issueB = await createIssueRecord(ctxB, { title: "B's issue" });
-    expect(issueA.ok && issueB.ok).toBe(true);
-    if (!issueA.ok || !issueB.ok) return;
+    const issueA = await seedIssue(db, wsA, { title: "A's issue" });
+    const issueB = await seedIssue(db, wsB, { title: "B's issue" });
 
     // A tries to read B's issue by id -> NOT_FOUND, not a leak.
-    const leak = await getIssueById(ctxA, issueB.data.id);
+    const leak = await getIssueById(ctxFor(db, wsA), issueB.id);
     expect(leak.ok).toBe(false);
     if (leak.ok) return;
     expect(leak.error).toBe("NOT_FOUND");
 
     // Each workspace still sees only its own issue.
-    const ownA = await getIssueById(ctxA, issueA.data.id);
+    const ownA = await getIssueById(ctxFor(db, wsA), issueA.id);
     expect(ownA.ok).toBe(true);
   });
 
   it("listIssues is scoped to the calling workspace only", async () => {
     const wsA = await seedWorkspace(db, "workspace-a");
     const wsB = await seedWorkspace(db, "workspace-b");
-    await createIssueRecord(ctxFor(db, wsA), { title: "A only" });
-    await createIssueRecord(ctxFor(db, wsB), { title: "B one" });
-    await createIssueRecord(ctxFor(db, wsB), { title: "B two" });
+    await seedIssue(db, wsA, { title: "A only" });
+    await seedIssue(db, wsB, { title: "B one" });
+    await seedIssue(db, wsB, { title: "B two" });
 
     const listA = await listIssues(ctxFor(db, wsA), {});
     expect(listA.ok).toBe(true);
@@ -147,12 +137,11 @@ describe("issue status is derived from its Tasks (FR-006)", () => {
   async function statusWith(states: TaskState[]): Promise<string> {
     const g = await seedWorkspaceGraph(db, `derive-${states.join("-") || "none"}`);
     const ctx = ctxFor(db, g.workspaceId);
-    const issue = await createIssueRecord(ctx, { title: "Gate servo stalls" });
-    if (!issue.ok) throw new Error("seed failed");
+    const seeded = await seedIssue(db, g.workspaceId, { title: "Gate servo stalls" });
 
     for (const [index, state] of states.entries()) {
       const created = await createTaskRecord(ctx, {
-        issueId: issue.data.id,
+        issueId: seeded.id,
         title: `task-${index}`,
         agentProfileId: g.agentProfileId,
         executorProfileId: g.executorProfileId,
@@ -162,7 +151,7 @@ describe("issue status is derived from its Tasks (FR-006)", () => {
       if (!created.ok) throw new Error("task seed failed");
     }
 
-    const read = await getIssueById(ctx, issue.data.id);
+    const read = await getIssueById(ctx, seeded.id);
     if (!read.ok) throw new Error("read failed");
     return read.data.status;
   }
@@ -185,10 +174,9 @@ describe("issue status is derived from its Tasks (FR-006)", () => {
   it("reports the same status through the list as through the single read", async () => {
     const g = await seedWorkspaceGraph(db, "derive-list");
     const ctx = ctxFor(db, g.workspaceId);
-    const issue = await createIssueRecord(ctx, { title: "Keypad backlight" });
-    if (!issue.ok) return;
+    const seeded = await seedIssue(db, g.workspaceId, { title: "Keypad backlight" });
     await createTaskRecord(ctx, {
-      issueId: issue.data.id,
+      issueId: seeded.id,
       title: "t",
       agentProfileId: g.agentProfileId,
       executorProfileId: g.executorProfileId,

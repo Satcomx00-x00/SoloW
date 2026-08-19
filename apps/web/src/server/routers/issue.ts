@@ -1,20 +1,13 @@
 import "server-only";
-import {
-  createIssueInput,
-  getIssueInput,
-  issueDto,
-  issueListDto,
-  listIssuesInput,
-} from "@gatecontrol/contracts";
-import { createIssueRecord, getIssueById, listIssues } from "../dal/issue.js";
+import { getIssueInput, issueDto, issueListDto, listIssuesInput } from "@gatecontrol/contracts";
+import { getIssueById, listIssues } from "../dal/issue.js";
 import { ownerProcedure, router, unwrap } from "../trpc.js";
 
+/**
+ * No `create` procedure (issue #15 product decision, 2026-08-19): every Issue is imported from
+ * a connected GitHub or GitLab account via `integration.importIssues`, never typed in by hand.
+ */
 export const issueRouter = router({
-  create: ownerProcedure
-    .meta({ openapi: { method: "POST", path: "/issue.create", tags: ["issue"], protect: true } })
-    .input(createIssueInput)
-    .output(issueDto)
-    .mutation(async ({ ctx, input }) => unwrap(await createIssueRecord(ctx.rctx, input))),
   list: ownerProcedure
     .meta({ openapi: { method: "GET", path: "/issue.list", tags: ["issue"], protect: true } })
     .input(listIssuesInput)

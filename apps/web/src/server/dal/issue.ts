@@ -1,7 +1,6 @@
 import "server-only";
 import {
   CommonErrorCode,
-  type CreateIssueInput,
   err,
   type IssueDto,
   type IssueListDto,
@@ -90,21 +89,4 @@ export async function listIssues(
   // Filtered after derivation, not in SQL: the column no longer decides the status, so a
   // `where status = …` would match on a value the caller never sees.
   return ok(input.status ? dtos.filter((d) => d.status === input.status) : dtos);
-}
-
-export async function createIssueRecord(
-  ctx: RequestContext,
-  input: CreateIssueInput,
-): Promise<Result<IssueDto>> {
-  const [row] = await ctx.db
-    .insert(issue)
-    .values({
-      workspaceId: ctx.workspaceId,
-      title: input.title,
-      description: input.description ?? null,
-    })
-    .returning();
-  if (!row) return err(CommonErrorCode.ValidationFailed);
-  // A brand-new Issue has no Tasks, which derives to "open".
-  return ok(issueToDto(row, 0, statusFor(row.status, [])));
 }

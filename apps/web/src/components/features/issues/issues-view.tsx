@@ -5,11 +5,11 @@ import { CommonErrorCode } from "@gatecontrol/contracts";
 import { ChevronRight, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { CreateIssueDialog } from "@/components/features/board/create-issue-dialog";
 import { HeaderActions } from "@/components/shell/header-actions";
 import { ISSUE_STATUS_LABELS, ISSUE_STATUS_STYLE, ISSUE_STATUSES } from "@/lib/issue-status";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
+import { ImportIssuesDialog } from "./import-issues-dialog";
 
 /**
  * The Issues section (spec F01).
@@ -88,7 +88,7 @@ export function IssuesView() {
   return (
     <div className="mx-auto w-full max-w-3xl space-y-5 px-6 py-5">
       <HeaderActions>
-        <CreateIssueDialog />
+        <ImportIssuesDialog />
       </HeaderActions>
 
       <StatusFilter active={status} />

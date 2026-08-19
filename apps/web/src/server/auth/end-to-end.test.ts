@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { beforeAll, beforeEach, describe, expect, it } from "bun:test";
-import { workspace } from "@gatecontrol/db";
+import { issue as issueTable, workspace } from "@gatecontrol/db";
 import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
 import { eq } from "drizzle-orm";
 import { getWorkspaceFlags } from "../dal/workspace.js";
@@ -77,16 +77,22 @@ describe("signed-in Owner reaching the API", () => {
     expect(await errCode(() => before.issue.list({}))).toBe("FORBIDDEN");
   });
 
-  it("reads and writes its own Workspace once the flag is on", async () => {
+  it("reads its own Workspace's seeded Issue once the flag is on", async () => {
     const { cookie, userId } = await signUpOwner();
     const workspaceId = (await workspaceForUser(db, userId)) as string;
     await enableCoreLoop(workspaceId);
+    // Issue #15 removed issue.create; every real Issue is imported. Seeded directly here since
+    // this test is about read-side Workspace scoping through the session, not the import flow.
+    const [seeded] = await db
+      .insert(issueTable)
+      .values({ workspaceId, title: "Gate servo stalls" })
+      .returning();
+    if (!seeded) throw new Error("failed to seed issue");
 
     const caller = appRouter.createCaller(await contextFor(cookie));
-    const created = await caller.issue.create({ title: "Gate servo stalls" });
     const listed = await caller.issue.list({});
 
-    expect(listed.map((i) => i.id)).toEqual([created.id]);
+    expect(listed.map((i) => i.id)).toEqual([seeded.id]);
   });
 
   it("writes land in the Workspace the session names, not one the client picked", async () => {
@@ -100,16 +106,21 @@ describe("signed-in Owner reaching the API", () => {
       .returning();
 
     const caller = appRouter.createCaller(await contextFor(cookie));
-    // The input schemas carry no `workspaceId` at all, so there is nothing to spoof — the row
-    // can only be written where the session says.
-    await caller.issue.create({ title: "Only mine" });
+    // The input schema carries no `workspaceId` at all, so there is nothing to spoof — the row
+    // can only be written where the session says. (repository.connect stands in for issue.create,
+    // which issue #15 removed — both are session-scoped writes with no workspaceId in their input.)
+    await caller.repository.connect({
+      name: "only-mine",
+      source: "local_path",
+      location: "/srv/only-mine",
+    });
 
     const theirs = appRouter.createCaller({
       db,
       session: { workspaceId: (other as { id: string }).id, userId: "another-user" },
       flagOverrides: { "ff-core-program": true },
     });
-    expect(await theirs.issue.list({})).toHaveLength(0);
+    expect(await theirs.repository.list({})).toHaveLength(0);
   });
 
   it("is unauthorized with no cookie, before the flag is even consulted", async () => {

@@ -96,13 +96,16 @@ docs when they refer to these specific concepts.
   prepares a Workspace for use on first run and can be re-run later to add or change
   configuration.
 
-- **GitHub CLI (`gh`) / GitLab CLI (`glab`)** — The official command-line tools GateControl
-  drives to perform GitHub and GitLab integration: authentication, Issue synchronisation, and
-  branch and pull/merge request creation.
+- **Integration** — A connected GitHub or GitLab account (Personal Access Token stored as a
+  Secret), driven through GateControl's own REST API client (`packages/scm`), not `gh`/`glab`
+  (see [Decision 0014](./decisions/0014-direct-api-source-integrations.md)).
+
+- **Change Request** — GateControl's provider-neutral term for a pull request (GitHub) or
+  merge request (GitLab); the domain never encodes one provider's noun. Reference-only today
+  (imported/synced, never created) — creating one is issue #71.
 
 - **Pull Request / Merge Request** — The change-integration mechanism of a source host: a
-  pull request on GitHub, a merge request on GitLab. GateControl creates them from accepted
-  Task changes.
+  pull request on GitHub, a merge request on GitLab. See Change Request above.
 
 - **tRPC** — The typed request/response protocol the SPA uses for queries and mutations
   against the backend HTTP API.

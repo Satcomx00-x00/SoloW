@@ -2,10 +2,13 @@ import { randomUUID } from "node:crypto";
 import type {
   AgentKind,
   AuthMode,
+  ChangeRequestState,
   ExecutorKind,
+  IssueSource,
   IssueStatus,
   RepositorySource,
   ReviewDecision,
+  ScmProvider,
   SecretKind,
   SessionState,
   TaskState,
@@ -49,6 +52,28 @@ export const workspace = sqliteTable("workspace", {
   updatedAt: updatedAt(),
 });
 
+/**
+ * SCM integrations (issue #15, spec F12). One connected GitHub or GitLab account per row; the
+ * PAT lives in `secret` (Principle IV) and is only ever reached through `secretId`.
+ */
+export const integration = sqliteTable(
+  "integration",
+  {
+    id: id(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspace.id),
+    provider: text("provider").$type<ScmProvider>().notNull(),
+    secretId: text("secret_id").notNull(),
+    /** GitHub Enterprise Server / self-managed GitLab host; null for the public SaaS API. */
+    baseUrl: text("base_url"),
+    writeBackEnabled: integer("write_back_enabled", { mode: "boolean" }).notNull().default(false),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => ({ byWs: index("integration_ws").on(t.workspaceId) }),
+);
+
 export const issue = sqliteTable(
   "issue",
   {
@@ -59,12 +84,33 @@ export const issue = sqliteTable(
     title: text("title").notNull(),
     description: text("description"),
     status: text("status").$type<IssueStatus>().notNull().default("open"),
+    /**
+     * Every Issue is imported now (issue #15) — `source`/`integrationId`/`externalId` are set
+     * together by the import DAL. `"local"` is the value existing pre-#15 rows carry; nothing
+     * creates a new one.
+     */
+    source: text("source").$type<IssueSource>().notNull().default("local"),
+    integrationId: text("integration_id").references(() => integration.id),
+    repositoryId: text("repository_id").references(() => repository.id),
+    externalId: text("external_id"),
+    externalNumber: integer("external_number"),
+    externalUrl: text("external_url"),
+    syncedAt: text("synced_at"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => ({
     byStatus: index("issue_ws_status").on(t.workspaceId, t.status),
     byCreated: index("issue_ws_created").on(t.workspaceId, t.createdAt),
+    /**
+     * Idempotent import (issue #15 AC-2 / DoD): re-importing the same provider issue must not
+     * duplicate it. `integrationId` already carries the provider and the Workspace it belongs
+     * to, so this is the DoD's `(workspaceId, provider, externalId)` requirement expressed
+     * without a denormalised `provider` column that could drift from `integration.provider`.
+     * SQLite treats each NULL as distinct, so any number of `source: "local"` rows (both
+     * columns null) coexist without tripping this index.
+     */
+    byExternal: uniqueIndex("issue_integration_external").on(t.integrationId, t.externalId),
   }),
 );
 
@@ -111,10 +157,78 @@ export const repository = sqliteTable(
     name: text("name").notNull(),
     source: text("source").$type<RepositorySource>().notNull(),
     location: text("location").notNull(),
+    /** Set together, once linked to an Integration (issue #15) — null for a purely local repo. */
+    integrationId: text("integration_id").references(() => integration.id),
+    /** The provider's own identifier — "owner/repo" for GitHub, "namespace/path" for GitLab. */
+    externalFullName: text("external_full_name"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => ({ byWs: index("repository_ws").on(t.workspaceId) }),
+);
+
+/** A Repository's branches, as last synced from its Integration (issue #15). */
+export const repositoryBranch = sqliteTable(
+  "repository_branch",
+  {
+    id: id(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspace.id),
+    repositoryId: text("repository_id")
+      .notNull()
+      .references(() => repository.id),
+    name: text("name").notNull(),
+    isDefault: integer("is_default", { mode: "boolean" }).notNull().default(false),
+    headSha: text("head_sha").notNull(),
+    headCommittedAt: text("head_committed_at"),
+    syncedAt: text("synced_at").notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ','now'))`),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => ({
+    byRepo: index("repository_branch_repo").on(t.repositoryId),
+    byName: uniqueIndex("repository_branch_repo_name").on(t.repositoryId, t.name),
+  }),
+);
+
+/**
+ * A Repository's change requests (GitHub pull requests / GitLab merge requests), as last synced
+ * from its Integration (issue #15). Reference-only today — GateControl does not open or merge
+ * these; that is issue #71, gated on #7.
+ */
+export const changeRequest = sqliteTable(
+  "change_request",
+  {
+    id: id(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspace.id),
+    repositoryId: text("repository_id")
+      .notNull()
+      .references(() => repository.id),
+    integrationId: text("integration_id")
+      .notNull()
+      .references(() => integration.id),
+    externalId: text("external_id").notNull(),
+    number: integer("number").notNull(),
+    title: text("title").notNull(),
+    state: text("state").$type<ChangeRequestState>().notNull(),
+    url: text("url").notNull(),
+    headRef: text("head_ref").notNull(),
+    baseRef: text("base_ref").notNull(),
+    authorLogin: text("author_login"),
+    syncedAt: text("synced_at").notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ','now'))`),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => ({
+    byRepo: index("change_request_repo").on(t.repositoryId),
+    byExternal: uniqueIndex("change_request_integration_external").on(
+      t.integrationId,
+      t.externalId,
+    ),
+  }),
 );
 
 export const task = sqliteTable(
@@ -317,10 +431,13 @@ export const secret = sqliteTable(
  */
 export const schema = {
   workspace,
+  integration,
   issue,
   agentProfile,
   executorProfile,
   repository,
+  repositoryBranch,
+  changeRequest,
   task,
   worktree,
   session,

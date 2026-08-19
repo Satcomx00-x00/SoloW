@@ -1,7 +1,11 @@
 import { z } from "zod";
 import { idSchema } from "./common.js";
 
-export const secretKindSchema = z.enum(["subscription_token", "api_key"]);
+/**
+ * `scm_pat` holds a GitHub/GitLab Personal Access Token (issue #15) — same write-only shape as
+ * every other credential; the value never comes back out of a read.
+ */
+export const secretKindSchema = z.enum(["subscription_token", "api_key", "scm_pat"]);
 export type SecretKind = z.infer<typeof secretKindSchema>;
 
 /**

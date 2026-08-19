@@ -127,8 +127,19 @@ export function CreateTaskDialog() {
         </DialogHeader>
         {missingConfig ? (
           <p className="text-muted-foreground text-sm">
-            Configure a secret, an agent and executor profile, and a repository in{" "}
-            <span className="font-medium text-foreground">Settings</span> first.
+            {(issues.data?.length ?? 0) === 0 ? (
+              <>
+                Import an Issue from the <span className="font-medium text-foreground">Issues</span>{" "}
+                page first — connect GitHub or GitLab in{" "}
+                <span className="font-medium text-foreground">Settings → Integrations</span> if you
+                haven't yet.
+              </>
+            ) : (
+              <>
+                Configure a secret, an agent and executor profile, and a repository in{" "}
+                <span className="font-medium text-foreground">Settings</span> first.
+              </>
+            )}
           </p>
         ) : (
           <Form {...form}>

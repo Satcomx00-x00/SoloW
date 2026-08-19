@@ -5,8 +5,10 @@
 ## Summary
 
 Issues are the organising unit of work in GateControl. Every Task exists to advance an
-Issue. Issues can be created directly in GateControl or synchronised from an external
-tracker, so that agent work is always anchored to a real request, bug, or feature.
+Issue. **Every Issue is imported from a connected GitHub or GitLab repository** (see
+[F12](./F12-integrations.md)) — there is no free-text "create Issue" form (product decision,
+2026-08-19, issue #15). Agent work is always anchored to a real, externally-tracked request,
+never to something typed up inside GateControl and nowhere else.
 
 ## Jobs served
 
@@ -14,10 +16,8 @@ tracker, so that agent work is always anchored to a real request, bug, or featur
 
 ## User stories
 
-- As a Team Lead, I want to create an Issue describing a piece of work, so agents can be
-  pointed at it.
-- As a Team Lead, I want to import Issues from our existing tracker, so I do not duplicate
-  work management.
+- As a Team Lead, I want to import Issues from our existing tracker, so agent work is
+  anchored to our real backlog, not a duplicate of it.
 - As a Solo Power User, I want to see all Tasks that belong to an Issue in one place, so I
   know the whole state of that work.
 - As a Reviewer, I want an Issue to reflect the outcome of its Tasks, so status stays
@@ -25,13 +25,15 @@ tracker, so that agent work is always anchored to a real request, bug, or featur
 
 ## Functional requirements
 
-- **FR-1** A user can create an Issue with a title, description, and optional labels and
-  priority.
+- **FR-1** ~~A user can create an Issue with a title, description, and optional labels and
+  priority.~~ Removed 2026-08-19 (issue #15) — see FR-3.
 - **FR-2** A user can view all Issues in a Workspace, filter them by status, label,
   priority, and source, and search them by text.
-- **FR-3** An Issue can be created natively or synchronised from a connected external
-  tracker (see [F12](./F12-integrations.md)).
-- **FR-4** A synchronised Issue displays its source and a link back to the original.
+- **FR-3** An Issue is created only by importing it from a connected GitHub or GitLab
+  repository (see [F12](./F12-integrations.md)); GateControl has no native Issue-creation
+  path. Title and description are the provider's own; GateControl does not edit them.
+- **FR-4** An imported Issue displays its source (provider, number) and a link back to the
+  original.
 - **FR-5** An Issue shows all Tasks administered under it and their current lifecycle
   states.
 - **FR-6** An Issue's status derives from its Tasks: it is In Progress while any Task is
@@ -51,8 +53,8 @@ tracker, so that agent work is always anchored to a real request, bug, or featur
 ## States & rules
 
 - Issue states: **Open → In Progress → Resolved → Closed**.
-- A native Issue is fully editable in GateControl. A synchronised Issue's canonical fields
-  are owned by its source; GateControl-specific fields (its Tasks, its derived status) are
+- An imported Issue's canonical fields (title, description) are owned by its source and are
+  not edited in GateControl; GateControl-specific fields (its Tasks, its derived status) are
   owned by GateControl.
 - Deleting an Issue is blocked while it has Tasks; the user must first move or remove those
   Tasks.
@@ -60,7 +62,7 @@ tracker, so that agent work is always anchored to a real request, bug, or featur
 ## Edge cases & failure handling
 
 - If an external tracker is unreachable, synchronised Issues remain visible with their last
-  known state and a staleness indicator; native Issues are unaffected.
+  known state and a staleness indicator.
 - A conflict between an external update and a local override surfaces to the user rather
   than silently resolving.
 

@@ -5,7 +5,7 @@ import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import type { OpenApiMeta } from "trpc-to-openapi";
 import type { RequestContext } from "./dal/context.js";
-import { isEnabled } from "./flags.js";
+import { type FlagKey, isEnabled } from "./flags.js";
 import { checkRateLimit, RATE_LIMITS, type RateLimitedProcedure } from "./rate-limit.js";
 
 /**
@@ -18,7 +18,7 @@ export interface BaseContext {
   db: Db;
   /** Resolved from the authenticated session; null when unauthenticated. */
   session: { workspaceId: string; userId: string } | null;
-  flagOverrides?: Partial<Record<"ff-core-program", boolean>>;
+  flagOverrides?: Partial<Record<FlagKey, boolean>>;
 }
 
 const t = initTRPC.meta<OpenApiMeta>().context<BaseContext>().create({ transformer: superjson });
@@ -39,23 +39,32 @@ const requireSession = t.middleware(({ ctx, next }) => {
   return next({ ctx: { ...ctx, rctx } });
 });
 
-/** Blocks the whole feature when the flag is OFF (kill switch). */
-const requireCoreFlag = t.middleware(({ ctx, next }) => {
-  const workspaceId = ctx.session?.workspaceId;
-  if (!workspaceId) {
-    throw new TRPCError({ code: "UNAUTHORIZED", message: CommonErrorCode.Unauthorized });
-  }
-  const flagCtx = ctx.flagOverrides
-    ? { workspaceId, overrides: ctx.flagOverrides }
-    : { workspaceId };
-  if (!isEnabled("ff-core-program", flagCtx)) {
-    throw new TRPCError({ code: "FORBIDDEN", message: CommonErrorCode.FlagDisabled });
-  }
-  return next();
-});
+/** Blocks the whole feature when its flag is OFF (kill switch) — one middleware per flag key. */
+function requireFlag(flag: FlagKey) {
+  return t.middleware(({ ctx, next }) => {
+    const workspaceId = ctx.session?.workspaceId;
+    if (!workspaceId) {
+      throw new TRPCError({ code: "UNAUTHORIZED", message: CommonErrorCode.Unauthorized });
+    }
+    const flagCtx = ctx.flagOverrides
+      ? { workspaceId, overrides: ctx.flagOverrides }
+      : { workspaceId };
+    if (!isEnabled(flag, flagCtx)) {
+      throw new TRPCError({ code: "FORBIDDEN", message: CommonErrorCode.FlagDisabled });
+    }
+    return next();
+  });
+}
 
 /** The procedure every core-program endpoint uses. */
-export const ownerProcedure = publicProcedure.use(requireSession).use(requireCoreFlag);
+export const ownerProcedure = publicProcedure
+  .use(requireSession)
+  .use(requireFlag("ff-core-program"));
+
+/** The procedure every SCM-integration endpoint uses (issue #15) — a separate kill switch. */
+export const integrationsProcedure = publicProcedure
+  .use(requireSession)
+  .use(requireFlag("ff-integrations"));
 
 /**
  * Per-Owner rate limit for a sensitive write. Returns a middleware to chain after

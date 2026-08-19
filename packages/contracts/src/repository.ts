@@ -31,6 +31,9 @@ export const repositoryDto = z
     name: z.string(),
     source: repositorySourceSchema,
     location: z.string(),
+    /** Set together, once linked to an Integration (issue #15) — null for a purely local repo. */
+    integrationId: idSchema.nullable(),
+    externalFullName: z.string().nullable(),
   })
   .merge(timestampsSchema);
 export type RepositoryDto = z.infer<typeof repositoryDto>;

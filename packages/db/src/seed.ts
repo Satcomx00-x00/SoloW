@@ -1,18 +1,16 @@
 import type { Db } from "./index.js";
-import {
-  agentProfile,
-  executorProfile,
-  issue,
-  repository,
-  secret,
-  task,
-  workspace,
-} from "./schema.js";
+import { agentProfile, executorProfile, repository, secret, workspace } from "./schema.js";
 import { encryptSecret } from "./secret-store.js";
 
 /**
- * Seed data (task TASK-005). Two Workspaces with *non-overlapping* Issues/Tasks/Profiles so
- * the cross-Workspace isolation tests (Principle V) have realistic tenants to run against.
+ * Seed data (task TASK-005). Two Workspaces with non-overlapping Profiles so the
+ * cross-Workspace isolation tests (Principle V) have realistic tenants to run against.
+ *
+ * No Issues or Tasks (issue #15 product decision, 2026-08-19): every real Issue now comes from
+ * importing a connected GitHub or GitLab repository, so a fabricated one has no honest place in
+ * a fixture meant to resemble what a real install looks like. A Workspace seeded here starts
+ * with zero Issues, exactly like a fresh sign-up does — connect an Integration and import to
+ * populate it.
  *
  * Idempotent: every row uses a fixed id and `onConflictDoNothing`, so re-running the seed is
  * safe and never duplicates. Secrets are encrypted at rest via the same store the app uses —
@@ -31,8 +29,6 @@ const A = {
   agent: "a2000000-0000-4000-8000-000000000002",
   executor: "a3000000-0000-4000-8000-000000000003",
   repo: "a4000000-0000-4000-8000-000000000004",
-  issue: "a5000000-0000-4000-8000-000000000005",
-  task: "a6000000-0000-4000-8000-000000000006",
 } as const;
 
 const B = {
@@ -40,8 +36,6 @@ const B = {
   agent: "b2000000-0000-4000-8000-000000000002",
   executor: "b3000000-0000-4000-8000-000000000003",
   repo: "b4000000-0000-4000-8000-000000000004",
-  issue: "b5000000-0000-4000-8000-000000000005",
-  task: "b6000000-0000-4000-8000-000000000006",
 } as const;
 
 export interface SeedResult {
@@ -91,30 +85,6 @@ export async function seed(db: Db): Promise<SeedResult> {
       location: "/srv/repos/northwind/gate-firmware",
     })
     .onConflictDoNothing();
-  await db
-    .insert(issue)
-    .values({
-      id: A.issue,
-      workspaceId: WS_A,
-      title: "Gate servo stalls under load",
-      description: "The main servo stalls when the gate is pushed against wind resistance.",
-      status: "open",
-    })
-    .onConflictDoNothing();
-  await db
-    .insert(task)
-    .values({
-      id: A.task,
-      workspaceId: WS_A,
-      issueId: A.issue,
-      title: "Investigate servo current-draw limits",
-      state: "backlog",
-      agentProfileId: A.agent,
-      executorProfileId: A.executor,
-      repositoryId: A.repo,
-      baseRef: "main",
-    })
-    .onConflictDoNothing();
 
   // --- Workspace B: Harbor Freight Automation (API-key billing) ---
   await db
@@ -155,30 +125,6 @@ export async function seed(db: Db): Promise<SeedResult> {
       name: "keypad-driver",
       source: "remote_url",
       location: "https://github.com/harbor-freight/keypad-driver.git",
-    })
-    .onConflictDoNothing();
-  await db
-    .insert(issue)
-    .values({
-      id: B.issue,
-      workspaceId: WS_B,
-      title: "Keypad backlight flickers at dusk",
-      description: "The capacitive keypad backlight flickers when ambient light is low.",
-      status: "in_progress",
-    })
-    .onConflictDoNothing();
-  await db
-    .insert(task)
-    .values({
-      id: B.task,
-      workspaceId: WS_B,
-      issueId: B.issue,
-      title: "Add debounce to the keypad backlight driver",
-      state: "ready",
-      agentProfileId: B.agent,
-      executorProfileId: B.executor,
-      repositoryId: B.repo,
-      baseRef: "main",
     })
     .onConflictDoNothing();
 
