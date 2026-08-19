@@ -246,6 +246,17 @@ cases: do not embed VS Code (34) when a `vscode://` deep link delivers the same 
 do not start Monaco with the LSP bridge (32) — read-only syntax highlighting is 80% of the
 benefit for 20% of the work.
 
+## Tracking
+
+Every row in this document is a GitHub issue, titled with its row number in brackets
+(`[42] Command palette and keyboard navigation`). The 32 ✅ rows are **closed** with their
+shipped evidence and a recorded follow-up; the other 73 are open, carry `Blocked by #n`
+dependencies, and are labelled by priority, kind, area, effort and status.
+
+- **[Roadmap index — issue #109](https://github.com/Satcomx00-x00/GateControl/issues/109)** — row → issue map, the eight foundations, and the suggested delivery order
+- Three foundations have no row of their own: [#1](https://github.com/Satcomx00-x00/GateControl/issues/1) executor interface, [#2](https://github.com/Satcomx00-x00/GateControl/issues/2) session log, [#3](https://github.com/Satcomx00-x00/GateControl/issues/3) contribution registries
+- [`scripts/labels.sh`](../../scripts/labels.sh) applies the label taxonomy's colours and descriptions
+
 ## Related
 
 - [Decision 0001 — Build a near-clone of kandev](../decisions/0001-scope-near-clone-of-kandev.md)
