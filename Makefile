@@ -4,7 +4,7 @@
 SHELL := bash
 .DEFAULT_GOAL := help
 .PHONY: help install clean build lint format typecheck test smoke e2e e2e-critical \
-	audit secretscan verify dev dev-web flags \
+	audit audit-executor-boundary secretscan verify dev dev-web flags \
 	dev-orchestrator update db-generate db-migrate db-seed openapi openapi-check
 
 help: ## Show this help
@@ -49,10 +49,13 @@ e2e-critical: ## Run only the @critical isolation E2E — this one blocks merge
 audit: ## Dependency audit at the project severity threshold
 	bun run audit
 
+audit-executor-boundary: ## No direct host access (Bun.spawn/$/fs) outside the local Executor (issue #1)
+	bun run audit:executor-boundary
+
 secretscan: ## Scan the repository and its history for committed secrets
 	bun run secretscan
 
-verify: lint typecheck test openapi-check audit secretscan e2e ## Every quality gate, in order
+verify: lint typecheck test openapi-check audit audit-executor-boundary secretscan e2e ## Every quality gate, in order
 	@echo "all quality gates passed"
 
 dev: ## Start ALL services (web :5000 + orchestrator :5001) with hot reload; auto-migrates+seeds

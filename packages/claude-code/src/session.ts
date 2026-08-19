@@ -1,4 +1,3 @@
-/// <reference types="bun-types" />
 import { type ClaudeUpdate, encodeUserTurn, parseStreamLine, toUpdates } from "./events.js";
 
 /**
@@ -11,7 +10,30 @@ import { type ClaudeUpdate, encodeUserTurn, parseStreamLine, toUpdates } from ".
  * **`--worktree` is not optional.** Several Tasks run against one repository at the same time,
  * and two agents editing one working tree would corrupt each other's changes (Principle II).
  * The flag is added by `buildArgs`, not by the caller, so no call site can leave it off.
+ *
+ * This module never spawns the process itself — the caller supplies `spawn` (issue #1's
+ * `Executor.spawn` in the orchestrator). That keeps this package agent-protocol-only and leaves
+ * exactly one place in the orchestrator allowed to touch the execution host.
  */
+
+/** A long-lived child process, shaped for an interactive stream-JSON protocol. */
+export interface ChildProcessHandle {
+  stdin: {
+    write(data: string): number | Promise<number>;
+    flush(): Promise<number>;
+    end(): Promise<void>;
+  };
+  stdout: AsyncIterable<Uint8Array>;
+  stderr: AsyncIterable<Uint8Array>;
+  exited: Promise<number>;
+  kill(): void;
+}
+
+/** Launches the CLI process. Implemented by the orchestrator's `Executor.spawn`. */
+export type SpawnFn = (
+  cmd: string[],
+  opts: { cwd: string; env: Record<string, string> },
+) => ChildProcessHandle;
 
 /** How the session ended, from the CLI's own `result` event. */
 export interface ClaudeOutcome {
@@ -33,6 +55,8 @@ export interface ClaudeSessionOptions {
   cwd: string;
   /** Environment for the agent process. Replaces, never extends (Principle IV). */
   env: Record<string, string>;
+  /** Launches the CLI process — the orchestrator's `Executor.spawn`. */
+  spawn: SpawnFn;
   /**
    * Worktree to create, or null to work in `cwd` directly because it already is one. Asking
    * for a worktree from inside a worktree would nest one in the other.
@@ -95,7 +119,7 @@ export function startClaudeSession(
   options: ClaudeSessionOptions,
   prompt: string,
 ): ClaudeSession & { stderrTail: () => string } {
-  const proc = Bun.spawn(
+  const proc = options.spawn(
     [
       options.command,
       ...buildArgs({
@@ -104,15 +128,9 @@ export function startClaudeSession(
         ...(options.extraArgs ? { extraArgs: options.extraArgs } : {}),
       }),
     ],
-    {
-      cwd: options.cwd,
-      // Replaces the environment rather than extending it: the child sees exactly the one
-      // credential the billing guard shaped, and nothing else of the orchestrator's.
-      env: options.env,
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-    },
+    // Replaces the environment rather than extending it: the child sees exactly the one
+    // credential the billing guard shaped, and nothing else of the orchestrator's (Principle IV).
+    { cwd: options.cwd, env: options.env },
   );
 
   let stderrTail = "";

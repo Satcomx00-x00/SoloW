@@ -5,14 +5,42 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ClaudeUpdate } from "./events.js";
-import { buildArgs, type ClaudeSession, startClaudeSession } from "./session.js";
+import { buildArgs, type ClaudeSession, type SpawnFn, startClaudeSession } from "./session.js";
 import { type FakeClaudeScript, writeFakeClaudeBin } from "./testing.js";
 
 /**
  * Driving a real child process that speaks the real stream-JSON protocol (task TASK-014). The
  * fake stands in for the model, not for the wire format — framing, turn-taking and the session
  * preamble are all exercised for real.
+ *
+ * `startClaudeSession` no longer spawns the process itself (issue #1) — this file stands in for
+ * the orchestrator's `Executor.spawn` with a plain `Bun.spawn` adapter, since a package test has
+ * no `Executor` of its own to reach for.
  */
+const bunSpawn: SpawnFn = (cmd, opts) => {
+  const [command, ...args] = cmd;
+  if (!command) throw new Error("spawn: empty command");
+  const proc = Bun.spawn([command, ...args], {
+    cwd: opts.cwd,
+    env: opts.env,
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  return {
+    stdin: {
+      write: (data: string) => proc.stdin.write(data),
+      flush: () => Promise.resolve(proc.stdin.flush()),
+      end: async () => {
+        await proc.stdin.end();
+      },
+    },
+    stdout: proc.stdout,
+    stderr: proc.stderr,
+    exited: proc.exited,
+    kill: () => proc.kill(),
+  };
+};
 
 let session: ClaudeSession | undefined;
 let workdir: string | undefined;
@@ -35,6 +63,7 @@ async function run(script: FakeClaudeScript = {}, prompt = "fix the latch") {
       // Bun needs PATH to resolve; nothing else is passed, so a test can assert what the child
       // could see (Principle IV).
       env: { PATH: process.env["PATH"] ?? "", CLAUDE_CODE_OAUTH_TOKEN: "the-credential" },
+      spawn: bunSpawn,
       worktreeName: "gatecontrol-task-1",
       permissionMode: "acceptEdits",
       onUpdate: (u) => updates.push(u),

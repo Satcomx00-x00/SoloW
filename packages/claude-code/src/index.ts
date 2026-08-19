@@ -13,8 +13,10 @@ export {
 } from "./events.js";
 export {
   buildArgs,
+  type ChildProcessHandle,
   type ClaudeOutcome,
   type ClaudeSession,
   type ClaudeSessionOptions,
+  type SpawnFn,
   startClaudeSession,
 } from "./session.js";

@@ -1,12 +1,52 @@
 # F07 — Execution Environments
 
-**Status:** Draft · **Owner:** Product · **Maturity:** Core · **Last reviewed:** 2026-08-17
+**Status:** Draft · **Owner:** Product · **Maturity:** Core · **Last reviewed:** 2026-08-19
 
 ## Summary
 
 An Executor is where an Agent actually runs. GateControl supports several execution
 environments so users can run agents locally for convenience or offload heavy work to
 containers, remote machines, or the cloud — all managed from the same control plane.
+
+## The `Executor` interface (issue #1)
+
+Before a second Executor kind exists, GateControl adopted one interface every kind implements —
+`apps/orchestrator/src/executor/types.ts`:
+
+```ts
+interface Executor {
+  spawn(cmd: string[], opts: SpawnOpts): ProcessHandle; // long-lived agent process
+  exec(cmd: string[], opts?: ExecOpts): Promise<ExecResult>; // one-shot: git, du, version probes
+  fs: ExecutorFs; // list, read, write, copy — root-jailed
+  forward(port: number): Promise<ForwardHandle>; // dev-server preview
+  metrics(): Promise<ExecutorMetrics>; // cpu, mem, disk, load
+  dispose(): Promise<void>;
+}
+```
+
+`apps/orchestrator/src/executor/local.ts` — the Local Executor — is the first and, until #46/#47
+land, only implementation, and the one module in the orchestrator allowed to call `Bun.spawn`,
+the Bun shell, or touch the host filesystem directly
+(`scripts/audit-executor-boundary.ts` enforces the boundary). Everything that reaches into the
+place an agent runs goes through it instead of a call of its own:
+
+- The **agent runner** (`apps/orchestrator/src/agent/claude-code-runner.ts`) launches the
+  `claude` CLI via `executor.spawn` — `packages/claude-code`'s `startClaudeSession` never spawns
+  a process itself, it takes a `SpawnFn` the caller supplies.
+- The **worktree manager and diff reader** (`apps/orchestrator/src/worktree/manager.ts`) run
+  every `git` invocation via `executor.exec` instead of a `Bun.spawn`/shell call of its own.
+
+Two properties every implementation must hold:
+
+- **`fs` is root-jailed.** Path resolution happens once, in the executor, and every consumer
+  inherits it — the highest path-traversal risk surface in the product (#33 file tree, #52
+  `.env` copy).
+- **`spawn` takes the environment verbatim.** It replaces the child's environment rather than
+  merging it with the executor's own, so the one credential the billing guard shaped is all an
+  agent process ever sees (Principle IV).
+
+A second Executor kind (Container #46, Remote SSH #47, Cloud #48) is a new file implementing
+this interface — a driver, not a second copy of "how do I reach the place the agent runs".
 
 ## Jobs served
 

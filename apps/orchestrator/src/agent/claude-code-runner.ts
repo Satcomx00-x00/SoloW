@@ -1,10 +1,10 @@
-/// <reference types="bun-types" />
 import {
   type ClaudeSession,
   type ClaudeUpdate,
   startClaudeSession,
 } from "@gatecontrol/claude-code";
 import { detectFailureSignal, type FailureSignal } from "@gatecontrol/core";
+import type { Executor } from "../executor/types.js";
 import type {
   AgentHandle,
   AgentOutcome,
@@ -43,13 +43,15 @@ export function worktreeNameForTask(taskId: string): string {
 }
 
 export interface ClaudeCodeRunnerOptions {
+  /** Where the CLI process actually runs — issue #1's `Executor`. */
+  executor: Executor;
   permissionMode?: string;
   /** Diagnostics sink for the CLI's stderr. Never receives protocol traffic. */
   onStderr?: (text: string) => void;
 }
 
 export class ClaudeCodeRunner implements AgentRunner {
-  constructor(private readonly options: ClaudeCodeRunnerOptions = {}) {}
+  constructor(private readonly options: ClaudeCodeRunnerOptions) {}
 
   start(opts: AgentStartOpts): AgentHandle {
     let session: (ClaudeSession & { stderrTail: () => string }) | undefined;
@@ -62,6 +64,7 @@ export class ClaudeCodeRunner implements AgentRunner {
           ...(opts.args.length > 0 ? { extraArgs: opts.args } : {}),
           cwd: opts.cwd,
           env: opts.env,
+          spawn: (cmd, spawnOpts) => this.options.executor.spawn(cmd, spawnOpts),
           worktreeName: opts.worktreeName,
           permissionMode: this.options.permissionMode ?? DEFAULT_PERMISSION_MODE,
           onUpdate: (update) => {

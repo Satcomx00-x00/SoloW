@@ -23,6 +23,7 @@ import {
   type TaskRunContext,
 } from "../../data.js";
 import { orchestratorEnv } from "../../env.js";
+import { createLocalExecutor } from "../../executor/local.js";
 import {
   adoptWorktree,
   cleanupWorktree,
@@ -30,7 +31,10 @@ import {
   diffWorktree,
   discardWorktreeChanges,
   hasChanges,
+  type ProvisionParams,
   prepareRepository,
+  type Worktree,
+  type WorktreeDiff,
 } from "../../worktree/manager.js";
 import { hub } from "../../ws/hub.js";
 import { inngest } from "../client.js";
@@ -59,20 +63,23 @@ const reviewData = z.object({
 
 const MAX_REVIEW_ROUNDS = 5;
 
-/** Worktree operations the lifecycle depends on (real impls in `defaultDeps`). */
+/**
+ * Worktree operations the lifecycle depends on (real impls in `defaultDeps`), already bound to
+ * an `Executor` (issue #1) — the lifecycle itself stays executor-agnostic.
+ */
 export interface WorktreeOps {
   /**
    * Resolve the repository the agent will run in. GateControl no longer creates the Task's
    * worktree — `claude --worktree` does — so there is no `provision` step here any more.
    */
-  prepare: typeof prepareRepository;
+  prepare(params: ProvisionParams): Promise<string>;
   /** Confirm with git that the path the agent reported really is a worktree of the repository. */
-  adopt: typeof adoptWorktree;
-  commit: typeof commitWorktree;
-  discard: typeof discardWorktreeChanges;
-  cleanup: typeof cleanupWorktree;
-  hasChanges: typeof hasChanges;
-  diff: typeof diffWorktree;
+  adopt(repoPath: string, reportedPath: string | null): Promise<Worktree>;
+  commit(path: string, message: string): Promise<void>;
+  discard(path: string): Promise<void>;
+  cleanup(repoPath: string, worktree: string): Promise<void>;
+  hasChanges(path: string): Promise<boolean>;
+  diff(path: string): Promise<WorktreeDiff>;
 }
 
 /** The bits of the WS hub the lifecycle uses. */
@@ -99,20 +106,23 @@ export interface TaskRunDeps {
 /** Production wiring. */
 export function defaultDeps(): TaskRunDeps {
   const env = orchestratorEnv();
+  // One local executor (issue #1) for the whole lifecycle: today the only kind, tomorrow one of
+  // several a Task's Executor Profile can select — everything below reaches the host through it.
+  const executor = createLocalExecutor(env.GATECONTROL_WORKTREE_ROOT);
   return {
     db: createDb(),
-    runner: new ClaudeCodeRunner(),
+    runner: new ClaudeCodeRunner({ executor }),
     worktreeRoot: env.GATECONTROL_WORKTREE_ROOT,
     repoCacheRoot: env.GATECONTROL_REPO_CACHE_ROOT,
     logger: createLogger({ service: "orchestrator" }),
     worktree: {
-      prepare: prepareRepository,
-      adopt: adoptWorktree,
-      commit: commitWorktree,
-      discard: discardWorktreeChanges,
-      cleanup: cleanupWorktree,
-      hasChanges,
-      diff: diffWorktree,
+      prepare: (params) => prepareRepository(executor, params),
+      adopt: (repoPath, reportedPath) => adoptWorktree(executor, repoPath, reportedPath),
+      commit: (path, message) => commitWorktree(executor, path, message),
+      discard: (path) => discardWorktreeChanges(executor, path),
+      cleanup: (repoPath, worktree) => cleanupWorktree(executor, repoPath, worktree),
+      hasChanges: (path) => hasChanges(executor, path),
+      diff: (path) => diffWorktree(executor, path),
     },
     hub,
     registry: agentRegistry,
