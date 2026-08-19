@@ -2,7 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Plus } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
@@ -32,6 +32,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { trpc } from "@/trpc/react";
+import { onOpenCreateDialog } from "./create-dialog-bus";
 
 const taskFormSchema = z.object({
   title: z.string().min(1, "Enter a task title"),
@@ -46,6 +47,8 @@ type TaskFormValues = z.infer<typeof taskFormSchema>;
 export function CreateTaskDialog() {
   const [open, setOpen] = useState(false);
   const utils = trpc.useUtils();
+  // The command palette can ask for this dialog from anywhere in the shell.
+  useEffect(() => onOpenCreateDialog("task", () => setOpen(true)), []);
   const issues = trpc.issue.list.useQuery({});
   const agents = trpc.profile.agent.list.useQuery({});
   const executors = trpc.profile.executor.list.useQuery({});
@@ -111,7 +114,7 @@ export function CreateTaskDialog() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button>
+        <Button size="sm" className="h-8">
           <Plus /> New task
         </Button>
       </DialogTrigger>
@@ -179,8 +182,8 @@ export function CreateTaskDialog() {
                 </p>
               )}
               <DialogFooter>
-                <Button type="submit" disabled={create.isPending}>
-                  {create.isPending ? "Creating…" : "Create task"}
+                <Button type="submit" loading={create.isPending}>
+                  Create task
                 </Button>
               </DialogFooter>
             </form>

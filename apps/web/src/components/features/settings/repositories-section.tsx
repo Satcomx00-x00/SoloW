@@ -82,8 +82,8 @@ export function RepositoriesSection() {
               required
             />
           </div>
-          <Button type="submit" disabled={create.isPending}>
-            {create.isPending ? "Connecting…" : "Connect repository"}
+          <Button type="submit" loading={create.isPending}>
+            Connect repository
           </Button>
         </form>
         {create.error && (
@@ -91,14 +91,27 @@ export function RepositoriesSection() {
             {create.error.message}
           </p>
         )}
-        {(list.data?.length ?? 0) > 0 && (
-          <div className="flex flex-wrap gap-2 border-t pt-4">
-            {(list.data ?? []).map((r) => (
-              <Badge key={r.id} variant="secondary">
-                {r.name} · {r.source}
-              </Badge>
-            ))}
-          </div>
+        {/*
+          Rendered as soon as the query resolves, empty included: "nothing yet" and "still
+          loading" have to look different, or a reader (and a test) cannot tell whether the
+          repository they are looking for is absent or merely not fetched yet.
+        */}
+        {list.isSuccess && (
+          <section aria-label="Connected repositories" className="border-t pt-4">
+            {list.data.length === 0 ? (
+              <p className="text-muted-foreground text-sm">No repositories connected yet.</p>
+            ) : (
+              <ul className="flex flex-wrap gap-2">
+                {list.data.map((r) => (
+                  <li key={r.id}>
+                    <Badge variant="secondary">
+                      {r.name} · {r.source}
+                    </Badge>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
         )}
       </CardContent>
     </Card>

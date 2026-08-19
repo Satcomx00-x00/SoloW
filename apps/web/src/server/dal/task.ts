@@ -11,7 +11,7 @@ import {
   type TaskState,
 } from "@gatecontrol/contracts";
 import { task } from "@gatecontrol/db";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, like } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
 import { taskToDto } from "./mappers.js";
 
@@ -35,6 +35,9 @@ export async function listTasks(
   const conditions = [eq(task.workspaceId, ctx.workspaceId)];
   if (input.issueId) conditions.push(eq(task.issueId, input.issueId));
   if (input.state) conditions.push(eq(task.state, input.state));
+  // `query` was accepted by the input schema and then dropped on the floor, so a filtered
+  // request came back unfiltered and looked like it had worked. Matches `listIssues`.
+  if (input.query) conditions.push(like(task.title, `%${input.query}%`));
 
   const rows = await ctx.db
     .select()

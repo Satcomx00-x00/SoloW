@@ -23,8 +23,19 @@ GATECONTROL_SQLITE_PATH="$GC_DIR/gatecontrol.db"
 GATECONTROL_SECRET_KEY="$(cat "$KEY_FILE")"
 export GATECONTROL_SQLITE_PATH GATECONTROL_SECRET_KEY
 export GATECONTROL_DB_DRIVER="${GATECONTROL_DB_DRIVER:-sqlite}"
+# Dev-owner mode skips sign-in and binds to the seeded Workspace with the core flag on.
+# Set GATECONTROL_DEV_OWNER=off to exercise the real BetterAuth flow: the first visit to
+# /sign-in creates the single Owner account, then enable the feature for their Workspace with
+#   bun run flag enable ff-core-program
 export GATECONTROL_DEV_OWNER="${GATECONTROL_DEV_OWNER:-on}"
-export GATECONTROL_AUTH_SECRET="${GATECONTROL_AUTH_SECRET:-dev-insecure}"
+# Signs the session cookie; the env module refuses anything under 32 characters.
+export GATECONTROL_AUTH_SECRET="${GATECONTROL_AUTH_SECRET:-dev-insecure-session-secret-32ch}"
+# Shared by web (signs stream tickets) and orchestrator (verifies them) — same value, both sides.
+export GATECONTROL_STREAM_SECRET="${GATECONTROL_STREAM_SECRET:-dev-insecure-stream}"
+# The ACP-speaking agent binary the orchestrator spawns per run. Override if the adapter that
+# gives Claude Code an ACP interface is installed under a different name or path.
+export GATECONTROL_AGENT_COMMAND="${GATECONTROL_AGENT_COMMAND:-claude-code-acp}"
+export GATECONTROL_AGENT_ARGS="${GATECONTROL_AGENT_ARGS:-}"
 export GATECONTROL_WS_PORT="${GATECONTROL_WS_PORT:-5001}"
 export GATECONTROL_WS_URL="${GATECONTROL_WS_URL:-ws://localhost:5001}"
 export GATECONTROL_WEB_URL="${GATECONTROL_WEB_URL:-http://localhost:5000}"

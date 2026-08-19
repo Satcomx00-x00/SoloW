@@ -113,9 +113,10 @@ export function AgentProfilesSection() {
           </div>
           <Button
             type="submit"
-            disabled={create.isPending || secretOptions.length === 0 || !secretId}
+            loading={create.isPending}
+            disabled={secretOptions.length === 0 || !secretId}
           >
-            {create.isPending ? "Creating…" : "Add profile"}
+            Add profile
           </Button>
         </form>
         {create.error && (

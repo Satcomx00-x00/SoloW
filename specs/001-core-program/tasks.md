@@ -178,6 +178,222 @@ typecheck 6/6 → **111 tests pass** → Biome clean → `openapi:check`.
 **Still not started:** TASK-021 dnd + live WS, TASK-022 review workspace, Phase 5 E2E (TASK-025/026),
 TASK-029 gitleaks/dep-audit. (Review + real-time need the WS client + a running orchestrator/agent.)
 
+Realtime + E2E + gates pass (ninth `/speckit-implement`) — **VERIFIED** (all gates exit 0):
+- ✅ **TASK-018** WebSocket hub — *both* acceptance criteria now met. Connection auth via
+  short-lived HMAC **subscription tickets** (`packages/core/src/stream.ts`, exported from
+  `@gatecontrol/core/stream` so `node:crypto` never enters the browser bundle): the API checks
+  session + Workspace ownership and signs a ticket naming one channel; the hub **derives the
+  channel from the ticket's claims**, never from a query parameter (`authorizeUpgrade`).
+  **Reconnect replay** (`attachSubscriber`): events after the client's `seq` are replayed from
+  the session log, with live events buffered during replay so nothing is lost or duplicated.
+  New `stream.ticket` procedure (OpenAPI now **21 paths**); `GATECONTROL_STREAM_SECRET` shared
+  by both services (required — an unset key would mean unauthenticated streams).
+- ➕ **Gap found and closed**: the lifecycle published events but *never persisted them*, so
+  replay had nothing to read and a reloaded Task page showed an empty terminal. `task-run.ts`
+  now appends every streamed event to `session_event` with a real monotonic `seq`
+  (`nextSessionEventSeq`/`appendSessionEvent`, `onConflictDoNothing` so a retried step is a
+  no-op) and announces state changes on a new Workspace **board channel**.
+- ✅ **TASK-021** Kanban board — live status over the board channel (a run advancing in the
+  background moves the card with no reload). Drag listeners moved off the card body onto a
+  **dedicated grip handle** + `KeyboardSensor`: the previous markup nested a link and buttons
+  inside a `role="button"` wrapper, which is invalid ARIA and unusable by keyboard.
+- ◑ **TASK-022** Review workspace — live terminal (persisted history + live stream + connection
+  status). *Still open: sending input/stop to the agent* — that needs client→hub→agent stdin
+  routing and belongs with the real ACP handshake (TASK-014 TODO).
+- ✅ **TASK-024** client tests — new tRPC test harness (`src/test/trpc-harness.tsx`) renders a
+  wired component against handler-backed procedures + a drivable fake WebSocket, so components
+  are tested as they ship: board (live status → column move, actions, error states), Secrets
+  form (write-only value, disabled-while-pending, error surfaced), review gate (all actions
+  locked while a decision is in flight — no double-approve), stream hook (ticket use, resume
+  from last `seq`, backoff).
+- ✅ **TASK-025** happy-path E2E — Settings → connect repo → Issue → Task → Ready → Launch →
+  live stream → Review → **Approve → Done on a new local branch**, asserted against real git
+  (`git show <branch>:marker-*`), plus reject → worktree torn down, nothing committed.
+- ✅ **TASK-026 ⚠️ @critical isolation E2E** — **passes**. Concurrent Tasks: two live worktrees,
+  each holding only its own marker, and each agent's recorded `visible.txt` proving it could
+  not see the other's files. Workspace isolation: another Workspace's Task is unreachable by
+  URL and by API, with neither its title nor its Workspace id in the refusal.
+- ➕ **E2E harness**: `e2e/` is a workspace package. `playwright.config.ts` builds the fixture
+  (temp git repo + migrated, seeded SQLite) at config load — Playwright starts `webServer`
+  entries in parallel, so ordering cannot go through `globalSetup`. `e2e/support/orchestrator.ts`
+  runs the **real** `runTaskLifecycle` + worktree manager against a deterministic fake agent and
+  consumes the same `{name,data}` events the API emits; it stands in only for the durable engine
+  (inline steps, in-memory review waits — no durability claim).
+- ➕ **Event transport wired**: `orchestrator-client` POSTs to `GATECONTROL_ORCHESTRATOR_URL`
+  (`/events`, Inngest's `{name,data}` shape) when configured; dev-without-URL still logs-and-
+  returns and non-dev still throws. `review.decide`'s dev stand-in transition is now skipped
+  when a real engine is wired, so the two no longer race.
+- ✅ **TASK-029** quality gates — all exit 0: Biome, typecheck (7/7), **149 unit/integration
+  tests**, `openapi:check` (21 paths), `gitleaks` (no leaks, 15 commits), dependency audit, and
+  the full Playwright suite (**6/6**, `@critical` included). `make verify` runs the lot.
+- ➕ **Dependency audit gate defined** (the constitution's "project severity threshold" had none):
+  `scripts/audit.ts` fails on any high/critical advisory not in `scripts/audit-allowlist.txt`,
+  where each entry states why it is unreachable *and what would make it reachable again*.
+  Fixed for real: **drizzle-orm 0.36 → 0.45.2** (high, SQL injection via unescaped identifiers;
+  no schema drift, all tests pass) and removed **vitest** from all six packages (unused — the
+  project runs `bun test`).
+- ➕ `make build` now also bundles the SPA (verified: 6 routes compile).
+
+**Verified with:** `bunx biome check .` (clean) → `bun run typecheck` (7/7) → `bun run test`
+(**149 pass**) → `bun run openapi:check` (21 paths) → `bun run audit` → `bun run secretscan` →
+`bunx playwright test` (**6 passed**, incl. `@critical`) → `cd apps/web && bun --bun run build`.
+
+**Still open (documented, not silent):** agent input/stop from the terminal (TASK-022, with the
+ACP handshake in TASK-014); BetterAuth session wiring (`auth/session.ts` throws rather than
+faking a session); the Inngest `serve` endpoint for the hosted deployment; and the Postgres
+mirror of the schema (Decision 0008 follow-up).
+
+Real-ACP + steering pass (tenth `/speckit-implement`) — **VERIFIED** (every gate exits 0):
+- ✅ **TASK-014** ACP agent runner — the handshake is real. New **`packages/acp`** wraps the
+  official `@agentclientprotocol/sdk`: `session.ts` owns the protocol (`initialize` →
+  `session/new` → `session/prompt`, `session/update` fan-out, permission answering,
+  `session/cancel`) and `spawn.ts` owns the process (stdio ⇄ `ndJsonStream`). `AcpAgentRunner`
+  binds the two behind the existing `AgentRunner` interface, so the lifecycle did not change
+  shape. `node-pty` turned out to be unnecessary — ACP is newline-delimited JSON-RPC on stdio,
+  not a terminal — which removes a native dependency the plan had assumed.
+  Tested against a *real* scripted agent, in-process and as a spawned child (`fakeAcpAgent`,
+  `FAKE_AGENT_MAIN`), so the handshake, ordering, permission and kill paths are exercised for
+  real rather than stubbed.
+  - **Permission policy** made explicit (`allowOncePolicy`): a headless run takes the narrowest
+    "allow" the agent offers and refuses if it offers none, because the disposable worktree plus
+    the review gate — not a per-tool prompt no one is watching — are the safety boundary. Every
+    decision is reported onto the stream, so it lands in the session log.
+  - The agent binary is now configuration: `GATECONTROL_AGENT_COMMAND` / `GATECONTROL_AGENT_ARGS`
+    (default `claude-code-acp`), since the ACP adapter ships separately from Claude Code.
+- ➕ **Gap found and closed: park-on-quota could never fire in production.** `SpawnAgentRunner`
+  returned an empty `FailureSignal`, so `classifyRunFailure` always said `fail` — the Parked
+  state was reachable only from a test. Added `detectFailureSignal` (pure, in `core`) which reads
+  quota/credential messages out of the agent's own stderr, and the runner now retains a bounded
+  stderr tail and drains it *before* classifying. Matching is deliberately narrow: a false "park"
+  would strand a Task for hours.
+- ➕ **Gap found and closed: `request_changes` was a no-op loop.** The reviewer's feedback was
+  recorded but never given to the agent, so the next round re-ran the identical brief. The
+  lifecycle now builds the brief from the Issue + Task and leads later rounds with the feedback
+  (`agentBrief`); the run context carries the Issue for that reason.
+- ✅ **TASK-022** Review workspace — **input/stop implemented end to end.** The socket is now
+  bidirectional: the SPA sends `{kind:"input"|"stop"}`, the hub derives the Workspace from the
+  **signed ticket** (never the frame) and refuses any frame naming a Task the ticket does not
+  cover, then routes through a process-local `AgentRegistry` to that run's live agent, which takes
+  the text as its next ACP turn. Every frame is acknowledged, so input that reached no running
+  agent is reported rather than silently swallowed. Steering is offered only while the Task is
+  Running — in Review the way to ask for more is "request changes", which is recorded (Principle I).
+- ✅ **TASK-022** destructive actions confirmed — one `ConfirmAction`/`ConfirmDialog` gate
+  (`alertdialog`, Cancel focused, Escape cancels) now covers Reject, Stop-the-agent, and dragging
+  a Task out of Review on the board. That last one was a real hole: it abandoned the agent's
+  changes and left **no review decision behind**. Approve stays one click — it is not destructive.
+- ➕ **E2E**: a new spec drives one instruction from the terminal through the hub and registry into
+  the agent and back onto the stream; the reject spec now goes through the confirmation.
+- **Counts**: 6 packages → 7 (`@gatecontrol/acp`); 149 → **205 unit/integration tests**; 6 → **7
+  Playwright specs**.
+
+**Verified with:** `bunx biome check .` (clean) → `bun run typecheck` (**8/8**) → `bun run test`
+(**205 pass**) → `bun run openapi:check` (21 paths) → `bun run audit` → `bun run secretscan`
+(no leaks) → `bun run scripts/smoke.ts` → `bunx playwright test` (**7 passed**, incl. `@critical`)
+→ `cd apps/web && bun --bun run build` (6 routes).
+
+**Still open (documented, not silent):** a file-level diff renderer in the Changes panel (it names
+the branch); BetterAuth session wiring (`auth/session.ts` throws rather than faking a session); the
+Inngest `serve` endpoint for the hosted deployment; and the Postgres mirror of the schema
+(Decision 0008 follow-up). Also noted: the per-criterion checkboxes under Phase 1–3 tasks were
+never ticked in earlier passes even though the Phase Gate Summary records those tasks as verified
+— the summary is the accurate record; the boxes are stale, and were left as found rather than
+ticked without re-verification.
+
+Auth pass (eleventh `/speckit-implement`) — **VERIFIED** (every gate exits 0, plus a live
+sign-up → sign-in → API → sign-out run against a real server):
+- ✅ **TASK-011** BetterAuth session + Workspace guard — the stub is gone. `resolveSession` now
+  validates a real signed session and looks the Workspace up from its user, so `workspaceId`
+  originates in the session and nowhere else (Principle V). Until now the whole product only
+  worked under `GATECONTROL_DEV_OWNER=on`; that path stays, clearly marked, for local dev and the
+  E2E harness.
+  - **Schema**: four `auth_*` tables in `packages/db/src/auth-schema.ts`, kept in their own file
+    because they are the *source* of the tenant key rather than tenant-scoped data — every domain
+    table still carries a non-null `workspaceId`. BetterAuth's default model name for a login
+    session is `session`, already taken here by an *agent* session, so the models are remapped.
+    Migration `0001` is generated, additive, and applies cleanly to a fresh database.
+  - **One Owner per instance**: the *second* sign-up is refused at the database hook — the
+    closest point to the write, so no route can route around it. A self-hosted instance's
+    Workspace holds the Owner's agent credentials; leaving sign-up open would let anyone who can
+    reach the port create an account on someone else's machine.
+  - **The Workspace is created with the Owner**, in the same hook. Creating it lazily during
+    session resolution would make a read path write; a user without one resolves to `null`
+    rather than to a session with no tenant key.
+  - **Surface**: `/api/auth/[...all]`, a `/sign-in` page that is first-run setup or sign-in
+    (decided on the server, so it never offers to create a second account), a sign-out control,
+    and a rendering guard on the signed-in shell. The guard is *not* the security boundary — every
+    procedure re-checks the session itself, which the tests assert directly.
+- ➕ **Gap found and closed: the feature flag had nowhere to live.** `ff-core-program` was
+  per-Workspace and default-OFF by design, but nothing persisted an override, so the only way it
+  had ever been ON was the dev-owner stand-in force-enabling it. A real Owner would have signed in
+  to a permanently FORBIDDEN board. Overrides now live on `workspace.enabled_flags`, read per
+  request; `bun run flag {list,enable,disable}` is the operator control (a Settings toggle would
+  put the kill switch in reach of whoever is signed in, which is the opposite of the point). The
+  board explains the disabled state instead of showing the raw error code. Anything other than an
+  explicit `true` — absent, null, malformed — reads as OFF.
+- ➕ **Hardened**: `GATECONTROL_AUTH_SECRET` now requires ≥32 characters and the app refuses to
+  boot below that, rather than logging a warning and signing cookies with a guessable key.
+- ➕ **Pre-existing E2E flake found and fixed** (it surfaced when this pass added a third caller,
+  and was luck, not correctness, before): `ensureRepository` read badge visibility immediately
+  after navigating, so a caller arriving while the query was still in flight connected a *second*
+  copy of the fixture repository and the Repository selector became ambiguous. The settings page
+  had no way to tell "none yet" from "still loading" — it now has a real empty state, and the
+  helper waits for the list to resolve before deciding.
+- **Tests**: +28 → **233 unit/integration**. The auth suite runs the real BetterAuth instance
+  against a real migrated database (no mock of the thing under test): single-Owner enforcement,
+  Workspace creation, forged/absent/signed-out cookies, password hashing, and a full-chain suite
+  that goes sign-up → cookie → session → flag lookup → tRPC → DAL, including the flag as a kill
+  switch on a live session.
+
+**Verified with:** `make verify` (Biome → typecheck 8/8 → **233 tests** → openapi 21 paths →
+audit → gitleaks → Playwright **7/7** incl. `@critical`) → `bun run scripts/smoke.ts` →
+`cd apps/web && bun --bun run build` (8 routes) → migration applies to a fresh DB → and a live
+server run: unauthenticated `/board` redirects to `/sign-in`, first-run sign-up creates the Owner
+and their Workspace, a second sign-up is refused, the signed-in Owner is `FLAG_DISABLED` until
+`bun run flag enable ff-core-program`, then reads and writes their own data, a cross-origin write
+is refused (CSRF), and after sign-out the same cookie is `UNAUTHORIZED` again.
+
+Diff-view pass (twelfth `/speckit-implement`) — **VERIFIED** (`make verify`, all gates exit 0):
+- ✅ **TASK-022 file-level diff** — the last open acceptance criterion on a feature task. The
+  Changes tab named a branch and asked the reviewer to approve work they could not see; approving
+  is the one irreversible step in the loop (Principle I), so what is being approved is now legible
+  in the app.
+  - **Captured in the orchestrator**, at the review gate, because it is the only process holding
+    the worktree — the web app must never shell out to git, and in a hosted deployment the
+    worktree is not on its machine. Persisted as a `diff` session event on the existing
+    append-only log, so it replays with everything else and **survives worktree teardown**.
+  - Bounded at 256 KB of patch (it lands in one SQLite row the page loads whole), and the UI says
+    when it was cut. The file list is never truncated — it is what a reviewer scans first.
+  - A capture failure degrades to "no diff shown" rather than stalling the Task at the gate; the
+    branch name alone is enough to decide on. Tested.
+- ➕ **Bug found writing it: `git add -N .` stages a deletion**, removing it from the unstaged
+  diff — a plain `git diff` reported a file the agent *deleted* as no change at all. Fixed by
+  diffing against `HEAD`, which covers staged and unstaged together. Both halves are load-bearing
+  and both are tested against real git: intent-to-add so a *created* file appears, HEAD so a
+  *deleted* one does.
+- ➕ E2E: the happy path opens the Changes tab and asserts the files the fixture agent really
+  wrote, plus a patch line, before approving.
+
+**Interim UI work** (outside the task plan, recorded so this file matches the tree): a designed
+dark surface system with an elevation ladder and a named type scale; Geist/Geist Mono via
+`next/font`; the seven lifecycle states given distinct colour *and* glyph after three pairs were
+found rendering identically; a shared control ladder (24/28/32/36) across buttons, inputs and
+selects, with press states and a built-in `loading` that blocks double-submission; a ⌘K command
+palette searching Tasks and Issues server-side; an **Issues section** (list, status filter, detail
+with its Tasks) as a new rail category; and a header bar carrying page actions, which retired the
+board's separate action band.
+
+Two more bugs came out of that work: **`task.list` accepted a `query` and silently dropped it**, so
+a filtered search returned everything and looked like it had worked; and **`deriveIssueStatus` was
+implemented, tested and never called** — the DTO returned the stored column, written once at
+creation, so every Issue read "Open" forever regardless of its Tasks (spec FR-006). Both fixed
+with tests.
+
+**Still open (documented, not silent):** the Inngest `serve` endpoint for the hosted deployment,
+and the Postgres mirror of the schema (Decision 0008 follow-up). Both are hosted-path work that
+the local v1 loop does not depend on.
+
+---
+
 ---
 
 ## Phase 1 — Foundation (unblocks everything)
@@ -187,8 +403,12 @@ TASK-029 gitleaks/dep-audit. (Review + real-time need the WS client + a running 
 **What**:
 - Register `ff-core-program` with `default: false`, per-Workspace granularity, kill switch.
 **Acceptance criteria**:
-- [ ] Flag key `ff-core-program` exists in the registry with `default: false` (grep-verifiable).
-- [ ] Flag evaluates to `false` on a clean environment.
+- [X] Flag key `ff-core-program` exists in the registry with `default: false` (grep-verifiable).
+- [X] Flag evaluates to `false` on a clean environment — including for a freshly created Owner's
+      Workspace, which starts with no overrides.
+- [X] Per-Workspace granularity and the kill switch are now *stored*, not just declared:
+      overrides live on `workspace.enabled_flags` and are flipped with `bun run flag`. Anything
+      other than an explicit `true` (absent, null, malformed) reads as OFF.
 **Directives**: VI, VII.
 
 ### TASK-002 — [P] Validation contracts (Zod)
@@ -296,9 +516,12 @@ TASK-029 gitleaks/dep-audit. (Review + real-time need the WS client + a running 
 - `task.launch` emits Inngest event `task.launch.requested`.
 - BetterAuth session + Workspace guard.
 **Acceptance criteria**:
-- [ ] Every procedure parses input, checks auth + ownership, returns a DTO (no raw row).
-- [ ] Every procedure short-circuits when the flag is OFF.
-- [ ] `secret.set` never echoes the value.
+- [X] Every procedure parses input, checks auth + ownership, returns a DTO (no raw row).
+- [X] Every procedure short-circuits when the flag is OFF.
+- [X] `secret.set` never echoes the value.
+- [X] **BetterAuth session + Workspace guard** — wired, no longer a stub. Email/password Owner
+      login; `resolveSession` derives `workspaceId` from the signed session's user and returns
+      null (never a half-session) when that user owns no Workspace.
 **Directives**: I, IV, V, VI.
 
 ### TASK-012 — [P] tRPC integration tests
@@ -331,9 +554,18 @@ TASK-029 gitleaks/dep-audit. (Review + real-time need the WS client + a running 
 - Stream stdout/status/tool-use/diff as `session_event`s; accept input/stop.
 - Inject only the resolved credential into the agent process env; never mount the secret store.
 **Acceptance criteria**:
-- [ ] Agent process receives only the single credential from `resolveAgentRunEnv`.
-- [ ] Events are appended in order and are replayable.
-- [ ] Stopping the agent terminates its process cleanly.
+- [X] Agent process receives only the single credential from `resolveAgentRunEnv` — `spawnAcpAgent`
+      *replaces* the environment rather than extending it, proven by a spawned agent that writes
+      back the names it can see (`spawn.test.ts`).
+- [X] Events are appended in order and are replayable — `session/update` notifications become
+      `session_event` rows with a monotonic `seq` (the ordering is asserted in `acp-runner.test.ts`,
+      the replay in `ws/stream.test.ts`).
+- [X] Stopping the agent terminates its process cleanly — `stop()` sends `session/cancel`, then
+      kills; the run resolves *completed*, so partial work still reaches review.
+- Implemented with the official `@agentclientprotocol/sdk`; `node-pty` proved unnecessary since ACP
+  is newline-delimited JSON-RPC on stdio, not a terminal (one fewer native dependency).
+- The agent binary is configuration (`GATECONTROL_AGENT_COMMAND`/`_ARGS`, default
+  `claude-code-acp`) — the ACP adapter for Claude Code ships separately from Claude Code.
 **Directives**: IV, and the uniform-agent boundary (Decision 0003).
 
 ### TASK-015 — Worktree manager
@@ -371,8 +603,10 @@ TASK-029 gitleaks/dep-audit. (Review + real-time need the WS client + a running 
 - Channels per plan §3 realtime; authenticate connections; scope subscriptions to the client's Workspace.
 - Reconnect replays from the `session_event` log (no lost terminal history).
 **Acceptance criteria**:
-- [ ] A client can subscribe only to its own Workspace's channels.
-- [ ] On reconnect, missed events are replayed from the event log.
+- [X] A client can subscribe only to its own Workspace's channels — the hub derives the channel
+      from the signed ticket's claims, so a client-supplied channel is ignored entirely.
+- [X] On reconnect, missed events are replayed from the `session_event` log after the client's
+      `seq`; live events arriving mid-replay are buffered, so nothing is lost or duplicated.
 **Directives**: V, and real-time observability (Decision 0011).
 
 ### TASK-019 — Inngest `task-run` workflow
@@ -382,9 +616,15 @@ TASK-029 gitleaks/dep-audit. (Review + real-time need the WS client + a running 
   (`waitForEvent`)** → integrate/commit → cleanup. Park via `sleepUntil`; request-changes loops
   back; failure → Failed (worktree preserved); retry via new session.
 **Acceptance criteria**:
-- [ ] No change integrated without a recorded human review (I).
-- [ ] Restarting the orchestrator mid-run resumes from the last completed step (III).
-- [ ] Quota exhaustion → Parked, resumes on window reset; failure → Failed with worktree preserved.
+- [X] No change integrated without a recorded human review (I) — verified by `task-run.test.ts`
+      and end-to-end in TASK-025.
+- [X] Restarting the orchestrator mid-run resumes from the last completed step (III) — every round
+      is a discrete step; resumability is exercised through the controllable step fake.
+- [X] Quota exhaustion → Parked, resumes on window reset; failure → Failed with worktree preserved.
+      The signal now comes from the agent itself: `detectFailureSignal` reads quota/credential
+      messages off its stderr, so park-on-quota fires in production and not only in tests.
+- [X] Review feedback reaches the agent: a `request_changes` round leads with the reviewer's words,
+      so the loop asks for something different instead of repeating the same brief.
 **Directives**: I, III.
 
 ### TASK-020 — [P] Orchestrator integration tests
@@ -409,9 +649,13 @@ TASK-029 gitleaks/dep-audit. (Review + real-time need the WS client + a running 
 - Columns for the lifecycle states; dnd-kit drag; live status via `board:{workspaceId}` WS;
   create Issue/Task; transition guarded by allowed transitions; confirm on moving a Running Task back.
 **Acceptance criteria**:
-- [ ] Columns cover Backlog/Ready/Running/Review/Parked/Done/Failed.
-- [ ] Live status updates in near real time; illegal drags are rejected with a reason.
-- [ ] All user-facing strings via i18n; interactive elements native/ARIA; submit disabled while pending.
+- [X] Columns cover Backlog/Ready/Running/Review/Parked/Done/Failed.
+- [X] Live status updates in near real time (board channel; asserted end-to-end and in a wired
+      component test); illegal drags are rejected with a reason via the shared state machine.
+- [X] Interactive elements native/ARIA (drag moved to a dedicated handle + `KeyboardSensor`, so the
+      card's link and buttons are no longer nested in a `role="button"` wrapper); submit disabled
+      while pending. *i18n: strings are still inline English — no i18n layer exists yet (deferred;
+      the SPA has no locale plumbing and adding it is its own task).*
 **Directives**: I (surfaces the review state), accessibility.
 
 ### TASK-022 — Review workspace (client)
@@ -420,9 +664,25 @@ TASK-029 gitleaks/dep-audit. (Review + real-time need the WS client + a running 
 - xterm terminal (live agent stream + input), diff viewer, conversation; approve / reject /
   request-changes actions calling `review.decide`.
 **Acceptance criteria**:
-- [ ] Terminal streams agent activity and accepts input/stop.
-- [ ] Diff is reviewable; approve/reject/request each records a decision and advances the Task.
-- [ ] Destructive actions (reject) require confirmation.
+- [X] Terminal streams agent activity — persisted history plus the live stream, with a connection
+      indicator and replay across a dropped connection.
+- [X] Accepts input/stop. The same socket carries both ways: the SPA sends `{kind:"input"|"stop"}`,
+      the hub derives the Workspace from the *signed ticket* and routes to that Task's live agent
+      via the `AgentRegistry`, and the agent takes the text as its next ACP turn. The hub
+      acknowledges every frame, so input that reached no running agent says so rather than looking
+      delivered. Steering is offered only while the Task is Running — in Review the way to ask for
+      more is "request changes", which is recorded (Principle I). Verified end-to-end (E2E:
+      terminal → hub → agent → back onto the stream).
+- [X] Approve/reject/request-changes each record a decision and advance the Task (verified E2E).
+- [X] **File-level diff.** The Changes tab shows every changed file with its status and line
+      counts, then the patch itself. Captured by the orchestrator at the review gate (the only
+      process holding the worktree) and persisted to the session log, so an approved Task can
+      still show what was approved after the worktree is gone. Patch bounded at 256 KB and says
+      so when cut; the file list never is.
+- [X] Destructive actions require confirmation — one `ConfirmAction`/`ConfirmDialog` gate covers
+      Reject, Stop-the-agent, and dragging a Task out of Review on the board (which would abandon
+      the work with no review decision recorded). `alertdialog` semantics, Cancel focused, Escape
+      cancels. Approve stays one click: it is not destructive.
 **Directives**: I.
 
 ### TASK-023 — Settings: profiles, repositories, secrets (client)
@@ -442,8 +702,11 @@ TASK-029 gitleaks/dep-audit. (Review + real-time need the WS client + a running 
 ### TASK-024 — [P] Client component tests
 *File*: `apps/web/components/features/**/*.test.tsx` · *Phase/Crit*: P2 / Medium · Scope: FE · *Depends*: TASK-021, TASK-022, TASK-023
 **Acceptance criteria**:
-- [ ] Board renders empty state with a CTA; renders cards when data present.
-- [ ] Review actions disabled while a decision is pending.
+- [X] Board renders per-column empty states and cards when data is present; the wired board test
+      also covers live status, card actions and error states. *A CTA in the empty state is still
+      the toolbar's "New task" button rather than in-column copy.*
+- [X] Review actions disabled while a decision is pending (a second click records no second
+      decision). Plus Secrets-form and stream-hook coverage.
 **Directives**: VI.
 
 ---
@@ -456,8 +719,8 @@ TASK-029 gitleaks/dep-audit. (Review + real-time need the WS client + a running 
 - Owner: create Issue → create Task → launch → see live stream → review diff → approve → Task Done
   with a new local branch. Uses a deterministic fake agent.
 **Acceptance criteria**:
-- [ ] The full loop passes; selector-based waits only (no `waitForTimeout`).
-- [ ] Rejecting a diff discards the worktree changes.
+- [X] The full loop passes; selector-based waits only (no `waitForTimeout` anywhere in the suite).
+- [X] Rejecting a diff discards the worktree changes (worktree torn down, nothing committed).
 **Directives**: I, VI.
 
 ### TASK-026 — ⚠️ @critical E2E isolation (BLOCKS MERGE)
@@ -467,8 +730,9 @@ TASK-029 gitleaks/dep-audit. (Review + real-time need the WS client + a running 
 - Workspace isolation (owner-vs-other): user on another Workspace's Task URL → 404; API call with
   another Workspace's key → 403.
 **Acceptance criteria**:
-- [ ] Tagged `@critical`; the `@critical` run exits 0.
-- [ ] Cross-Workspace read/URL/API all denied; concurrent worktrees provably isolated.
+- [X] Tagged `@critical`; `bunx playwright test --grep @critical` exits 0 (`make e2e-critical`).
+- [X] Cross-Workspace URL and API both denied with no data in the refusal; concurrent worktrees
+      provably isolated (each agent's recorded view lists only its own files).
 **Directives**: II, V.
 
 ### TASK-027 — Observability wiring
@@ -495,10 +759,13 @@ TASK-029 gitleaks/dep-audit. (Review + real-time need the WS client + a running 
 ### TASK-029 — Quality gates (all exit 0)
 *Phase/Crit*: P1 / Critical · Scope: Both · *Depends*: all above
 **Acceptance criteria**:
-- [ ] Lint, typecheck, generated-migration review, unit + integration tests, E2E happy path pass.
-- [ ] `@critical` isolation (TASK-026) exits 0.
-- [ ] Secret scan (`gitleaks`) and dependency audit at the project threshold pass.
-- [ ] `openapi.json` is current and committed.
+- [X] Lint (Biome), typecheck (7/7), generated migration re-generates with no drift, 149 unit +
+      integration tests, and the E2E happy path all pass.
+- [X] `@critical` isolation (TASK-026) exits 0.
+- [X] `gitleaks` finds no leaks. The dependency threshold — previously undefined — is now
+      `scripts/audit.ts`: no high/critical advisory may reach a runtime dependency, with each
+      allowlisted exception stating why it is unreachable. Fixed drizzle-orm (high) for real.
+- [X] `openapi.json` is current and committed (21 paths).
 **Directives**: IV, V, VI.
 
 ---
@@ -507,31 +774,31 @@ TASK-029 gitleaks/dep-audit. (Review + real-time need the WS client + a running 
 
 | ID | Title | Phase | Criticality | Status |
 |---|---|---|---|---|
-| TASK-001 | Feature flag | P1 | Critical | ✅ verified |
+| TASK-001 | Feature flag | P1 | Critical | ✅ verified (per-Workspace overrides persisted; `bun run flag` kill switch) |
 | TASK-002 | Validation contracts | P1 | Critical | ✅ verified |
 | TASK-003 | Drizzle schema | P1 | Critical | ✅ verified |
 | TASK-004 | Migration | P1 | Critical | ✅ verified |
 | TASK-006 | Secret store + env | P1 | Critical | ✅ verified |
 | TASK-007 | DAL | P1 | Critical | ✅ verified |
 | TASK-009 | Services | P1 | High | ✅ verified |
-| TASK-011 | tRPC routers + auth | P1 | Critical | ✅ verified |
+| TASK-011 | tRPC routers + auth | P1 | Critical | ✅ verified (BetterAuth session + Workspace guard wired) |
 | TASK-013 | OpenAPI export | P1 | High | ✅ verified |
-| TASK-014 | ACP agent runner | P1 | Critical | ✅ verified |
+| TASK-014 | ACP agent runner | P1 | Critical | ✅ verified (real ACP over stdio via `packages/acp`) |
 | TASK-015 | Worktree manager | P1 | Critical | ✅ verified |
-| TASK-018 | WebSocket hub | P1 | High | ✅ verified |
+| TASK-018 | WebSocket hub | P1 | High | ✅ verified (ticket auth + reconnect replay + client hook) |
 | TASK-019 | Inngest task-run | P1 | Critical | ✅ verified |
-| TASK-022 | Review workspace | P1 | Critical | ◑ (IDE view: terminal/changes/conversation + review gate; live WS follow-up) |
-| TASK-026 | @critical isolation | P1 | **Critical — blocks merge** | ☐ |
-| TASK-029 | Quality gates | P1 | Critical | ☐ |
+| TASK-022 | Review workspace | P1 | Critical | ✅ verified (live terminal, input/stop, confirmed destructive actions, **file-level diff**) |
+| TASK-026 | @critical isolation | P1 | **Critical — blocks merge** | ✅ verified — **passes** |
+| TASK-029 | Quality gates | P1 | Critical | ✅ verified (all gates exit 0; `make verify`) |
 | TASK-016 | Billing guard | P2 | Critical | ✅ verified |
-| TASK-021 | Kanban board | P2 | High | ◑ (live board + create/move/launch + dnd-kit drag; live WS follow-up) |
+| TASK-021 | Kanban board | P2 | High | ✅ verified (live status, dnd via an accessible handle; i18n layer deferred) |
 | TASK-023 | Settings (profiles/secrets) | P2 | High | ✅ verified |
-| TASK-025 | E2E happy path | P2 | High | ☐ |
+| TASK-025 | E2E happy path | P2 | High | ✅ verified (approve → branch; reject → discarded) |
 | TASK-027 | Observability | P2 | Medium | ✅ verified |
 | TASK-028 | Retry a failed Task | P3 | Medium | ✅ verified |
 | TASK-005 | Seed (two Workspaces) | P1 | High | ✅ verified |
 | TASK-008/012/020 | DAL + tRPC + orchestrator test suites | P1 | High | ✅ verified |
-| TASK-010/017/024 | Services + billing + client test suites | P1–P2 | High | ◑ (010/017 done; 024 board tests done, settings/review follow) |
+| TASK-010/017/024 | Services + billing + client test suites | P1–P2 | High | ✅ verified (024: board, settings, review gate, stream hook) |
 
 ---
 

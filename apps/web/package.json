@@ -26,7 +26,9 @@
     "better-auth": "^1.2.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "drizzle-orm": "^0.36.0",
+    "cmdk": "^1.1.1",
+    "drizzle-orm": "^0.45.2",
+    "geist": "^1.7.2",
     "lucide-react": "^1.31.0",
     "next": "^15",
     "radix-ui": "^1.6.7",
@@ -51,7 +53,6 @@
     "bun-types": "^1.1.0",
     "tailwindcss": "^4.3.3",
     "tw-animate-css": "^1.4.0",
-    "typescript": "^5.6.0",
-    "vitest": "^2.1.0"
+    "typescript": "^5.6.0"
   }
 }

@@ -10,13 +10,16 @@ import {
   repository,
   secret,
   session,
+  sessionEvent,
   task,
   workspace,
 } from "@gatecontrol/db";
 import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
 import { createLogger } from "@gatecontrol/observability";
-import { eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
+import { AgentRegistry } from "../../agent/registry.js";
 import type { AgentHandle, AgentOutcome, AgentRunner, AgentStartOpts } from "../../agent/runner.js";
+import { listTaskEventsSince } from "../../data.js";
 import { runTaskLifecycle, type StepLike, type TaskRunDeps } from "./task-run.js";
 
 /**
@@ -101,15 +104,19 @@ async function taskState(db: TestDb, taskId: string): Promise<string> {
   return row?.state ?? "MISSING";
 }
 
+/** A review decision, optionally with the feedback the reviewer wrote. */
+type ScriptedDecision = string | null | { decision: string; feedback: string };
+
 /** A step that runs work inline and replays a scripted list of review decisions. */
-function scriptedStep(decisions: (string | null)[]): StepLike {
+function scriptedStep(decisions: ScriptedDecision[]): StepLike {
   const queue = [...decisions];
   return {
     run: async (_id, fn) => fn(),
     waitForEvent: async (_id, opts) => {
-      const decision = queue.shift();
-      if (decision === undefined || decision === null) return null;
-      return { data: { sessionId: opts.match, decision } };
+      const next = queue.shift();
+      if (next === undefined || next === null) return null;
+      const decided = typeof next === "string" ? { decision: next } : next;
+      return { data: { sessionId: opts.match, ...decided } };
     },
     sleepUntil: async () => {},
   };
@@ -118,12 +125,15 @@ function scriptedStep(decisions: (string | null)[]): StepLike {
 /** Fake agent runner returning queued outcomes; records how many times it started. */
 class ScriptedRunner implements AgentRunner {
   starts = 0;
+  /** The brief each run was given, in order. */
+  readonly prompts: string[] = [];
   constructor(private readonly outcomes: AgentOutcome[]) {}
   start(opts: AgentStartOpts): AgentHandle {
     this.starts += 1;
+    this.prompts.push(opts.prompt);
     opts.onEvent({ kind: "stdout", text: "working" });
     const outcome = this.outcomes.shift() ?? { kind: "completed" };
-    return { outcome: Promise.resolve(outcome), stop: async () => {} };
+    return { outcome: Promise.resolve(outcome), send: async () => true, stop: async () => {} };
   }
 }
 
@@ -131,6 +141,7 @@ interface Spies {
   commit: number;
   discard: number;
   cleanup: number;
+  published: Array<{ channel: string; event: Record<string, unknown> }>;
 }
 
 function makeDeps(
@@ -138,7 +149,7 @@ function makeDeps(
   runner: AgentRunner,
   logStream: NodeJS.WritableStream,
 ): { deps: TaskRunDeps; spies: Spies } {
-  const spies: Spies = { commit: 0, discard: 0, cleanup: 0 };
+  const spies: Spies = { commit: 0, discard: 0, cleanup: 0, published: [] };
   const deps: TaskRunDeps = {
     db,
     runner,
@@ -161,8 +172,19 @@ function makeDeps(
         spies.cleanup += 1;
       },
       hasChanges: async () => true,
+      diff: async () => ({
+        files: [{ path: "src/latch.ts", status: "modified" as const, additions: 4, deletions: 1 }],
+        patch: "--- a/src/latch.ts\n+++ b/src/latch.ts\n",
+        truncated: false,
+      }),
     },
-    hub: { taskChannel: (_w, t) => `task:${t}`, publish: () => {} },
+    hub: {
+      taskChannel: (w, t) => `ws:${w}:task:${t}`,
+      boardChannel: (w) => `ws:${w}:board`,
+      publish: (channel, event) =>
+        spies.published.push({ channel, event: event as Record<string, unknown> }),
+    },
+    registry: new AgentRegistry(),
     agentInvocation: () => ({ command: "fake", args: [] }),
   };
   return { deps, spies };
@@ -296,6 +318,76 @@ describe("runTaskLifecycle (integration)", () => {
     expect(await taskState(db, b.taskId)).toBe("failed");
   });
 
+  it("persists streamed agent events so a reconnecting client can replay them (TASK-018)", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const { deps } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    // Filtered to stdout: the log also carries the diff captured at the review gate.
+    const logged = (
+      await db.select().from(sessionEvent).where(eq(sessionEvent.sessionId, ids.sessionId))
+    ).filter((e) => e.kind === "stdout");
+    expect(logged).toHaveLength(1);
+    expect(logged[0]?.seq).toBe(0);
+    expect(logged[0]?.payload).toEqual({ text: "working" });
+    expect(logged[0]?.workspaceId).toBe(ids.workspaceId);
+  });
+
+  it("numbers events across rounds so replay resumes where the client left off", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const runner = new ScriptedRunner([{ kind: "completed" }, { kind: "completed" }]);
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    await runTaskLifecycle(deps, {
+      event: { data: ids },
+      step: scriptedStep(["request_changes", "approve"]),
+    });
+
+    const logged = (
+      await db
+        .select()
+        .from(sessionEvent)
+        .where(eq(sessionEvent.sessionId, ids.sessionId))
+        .orderBy(asc(sessionEvent.seq))
+    ).filter((e) => e.kind === "stdout");
+    expect(logged.map((e) => e.seq)).toEqual([0, 2]);
+
+    // Every event shares one `seq` sequence, diffs included, so a client resuming from a
+    // cursor gets each of them exactly once and in order.
+    const missed = await listTaskEventsSince(db, ids.workspaceId, ids.taskId, 0);
+    expect(missed.map((e) => e.seq)).toEqual([1, 2, 3]);
+  });
+
+  it("announces Task state changes on the Workspace board channel", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const { deps, spies } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    const board = spies.published.filter((p) => p.channel === `ws:${ids.workspaceId}:board`);
+    expect(board.map((p) => p.event["state"])).toEqual(["review", "done"]);
+    // Task-scoped output never leaks onto the Workspace-wide board channel.
+    expect(board.every((p) => p.event["kind"] === "status")).toBe(true);
+  });
+
+  it("a Task's events are invisible to another Workspace's replay (Principle V)", async () => {
+    const a = freshIds();
+    const b = freshIds();
+    await seedRun(db, a);
+    await seedRun(db, b);
+    const { deps } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+
+    await runTaskLifecycle(deps, { event: { data: a }, step: scriptedStep(["approve"]) });
+
+    // One stdout line plus the diff captured at the review gate.
+    expect(await listTaskEventsSince(db, a.workspaceId, a.taskId, -1)).toHaveLength(2);
+    expect(await listTaskEventsSince(db, b.workspaceId, a.taskId, -1)).toHaveLength(0);
+  });
+
   it("emits the worktree→task audit binding with no secret value in the logs (Principle IV)", async () => {
     const ids = freshIds();
     await seedRun(db, ids);
@@ -316,5 +408,158 @@ describe("runTaskLifecycle (integration)", () => {
     expect(events).toContain("state.transition");
     const serialized = JSON.stringify(lines);
     expect(serialized).not.toContain("oauth-token");
+  });
+});
+
+describe("the brief the agent is given", () => {
+  let db: TestDb;
+
+  beforeAll(() => {
+    process.env.GATECONTROL_SECRET_KEY ??= Buffer.alloc(32, 3).toString("base64");
+  });
+  beforeEach(() => {
+    db = createTestDb();
+  });
+
+  it("carries the reviewer's feedback into the next round", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const runner = new ScriptedRunner([{ kind: "completed" }, { kind: "completed" }]);
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    await runTaskLifecycle(deps, {
+      event: { data: ids },
+      step: scriptedStep([
+        { decision: "request_changes", feedback: "Add a regression test for the latch." },
+        "approve",
+      ]),
+    });
+
+    expect(runner.prompts).toHaveLength(2);
+    // Without this the second round repeats the first brief verbatim and the agent has no
+    // reason to produce anything different — request-changes would be a no-op loop.
+    expect(runner.prompts[0]).not.toContain("Add a regression test");
+    expect(runner.prompts[1]).toContain("Add a regression test for the latch.");
+  });
+
+  it("describes the Task and its Issue so the agent knows what to do", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const runner = new ScriptedRunner([{ kind: "completed" }]);
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    expect(runner.prompts[0]).toContain("Task");
+    expect(runner.prompts[0]).toContain("Issue");
+  });
+
+  it("publishes the running agent so the terminal can steer it, and withdraws it after", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const registry = new AgentRegistry();
+    const seen: boolean[] = [];
+    // A runner that checks, from inside the run, whether the hub could have found it.
+    const runner: AgentRunner = {
+      start(opts: AgentStartOpts): AgentHandle {
+        opts.onEvent({ kind: "stdout", text: "working" });
+        return {
+          outcome: Promise.resolve({ kind: "completed" } as AgentOutcome).then((o) => {
+            seen.push(registry.get(ids.workspaceId, ids.taskId) !== undefined);
+            return o;
+          }),
+          send: async () => true,
+          stop: async () => {},
+        };
+      },
+    };
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    await runTaskLifecycle(
+      { ...deps, registry },
+      {
+        event: { data: ids },
+        step: scriptedStep(["approve"]),
+      },
+    );
+
+    expect(seen).toEqual([true]);
+    // Once the run is over there is no agent to steer, and a stale handle would let the
+    // terminal appear to send input into a dead process.
+    expect(registry.get(ids.workspaceId, ids.taskId)).toBeUndefined();
+  });
+});
+
+describe("the diff a reviewer is shown", () => {
+  let db: TestDb;
+
+  beforeAll(() => {
+    process.env.GATECONTROL_SECRET_KEY ??= Buffer.alloc(32, 3).toString("base64");
+  });
+  beforeEach(() => {
+    db = createTestDb();
+  });
+
+  it("is captured at the review gate and persisted to the session log", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const { deps } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    const [captured] = (
+      await db.select().from(sessionEvent).where(eq(sessionEvent.sessionId, ids.sessionId))
+    ).filter((e) => e.kind === "diff");
+    expect(captured).toBeDefined();
+    expect(captured?.payload).toMatchObject({
+      diffRef: `gatecontrol/task-${ids.taskId}`,
+      files: [{ path: "src/latch.ts", status: "modified", additions: 4, deletions: 1 }],
+      truncated: false,
+    });
+  });
+
+  it("survives the worktree being removed, so an approved Task can still show its change", async () => {
+    // Approving commits and then tears the worktree down. If the diff were read on demand from
+    // disk it would be gone by the time anyone looked at the finished Task.
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const { deps, spies } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    expect(spies.cleanup).toBe(1);
+    const stored = (
+      await db.select().from(sessionEvent).where(eq(sessionEvent.sessionId, ids.sessionId))
+    ).filter((e) => e.kind === "diff");
+    expect(stored).toHaveLength(1);
+  });
+
+  it("a capture failure does not block the review gate", async () => {
+    // The branch name alone is enough to decide on, so a git hiccup must degrade to "no diff
+    // shown" rather than stranding the Task short of the gate.
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const { deps } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+    const failing: TaskRunDeps = {
+      ...deps,
+      worktree: {
+        ...deps.worktree,
+        diff: async () => {
+          throw new Error("git exploded");
+        },
+      },
+    };
+
+    const result = await runTaskLifecycle(failing, {
+      event: { data: ids },
+      step: scriptedStep(["approve"]),
+    });
+
+    expect(result.result).toBe("done");
+    expect(await taskState(db, ids.taskId)).toBe("done");
+    const diffs = (
+      await db.select().from(sessionEvent).where(eq(sessionEvent.sessionId, ids.sessionId))
+    ).filter((e) => e.kind === "diff");
+    expect(diffs).toHaveLength(0);
   });
 });

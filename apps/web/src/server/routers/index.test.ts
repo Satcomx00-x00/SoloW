@@ -1,6 +1,7 @@
 /// <reference types="bun-types" />
 
 import { beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { verifyStreamTicket } from "@gatecontrol/core/stream";
 import { workspace } from "@gatecontrol/db";
 import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
 import { RATE_LIMITS, resetRateLimits } from "../rate-limit.js";
@@ -78,6 +79,8 @@ describe("tRPC router integration", () => {
 
   beforeAll(() => {
     process.env.GATECONTROL_SECRET_KEY ??= Buffer.alloc(32, 5).toString("base64");
+    process.env.GATECONTROL_STREAM_SECRET ??= "test-stream-secret";
+    process.env.GATECONTROL_AUTH_SECRET ??= "test-auth-secret";
   });
 
   beforeEach(() => {
@@ -158,6 +161,38 @@ describe("tRPC router integration", () => {
 
     // ready→done is not a legal transition (only ready→running / ready→backlog are).
     expect(await errCode(() => c.task.move({ id: task.id, to: "done" }))).toBe("BAD_REQUEST");
+  });
+
+  it("mints a stream ticket whose claims carry the caller's own Workspace (TASK-018)", async () => {
+    const wsId = await seedWs(db, "acme");
+    const c = caller(db, wsId);
+    const { url, expiresAt } = await c.stream.ticket({});
+
+    const ticket = new URL(url).searchParams.get("ticket") ?? "";
+    const verified = verifyStreamTicket(ticket, process.env["GATECONTROL_STREAM_SECRET"] ?? "", 0);
+    expect(verified.ok).toBe(true);
+    if (!verified.ok) return;
+    expect(verified.claims.workspaceId).toBe(wsId);
+    expect(verified.claims.taskId).toBeNull();
+    expect(Date.parse(expiresAt)).toBeGreaterThan(0);
+  });
+
+  it("refuses a stream ticket for another Workspace's Task (Principle V)", async () => {
+    const wsA = await seedWs(db, "workspace-a");
+    const wsB = await seedWs(db, "workspace-b");
+    const fx = await taskFixtures(db, wsA);
+    const taskA = await fx.c.task.create({
+      issueId: fx.issueId,
+      title: "A's task",
+      agentProfileId: fx.agentId,
+      executorProfileId: fx.executorId,
+      repositoryId: fx.repoId,
+    });
+
+    expect(await errCode(() => caller(db, wsB).stream.ticket({ taskId: taskA.id }))).toBe(
+      "NOT_FOUND",
+    );
+    expect(await errCode(() => fx.c.stream.ticket({ taskId: taskA.id }))).toBe("OK");
   });
 
   it("scopes task.create ownership — cannot attach to another Workspace's issue", async () => {

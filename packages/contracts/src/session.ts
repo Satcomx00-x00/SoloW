@@ -32,9 +32,36 @@ export const sessionEventDto = z.object({
 });
 export type SessionEventDto = z.infer<typeof sessionEventDto>;
 
+/**
+ * The change an agent is proposing (task TASK-022 diff view).
+ *
+ * Captured by the orchestrator at the review gate and persisted to the session log, so it is
+ * still readable after the worktree is torn down — an approved Task can show what was approved.
+ * The patch is bounded; the file list never is, because that is what a reviewer scans first.
+ */
+export const diffFileDto = z.object({
+  path: z.string(),
+  status: z.enum(["added", "modified", "deleted", "renamed"]),
+  additions: z.number().int().nonnegative(),
+  deletions: z.number().int().nonnegative(),
+});
+export type DiffFileDto = z.infer<typeof diffFileDto>;
+
+export const taskDiffDto = z.object({
+  /** The branch the change sits on. */
+  diffRef: z.string(),
+  files: z.array(diffFileDto),
+  patch: z.string(),
+  /** True when `patch` was cut short. `files` is always complete. */
+  truncated: z.boolean(),
+});
+export type TaskDiffDto = z.infer<typeof taskDiffDto>;
+
 export const sessionDetailDto = z.object({
   session: sessionDto,
   events: z.array(sessionEventDto),
   review: reviewDto.nullable(),
+  /** Null until the agent reaches the review gate, or if the capture failed. */
+  diff: taskDiffDto.nullable(),
 });
 export type SessionDetailDto = z.infer<typeof sessionDetailDto>;

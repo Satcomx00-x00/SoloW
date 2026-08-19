@@ -1,53 +1,8 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import { agentProfile, executorProfile, repository, workspace } from "@gatecontrol/db";
 import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
-import type { RequestContext } from "./context.js";
 import { createIssueRecord, getIssueById } from "./issue.js";
 import { createTaskRecord, getTaskById, listTasks } from "./task.js";
-
-/** Seed the full FK chain a Task needs and return the ids required to create one. */
-async function seedWorkspaceGraph(db: TestDb, name: string) {
-  const [ws] = await db
-    .insert(workspace)
-    .values({ name, ownerUserId: `owner-${name}` })
-    .returning();
-  if (!ws) throw new Error("failed to seed workspace");
-
-  const [agent] = await db
-    .insert(agentProfile)
-    .values({
-      workspaceId: ws.id,
-      name: "claude",
-      authMode: "api_key",
-      secretId: "secret-1",
-    })
-    .returning();
-  const [executor] = await db
-    .insert(executorProfile)
-    .values({ workspaceId: ws.id, name: "local" })
-    .returning();
-  const [repo] = await db
-    .insert(repository)
-    .values({
-      workspaceId: ws.id,
-      name: "gatecontrol",
-      source: "local_path",
-      location: "/srv/repos/gatecontrol",
-    })
-    .returning();
-  if (!agent || !executor || !repo) throw new Error("failed to seed profiles");
-
-  return {
-    workspaceId: ws.id,
-    agentProfileId: agent.id,
-    executorProfileId: executor.id,
-    repositoryId: repo.id,
-  };
-}
-
-function ctxFor(db: TestDb, workspaceId: string): RequestContext {
-  return { db, workspaceId, userId: "user-1" };
-}
+import { ctxFor, seedWorkspaceGraph } from "./test-fixtures.js";
 
 describe("task DAL", () => {
   let db: TestDb;
@@ -131,6 +86,35 @@ describe("task DAL", () => {
     if (!onlyB.ok) return;
     expect(onlyB.data.length).toBe(2);
     expect(onlyB.data.every((t) => t.issueId === issueB.data.id)).toBe(true);
+  });
+
+  it("listTasks filters by title query, and does not silently ignore it", async () => {
+    // The input schema accepted `query` while the DAL dropped it, so a search came back
+    // unfiltered and looked like it had worked — worse than an error.
+    const g = await seedWorkspaceGraph(db, "acme");
+    const ctx = ctxFor(db, g.workspaceId);
+    const issue = await createIssueRecord(ctx, { title: "Gate" });
+    if (!issue.ok) return;
+
+    const mk = (title: string) =>
+      createTaskRecord(ctx, {
+        issueId: issue.data.id,
+        title,
+        agentProfileId: g.agentProfileId,
+        executorProfileId: g.executorProfileId,
+        repositoryId: g.repositoryId,
+        state: "backlog",
+      });
+    await mk("Debounce the keypad backlight");
+    await mk("Replace the servo stall detector");
+
+    const hits = await listTasks(ctx, { query: "servo" });
+    expect(hits.ok).toBe(true);
+    if (!hits.ok) return;
+    expect(hits.data.map((t) => t.title)).toEqual(["Replace the servo stall detector"]);
+
+    const none = await listTasks(ctx, { query: "nothing matches this" });
+    expect(none.ok && none.data).toEqual([]);
   });
 
   // Cross-workspace isolation (Principle V) for the task DAL.

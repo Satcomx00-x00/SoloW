@@ -78,3 +78,97 @@ export async function discardWorktreeChanges(path: string): Promise<void> {
 export async function cleanupWorktree(repoPath: string, worktree: string): Promise<void> {
   await $`git -C ${repoPath} worktree remove --force ${worktree}`.quiet();
 }
+
+/**
+ * Per-file summary of what the agent changed, plus the patch itself (TASK-022 diff view).
+ *
+ * Captured in the orchestrator because it is the only process that has the worktree: the web app
+ * must never shell out to git, and in a hosted deployment the worktree is not even on its
+ * machine. The result is persisted to the session log, so the diff survives the worktree being
+ * torn down — a Done Task can still show what was approved.
+ */
+export type DiffFileStatus = "added" | "modified" | "deleted" | "renamed";
+
+export interface DiffFile {
+  path: string;
+  status: DiffFileStatus;
+  additions: number;
+  deletions: number;
+}
+
+export interface WorktreeDiff {
+  files: DiffFile[];
+  patch: string;
+  /** True when the patch was cut short; the file list is always complete. */
+  truncated: boolean;
+}
+
+/**
+ * How much patch text to keep. A generated change can run to megabytes, and this lands in a
+ * SQLite row that the review page loads in one go. The file list is never truncated — that is
+ * what a reviewer scans first, and it is small.
+ */
+export const DIFF_PATCH_LIMIT = 256 * 1024;
+
+const STATUS_CODES: Record<string, DiffFileStatus> = {
+  A: "added",
+  M: "modified",
+  D: "deleted",
+  R: "renamed",
+  C: "added",
+};
+
+/** Parse `git diff --numstat`. Binary files report `-` rather than a count. */
+function parseNumstat(out: string): Map<string, { additions: number; deletions: number }> {
+  const stats = new Map<string, { additions: number; deletions: number }>();
+  for (const line of out.split("\n")) {
+    const [added, removed, ...rest] = line.split("\t");
+    const path = rest.join("\t").trim();
+    if (!path) continue;
+    stats.set(path, {
+      additions: Number.parseInt(added ?? "", 10) || 0,
+      deletions: Number.parseInt(removed ?? "", 10) || 0,
+    });
+  }
+  return stats;
+}
+
+/**
+ * The agent's uncommitted work, as a diff against the commit the worktree started from.
+ *
+ * Two details, both load-bearing:
+ *
+ * `git add -N` first, so files the agent *created* appear at all — an untracked file is
+ * invisible to `git diff`, and "the agent wrote a new module" is exactly the change a reviewer
+ * most needs to see. Intent-to-add stages no content, so the later commit or discard is
+ * unaffected.
+ *
+ * Then diff against `HEAD`, not the index. `add -N .` *stages* any deletion it finds, which
+ * takes it out of the unstaged diff entirely: a plain `git diff` reported a deleted file as no
+ * change at all. Against HEAD both staged and unstaged work is included, so a deletion survives.
+ */
+export async function diffWorktree(path: string): Promise<WorktreeDiff> {
+  await $`git -C ${path} add -N .`.quiet().nothrow();
+
+  const numstat = await $`git -C ${path} diff HEAD --numstat`.quiet().text();
+  const nameStatus = await $`git -C ${path} diff HEAD --name-status`.quiet().text();
+  const stats = parseNumstat(numstat);
+
+  const files: DiffFile[] = [];
+  for (const line of nameStatus.split("\n")) {
+    const [code, ...rest] = line.split("\t");
+    const filePath = rest[rest.length - 1]?.trim();
+    if (!code || !filePath) continue;
+    const stat = stats.get(filePath) ?? { additions: 0, deletions: 0 };
+    files.push({
+      path: filePath,
+      status: STATUS_CODES[code.trim()[0] ?? ""] ?? "modified",
+      additions: stat.additions,
+      deletions: stat.deletions,
+    });
+  }
+
+  const full = await $`git -C ${path} diff HEAD`.quiet().text();
+  const truncated = full.length > DIFF_PATCH_LIMIT;
+  return { files, patch: truncated ? full.slice(0, DIFF_PATCH_LIMIT) : full, truncated };
+}

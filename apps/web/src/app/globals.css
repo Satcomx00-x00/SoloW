@@ -3,80 +3,150 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/*
+ * GateControl surface system.
+ *
+ * The interface is a supervision console: several agents working in parallel, and the reader
+ * needs to know at a glance which one needs them. Two ideas carry that.
+ *
+ * 1. Depth is an elevation ladder, not a set of unrelated greys. background → sidebar → card →
+ *    popover each lift by a fixed step, all sharing one faint blue cast (hue 265, chroma ~0.008).
+ *    A neutral grey at chroma 0 reads as switched-off; the cast is barely nameable but it makes
+ *    the whole surface feel lit.
+ * 2. Chroma is reserved. Almost nothing in the chrome is coloured, so when a Task turns amber
+ *    it is the only warm thing on screen and the eye goes straight to it.
+ */
+
 :root {
-  --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  --radius: 0.5rem;
+
+  --background: oklch(0.985 0.002 265);
+  --foreground: oklch(0.17 0.01 265);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: oklch(0.17 0.01 265);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --popover-foreground: oklch(0.17 0.01 265);
+  --primary: oklch(0.52 0.19 272);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.955 0.004 265);
+  --secondary-foreground: oklch(0.24 0.01 265);
+  --muted: oklch(0.955 0.004 265);
+  --muted-foreground: oklch(0.5 0.012 265);
+  --accent: oklch(0.94 0.006 265);
+  --accent-foreground: oklch(0.24 0.01 265);
+  --destructive: oklch(0.55 0.21 25);
+  --border: oklch(0.17 0.01 265 / 11%);
+  --input: oklch(0.17 0.01 265 / 15%);
+  --ring: oklch(0.52 0.19 272);
+
+  --sidebar: oklch(0.968 0.003 265);
+  --sidebar-foreground: oklch(0.17 0.01 265);
+  --sidebar-primary: oklch(0.52 0.19 272);
+  --sidebar-primary-foreground: oklch(0.99 0 0);
+  --sidebar-accent: oklch(0.93 0.006 265);
+  --sidebar-accent-foreground: oklch(0.24 0.01 265);
+  --sidebar-border: oklch(0.17 0.01 265 / 10%);
+  --sidebar-ring: oklch(0.52 0.19 272);
+
+  /* Edge highlight and cast shadow, tuned per theme so panels read as physical. */
+  --edge-highlight: oklch(1 0 0 / 0%);
+  --shadow-panel: 0 1px 2px oklch(0.17 0.01 265 / 6%), 0 8px 24px oklch(0.17 0.01 265 / 6%);
+  --shadow-float: 0 2px 4px oklch(0.17 0.01 265 / 8%), 0 16px 48px oklch(0.17 0.01 265 / 12%);
+  --grain-opacity: 0;
+
+  /*
+   * Task lifecycle colours. Semantic, not decorative: state is the single thing a reader comes
+   * to this tool to learn, and shadcn's four generic badge variants cannot carry seven states
+   * without collisions. Hue encodes urgency rather than category.
+   *
+   * `review` is the loudest because it is the only state waiting on a human. `parked` is
+   * deliberately the quietest, near-greyscale: it means "nothing for you to do, it resumes by
+   * itself", and a loud colour there would compete with the one state that does need you.
+   * Colour is never the only signal; every state also carries its own icon (WCAG 1.4.1).
+   */
+  --state-idle: oklch(0.55 0.012 265);
+  --state-queued: oklch(0.34 0.014 265);
+  --state-running: oklch(0.52 0.16 228);
+  --state-review: oklch(0.58 0.15 78);
+  --state-parked: oklch(0.52 0.035 258);
+  --state-failed: oklch(0.55 0.21 25);
+  --state-done: oklch(0.5 0.13 155);
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --background: oklch(0.155 0.007 265);
+  --foreground: oklch(0.97 0.004 265);
+  --card: oklch(0.198 0.008 265);
+  --card-foreground: oklch(0.97 0.004 265);
+  --popover: oklch(0.222 0.009 265);
+  --popover-foreground: oklch(0.97 0.004 265);
+  --primary: oklch(0.63 0.18 272);
+  --primary-foreground: oklch(0.99 0.002 272);
+  --secondary: oklch(0.245 0.009 265);
+  --secondary-foreground: oklch(0.97 0.004 265);
+  --muted: oklch(0.235 0.008 265);
+  --muted-foreground: oklch(0.68 0.014 265);
+  --accent: oklch(0.27 0.011 265);
+  --accent-foreground: oklch(0.98 0.004 265);
+  --destructive: oklch(0.68 0.19 25);
+  --border: oklch(1 0 0 / 9%);
+  --input: oklch(1 0 0 / 13%);
+  --ring: oklch(0.63 0.18 272);
+
+  --sidebar: oklch(0.178 0.0075 265);
+  --sidebar-foreground: oklch(0.97 0.004 265);
+  --sidebar-primary: oklch(0.63 0.18 272);
+  --sidebar-primary-foreground: oklch(0.99 0.002 272);
+  --sidebar-accent: oklch(0.255 0.01 265);
+  --sidebar-accent-foreground: oklch(0.98 0.004 265);
+  --sidebar-border: oklch(1 0 0 / 8%);
+  --sidebar-ring: oklch(0.63 0.18 272);
+
+  /* A 1px top highlight is what stops a dark panel reading as a hole in the page. */
+  --edge-highlight: oklch(1 0 0 / 5%);
+  --shadow-panel: 0 1px 2px oklch(0 0 0 / 40%), 0 8px 24px oklch(0 0 0 / 22%);
+  --shadow-float: 0 2px 6px oklch(0 0 0 / 45%), 0 24px 64px oklch(0 0 0 / 40%);
+  --grain-opacity: 0.028;
+
+  --state-idle: oklch(0.63 0.014 265);
+  --state-queued: oklch(0.86 0.008 265);
+  --state-running: oklch(0.73 0.145 228);
+  --state-review: oklch(0.82 0.145 78);
+  --state-parked: oklch(0.66 0.035 258);
+  --state-failed: oklch(0.71 0.175 25);
+  --state-done: oklch(0.75 0.145 155);
 }
 
 @theme inline {
+  /* Bound to the `next/font` CSS variables declared on <html> in layout.tsx. */
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+
+  /*
+   * Type scale, pitched down for a console. Tailwind's default `sm` is 14px, which is a
+   * document size; this interface is read at a glance in a panel beside an editor, so `sm` is
+   * 13px and everything else falls in around it. Redefining the named steps rather than
+   * sprinkling `text-[13px]` means the vendored components inherit the scale for free, and
+   * there is exactly one place to change it.
+   */
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1rem;
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1.05rem;
+  --text-sm: 0.8125rem;
+  --text-sm--line-height: 1.25rem;
+  --text-base: 0.875rem;
+  --text-base--line-height: 1.375rem;
+  --text-lg: 1rem;
+  --text-lg--line-height: 1.5rem;
+  --text-xl: 1.125rem;
+  --text-xl--line-height: 1.625rem;
+
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -95,11 +165,6 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  --color-chart-1: var(--chart-1);
-  --color-chart-2: var(--chart-2);
-  --color-chart-3: var(--chart-3);
-  --color-chart-4: var(--chart-4);
-  --color-chart-5: var(--chart-5);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
@@ -108,13 +173,106 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+
+  --color-state-idle: var(--state-idle);
+  --color-state-queued: var(--state-queued);
+  --color-state-running: var(--state-running);
+  --color-state-review: var(--state-review);
+  --color-state-parked: var(--state-parked);
+  --color-state-failed: var(--state-failed);
+  --color-state-done: var(--state-done);
+
+  --shadow-panel: var(--shadow-panel);
+  --shadow-float: var(--shadow-float);
 }
 
 @layer base {
   * {
-    @apply border-border outline-ring/50;
+    @apply border-border;
   }
+
   body {
     @apply bg-background text-foreground;
+    /* Optical sizing and real kerning: the interface is mostly 11-13px, where it shows. */
+    font-feature-settings: "cv11", "ss01";
+    font-optical-sizing: auto;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /*
+   * One focus ring for the whole app, on `:focus-visible` only so a mouse user never sees it.
+   * This is the *only* focus treatment: the vendored components had their own ring, which drew
+   * a second one around every button. An outline follows the element's own border-radius, so a
+   * pill stays a pill — the earlier version set a radius here and squared them off.
+   */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--primary) 32%, transparent);
+  }
+
+  /* Thin, self-effacing scrollbars: this app has a lot of scrolling panes. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklab, var(--foreground) 14%, transparent) transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: color-mix(in oklab, var(--foreground) 10%, transparent);
+    border: 3px solid transparent;
+    background-clip: content-box;
+    border-radius: 999px;
+    transition: background-color 150ms;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in oklab, var(--foreground) 26%, transparent);
+  }
+}
+
+@layer components {
+  /* A hairline of light along the top edge — the cheapest way to make a dark panel feel raised. */
+  .surface-edge {
+    box-shadow: inset 0 1px 0 0 var(--edge-highlight);
+  }
+
+  /*
+   * Film grain over the whole viewport. Flat dark UI bands badly on wide gradients and reads
+   * as plastic; a couple of percent of noise breaks up the banding and gives the surface a
+   * material quality. Fixed and pointer-events-none, never on a scrolling container, so it
+   * costs one composited layer rather than a repaint per frame.
+   */
+  .grain-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    pointer-events: none;
+    opacity: var(--grain-opacity);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+}
+
+/*
+ * Motion is decoration here, never information: every state change is also carried by a label,
+ * an icon and a colour. So under `prefers-reduced-motion` it can all be switched off without
+ * anything becoming unreadable.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

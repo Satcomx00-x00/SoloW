@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { migrate } from "drizzle-orm/bun-sqlite/migrator";
-import { schema } from "./schema.js";
+import { allTables } from "./tables.js";
 
 /**
  * Test-only: an in-memory SQLite database with all migrations applied. Used by DAL and
@@ -14,7 +14,7 @@ import { schema } from "./schema.js";
 export function createTestDb() {
   const sqlite = new Database(":memory:");
   sqlite.exec("PRAGMA foreign_keys = ON;");
-  const db = drizzle(sqlite, { schema });
+  const db = drizzle(sqlite, { schema: allTables });
   const migrationsFolder = join(dirname(fileURLToPath(import.meta.url)), "..", "migrations");
   migrate(db, { migrationsFolder });
   return db;

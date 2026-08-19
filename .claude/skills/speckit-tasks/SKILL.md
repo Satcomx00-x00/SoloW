@@ -1,17 +1,15 @@
 ---
-name: speckit-tasks
-description: Next.js-specialized task generation. Converts a feature plan into an
-  ordered, constitution-compliant task list with Next.js-shaped task titles, acceptance
-  criteria referencing behavioral directives, and explicit phase tags.
-compatibility: Requires spec-kit project structure with .specify/ directory
+name: "speckit-tasks"
+description: "Generate an actionable, dependency-ordered tasks.md for the feature based on available design artifacts."
+argument-hint: "Optional task generation constraints"
+compatibility: "Requires spec-kit project structure with .specify/ directory"
 metadata:
-  author: github-spec-kit
-  source: preset:nextjs
+  author: "github-spec-kit"
+  source: "templates/commands/tasks.md"
 user-invocable: true
 disable-model-invocation: false
 ---
 
-# Speckit Tasks Skill
 
 ## User Input
 
@@ -19,329 +17,186 @@ disable-model-invocation: false
 $ARGUMENTS
 ```
 
-If a plan document path is supplied (e.g. `.specify/plans/feature-name.md`), read it and derive tasks from it.
-If the argument is a freeform feature description, derive tasks directly from the description.
-If the argument is empty, look for the most recent plan at `.specify/plans/` and generate tasks from it.
+You **MUST** consider the user input before proceeding (if not empty).
 
 ## Pre-Execution Checks
 
-Check for `.specify/extensions.yml`. Look for hooks under `hooks.before_tasks`. Apply standard hook-processing (skip `enabled: false`, skip non-empty `condition`, surface optional, auto-execute mandatory).
+**Check for extension hooks (before tasks generation)**:
+- Check if `.specify/extensions.yml` exists in the project root.
+- If it exists, read it and look for entries under the `hooks.before_tasks` key
+- If the YAML cannot be parsed or is invalid, skip hook checking silently and continue normally
+- Filter out hooks where `enabled` is explicitly `false`. Treat hooks without an `enabled` field as enabled by default.
+- For each remaining hook, do **not** attempt to interpret or evaluate hook `condition` expressions:
+  - If the hook has no `condition` field, or it is null/empty, treat the hook as executable
+  - If the hook defines a non-empty `condition`, skip the hook and leave condition evaluation to the HookExecutor implementation
+- When constructing slash commands from hook command names, replace dots (`.`) with hyphens (`-`). For example, `speckit.git.commit` → `/speckit-git-commit`.
+- For each executable hook, output the following based on its `optional` flag:
+  - **Optional hook** (`optional: true`):
+    ```
+    ## Extension Hooks
+
+    **Optional Pre-Hook**: {extension}
+    Command: `/{command}`
+    Description: {description}
+
+    Prompt: {prompt}
+    To execute: `/{command}`
+    ```
+  - **Mandatory hook** (`optional: false`):
+    ```
+    ## Extension Hooks
+
+    **Automatic Pre-Hook**: {extension}
+    Executing: `/{command}`
+    EXECUTE_COMMAND: {command}
+    
+    Wait for the result of the hook command before proceeding to the Outline.
+    ```
+- If no hooks are registered or `.specify/extensions.yml` does not exist, skip silently
 
 ## Outline
 
-### 1. Parse the plan
-
-Extract:
-- Route prefix (e.g. `app/dashboard`)
-- List of segments (page, layout, loading, error, not-found, route handlers)
-- List of Server Actions + their recipe columns (Parse / Authorize / Ownership / DTO)
-- List of DAL methods
-- List of schemas
-- Caching directives
-- Phase target
-- Auth requirement
-- Testing plan
-
-### 2. Produce the task list
-
-Generate tasks using the template below. Follow these ordering rules:
-
-**Dependency order** (tasks must be listed in this order unless a dependency makes an exception necessary):
-
-1. Schema validators (schemas are imported by both DAL and Actions)
-2. DAL methods (depend on schemas; are imported by Actions)
-3. Server Actions (depend on schemas + DAL)
-4. Route structure scaffold (RSC pages, layouts, loading, error, not-found)
-5. RSC data-fetching components (depend on DAL)
-6. Client islands (depend on RSC boundary decisions)
-7. Route Handlers (independent of above, but after DAL)
-8. Metadata (`generateMetadata`)
-9. Suspense / Skeleton components
-10. Tests (unit → integration → E2E)
-
-Within each group, order by dependency (e.g. `getEntityById` before `createEntity`).
-
----
-
-```
-# Tasks: <Feature Name>
-
-**Plan ref**: <path or "inline">
-**Phase**: <P1 | P2 | P3 | P4>
-**Total tasks**: <N>
-**Constitution ref**: `.specify/memory/constitution.md`
-
----
-
-## Foundation (unblock everything)
-
-### TASK-001 — Add `<EntityName>` zod schema
-*File*: `lib/schemas/<entity>.ts`
-*Phase/Crit*: P1 / Critical · Scope: Both
-
-**What**:
-- Create `<EntityName>Schema` with `z.object({ ... })`
-- Export `type <EntityName>Input = z.infer<typeof <EntityName>Schema>`
-- Add `<EntityName>ParamsSchema` for dynamic route params if applicable
-
-**Acceptance criteria**:
-- [ ] Schema compiles under `tsc --noEmit` with no errors
-- [ ] `parse()` throws `ZodError` on invalid input (test in unit suite)
-- [ ] No field typed as `any` or `unknown` without explicit narrowing
-
-**Constitution directives**: `BE.ENV.schema-validated-boundaries` (Critical) · `TS.TYPE.any-usage` (Critical)
-
----
-
-### TASK-002 — Scaffold DAL module `lib/dal/<entity>.ts`
-*File*: `lib/dal/<entity>.ts`
-*Phase/Crit*: P1 / Critical · Scope: BE
-
-**What**:
-- `import 'server-only'` as first line
-- `get<Entity>ById(id: BrandedId): Promise<Result<EntityDTO>>`
-- `create<Entity>(input: CreateEntityInput): Promise<Result<EntityDTO>>`
-- *(add other methods from plan §3c)*
-- Return `{ ok: true; data }` / `{ ok: false; error }` — never throw to callers
-
-**Acceptance criteria**:
-- [ ] `server-only` import present — verified by audit rule `BE.DAL.missing-server-only`
-- [ ] Return type is `Promise<Result<EntityDTO>>`, not `Promise<any>`
-- [ ] No raw SQL string interpolation (parameterized queries only)
-- [ ] Unit tested with a mock DB fixture
-
-**Constitution directives**: `BE.DAL.missing-server-only` (Critical) · `SEC.SQL.injection` (Critical) · `TS.TYPE.any-usage` (Critical)
-
----
-
-## Server Actions
-
-### TASK-003 — Implement `<actionName>` Server Action
-*File*: `app/<path>/actions.ts`
-*Phase/Crit*: P2 / Critical · Scope: BE
-
-**What**:
-- `'use server'` directive at file top
-- **Parse**: `<EntityName>Schema.parse(formData / input)` at function top
-- **Authorize**: `const session = await getServerSession(); if (!session) redirect('/login')`
-- **Ownership**: `if (resource.userId !== session.user.id) throw new Error('Forbidden')`
-- **DTO**: return `{ <field>, <field> }` — only the fields the client needs
-- Call the DAL method, handle `Result.ok === false`
-
-**Acceptance criteria**:
-- [ ] Parse fires before any DB call
-- [ ] Auth check is inside the action (not just at layout/middleware)
-- [ ] Ownership check present when action mutates a user-owned resource
-- [ ] Return value is a typed DTO — no raw DB row exposed to the client
-- [ ] Integration-tested with an authenticated + unauthenticated fixture
-
-**Constitution directives**: `BE.ACTION.recipe-violation` (Critical) · `SEC.SESSION.auth-at-action` (Critical)
-
----
-
-## Route Structure
-
-### TASK-004 — Scaffold route segment `app/<path>/`
-*Files*: `page.tsx` · `layout.tsx` · `loading.tsx` · `error.tsx` · `not-found.tsx`
-*Phase/Crit*: P1 / High · Scope: FE
-
-**What**:
-- `page.tsx` — async RSC; fetches data via DAL (no `"use client"`)
-- `layout.tsx` — RSC; wraps children; no data fetching unless shared data (e.g. nav user)
-- `loading.tsx` — instant skeleton shown during page-level Suspense
-- `error.tsx` — `"use client"` boundary; receives `error` + `reset` props
-- `not-found.tsx` — RSC; shown when `notFound()` is thrown
-
-**Acceptance criteria**:
-- [ ] `page.tsx` has no `"use client"` directive
-- [ ] `error.tsx` is the only file with `"use client"` in this segment (unless client islands are needed)
-- [ ] `loading.tsx` renders a skeleton — not an empty `<div>`
-- [ ] `generateMetadata` exported from `page.tsx` (or a separate `metadata.ts`)
-
-**Constitution directives**: `FE.RSC.use-client-at-page-or-layout` (High) · `FE.META.missing-generate-metadata` (Medium)
-
----
-
-## RSC Data Components
-
-### TASK-005 — Implement `<EntityList>` RSC component
-*File*: `app/<path>/_components/<EntityList>.tsx`
-*Phase/Crit*: P1 / Medium · Scope: FE
-
-**What**:
-- `async` function — fetches data via DAL, NOT via `fetch('/api/...')`
-- Wrapped in `<Suspense fallback={<EntityListSkeleton />}>` at the call site in `page.tsx`
-- Uses `Promise.all([...])` if multiple independent fetches are needed
-
-**Acceptance criteria**:
-- [ ] No `useEffect`, `useState`, or browser API calls
-- [ ] Parallel fetches for independent data (not sequential `await`)
-- [ ] Skeleton shown while data loads (Suspense in page.tsx)
-
-**Constitution directives**: `FE.RSC.client-fetch` (High) · `PERF.FETCH.parallel-fetches` (Medium)
-
----
-
-## Client Islands
-
-### TASK-006 — Implement `<InteractiveWidget>` client component
-*File*: `app/<path>/_components/<InteractiveWidget>.tsx`
-*Phase/Crit*: P1 / High · Scope: FE
-
-**What**:
-- `'use client'` at the top
-- Receives pre-fetched data as props from the RSC parent
-- Calls Server Actions via `useTransition` / `useFormState` — no `fetch('/api/...')`
-- Manages only UI state (open/closed, form values) — no auth state, no session
-
-**Acceptance criteria**:
-- [ ] Props typed as `Readonly<{ ... }>` — no `any`
-- [ ] No direct DB or DAL imports
-- [ ] No auth context — identity passed as a prop if needed for display
-- [ ] Accessible: interactive elements are native HTML or fully ARIA-labelled
-
-**Constitution directives**: `FE.RSC.use-client-at-page-or-layout` (High) · `TS.TYPE.any-usage` (Critical) · `FE.A11Y.*` (Critical)
-
----
-
-## Route Handlers (if applicable)
-
-### TASK-007 — Implement `POST app/api/<path>/route.ts`
-*File*: `app/api/<path>/route.ts`
-*Phase/Crit*: P2 / Critical · Scope: BE
-
-**What**:
-- Verify `Authorization` header (Bearer) or session cookie
-- Parse body with schema before any processing
-- Rate-limit via `<rate-limiter>` (project-configured)
-- HMAC signature check for webhook endpoints (`X-<Provider>-Signature`)
-- Return typed `NextResponse.json(dto, { status })` — no raw DB row
-
-**Acceptance criteria**:
-- [ ] Returns `401` for unauthenticated requests
-- [ ] Returns `400` for schema-invalid bodies
-- [ ] Rate limiting wired
-- [ ] No secrets in response body or headers
-
-**Constitution directives**: `SEC.SESSION.auth-at-action` (Critical) · `BE.ENV.schema-validated-boundaries` (Critical) · `SEC.RATE.missing` (High)
-
----
-
-## Metadata
-
-### TASK-008 — Add `generateMetadata` to `app/<path>/page.tsx`
-*File*: `app/<path>/page.tsx`
-*Phase/Crit*: P2 / Medium · Scope: FE
-
-**What**:
-- Export `generateMetadata({ params, searchParams }: Props): Promise<Metadata>`
-- Fetch minimal fields (title, description image) — use `{ cache: 'force-cache' }` if data is stable
-- Return `title`, `description`, `openGraph`, `twitter` at minimum
-
-**Acceptance criteria**:
-- [ ] No `<title>` hard-coded in JSX — only `generateMetadata`
-- [ ] OG image included for public pages
-- [ ] Dynamic pages fetch their own metadata — not a copy-paste of the layout's metadata
-
-**Constitution directives**: `FE.META.missing-generate-metadata` (Medium)
-
----
-
-## Suspense Skeletons
-
-### TASK-009 — Build `<EntityListSkeleton>` component
-*File*: `app/<path>/_components/<EntityList>.skeleton.tsx`
-*Phase/Crit*: P1 / Medium · Scope: FE
-
-**What**:
-- RSC (no `"use client"`)
-- Renders placeholder UI matching the shape of `<EntityList>` (same layout, no real data)
-- Used as `fallback` in `<Suspense>` in `page.tsx`
-
-**Acceptance criteria**:
-- [ ] Skeleton renders without any async calls
-- [ ] Dimensions approximately match the loaded component (prevents layout shift)
-- [ ] `aria-busy="true"` on the container (accessibility)
-
-**Constitution directives**: `FE.PERF.streaming-suspense` (Medium)
-
----
-
-## Tests
-
-### TASK-010 — Unit tests for `<EntityName>` schema
-*File*: `__tests__/schemas/<entity>.test.ts`
-*Phase/Crit*: P2 / High · Scope: Both
-
-**What**:
-- Valid input → `parse()` returns typed object
-- Missing required field → `ZodError` thrown with field path
-- Type coercion edge cases (empty string, null, undefined)
-
-### TASK-011 — Unit tests for DAL methods
-*File*: `__tests__/dal/<entity>.test.ts`
-*Phase/Crit*: P2 / High · Scope: BE
-
-**What**:
-- Mock the DB client
-- `get<Entity>ById` with existing / missing ID
-- `create<Entity>` with valid / schema-invalid input
-- Verify `Result` envelope shape in all paths
-
-### TASK-012 — Integration tests for Server Actions
-*File*: `__tests__/actions/<entity>.test.ts`
-*Phase/Crit*: P2 / High · Scope: BE
-
-**What**:
-- Authenticated fixture: action succeeds, returns DTO
-- Unauthenticated fixture: action redirects or returns `{ error: 'Unauthorized' }`
-- Schema-invalid input: action returns `{ error: '...' }` without reaching DB
-- Ownership violation: action returns `{ error: 'Forbidden' }`
-
-### TASK-013 — E2E test: happy path + auth gate
-*File*: `e2e/<feature>.spec.ts`
-*Phase/Crit*: P3 / Medium · Scope: FE
-
-**What**:
-- Unauthenticated user is redirected to login
-- Authenticated user sees data and can perform the primary action
-- Form validation errors are visible and announced (screen-reader check via `axe-core`)
-
----
-
-## Phase Gate Summary
-
-Tasks required to complete **Phase <P1/P2/P3/P4>** for this feature:
-
-| ID | Title | Phase | Criticality | Status |
-|---|---|---|---|---|
-| TASK-001 | Add schema | P1 | Critical | ☐ |
-| TASK-002 | Scaffold DAL | P1 | Critical | ☐ |
-| TASK-003 | Server Action | P2 | Critical | ☐ |
-| TASK-004 | Route scaffold | P1 | High | ☐ |
-| TASK-005 | RSC component | P1 | Medium | ☐ |
-| TASK-006 | Client island | P1 | High | ☐ |
-| TASK-007 | Route Handler | P2 | Critical | ☐ |
-| TASK-008 | Metadata | P2 | Medium | ☐ |
-| TASK-009 | Skeleton | P1 | Medium | ☐ |
-| TASK-010 | Schema tests | P2 | High | ☐ |
-| TASK-011 | DAL tests | P2 | High | ☐ |
-| TASK-012 | Action tests | P2 | High | ☐ |
-| TASK-013 | E2E tests | P3 | Medium | ☐ |
-
-*Adjust task IDs and rows to match the actual tasks generated above.*
+1. **Setup**: Run `.specify/scripts/bash/setup-tasks.sh --json` from repo root and parse FEATURE_DIR, TASKS_TEMPLATE, and AVAILABLE_DOCS list. `FEATURE_DIR` and `TASKS_TEMPLATE` must be absolute paths when provided. `AVAILABLE_DOCS` is a list of document names/relative paths available under `FEATURE_DIR` (for example `research.md` or `contracts/`). For single quotes in args like "I'm Groot", use escape syntax: e.g 'I'\''m Groot' (or double-quote if possible: "I'm Groot").
+
+2. **Load design documents**: Read from FEATURE_DIR:
+   - **Required**: plan.md (tech stack, libraries, structure), spec.md (user stories with priorities)
+   - **Optional**: data-model.md (entities), contracts/ (interface contracts), research.md (decisions), quickstart.md (test scenarios)
+   - Note: Not all projects have all documents. Generate tasks based on what's available.
+
+3. **Execute task generation workflow**:
+   - Load plan.md and extract tech stack, libraries, project structure
+   - Load spec.md and extract user stories with their priorities (P1, P2, P3, etc.)
+   - If data-model.md exists: Extract entities and map to user stories
+   - If contracts/ exists: Map interface contracts to user stories
+   - If research.md exists: Extract decisions for setup tasks
+   - Generate tasks organized by user story (see Task Generation Rules below)
+   - Generate dependency graph showing user story completion order
+   - Create parallel execution examples per user story
+   - Validate task completeness (each user story has all needed tasks, independently testable)
+
+4. **Generate tasks.md**: Read the tasks template from TASKS_TEMPLATE (from the JSON output above) and use it as structure. If TASKS_TEMPLATE is empty, fall back to `.specify/templates/tasks-template.md`. Fill with:
+   - Correct feature name from plan.md
+   - Phase 1: Setup tasks (project initialization)
+   - Phase 2: Foundational tasks (blocking prerequisites for all user stories)
+   - Phase 3+: One phase per user story (in priority order from spec.md)
+   - Each phase includes: story goal, independent test criteria, tests (if requested), implementation tasks
+   - Final Phase: Polish & cross-cutting concerns
+   - All tasks must follow the strict checklist format (see Task Generation Rules below)
+   - Clear file paths for each task
+   - Dependencies section showing story completion order
+   - Parallel execution examples per story
+   - Implementation strategy section (MVP first, incremental delivery)
+
+5. **Report**: Output path to generated tasks.md and summary:
+   - Total task count
+   - Task count per user story
+   - Parallel opportunities identified
+   - Independent test criteria for each story
+   - Suggested MVP scope (typically just User Story 1)
+   - Format validation: Confirm ALL tasks follow the checklist format (checkbox, ID, labels, file paths)
+
+6. **Check for extension hooks**: After tasks.md is generated, check if `.specify/extensions.yml` exists in the project root.
+   - If it exists, read it and look for entries under the `hooks.after_tasks` key
+   - If the YAML cannot be parsed or is invalid, skip hook checking silently and continue normally
+   - Filter out hooks where `enabled` is explicitly `false`. Treat hooks without an `enabled` field as enabled by default.
+   - For each remaining hook, do **not** attempt to interpret or evaluate hook `condition` expressions:
+     - If the hook has no `condition` field, or it is null/empty, treat the hook as executable
+     - If the hook defines a non-empty `condition`, skip the hook and leave condition evaluation to the HookExecutor implementation
+   - When constructing slash commands from hook command names, replace dots (`.`) with hyphens (`-`). For example, `speckit.git.commit` → `/speckit-git-commit`.
+   - For each executable hook, output the following based on its `optional` flag:
+     - **Optional hook** (`optional: true`):
+       ```
+       ## Extension Hooks
+
+       **Optional Hook**: {extension}
+       Command: `/{command}`
+       Description: {description}
+
+       Prompt: {prompt}
+       To execute: `/{command}`
+       ```
+     - **Mandatory hook** (`optional: false`):
+       ```
+       ## Extension Hooks
+
+       **Automatic Hook**: {extension}
+       Executing: `/{command}`
+       EXECUTE_COMMAND: {command}
+       ```
+   - If no hooks are registered or `.specify/extensions.yml` does not exist, skip silently
+
+Context for task generation: $ARGUMENTS
+
+The tasks.md should be immediately executable - each task must be specific enough that an LLM can complete it without additional context.
+
+## Task Generation Rules
+
+**CRITICAL**: Tasks MUST be organized by user story to enable independent implementation and testing.
+
+**Tests are OPTIONAL**: Only generate test tasks if explicitly requested in the feature specification or if user requests TDD approach.
+
+### Checklist Format (REQUIRED)
+
+Every task MUST strictly follow this format:
+
+```text
+- [ ] [TaskID] [P?] [Story?] Description with file path
 ```
 
----
+**Format Components**:
 
-## Formatting Rules
+1. **Checkbox**: ALWAYS start with `- [ ]` (markdown checkbox)
+2. **Task ID**: Sequential number (T001, T002, T003...) in execution order
+3. **[P] marker**: Include ONLY if task is parallelizable (different files, no dependencies on incomplete tasks)
+4. **[Story] label**: REQUIRED for user story phase tasks only
+   - Format: [US1], [US2], [US3], etc. (maps to user stories from spec.md)
+   - Setup phase: NO story label
+   - Foundational phase: NO story label  
+   - User Story phases: MUST have story label
+   - Polish phase: NO story label
+5. **Description**: Clear action with exact file path
 
-- Task IDs are sequential (`TASK-001`, `TASK-002`, …) within a session.
-- Every task has: *File*, *Phase/Crit/Scope*, **What** (bullet list), **Acceptance criteria** (checklist), **Constitution directives** (rule IDs).
-- Do not invent constitution directives — use only rule IDs from the audit script's `--list-rules` output or the constitution's behavior table.
-- Omit task groups (Route Handlers, Client Islands, etc.) that are not relevant to this feature.
-- The Phase Gate Summary table is always present; it is the first thing a release reviewer checks.
+**Examples**:
 
-## Post-Execution Hooks
+- ✅ CORRECT: `- [ ] T001 Create project structure per implementation plan`
+- ✅ CORRECT: `- [ ] T005 [P] Implement authentication middleware in src/middleware/auth.py`
+- ✅ CORRECT: `- [ ] T012 [P] [US1] Create User model in src/models/user.py`
+- ✅ CORRECT: `- [ ] T014 [US1] Implement UserService in src/services/user_service.py`
+- ❌ WRONG: `- [ ] Create User model` (missing ID and Story label)
+- ❌ WRONG: `T001 [US1] Create model` (missing checkbox)
+- ❌ WRONG: `- [ ] [US1] Create User model` (missing Task ID)
+- ❌ WRONG: `- [ ] T001 [US1] Create model` (missing file path)
 
-Check `.specify/extensions.yml` for `hooks.after_tasks`. Apply standard hook-processing.
+### Task Organization
+
+1. **From User Stories (spec.md)** - PRIMARY ORGANIZATION:
+   - Each user story (P1, P2, P3...) gets its own phase
+   - Map all related components to their story:
+     - Models needed for that story
+     - Services needed for that story
+     - Interfaces/UI needed for that story
+     - If tests requested: Tests specific to that story
+   - Mark story dependencies (most stories should be independent)
+
+2. **From Contracts**:
+   - Map each interface contract → to the user story it serves
+   - If tests requested: Each interface contract → contract test task [P] before implementation in that story's phase
+
+3. **From Data Model**:
+   - Map each entity to the user story(ies) that need it
+   - If entity serves multiple stories: Put in earliest story or Setup phase
+   - Relationships → service layer tasks in appropriate story phase
+
+4. **From Setup/Infrastructure**:
+   - Shared infrastructure → Setup phase (Phase 1)
+   - Foundational/blocking tasks → Foundational phase (Phase 2)
+   - Story-specific setup → within that story's phase
+
+### Phase Structure
+
+- **Phase 1**: Setup (project initialization)
+- **Phase 2**: Foundational (blocking prerequisites - MUST complete before user stories)
+- **Phase 3+**: User Stories in priority order (P1, P2, P3...)
+  - Within each story: Tests (if requested) → Models → Services → Endpoints → Integration
+  - Each phase should be a complete, independently testable increment
+- **Final Phase**: Polish & Cross-Cutting Concerns

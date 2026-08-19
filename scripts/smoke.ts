@@ -195,6 +195,7 @@ async function main(): Promise<void> {
       args: ["--task", taskId],
       cwd: wt.path,
       env: agentEnv,
+      prompt: `Smoke task ${taskId}`,
       onEvent: (e) => events.push(e.kind),
     });
     const outcome = await handle.outcome;

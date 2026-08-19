@@ -1,8 +1,11 @@
 import { beforeEach, describe, expect, it } from "bun:test";
+import type { TaskState } from "@gatecontrol/contracts";
 import { workspace } from "@gatecontrol/db";
 import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
 import type { RequestContext } from "./context.js";
 import { createIssueRecord, getIssueById, listIssues } from "./issue.js";
+import { createTaskRecord } from "./task.js";
+import { seedWorkspaceGraph } from "./test-fixtures.js";
 
 /** Insert a workspace row (Issues FK-reference it) and return its id. */
 async function seedWorkspace(db: TestDb, name: string): Promise<string> {
@@ -131,5 +134,75 @@ describe("issue DAL", () => {
     expect(listB.ok).toBe(true);
     if (!listB.ok) return;
     expect(listB.data.length).toBe(2);
+  });
+});
+
+describe("issue status is derived from its Tasks (FR-006)", () => {
+  let db: TestDb;
+  beforeEach(() => {
+    db = createTestDb();
+  });
+
+  /** Create an Issue with Tasks in the given states, and read its status back. */
+  async function statusWith(states: TaskState[]): Promise<string> {
+    const g = await seedWorkspaceGraph(db, `derive-${states.join("-") || "none"}`);
+    const ctx = ctxFor(db, g.workspaceId);
+    const issue = await createIssueRecord(ctx, { title: "Gate servo stalls" });
+    if (!issue.ok) throw new Error("seed failed");
+
+    for (const [index, state] of states.entries()) {
+      const created = await createTaskRecord(ctx, {
+        issueId: issue.data.id,
+        title: `task-${index}`,
+        agentProfileId: g.agentProfileId,
+        executorProfileId: g.executorProfileId,
+        repositoryId: g.repositoryId,
+        state,
+      });
+      if (!created.ok) throw new Error("task seed failed");
+    }
+
+    const read = await getIssueById(ctx, issue.data.id);
+    if (!read.ok) throw new Error("read failed");
+    return read.data.status;
+  }
+
+  it("is Open with no Tasks", async () => {
+    expect(await statusWith([])).toBe("open");
+  });
+
+  it("is In progress while any Task is still moving", async () => {
+    // The bug this covers: `deriveIssueStatus` existed and was never called, so an Issue whose
+    // agents were mid-run still reported "Open" — the column is written once and never updated.
+    expect(await statusWith(["running"])).toBe("in_progress");
+    expect(await statusWith(["done", "review"])).toBe("in_progress");
+  });
+
+  it("is Resolved once every Task is Done", async () => {
+    expect(await statusWith(["done", "done"])).toBe("resolved");
+  });
+
+  it("reports the same status through the list as through the single read", async () => {
+    const g = await seedWorkspaceGraph(db, "derive-list");
+    const ctx = ctxFor(db, g.workspaceId);
+    const issue = await createIssueRecord(ctx, { title: "Keypad backlight" });
+    if (!issue.ok) return;
+    await createTaskRecord(ctx, {
+      issueId: issue.data.id,
+      title: "t",
+      agentProfileId: g.agentProfileId,
+      executorProfileId: g.executorProfileId,
+      repositoryId: g.repositoryId,
+      state: "running",
+    });
+
+    const listed = await listIssues(ctx, {});
+    expect(listed.ok && listed.data[0]?.status).toBe("in_progress");
+
+    // And the status filter matches on what the caller is actually shown, not on the column.
+    const inProgress = await listIssues(ctx, { status: "in_progress" });
+    expect(inProgress.ok && inProgress.data.length).toBe(1);
+    const open = await listIssues(ctx, { status: "open" });
+    expect(open.ok && open.data.length).toBe(0);
   });
 });

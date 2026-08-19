@@ -1,6 +1,11 @@
 import { describe, expect, it } from "bun:test";
 import { BillingErrorCode } from "@gatecontrol/contracts";
-import { classifyRunFailure, resolveAgentRunEnv, withinConcurrencyCap } from "./billing.js";
+import {
+  classifyRunFailure,
+  detectFailureSignal,
+  resolveAgentRunEnv,
+  withinConcurrencyCap,
+} from "./billing.js";
 
 describe("resolveAgentRunEnv — billing integrity (Principle IV)", () => {
   it("subscription mode injects the OAuth token and STRIPS ANTHROPIC_API_KEY", () => {
@@ -56,5 +61,40 @@ describe("classifyRunFailure", () => {
     expect(classifyRunFailure({})).toBe("fail");
     // quota takes precedence over other signals
     expect(classifyRunFailure({ quotaExhausted: true, credentialInvalid: true })).toBe("park");
+  });
+});
+
+describe("detectFailureSignal", () => {
+  it("reads quota exhaustion out of what the agent reported", () => {
+    for (const text of [
+      "Error: usage limit reached, resets at 18:00",
+      "API error 429: too many requests",
+      "monthly quota exhausted",
+    ]) {
+      expect(detectFailureSignal(text)).toEqual({ quotaExhausted: true });
+    }
+  });
+
+  it("reads a rejected credential out of what the agent reported", () => {
+    for (const text of [
+      "HTTP 401 Unauthorized",
+      "invalid api key provided",
+      "OAuth token expired — run `claude login`",
+    ]) {
+      expect(detectFailureSignal(text)).toEqual({ credentialInvalid: true });
+    }
+  });
+
+  it("prefers parking when a quota message arrives with a 429", () => {
+    expect(detectFailureSignal("429 rate limit: usage limit reached")).toEqual({
+      quotaExhausted: true,
+    });
+  });
+
+  it("leaves an unrecognised failure as a plain failure", () => {
+    // A false "park" would strand the Task for hours, so silence must mean `fail`.
+    expect(detectFailureSignal("Segmentation fault")).toEqual({});
+    expect(detectFailureSignal(null)).toEqual({});
+    expect(detectFailureSignal("")).toEqual({});
   });
 });

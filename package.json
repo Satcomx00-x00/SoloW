@@ -7,7 +7,8 @@
   "packageManager": "bun@1.3.14",
   "workspaces": [
     "apps/*",
-    "packages/*"
+    "packages/*",
+    "e2e"
   ],
   "engines": {
     "bun": ">=1.3"
@@ -25,10 +26,17 @@
     "db:migrate": "bun run --filter @gatecontrol/db db:migrate",
     "db:seed": "bun run --filter @gatecontrol/db db:seed",
     "openapi:gen": "bun run --filter @gatecontrol/web openapi:gen",
-    "openapi:check": "bun run --filter @gatecontrol/web openapi:check"
+    "openapi:check": "bun run --filter @gatecontrol/web openapi:check",
+    "e2e": "playwright test",
+    "e2e:critical": "playwright test --grep @critical",
+    "audit": "bun run scripts/audit.ts",
+    "secretscan": "gitleaks detect --source . --no-banner --redact",
+    "verify": "bun run lint && bun run typecheck && bun run test && bun run openapi:check && bun run audit",
+    "flag": "bun run scripts/flag.ts"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.8",
-    "typescript": "^5.6.0"
+    "@biomejs/biome": "^2.5.9",
+    "@playwright/test": "^1.62.1",
+    "typescript": "^5.9.3"
   }
 }

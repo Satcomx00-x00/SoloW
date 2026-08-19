@@ -6,6 +6,8 @@ import { $ } from "bun";
 import {
   cleanupWorktree,
   commitWorktree,
+  DIFF_PATCH_LIMIT,
+  diffWorktree,
   hasChanges,
   provisionWorktree,
   type Worktree,
@@ -74,5 +76,100 @@ describe("provisionWorktree lifecycle (local_path)", () => {
   it("removes the worktree on cleanup", async () => {
     await cleanupWorktree(wt.repoPath, wt.path);
     expect(existsSync(wt.path)).toBe(false);
+  });
+});
+
+/**
+ * The diff a reviewer is shown (TASK-022). Against real git, because the thing most likely to be
+ * wrong is which changes git reports — in particular that a file the agent *created* shows up at
+ * all, which plain `git diff` will not tell you.
+ *
+ * Each case gets its own worktree. Sharing one made the tests order-dependent: a case that
+ * committed to set up a deletion wiped the changes a later case was asserting on.
+ */
+describe("diffWorktree", () => {
+  let counter = 0;
+  const worktrees: Worktree[] = [];
+
+  /** A fresh worktree off the fixture repo, cleaned up when the suite ends. */
+  async function freshWorktree(): Promise<Worktree> {
+    counter += 1;
+    const wt = await provisionWorktree({
+      taskId: `diff-${counter}`,
+      repository: { source: "local_path", location: repoDir },
+      worktreeRoot,
+      repoCacheRoot,
+    });
+    worktrees.push(wt);
+    return wt;
+  }
+
+  afterAll(async () => {
+    for (const wt of worktrees) {
+      if (existsSync(wt.path)) await cleanupWorktree(wt.repoPath, wt.path);
+    }
+  });
+
+  it("reports nothing when the agent changed nothing", async () => {
+    const diff = await diffWorktree((await freshWorktree()).path);
+    expect(diff.files).toEqual([]);
+    expect(diff.patch).toBe("");
+    expect(diff.truncated).toBe(false);
+  });
+
+  it("includes a file the agent created, not just ones it edited", async () => {
+    // An untracked file is invisible to `git diff`, so without the intent-to-add step the most
+    // interesting change an agent makes — a new module — would be missing from the review.
+    const wt = await freshWorktree();
+    writeFileSync(join(wt.path, "new-module.ts"), "export const answer = 42;\n");
+
+    const diff = await diffWorktree(wt.path);
+    const created = diff.files.find((f) => f.path === "new-module.ts");
+    expect(created?.status).toBe("added");
+    expect(created?.additions).toBe(1);
+    expect(diff.patch).toContain("export const answer = 42;");
+  });
+
+  it("counts additions and deletions on an edited file", async () => {
+    const wt = await freshWorktree();
+    writeFileSync(join(wt.path, "README.md"), "rewritten\nsecond line\n");
+
+    const edited = (await diffWorktree(wt.path)).files.find((f) => f.path === "README.md");
+    expect(edited?.status).toBe("modified");
+    expect(edited?.additions).toBe(2);
+    expect(edited?.deletions).toBe(1);
+  });
+
+  it("records a deletion", async () => {
+    const wt = await freshWorktree();
+    rmSync(join(wt.path, "README.md"));
+
+    const diff = await diffWorktree(wt.path);
+    expect(diff.files.find((f) => f.path === "README.md")?.status).toBe("deleted");
+  });
+
+  it("truncates a huge patch but never the file list", async () => {
+    // The patch lands in one SQLite row that the review page loads whole, so it is bounded. The
+    // file list is what a reviewer scans first and stays complete.
+    const wt = await freshWorktree();
+    writeFileSync(join(wt.path, "huge.txt"), `${"x".repeat(DIFF_PATCH_LIMIT * 2)}\n`);
+    writeFileSync(join(wt.path, "small.txt"), "also changed\n");
+
+    const diff = await diffWorktree(wt.path);
+    expect(diff.truncated).toBe(true);
+    expect(diff.patch.length).toBe(DIFF_PATCH_LIMIT);
+    expect(diff.files.some((f) => f.path === "huge.txt")).toBe(true);
+    expect(diff.files.some((f) => f.path === "small.txt")).toBe(true);
+  });
+
+  it("leaves the worktree committable, so intent-to-add did not break the approve path", async () => {
+    const wt = await freshWorktree();
+    writeFileSync(join(wt.path, "added-by-agent.ts"), "export const x = 1;\n");
+    await diffWorktree(wt.path);
+
+    await commitWorktree(wt.path, "GateControl: diff test");
+    expect(await hasChanges(wt.path)).toBe(false);
+    const shown = await $`git -C ${wt.path} show --name-only --format=`.quiet().text();
+    expect(shown).toContain("added-by-agent.ts");
   });
 });

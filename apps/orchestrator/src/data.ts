@@ -1,6 +1,15 @@
 import type { SessionState, TaskState } from "@gatecontrol/contracts";
-import { agentProfile, type Db, repository, secret, session, task } from "@gatecontrol/db";
-import { and, eq } from "drizzle-orm";
+import {
+  agentProfile,
+  type Db,
+  issue,
+  repository,
+  secret,
+  session,
+  sessionEvent,
+  task,
+} from "@gatecontrol/db";
+import { and, asc, desc, eq, gt, inArray } from "drizzle-orm";
 
 /**
  * Orchestrator-side data access. Scoped by workspaceId (the tenant key travels on the
@@ -10,6 +19,8 @@ import { and, eq } from "drizzle-orm";
 
 export interface TaskRunContext {
   task: typeof task.$inferSelect;
+  /** The Issue the Task belongs to — its description is the agent's brief. */
+  issue: typeof issue.$inferSelect;
   agentProfile: typeof agentProfile.$inferSelect;
   repository: typeof repository.$inferSelect;
   secretCiphertext: string | null;
@@ -26,6 +37,13 @@ export async function loadTaskRunContext(
     .where(and(eq(task.workspaceId, workspaceId), eq(task.id, taskId)))
     .limit(1);
   if (!t) throw new Error(`task ${taskId} not found in workspace ${workspaceId}`);
+
+  const [iss] = await db
+    .select()
+    .from(issue)
+    .where(and(eq(issue.workspaceId, workspaceId), eq(issue.id, t.issueId)))
+    .limit(1);
+  if (!iss) throw new Error(`issue ${t.issueId} not found`);
 
   const [ap] = await db
     .select()
@@ -47,7 +65,13 @@ export async function loadTaskRunContext(
     .where(and(eq(secret.workspaceId, workspaceId), eq(secret.id, ap.secretId)))
     .limit(1);
 
-  return { task: t, agentProfile: ap, repository: repo, secretCiphertext: sec?.ciphertext ?? null };
+  return {
+    task: t,
+    issue: iss,
+    agentProfile: ap,
+    repository: repo,
+    secretCiphertext: sec?.ciphertext ?? null,
+  };
 }
 
 export async function setTaskState(
@@ -83,4 +107,86 @@ export async function setSessionState(
       ...(extra?.endedAt !== undefined ? { endedAt: extra.endedAt } : {}),
     })
     .where(and(eq(session.workspaceId, workspaceId), eq(session.id, sessionId)));
+}
+
+/**
+ * Append-only agent event log (TASK-018 replay). Every streamed event is persisted before a
+ * client can ask for it again, so a reconnecting SPA replays exactly what it missed instead of
+ * losing terminal history. `seq` is unique per Session, so a retried durable step that re-emits
+ * the same event is a no-op rather than a duplicate.
+ */
+export async function appendSessionEvent(
+  db: Db,
+  workspaceId: string,
+  input: { sessionId: string; seq: number; kind: string; payload: unknown },
+): Promise<void> {
+  await db
+    .insert(sessionEvent)
+    .values({
+      workspaceId,
+      sessionId: input.sessionId,
+      seq: input.seq,
+      kind: input.kind,
+      payload: input.payload,
+    })
+    .onConflictDoNothing();
+}
+
+/** The next free `seq` for a Session (resumes correctly after an orchestrator restart). */
+export async function nextSessionEventSeq(
+  db: Db,
+  workspaceId: string,
+  sessionId: string,
+): Promise<number> {
+  const [row] = await db
+    .select({ seq: sessionEvent.seq })
+    .from(sessionEvent)
+    .where(and(eq(sessionEvent.workspaceId, workspaceId), eq(sessionEvent.sessionId, sessionId)))
+    .orderBy(desc(sessionEvent.seq))
+    .limit(1);
+  return row ? row.seq + 1 : 0;
+}
+
+export interface ReplayEvent {
+  sessionId: string;
+  seq: number;
+  kind: string;
+  payload: unknown;
+}
+
+/**
+ * Events for a Task's Sessions with `seq` above `sinceSeq`, oldest first. Workspace-scoped:
+ * the caller's ticket names the Workspace, and a Task from another one yields nothing.
+ */
+export async function listTaskEventsSince(
+  db: Db,
+  workspaceId: string,
+  taskId: string,
+  sinceSeq: number,
+): Promise<ReplayEvent[]> {
+  const sessions = await db
+    .select({ id: session.id })
+    .from(session)
+    .where(and(eq(session.workspaceId, workspaceId), eq(session.taskId, taskId)));
+  if (sessions.length === 0) return [];
+
+  return db
+    .select({
+      sessionId: sessionEvent.sessionId,
+      seq: sessionEvent.seq,
+      kind: sessionEvent.kind,
+      payload: sessionEvent.payload,
+    })
+    .from(sessionEvent)
+    .where(
+      and(
+        eq(sessionEvent.workspaceId, workspaceId),
+        inArray(
+          sessionEvent.sessionId,
+          sessions.map((s) => s.id),
+        ),
+        gt(sessionEvent.seq, sinceSeq),
+      ),
+    )
+    .orderBy(asc(sessionEvent.seq));
 }

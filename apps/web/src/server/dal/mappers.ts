@@ -13,12 +13,13 @@ type SecretRow = typeof secret.$inferSelect;
  * DTO mapper that includes `ciphertext` (Principle IV).
  */
 
-export function issueToDto(row: IssueRow, taskCount: number): IssueDto {
+export function issueToDto(row: IssueRow, taskCount: number, status = row.status): IssueDto {
   return {
     id: row.id,
     title: row.title,
     description: row.description,
-    status: row.status,
+    // Derived from the Issue's Tasks by the DAL (spec FR-006); the column is only a fallback.
+    status,
     taskCount,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,

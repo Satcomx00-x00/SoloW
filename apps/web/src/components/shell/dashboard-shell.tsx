@@ -1,40 +1,38 @@
 "use client";
 
-import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ActivityBar } from "./activity-bar";
+import { CommandPalette } from "./command-palette";
+import { HeaderBar } from "./header-bar";
 import { Navigator } from "./navigator";
-import { StatusBar } from "./status-bar";
+import { type ShellIdentity, StatusBar } from "./status-bar";
 
 /** VS-Code-style dashboard shell: activity bar + navigator + header'd main + status bar. */
-export function DashboardShell({ children }: { children: ReactNode }) {
-  const pathname = usePathname();
-  const title = pathname.startsWith("/settings")
-    ? "Settings"
-    : pathname.startsWith("/task/")
-      ? "Task"
-      : "Board";
-
+export function DashboardShell({
+  children,
+  identity,
+  workspaceName,
+}: {
+  children: ReactNode;
+  /** The signed-in Owner, or null when running on the local dev-owner path. */
+  identity: ShellIdentity | null;
+  workspaceName: string;
+}) {
   return (
     <TooltipProvider delayDuration={200}>
-      <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
+      <div className="flex h-[100dvh] flex-col overflow-hidden bg-background text-foreground">
         <div className="flex min-h-0 flex-1">
-          <ActivityBar />
-          <Navigator />
+          <ActivityBar signedIn={identity !== null} />
+          <Navigator workspaceName={workspaceName} />
           <div className="flex min-w-0 flex-1 flex-col">
-            <header className="flex h-12 shrink-0 items-center gap-2 border-b px-4 text-muted-foreground text-xs uppercase tracking-wider">
-              <span>GateControl</span>
-              <span className="text-border">/</span>
-              <span className="font-medium text-foreground normal-case tracking-normal">
-                {title}
-              </span>
-            </header>
+            <HeaderBar workspaceName={workspaceName} />
             <main className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">{children}</main>
           </div>
         </div>
-        <StatusBar />
+        <StatusBar identity={identity} />
       </div>
+      <CommandPalette />
     </TooltipProvider>
   );
 }

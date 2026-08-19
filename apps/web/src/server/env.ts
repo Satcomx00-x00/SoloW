@@ -11,12 +11,21 @@ import { z } from "zod";
  */
 const webEnvSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
-  /** BetterAuth session secret. */
-  GATECONTROL_AUTH_SECRET: z.string().min(1),
+  /**
+   * BetterAuth session secret. At least 32 characters: it signs the session cookie, so a short
+   * or guessable value means forged sessions — refuse to boot rather than warn.
+   * Generate one with `openssl rand -base64 32`.
+   */
+  GATECONTROL_AUTH_SECRET: z.string().min(32),
   /** Base URL the SPA is served from. */
   GATECONTROL_WEB_URL: z.string().url().default("http://localhost:5000"),
   /** WebSocket endpoint exposed by the orchestrator service. */
   GATECONTROL_WS_URL: z.string().url().default("ws://localhost:5001"),
+  /**
+   * HMAC key for stream subscription tickets (TASK-018). Shared with the orchestrator, which
+   * verifies what this app signs. Required — an unset key would mean unauthenticated streams.
+   */
+  GATECONTROL_STREAM_SECRET: z.string().min(1),
 });
 
 export type WebEnv = z.infer<typeof webEnvSchema>;
@@ -41,4 +50,17 @@ const devEnvSchema = z.object({
 
 export function devOwnerMode(): boolean {
   return devEnvSchema.parse(process.env).GATECONTROL_DEV_OWNER === "on";
+}
+
+/**
+ * Base URL of the workflow-event consumer (the orchestrator service, or Inngest when hosted).
+ * `undefined` means no engine is wired — see `orchestrator-client`. Parsed separately for the
+ * same reason as the dev flag: it must be readable without the full web env.
+ */
+const orchestratorEnvSchema = z.object({
+  GATECONTROL_ORCHESTRATOR_URL: z.string().url().optional(),
+});
+
+export function orchestratorUrl(): string | undefined {
+  return orchestratorEnvSchema.parse(process.env).GATECONTROL_ORCHESTRATOR_URL;
 }

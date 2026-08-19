@@ -2,7 +2,7 @@
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { dbEnv } from "./env.js";
-import { schema } from "./schema.js";
+import { allTables } from "./tables.js";
 
 /**
  * Driver selection for the single data model (Decision 0008).
@@ -19,13 +19,16 @@ export function createDb() {
   const sqlite = new Database(env.GATECONTROL_SQLITE_PATH, { create: true });
   sqlite.exec("PRAGMA journal_mode = WAL;");
   sqlite.exec("PRAGMA foreign_keys = ON;");
-  return drizzle(sqlite, { schema });
+  return drizzle(sqlite, { schema: allTables });
 }
 
 export type Db = ReturnType<typeof createDb>;
 
+export * from "./auth-schema.js";
 export { dbEnv } from "./env.js";
+export { listWorkspaceFlags, setWorkspaceFlag, type WorkspaceFlags } from "./flags.js";
 export * from "./schema.js";
 export { schema } from "./schema.js";
 export { decryptForAgentRun, encryptSecret } from "./secret-store.js";
 export { SEED_WORKSPACE_A, SEED_WORKSPACE_B, seed } from "./seed.js";
+export { allTables } from "./tables.js";

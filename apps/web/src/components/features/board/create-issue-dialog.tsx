@@ -2,7 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Plus } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/trpc/react";
+import { onOpenCreateDialog } from "./create-dialog-bus";
 
 const issueFormSchema = z.object({
   title: z.string().min(1, "Enter an issue title").max(200),
@@ -37,6 +38,8 @@ type IssueFormValues = z.infer<typeof issueFormSchema>;
 export function CreateIssueDialog() {
   const [open, setOpen] = useState(false);
   const utils = trpc.useUtils();
+  // The command palette can ask for this dialog from anywhere in the shell.
+  useEffect(() => onOpenCreateDialog("issue", () => setOpen(true)), []);
   const form = useForm<IssueFormValues>({
     resolver: zodResolver(issueFormSchema),
     defaultValues: { title: "", description: "" },
@@ -58,7 +61,11 @@ export function CreateIssueDialog() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="secondary">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-8 text-muted-foreground hover:text-foreground"
+        >
           <Plus /> New issue
         </Button>
       </DialogTrigger>
@@ -103,8 +110,8 @@ export function CreateIssueDialog() {
               </p>
             )}
             <DialogFooter>
-              <Button type="submit" disabled={create.isPending}>
-                {create.isPending ? "Creating…" : "Create issue"}
+              <Button type="submit" loading={create.isPending}>
+                Create issue
               </Button>
             </DialogFooter>
           </form>

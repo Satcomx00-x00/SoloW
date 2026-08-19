@@ -81,8 +81,8 @@ export function SecretsSection() {
               required
             />
           </div>
-          <Button type="submit" disabled={setSecret.isPending}>
-            {setSecret.isPending ? "Saving…" : "Save secret"}
+          <Button type="submit" loading={setSecret.isPending}>
+            Save secret
           </Button>
         </form>
         {setSecret.error && (

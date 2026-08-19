@@ -33,7 +33,7 @@ afterEach(cleanup);
 describe("BoardView", () => {
   it("renders every lifecycle column with an empty state when there are no tasks", () => {
     render(<BoardView tasks={[]} />);
-    expect(screen.getAllByText("No tasks")).toHaveLength(BOARD_COLUMNS.length);
+    expect(screen.getAllByText(/^No tasks in/)).toHaveLength(BOARD_COLUMNS.length);
     // Column headings are present.
     expect(screen.getByText("Backlog")).toBeDefined();
     expect(screen.getByText("Review")).toBeDefined();
@@ -51,7 +51,7 @@ describe("BoardView", () => {
     expect(screen.getByText("Fix the gate latch")).toBeDefined();
     expect(screen.getByText("Investigate servo")).toBeDefined();
     // Only 5 of 7 columns remain empty (backlog + running now populated).
-    expect(screen.getAllByText("No tasks")).toHaveLength(BOARD_COLUMNS.length - 2);
+    expect(screen.getAllByText(/^No tasks in/)).toHaveLength(BOARD_COLUMNS.length - 2);
   });
 
   it("shows a failure reason on a failed Task card", () => {

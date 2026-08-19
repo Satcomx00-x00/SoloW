@@ -1,18 +1,15 @@
 ---
-name: speckit-plan
-description: "Next.js-specialized planning command. Decomposes a feature into routes,\
-  \ RSC/client boundaries, Server Actions, Route Handlers, schema validators, DAL\
-  \ methods, caching strategy, prerendering strategy, metadata, and accessibility\
-  \ checkpoints \u2014 all tagged with Phase and Criticality."
-compatibility: Requires spec-kit project structure with .specify/ directory
+name: "speckit-plan"
+description: "Execute the implementation planning workflow using the plan template to generate design artifacts."
+argument-hint: "Optional guidance for the planning phase"
+compatibility: "Requires spec-kit project structure with .specify/ directory"
 metadata:
-  author: github-spec-kit
-  source: preset:nextjs
+  author: "github-spec-kit"
+  source: "templates/commands/plan.md"
 user-invocable: true
 disable-model-invocation: false
 ---
 
-# Speckit Plan Skill
 
 ## User Input
 
@@ -20,257 +17,136 @@ disable-model-invocation: false
 $ARGUMENTS
 ```
 
-Parse the user's description to extract:
-- Feature name / route prefix (e.g. `app/dashboard`, `app/(auth)/login`)
-- Data shape (entities, fields, relationships) — infer from context if not stated
-- Auth requirement — `none` / `required` / `required + ownership`
-- Known dependencies — ORM, auth provider, validation library, styling layer
-
-If critical fields are missing and cannot be reasonably inferred, ask one clarifying question before proceeding.
+You **MUST** consider the user input before proceeding (if not empty).
 
 ## Pre-Execution Checks
 
-Check for `.specify/extensions.yml`. If present, look for hooks under `hooks.before_plan`. Apply the same hook-processing rules as `/speckit.audit`: skip hooks with `enabled: false`, skip hooks with non-empty `condition`, surface optional hooks as instructions, auto-execute mandatory hooks.
+**Check for extension hooks (before planning)**:
+- Check if `.specify/extensions.yml` exists in the project root.
+- If it exists, read it and look for entries under the `hooks.before_plan` key
+- If the YAML cannot be parsed or is invalid, skip hook checking silently and continue normally
+- Filter out hooks where `enabled` is explicitly `false`. Treat hooks without an `enabled` field as enabled by default.
+- For each remaining hook, do **not** attempt to interpret or evaluate hook `condition` expressions:
+  - If the hook has no `condition` field, or it is null/empty, treat the hook as executable
+  - If the hook defines a non-empty `condition`, skip the hook and leave condition evaluation to the HookExecutor implementation
+- When constructing slash commands from hook command names, replace dots (`.`) with hyphens (`-`). For example, `speckit.git.commit` → `/speckit-git-commit`.
+- For each executable hook, output the following based on its `optional` flag:
+  - **Optional hook** (`optional: true`):
+    ```
+    ## Extension Hooks
+
+    **Optional Pre-Hook**: {extension}
+    Command: `/{command}`
+    Description: {description}
+
+    Prompt: {prompt}
+    To execute: `/{command}`
+    ```
+  - **Mandatory hook** (`optional: false`):
+    ```
+    ## Extension Hooks
+
+    **Automatic Pre-Hook**: {extension}
+    Executing: `/{command}`
+    EXECUTE_COMMAND: {command}
+
+    Wait for the result of the hook command before proceeding to the Outline.
+    ```
+- If no hooks are registered or `.specify/extensions.yml` does not exist, skip silently
 
 ## Outline
 
-Produce a structured plan using this exact template. Omit any sub-section that is not applicable; add a one-line note explaining why.
-
----
-
-```
-# Plan: <Feature Name>
-
-**Route prefix**: `<app/...>`
-**Phase**: <P1 | P2 | P3 | P4>
-**Auth**: <none | required | required + ownership>
-**Tenancy**: org-scoped (tenant key: `organizationId` — every
-tenant-scoped table, query, and cache key carries it; for `user-scoped`
-projects it is the owning user, for `single-tenant` note the waiver)
-**Constitution ref**: `.specify/memory/constitution.md`
-
----
-
-## 1. Route Map
-
-| Segment | Type | RSC? | Auth gate |
-|---|---|---|---|
-| `app/<path>/page.tsx` | Page | Yes | <none/required> |
-| `app/<path>/layout.tsx` | Layout | Yes | <none/required> |
-| `app/<path>/loading.tsx` | Skeleton | Yes | — |
-| `app/<path>/error.tsx` | Error boundary | Client | — |
-| `app/<path>/not-found.tsx` | 404 | Yes | — |
-| `app/api/<path>/route.ts` | Route Handler | — | <method list> |
-
-*List only the segments this feature actually needs. Mark `RSC?` as No only when `"use client"` is required.*
-
----
-
-## 2. RSC / Client Boundary
-
-**Server boundary**: `<root segment — everything above this is RSC>`
-**Client islands**:
-- `<ComponentName>` — reason (user interaction / browser API / client-state)
-- ...
-
-**Discipline check**:
-- [ ] `"use client"` pushed to the smallest leaf, not to a page or layout
-- [ ] No `async` / `await` inside `"use client"` components (use Server Components or Route Handlers for data fetching)
-- [ ] No `useEffect` for data fetching
-
----
-
-## 3. Service Interaction Map
-
-> One row per service the project has (frontend, API routes, DB, cache,
-> background jobs, external APIs, auth, realtime, analytics, storage) with an
-> explicit touched/not-touched verdict. "Not touched" requires a reason.
-
-| Service | Touched? | Interaction | Changes needed | If down/slow |
-|---|---|---|---|---|
-| <service> | yes/no | <read/write/call/emit> | <files> | <failure behavior> |
-
-- Every "yes" row must appear in the sections below and in the Testing Plan.
-- External APIs must name timeout, retry budget, fallback, and cost.
-
----
-
-## 4. Data Flow
-
-### 4a. Server Actions
-
-| Action | File | Parse | Authorize | Ownership | DTO |
-|---|---|---|---|---|---|
-| `<actionName>` | `app/<path>/actions.ts` | zod/valibot | session.userId | resourceId === actor | `Pick<...>` |
-
-*Each action is a public POST endpoint. Parse → Authorize → Ownership → DTO is non-negotiable (constitution: BE.ACTION / Critical).*
-
-### 4b. Route Handlers
-
-| Method | File | Auth | Rate-limit | Purpose |
-|---|---|---|---|---|
-| POST | `app/api/<path>/route.ts` | Bearer / session | yes | webhook / external client |
-
-### 4c. DAL Methods
-
-| Method | File | Input type | Return type |
-|---|---|---|---|
-| `get<Entity>ById` | `lib/dal/<entity>.ts` | `{ id: BrandedId }` | `Result<EntityDTO>` |
-| `create<Entity>` | `lib/dal/<entity>.ts` | `CreateEntityInput` | `Result<EntityDTO>` |
-
-*Every DAL file starts with `import 'server-only'`. Inputs are schema-parsed; return type is a typed envelope, never `any`.*
-
----
-
-## 5. Schema Validators
-
-| Schema name | File | Validates |
-|---|---|---|
-| `<EntityName>Schema` | `lib/schemas/<entity>.ts` | Create/Update body |
-| `<RouteParams>Schema` | `lib/schemas/<entity>.ts` | Dynamic route params |
-
-*Use the project's configured validator (zod / valibot / yup). Never widen to `unknown` without narrowing; never use `any`.*
-
----
-
-## 6. Caching Strategy
-
-| Fetch / Query | Cache directive | Revalidation |
-|---|---|---|
-| `<description>` | `{ cache: 'force-cache' }` / `unstable_cache` | `revalidateTag('<tag>')` on mutation |
-| `<description>` | `{ cache: 'no-store' }` | — (real-time) |
-
-*Every `fetch` or `unstable_cache` call must have an explicit cache directive. No implicit defaults.*
-
----
-
-## 7. Prerendering Strategy
-
-| Segment | Strategy | Reason |
-|---|---|---|
-| `app/<path>/page.tsx` | Static (`generateStaticParams`) | Content known at build |
-| `app/<path>/page.tsx` | Dynamic (`force-dynamic`) | User-specific data |
-| `app/<path>/page.tsx` | ISR (`revalidate: N`) | Shared, time-sensitive |
-
----
-
-## 8. Streaming & Suspense
-
-List every data-fetch boundary and its Suspense skeleton:
-
-- `<DataComponent>` wrapped in `<Suspense fallback={<SkeletonName />}>` in `app/<path>/page.tsx`
-- Loading skeleton: `app/<path>/loading.tsx` covers the full route segment
-
-*Avoid blocking the whole page on a slow query. Use parallel `Promise.all` for independent fetches.*
-
----
-
-## 9. Metadata
-
-```ts
-// app/<path>/page.tsx — generateMetadata
-export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  // fetch minimal fields for title / description / OG
-  return {
-    title: `<Title> | <Site>`,
-    description: `...`,
-    openGraph: { ... },
-  };
-}
-```
-
-*Required for every public-facing page (constitution: FE / Medium).*
-
----
-
-## 10. Accessibility Checkpoints
-
-- [ ] Interactive elements are native HTML (`<button>`, `<a>`) or carry full ARIA role/label
-- [ ] Images carry descriptive `alt`; decorative images use `alt=""`
-- [ ] Form errors announced via `aria-describedby` / `role="alert"`
-- [ ] Color contrast ≥ 4.5:1 (AA) for normal text, ≥ 3:1 for large text
-- [ ] Keyboard navigation tested for all interactive flows
-
----
-
-## 11. Error Handling
-
-| Layer | Mechanism | Scope |
-|---|---|---|
-| Server Action failure | Return `{ error: string }` DTO | Caller shows inline error |
-| RSC fetch error | `error.tsx` boundary | Segment-level |
-| Route Handler error | `NextResponse.json({ error }, { status })` | HTTP client |
-| DAL failure | Typed `Result` envelope (`{ ok: false; error }`) | Bubbles to Action |
-
-*Never throw untyped errors from Server Actions or DAL methods. The client should always receive a typed failure state.*
-
----
-
-## 12. Security Checklist
-
-- [ ] CSRF: Server Actions are protected by Next.js origin check (same-origin + `SameSite=Lax` cookie)
-- [ ] Route Handler webhooks verify HMAC signature before processing
-- [ ] Rate limiting on public Route Handlers
-- [ ] Authorization re-checked inside every Server Action (not only at the route level)
-- [ ] Ownership enforced: `resource.userId === session.userId` before mutation
-- [ ] No secrets interpolated into client components or public env vars (`NEXT_PUBLIC_`)
-- [ ] Content-Security-Policy header configured in `next.config.*`
-
----
-
-## 13. Testing Plan
-
-| Test type | Target | Tool |
-|---|---|---|
-| Unit | Schema validators | vitest |
-| Unit | DAL methods (mock DB) | vitest |
-| Integration | Server Actions | vitest + db fixture |
-| E2E | Happy path + auth gate | Playwright |
-
----
-
-## 14. Phase Gate
-
-**This plan targets Phase <P1/P2/P3/P4>.** Directives from higher phases are noted as `[future]` and do not block this iteration.
-
-Items deferred to a higher phase:
-- `[P3]` Rate limiting on public endpoints
-- `[P3]` Full audit trail in `audit_log` table
-- *(adjust to match your actual deferrals)*
-
----
-
-## 15. Open Questions
-
-List any decisions the team needs to make before implementation starts:
-
-1. <Question>
-2. ...
-
-*(Delete this section if there are none.)*
-```
-
----
-
-## Post-Plan Checks
-
-After producing the plan:
-
-1. Verify every Server Action listed in §4a has Parse / Authorize / Ownership / DTO columns completed. If any column is marked `—` without justification, call it out as a constitution risk.
-2. Verify every DAL method listed in §4c has a typed return envelope — not `Promise<any>` or `Promise<Row>`.
-3. Verify every `fetch` in §6 has an explicit cache directive — no row is left blank.
-4. Verify the Service Interaction Map (§3) has an explicit yes/no verdict for every service the project has, every "yes" row is reflected in a later section AND in the Testing Plan, and every external-API row names timeout / retry / fallback / cost. A blank or missing row blocks the plan.
-5. If the plan targets P1 but includes Critical directives that are marked `[future]`, flag each one and ask the user to confirm the deferral.
-
-After completing these checks, offer:
-
-```
-## Next Steps
-
-Run `/speckit.tasks` to generate implementation tasks from this plan, or
-run `/speckit.scaffold.route app/<path>` to scaffold the route structure now.
-```
-
-## Post-Execution Hooks
-
-Check `.specify/extensions.yml` for `hooks.after_plan` entries and apply the same hook-processing rules.
+1. **Setup**: Run `.specify/scripts/bash/setup-plan.sh --json` from repo root and parse JSON for FEATURE_SPEC, IMPL_PLAN, SPECS_DIR, BRANCH. For single quotes in args like "I'm Groot", use escape syntax: e.g 'I'\''m Groot' (or double-quote if possible: "I'm Groot").
+
+2. **Load context**: Read FEATURE_SPEC and `.specify/memory/constitution.md`. Load IMPL_PLAN template (already copied).
+
+3. **Execute plan workflow**: Follow the structure in IMPL_PLAN template to:
+   - Fill Technical Context (mark unknowns as "NEEDS CLARIFICATION")
+   - Fill Constitution Check section from constitution
+   - Evaluate gates (ERROR if violations unjustified)
+   - Phase 0: Generate research.md (resolve all NEEDS CLARIFICATION)
+   - Phase 1: Generate data-model.md, contracts/, quickstart.md
+   - Phase 1: Update agent context by running the agent script
+   - Re-evaluate Constitution Check post-design
+
+4. **Stop and report**: Command ends after Phase 2 planning. Report branch, IMPL_PLAN path, and generated artifacts.
+
+5. **Check for extension hooks**: After reporting, check if `.specify/extensions.yml` exists in the project root.
+   - If it exists, read it and look for entries under the `hooks.after_plan` key
+   - If the YAML cannot be parsed or is invalid, skip hook checking silently and continue normally
+   - Filter out hooks where `enabled` is explicitly `false`. Treat hooks without an `enabled` field as enabled by default.
+   - For each remaining hook, do **not** attempt to interpret or evaluate hook `condition` expressions:
+     - If the hook has no `condition` field, or it is null/empty, treat the hook as executable
+     - If the hook defines a non-empty `condition`, skip the hook and leave condition evaluation to the HookExecutor implementation
+   - When constructing slash commands from hook command names, replace dots (`.`) with hyphens (`-`). For example, `speckit.git.commit` → `/speckit-git-commit`.
+   - For each executable hook, output the following based on its `optional` flag:
+     - **Optional hook** (`optional: true`):
+       ```
+       ## Extension Hooks
+
+       **Optional Hook**: {extension}
+       Command: `/{command}`
+       Description: {description}
+
+       Prompt: {prompt}
+       To execute: `/{command}`
+       ```
+     - **Mandatory hook** (`optional: false`):
+       ```
+       ## Extension Hooks
+
+       **Automatic Hook**: {extension}
+       Executing: `/{command}`
+       EXECUTE_COMMAND: {command}
+       ```
+   - If no hooks are registered or `.specify/extensions.yml` does not exist, skip silently
+
+## Phases
+
+### Phase 0: Outline & Research
+
+1. **Extract unknowns from Technical Context** above:
+   - For each NEEDS CLARIFICATION → research task
+   - For each dependency → best practices task
+   - For each integration → patterns task
+
+2. **Generate and dispatch research agents**:
+
+   ```text
+   For each unknown in Technical Context:
+     Task: "Research {unknown} for {feature context}"
+   For each technology choice:
+     Task: "Find best practices for {tech} in {domain}"
+   ```
+
+3. **Consolidate findings** in `research.md` using format:
+   - Decision: [what was chosen]
+   - Rationale: [why chosen]
+   - Alternatives considered: [what else evaluated]
+
+**Output**: research.md with all NEEDS CLARIFICATION resolved
+
+### Phase 1: Design & Contracts
+
+**Prerequisites:** `research.md` complete
+
+1. **Extract entities from feature spec** → `data-model.md`:
+   - Entity name, fields, relationships
+   - Validation rules from requirements
+   - State transitions if applicable
+
+2. **Define interface contracts** (if project has external interfaces) → `/contracts/`:
+   - Identify what interfaces the project exposes to users or other systems
+   - Document the contract format appropriate for the project type
+   - Examples: public APIs for libraries, command schemas for CLI tools, endpoints for web services, grammars for parsers, UI contracts for applications
+   - Skip if project is purely internal (build scripts, one-off tools, etc.)
+
+3. **Agent context update**:
+   - Update the plan reference between the `<!-- SPECKIT START -->` and `<!-- SPECKIT END -->` markers in `CLAUDE.md` to point to the plan file created in step 1 (the IMPL_PLAN path)
+
+**Output**: data-model.md, /contracts/*, quickstart.md, updated agent context file
+
+## Key rules
+
+- Use absolute paths for filesystem operations; use project-relative paths for references in documentation and agent context files
+- ERROR on gate failures or unresolved clarifications

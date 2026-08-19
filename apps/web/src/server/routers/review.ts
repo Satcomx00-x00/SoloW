@@ -46,8 +46,9 @@ export const reviewRouter = router({
       });
 
       // Dev stand-in for the orchestrator's integrate step: apply the resulting Task state
-      // and close the session on a terminal decision.
-      if (devOwnerMode()) {
+      // and close the session on a terminal decision. Skipped once a real engine is wired —
+      // there the workflow owns the transition, and writing it here too would race it.
+      if (devOwnerMode() && !orchestrator.isWired()) {
         const nextState = DECISION_TASK_STATE[input.decision];
         unwrap(await updateTaskState(ctx.rctx, session.taskId, nextState));
         if (input.decision !== "request_changes") {

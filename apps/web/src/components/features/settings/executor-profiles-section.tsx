@@ -45,8 +45,8 @@ export function ExecutorProfilesSection() {
               required
             />
           </div>
-          <Button type="submit" disabled={create.isPending}>
-            {create.isPending ? "Creating…" : "Add executor"}
+          <Button type="submit" loading={create.isPending}>
+            Add executor
           </Button>
         </form>
         {create.error && (

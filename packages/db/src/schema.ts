@@ -37,7 +37,14 @@ const updatedAt = () =>
 export const workspace = sqliteTable("workspace", {
   id: id(),
   name: text("name").notNull(),
+  /** The BetterAuth user who owns this Workspace (`auth_user.id`). */
   ownerUserId: text("owner_user_id").notNull(),
+  /**
+   * Per-Workspace feature-flag overrides, `{ "ff-core-program": true }` (task TASK-001).
+   * The registry default stays OFF, so a Workspace with no entry here has the feature off and
+   * clearing the column is the kill switch.
+   */
+  enabledFlags: text("enabled_flags", { mode: "json" }).$type<Record<string, boolean>>(),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -237,6 +244,10 @@ export const secret = sqliteTable(
   (t) => ({ byName: uniqueIndex("secret_ws_name").on(t.workspaceId, t.name) }),
 );
 
+/**
+ * The domain tables. BetterAuth's tables live in `auth-schema.ts` and are joined onto this in
+ * `tables.ts` — kept in separate files because drizzle-kit reads each schema file standalone.
+ */
 export const schema = {
   workspace,
   issue,
