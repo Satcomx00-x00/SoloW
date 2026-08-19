@@ -6,6 +6,8 @@ import { ScmProviderError } from "./types.js";
 
 let server: ReturnType<typeof Bun.serve>;
 let receivedAuth: string[] = [];
+/** Full request paths including query, so a test can assert how the API was actually called. */
+let receivedPaths: string[] = [];
 
 const PROJECT = "acme/gate"; // URL-encoded as acme%2Fgate in the request path
 
@@ -15,6 +17,7 @@ beforeAll(() => {
     fetch(req) {
       receivedAuth.push(req.headers.get("private-token") ?? "");
       const url = new URL(req.url);
+      receivedPaths.push(`${url.pathname}${url.search}`);
 
       if (url.pathname === "/api/v4/user") {
         return Response.json({ username: "glab" });
@@ -73,6 +76,36 @@ beforeAll(() => {
             name: "feat",
             default: false,
             commit: { id: "sha2", committed_date: "2026-01-02T00:00:00Z" },
+          },
+        ]);
+      }
+      if (url.pathname === "/api/v4/projects") {
+        // Echo the query back so the test can assert membership scoping was actually requested.
+        return Response.json([
+          {
+            name: "gate",
+            path_with_namespace: "acme/gate",
+            description: "the gate",
+            default_branch: "main",
+            visibility: "private",
+            web_url: "u/acme/gate",
+            _query: url.search,
+          },
+          {
+            name: "internal-tools",
+            path_with_namespace: "acme/internal-tools",
+            description: null,
+            default_branch: null,
+            visibility: "internal",
+            web_url: "u/acme/internal-tools",
+          },
+          {
+            name: "docs",
+            path_with_namespace: "acme/docs",
+            description: null,
+            default_branch: "main",
+            visibility: "public",
+            web_url: "u/acme/docs",
           },
         ]);
       }
@@ -153,6 +186,34 @@ describe("GitlabProvider", () => {
       headSha: "sha1",
       headCommittedAt: "2026-01-01T00:00:00Z",
     });
+  });
+
+  it("lists projects the token is a member of, keyed on path_with_namespace", async () => {
+    const repos = await new GitlabProvider().listRepositories(credential());
+    expect(repos[0]).toEqual({
+      fullName: "acme/gate",
+      name: "gate",
+      description: "the gate",
+      defaultBranch: "main",
+      isPrivate: true,
+      url: "u/acme/gate",
+    });
+    // fullName is the RepoRef every other method takes, so a picked value needs no reformatting.
+    expect(repos.map((r) => r.fullName)).toEqual(["acme/gate", "acme/internal-tools", "acme/docs"]);
+  });
+
+  it("scopes the project list to membership — otherwise GitLab returns every public project", async () => {
+    receivedPaths = [];
+    await new GitlabProvider().listRepositories(credential());
+    expect(receivedPaths.at(-1)).toContain("membership=true");
+  });
+
+  it('treats GitLab "internal" visibility as private, not as publicly readable', async () => {
+    const repos = await new GitlabProvider().listRepositories(credential());
+    const internal = repos.find((r) => r.fullName === "acme/internal-tools");
+    const open = repos.find((r) => r.fullName === "acme/docs");
+    expect(internal?.isPrivate).toBe(true);
+    expect(open?.isPrivate).toBe(false);
   });
 
   it("throws ScmProviderError on a non-2xx response, token never in the message", async () => {

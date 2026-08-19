@@ -7,6 +7,7 @@ import {
   importIssues,
   linkRepository,
   listExternalIssues,
+  listExternalRepositories,
   syncRepositorySignals,
 } from "./integration.js";
 
@@ -61,6 +62,18 @@ beforeAll(() => {
     fetch(req) {
       const url = new URL(req.url);
       if (url.pathname === "/api/v4/user") return Response.json({ username: "fixture" });
+      if (url.pathname === "/api/v4/projects") {
+        return Response.json(
+          Object.keys(PROJECTS).map((path) => ({
+            name: path.split("/").at(-1),
+            path_with_namespace: path,
+            description: null,
+            default_branch: "main",
+            visibility: "private",
+            web_url: `u/${path}`,
+          })),
+        );
+      }
       for (const [path, data] of Object.entries(PROJECTS)) {
         const encoded = encodeURIComponent(path);
         if (url.pathname === `/api/v4/projects/${encoded}/issues`)
@@ -89,6 +102,7 @@ async function seedLinkedRepos(): Promise<{
   ctx: RequestContext;
   repoAId: string;
   repoBId: string;
+  integrationId: string;
 }> {
   const [ws] = await db
     .insert(workspace)
@@ -138,7 +152,7 @@ async function seedLinkedRepos(): Promise<{
   });
   if (!linkedA.ok || !linkedB.ok) throw new Error("failed to link repositories");
 
-  return { ctx, repoAId: repoA.id, repoBId: repoB.id };
+  return { ctx, repoAId: repoA.id, repoBId: repoB.id, integrationId: connected.data.id };
 }
 
 describe("importIssues — two Repositories sharing one Integration (regression)", () => {
@@ -187,5 +201,73 @@ describe("syncRepositorySignals — branches scoped per Repository", () => {
 
     expect(syncedA.ok && syncedA.data.branches[0]?.headSha).toBe("a1");
     expect(syncedB.ok && syncedB.data.branches[0]?.headSha).toBe("b1");
+  });
+});
+
+describe("listExternalRepositories — the link picker's source of truth", () => {
+  it("returns the repositories the token can see, keyed on the provider's full name", async () => {
+    const { ctx, integrationId } = await seedLinkedRepos();
+    const listed = await listExternalRepositories(ctx, { integrationId });
+
+    expect(listed.ok).toBe(true);
+    if (!listed.ok) return;
+    expect(listed.data.map((r) => r.fullName).sort()).toEqual([
+      "group/project-a",
+      "group/project-b",
+    ]);
+  });
+
+  it("flags an already-linked repository instead of hiding it", async () => {
+    // seedLinkedRepos links BOTH projects, so both must come back flagged — a picker that
+    // silently dropped them would look broken to someone re-checking last week's link.
+    const { ctx, integrationId } = await seedLinkedRepos();
+    const listed = await listExternalRepositories(ctx, { integrationId });
+
+    expect(listed.ok).toBe(true);
+    if (!listed.ok) return;
+    expect(listed.data.every((r) => r.alreadyLinked)).toBe(true);
+  });
+
+  it("does not flag a repository linked under a different Integration", async () => {
+    const { ctx, integrationId } = await seedLinkedRepos();
+
+    // A second Integration (same fixture host) has linked nothing of its own.
+    const [sec] = await db
+      .insert(secret)
+      .values({
+        workspaceId: ctx.workspaceId,
+        name: "gitlab-pat-2",
+        kind: "scm_pat",
+        ciphertext: encryptSecret("glpat-fixture-2"),
+      })
+      .returning();
+    if (!sec) throw new Error("failed to seed second secret");
+    const second = await connectIntegration(ctx, {
+      provider: "gitlab",
+      secretId: sec.id,
+      baseUrl: `http://localhost:${server.port}`,
+      writeBackEnabled: false,
+    });
+    if (!second.ok) throw new Error("failed to connect second integration");
+
+    const listed = await listExternalRepositories(ctx, { integrationId: second.data.id });
+    expect(listed.ok).toBe(true);
+    if (!listed.ok) return;
+    // Same names, different Integration — linking is per-Integration, so nothing is flagged.
+    expect(listed.data.some((r) => r.alreadyLinked)).toBe(false);
+    expect(integrationId).not.toBe(second.data.id);
+  });
+
+  it("refuses an Integration from another Workspace (Principle V)", async () => {
+    const { integrationId } = await seedLinkedRepos();
+    const [otherWs] = await db
+      .insert(workspace)
+      .values({ name: "other", ownerUserId: "owner-2" })
+      .returning();
+    if (!otherWs) throw new Error("failed to seed workspace");
+
+    const intruder: RequestContext = { db, workspaceId: otherWs.id, userId: "user-2" };
+    const listed = await listExternalRepositories(intruder, { integrationId });
+    expect(listed.ok).toBe(false);
   });
 });

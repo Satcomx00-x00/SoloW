@@ -46,9 +46,31 @@ export function IntegrationsSection() {
     integrationId: "",
   });
   const [externalFullName, setExternalFullName] = useState("");
+
+  /**
+   * The repositories the selected Integration's token can actually see. Fetched only once an
+   * Integration is chosen, because the query authenticates against that Integration's stored
+   * token — there is nothing meaningful to list before then.
+   */
+  const externalRepos = trpc.integration.listExternalRepositories.useQuery(
+    { integrationId: linkTarget.integrationId },
+    { enabled: linkTarget.integrationId.length > 0 },
+  );
+
+  /**
+   * Switching Integration must drop the chosen repository: a full name is only meaningful on the
+   * Integration that listed it, and carrying it across would submit a name from account A against
+   * account B — the exact mistake the picker exists to prevent.
+   */
+  const changeIntegration = (integrationId: string) => {
+    setLinkTarget((t) => ({ ...t, integrationId }));
+    setExternalFullName("");
+  };
+
   const link = trpc.integration.linkRepository.useMutation({
     onSuccess: () => {
       utils.repository.list.invalidate();
+      utils.integration.listExternalRepositories.invalidate();
       setExternalFullName("");
     },
   });
@@ -176,10 +198,7 @@ export function IntegrationsSection() {
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="link-integration">Integration</Label>
-                <Select
-                  value={linkTarget.integrationId}
-                  onValueChange={(v) => setLinkTarget((t) => ({ ...t, integrationId: v }))}
-                >
+                <Select value={linkTarget.integrationId} onValueChange={changeIntegration}>
                   <SelectTrigger className="w-40" id="link-integration">
                     <SelectValue placeholder="Integration" />
                   </SelectTrigger>
@@ -193,20 +212,58 @@ export function IntegrationsSection() {
                 </Select>
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="link-full-name">owner/repo</Label>
-                <Input
-                  id="link-full-name"
-                  className="w-48"
-                  placeholder="acme/gate"
+                <Label htmlFor="link-full-name">Provider repository</Label>
+                <Select
                   value={externalFullName}
-                  onChange={(e) => setExternalFullName(e.target.value)}
-                  required
-                />
+                  onValueChange={setExternalFullName}
+                  disabled={!linkTarget.integrationId || externalRepos.isPending}
+                >
+                  <SelectTrigger className="w-64" id="link-full-name">
+                    <SelectValue
+                      placeholder={
+                        !linkTarget.integrationId
+                          ? "Select an integration first"
+                          : externalRepos.isPending
+                            ? "Loading repositories…"
+                            : "Select a repository"
+                      }
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(externalRepos.data ?? []).map((r) => (
+                      <SelectItem key={r.fullName} value={r.fullName} disabled={r.alreadyLinked}>
+                        {r.fullName}
+                        {r.isPrivate ? " · private" : ""}
+                        {r.alreadyLinked ? " · already linked" : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
-              <Button type="submit" size="sm" loading={link.isPending}>
+              <Button
+                type="submit"
+                size="sm"
+                loading={link.isPending}
+                disabled={!externalFullName || !linkTarget.repoId}
+              >
                 Link
               </Button>
             </form>
+            {externalRepos.error && (
+              <p className="text-destructive text-sm" role="alert">
+                Could not list repositories: {externalRepos.error.message}
+              </p>
+            )}
+            {externalRepos.isSuccess && externalRepos.data.length === 0 && (
+              <p className="text-muted-foreground text-xs">
+                This token cannot see any repositories. Check its scopes on the provider.
+              </p>
+            )}
+            {link.error && (
+              <p className="text-destructive text-sm" role="alert">
+                {link.error.message}
+              </p>
+            )}
           </div>
         )}
 

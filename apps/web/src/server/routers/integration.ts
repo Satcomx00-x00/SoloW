@@ -3,11 +3,13 @@ import {
   changeRequestDto,
   connectIntegrationInput,
   externalIssuePreviewDto,
+  externalRepositoryDto,
   importIssuesInput,
   integrationDto,
   issueDto,
   linkRepositoryInput,
   listExternalIssuesInput,
+  listExternalRepositoriesInput,
   repositoryBranchDto,
   repositoryDto,
   syncRepositorySignalsInput,
@@ -18,6 +20,7 @@ import {
   importIssues,
   linkRepository,
   listExternalIssues,
+  listExternalRepositories,
   listIntegrations,
   syncRepositorySignals,
 } from "../dal/integration.js";
@@ -52,6 +55,20 @@ export const integrationRouter = router({
     .input(z.object({}))
     .output(z.array(integrationDto))
     .query(async ({ ctx }) => unwrap(await listIntegrations(ctx.rctx))),
+  listExternalRepositories: integrationsProcedure
+    .meta({
+      openapi: {
+        method: "GET",
+        path: "/integration.listExternalRepositories",
+        tags: ["integration"],
+        protect: true,
+        summary:
+          "List the repositories this Integration's token can actually see, flagging the ones already linked. Backs the link picker so a repository is chosen from real options rather than typed.",
+      },
+    })
+    .input(listExternalRepositoriesInput)
+    .output(z.array(externalRepositoryDto))
+    .query(async ({ ctx, input }) => unwrap(await listExternalRepositories(ctx.rctx, input))),
   linkRepository: integrationsProcedure
     .meta({
       openapi: {

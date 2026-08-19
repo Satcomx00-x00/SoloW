@@ -4,6 +4,7 @@ import type {
   ExternalBranch,
   ExternalChangeRequest,
   ExternalIssue,
+  ExternalRepository,
   RepoRef,
   ScmCredential,
 } from "./types.js";
@@ -45,6 +46,15 @@ interface GithubRepo {
   default_branch: string;
 }
 
+interface GithubRepoSummary {
+  name: string;
+  full_name: string;
+  description: string | null;
+  default_branch: string | null;
+  private: boolean;
+  html_url: string;
+}
+
 function apiRoot(baseUrl: string | null): string {
   // GitHub Enterprise Server serves its API under /api/v3 on the same host; github.com does not.
   return baseUrl ? `${baseUrl.replace(/\/$/, "")}/api/v3` : "https://api.github.com";
@@ -70,6 +80,25 @@ export class GithubProvider implements ChangeProvider {
     } catch (cause) {
       return { ok: false, reason: cause instanceof Error ? cause.message : String(cause) };
     }
+  }
+
+  /**
+   * `/user/repos` rather than `/user/{login}/repos`: the authenticated-user endpoint is the only
+   * one that returns private repositories and organisation repositories the token was granted,
+   * which is precisely the set a user expects to see offered. Sorted by full name so the list is
+   * stable between calls — a picker that reorders itself is worse than one that is merely long.
+   */
+  async listRepositories(credential: ScmCredential): Promise<ExternalRepository[]> {
+    const url = `${apiRoot(credential.baseUrl)}/user/repos?per_page=100&sort=full_name&affiliation=owner,collaborator,organization_member`;
+    const rows = (await scmFetch("github", url, authHeaders(credential))) as GithubRepoSummary[];
+    return rows.map((r) => ({
+      fullName: r.full_name,
+      name: r.name,
+      description: r.description,
+      defaultBranch: r.default_branch,
+      isPrivate: r.private,
+      url: r.html_url,
+    }));
   }
 
   async listIssues(credential: ScmCredential, repo: RepoRef): Promise<ExternalIssue[]> {

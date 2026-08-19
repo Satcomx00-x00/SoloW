@@ -56,6 +56,31 @@ export const linkRepositoryInput = z.object({
 });
 export type LinkRepositoryInput = z.infer<typeof linkRepositoryInput>;
 
+/**
+ * A repository the connected token can actually see, for the link picker.
+ *
+ * Linking used to take `externalFullName` as free text, which made a typo indistinguishable from
+ * a repository the token simply cannot reach: both surfaced as a 404 later, at first sync, far
+ * from the form that caused it. Offering the real list turns that class of error into something
+ * the UI cannot express.
+ */
+export const externalRepositoryDto = z.object({
+  fullName: z.string(),
+  name: z.string(),
+  description: z.string().nullable(),
+  defaultBranch: z.string().nullable(),
+  isPrivate: z.boolean(),
+  url: z.string(),
+  /** True when some Repository in this Workspace is already linked to this provider repo. */
+  alreadyLinked: z.boolean(),
+});
+export type ExternalRepositoryDto = z.infer<typeof externalRepositoryDto>;
+
+export const listExternalRepositoriesInput = z.object({
+  integrationId: idSchema,
+});
+export type ListExternalRepositoriesInput = z.infer<typeof listExternalRepositoriesInput>;
+
 /** A provider issue not yet imported, or already imported (`alreadyImported` true) — the Import dialog's row shape. */
 export const externalIssuePreviewDto = z.object({
   externalId: z.string(),

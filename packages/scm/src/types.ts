@@ -50,6 +50,23 @@ export interface ExternalBranch {
 }
 
 /**
+ * A repository the connected token can actually see — what makes linking a *pick* rather than a
+ * typed guess. `fullName` is the same "owner/repo" (GitHub) or "namespace/path" (GitLab) string
+ * every other method here takes as its `RepoRef`, so the value chosen from a list is exactly the
+ * value the rest of the interface expects; no reformatting between the picker and the call.
+ */
+export interface ExternalRepository {
+  fullName: RepoRef;
+  /** The last path segment, for a compact label when the namespace is obvious from context. */
+  name: string;
+  description: string | null;
+  defaultBranch: string | null;
+  isPrivate: boolean;
+  /** The provider's web page for the repository — not a clone URL, which would embed a token. */
+  url: string;
+}
+
+/**
  * Read-side today. `createChangeRequest` / `comment` / `readChecks` — the write-side #15
  * originally sketched — are deliberately not declared here yet: they belong to issue #71 (push
  * a branch, open a change request), which is separately blocked on issue #7 landing the
@@ -60,6 +77,11 @@ export interface ChangeProvider {
   readonly provider: ScmProvider;
   /** Verifies the credential actually authenticates, before it is stored as connected. */
   authenticate(credential: ScmCredential): Promise<{ ok: true } | { ok: false; reason: string }>;
+  /**
+   * Every repository this credential can reach, so the UI offers a choice of real repositories
+   * instead of a free-text box where a typo becomes a 404 at first sync.
+   */
+  listRepositories(credential: ScmCredential): Promise<ExternalRepository[]>;
   listIssues(credential: ScmCredential, repo: RepoRef): Promise<ExternalIssue[]>;
   listChangeRequests(credential: ScmCredential, repo: RepoRef): Promise<ExternalChangeRequest[]>;
   listBranches(credential: ScmCredential, repo: RepoRef): Promise<ExternalBranch[]>;

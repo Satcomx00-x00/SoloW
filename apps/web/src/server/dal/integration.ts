@@ -4,6 +4,7 @@ import {
   CommonErrorCode,
   type ConnectIntegrationInput,
   type ExternalIssuePreviewDto,
+  type ExternalRepositoryDto,
   err,
   type ImportIssuesInput,
   type IntegrationDto,
@@ -11,6 +12,7 @@ import {
   type IssueDto,
   type LinkRepositoryInput,
   type ListExternalIssuesInput,
+  type ListExternalRepositoriesInput,
   ok,
   type RepositoryBranchDto,
   type RepositoryDto,
@@ -141,6 +143,39 @@ export async function listIntegrations(ctx: RequestContext): Promise<Result<Inte
     .where(eq(integration.workspaceId, ctx.workspaceId))
     .orderBy(desc(integration.createdAt));
   return ok(rows.map(integrationToDto));
+}
+
+/**
+ * The repositories a connected Integration's token can actually see, for the link picker.
+ *
+ * Flags the ones already linked rather than hiding them, so a user looking for a repository they
+ * linked last week finds it marked instead of concluding the list is broken. Read-only: this
+ * never writes, so it stays safe to call on every render of the form.
+ */
+export async function listExternalRepositories(
+  ctx: RequestContext,
+  input: ListExternalRepositoriesInput,
+): Promise<Result<ExternalRepositoryDto[], typeof CommonErrorCode.NotFound>> {
+  const cred = await loadCredential(ctx, input.integrationId);
+  if (!cred.ok) return err(CommonErrorCode.NotFound);
+
+  const external = await providerFor(cred.data.row.provider).listRepositories(cred.data.credential);
+
+  // Scoped to this Integration: two Integrations can legitimately expose the same full name
+  // (a github.com account and a GitHub Enterprise host both having "acme/gate"), and marking
+  // one as linked because of the other would be wrong.
+  const linked = await ctx.db
+    .select({ externalFullName: repository.externalFullName })
+    .from(repository)
+    .where(
+      and(
+        eq(repository.workspaceId, ctx.workspaceId),
+        eq(repository.integrationId, input.integrationId),
+      ),
+    );
+  const linkedNames = new Set(linked.map((r) => r.externalFullName));
+
+  return ok(external.map((r) => ({ ...r, alreadyLinked: linkedNames.has(r.fullName) })));
 }
 
 /** Bind a connected Repository to a specific `owner/repo` on an Integration (issue #15). */

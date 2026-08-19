@@ -609,6 +609,130 @@
         }
       }
     },
+    "/integration.listExternalRepositories": {
+      "get": {
+        "operationId": "integration-listExternalRepositories",
+        "summary": "List the repositories this Integration's token can actually see, flagging the ones already linked. Backs the link picker so a repository is chosen from real options rather than typed.",
+        "tags": [
+          "integration"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "integrationId",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "fullName": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "description": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "defaultBranch": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "isPrivate": {
+                        "type": "boolean"
+                      },
+                      "url": {
+                        "type": "string"
+                      },
+                      "alreadyLinked": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "fullName",
+                      "name",
+                      "description",
+                      "defaultBranch",
+                      "isPrivate",
+                      "url",
+                      "alreadyLinked"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.NOT_FOUND"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/integration.linkRepository": {
       "post": {
         "operationId": "integration-linkRepository",

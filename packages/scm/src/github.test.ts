@@ -10,6 +10,8 @@ import { ScmProviderError } from "./types.js";
 
 let server: ReturnType<typeof Bun.serve>;
 let receivedAuth: string[] = [];
+/** Full request paths including query, so a test can assert how the API was actually called. */
+let receivedPaths: string[] = [];
 
 beforeAll(() => {
   server = Bun.serve({
@@ -17,9 +19,30 @@ beforeAll(() => {
     fetch(req) {
       receivedAuth.push(req.headers.get("authorization") ?? "");
       const url = new URL(req.url);
+      receivedPaths.push(`${url.pathname}${url.search}`);
 
       if (url.pathname === "/api/v3/user") {
         return Response.json({ login: "octocat" });
+      }
+      if (url.pathname === "/api/v3/user/repos") {
+        return Response.json([
+          {
+            name: "gate",
+            full_name: "acme/gate",
+            description: "the gate",
+            default_branch: "main",
+            private: true,
+            html_url: "u/acme/gate",
+          },
+          {
+            name: "docs",
+            full_name: "acme/docs",
+            description: null,
+            default_branch: null,
+            private: false,
+            html_url: "u/acme/docs",
+          },
+        ]);
       }
       if (url.pathname === "/api/v3/repos/acme/gate/issues") {
         return Response.json([
@@ -146,6 +169,36 @@ describe("GithubProvider", () => {
       { name: "main", isDefault: true, headSha: "abc123", headCommittedAt: null },
       { name: "feat", isDefault: false, headSha: "def456", headCommittedAt: null },
     ]);
+  });
+
+  it("lists the repositories the token can see, keyed on full_name", async () => {
+    const repos = await new GithubProvider().listRepositories(credential());
+    expect(repos[0]).toEqual({
+      fullName: "acme/gate",
+      name: "gate",
+      description: "the gate",
+      defaultBranch: "main",
+      isPrivate: true,
+      url: "u/acme/gate",
+    });
+    // fullName is the RepoRef every other method takes, so a picked value needs no reformatting.
+    expect(repos.map((r) => r.fullName)).toEqual(["acme/gate", "acme/docs"]);
+  });
+
+  it("asks the authenticated-user endpoint — the only one returning private and org repos", async () => {
+    receivedPaths = [];
+    await new GithubProvider().listRepositories(credential());
+    const path = receivedPaths.at(-1) ?? "";
+    expect(path.startsWith("/api/v3/user/repos")).toBe(true);
+    expect(decodeURIComponent(path)).toContain(
+      "affiliation=owner,collaborator,organization_member",
+    );
+  });
+
+  it("reports visibility so the picker can mark a private repository", async () => {
+    const repos = await new GithubProvider().listRepositories(credential());
+    expect(repos.find((r) => r.fullName === "acme/gate")?.isPrivate).toBe(true);
+    expect(repos.find((r) => r.fullName === "acme/docs")?.isPrivate).toBe(false);
   });
 
   it("throws ScmProviderError, never a bare fetch error, on a non-2xx response", async () => {

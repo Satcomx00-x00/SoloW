@@ -4,6 +4,7 @@ import type {
   ExternalBranch,
   ExternalChangeRequest,
   ExternalIssue,
+  ExternalRepository,
   RepoRef,
   ScmCredential,
 } from "./types.js";
@@ -37,6 +38,15 @@ interface GitlabBranch {
   name: string;
   default: boolean;
   commit: { id: string; committed_date: string };
+}
+
+interface GitlabProject {
+  name: string;
+  path_with_namespace: string;
+  description: string | null;
+  default_branch: string | null;
+  visibility: "private" | "internal" | "public";
+  web_url: string;
 }
 
 function apiRoot(baseUrl: string | null): string {
@@ -73,6 +83,29 @@ export class GitlabProvider implements ChangeProvider {
     } catch (cause) {
       return { ok: false, reason: cause instanceof Error ? cause.message : String(cause) };
     }
+  }
+
+  /**
+   * `membership=true` restricts the list to projects the token's user actually belongs to.
+   * Without it GitLab returns every *public* project on the instance — thousands of strangers'
+   * repositories on gitlab.com — which is not a picker, it is a denial of service on the user.
+   *
+   * `path_with_namespace` is the value every other method here takes as its `RepoRef`, so what
+   * the user picks is what gets stored and later URL-encoded for the per-project endpoints.
+   */
+  async listRepositories(credential: ScmCredential): Promise<ExternalRepository[]> {
+    const url = `${apiRoot(credential.baseUrl)}/projects?membership=true&per_page=100&order_by=path&sort=asc`;
+    const rows = (await scmFetch("gitlab", url, authHeaders(credential))) as GitlabProject[];
+    return rows.map((r) => ({
+      fullName: r.path_with_namespace,
+      name: r.name,
+      description: r.description,
+      defaultBranch: r.default_branch,
+      // GitLab has three visibilities; only `public` is genuinely open, so "internal" counts as
+      // private here rather than being reported to the user as if anyone could read it.
+      isPrivate: r.visibility !== "public",
+      url: r.web_url,
+    }));
   }
 
   async listIssues(credential: ScmCredential, repo: RepoRef): Promise<ExternalIssue[]> {
