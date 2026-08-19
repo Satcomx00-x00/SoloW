@@ -103,14 +103,18 @@ export const issue = sqliteTable(
     byStatus: index("issue_ws_status").on(t.workspaceId, t.status),
     byCreated: index("issue_ws_created").on(t.workspaceId, t.createdAt),
     /**
-     * Idempotent import (issue #15 AC-2 / DoD): re-importing the same provider issue must not
-     * duplicate it. `integrationId` already carries the provider and the Workspace it belongs
-     * to, so this is the DoD's `(workspaceId, provider, externalId)` requirement expressed
-     * without a denormalised `provider` column that could drift from `integration.provider`.
-     * SQLite treats each NULL as distinct, so any number of `source: "local"` rows (both
-     * columns null) coexist without tripping this index.
+     * Idempotent import (issue #15 AC-2 / DoD), scoped per **Repository**, not per Integration.
+     * GitHub's issue `id` is globally unique, but GitLab's `iid` is scoped *per project* and
+     * restarts at 1 — so two Repositories linked to the same Integration (one GitLab account,
+     * several projects) would collide on `(integrationId, externalId)` alone: project A's issue
+     * #1 and project B's issue #1 both map to the same key, and the second import would
+     * silently no-op onto the first's row instead of creating its own (caught in adversarial
+     * review before merge). `externalId` only has to be unique within the Repository it came
+     * from, which `(repositoryId, externalId)` states directly. SQLite treats each NULL as
+     * distinct, so any number of `source: "local"` rows (both columns null) coexist without
+     * tripping this index.
      */
-    byExternal: uniqueIndex("issue_integration_external").on(t.integrationId, t.externalId),
+    byExternal: uniqueIndex("issue_repository_external").on(t.repositoryId, t.externalId),
   }),
 );
 
@@ -224,10 +228,9 @@ export const changeRequest = sqliteTable(
   },
   (t) => ({
     byRepo: index("change_request_repo").on(t.repositoryId),
-    byExternal: uniqueIndex("change_request_integration_external").on(
-      t.integrationId,
-      t.externalId,
-    ),
+    // Same reasoning as `issue`'s `issue_repository_external`: GitLab's merge-request `iid` is
+    // scoped per project, so this must be scoped per Repository, not per Integration.
+    byExternal: uniqueIndex("change_request_repository_external").on(t.repositoryId, t.externalId),
   }),
 );
 

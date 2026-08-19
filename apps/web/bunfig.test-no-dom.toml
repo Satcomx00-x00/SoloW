@@ -1,0 +1,4 @@
+[test]
+# Same as bunfig.toml's [test] block minus happydom-setup.ts — see
+# src/server/dal/integration.test.ts for why this exists.
+preload = ["./test-setup.ts"]

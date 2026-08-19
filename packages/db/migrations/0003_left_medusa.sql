@@ -20,7 +20,7 @@ CREATE TABLE `change_request` (
 );
 --> statement-breakpoint
 CREATE INDEX `change_request_repo` ON `change_request` (`repository_id`);--> statement-breakpoint
-CREATE UNIQUE INDEX `change_request_integration_external` ON `change_request` (`integration_id`,`external_id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `change_request_repository_external` ON `change_request` (`repository_id`,`external_id`);--> statement-breakpoint
 CREATE TABLE `integration` (
 	`id` text PRIMARY KEY NOT NULL,
 	`workspace_id` text NOT NULL,
@@ -58,6 +58,6 @@ ALTER TABLE `issue` ADD `external_id` text;--> statement-breakpoint
 ALTER TABLE `issue` ADD `external_number` integer;--> statement-breakpoint
 ALTER TABLE `issue` ADD `external_url` text;--> statement-breakpoint
 ALTER TABLE `issue` ADD `synced_at` text;--> statement-breakpoint
-CREATE UNIQUE INDEX `issue_integration_external` ON `issue` (`integration_id`,`external_id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `issue_repository_external` ON `issue` (`repository_id`,`external_id`);--> statement-breakpoint
 ALTER TABLE `repository` ADD `integration_id` text REFERENCES integration(id);--> statement-breakpoint
 ALTER TABLE `repository` ADD `external_full_name` text;

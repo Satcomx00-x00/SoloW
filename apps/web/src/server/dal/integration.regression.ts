@@ -1,0 +1,191 @@
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { encryptSecret, repository, secret, workspace } from "@gatecontrol/db";
+import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
+import type { RequestContext } from "./context.js";
+import {
+  connectIntegration,
+  importIssues,
+  linkRepository,
+  listExternalIssues,
+  syncRepositorySignals,
+} from "./integration.js";
+
+/**
+ * DAL tests against a scripted fixture GitLab server (Principle VI — no live API in CI),
+ * exercising `@gatecontrol/scm`'s real `GitlabProvider` through it rather than mocking the
+ * provider layer. Centred on the bug an adversarial review caught before merge: GitLab's issue
+ * `iid` restarts per project, so two Repositories linked to one Integration must not collide.
+ *
+ * Deliberately named `*.regression.ts`, not `*.test.ts`: this suite needs real network I/O
+ * against `server`, but the workspace preloads happy-dom globally (bunfig.toml) for React
+ * component tests, and happy-dom's `fetch` polyfill cannot parse Bun.serve's responses over
+ * loopback (a happy-dom/Bun compat bug — HPE_UNEXPECTED_CONTENT_LENGTH — reproducible with no
+ * GateControl code involved). `integration.test.ts` runs this file in an isolated subprocess,
+ * with a bunfig that preloads only the `server-only` stub, not happy-dom.
+ */
+
+let server: ReturnType<typeof Bun.serve>;
+const PROJECTS: Record<string, { issues: unknown[]; mrs: unknown[]; branches: unknown[] }> = {
+  "group/project-a": {
+    issues: [
+      {
+        iid: 1,
+        title: "Project A's first issue",
+        description: "from A",
+        state: "opened",
+        web_url: "a/issues/1",
+      },
+    ],
+    mrs: [],
+    branches: [{ name: "main", default: true, commit: { id: "a1", committed_date: null } }],
+  },
+  "group/project-b": {
+    issues: [
+      {
+        iid: 1,
+        title: "Project B's first issue — unrelated to A's",
+        description: "from B",
+        state: "opened",
+        web_url: "b/issues/1",
+      },
+    ],
+    mrs: [],
+    branches: [{ name: "main", default: true, commit: { id: "b1", committed_date: null } }],
+  },
+};
+
+beforeAll(() => {
+  process.env.GATECONTROL_SECRET_KEY ??= Buffer.alloc(32, 4).toString("base64");
+  server = Bun.serve({
+    port: 0,
+    fetch(req) {
+      const url = new URL(req.url);
+      if (url.pathname === "/api/v4/user") return Response.json({ username: "fixture" });
+      for (const [path, data] of Object.entries(PROJECTS)) {
+        const encoded = encodeURIComponent(path);
+        if (url.pathname === `/api/v4/projects/${encoded}/issues`)
+          return Response.json(data.issues);
+        if (url.pathname === `/api/v4/projects/${encoded}/merge_requests`)
+          return Response.json(data.mrs);
+        if (url.pathname === `/api/v4/projects/${encoded}/repository/branches`)
+          return Response.json(data.branches);
+      }
+      return new Response("unmapped", { status: 404 });
+    },
+  });
+});
+
+afterAll(() => {
+  server.stop();
+});
+
+let db: TestDb;
+
+beforeEach(() => {
+  db = createTestDb();
+});
+
+async function seedLinkedRepos(): Promise<{
+  ctx: RequestContext;
+  repoAId: string;
+  repoBId: string;
+}> {
+  const [ws] = await db
+    .insert(workspace)
+    .values({ name: "acme", ownerUserId: "owner-1" })
+    .returning();
+  if (!ws) throw new Error("failed to seed workspace");
+  const ctx: RequestContext = { db, workspaceId: ws.id, userId: "user-1" };
+
+  const [sec] = await db
+    .insert(secret)
+    .values({
+      workspaceId: ws.id,
+      name: "gitlab-pat",
+      kind: "scm_pat",
+      ciphertext: encryptSecret("glpat-fixture"),
+    })
+    .returning();
+  if (!sec) throw new Error("failed to seed secret");
+
+  const connected = await connectIntegration(ctx, {
+    provider: "gitlab",
+    secretId: sec.id,
+    baseUrl: `http://localhost:${server.port}`,
+    writeBackEnabled: false,
+  });
+  if (!connected.ok) throw new Error("failed to connect integration");
+
+  const [repoA] = await db
+    .insert(repository)
+    .values({ workspaceId: ws.id, name: "A", source: "remote_url", location: "https://x/a.git" })
+    .returning();
+  const [repoB] = await db
+    .insert(repository)
+    .values({ workspaceId: ws.id, name: "B", source: "remote_url", location: "https://x/b.git" })
+    .returning();
+  if (!repoA || !repoB) throw new Error("failed to seed repositories");
+
+  const linkedA = await linkRepository(ctx, {
+    repositoryId: repoA.id,
+    integrationId: connected.data.id,
+    externalFullName: "group/project-a",
+  });
+  const linkedB = await linkRepository(ctx, {
+    repositoryId: repoB.id,
+    integrationId: connected.data.id,
+    externalFullName: "group/project-b",
+  });
+  if (!linkedA.ok || !linkedB.ok) throw new Error("failed to link repositories");
+
+  return { ctx, repoAId: repoA.id, repoBId: repoB.id };
+}
+
+describe("importIssues — two Repositories sharing one Integration (regression)", () => {
+  it("imports both projects' iid=1 as distinct Issues, not a collision", async () => {
+    const { ctx, repoAId, repoBId } = await seedLinkedRepos();
+
+    const importedA = await importIssues(ctx, { repositoryId: repoAId, externalIds: ["1"] });
+    const importedB = await importIssues(ctx, { repositoryId: repoBId, externalIds: ["1"] });
+
+    expect(importedA.ok && importedA.data[0]?.title).toBe("Project A's first issue");
+    expect(importedB.ok && importedB.data[0]?.title).toBe(
+      "Project B's first issue — unrelated to A's",
+    );
+    // The bug: B's import used to silently return A's row instead of creating its own.
+    expect(importedA.ok && importedB.ok && importedA.data[0]?.id).not.toBe(
+      importedB.ok && importedB.data[0]?.id,
+    );
+    expect(importedB.ok && importedB.data[0]?.repositoryId).toBe(repoBId);
+  });
+
+  it("does not flag project B's un-imported issue as alreadyImported after importing A's", async () => {
+    const { ctx, repoAId, repoBId } = await seedLinkedRepos();
+
+    await importIssues(ctx, { repositoryId: repoAId, externalIds: ["1"] });
+    const preview = await listExternalIssues(ctx, { repositoryId: repoBId });
+
+    expect(preview.ok && preview.data[0]?.alreadyImported).toBe(false);
+  });
+
+  it("re-importing the same id for the same repository is a real no-op", async () => {
+    const { ctx, repoAId } = await seedLinkedRepos();
+
+    const first = await importIssues(ctx, { repositoryId: repoAId, externalIds: ["1"] });
+    const second = await importIssues(ctx, { repositoryId: repoAId, externalIds: ["1"] });
+
+    expect(first.ok && second.ok && first.data[0]?.id).toBe(second.ok && second.data[0]?.id);
+  });
+});
+
+describe("syncRepositorySignals — branches scoped per Repository", () => {
+  it("does not mix up two Repositories' branches sharing an Integration", async () => {
+    const { ctx, repoAId, repoBId } = await seedLinkedRepos();
+
+    const syncedA = await syncRepositorySignals(ctx, { repositoryId: repoAId });
+    const syncedB = await syncRepositorySignals(ctx, { repositoryId: repoBId });
+
+    expect(syncedA.ok && syncedA.data.branches[0]?.headSha).toBe("a1");
+    expect(syncedB.ok && syncedB.data.branches[0]?.headSha).toBe("b1");
+  });
+});

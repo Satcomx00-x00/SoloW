@@ -56,6 +56,17 @@ export function ImportIssuesDialog() {
     },
   });
 
+  /**
+   * Switching repositories must drop the previous selection — the checked externalIds are only
+   * meaningful within the repository that produced them, and importIssues sends whatever is
+   * still checked to *this* repositoryId regardless of which repository the user meant it for
+   * (adversarial review, pre-merge).
+   */
+  const changeRepository = (id: string) => {
+    setRepositoryId(id);
+    setSelected(new Set());
+  };
+
   const toggle = (id: string) => {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -70,7 +81,14 @@ export function ImportIssuesDialog() {
   );
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        // Closing without importing must not leave a stale selection for next time either.
+        if (!next) setSelected(new Set());
+      }}
+    >
       <DialogTrigger asChild>
         <Button
           variant="ghost"
@@ -100,7 +118,7 @@ export function ImportIssuesDialog() {
           <div className="space-y-4">
             <div className="grid gap-2">
               <Label htmlFor="import-repo">Repository</Label>
-              <Select value={repositoryId} onValueChange={setRepositoryId}>
+              <Select value={repositoryId} onValueChange={changeRepository}>
                 <SelectTrigger className="w-full" id="import-repo">
                   <SelectValue placeholder="Select a repository" />
                 </SelectTrigger>

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "78bb01af-0d14-42d1-9b7e-a8a8ff27e727",
+  "id": "6618e5ed-0fa3-4e9a-b4c6-a05bca0d6b38",
   "prevId": "436bc7a4-4368-4cc7-89a1-e941fb644560",
   "tables": {
     "agent_profile": {
@@ -223,10 +223,10 @@
           ],
           "isUnique": false
         },
-        "change_request_integration_external": {
-          "name": "change_request_integration_external",
+        "change_request_repository_external": {
+          "name": "change_request_repository_external",
           "columns": [
-            "integration_id",
+            "repository_id",
             "external_id"
           ],
           "isUnique": true
@@ -568,10 +568,10 @@
           ],
           "isUnique": false
         },
-        "issue_integration_external": {
-          "name": "issue_integration_external",
+        "issue_repository_external": {
+          "name": "issue_repository_external",
           "columns": [
-            "integration_id",
+            "repository_id",
             "external_id"
           ],
           "isUnique": true

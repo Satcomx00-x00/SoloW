@@ -197,10 +197,14 @@ export async function listExternalIssues(
     repo.data.externalFullName,
   );
 
+  // Scoped to this Repository, not the whole Integration: GitLab's issue `iid` restarts per
+  // project, so two Repositories on one Integration can share an externalId that means two
+  // different issues — filtering by integrationId alone would flag one as "already imported"
+  // because of the other (caught in adversarial review before merge).
   const imported = await ctx.db
     .select({ externalId: issue.externalId })
     .from(issue)
-    .where(eq(issue.integrationId, repo.data.integrationId));
+    .where(eq(issue.repositoryId, repo.data.id));
   const importedIds = new Set(imported.map((r) => r.externalId));
 
   return ok(external.map((i) => ({ ...i, alreadyImported: importedIds.has(i.externalId) })));
@@ -208,9 +212,11 @@ export async function listExternalIssues(
 
 /**
  * Import selected external issues as GateControl Issues (AC-2). Idempotent on
- * `(integrationId, externalId)` — an id already imported is skipped on insert and its existing
- * row is returned, so a second import of the same selection is visibly a no-op, not a
- * duplicate.
+ * `(repositoryId, externalId)` — an id already imported *for this Repository* is skipped on
+ * insert and its existing row is returned, so a second import of the same selection is visibly
+ * a no-op, not a duplicate. Scoped to the Repository rather than the Integration: GitLab's issue
+ * `iid` restarts per project, so two Repositories sharing an Integration can otherwise collide
+ * on the same externalId for two genuinely different issues (adversarial review, pre-merge).
  */
 export async function importIssues(
   ctx: RequestContext,
@@ -258,7 +264,7 @@ export async function importIssues(
     .where(
       and(
         eq(issue.workspaceId, ctx.workspaceId),
-        eq(issue.integrationId, repo.data.integrationId),
+        eq(issue.repositoryId, repo.data.id),
         inArray(issue.externalId, input.externalIds),
       ),
     );
@@ -306,8 +312,12 @@ export async function syncRepositorySignals(
         authorLogin: cr.authorLogin,
         syncedAt,
       })
+      // Scoped to (repositoryId, externalId), matching the schema's unique index: GitLab's
+      // merge-request `iid` restarts per project, so keying on integrationId alone would let
+      // one Repository's sync overwrite a different Repository's change request that happens
+      // to share the same iid (adversarial review, pre-merge).
       .onConflictDoUpdate({
-        target: [changeRequest.integrationId, changeRequest.externalId],
+        target: [changeRequest.repositoryId, changeRequest.externalId],
         set: { title: cr.title, state: cr.state, syncedAt, updatedAt: syncedAt },
       });
   }
