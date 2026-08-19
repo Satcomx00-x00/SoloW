@@ -4,11 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { $ } from "bun";
 import {
+  adoptWorktree,
   cleanupWorktree,
   commitWorktree,
   DIFF_PATCH_LIMIT,
   diffWorktree,
   hasChanges,
+  listWorktrees,
+  prepareRepository,
   provisionWorktree,
   type Worktree,
 } from "./manager.js";
@@ -171,5 +174,88 @@ describe("diffWorktree", () => {
     expect(await hasChanges(wt.path)).toBe(false);
     const shown = await $`git -C ${wt.path} show --name-only --format=`.quiet().text();
     expect(shown).toContain("added-by-agent.ts");
+  });
+});
+
+/**
+ * Adopting the worktree the agent created (task TASK-014).
+ *
+ * `claude --worktree` makes the directory, so GateControl no longer picks it — it confirms with
+ * git that the path the agent reported really is a worktree of this repository, and refuses
+ * anything else. That refusal is the isolation guarantee (Principle II): committing from a
+ * directory we could not verify would be worse than failing the Task.
+ */
+describe("prepareRepository and adoptWorktree", () => {
+  it("prepares a local repository without creating a Task worktree", async () => {
+    const before = await listWorktrees(repoDir);
+    const prepared = await prepareRepository({
+      taskId: "adopt-1",
+      repository: { source: "local_path", location: repoDir },
+      worktreeRoot,
+      repoCacheRoot,
+    });
+
+    expect(prepared).toBe(repoDir);
+    // The agent makes the worktree, so preparing must not have made one.
+    expect(await listWorktrees(repoDir)).toHaveLength(before.length);
+  });
+
+  it("fails before any agent starts when the location is not a repository", async () => {
+    // TASK-015: an unusable repository fails the Task up front rather than surfacing later as a
+    // confusing agent error.
+    const notARepo = mkdtempSync(join(tmpdir(), "gc-notrepo-"));
+    await expect(
+      prepareRepository({
+        taskId: "adopt-2",
+        repository: { source: "local_path", location: notARepo },
+        worktreeRoot,
+        repoCacheRoot,
+      }),
+    ).rejects.toThrow(/not a git repository/);
+    rmSync(notARepo, { recursive: true, force: true });
+  });
+
+  it("adopts a worktree the agent created, reading its branch from git", async () => {
+    // Stands in for what `claude --worktree gatecontrol-task-9` does.
+    const agentPath = join(worktreeRoot, "gatecontrol-task-9");
+    await $`git -C ${repoDir} worktree add -b gatecontrol-task-9 ${agentPath}`.quiet();
+
+    const adopted = await adoptWorktree(repoDir, agentPath);
+    expect(adopted.path).toBe(agentPath);
+    expect(adopted.branch).toBe("gatecontrol-task-9");
+    expect(adopted.repoPath).toBe(repoDir);
+
+    await cleanupWorktree(repoDir, agentPath);
+  });
+
+  it("refuses a path that is not a worktree of this repository", async () => {
+    // An agent working somewhere unverified has not been isolated; committing from there could
+    // mix another Task's changes into this one's branch.
+    const stray = mkdtempSync(join(tmpdir(), "gc-stray-"));
+    await expect(adoptWorktree(repoDir, stray)).rejects.toThrow(/refusing to use it/);
+    rmSync(stray, { recursive: true, force: true });
+  });
+
+  it("refuses when the agent reported no workspace at all", async () => {
+    await expect(adoptWorktree(repoDir, null)).rejects.toThrow(/did not report a workspace/);
+  });
+
+  it("lists concurrent worktrees separately, which is what makes parallel Tasks safe", async () => {
+    // Two Tasks, one repository: each agent gets its own directory and its own branch.
+    const a = join(worktreeRoot, "gatecontrol-task-a");
+    const b = join(worktreeRoot, "gatecontrol-task-b");
+    await $`git -C ${repoDir} worktree add -b gatecontrol-task-a ${a}`.quiet();
+    await $`git -C ${repoDir} worktree add -b gatecontrol-task-b ${b}`.quiet();
+
+    const adoptedA = await adoptWorktree(repoDir, a);
+    const adoptedB = await adoptWorktree(repoDir, b);
+    expect(adoptedA.path).not.toBe(adoptedB.path);
+    expect(adoptedA.branch).not.toBe(adoptedB.branch);
+
+    writeFileSync(join(a, "only-a.txt"), "a\n");
+    expect(existsSync(join(b, "only-a.txt"))).toBe(false);
+
+    await cleanupWorktree(repoDir, a);
+    await cleanupWorktree(repoDir, b);
   });
 });

@@ -11,11 +11,13 @@ const schema = z.object({
    */
   GATECONTROL_STREAM_SECRET: z.string().min(1),
   /**
-   * The ACP-speaking agent binary and its arguments (TASK-014). Configurable because the
-   * adapter that gives Claude Code an ACP interface ships separately from Claude Code itself,
-   * and a self-hoster may have it under a different name or path.
+   * The Claude Code binary and any extra arguments (TASK-014). Configurable because a
+   * self-hoster may have `claude` installed under a different name or path.
+   *
+   * GateControl supplies the arguments it requires itself — `--print`, the stream-JSON formats,
+   * and above all `--worktree` — so `GATECONTROL_AGENT_ARGS` cannot be used to drop them.
    */
-  GATECONTROL_AGENT_COMMAND: z.string().min(1).default("claude-code-acp"),
+  GATECONTROL_AGENT_COMMAND: z.string().min(1).default("claude"),
   GATECONTROL_AGENT_ARGS: z
     .string()
     .default("")

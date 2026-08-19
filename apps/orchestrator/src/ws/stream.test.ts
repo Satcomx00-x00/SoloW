@@ -228,6 +228,7 @@ describe("handleClientFrame (operator input and stop)", () => {
       inputs: [] as string[],
       stopped: false,
       outcome: Promise.resolve({ kind: "completed" as const }),
+      workspacePath: Promise.resolve<string | null>("/wt/gatecontrol-task-1"),
       async send(text: string) {
         state.inputs.push(text);
         return true;

@@ -107,20 +107,25 @@ test.describe("@critical isolation", () => {
     const idB = await launchToReview(page, titleB);
     expect(idA).not.toBe(idB);
 
-    const pathA = join(PATHS.worktrees, idA);
-    const pathB = join(PATHS.worktrees, idB);
+    // Named by the agent: `claude --worktree gatecontrol-task-<id>` is what creates these.
+    const pathA = join(PATHS.worktrees, `gatecontrol-task-${idA}`);
+    const pathB = join(PATHS.worktrees, `gatecontrol-task-${idB}`);
     const filesA = readdirSync(pathA);
     const filesB = readdirSync(pathB);
 
     // Each worktree holds its own Task's marker and nothing of the other's.
-    expect(filesA).toContain(`marker-${idA}.txt`);
-    expect(filesA).not.toContain(`marker-${idB}.txt`);
-    expect(filesB).toContain(`marker-${idB}.txt`);
-    expect(filesB).not.toContain(`marker-${idA}.txt`);
+    expect(filesA).toContain(`marker-gatecontrol-task-${idA}.txt`);
+    expect(filesA).not.toContain(`marker-gatecontrol-task-${idB}.txt`);
+    expect(filesB).toContain(`marker-gatecontrol-task-${idB}.txt`);
+    expect(filesB).not.toContain(`marker-gatecontrol-task-${idA}.txt`);
 
     // And what each agent could actually see from inside its worktree was only its own file.
-    expect(readFileSync(join(pathA, "visible.txt"), "utf8").trim()).toBe(`marker-${idA}.txt`);
-    expect(readFileSync(join(pathB, "visible.txt"), "utf8").trim()).toBe(`marker-${idB}.txt`);
+    expect(readFileSync(join(pathA, "visible.txt"), "utf8").trim()).toBe(
+      `marker-gatecontrol-task-${idA}.txt`,
+    );
+    expect(readFileSync(join(pathB, "visible.txt"), "utf8").trim()).toBe(
+      `marker-gatecontrol-task-${idB}.txt`,
+    );
   });
 
   test("another Workspace's Task is unreachable by URL (Principle V)", async ({ page }) => {

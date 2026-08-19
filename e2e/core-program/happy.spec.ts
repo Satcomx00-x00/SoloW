@@ -157,7 +157,7 @@ test.describe("core program happy path", () => {
     await page.getByRole("tab", { name: "Changes" }).click();
     // Scoped to the file list: each path also appears several times inside the patch below it.
     const changed = page.getByLabel("Changed files");
-    await expect(changed.getByText(`marker-${taskId}.txt`)).toBeVisible();
+    await expect(changed.getByText(`marker-gatecontrol-task-${taskId}.txt`)).toBeVisible();
     await expect(changed.getByText("visible.txt")).toBeVisible();
     // …and the patch body carries the line the agent actually wrote.
     await expect(page.getByText(/^\+edited by the agent/)).toBeVisible();
@@ -167,7 +167,7 @@ test.describe("core program happy path", () => {
     // The workflow committed the change and moved the Task to Done. The state is read from the
     // header badge specifically — the lifecycle labels also appear in the shell navigator.
     await expect(page.locator('[data-task-state="done"]')).toBeVisible();
-    const branch = `gatecontrol/task-${taskId}`;
+    const branch = `gatecontrol-task-${taskId}`;
     // Shown twice now, in the task header and at the top of the diff, so take the first: the
     // assertion is that the result branch is surfaced at all, not where.
     await expect(page.getByText(branch).first()).toBeVisible();
@@ -177,8 +177,10 @@ test.describe("core program happy path", () => {
     expect(git(["branch", "--list", branch])).toContain(branch);
     await expect
       .poll(() => git(["show", "--name-only", "--format=", branch]))
-      .toContain(`marker-${taskId}.txt`);
-    expect(git(["show", `${branch}:marker-${taskId}.txt`])).toContain("edited by the agent");
+      .toContain(`marker-gatecontrol-task-${taskId}.txt`);
+    expect(git(["show", `${branch}:marker-gatecontrol-task-${taskId}.txt`])).toContain(
+      "edited by the agent",
+    );
     // No push, no PR: the change lives only on the local branch (spec FR-009).
     expect(git(["remote"])).toBe("");
   });
@@ -203,8 +205,10 @@ test.describe("core program happy path", () => {
 
     // The Task returns to Ready and the worktree is torn down — nothing was committed.
     await expect(page.locator('[data-task-state="ready"]')).toBeVisible();
-    const branch = `gatecontrol/task-${taskId}`;
-    await expect.poll(() => existsSync(join(PATHS.worktrees, taskId))).toBe(false);
+    const branch = `gatecontrol-task-${taskId}`;
+    await expect
+      .poll(() => existsSync(join(PATHS.worktrees, `gatecontrol-task-${taskId}`)))
+      .toBe(false);
     expect(git(["log", "--oneline", branch, "--"])).not.toContain("GateControl");
   });
 });

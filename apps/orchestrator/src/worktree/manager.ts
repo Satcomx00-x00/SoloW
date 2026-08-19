@@ -56,6 +56,89 @@ export async function provisionWorktree(params: ProvisionParams): Promise<Worktr
   return { path, branch, repoPath };
 }
 
+/**
+ * Make the repository ready for an agent to run in, without creating the Task's worktree.
+ *
+ * Claude Code creates that itself (`--worktree`), which is what lets several Tasks share one
+ * repository at a time. GateControl still has to resolve *which* repository — a local path is
+ * used as-is, a remote URL is cloned into the cache once — and to fail here, before any agent
+ * starts, when the repository is unusable (TASK-015: an invalid location fails the Task rather
+ * than producing a confusing agent error later).
+ */
+export async function prepareRepository(params: ProvisionParams): Promise<string> {
+  const repoPath = await resolveRepoPath(params);
+  const isRepo = await $`git -C ${repoPath} rev-parse --git-dir`.quiet().nothrow();
+  if (isRepo.exitCode !== 0) {
+    throw new Error(`not a git repository: ${params.repository.location}`);
+  }
+  return repoPath;
+}
+
+/** A worktree as git reports it. */
+export interface WorktreeRecord {
+  path: string;
+  branch: string | null;
+}
+
+/**
+ * Every worktree attached to a repository, as git sees them.
+ *
+ * Read from git rather than from a naming convention: the agent creates the worktree, and where
+ * it puts it and what it calls the branch are its business. Asking git means the adoption works
+ * whatever the CLI decides to do.
+ */
+export async function listWorktrees(repoPath: string): Promise<WorktreeRecord[]> {
+  const out = await $`git -C ${repoPath} worktree list --porcelain`.quiet().text();
+  const records: WorktreeRecord[] = [];
+  let current: { path?: string; branch?: string } = {};
+
+  for (const line of `${out}\n`.split("\n")) {
+    if (line.startsWith("worktree ")) {
+      current = { path: line.slice("worktree ".length).trim() };
+    } else if (line.startsWith("branch ")) {
+      current.branch = line
+        .slice("branch ".length)
+        .trim()
+        .replace(/^refs\/heads\//, "");
+    } else if (line.trim() === "" && current.path) {
+      records.push({ path: current.path, branch: current.branch ?? null });
+      current = {};
+    }
+  }
+  return records;
+}
+
+/**
+ * The worktree the agent created, confirmed against git.
+ *
+ * The agent reports where it is working; this checks that git agrees the path really is a
+ * worktree of this repository, and returns its branch. An agent that reported a path outside
+ * the repository — or none at all — has not given the Task an isolated workspace, and the
+ * caller must fail rather than commit from wherever it happens to be pointing (Principle II).
+ */
+export async function adoptWorktree(
+  repoPath: string,
+  reportedPath: string | null,
+): Promise<Worktree> {
+  if (!reportedPath) {
+    throw new Error("agent did not report a workspace; cannot confirm an isolated worktree");
+  }
+  const known = await listWorktrees(repoPath);
+  const match = known.find((w) => samePath(w.path, reportedPath));
+  if (!match) {
+    throw new Error(
+      `agent reported ${reportedPath}, which is not a worktree of ${repoPath}; refusing to use it`,
+    );
+  }
+  return { path: match.path, branch: match.branch ?? "", repoPath };
+}
+
+/** Compare paths without tripping over a trailing slash or a `/private` symlink prefix. */
+function samePath(a: string, b: string): boolean {
+  const normalise = (p: string) => p.replace(/\/+$/, "").replace(/^\/private\//, "/");
+  return normalise(a) === normalise(b);
+}
+
 /** True when the worktree has uncommitted changes (i.e. the agent produced a diff). */
 export async function hasChanges(path: string): Promise<boolean> {
   const out = await $`git -C ${path} status --porcelain`.quiet().text();

@@ -4,6 +4,7 @@ import { basename, join } from "node:path";
 import { Writable } from "node:stream";
 import { createDb } from "@gatecontrol/db";
 import { createLogger } from "@gatecontrol/observability";
+import { $ } from "bun";
 import { agentRegistry } from "../../apps/orchestrator/src/agent/registry.js";
 import type {
   AgentHandle,
@@ -17,12 +18,13 @@ import {
   type TaskRunDeps,
 } from "../../apps/orchestrator/src/inngest/functions/task-run.js";
 import {
+  adoptWorktree,
   cleanupWorktree,
   commitWorktree,
   diffWorktree,
   discardWorktreeChanges,
   hasChanges,
-  provisionWorktree,
+  prepareRepository,
 } from "../../apps/orchestrator/src/worktree/manager.js";
 import { hub } from "../../apps/orchestrator/src/ws/hub.js";
 import { PATHS, PORTS } from "./fixture.js";
@@ -41,49 +43,65 @@ import { PATHS, PORTS } from "./fixture.js";
 const STEERABLE = "[steerable]";
 
 /**
- * Deterministic agent: writes a marker into its own worktree and records what it can see there.
- * That recording is the evidence for the isolation test — an agent that could reach another
- * Task's worktree would list the other Task's marker.
+ * Deterministic agent standing in for Claude Code.
+ *
+ * It does what `claude --worktree` does: creates its own git worktree off the repository it was
+ * pointed at, works only in there, and reports the path back so GateControl can adopt it. That
+ * is what makes the isolation test meaningful under the new model — the agent, not GateControl,
+ * chooses the directory, and the guarantee is that two agents on one repository never share one.
+ *
+ * It writes a marker into its worktree and records what it can see there. That recording is the
+ * evidence: an agent that could reach another Task's worktree would list the other's marker.
  *
  * It also honours input and stop (TASK-022): a steerable Task's run stays open until the
- * operator sends something, and whatever arrives is echoed onto the stream, so a test can follow
- * one instruction all the way from the terminal to the agent and back.
+ * operator sends something, and whatever arrives is echoed onto the stream.
  */
 class FixtureAgentRunner implements AgentRunner {
   start(opts: AgentStartOpts): AgentHandle {
-    const label = basename(opts.cwd);
-    opts.onEvent({ kind: "tool_use", name: "edit_file" });
-    writeFileSync(join(opts.cwd, `marker-${label}.txt`), `edited by the agent in ${label}\n`);
-    const visible = readdirSync(opts.cwd)
-      .filter((f) => f.startsWith("marker-"))
-      .sort()
-      .join(",");
-    writeFileSync(join(opts.cwd, "visible.txt"), `${visible}\n`);
-    opts.onEvent({ kind: "stdout", text: `agent edited ${label}\n` });
+    const worktree = join(PATHS.worktrees, opts.worktreeName);
 
-    if (!opts.prompt.includes(STEERABLE)) {
-      return {
-        outcome: Promise.resolve({ kind: "completed" }),
-        send: async () => false,
-        stop: async () => {},
-      };
-    }
-
-    let finish: () => void = () => {};
-    const outcome = new Promise<{ kind: "completed" }>((resolve) => {
-      finish = () => resolve({ kind: "completed" });
+    let resolveWorkspace: (path: string | null) => void = () => {};
+    const workspacePath = new Promise<string | null>((resolve) => {
+      resolveWorkspace = resolve;
     });
+
+    let finish: (outcome: { kind: "completed" }) => void = () => {};
+    const outcome = new Promise<{ kind: "completed" }>((resolve) => {
+      finish = resolve;
+    });
+
+    void (async () => {
+      // The agent creates its own worktree, exactly as `claude --worktree <name>` would.
+      await $`git -C ${opts.cwd} worktree add -b ${opts.worktreeName} ${worktree}`.quiet();
+      resolveWorkspace(worktree);
+
+      const label = basename(worktree);
+      opts.onEvent({ kind: "tool_use", name: "edit_file" });
+      writeFileSync(join(worktree, `marker-${label}.txt`), `edited by the agent in ${label}\n`);
+      const visible = readdirSync(worktree)
+        .filter((f) => f.startsWith("marker-"))
+        .sort()
+        .join(",");
+      writeFileSync(join(worktree, "visible.txt"), `${visible}\n`);
+      opts.onEvent({ kind: "stdout", text: `agent edited ${label}\n` });
+
+      if (!opts.prompt.includes(STEERABLE)) finish({ kind: "completed" });
+    })();
+
     return {
       outcome,
+      workspacePath,
       send: async (text: string) => {
-        writeFileSync(join(opts.cwd, "steered.txt"), `${text}\n`);
+        const path = await workspacePath;
+        if (!path) return false;
+        writeFileSync(join(path, "steered.txt"), `${text}\n`);
         opts.onEvent({ kind: "stdout", text: `agent received: ${text}\n` });
-        finish();
+        finish({ kind: "completed" });
         return true;
       },
       stop: async () => {
         opts.onEvent({ kind: "stdout", text: "agent stopped by the operator\n" });
-        finish();
+        finish({ kind: "completed" });
       },
     };
   }
@@ -120,7 +138,8 @@ function deps(): TaskRunDeps {
     repoCacheRoot: PATHS.repoCache,
     logger: createLogger({ service: "e2e-orchestrator", destination: quietLogs }),
     worktree: {
-      provision: provisionWorktree,
+      prepare: prepareRepository,
+      adopt: adoptWorktree,
       commit: commitWorktree,
       discard: discardWorktreeChanges,
       cleanup: cleanupWorktree,

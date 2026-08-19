@@ -14,7 +14,7 @@
       "name": "@gatecontrol/orchestrator",
       "version": "0.1.0",
       "dependencies": {
-        "@gatecontrol/acp": "workspace:*",
+        "@gatecontrol/claude-code": "workspace:*",
         "@gatecontrol/contracts": "workspace:*",
         "@gatecontrol/core": "workspace:*",
         "@gatecontrol/db": "workspace:*",
@@ -90,11 +90,10 @@
         "typescript": "^5.6.0",
       },
     },
-    "packages/acp": {
-      "name": "@gatecontrol/acp",
+    "packages/claude-code": {
+      "name": "@gatecontrol/claude-code",
       "version": "0.1.0",
       "dependencies": {
-        "@agentclientprotocol/sdk": "^1.3.0",
         "zod": "^3.23.8",
       },
       "devDependencies": {
@@ -151,8 +150,6 @@
     },
   },
   "packages": {
-    "@agentclientprotocol/sdk": ["@agentclientprotocol/sdk@1.3.0", "", { "peerDependencies": { "zod": "^3.25.0 || ^4.0.0" } }, "sha512-i3h/efaeuMUFAO1HSfo97QZQnnvMd7wWBYtBsdL6UMZg3a78sk3Ffya5Xu7C7tYsXomXoDXJBAzQF2PcFKAhIQ=="],
-
     "@alloc/quick-lru": ["@alloc/quick-lru@5.2.0", "", {}, "sha512-UrcABB+4bUrFABwbluTIBErXwvbsU/V7TZWfmbgJfbkwiBuziS9gxdODUyuiecfdGQ85jglMW6juS3+z5TsKLw=="],
 
     "@babel/code-frame": ["@babel/code-frame@7.29.7", "", { "dependencies": { "@babel/helper-validator-identifier": "^7.29.7", "js-tokens": "^4.0.0", "picocolors": "^1.1.1" } }, "sha512-Aup7aUOfpbAUg2ROOJN6Iw5f9DMBlzu0mIkm/malLQFN/YQgO48wCj0Kxa3sEHJvPVFg7siR+qRInwXd2qhQKw=="],
@@ -267,7 +264,7 @@
 
     "@floating-ui/utils": ["@floating-ui/utils@0.2.12", "", {}, "sha512-HpCo8tmWzLVad5s2d19EhAz5zqrrQ6s69qd6moPMQvkOuSwDT1YgRfWSVuc4ennqrgv3OHppiOGMQ7oC13yIww=="],
 
-    "@gatecontrol/acp": ["@gatecontrol/acp@workspace:packages/acp"],
+    "@gatecontrol/claude-code": ["@gatecontrol/claude-code@workspace:packages/claude-code"],
 
     "@gatecontrol/contracts": ["@gatecontrol/contracts@workspace:packages/contracts"],
 

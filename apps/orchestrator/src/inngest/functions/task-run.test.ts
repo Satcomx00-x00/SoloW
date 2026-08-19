@@ -133,7 +133,16 @@ class ScriptedRunner implements AgentRunner {
     this.prompts.push(opts.prompt);
     opts.onEvent({ kind: "stdout", text: "working" });
     const outcome = this.outcomes.shift() ?? { kind: "completed" };
-    return { outcome: Promise.resolve(outcome), send: async () => true, stop: async () => {} };
+    return {
+      outcome: Promise.resolve(outcome),
+      // The worktree the agent reports: the one it was asked to create, or — when resuming —
+      // the one it is already running in.
+      workspacePath: Promise.resolve<string | null>(
+        opts.worktreeName ? `/wt/${opts.worktreeName}` : opts.cwd,
+      ),
+      send: async () => true,
+      stop: async () => {},
+    };
   }
 }
 
@@ -157,11 +166,14 @@ function makeDeps(
     repoCacheRoot: "/cache",
     logger: createLogger({ service: "orchestrator", destination: logStream }),
     worktree: {
-      provision: async (p) => ({
-        path: `/wt/${p.taskId}`,
-        branch: `gatecontrol/task-${p.taskId}`,
-        repoPath: `/repo/${p.taskId}`,
-      }),
+      prepare: async (p) => `/repo/${p.taskId}`,
+      // Stands in for git confirming the agent's worktree really belongs to the repository.
+      adopt: async (repoPath, reported) => {
+        if (!reported) throw new Error("agent did not report a workspace");
+        // `claude --worktree <name>` names the branch after the worktree, and the real `adopt`
+        // reads whatever git reports; the fake mirrors that shape.
+        return { path: reported, branch: reported.split("/").pop() ?? "", repoPath };
+      },
       commit: async () => {
         spies.commit += 1;
       },
@@ -468,6 +480,9 @@ describe("the brief the agent is given", () => {
             seen.push(registry.get(ids.workspaceId, ids.taskId) !== undefined);
             return o;
           }),
+          workspacePath: Promise.resolve<string | null>(
+            opts.worktreeName ? `/wt/${opts.worktreeName}` : opts.cwd,
+          ),
           send: async () => true,
           stop: async () => {},
         };
@@ -512,7 +527,7 @@ describe("the diff a reviewer is shown", () => {
     ).filter((e) => e.kind === "diff");
     expect(captured).toBeDefined();
     expect(captured?.payload).toMatchObject({
-      diffRef: `gatecontrol/task-${ids.taskId}`,
+      diffRef: `gatecontrol-task-${ids.taskId}`,
       files: [{ path: "src/latch.ts", status: "modified", additions: 4, deletions: 1 }],
       truncated: false,
     });

@@ -10,7 +10,7 @@ import {
   withRunContext,
 } from "@gatecontrol/observability";
 import { z } from "zod";
-import { AcpAgentRunner } from "../../agent/acp-runner.js";
+import { ClaudeCodeRunner, worktreeNameForTask } from "../../agent/claude-code-runner.js";
 import { type AgentRegistry, agentRegistry } from "../../agent/registry.js";
 import type { AgentRunner } from "../../agent/runner.js";
 import { prepareAgentEnv } from "../../billing/guard.js";
@@ -24,12 +24,13 @@ import {
 } from "../../data.js";
 import { orchestratorEnv } from "../../env.js";
 import {
+  adoptWorktree,
   cleanupWorktree,
   commitWorktree,
   diffWorktree,
   discardWorktreeChanges,
   hasChanges,
-  provisionWorktree,
+  prepareRepository,
 } from "../../worktree/manager.js";
 import { hub } from "../../ws/hub.js";
 import { inngest } from "../client.js";
@@ -60,7 +61,13 @@ const MAX_REVIEW_ROUNDS = 5;
 
 /** Worktree operations the lifecycle depends on (real impls in `defaultDeps`). */
 export interface WorktreeOps {
-  provision: typeof provisionWorktree;
+  /**
+   * Resolve the repository the agent will run in. GateControl no longer creates the Task's
+   * worktree — `claude --worktree` does — so there is no `provision` step here any more.
+   */
+  prepare: typeof prepareRepository;
+  /** Confirm with git that the path the agent reported really is a worktree of the repository. */
+  adopt: typeof adoptWorktree;
   commit: typeof commitWorktree;
   discard: typeof discardWorktreeChanges;
   cleanup: typeof cleanupWorktree;
@@ -94,12 +101,13 @@ export function defaultDeps(): TaskRunDeps {
   const env = orchestratorEnv();
   return {
     db: createDb(),
-    runner: new AcpAgentRunner(),
+    runner: new ClaudeCodeRunner(),
     worktreeRoot: env.GATECONTROL_WORKTREE_ROOT,
     repoCacheRoot: env.GATECONTROL_REPO_CACHE_ROOT,
     logger: createLogger({ service: "orchestrator" }),
     worktree: {
-      provision: provisionWorktree,
+      prepare: prepareRepository,
+      adopt: adoptWorktree,
       commit: commitWorktree,
       discard: discardWorktreeChanges,
       cleanup: cleanupWorktree,
@@ -142,8 +150,16 @@ export async function runTaskLifecycle(
 
   const ctx = await step.run("load", () => loadTaskRunContext(db, workspaceId, taskId));
 
-  const wt = await step.run("provision-worktree", () =>
-    deps.worktree.provision({
+  /**
+   * The repository, not the Task's worktree.
+   *
+   * The agent creates the worktree itself (`claude --worktree`), which is what lets several
+   * Tasks run against one repository at a time (Principle II). This step still resolves and
+   * validates the repository up front, so an unusable location fails the Task before any agent
+   * starts rather than surfacing as a confusing agent error later (TASK-015).
+   */
+  const repoPath = await step.run("prepare-repository", () =>
+    deps.worktree.prepare({
       taskId,
       repository: { source: ctx.repository.source, location: ctx.repository.location },
       baseRef: ctx.task.baseRef ?? undefined,
@@ -151,7 +167,12 @@ export async function runTaskLifecycle(
       repoCacheRoot: deps.repoCacheRoot,
     }),
   );
-  logWorktreeBinding(log, { workspaceId, taskId, worktreePath: wt.path });
+
+  /**
+   * Set once the first round adopts the worktree the agent made. Every later step — diff,
+   * commit, discard, cleanup — acts on this, so it is read from the agent rather than assumed.
+   */
+  let wt: { path: string; branch: string; repoPath: string } | null = null;
 
   const channel = deps.hub.taskChannel(workspaceId, taskId);
   const boardChannel = deps.hub.boardChannel(workspaceId);
@@ -192,11 +213,17 @@ export async function runTaskLifecycle(
       };
 
       const { command, args } = deps.agentInvocation();
+      // First round: run in the repository and have the agent create the Task's worktree.
+      // Later rounds continue *inside* that worktree — a reviewer asking for changes wants the
+      // work carried on, and asking for the worktree again would branch a fresh one from the
+      // base ref and throw the earlier round away.
+      const resuming = wt;
       const handle = deps.runner.start({
         command,
         args,
-        cwd: wt.path,
+        cwd: resuming ? resuming.path : repoPath,
         env: shaped.data,
+        worktreeName: resuming ? null : worktreeNameForTask(taskId),
         prompt: brief,
         onEvent: (e) => {
           if (e.kind === "stdout") emit("stdout", { text: e.text });
@@ -207,18 +234,46 @@ export async function runTaskLifecycle(
       // input or stop to *this* agent (TASK-022), and withdraw it the moment the run ends.
       const deregister = deps.registry.register(workspaceId, { taskId, sessionId, handle });
       let outcome: Awaited<typeof handle.outcome>;
+      let reported: string | null = null;
       try {
+        // Learn where the agent went as soon as it says so, before waiting on the run: if the
+        // agent dies mid-run we still know which worktree to clean up.
+        reported = await handle.workspacePath;
         outcome = await handle.outcome;
       } finally {
         deregister();
       }
       await writes;
-      if (outcome.kind === "failed") {
-        return { kind: "failed" as const, cls: classifyRunFailure(outcome.signal) };
+
+      // Confirm with git that the reported path really is a worktree of this repository. An
+      // agent working somewhere else has not been isolated, and committing from wherever it
+      // happened to point would be worse than failing (Principle II). A resuming round is
+      // re-checked too: the worktree could have been removed underneath us between rounds.
+      let adopted: { path: string; branch: string; repoPath: string };
+      try {
+        adopted = await deps.worktree.adopt(repoPath, reported);
+      } catch (cause) {
+        captureException(log, cause, { stage: "worktree-adopt", reported });
+        return { kind: "failed" as const, cls: "fail" as const };
       }
-      const changed = await deps.worktree.hasChanges(wt.path);
-      return { kind: "completed" as const, changed };
+
+      if (outcome.kind === "failed") {
+        return {
+          kind: "failed" as const,
+          cls: classifyRunFailure(outcome.signal),
+          worktree: adopted,
+        };
+      }
+      const changed = await deps.worktree.hasChanges(adopted.path);
+      return { kind: "completed" as const, changed, worktree: adopted };
     });
+
+    if (run.worktree) {
+      wt = run.worktree;
+      // The audit line binding a worktree to its Task (Principle IV) is emitted on adoption,
+      // because that is the first moment GateControl knows which directory the agent used.
+      logWorktreeBinding(log, { workspaceId, taskId, worktreePath: run.worktree.path });
+    }
 
     if (run.kind === "failed") {
       if (run.cls === "park") {
@@ -240,10 +295,11 @@ export async function runTaskLifecycle(
     }
 
     // Completed: move to review and wait for a human decision.
+    const worktree = run.worktree;
     await step.run(`to-review-${round}`, async () => {
       await setTaskState(db, workspaceId, taskId, "review");
       await setSessionState(db, workspaceId, sessionId, "awaiting_review", {
-        diffRef: wt.branch,
+        diffRef: worktree.branch,
       });
 
       // Capture the change now, while the worktree still exists: approving removes it, and a
@@ -251,18 +307,18 @@ export async function runTaskLifecycle(
       // A capture failure must not block the review gate — the branch name alone is enough to
       // decide on, so this degrades to "no diff shown" rather than stalling the Task.
       try {
-        const captured = await deps.worktree.diff(wt.path);
+        const captured = await deps.worktree.diff(worktree.path);
         await appendSessionEvent(db, workspaceId, {
           sessionId,
           seq: await nextSessionEventSeq(db, workspaceId, sessionId),
           kind: "diff",
-          payload: { diffRef: wt.branch, ...captured },
+          payload: { diffRef: worktree.branch, ...captured },
         });
       } catch (cause) {
         captureException(log, cause, { stage: "diff-capture" });
       }
 
-      deps.hub.publish(channel, { kind: "diff", taskId, sessionId, diffRef: wt.branch });
+      deps.hub.publish(channel, { kind: "diff", taskId, sessionId, diffRef: worktree.branch });
     });
     logStateTransition(log, { workspaceId, taskId, from: "running", to: "review" });
     announce("review");
@@ -278,8 +334,8 @@ export async function runTaskLifecycle(
 
     if (decision === "approve") {
       await step.run(`approve-${round}`, async () => {
-        await deps.worktree.commit(wt.path, `GateControl: task ${taskId}`);
-        await setTaskState(db, workspaceId, taskId, "done", { resultBranch: wt.branch });
+        await deps.worktree.commit(worktree.path, `GateControl: task ${taskId}`);
+        await setTaskState(db, workspaceId, taskId, "done", { resultBranch: worktree.branch });
         await setSessionState(db, workspaceId, sessionId, "closed", {
           endedAt: new Date().toISOString(),
         });
@@ -290,7 +346,7 @@ export async function runTaskLifecycle(
     }
     if (decision === "reject") {
       await step.run(`reject-${round}`, async () => {
-        await deps.worktree.discard(wt.path);
+        await deps.worktree.discard(worktree.path);
         await setTaskState(db, workspaceId, taskId, "ready");
       });
       logStateTransition(log, { workspaceId, taskId, from: "review", to: "ready" });
@@ -305,7 +361,10 @@ export async function runTaskLifecycle(
     announce("running");
   }
 
-  await step.run("cleanup", () => deps.worktree.cleanup(wt.repoPath, wt.path));
+  const adopted = wt;
+  if (adopted) {
+    await step.run("cleanup", () => deps.worktree.cleanup(adopted.repoPath, adopted.path));
+  }
   return { taskId, result: "done" };
 }
 
