@@ -23,11 +23,17 @@ export interface ModelPrice {
 }
 
 /**
- * Known prices, keyed by an exact model identifier.
+ * Known prices, keyed by the **exact** model identifier the agent reports.
  *
- * Deliberately not exhaustive and deliberately not guessed: an unknown model yields `null`
- * rather than an invented number, so a missing entry shows up as "not priced" instead of as a
- * confidently wrong total. Add rows here as models are used; recorded history is unaffected.
+ * These keys must match the agent's own strings character for character, and this table is a
+ * starting point rather than an authority — it is expected to be incomplete, and a model the
+ * agent reports under a name that is not here is simply not priced.
+ *
+ * That failure is deliberately loud rather than silent: an unknown model yields `null`, and
+ * `totalUsage` surfaces it as `unpricedTurns`. A `costUsd` of 0 alongside a non-zero
+ * `unpricedTurns` means "these keys are wrong", not "this was free". Check that counter before
+ * trusting any total. Adding or correcting a row never rewrites recorded history, because
+ * history holds counts, not currency.
  */
 export const MODEL_PRICES: Readonly<Record<string, ModelPrice>> = {
   "claude-opus-4-20250514": { input: 15, output: 75, cacheRead: 1.5, cacheWrite: 18.75 },
@@ -58,6 +64,10 @@ export function deriveCostUsd(
   prices: Readonly<Record<string, ModelPrice>> = MODEL_PRICES,
 ): number | null {
   if (!usage.model) return null;
+  // Own-property only: a model named like an Object.prototype member (`constructor`,
+  // `toString`) would otherwise resolve to an inherited function and make the arithmetic NaN —
+  // a wrong number where the contract promises null.
+  if (!Object.hasOwn(prices, usage.model)) return null;
   const price = prices[usage.model];
   if (!price) return null;
   return (

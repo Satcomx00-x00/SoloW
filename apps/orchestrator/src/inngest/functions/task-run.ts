@@ -227,6 +227,7 @@ export async function runTaskLifecycle(
       const seenTurns = new Set<string>();
       const recordUsage = (u: {
         messageId: string | null;
+        reported: boolean;
         model: string | null;
         inputTokens: number;
         outputTokens: number;
@@ -248,7 +249,7 @@ export async function runTaskLifecycle(
               agentProfileId: ctx.agentProfile.id,
               messageId,
               seq,
-              reported: true,
+              reported: u.reported,
               model: u.model,
               inputTokens: u.inputTokens,
               outputTokens: u.outputTokens,

@@ -124,6 +124,15 @@ export type ClaudeUpdate =
        * over-counts a multi-block turn by its block count.
        */
       messageId: string | null;
+      /**
+       * False when the CLI completed a turn but stated no usage for it.
+       *
+       * The turn still happened and still cost something, so it is reported as a turn with
+       * nothing known rather than omitted — an omitted turn is indistinguishable from a free
+       * one, and a provider that quietly stops reporting usage would otherwise make a whole
+       * session look costless.
+       */
+      reported: boolean;
       model: string | null;
       inputTokens: number;
       outputTokens: number;
@@ -180,18 +189,21 @@ export function toUpdates(event: StreamEvent): ClaudeUpdate[] {
     }
     // Usage last: it belongs to the turn these blocks just completed, and ordering it after
     // them keeps the event log readable as a narrative.
+    //
+    // Emitted whether or not the CLI stated usage. A turn it said nothing about is reported
+    // with `reported: false` and zero counts, so the gap is visible downstream instead of
+    // looking like a turn that cost nothing.
     const usage = parsed.data.message.usage;
-    if (usage) {
-      updates.push({
-        kind: "usage",
-        messageId: parsed.data.message.id ?? null,
-        model: parsed.data.message.model ?? null,
-        inputTokens: usage.input_tokens ?? 0,
-        outputTokens: usage.output_tokens ?? 0,
-        cacheReadTokens: usage.cache_read_input_tokens ?? 0,
-        cacheWriteTokens: usage.cache_creation_input_tokens ?? 0,
-      });
-    }
+    updates.push({
+      kind: "usage",
+      messageId: parsed.data.message.id ?? null,
+      reported: usage !== undefined,
+      model: parsed.data.message.model ?? null,
+      inputTokens: usage?.input_tokens ?? 0,
+      outputTokens: usage?.output_tokens ?? 0,
+      cacheReadTokens: usage?.cache_read_input_tokens ?? 0,
+      cacheWriteTokens: usage?.cache_creation_input_tokens ?? 0,
+    });
     return updates;
   }
 

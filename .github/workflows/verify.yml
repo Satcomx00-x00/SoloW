@@ -57,9 +57,11 @@ jobs:
         run: make test
 
       # Executes the real lifecycle against an in-memory DB, a fake agent and a temp git repo.
-      # It is the only gate that would have caught #111 breaking scripts/smoke.ts: `scripts/`
-      # is covered by the root tsconfig, but `bun run typecheck` fans out per package and never
-      # invokes it, so a changed signature there compiles forever and fails only when run.
+      # It is what would have caught #111 breaking scripts/smoke.ts — but only by running it:
+      # `scripts/` is listed in the root tsconfig, yet `bun run typecheck` fans out per package
+      # and never invokes that config, so a stale call signature there still compiles. This
+      # gate catches the ones the smoke path exercises; typechecking `scripts/` is the
+      # remaining, separate gap.
       - name: Smoke (end-to-end lifecycle)
         run: make smoke
 

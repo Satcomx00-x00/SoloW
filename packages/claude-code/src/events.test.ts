@@ -34,6 +34,7 @@ describe("usage capture (issue #14)", () => {
     expect(usage).toEqual({
       kind: "usage",
       messageId: "msg_01",
+      reported: true,
       model: "claude-sonnet-4-20250514",
       inputTokens: 120,
       outputTokens: 34,
@@ -47,16 +48,19 @@ describe("usage capture (issue #14)", () => {
     expect(updates.map((u) => u.kind)).toEqual(["text", "usage"]);
   });
 
-  it("emits no usage when the CLI reported none, rather than inventing zeros", () => {
-    // A turn with content but no `usage` key at all.
+  it("records a turn the CLI stated no usage for as a gap, not as a free turn", () => {
+    // A turn with content but no `usage` key at all. Omitting it would make a provider that
+    // quietly stops reporting usage look like a session that cost nothing.
     const updates = updatesFor(
       JSON.stringify({
         type: "assistant",
-        message: { content: [{ type: "text", text: "hi" }] },
+        message: { id: "msg_02", content: [{ type: "text", text: "hi" }] },
       }),
     );
-    expect(usageOf(updates)).toBeUndefined();
-    expect(updates.map((u) => u.kind)).toEqual(["text"]);
+    const usage = usageOf(updates);
+    expect(usage?.reported).toBe(false);
+    expect(usage?.inputTokens).toBe(0);
+    expect(updates.map((u) => u.kind)).toEqual(["text", "usage"]);
   });
 
   it("treats individually missing counters as zero but still reports the turn", () => {
@@ -64,6 +68,7 @@ describe("usage capture (issue #14)", () => {
     expect(usageOf(updates)).toEqual({
       kind: "usage",
       messageId: "msg_01",
+      reported: true,
       model: "claude-sonnet-4-20250514",
       inputTokens: 5,
       outputTokens: 0,

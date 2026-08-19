@@ -36,6 +36,14 @@ describe("deriveCostUsd", () => {
     expect(deriveCostUsd(turn({ model: null }), PRICES)).toBeNull();
   });
 
+  it("returns null, not NaN, for a model named like an Object.prototype member", () => {
+    // `prices["constructor"]` resolves to an inherited function on a plain object literal;
+    // multiplying by it yields NaN — a wrong number where the contract promises null.
+    for (const name of ["constructor", "toString", "valueOf", "__proto__"]) {
+      expect(deriveCostUsd(turn({ model: name, inputTokens: 1_000 }), PRICES)).toBeNull();
+    }
+  });
+
   it("is a pure function of the counts, so a price change never rewrites history", () => {
     const usage = turn({ inputTokens: 2_000_000 });
     expect(deriveCostUsd(usage, PRICES)).toBe(20);

@@ -18,6 +18,8 @@ export type AgentStreamEvent =
       kind: "usage";
       /** The assistant turn this belongs to — the deduplication key. See events.ts. */
       messageId: string | null;
+      /** False when the turn completed but the agent stated no usage for it. */
+      reported: boolean;
       model: string | null;
       inputTokens: number;
       outputTokens: number;

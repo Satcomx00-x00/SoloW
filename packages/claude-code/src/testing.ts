@@ -52,17 +52,30 @@ export async function serveFakeClaude(script: FakeClaudeScript): Promise<void> {
     if (!trimmed) continue;
 
     const turn = turns[index++] ?? { text: ["ok"] };
+    // Faithful to the real CLI in the detail that matters for usage: ONE assistant message,
+    // split across several stream events (one per content block), with the whole turn's usage
+    // repeated on every one. A consumer that sums per event over-counts; the fake has to show
+    // that, or the tests cannot see it.
+    const messageId = `msg_${index}`;
+    const usage = {
+      input_tokens: 100 * index,
+      output_tokens: 10 * index,
+      cache_read_input_tokens: 5,
+      cache_creation_input_tokens: 1,
+    };
+    const message = (content: unknown) => ({
+      type: "assistant",
+      message: { id: messageId, model: "test-model", content: [content], usage },
+    });
+
     for (const tool of turn.tools ?? []) {
-      emit({
-        type: "assistant",
-        message: { content: [{ type: "tool_use", id: `t-${tool}`, name: tool, input: {} }] },
-      });
+      emit(message({ type: "tool_use", id: `t-${tool}`, name: tool, input: {} }));
     }
     for (const write of turn.writes ?? []) {
       await Bun.write(`${cwd}/${write.path}`, write.content);
     }
     for (const text of turn.text ?? []) {
-      emit({ type: "assistant", message: { content: [{ type: "text", text }] } });
+      emit(message({ type: "text", text }));
     }
 
     // The run ends when the script runs out of turns; anything left keeps the session open so
