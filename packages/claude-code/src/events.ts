@@ -36,10 +36,33 @@ export const initEventSchema = z
   })
   .passthrough();
 
+/**
+ * Token usage, as the CLI reports it on each assistant message.
+ *
+ * Every field is optional: usage is the CLI's to report, not ours to require, and a release
+ * that renames or drops one must not stop a run. A turn whose usage cannot be read is still
+ * recorded — as a turn with nothing reported — so a coverage gap is visible rather than
+ * indistinguishable from a turn that genuinely cost nothing.
+ */
+export const usageSchema = z
+  .object({
+    input_tokens: z.number().optional(),
+    output_tokens: z.number().optional(),
+    cache_read_input_tokens: z.number().optional(),
+    cache_creation_input_tokens: z.number().optional(),
+  })
+  .passthrough();
+
 export const assistantEventSchema = z
   .object({
     type: z.literal("assistant"),
-    message: z.object({ content: z.array(contentBlockSchema).optional() }).passthrough(),
+    message: z
+      .object({
+        content: z.array(contentBlockSchema).optional(),
+        model: z.string().optional(),
+        usage: usageSchema.optional(),
+      })
+      .passthrough(),
   })
   .passthrough();
 
@@ -81,6 +104,20 @@ export type ClaudeUpdate =
   | { kind: "session"; cwd: string | null; sessionId: string | null }
   | { kind: "text"; channel: "assistant" | "thinking"; text: string }
   | { kind: "tool_use"; name: string }
+  /**
+   * One completed assistant turn's token usage (issue #14).
+   *
+   * Deliberately carries counts and a model, never content, and no monetary figure: cost is
+   * derived from these at query time so a price change can never rewrite recorded history.
+   */
+  | {
+      kind: "usage";
+      model: string | null;
+      inputTokens: number;
+      outputTokens: number;
+      cacheReadTokens: number;
+      cacheWriteTokens: number;
+    }
   | { kind: "result"; ok: boolean; subtype: string | null; text: string | null };
 
 /** Parse one stdout line. Returns null for blank lines and anything unparseable. */
@@ -128,6 +165,19 @@ export function toUpdates(event: StreamEvent): ClaudeUpdate[] {
       }
       const tool = toolUseBlockSchema.safeParse(block);
       if (tool.success) updates.push({ kind: "tool_use", name: tool.data.name });
+    }
+    // Usage last: it belongs to the turn these blocks just completed, and ordering it after
+    // them keeps the event log readable as a narrative.
+    const usage = parsed.data.message.usage;
+    if (usage) {
+      updates.push({
+        kind: "usage",
+        model: parsed.data.message.model ?? null,
+        inputTokens: usage.input_tokens ?? 0,
+        outputTokens: usage.output_tokens ?? 0,
+        cacheReadTokens: usage.cache_read_input_tokens ?? 0,
+        cacheWriteTokens: usage.cache_creation_input_tokens ?? 0,
+      });
     }
     return updates;
   }

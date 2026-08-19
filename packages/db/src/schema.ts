@@ -208,6 +208,63 @@ export const sessionEvent = sqliteTable(
   (t) => ({ bySeq: uniqueIndex("session_event_seq").on(t.sessionId, t.seq) }),
 );
 
+/**
+ * Per-turn token usage (issue #14).
+ *
+ * Written at the moment a turn completes, because this is the one record in the product that
+ * cannot be reconstructed later: the agent reports usage once, in its own event stream, and
+ * GateControl is the only thing watching. A run that happens before this table exists is
+ * permanently unmeasurable.
+ *
+ * Three deliberate choices:
+ *
+ *  - **No monetary column.** Counts and model are facts; price is a moving external opinion.
+ *    Cost is derived at query time (`deriveCostUsd` in `@gatecontrol/core`) so a price change
+ *    never rewrites what was recorded.
+ *  - **`reported` marks coverage.** A turn whose agent said nothing about usage is still
+ *    inserted, with `reported: false` and zero counts, so a gap in coverage is visible instead
+ *    of being indistinguishable from a turn that genuinely cost nothing.
+ *  - **No content, ever.** Prompts and completions are not usage data (Principle IV).
+ */
+export const sessionUsage = sqliteTable(
+  "session_usage",
+  {
+    id: id(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspace.id),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => session.id),
+    taskId: text("task_id")
+      .notNull()
+      .references(() => task.id),
+    /**
+     * The Agent Profile the turn ran under — the attribution key for "what did this profile
+     * cost". Issue #14 names an agent-catalog reference; the catalog is issue #10 and does not
+     * exist yet, and the profile reaches it once it does.
+     */
+    agentProfileId: text("agent_profile_id")
+      .notNull()
+      .references(() => agentProfile.id),
+    /** Turn ordinal within the session, shared with `session_event.seq`. */
+    seq: integer("seq").notNull(),
+    /** Whatever the agent called the model. Null when it did not say. */
+    model: text("model"),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    cacheReadTokens: integer("cache_read_tokens").notNull().default(0),
+    cacheWriteTokens: integer("cache_write_tokens").notNull().default(0),
+    /** False when the agent reported no usage for this turn — a visible coverage gap. */
+    reported: integer("reported", { mode: "boolean" }).notNull().default(true),
+    at: createdAt(),
+  },
+  (t) => ({
+    bySession: uniqueIndex("session_usage_seq").on(t.sessionId, t.seq),
+    byWorkspace: index("session_usage_ws_at").on(t.workspaceId, t.at),
+  }),
+);
+
 export const review = sqliteTable(
   "review",
   {
@@ -258,6 +315,7 @@ export const schema = {
   worktree,
   session,
   sessionEvent,
+  sessionUsage,
   review,
   secret,
 };

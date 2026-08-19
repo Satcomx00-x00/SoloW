@@ -18,6 +18,7 @@ import {
   appendSessionEvent,
   loadTaskRunContext,
   nextSessionEventSeq,
+  recordSessionUsage,
   setSessionState,
   setTaskState,
   type TaskRunContext,
@@ -214,6 +215,31 @@ export async function runTaskLifecycle(
       // chained to keep log order identical to stream order.
       let seq = await nextSessionEventSeq(db, workspaceId, sessionId);
       let writes: Promise<unknown> = Promise.resolve();
+      // Usage is recorded per turn as it is reported (issue #14) — the agent states it once,
+      // in its own stream, and nothing else in the system can reconstruct it afterwards.
+      let usageTurns = 0;
+      const recordUsage = (u: {
+        model: string | null;
+        inputTokens: number;
+        outputTokens: number;
+        cacheReadTokens: number;
+        cacheWriteTokens: number;
+      }) => {
+        const turn = usageTurns++;
+        writes = writes
+          .then(() =>
+            recordSessionUsage(db, workspaceId, {
+              sessionId,
+              taskId,
+              agentProfileId: ctx.agentProfile.id,
+              seq: turn,
+              reported: true,
+              ...u,
+            }),
+          )
+          .catch((cause) => captureException(log, cause, { stage: "session-usage-record" }));
+      };
+
       const emit = (kind: "stdout" | "tool_use", payload: Record<string, unknown>) => {
         const at = seq++;
         deps.hub.publish(channel, { kind, taskId, sessionId, seq: at, ...payload });
@@ -237,7 +263,8 @@ export async function runTaskLifecycle(
         prompt: brief,
         onEvent: (e) => {
           if (e.kind === "stdout") emit("stdout", { text: e.text });
-          else emit("tool_use", { name: e.name });
+          else if (e.kind === "tool_use") emit("tool_use", { name: e.name });
+          else recordUsage(e);
         },
       });
       // Publish the handle for the lifetime of the run so the hub can deliver the operator's

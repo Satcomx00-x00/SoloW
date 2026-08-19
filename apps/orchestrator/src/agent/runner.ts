@@ -12,7 +12,16 @@ import type { FailureSignal } from "@gatecontrol/core";
  */
 export type AgentStreamEvent =
   | { kind: "stdout"; text: string }
-  | { kind: "tool_use"; name: string };
+  | { kind: "tool_use"; name: string }
+  /** One completed turn's token usage (issue #14). Counts and model only — never content. */
+  | {
+      kind: "usage";
+      model: string | null;
+      inputTokens: number;
+      outputTokens: number;
+      cacheReadTokens: number;
+      cacheWriteTokens: number;
+    };
 
 export type AgentOutcome = { kind: "completed" } | { kind: "failed"; signal: FailureSignal };
 

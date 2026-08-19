@@ -77,7 +77,9 @@ describe("ClaudeCodeRunner", () => {
 
     expect(await h.send("also add a regression test")).toBe(true);
     expect(await h.outcome).toEqual({ kind: "completed" });
-    expect(events.map((e) => (e.kind === "stdout" ? e.text : e.name))).toContain("added the test");
+    expect(events.flatMap((e) => (e.kind === "stdout" ? [e.text] : []))).toContain(
+      "added the test",
+    );
   });
 
   it("refuses input once the run has finished rather than swallowing it", async () => {
