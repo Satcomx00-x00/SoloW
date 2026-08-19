@@ -11,6 +11,7 @@ import type {
   AgentRunner,
   AgentStartOpts,
 } from "../../apps/orchestrator/src/agent/runner.js";
+import { createLocalExecutor } from "../../apps/orchestrator/src/executor/local.js";
 import { startWebSocketServer } from "../../apps/orchestrator/src/index.js";
 import {
   runTaskLifecycle,
@@ -136,6 +137,10 @@ const quietLogs = new Writable({
   },
 });
 
+// The real local Executor (issue #1) — the E2E suite proves the lifecycle against the same
+// git-through-executor path production uses, not a harness shortcut.
+const executor = createLocalExecutor(PATHS.worktrees);
+
 function deps(): TaskRunDeps {
   return {
     db: createDb(),
@@ -144,15 +149,15 @@ function deps(): TaskRunDeps {
     repoCacheRoot: PATHS.repoCache,
     logger: createLogger({ service: "e2e-orchestrator", destination: quietLogs }),
     worktree: {
-      prepare: prepareRepository,
-      adopt: adoptWorktree,
-      commit: commitWorktree,
-      discard: discardWorktreeChanges,
-      cleanup: cleanupWorktree,
-      hasChanges,
+      prepare: (params) => prepareRepository(executor, params),
+      adopt: (repoPath, reportedPath) => adoptWorktree(executor, repoPath, reportedPath),
+      commit: (path, message) => commitWorktree(executor, path, message),
+      discard: (path) => discardWorktreeChanges(executor, path),
+      cleanup: (repoPath, worktree) => cleanupWorktree(executor, repoPath, worktree),
+      hasChanges: (path) => hasChanges(executor, path),
       // The real capture against the real worktree, so the E2E proves the diff a reviewer sees
       // is the diff git reports.
-      diff: diffWorktree,
+      diff: (path) => diffWorktree(executor, path),
     },
     hub,
     // The same process-wide registry the WebSocket hub looks in, so a frame the SPA sends

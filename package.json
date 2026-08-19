@@ -30,8 +30,9 @@
     "e2e": "playwright test",
     "e2e:critical": "playwright test --grep @critical",
     "audit": "bun run scripts/audit.ts",
+    "audit:executor-boundary": "bun run scripts/audit-executor-boundary.ts",
     "secretscan": "gitleaks detect --source . --no-banner --redact",
-    "verify": "bun run lint && bun run typecheck && bun run test && bun run openapi:check && bun run audit",
+    "verify": "bun run lint && bun run typecheck && bun run test && bun run openapi:check && bun run audit && bun run audit:executor-boundary",
     "flag": "bun run scripts/flag.ts"
   },
   "devDependencies": {

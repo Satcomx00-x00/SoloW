@@ -1,13 +1,25 @@
-/// <reference types="bun-types" />
 import { join } from "node:path";
 import type { RepositorySource } from "@gatecontrol/contracts";
-import { $ } from "bun";
+import type { Executor } from "../executor/types.js";
 
 /**
  * Git worktree manager (spec F08 / task TASK-015). Each Task gets an isolated worktree so
  * concurrent Tasks never share working files (Principle II). Repositories come from a local
  * clone path or a remote URL that is cloned into a cache first (clarified 2026-08-17).
+ *
+ * Every git invocation goes through the `Executor` (issue #1) rather than a `Bun.spawn`/shell
+ * call of its own — that is what makes a second executor kind (#46 #47 #48) a driver instead of
+ * a second implementation of "where does this worktree actually live".
  */
+
+/** Run a command through the executor; throws with stderr on a non-zero exit. */
+async function run(executor: Executor, cmd: string[]): Promise<string> {
+  const result = await executor.exec(cmd);
+  if (result.exitCode !== 0) {
+    throw new Error(`command failed (${result.exitCode}): ${cmd.join(" ")}\n${result.stderr}`);
+  }
+  return result.stdout;
+}
 
 /** Deterministic, collision-free branch name for a Task's worktree. */
 export function worktreeBranch(taskId: string): string {
@@ -35,24 +47,27 @@ export interface Worktree {
 }
 
 /** The main repository path a worktree is added onto (local path, or a cached clone). */
-async function resolveRepoPath(params: ProvisionParams): Promise<string> {
+async function resolveRepoPath(executor: Executor, params: ProvisionParams): Promise<string> {
   if (params.repository.source === "local_path") return params.repository.location;
   // remote_url: clone into the cache once (idempotent), then add worktrees from it.
   const cachePath = join(params.repoCacheRoot, encodeURIComponent(params.repository.location));
-  const exists = await Bun.file(join(cachePath, ".git", "HEAD")).exists();
-  if (!exists) {
-    await $`git clone ${params.repository.location} ${cachePath}`.quiet();
+  const marker = await executor.exec(["test", "-f", join(cachePath, ".git", "HEAD")]);
+  if (marker.exitCode !== 0) {
+    await run(executor, ["git", "clone", params.repository.location, cachePath]);
   }
   return cachePath;
 }
 
-export async function provisionWorktree(params: ProvisionParams): Promise<Worktree> {
-  const repoPath = await resolveRepoPath(params);
+export async function provisionWorktree(
+  executor: Executor,
+  params: ProvisionParams,
+): Promise<Worktree> {
+  const repoPath = await resolveRepoPath(executor, params);
   const branch = worktreeBranch(params.taskId);
   const path = worktreePath(params.worktreeRoot, params.taskId);
   const base = params.baseRef ?? "HEAD";
   // Create a new branch for the Task, checked out into its own worktree.
-  await $`git -C ${repoPath} worktree add -b ${branch} ${path} ${base}`.quiet();
+  await run(executor, ["git", "-C", repoPath, "worktree", "add", "-b", branch, path, base]);
   return { path, branch, repoPath };
 }
 
@@ -65,9 +80,12 @@ export async function provisionWorktree(params: ProvisionParams): Promise<Worktr
  * starts, when the repository is unusable (TASK-015: an invalid location fails the Task rather
  * than producing a confusing agent error later).
  */
-export async function prepareRepository(params: ProvisionParams): Promise<string> {
-  const repoPath = await resolveRepoPath(params);
-  const isRepo = await $`git -C ${repoPath} rev-parse --git-dir`.quiet().nothrow();
+export async function prepareRepository(
+  executor: Executor,
+  params: ProvisionParams,
+): Promise<string> {
+  const repoPath = await resolveRepoPath(executor, params);
+  const isRepo = await executor.exec(["git", "-C", repoPath, "rev-parse", "--git-dir"]);
   if (isRepo.exitCode !== 0) {
     throw new Error(`not a git repository: ${params.repository.location}`);
   }
@@ -87,8 +105,11 @@ export interface WorktreeRecord {
  * it puts it and what it calls the branch are its business. Asking git means the adoption works
  * whatever the CLI decides to do.
  */
-export async function listWorktrees(repoPath: string): Promise<WorktreeRecord[]> {
-  const out = await $`git -C ${repoPath} worktree list --porcelain`.quiet().text();
+export async function listWorktrees(
+  executor: Executor,
+  repoPath: string,
+): Promise<WorktreeRecord[]> {
+  const out = await run(executor, ["git", "-C", repoPath, "worktree", "list", "--porcelain"]);
   const records: WorktreeRecord[] = [];
   let current: { path?: string; branch?: string } = {};
 
@@ -117,13 +138,14 @@ export async function listWorktrees(repoPath: string): Promise<WorktreeRecord[]>
  * caller must fail rather than commit from wherever it happens to be pointing (Principle II).
  */
 export async function adoptWorktree(
+  executor: Executor,
   repoPath: string,
   reportedPath: string | null,
 ): Promise<Worktree> {
   if (!reportedPath) {
     throw new Error("agent did not report a workspace; cannot confirm an isolated worktree");
   }
-  const known = await listWorktrees(repoPath);
+  const known = await listWorktrees(executor, repoPath);
   const match = known.find((w) => samePath(w.path, reportedPath));
   if (!match) {
     throw new Error(
@@ -140,26 +162,34 @@ function samePath(a: string, b: string): boolean {
 }
 
 /** True when the worktree has uncommitted changes (i.e. the agent produced a diff). */
-export async function hasChanges(path: string): Promise<boolean> {
-  const out = await $`git -C ${path} status --porcelain`.quiet().text();
+export async function hasChanges(executor: Executor, path: string): Promise<boolean> {
+  const out = await run(executor, ["git", "-C", path, "status", "--porcelain"]);
   return out.trim().length > 0;
 }
 
 /** Commit the agent's changes onto the Task's new local branch (no push/PR — spec FR-009). */
-export async function commitWorktree(path: string, message: string): Promise<void> {
-  await $`git -C ${path} add -A`.quiet();
-  await $`git -C ${path} commit -m ${message}`.quiet();
+export async function commitWorktree(
+  executor: Executor,
+  path: string,
+  message: string,
+): Promise<void> {
+  await run(executor, ["git", "-C", path, "add", "-A"]);
+  await run(executor, ["git", "-C", path, "commit", "-m", message]);
 }
 
 /** Discard uncommitted changes (reject). */
-export async function discardWorktreeChanges(path: string): Promise<void> {
-  await $`git -C ${path} reset --hard`.quiet();
-  await $`git -C ${path} clean -fd`.quiet();
+export async function discardWorktreeChanges(executor: Executor, path: string): Promise<void> {
+  await run(executor, ["git", "-C", path, "reset", "--hard"]);
+  await run(executor, ["git", "-C", path, "clean", "-fd"]);
 }
 
 /** Remove the worktree when the Task completes or is discarded. */
-export async function cleanupWorktree(repoPath: string, worktree: string): Promise<void> {
-  await $`git -C ${repoPath} worktree remove --force ${worktree}`.quiet();
+export async function cleanupWorktree(
+  executor: Executor,
+  repoPath: string,
+  worktree: string,
+): Promise<void> {
+  await run(executor, ["git", "-C", repoPath, "worktree", "remove", "--force", worktree]);
 }
 
 /**
@@ -230,11 +260,11 @@ function parseNumstat(out: string): Map<string, { additions: number; deletions: 
  * takes it out of the unstaged diff entirely: a plain `git diff` reported a deleted file as no
  * change at all. Against HEAD both staged and unstaged work is included, so a deletion survives.
  */
-export async function diffWorktree(path: string): Promise<WorktreeDiff> {
-  await $`git -C ${path} add -N .`.quiet().nothrow();
+export async function diffWorktree(executor: Executor, path: string): Promise<WorktreeDiff> {
+  await executor.exec(["git", "-C", path, "add", "-N", "."]);
 
-  const numstat = await $`git -C ${path} diff HEAD --numstat`.quiet().text();
-  const nameStatus = await $`git -C ${path} diff HEAD --name-status`.quiet().text();
+  const numstat = await run(executor, ["git", "-C", path, "diff", "HEAD", "--numstat"]);
+  const nameStatus = await run(executor, ["git", "-C", path, "diff", "HEAD", "--name-status"]);
   const stats = parseNumstat(numstat);
 
   const files: DiffFile[] = [];
@@ -251,7 +281,7 @@ export async function diffWorktree(path: string): Promise<WorktreeDiff> {
     });
   }
 
-  const full = await $`git -C ${path} diff HEAD`.quiet().text();
+  const full = await run(executor, ["git", "-C", path, "diff", "HEAD"]);
   const truncated = full.length > DIFF_PATCH_LIMIT;
   return { files, patch: truncated ? full.slice(0, DIFF_PATCH_LIMIT) : full, truncated };
 }

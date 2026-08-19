@@ -5,6 +5,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type FakeClaudeScript, writeFakeClaudeBin } from "@gatecontrol/claude-code/testing";
+import { createLocalExecutor } from "../executor/local.js";
 import { ClaudeCodeRunner, toStreamEvent, worktreeNameForTask } from "./claude-code-runner.js";
 import type { AgentHandle, AgentStreamEvent } from "./runner.js";
 
@@ -29,7 +30,7 @@ async function run(script: FakeClaudeScript = {}, prompt = "fix the latch") {
   workdir = await mkdtemp(join(tmpdir(), "gatecontrol-cc-"));
   const events: AgentStreamEvent[] = [];
   const command = await writeFakeClaudeBin(workdir, { cwd: workdir, ...script });
-  handle = new ClaudeCodeRunner().start({
+  handle = new ClaudeCodeRunner({ executor: createLocalExecutor(workdir) }).start({
     command,
     args: [],
     cwd: workdir,
@@ -119,7 +120,7 @@ describe("ClaudeCodeRunner", () => {
 
   it("fails rather than hangs when the binary does not exist", async () => {
     workdir = await mkdtemp(join(tmpdir(), "gatecontrol-cc-"));
-    handle = new ClaudeCodeRunner().start({
+    handle = new ClaudeCodeRunner({ executor: createLocalExecutor(workdir) }).start({
       command: join(workdir, "no-such-claude"),
       args: [],
       cwd: workdir,
