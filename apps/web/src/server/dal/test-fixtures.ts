@@ -1,4 +1,11 @@
-import { agentProfile, executorProfile, issue, repository, workspace } from "@gatecontrol/db";
+import {
+  agentCatalog,
+  agentProfile,
+  executorProfile,
+  issue,
+  repository,
+  workspace,
+} from "@gatecontrol/db";
 import type { TestDb } from "@gatecontrol/db/testing";
 import type { RequestContext } from "./context.js";
 
@@ -14,9 +21,29 @@ export async function seedWorkspaceGraph(db: TestDb, name: string) {
     .returning();
   if (!ws) throw new Error("failed to seed workspace");
 
+  const [catalogEntry] = await db
+    .insert(agentCatalog)
+    .values({
+      workspaceId: ws.id,
+      key: "claude_code",
+      displayName: "Claude Code",
+      protocol: "claude_code_stream_json",
+      command: "claude",
+      subscriptionEnvVar: "CLAUDE_CODE_OAUTH_TOKEN",
+      meteredEnvVar: "ANTHROPIC_API_KEY",
+    })
+    .returning();
+  if (!catalogEntry) throw new Error("failed to seed agent catalog");
+
   const [agent] = await db
     .insert(agentProfile)
-    .values({ workspaceId: ws.id, name: "claude", authMode: "api_key", secretId: "secret-1" })
+    .values({
+      workspaceId: ws.id,
+      name: "claude",
+      agentCatalogId: catalogEntry.id,
+      authMode: "api_key",
+      secretId: "secret-1",
+    })
     .returning();
   const [executor] = await db
     .insert(executorProfile)

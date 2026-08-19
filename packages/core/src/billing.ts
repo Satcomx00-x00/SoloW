@@ -13,7 +13,14 @@ import {
  * environment for the agent process. The orchestrator decrypts and calls this.
  *
  * Billing integrity: a subscription-mode run MUST NOT be able to cause metered API
- * billing, so `ANTHROPIC_API_KEY` is stripped from the returned environment.
+ * billing, so the agent's metered-credential variable is stripped from the returned
+ * environment.
+ *
+ * Which two variables those are is a parameter, not a constant (issue #10): it used to be a
+ * hardcoded `CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY` pair, which is Claude Code's own
+ * naming and would have been silently wrong for the next agent's catalog row. Both names now
+ * come from the running Agent Profile's `agent_catalog` row, so the guarantee holds for
+ * whichever agent is actually running, not just the first one GateControl shipped.
  */
 
 export interface ResolveEnvParams {
@@ -22,6 +29,10 @@ export interface ResolveEnvParams {
   credentialValue: string | null;
   /** The base environment the agent process would otherwise inherit. */
   baseEnv: Readonly<Record<string, string | undefined>>;
+  /** From the running Agent's catalog row — see `agent-catalog.ts`. */
+  subscriptionEnvVar: string;
+  /** From the running Agent's catalog row — the variable that must never carry a value. */
+  meteredEnvVar: string;
   /**
    * Extra environment from the Task's Executor Profile (issue #73). Applied *over* the base
    * environment and *under* the credential shaping below, so a profile can never set the
@@ -30,7 +41,10 @@ export interface ResolveEnvParams {
    *
    * The contract already refuses a profile that names a guarded variable, so a value reaching
    * here would have to predate that check or bypass the API. It is dropped anyway: this is the
-   * last point at which billing integrity is still enforceable.
+   * last point at which billing integrity is still enforceable — and since the guarded names are
+   * catalog-driven (issue #10), not just the Claude Code pair the contract's static check knows
+   * about, this also strips `subscriptionEnvVar`/`meteredEnvVar` for whichever agent is actually
+   * running, not only the two names the contract layer recognises.
    */
   profileEnv?: Readonly<Record<string, string>>;
 }
@@ -38,7 +52,8 @@ export interface ResolveEnvParams {
 export function resolveAgentRunEnv(
   params: ResolveEnvParams,
 ): Result<Record<string, string>, typeof BillingErrorCode.MissingCredential> {
-  const { authMode, credentialValue, baseEnv, profileEnv } = params;
+  const { authMode, credentialValue, baseEnv, subscriptionEnvVar, meteredEnvVar, profileEnv } =
+    params;
   if (!credentialValue) return err(BillingErrorCode.MissingCredential);
 
   // Copy the base env, dropping undefined values.
@@ -46,18 +61,18 @@ export function resolveAgentRunEnv(
   for (const [k, v] of Object.entries(baseEnv)) if (v !== undefined) env[k] = v;
 
   for (const [k, v] of Object.entries(profileEnv ?? {})) {
-    if (isGuardedEnvVar(k)) continue;
+    if (isGuardedEnvVar(k) || k === subscriptionEnvVar || k === meteredEnvVar) continue;
     env[k] = v;
   }
 
   if (authMode === "subscription") {
-    env["CLAUDE_CODE_OAUTH_TOKEN"] = credentialValue;
-    // Billing integrity: an API key in the env would divert to metered billing.
-    delete env["ANTHROPIC_API_KEY"];
+    env[subscriptionEnvVar] = credentialValue;
+    // Billing integrity: a metered credential in the env would divert to metered billing.
+    delete env[meteredEnvVar];
   } else {
-    env["ANTHROPIC_API_KEY"] = credentialValue;
+    env[meteredEnvVar] = credentialValue;
     // Avoid a stale subscription token silently taking precedence.
-    delete env["CLAUDE_CODE_OAUTH_TOKEN"];
+    delete env[subscriptionEnvVar];
   }
   return ok(env);
 }

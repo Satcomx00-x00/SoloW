@@ -2262,12 +2262,9 @@
                     "minLength": 1,
                     "maxLength": 120
                   },
-                  "agentKind": {
+                  "agentCatalogId": {
                     "type": "string",
-                    "enum": [
-                      "claude_code"
-                    ],
-                    "default": "claude_code"
+                    "minLength": 1
                   },
                   "authMode": {
                     "type": "string",
@@ -2289,6 +2286,7 @@
                 },
                 "required": [
                   "name",
+                  "agentCatalogId",
                   "authMode",
                   "secretId"
                 ]
@@ -2311,11 +2309,9 @@
                     "name": {
                       "type": "string"
                     },
-                    "agentKind": {
+                    "agentCatalogId": {
                       "type": "string",
-                      "enum": [
-                        "claude_code"
-                      ]
+                      "minLength": 1
                     },
                     "authMode": {
                       "type": "string",
@@ -2343,7 +2339,7 @@
                   "required": [
                     "id",
                     "name",
-                    "agentKind",
+                    "agentCatalogId",
                     "authMode",
                     "secretId",
                     "concurrencyCap",
@@ -2425,11 +2421,9 @@
                       "name": {
                         "type": "string"
                       },
-                      "agentKind": {
+                      "agentCatalogId": {
                         "type": "string",
-                        "enum": [
-                          "claude_code"
-                        ]
+                        "minLength": 1
                       },
                       "authMode": {
                         "type": "string",
@@ -2457,10 +2451,178 @@
                     "required": [
                       "id",
                       "name",
-                      "agentKind",
+                      "agentCatalogId",
                       "authMode",
                       "secretId",
                       "concurrencyCap",
+                      "createdAt",
+                      "updatedAt"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.NOT_FOUND"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/profile.agentCatalog.list": {
+      "get": {
+        "operationId": "profile-agentCatalog-list",
+        "tags": [
+          "profile"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "key": {
+                        "type": "string",
+                        "pattern": "^[a-z][a-z0-9_]*$",
+                        "minLength": 1,
+                        "maxLength": 60
+                      },
+                      "displayName": {
+                        "type": "string"
+                      },
+                      "protocol": {
+                        "type": "string",
+                        "enum": [
+                          "claude_code_stream_json",
+                          "acp",
+                          "cli_passthrough"
+                        ]
+                      },
+                      "command": {
+                        "type": "string"
+                      },
+                      "argsTemplate": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "installHint": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "subscriptionEnvVar": {
+                        "type": "string"
+                      },
+                      "meteredEnvVar": {
+                        "type": "string"
+                      },
+                      "capabilities": {
+                        "type": "object",
+                        "properties": {
+                          "models": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "default": []
+                          },
+                          "modes": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "default": []
+                          }
+                        },
+                        "required": [
+                          "models",
+                          "modes"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "createdAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "updatedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "key",
+                      "displayName",
+                      "protocol",
+                      "command",
+                      "argsTemplate",
+                      "installHint",
+                      "subscriptionEnvVar",
+                      "meteredEnvVar",
+                      "capabilities",
                       "createdAt",
                       "updatedAt"
                     ]

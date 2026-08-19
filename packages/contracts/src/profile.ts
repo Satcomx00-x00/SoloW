@@ -1,15 +1,19 @@
 import { z } from "zod";
-import { agentKindSchema, authModeSchema, idSchema, timestampsSchema } from "./common.js";
+import { authModeSchema, idSchema, timestampsSchema } from "./common.js";
 import {
   DEFAULT_EXECUTOR_CONFIG,
   executorConfigSchema,
   executorKindSchema,
 } from "./executor-config.js";
 
-/** Agent Profile (spec F05/F06). Subscription concurrency cap defaults to 3. */
+/**
+ * Agent Profile (spec F05/F06, issue #10). `agentCatalogId` replaces the old closed
+ * `agentKind` enum — which agent this Profile runs, and how, is data in `agent_catalog`, not a
+ * literal the contract has to know about.
+ */
 export const createAgentProfileInput = z.object({
   name: z.string().min(1).max(120),
-  agentKind: agentKindSchema.default("claude_code"),
+  agentCatalogId: idSchema,
   authMode: authModeSchema,
   /** References a stored Secret (subscription token or API key). */
   secretId: idSchema,
@@ -21,7 +25,7 @@ export const agentProfileDto = z
   .object({
     id: idSchema,
     name: z.string(),
-    agentKind: agentKindSchema,
+    agentCatalogId: idSchema,
     authMode: authModeSchema,
     secretId: idSchema,
     concurrencyCap: z.number().int(),

@@ -1,5 +1,6 @@
 import type { SessionState, TaskState } from "@gatecontrol/contracts";
 import {
+  agentCatalog,
   agentProfile,
   type Db,
   executorProfile,
@@ -24,6 +25,8 @@ export interface TaskRunContext {
   /** The Issue the Task belongs to — its description is the agent's brief. */
   issue: typeof issue.$inferSelect;
   agentProfile: typeof agentProfile.$inferSelect;
+  /** Which agent this Profile runs, and how — launch command and billing variables (#10). */
+  agentCatalog: typeof agentCatalog.$inferSelect;
   /** Where the agent runs, and the per-kind configuration it runs under (issue #73). */
   executorProfile: typeof executorProfile.$inferSelect;
   repository: typeof repository.$inferSelect;
@@ -56,6 +59,13 @@ export async function loadTaskRunContext(
     .limit(1);
   if (!ap) throw new Error(`agent profile ${t.agentProfileId} not found`);
 
+  const [cat] = await db
+    .select()
+    .from(agentCatalog)
+    .where(and(eq(agentCatalog.workspaceId, workspaceId), eq(agentCatalog.id, ap.agentCatalogId)))
+    .limit(1);
+  if (!cat) throw new Error(`agent catalog entry ${ap.agentCatalogId} not found`);
+
   const [ep] = await db
     .select()
     .from(executorProfile)
@@ -85,6 +95,7 @@ export async function loadTaskRunContext(
     task: t,
     issue: iss,
     agentProfile: ap,
+    agentCatalog: cat,
     executorProfile: ep,
     repository: repo,
     secretCiphertext: sec?.ciphertext ?? null,

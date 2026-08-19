@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from "bun:test";
 import type { TaskEvent } from "@gatecontrol/contracts";
 import { signStreamTicket } from "@gatecontrol/core/stream";
 import {
+  agentCatalog,
   agentProfile,
   executorProfile,
   issue,
@@ -90,10 +91,21 @@ describe("attachSubscriber (reconnect replay)", () => {
     await db
       .insert(issue)
       .values({ id: `issue-${suffix}`, workspaceId, title: "Issue", status: "open" });
+    await db.insert(agentCatalog).values({
+      id: `catalog-${suffix}`,
+      workspaceId,
+      key: "claude_code",
+      displayName: "Claude Code",
+      protocol: "claude_code_stream_json",
+      command: "claude",
+      subscriptionEnvVar: "CLAUDE_CODE_OAUTH_TOKEN",
+      meteredEnvVar: "ANTHROPIC_API_KEY",
+    });
     await db.insert(agentProfile).values({
       id: `agent-${suffix}`,
       workspaceId,
       name: "Claude",
+      agentCatalogId: `catalog-${suffix}`,
       authMode: "subscription",
       secretId: `secret-${suffix}`,
     });

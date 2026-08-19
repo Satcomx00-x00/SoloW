@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type {
-  AgentKind,
+  AgentCapabilities,
+  AgentProtocol,
   AuthMode,
   ChangeRequestState,
   ExecutorConfig,
@@ -119,6 +120,52 @@ export const issue = sqliteTable(
   }),
 );
 
+/**
+ * Agent catalog (issue #10, spec F05). Agent identity as data: adding a supported agent is a
+ * seed row plus an Agent Profile pointing at it, not a change to `agent_profile.agentKind` and
+ * every place that used to switch on it.
+ *
+ * Workspace-scoped like every other tenant-owned table (Principle V) — a self-hoster who wires
+ * up a custom agent CLI does it for their own Workspace.
+ *
+ * `subscriptionEnvVar` / `meteredEnvVar` are why this is a table and not a JSON blob: the
+ * billing strip (`resolveAgentRunEnv`) used to hardcode Claude Code's two variable names. That
+ * guarantee is GateControl's headline differentiator, and it must not silently stop holding the
+ * moment a second agent's row is added — so which variables to strip is read off this row, not
+ * assumed.
+ */
+export const agentCatalog = sqliteTable(
+  "agent_catalog",
+  {
+    id: id(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspace.id),
+    key: text("key").notNull(),
+    displayName: text("display_name").notNull(),
+    protocol: text("protocol").$type<AgentProtocol>().notNull(),
+    command: text("command").notNull(),
+    argsTemplate: text("args_template", { mode: "json" })
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    installHint: text("install_hint"),
+    subscriptionEnvVar: text("subscription_env_var").notNull(),
+    meteredEnvVar: text("metered_env_var").notNull(),
+    /** A cache of the agent's last advertised models/modes — see `AgentCapabilities`. */
+    capabilities: text("capabilities", { mode: "json" })
+      .$type<AgentCapabilities>()
+      .notNull()
+      .default(sql`'{"models":[],"modes":[]}'`),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => ({
+    byWs: index("agent_catalog_ws").on(t.workspaceId),
+    byKey: uniqueIndex("agent_catalog_ws_key").on(t.workspaceId, t.key),
+  }),
+);
+
 export const agentProfile = sqliteTable(
   "agent_profile",
   {
@@ -127,7 +174,9 @@ export const agentProfile = sqliteTable(
       .notNull()
       .references(() => workspace.id),
     name: text("name").notNull(),
-    agentKind: text("agent_kind").$type<AgentKind>().notNull().default("claude_code"),
+    agentCatalogId: text("agent_catalog_id")
+      .notNull()
+      .references(() => agentCatalog.id),
     authMode: text("auth_mode").$type<AuthMode>().notNull(),
     secretId: text("secret_id").notNull(),
     concurrencyCap: integer("concurrency_cap").notNull().default(3),
@@ -453,6 +502,7 @@ export const schema = {
   workspace,
   integration,
   issue,
+  agentCatalog,
   agentProfile,
   executorProfile,
   repository,

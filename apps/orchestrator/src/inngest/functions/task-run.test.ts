@@ -2,8 +2,9 @@
 
 import { beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { Writable } from "node:stream";
-import type { ExecutorConfig } from "@gatecontrol/contracts";
+import type { AgentProtocol, ExecutorConfig } from "@gatecontrol/contracts";
 import {
+  agentCatalog,
   agentProfile,
   encryptSecret,
   executorProfile,
@@ -49,7 +50,7 @@ function freshIds(): Ids {
 async function seedRun(
   db: TestDb,
   ids: Ids,
-  opts: { executorConfig?: ExecutorConfig } = {},
+  opts: { agentProtocol?: AgentProtocol; executorConfig?: ExecutorConfig } = {},
 ): Promise<void> {
   await db.insert(workspace).values({ id: ids.workspaceId, name: "WS", ownerUserId: "owner" });
   const secretId = `secret-${ids.taskId}`;
@@ -60,11 +61,23 @@ async function seedRun(
     kind: "subscription_token",
     ciphertext: encryptSecret("oauth-token"),
   });
+  const catalogId = `catalog-${ids.taskId}`;
+  await db.insert(agentCatalog).values({
+    id: catalogId,
+    workspaceId: ids.workspaceId,
+    key: "claude_code",
+    displayName: "Claude Code",
+    protocol: opts.agentProtocol ?? "claude_code_stream_json",
+    command: "fake",
+    subscriptionEnvVar: "CLAUDE_CODE_OAUTH_TOKEN",
+    meteredEnvVar: "ANTHROPIC_API_KEY",
+  });
   const agentId = `agent-${ids.taskId}`;
   await db.insert(agentProfile).values({
     id: agentId,
     workspaceId: ids.workspaceId,
     name: "Claude",
+    agentCatalogId: catalogId,
     authMode: "subscription",
     secretId,
     concurrencyCap: 3,
@@ -137,12 +150,15 @@ class ScriptedRunner implements AgentRunner {
   starts = 0;
   /** The brief each run was given, in order. */
   readonly prompts: string[] = [];
-  /** The environment each run was handed — where the billing guard's output is observable. */
+  /** The command and environment each run was launched with — where the catalog row and the
+   * billing guard's output become observable. */
+  readonly commands: string[] = [];
   readonly envs: Record<string, string>[] = [];
   constructor(private readonly outcomes: AgentOutcome[]) {}
   start(opts: AgentStartOpts): AgentHandle {
     this.starts += 1;
     this.prompts.push(opts.prompt);
+    this.commands.push(opts.command);
     this.envs.push(opts.env);
     opts.onEvent({ kind: "stdout", text: "working" });
     const outcome = this.outcomes.shift() ?? { kind: "completed" };
@@ -210,7 +226,6 @@ function makeDeps(
         spies.published.push({ channel, event: event as Record<string, unknown> }),
     },
     registry: new AgentRegistry(),
-    agentInvocation: () => ({ command: "fake", args: [] }),
   };
   return { deps, spies };
 }
@@ -760,5 +775,53 @@ describe("the worktree a Task runs in", () => {
 
     expect(cleaned).toEqual([`/wt/gatecontrol-task-${ids.taskId}`]);
     expect(spies.commit).toBe(1);
+  });
+
+  describe("agent catalog (issue #10)", () => {
+    it("fails a Task whose Agent catalog protocol has no runner, rather than crashing inside one", async () => {
+      const ids = freshIds();
+      // `acp` names a real member of AgentProtocol (issue #58's target), but no runner speaks
+      // it yet — this must fail cleanly before an agent is ever started.
+      await seedRun(db, ids, { agentProtocol: "acp" });
+      const runner = new ScriptedRunner([{ kind: "completed" }]);
+      const { deps, spies } = makeDeps(db, runner, nullStream());
+
+      const result = await runTaskLifecycle(deps, {
+        event: { data: ids },
+        step: scriptedStep(["approve"]),
+      });
+
+      expect(result.result).toBe("failed");
+      expect(await taskState(db, ids.taskId)).toBe("failed");
+      expect(runner.starts).toBe(0);
+      expect(spies.commit).toBe(0);
+      const [row] = await db.select().from(task).where(eq(task.id, ids.taskId)).limit(1);
+      expect(row?.failureReason).toContain("acp");
+    });
+
+    it("launches the agent with the command the catalog row declares, not a global env var", async () => {
+      const ids = freshIds();
+      await seedRun(db, ids);
+      const runner = new ScriptedRunner([{ kind: "completed" }]);
+      const { deps } = makeDeps(db, runner, nullStream());
+
+      await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+      // seedRun's catalog row sets command "fake" — there is no GATECONTROL_AGENT_COMMAND any
+      // more for this to have fallen back to.
+      expect(runner.commands).toEqual(["fake"]);
+    });
+
+    it("strips the metered variable this catalog row names, not a hardcoded one", async () => {
+      const ids = freshIds();
+      await seedRun(db, ids);
+      const runner = new ScriptedRunner([{ kind: "completed" }]);
+      const { deps } = makeDeps(db, runner, nullStream());
+
+      await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+      expect(runner.envs[0]?.["CLAUDE_CODE_OAUTH_TOKEN"]).toBe("oauth-token");
+      expect(runner.envs[0]).not.toHaveProperty("ANTHROPIC_API_KEY");
+    });
   });
 });

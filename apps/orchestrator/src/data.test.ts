@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it } from "bun:test";
 import {
+  agentCatalog,
   agentProfile,
   encryptSecret,
   executorProfile,
@@ -45,11 +46,22 @@ async function seed(db: TestDb) {
     ciphertext,
   });
 
+  await db.insert(agentCatalog).values({
+    id: "cat-1",
+    workspaceId: WS,
+    key: "claude_code",
+    displayName: "Claude Code",
+    protocol: "claude_code_stream_json",
+    command: "claude",
+    subscriptionEnvVar: "CLAUDE_CODE_OAUTH_TOKEN",
+    meteredEnvVar: "ANTHROPIC_API_KEY",
+  });
+
   await db.insert(agentProfile).values({
     id: "ap-1",
     workspaceId: WS,
     name: "Default Claude",
-    agentKind: "claude_code",
+    agentCatalogId: "cat-1",
     authMode: "subscription",
     secretId: "sec-1",
   });
@@ -104,6 +116,10 @@ describe("loadTaskRunContext", () => {
     expect(ctx.agentProfile.id).toBe("ap-1");
     expect(ctx.agentProfile.authMode).toBe("subscription");
     expect(ctx.agentProfile.secretId).toBe("sec-1");
+
+    expect(ctx.agentCatalog.id).toBe("cat-1");
+    expect(ctx.agentCatalog.command).toBe("claude");
+    expect(ctx.agentCatalog.subscriptionEnvVar).toBe("CLAUDE_CODE_OAUTH_TOKEN");
 
     expect(ctx.repository.id).toBe("repo-1");
     expect(ctx.repository.source).toBe("local_path");
