@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { beforeAll, beforeEach, describe, expect, it } from "bun:test";
-import { authSchema, workspace } from "@gatecontrol/db";
+import { agentCatalog, authSchema, workspace } from "@gatecontrol/db";
 import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
 import { eq } from "drizzle-orm";
 import { createAuth, ownerExists, workspaceForUser } from "./auth.js";
@@ -122,6 +122,10 @@ describe("resolveSession", () => {
 
   it("refuses a user with no Workspace rather than a session without a tenant key", async () => {
     const { cookie, userId } = await signUpOwner();
+    // Sign-up also seeds the Workspace's default agent catalog row (issue #10); delete it first
+    // so the Workspace delete below isn't rejected by its own foreign key.
+    const [ws] = await db.select().from(workspace).where(eq(workspace.ownerUserId, userId));
+    if (ws) await db.delete(agentCatalog).where(eq(agentCatalog.workspaceId, ws.id));
     await db.delete(workspace).where(eq(workspace.ownerUserId, userId));
 
     // Half a session is worse than none: `workspaceId` would then have to come from somewhere

@@ -24,6 +24,7 @@ export function createDb() {
 
 export type Db = ReturnType<typeof createDb>;
 
+export { ensureDefaultAgentCatalog } from "./agent-catalog-defaults.js";
 export * from "./auth-schema.js";
 export { dbEnv } from "./env.js";
 export { listWorkspaceFlags, setWorkspaceFlag, type WorkspaceFlags } from "./flags.js";

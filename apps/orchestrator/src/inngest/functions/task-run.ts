@@ -11,6 +11,7 @@ import {
 } from "@gatecontrol/observability";
 import { z } from "zod";
 import { ClaudeCodeRunner, worktreeNameForTask } from "../../agent/claude-code-runner.js";
+import { hasAgentRunner, missingAgentRunnerReason } from "../../agent/protocols.js";
 import { type AgentRegistry, agentRegistry } from "../../agent/registry.js";
 import type { AgentRunner } from "../../agent/runner.js";
 import { prepareAgentEnv } from "../../billing/guard.js";
@@ -103,7 +104,6 @@ export interface TaskRunDeps {
   hub: HubLike;
   /** Where the hub finds the agent belonging to a Task, to deliver input or a stop. */
   registry: AgentRegistry;
-  agentInvocation: () => { command: string; args: string[] };
 }
 
 /** Production wiring. */
@@ -129,12 +129,6 @@ export function defaultDeps(): TaskRunDeps {
     },
     hub,
     registry: agentRegistry,
-    // Which ACP-speaking agent binary to run. Configurable because the adapter that puts an
-    // ACP face on Claude Code ships separately from Claude Code itself.
-    agentInvocation: () => ({
-      command: env.GATECONTROL_AGENT_COMMAND,
-      args: env.GATECONTROL_AGENT_ARGS,
-    }),
   };
 }
 
@@ -174,6 +168,23 @@ export async function runTaskLifecycle(
       state,
       at: new Date().toISOString(),
     });
+
+  /**
+   * An Agent Profile names the protocol its catalog row declares, and only some protocols have
+   * a runner behind them yet (issue #10). Checked here, before anything is cloned: a Task
+   * pointed at an `acp` catalog entry must fail with a legible reason, not crash deep inside a
+   * runner that was never built to speak it.
+   */
+  if (!hasAgentRunner(ctx.agentCatalog.protocol)) {
+    const reason = missingAgentRunnerReason(ctx.agentCatalog.protocol);
+    await step.run("agent-runner-unavailable", () =>
+      setTaskState(db, workspaceId, taskId, "failed", { failureReason: reason }),
+    );
+    logStateTransition(log, { workspaceId, taskId, from: ctx.task.state, to: "failed" });
+    announce("failed");
+    captureException(log, new Error(reason), { failureReason: reason });
+    return { taskId, result: "failed" as const };
+  }
 
   /**
    * A Task names the Executor Profile it runs under, and only some kinds have a driver behind
@@ -226,6 +237,8 @@ export async function runTaskLifecycle(
         authMode: ctx.agentProfile.authMode,
         secretCiphertext: ctx.secretCiphertext,
         baseEnv: process.env,
+        subscriptionEnvVar: ctx.agentCatalog.subscriptionEnvVar,
+        meteredEnvVar: ctx.agentCatalog.meteredEnvVar,
         // The Executor Profile's environment (issue #73). It is applied under the credential
         // shaping, never over it, so a profile cannot become a route to metered billing.
         profileEnv: ctx.executorProfile.config.env ?? {},
@@ -289,7 +302,10 @@ export async function runTaskLifecycle(
           .catch((cause) => captureException(log, cause, { stage: "session-event-append" }));
       };
 
-      const { command, args } = deps.agentInvocation();
+      // Launch command and arguments come from the Agent's catalog row (issue #10) — not a
+      // global env var, since two Agent Profiles in the same Workspace can point at different
+      // catalog entries.
+      const { command, argsTemplate: args } = ctx.agentCatalog;
       // First round: run in the repository and have the agent create the Task's worktree.
       // Later rounds continue *inside* that worktree — a reviewer asking for changes wants the
       // work carried on, and asking for the worktree again would branch a fresh one from the

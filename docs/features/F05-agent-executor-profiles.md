@@ -24,12 +24,44 @@ re-specifying configuration each time.
 - As an Operator, I want to define where agents run, so heavy work goes to the right
   machines.
 
+## Agent catalog (issue #10)
+
+Which agents an Agent Profile can name is data, not an enum. `agent_catalog` is a
+Workspace-scoped table — `packages/db/src/schema.ts` → `agentCatalog` — of rows shaped like:
+
+```
+agent_catalog (id, workspaceId, key, displayName, protocol, command, argsTemplate,
+               installHint, subscriptionEnvVar, meteredEnvVar, capabilities)
+```
+
+An Agent Profile's `agentCatalogId` points at one of these rather than switching on a closed
+`agentKind` string. **Adding a supported agent is a seed row plus a Profile pointing at it, not
+a change to application code** — the schema, the DAL, and the billing guard all read the
+catalog row rather than a literal.
+
+Two fields carry the weight:
+
+- **`subscriptionEnvVar` / `meteredEnvVar`.** `resolveAgentRunEnv` (`packages/core/src/billing.ts`)
+  strips whichever variable the *running* catalog row names, not a hardcoded
+  `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` pair. That is what keeps the billing-integrity
+  guarantee (Principle IV) true once a second agent's row exists.
+- **`protocol`.** Names how the agent is meant to be driven — `claude_code_stream_json` today,
+  `acp` once issue #58 lands, `cli_passthrough` once issue #21 does. Naming a protocol and
+  *driving* it are different things: `apps/orchestrator/src/agent/protocols.ts` lists which
+  protocols actually have a runner (today: one), and the Task lifecycle fails a Task pointed at
+  an undriven protocol before an agent starts, rather than crashing inside a runner never built
+  to speak it — the same pattern F07 uses for an Executor kind with no driver yet.
+
+Every Workspace is seeded with a `claude_code` catalog entry the moment it exists — at sign-up
+(`apps/web/src/server/auth/auth.ts`) and in the dev/test seed alike
+(`packages/db/src/agent-catalog-defaults.ts`) — so an Agent Profile is always creatable.
+
 ## Functional requirements
 
 ### Agent Profiles
-- **FR-1** A user can create an Agent Profile specifying: the agent tool, the model, its
-  connected tools/capabilities, its Authentication Mode (see [F06](./F06-authentication-billing.md)),
-  its tool-use approval policy, and its concurrency limit.
+- **FR-1** A user can create an Agent Profile specifying: the catalog agent it runs (see
+  above), its Authentication Mode (see [F06](./F06-authentication-billing.md)), its tool-use
+  approval policy, and its concurrency limit.
 - **FR-2** A user can create, edit, duplicate, and delete Agent Profiles within a Workspace.
 - **FR-3** An Agent Profile can be referenced by many Tasks and Workflow Steps.
 - **FR-4** Editing an Agent Profile affects future Sessions; Sessions already running are

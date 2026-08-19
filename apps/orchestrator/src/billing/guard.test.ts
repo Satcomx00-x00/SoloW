@@ -13,6 +13,8 @@ describe("prepareAgentEnv — decrypt + billing integrity", () => {
       authMode: "subscription",
       secretCiphertext: ciphertext,
       baseEnv: { ANTHROPIC_API_KEY: "leak", PATH: "/bin" },
+      subscriptionEnvVar: "CLAUDE_CODE_OAUTH_TOKEN",
+      meteredEnvVar: "ANTHROPIC_API_KEY",
     });
     expect(r.ok).toBe(true);
     if (r.ok) {
@@ -23,7 +25,13 @@ describe("prepareAgentEnv — decrypt + billing integrity", () => {
 
   it("errors when no credential", async () => {
     const { prepareAgentEnv } = await import("./guard.js");
-    const r = prepareAgentEnv({ authMode: "api_key", secretCiphertext: null, baseEnv: {} });
+    const r = prepareAgentEnv({
+      authMode: "api_key",
+      secretCiphertext: null,
+      baseEnv: {},
+      subscriptionEnvVar: "CLAUDE_CODE_OAUTH_TOKEN",
+      meteredEnvVar: "ANTHROPIC_API_KEY",
+    });
     expect(r.ok).toBe(false);
   });
 });

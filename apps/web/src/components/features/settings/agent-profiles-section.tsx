@@ -1,7 +1,7 @@
 "use client";
 
 import type { AuthMode } from "@gatecontrol/contracts";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,15 +16,27 @@ import {
 } from "@/components/ui/select";
 import { trpc } from "@/trpc/react";
 
-/** Create Agent Profiles (auth mode + concurrency cap) bound to a stored Secret. */
+/**
+ * Create Agent Profiles: which agent (issue #10), auth mode + concurrency cap, bound to a
+ * stored Secret.
+ */
 export function AgentProfilesSection() {
   const utils = trpc.useUtils();
   const profiles = trpc.profile.agent.list.useQuery({});
+  const catalog = trpc.profile.agentCatalog.list.useQuery({});
   const secrets = trpc.secret.list.useQuery({});
   const [name, setName] = useState("");
+  const [agentCatalogId, setAgentCatalogId] = useState("");
   const [authMode, setAuthMode] = useState<AuthMode>("subscription");
   const [secretId, setSecretId] = useState("");
   const [cap, setCap] = useState(3);
+
+  const catalogOptions = catalog.data ?? [];
+  // A Workspace ships with exactly one catalog entry today (Claude Code) — pick it once it
+  // loads, so a self-hoster with more than one configured still sees an explicit choice.
+  useEffect(() => {
+    if (!agentCatalogId && catalogOptions[0]) setAgentCatalogId(catalogOptions[0].id);
+  }, [agentCatalogId, catalogOptions]);
 
   const create = trpc.profile.agent.create.useMutation({
     onSuccess: () => {
@@ -49,7 +61,7 @@ export function AgentProfilesSection() {
             e.preventDefault();
             create.mutate({
               name,
-              agentKind: "claude_code",
+              agentCatalogId,
               authMode,
               secretId,
               concurrencyCap: cap,
@@ -65,6 +77,21 @@ export function AgentProfilesSection() {
               onChange={(e) => setName(e.target.value)}
               required
             />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="agent-catalog">Agent</Label>
+            <Select value={agentCatalogId} onValueChange={setAgentCatalogId}>
+              <SelectTrigger className="w-full" id="agent-catalog">
+                <SelectValue placeholder="Select an agent" />
+              </SelectTrigger>
+              <SelectContent>
+                {catalogOptions.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>
+                    {c.displayName}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="grid gap-2">
@@ -114,7 +141,7 @@ export function AgentProfilesSection() {
           <Button
             type="submit"
             loading={create.isPending}
-            disabled={secretOptions.length === 0 || !secretId}
+            disabled={secretOptions.length === 0 || !secretId || !agentCatalogId}
           >
             Add profile
           </Button>

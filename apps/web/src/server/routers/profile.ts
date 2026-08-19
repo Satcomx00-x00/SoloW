@@ -1,5 +1,6 @@
 import "server-only";
 import {
+  agentCatalogEntryDto,
   agentProfileDto,
   createAgentProfileInput,
   createExecutorProfileInput,
@@ -10,6 +11,7 @@ import { z } from "zod";
 import {
   createAgentProfile,
   createExecutorProfile,
+  listAgentCatalog,
   listAgentProfiles,
   listExecutorProfiles,
   updateExecutorProfile,
@@ -37,6 +39,21 @@ export const profileRouter = router({
       .input(z.object({}))
       .output(z.array(agentProfileDto))
       .query(async ({ ctx }) => unwrap(await listAgentProfiles(ctx.rctx))),
+  }),
+  /** The agent catalog (issue #10) — read-only from the API today; rows are seeded per Workspace. */
+  agentCatalog: router({
+    list: ownerProcedure
+      .meta({
+        openapi: {
+          method: "GET",
+          path: "/profile.agentCatalog.list",
+          tags: ["profile"],
+          protect: true,
+        },
+      })
+      .input(z.object({}))
+      .output(z.array(agentCatalogEntryDto))
+      .query(async ({ ctx }) => unwrap(await listAgentCatalog(ctx.rctx))),
   }),
   executor: router({
     create: ownerProcedure
