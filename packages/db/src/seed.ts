@@ -73,7 +73,13 @@ export async function seed(db: Db): Promise<SeedResult> {
     .onConflictDoNothing();
   await db
     .insert(executorProfile)
-    .values({ id: A.executor, workspaceId: WS_A, name: "Local executor", kind: "local" })
+    .values({
+      id: A.executor,
+      workspaceId: WS_A,
+      name: "Local executor",
+      kind: "local",
+      config: { kind: "local", env: {} },
+    })
     .onConflictDoNothing();
   await db
     .insert(repository)
@@ -115,7 +121,13 @@ export async function seed(db: Db): Promise<SeedResult> {
     .onConflictDoNothing();
   await db
     .insert(executorProfile)
-    .values({ id: B.executor, workspaceId: WS_B, name: "Local executor", kind: "local" })
+    .values({
+      id: B.executor,
+      workspaceId: WS_B,
+      name: "Local executor",
+      kind: "local",
+      config: { kind: "local", env: {} },
+    })
     .onConflictDoNothing();
   await db
     .insert(repository)

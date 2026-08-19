@@ -47,9 +47,10 @@ export type ReviewDecision = z.infer<typeof reviewDecisionSchema>;
 export const repositorySourceSchema = z.enum(["local_path", "remote_url"]);
 export type RepositorySource = z.infer<typeof repositorySourceSchema>;
 
-/** Executor kinds — v1 supports the local kind only. */
-export const executorKindSchema = z.enum(["local"]);
-export type ExecutorKind = z.infer<typeof executorKindSchema>;
+/**
+ * Executor kinds live in `executor-config.ts`, beside the per-kind configuration union they
+ * must stay in step with (issue #73), and are re-exported from the package root.
+ */
 
 /** Agent kinds — v1 supports Claude Code only, driven via ACP. */
 export const agentKindSchema = z.enum(["claude_code"]);

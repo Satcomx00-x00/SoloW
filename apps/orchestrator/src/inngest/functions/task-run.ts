@@ -25,6 +25,7 @@ import {
   type TaskRunContext,
 } from "../../data.js";
 import { orchestratorEnv } from "../../env.js";
+import { hasDriver, missingDriverReason } from "../../executor/drivers.js";
 import { createLocalExecutor } from "../../executor/local.js";
 import {
   adoptWorktree,
@@ -162,6 +163,35 @@ export async function runTaskLifecycle(
 
   const ctx = await step.run("load", () => loadTaskRunContext(db, workspaceId, taskId));
 
+  const channel = deps.hub.taskChannel(workspaceId, taskId);
+  const boardChannel = deps.hub.boardChannel(workspaceId);
+
+  /** Announce a Task state change on the Workspace board channel (the SPA board listens here). */
+  const announce = (state: TaskState) =>
+    deps.hub.publish(boardChannel, {
+      kind: "status",
+      taskId,
+      state,
+      at: new Date().toISOString(),
+    });
+
+  /**
+   * A Task names the Executor Profile it runs under, and only some kinds have a driver behind
+   * them (issue #73). Checked here, before anything is cloned: a Task pointed at a Docker
+   * profile must not quietly run on the orchestrator's own host and report success — the user
+   * asked for isolation and would not have got it.
+   */
+  if (!hasDriver(ctx.executorProfile.kind)) {
+    const reason = missingDriverReason(ctx.executorProfile.kind);
+    await step.run("executor-unavailable", () =>
+      setTaskState(db, workspaceId, taskId, "failed", { failureReason: reason }),
+    );
+    logStateTransition(log, { workspaceId, taskId, from: ctx.task.state, to: "failed" });
+    announce("failed");
+    captureException(log, new Error(reason), { failureReason: reason });
+    return { taskId, result: "failed" as const };
+  }
+
   /**
    * The repository, not the Task's worktree.
    *
@@ -186,18 +216,6 @@ export async function runTaskLifecycle(
    */
   let wt: { path: string; branch: string; repoPath: string } | null = null;
 
-  const channel = deps.hub.taskChannel(workspaceId, taskId);
-  const boardChannel = deps.hub.boardChannel(workspaceId);
-
-  /** Announce a Task state change on the Workspace board channel (the SPA board listens here). */
-  const announce = (state: TaskState) =>
-    deps.hub.publish(boardChannel, {
-      kind: "status",
-      taskId,
-      state,
-      at: new Date().toISOString(),
-    });
-
   /** Feedback from the previous review round; it becomes the next round's brief. */
   let pendingFeedback: string | undefined;
 
@@ -208,6 +226,9 @@ export async function runTaskLifecycle(
         authMode: ctx.agentProfile.authMode,
         secretCiphertext: ctx.secretCiphertext,
         baseEnv: process.env,
+        // The Executor Profile's environment (issue #73). It is applied under the credential
+        // shaping, never over it, so a profile cannot become a route to metered billing.
+        profileEnv: ctx.executorProfile.config.env ?? {},
       });
       if (!shaped.ok) return { kind: "failed" as const, cls: "credential_expired" as const };
 
