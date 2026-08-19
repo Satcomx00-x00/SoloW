@@ -15,6 +15,8 @@ export function prepareAgentEnv(params: {
   authMode: AuthMode;
   secretCiphertext: string | null;
   baseEnv: Readonly<Record<string, string | undefined>>;
+  /** The Task's Executor Profile environment (issue #73); never able to reach the credential. */
+  profileEnv?: Readonly<Record<string, string>>;
 }): Result<Record<string, string>, typeof BillingErrorCode.MissingCredential> {
   if (!params.secretCiphertext) return err(BillingErrorCode.MissingCredential);
   const credentialValue = decryptForAgentRun(params.secretCiphertext);
@@ -22,6 +24,7 @@ export function prepareAgentEnv(params: {
     authMode: params.authMode,
     credentialValue,
     baseEnv: params.baseEnv,
+    ...(params.profileEnv ? { profileEnv: params.profileEnv } : {}),
   });
 }
 

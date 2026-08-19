@@ -1,0 +1,1 @@
+ALTER TABLE `executor_profile` ADD `config` text DEFAULT '{"kind":"local","env":{}}' NOT NULL;

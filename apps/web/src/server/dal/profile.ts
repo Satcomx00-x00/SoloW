@@ -8,6 +8,7 @@ import {
   err,
   ok,
   type Result,
+  type UpdateExecutorProfileInput,
 } from "@gatecontrol/contracts";
 import { agentProfile, executorProfile } from "@gatecontrol/db";
 import { and, desc, eq } from "drizzle-orm";
@@ -52,15 +53,42 @@ export async function getAgentProfile(
   return row ? ok(row) : err(CommonErrorCode.NotFound);
 }
 
+/**
+ * `kind` is derived from `config.kind` rather than taken separately (issue #73) — the column is
+ * a queryable copy of the configuration, and nothing else may set it.
+ */
 export async function createExecutorProfile(
   ctx: RequestContext,
   input: CreateExecutorProfileInput,
 ): Promise<Result<ExecutorProfileDto>> {
   const [row] = await ctx.db
     .insert(executorProfile)
-    .values({ workspaceId: ctx.workspaceId, name: input.name, kind: input.kind })
+    .values({
+      workspaceId: ctx.workspaceId,
+      name: input.name,
+      kind: input.config.kind,
+      config: input.config,
+    })
     .returning();
   return row ? ok(row) : err(CommonErrorCode.ValidationFailed);
+}
+
+export async function updateExecutorProfile(
+  ctx: RequestContext,
+  input: UpdateExecutorProfileInput,
+): Promise<Result<ExecutorProfileDto, typeof CommonErrorCode.NotFound>> {
+  const [row] = await ctx.db
+    .update(executorProfile)
+    .set({
+      ...(input.name !== undefined ? { name: input.name } : {}),
+      ...(input.config !== undefined ? { kind: input.config.kind, config: input.config } : {}),
+      updatedAt: new Date().toISOString(),
+    })
+    // The workspace predicate is the tenancy boundary (Principle V): without it an id from
+    // another tenant would update someone else's profile.
+    .where(and(eq(executorProfile.workspaceId, ctx.workspaceId), eq(executorProfile.id, input.id)))
+    .returning();
+  return row ? ok(row) : err(CommonErrorCode.NotFound);
 }
 
 export async function listExecutorProfiles(

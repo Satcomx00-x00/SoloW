@@ -35,6 +35,45 @@ describe("resolveAgentRunEnv — billing integrity (Principle IV)", () => {
     }
   });
 
+  it("applies an Executor Profile's environment over the base environment (issue #73)", () => {
+    const r = resolveAgentRunEnv({
+      authMode: "subscription",
+      credentialValue: "sk-ant-oat01-abc",
+      baseEnv: { PATH: "/usr/bin", NODE_ENV: "development" },
+      profileEnv: { NODE_ENV: "production", GOPATH: "/go" },
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.data["NODE_ENV"]).toBe("production");
+      expect(r.data["GOPATH"]).toBe("/go");
+      expect(r.data["PATH"]).toBe("/usr/bin");
+    }
+  });
+
+  it("AC-6: a profile env cannot set the credential the guard owns", () => {
+    // The contract already refuses such a profile, so this is the second lock: a row written
+    // before that check existed, or by anything bypassing the API, still cannot divert billing.
+    const r = resolveAgentRunEnv({
+      authMode: "subscription",
+      credentialValue: "sk-ant-oat01-abc",
+      baseEnv: {},
+      profileEnv: { ANTHROPIC_API_KEY: "sk-metered-billing" },
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.data).not.toHaveProperty("ANTHROPIC_API_KEY");
+  });
+
+  it("AC-6: a profile env cannot replace the credential the guard just injected", () => {
+    const r = resolveAgentRunEnv({
+      authMode: "subscription",
+      credentialValue: "sk-ant-oat01-real",
+      baseEnv: {},
+      profileEnv: { CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-someone-elses" },
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.data["CLAUDE_CODE_OAUTH_TOKEN"]).toBe("sk-ant-oat01-real");
+  });
+
   it("errors when the credential is missing", () => {
     const r = resolveAgentRunEnv({
       authMode: "subscription",
