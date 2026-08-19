@@ -27,6 +27,7 @@ import { $ } from "bun";
 import { FakeAgentRunner } from "../apps/orchestrator/src/agent/runner.js";
 import { prepareAgentEnv } from "../apps/orchestrator/src/billing/guard.js";
 import { loadTaskRunContext, setTaskState } from "../apps/orchestrator/src/data.js";
+import { createLocalExecutor } from "../apps/orchestrator/src/executor/local.js";
 import {
   cleanupWorktree,
   commitWorktree,
@@ -170,7 +171,10 @@ async function main(): Promise<void> {
     );
 
     // 6. Provision an isolated worktree for the task (Principle II).
-    const wt = await provisionWorktree({
+    // Every host interaction goes through the Executor (issue #1) — the smoke run exercises
+    // the same path the orchestrator uses rather than a shortcut around it.
+    const executor = createLocalExecutor(worktreeRoot);
+    const wt = await provisionWorktree(executor, {
       taskId,
       repository: { source: ctx.repository.source, location: ctx.repository.location },
       worktreeRoot,
@@ -180,7 +184,7 @@ async function main(): Promise<void> {
     assert(wt.branch === `gatecontrol/task-${taskId}`, "worktree branch is deterministic");
 
     // Fresh worktree has no changes yet.
-    assert(!(await hasChanges(wt.path)), "worktree starts clean");
+    assert(!(await hasChanges(executor, wt.path)), "worktree starts clean");
 
     // 7. Demonstrate the runner interface with the deterministic fake, then simulate the
     //    agent's real effect: an edit written into the worktree (where a real Claude Code
@@ -205,9 +209,9 @@ async function main(): Promise<void> {
     writeFileSync(join(wt.path, "SMOKE_CHANGE.txt"), `edited by smoke run for task ${taskId}\n`);
 
     // 8. The edit must show up as a diff, then get committed onto the task branch.
-    assert(await hasChanges(wt.path), "worktree has the agent's uncommitted changes");
-    await commitWorktree(wt.path, "GateControl smoke");
-    assert(!(await hasChanges(wt.path)), "changes committed; worktree clean again");
+    assert(await hasChanges(executor, wt.path), "worktree has the agent's uncommitted changes");
+    await commitWorktree(executor, wt.path, "GateControl smoke");
+    assert(!(await hasChanges(executor, wt.path)), "changes committed; worktree clean again");
 
     // 9. Advance the task to done, recording the result branch.
     await setTaskState(db, workspaceId, taskId, "done", { resultBranch: wt.branch });
@@ -220,7 +224,7 @@ async function main(): Promise<void> {
     assert(after.resultBranch === wt.branch, "task resultBranch recorded");
 
     // 11. Tear down the worktree (as the orchestrator does after review).
-    await cleanupWorktree(wt.repoPath, wt.path);
+    await cleanupWorktree(executor, wt.repoPath, wt.path);
     assert(!existsSync(wt.path), "worktree removed on cleanup");
   } finally {
     rmSync(scratch, { recursive: true, force: true });
