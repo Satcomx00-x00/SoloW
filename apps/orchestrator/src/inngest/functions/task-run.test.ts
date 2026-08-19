@@ -578,3 +578,117 @@ describe("the diff a reviewer is shown", () => {
     expect(diffs).toHaveLength(0);
   });
 });
+
+describe("the worktree a Task runs in", () => {
+  let db: TestDb;
+
+  beforeAll(() => {
+    process.env.GATECONTROL_SECRET_KEY ??= Buffer.alloc(32, 3).toString("base64");
+  });
+  beforeEach(() => {
+    db = createTestDb();
+  });
+
+  /** Records what each round was asked to do about its worktree. */
+  class WorktreeRecordingRunner implements AgentRunner {
+    readonly asked: Array<{ cwd: string; worktreeName: string | null }> = [];
+    start(opts: AgentStartOpts): AgentHandle {
+      this.asked.push({ cwd: opts.cwd, worktreeName: opts.worktreeName });
+      opts.onEvent({ kind: "stdout", text: "working" });
+      return {
+        outcome: Promise.resolve<AgentOutcome>({ kind: "completed" }),
+        workspacePath: Promise.resolve<string | null>(
+          opts.worktreeName ? `/wt/${opts.worktreeName}` : opts.cwd,
+        ),
+        send: async () => true,
+        stop: async () => {},
+      };
+    }
+  }
+
+  it("asks the agent to create one worktree, named after the Task", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const runner = new WorktreeRecordingRunner();
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    // Run in the repository, and let `claude --worktree` make the directory. That is what
+    // keeps concurrent Tasks on one repository apart (Principle II).
+    expect(runner.asked).toEqual([
+      { cwd: `/repo/${ids.taskId}`, worktreeName: `gatecontrol-task-${ids.taskId}` },
+    ]);
+  });
+
+  it("continues in the same worktree when a reviewer asks for changes", async () => {
+    // Asking for the worktree again would branch a fresh one from the base ref and throw away
+    // everything the first round produced — the reviewer's feedback would be applied to nothing.
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const runner = new WorktreeRecordingRunner();
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    await runTaskLifecycle(deps, {
+      event: { data: ids },
+      step: scriptedStep([{ decision: "request_changes", feedback: "add a test" }, "approve"]),
+    });
+
+    expect(runner.asked).toHaveLength(2);
+    expect(runner.asked[1]).toEqual({
+      cwd: `/wt/gatecontrol-task-${ids.taskId}`,
+      worktreeName: null,
+    });
+  });
+
+  it("fails the Task when the agent never reports a workspace", async () => {
+    // No reported workspace means nothing confirmed the agent was isolated. Committing from
+    // wherever it happened to be pointing would be worse than failing.
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const runner: AgentRunner = {
+      start(opts: AgentStartOpts): AgentHandle {
+        opts.onEvent({ kind: "stdout", text: "working" });
+        return {
+          outcome: Promise.resolve<AgentOutcome>({ kind: "completed" }),
+          workspacePath: Promise.resolve<string | null>(null),
+          send: async () => true,
+          stop: async () => {},
+        };
+      },
+    };
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    const result = await runTaskLifecycle(deps, {
+      event: { data: ids },
+      step: scriptedStep(["approve"]),
+    });
+
+    expect(result.result).toBe("fail");
+    expect(await taskState(db, ids.taskId)).toBe("failed");
+  });
+
+  it("cleans up the worktree the agent made, not one GateControl guessed at", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const runner = new WorktreeRecordingRunner();
+    const { deps, spies } = makeDeps(db, runner, nullStream());
+    const cleaned: string[] = [];
+
+    await runTaskLifecycle(
+      {
+        ...deps,
+        worktree: {
+          ...deps.worktree,
+          cleanup: async (_repo: string, path: string) => {
+            cleaned.push(path);
+          },
+        },
+      },
+      { event: { data: ids }, step: scriptedStep(["approve"]) },
+    );
+
+    expect(cleaned).toEqual([`/wt/gatecontrol-task-${ids.taskId}`]);
+    expect(spies.commit).toBe(1);
+  });
+});

@@ -179,3 +179,16 @@ describe("startClaudeSession", () => {
     }
   });
 });
+
+describe("continuing inside an existing worktree", () => {
+  it("omits --worktree when the caller is already in one", () => {
+    // A later review round runs *inside* the Task's worktree. Asking for a worktree from inside
+    // a worktree would nest one in the other, and the agent's edits would land somewhere the
+    // lifecycle never diffs or commits.
+    const args = buildArgs({ worktreeName: null, permissionMode: "acceptEdits" });
+    expect(args).not.toContain("--worktree");
+    // Everything else the protocol needs is still there.
+    expect(args).toContain("--print");
+    expect(args).toContain("--verbose");
+  });
+});
