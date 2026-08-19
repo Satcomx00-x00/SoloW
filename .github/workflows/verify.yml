@@ -1,0 +1,138 @@
+name: Verify
+
+# Every quality gate the constitution requires, run on the machine that matters.
+# `make verify` chains these locally; CI splits them into named jobs so a red check
+# says which gate failed without opening the log.
+#
+# The @critical isolation suite is the merge blocker (constitution Principle V,
+# TASK-026) — it runs inside the `e2e` job as part of the full suite.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Only the newest run per ref matters; supersede the rest.
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+# A `permissions:` block replaces the defaults rather than extending them.
+permissions:
+  contents: read
+
+env:
+  # Keep in sync with `packageManager` in package.json.
+  BUN_VERSION: "1.3.14"
+
+jobs:
+  verify:
+    name: Lint, types, tests, contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Cache Bun install cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Lint (Biome)
+        run: make lint
+
+      - name: Typecheck (all workspace packages)
+        run: make typecheck
+
+      - name: Unit tests
+        run: make test
+
+      - name: OpenAPI freshness
+        run: make openapi-check
+
+      # TASK-029 claims migrations regenerate with no drift; nothing asserted it
+      # until now. Generation must be a no-op against a committed schema.
+      - name: Migration drift
+        run: |
+          make db-generate
+          if ! git diff --exit-code -- packages/db/migrations; then
+            echo "::error::Generated migrations differ from what is committed. Run 'make db-generate' and commit the result."
+            exit 1
+          fi
+
+      - name: Dependency audit
+        run: make audit
+
+  secretscan:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # gitleaks scans history, not just the working tree.
+          fetch-depth: 0
+
+      # Deliberately unpinned: a scanner is more useful with current rules than
+      # with reproducible ones. Pin the version here if that trade-off changes.
+      - name: Install gitleaks
+        run: |
+          set -euo pipefail
+          version="$(curl -sSfL https://api.github.com/repos/gitleaks/gitleaks/releases/latest | jq -r .tag_name)"
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/${version}/gitleaks_${version#v}_linux_x64.tar.gz" \
+            | tar -xz gitleaks
+          sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+
+      - name: Scan repository and history
+        run: gitleaks detect --source . --no-banner --redact
+
+  e2e:
+    name: E2E (includes the @critical isolation gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Cache Bun install cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install Chromium for Playwright
+        run: bunx playwright install --with-deps chromium
+
+      # The suite boots its own orchestrator and Next dev server (see
+      # playwright.config.ts webServer) and runs serially on one database —
+      # the isolation spec launches concurrent Tasks on purpose.
+      - name: Full E2E suite
+        run: make e2e
+
+      - name: Upload Playwright artefacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+          if-no-files-found: ignore
