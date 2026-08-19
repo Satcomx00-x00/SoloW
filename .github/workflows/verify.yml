@@ -129,8 +129,13 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # `--with-deps` shells out to `apt-get`, which has been observed to hang for 30+ minutes
+      # against this runner image's package mirrors — the job then times out having run no
+      # tests at all. `ubuntu-latest` GitHub-hosted runners already ship the shared libraries
+      # Chromium needs (Microsoft's own runner images include them), so the apt step is not
+      # required here; install just the browser binary.
       - name: Install Chromium for Playwright
-        run: bunx playwright install --with-deps chromium
+        run: bunx playwright install chromium
 
       # The suite boots its own orchestrator and Next dev server (see
       # playwright.config.ts webServer) and runs serially on one database —

@@ -388,9 +388,50 @@ implemented, tested and never called** — the DTO returned the stored column, w
 creation, so every Issue read "Open" forever regardless of its Tasks (spec FR-006). Both fixed
 with tests.
 
-**Still open (documented, not silent):** the Inngest `serve` endpoint for the hosted deployment,
-and the Postgres mirror of the schema (Decision 0008 follow-up). Both are hosted-path work that
-the local v1 loop does not depend on.
+Claude Code pass (thirteenth `/speckit-implement`) — lint, typecheck 8/8, **283 tests**, smoke and
+openapi green; **Playwright not run this pass** (see below):
+- ✅ **TASK-014 rewritten around the real CLI.** New `packages/claude-code` drives
+  `claude -p --input-format stream-json --output-format stream-json --verbose`: the CLI's own
+  programmatic mode, so every message, tool call and result arrives as a parseable event instead
+  of terminal text to scrape, and a turn can be sent mid-session.
+- ✅ **`--worktree` is mandatory and unforgeable.** It is added by `buildArgs`, not by a call
+  site, and `GATECONTROL_AGENT_ARGS` is appended *after* the required flags so configuration
+  cannot drop it. Several Tasks share one repository; two agents in one working tree would
+  overwrite each other (Principle II).
+- ➕ **Worktree ownership inverted.** GateControl used to `git worktree add` per Task. Running
+  `claude --worktree` inside that would nest a worktree in a worktree and put the agent's edits
+  where nothing downstream reads. So the agent now creates the worktree and GateControl *adopts*
+  it: `prepareRepository` resolves and validates the repository up front (an unusable location
+  still fails the Task before any agent starts), the runner reports the path from the session's
+  own `system/init` event, and `adoptWorktree` confirms with **git** — not with a guessed naming
+  convention — that the path really is a worktree of that repository. An agent that reports a
+  path outside the repository, or none at all, fails the Task rather than having GateControl
+  commit from wherever it happened to be pointing. Diff, commit, discard and cleanup all target
+  the adopted path.
+- ➕ **Bug found and fixed in the review loop.** A `request_changes` round re-ran the agent, and
+  passing `--worktree <name>` a second time would either error or branch a *fresh* worktree from
+  the base ref — throwing away everything the first round produced, so the reviewer's feedback
+  would be applied to nothing. Round one creates the worktree; later rounds run *inside* it with
+  no `--worktree` (it is already isolated). Both behaviours are pinned by tests.
+- ➕ **ACP path removed.** `packages/acp` and `acp-runner` are gone: an ACP agent has no
+  `--worktree`, so keeping it as an alternative runner would have meant a second, silently
+  unisolated way to run a Task. **Decision 0003 ("integrate agents via ACP") no longer matches
+  what ships and needs revisiting.** The code is recoverable from git history if a second agent
+  lands.
+- Failure classification now reads the CLI's own `result.subtype` first and falls back to
+  stderr, so `error_max_turns` and a quota message are told apart; a missing `result` event is a
+  failure rather than assumed success.
+
+**Not verified this pass:** the real `claude --worktree` behaviour — running the CLI was declined
+in this environment, so the adoption path is exercised against a scripted fake that speaks the
+real protocol and against real `git worktree` operations, but not against the real binary. The one
+thing to confirm on a machine with credentials is that `claude --worktree <name> -p …` creates the
+worktree and reports it as `cwd` in the `system/init` event. Playwright was also not run: that call
+was declined mid-turn.
+
+**Still open (documented, not silent):** settings to install and configure Claude Code (asked for
+and not yet built); the Inngest `serve` endpoint for the hosted deployment; and the Postgres
+mirror of the schema (Decision 0008 follow-up).
 
 ---
 
