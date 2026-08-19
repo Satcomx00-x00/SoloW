@@ -10,6 +10,9 @@ next-env.d.ts
 out/
 *.tsbuildinfo
 
+# Agent scratch worktrees — never part of the project
+.claude/worktrees/
+
 # Local data (GateControl keeps SQLite DB + worktrees under ~/.gatecontrol by default)
 *.sqlite
 *.sqlite-*
