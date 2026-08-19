@@ -2,6 +2,7 @@
 
 import { beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { Writable } from "node:stream";
+import type { ExecutorConfig } from "@gatecontrol/contracts";
 import {
   agentProfile,
   encryptSecret,
@@ -45,7 +46,11 @@ function freshIds(): Ids {
   };
 }
 
-async function seedRun(db: TestDb, ids: Ids): Promise<void> {
+async function seedRun(
+  db: TestDb,
+  ids: Ids,
+  opts: { executorConfig?: ExecutorConfig } = {},
+): Promise<void> {
   await db.insert(workspace).values({ id: ids.workspaceId, name: "WS", ownerUserId: "owner" });
   const secretId = `secret-${ids.taskId}`;
   await db.insert(secret).values({
@@ -65,9 +70,14 @@ async function seedRun(db: TestDb, ids: Ids): Promise<void> {
     concurrencyCap: 3,
   });
   const executorId = `exec-${ids.taskId}`;
-  await db
-    .insert(executorProfile)
-    .values({ id: executorId, workspaceId: ids.workspaceId, name: "Local", kind: "local" });
+  const executorConfig: ExecutorConfig = opts.executorConfig ?? { kind: "local", env: {} };
+  await db.insert(executorProfile).values({
+    id: executorId,
+    workspaceId: ids.workspaceId,
+    name: "Local",
+    kind: executorConfig.kind,
+    config: executorConfig,
+  });
   const repoId = `repo-${ids.taskId}`;
   await db.insert(repository).values({
     id: repoId,
@@ -127,10 +137,13 @@ class ScriptedRunner implements AgentRunner {
   starts = 0;
   /** The brief each run was given, in order. */
   readonly prompts: string[] = [];
+  /** The environment each run was handed — where the billing guard's output is observable. */
+  readonly envs: Record<string, string>[] = [];
   constructor(private readonly outcomes: AgentOutcome[]) {}
   start(opts: AgentStartOpts): AgentHandle {
     this.starts += 1;
     this.prompts.push(opts.prompt);
+    this.envs.push(opts.env);
     opts.onEvent({ kind: "stdout", text: "working" });
     const outcome = this.outcomes.shift() ?? { kind: "completed" };
     return {
@@ -576,5 +589,62 @@ describe("the diff a reviewer is shown", () => {
       await db.select().from(sessionEvent).where(eq(sessionEvent.sessionId, ids.sessionId))
     ).filter((e) => e.kind === "diff");
     expect(diffs).toHaveLength(0);
+  });
+
+  describe("executor profile configuration (issue #73)", () => {
+    it("fails a Task whose Executor kind has no driver, rather than running it on the host", async () => {
+      const ids = freshIds();
+      await seedRun(db, ids, {
+        executorConfig: { kind: "docker", image: "oven/bun:1.3", mounts: [], env: {} },
+      });
+      const runner = new ScriptedRunner([{ kind: "completed" }]);
+      const { deps, spies } = makeDeps(db, runner, nullStream());
+
+      const result = await runTaskLifecycle(deps, {
+        event: { data: ids },
+        step: scriptedStep(["approve"]),
+      });
+
+      expect(result.result).toBe("failed");
+      expect(await taskState(db, ids.taskId)).toBe("failed");
+      // The user asked for a container. Running the agent anywhere else and reporting success
+      // would be the product silently ignoring the isolation it was asked for.
+      expect(runner.starts).toBe(0);
+      expect(spies.commit).toBe(0);
+      const [row] = await db.select().from(task).where(eq(task.id, ids.taskId)).limit(1);
+      expect(row?.failureReason).toContain("docker");
+    });
+
+    it("hands the profile's environment to the agent process", async () => {
+      const ids = freshIds();
+      await seedRun(db, ids, {
+        executorConfig: { kind: "local", env: { BUILD_FLAVOUR: "debug" } },
+      });
+      const runner = new ScriptedRunner([{ kind: "completed" }]);
+      const { deps } = makeDeps(db, runner, nullStream());
+
+      await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+      expect(runner.envs[0]?.["BUILD_FLAVOUR"]).toBe("debug");
+    });
+
+    it("AC-6: a profile environment cannot divert the run to metered billing", async () => {
+      const ids = freshIds();
+      // The contract refuses such a profile; this row stands in for one written before that
+      // check existed, and proves the guard is still the last word.
+      await seedRun(db, ids, {
+        executorConfig: {
+          kind: "local",
+          env: { ANTHROPIC_API_KEY: "sk-metered" } as Record<string, string>,
+        },
+      });
+      const runner = new ScriptedRunner([{ kind: "completed" }]);
+      const { deps } = makeDeps(db, runner, nullStream());
+
+      await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+      expect(runner.envs[0]).not.toHaveProperty("ANTHROPIC_API_KEY");
+      expect(runner.envs[0]?.["CLAUDE_CODE_OAUTH_TOKEN"]).toBe("oauth-token");
+    });
   });
 });

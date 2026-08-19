@@ -213,4 +213,87 @@ describe("tRPC router integration", () => {
       ),
     ).not.toBe("OK");
   });
+
+  describe("executor profile configuration (issue #73)", () => {
+    it("AC-2: rejects a configuration that does not match its kind, at the API boundary", async () => {
+      const wsId = await seedWs(db, "acme");
+      const c = caller(db, wsId);
+      expect(
+        await errCode(() =>
+          // Docker without an image: the boundary refuses it rather than storing a profile no
+          // driver could ever run.
+          c.profile.executor.create({ name: "Container", config: { kind: "docker" } as never }),
+        ),
+      ).toBe("BAD_REQUEST");
+    });
+
+    it("AC-3: rejects an inline credential in place of a secret reference", async () => {
+      const wsId = await seedWs(db, "acme");
+      const c = caller(db, wsId);
+      expect(
+        await errCode(() =>
+          c.profile.executor.create({
+            name: "Build box",
+            config: {
+              kind: "ssh",
+              host: "build-01",
+              user: "ci",
+              keySecretId: "sec_1",
+              privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----",
+            } as never,
+          }),
+        ),
+      ).toBe("BAD_REQUEST");
+    });
+
+    it("AC-6: rejects a profile env that names a billing-guard variable", async () => {
+      const wsId = await seedWs(db, "acme");
+      const c = caller(db, wsId);
+      expect(
+        await errCode(() =>
+          c.profile.executor.create({
+            name: "Sneaky",
+            config: { kind: "local", env: { ANTHROPIC_API_KEY: "sk-metered" } },
+          }),
+        ),
+      ).toBe("BAD_REQUEST");
+    });
+
+    it("stores the configuration and derives the kind column from it", async () => {
+      const wsId = await seedWs(db, "acme");
+      const c = caller(db, wsId);
+      const created = await c.profile.executor.create({
+        name: "Container",
+        config: { kind: "docker", image: "oven/bun:1.3", env: { CI: "1" } },
+      });
+      expect(created.kind).toBe("docker");
+      expect(created.config).toEqual({
+        kind: "docker",
+        image: "oven/bun:1.3",
+        mounts: [],
+        env: { CI: "1" },
+      });
+    });
+
+    it("updates a configuration in place, moving the kind with it", async () => {
+      const wsId = await seedWs(db, "acme");
+      const c = caller(db, wsId);
+      const created = await c.profile.executor.create({ name: "Local" });
+      const updated = await c.profile.executor.update({
+        id: created.id,
+        config: { kind: "docker", image: "oven/bun:1.3" },
+      });
+      expect(updated.kind).toBe("docker");
+      expect(updated.name).toBe("Local");
+    });
+
+    it("scopes an update to the Workspace (Principle V)", async () => {
+      const wsA = await seedWs(db, "workspace-a");
+      const wsB = await seedWs(db, "workspace-b");
+      const a = await caller(db, wsA).profile.executor.create({ name: "A local" });
+      expect(
+        await errCode(() => caller(db, wsB).profile.executor.update({ id: a.id, name: "stolen" })),
+      ).toBe("NOT_FOUND");
+    });
+  });
 });

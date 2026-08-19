@@ -1,7 +1,17 @@
 import { z } from "zod";
 import { idSchema } from "./common.js";
 
-export const secretKindSchema = z.enum(["subscription_token", "api_key"]);
+/**
+ * `ssh_key` and `cloud_credential` exist so an Executor Profile can *reference* the credential
+ * its runtime needs instead of carrying it inline (issue #73, AC-3). A reference to a secret the
+ * product cannot store is not a satisfied criterion.
+ */
+export const secretKindSchema = z.enum([
+  "subscription_token",
+  "api_key",
+  "ssh_key",
+  "cloud_credential",
+]);
 export type SecretKind = z.infer<typeof secretKindSchema>;
 
 /**

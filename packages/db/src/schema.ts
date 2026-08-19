@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type {
   AgentKind,
   AuthMode,
+  ExecutorConfig,
   ExecutorKind,
   IssueStatus,
   RepositorySource,
@@ -94,7 +95,23 @@ export const executorProfile = sqliteTable(
       .notNull()
       .references(() => workspace.id),
     name: text("name").notNull(),
+    /**
+     * Denormalised copy of `config.kind`, derived by the DAL on every write so the kind is
+     * queryable. The configuration is the source of truth; nothing sets this independently.
+     */
     kind: text("kind").$type<ExecutorKind>().notNull().default("local"),
+    /**
+     * Per-kind configuration, validated by the discriminated union in `@gatecontrol/contracts`
+     * (issue #73). One JSON column rather than a column — or a table — per kind is what makes a
+     * new Executor kind a driver plus a union member instead of a migration (AC-5).
+     *
+     * The SQL default exists so the column can be added to a populated table; every write goes
+     * through the DAL and states a configuration explicitly.
+     */
+    config: text("config", { mode: "json" })
+      .$type<ExecutorConfig>()
+      .notNull()
+      .default(sql`'{"kind":"local","env":{}}'`),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
