@@ -1,0 +1,92 @@
+name: Sync milestones
+
+# Milestones-as-code, the companion to `.github/labels.json`.
+# `.github/milestones.json` is the source of truth: it declares each milestone and
+# the issues it owns. One entry may set `catchAll`, which sweeps every remaining
+# open, un-milestoned issue into it.
+#
+# Idempotent. Never closes or deletes a milestone, and never removes an issue from
+# one — un-scheduling work is a deliberate act, not a side effect of a sync.
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - ".github/milestones.json"
+      - ".github/workflows/milestones.yml"
+  workflow_dispatch:
+
+# A `permissions:` block replaces the defaults rather than extending them —
+# `contents: read` is required or actions/checkout 404s on a private repo.
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: sync-milestones
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Apply milestones
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          existing="$(gh api "repos/$REPO/milestones?state=all&per_page=100")"
+          catch_entry=""
+          catch_number=""
+
+          # Fed by process substitution rather than a pipe, so the loop body runs in
+          # this shell and the catch-all's number survives it.
+          while read -r entry; do
+            title=$(jq -r '.title'       <<<"$entry")
+            body=$(jq  -r '.description' <<<"$entry")
+
+            number=$(jq -r --arg t "$title" '.[] | select(.title == $t) | .number' <<<"$existing" | head -1)
+
+            if [ -n "$number" ]; then
+              gh api -X PATCH "repos/$REPO/milestones/$number" -f description="$body" >/dev/null
+              echo "milestone updated  #$number  $title"
+            else
+              number=$(gh api -X POST "repos/$REPO/milestones" \
+                         -f title="$title" -f description="$body" --jq '.number')
+              echo "milestone created  #$number  $title"
+            fi
+
+            for issue in $(jq -r '.issues[]' <<<"$entry"); do
+              gh api -X PATCH "repos/$REPO/issues/$issue" -F milestone="$number" >/dev/null
+              printf '  issue #%-4s -> %s\n' "$issue" "$title"
+            done
+
+            if [ "$(jq -r '.catchAll // false' <<<"$entry")" = "true" ]; then
+              catch_entry="$entry"
+              catch_number="$number"
+            fi
+          done < <(jq -c '.[]' .github/milestones.json)
+
+          # ── Catch-all: every open issue still without a milestone ──
+          if [ -n "$catch_entry" ]; then
+            title=$(jq -r '.title' <<<"$catch_entry")
+            mapfile -t excluded < <(jq -r '.exclude // [] | .[]' <<<"$catch_entry")
+
+            swept=0
+            while read -r issue; do
+              for e in "${excluded[@]:-}"; do
+                [ "$issue" = "$e" ] && continue 2
+              done
+              gh api -X PATCH "repos/$REPO/issues/$issue" -F milestone="$catch_number" >/dev/null
+              swept=$((swept + 1))
+            done < <(gh issue list --state open --limit 300 --json number,milestone \
+                       --jq '.[] | select(.milestone == null) | .number')
+
+            echo "::notice::Swept $swept un-milestoned open issues into \"$title\""
+          fi

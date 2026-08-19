@@ -1,0 +1,118 @@
+schema_version: "1.0"
+
+preset:
+  id: "nextjs"
+  name: "Next.js Web Application"
+  version: "0.2.0"
+  description: "State-of-the-art directives for full-stack Next.js (App Router + Route Handlers + DB): frontend, backend, security, performance, infrastructure, and TypeScript code quality. Behaviors only — no stack lock-in."
+  author: "spec-kit"
+  repository: "https://github.com/Satcomx00-x00/spec-kit"
+  license: "MIT"
+
+requires:
+  speckit_version: ">=0.6.0"
+
+# Resolved at install time into the installed copy. Override per project in
+# .specify/preset-variables.yml (scoped under this preset's id or flat).
+variables:
+  tenancy_model:
+    default: "org-scoped"
+    description: "Tenancy model: org-scoped | user-scoped | hybrid | single-tenant"
+  tenancy_column:
+    default: "organizationId"
+    description: "Tenant key column (organizationId for org-scoped, ownerId/userId for user-scoped)"
+
+provides:
+  templates:
+    - type: "template"
+      name: "constitution-template"
+      file: "templates/constitution-template.md"
+      description: "Next.js project constitution — phased, criticality-tagged behavioral directives for production web apps"
+      replaces: "constitution-template"
+
+    - type: "template"
+      name: "agent-context"
+      file: "templates/agent-context.md"
+      description: "Compressed always-on agent rules for Next.js development; copy or reference from AGENTS.md / CLAUDE.md / .github/copilot-instructions.md"
+
+    - type: "command"
+      name: "speckit.constitution.scan"
+      file: "commands/speckit.constitution.scan.md"
+      description: "Scan the repo (Markdown docs + package.json + tsconfig + Next.js structure + tooling) and export a Next.js constitution at .specify/memory/constitution.md with a Sync Impact Report mapping evidence to directives."
+
+    - type: "command"
+      name: "speckit.audit"
+      file: "commands/speckit.audit.md"
+      description: "Audit the codebase against TypeScript and Next.js behavioral directives. Runs the audit script, summarizes findings by section and severity, and proposes prioritized fixes."
+
+    - type: "command"
+      name: "speckit.audit.deep"
+      file: "commands/speckit.audit.deep.md"
+      description: "Deep codebase audit: runs the regex audit, then layers tsc --noEmit, eslint, npm audit, and LLM-based file-level confirmation plus cross-file pattern analysis."
+
+    - type: "command"
+      name: "speckit.plan"
+      file: "commands/speckit.plan.md"
+      description: "Next.js-specialized feature planning. Decomposes a feature into routes, RSC/client boundaries, Server Actions, Route Handlers, DAL methods, schemas, caching, prerendering, metadata, and accessibility checkpoints — all tagged with Phase and Criticality."
+
+    - type: "command"
+      name: "speckit.tasks"
+      file: "commands/speckit.tasks.md"
+      description: "Next.js-shaped task generation. Converts a feature plan into an ordered task list with Next.js-idiomatic titles, acceptance criteria referencing constitution directives, and explicit phase tags."
+
+    - type: "command"
+      name: "speckit.scaffold.route"
+      file: "commands/speckit.scaffold.route.md"
+      description: "Scaffold a Next.js App Router route segment: page.tsx (RSC), layout.tsx, loading.tsx (skeleton), error.tsx (client boundary), not-found.tsx — all wired to constitution directives."
+
+    - type: "command"
+      name: "speckit.scaffold.dal"
+      file: "commands/speckit.scaffold.dal.md"
+      description: "Scaffold a DAL module at lib/dal/<entity>.ts with import 'server-only', typed Result envelope, schema-parsed inputs, and CRUD method stubs."
+
+    - type: "command"
+      name: "speckit.docs.sync"
+      file: "commands/speckit.docs.sync.md"
+      description: "Sync AGENTS.md / CLAUDE.md / .github/copilot-instructions.md / GEMINI.md from the installed agent-context.md template. Shows a diff for review before writing."
+
+    - type: "command"
+      name: "speckit.adr.new"
+      file: "commands/speckit.adr.new.md"
+      description: "Scaffold a new Architecture Decision Record at docs/adr/ in MADR 4 (full) format. Auto-numbers, links the current commit, supports --supersedes, and updates the ADR index."
+
+    - type: "command"
+      name: "speckit.adr.supersede"
+      file: "commands/speckit.adr.supersede.md"
+      description: "Mark an existing ADR as superseded and scaffold its replacement. Preserves the audit trail and carries constitution_refs over by default."
+
+    - type: "command"
+      name: "speckit.adr.audit"
+      file: "commands/speckit.adr.audit.md"
+      description: "Audit the codebase against accepted ADRs. Honors the central waiver registry at .specify/waivers.yml, phase-gates findings, and surfaces ADRs without an audit: block as aspirational."
+
+    - type: "command"
+      name: "speckit.context.refresh"
+      file: "commands/speckit.context.refresh.md"
+      description: "Regenerate .specify/memory/context-pack.md — the one-page snapshot every new AI session reads first. Aggregates ADRs, RFCs, in-flight plans, CHANGELOG, waivers, and recent session logs."
+
+    - type: "command"
+      name: "speckit.session.close"
+      file: "commands/speckit.session.close.md"
+      description: "Write a structured session log at .specify/sessions/<date>-<slug>.md capturing decisions, files touched, CHANGELOG additions, waivers added, and follow-ups for the next session."
+
+    - type: "command"
+      name: "speckit.handoff"
+      file: "commands/speckit.handoff.md"
+      description: "Generate a curated, human-written handoff at .specify/handoffs/<date>-<slug>.md complementing the auto-generated context pack with 'first 15 minutes', known traps, parked work, and don't-touch list."
+
+    - type: "command"
+      name: "speckit.help"
+      file: "commands/speckit.help.md"
+      description: "List every spec-kit command grouped by phase of use (bootstrap / planning / implementation / quality / session) with one-line descriptions. Prints a state-aware 'suggested next' line."
+
+tags:
+  - "nextjs"
+  - "web"
+  - "fullstack"
+  - "typescript"
+  - "production"

@@ -1,0 +1,197 @@
+[
+  {
+    "name": "priority/P0-critical",
+    "color": "B60205",
+    "description": "Blocks other work, or protects a zero-tolerance invariant"
+  },
+  {
+    "name": "priority/P1-high",
+    "color": "D93F0B",
+    "description": "Next after the P0 foundations"
+  },
+  {
+    "name": "priority/P2-medium",
+    "color": "FBCA04",
+    "description": "Valuable, not blocking"
+  },
+  {
+    "name": "priority/P3-low",
+    "color": "C5DEF5",
+    "description": "Deferred; revisit when its prerequisites land"
+  },
+  {
+    "name": "kind/foundation",
+    "color": "5319E7",
+    "description": "Architectural work other issues depend on"
+  },
+  {
+    "name": "kind/feature",
+    "color": "0E8A16",
+    "description": "New user-facing capability"
+  },
+  {
+    "name": "kind/enhancement",
+    "color": "A2EEEF",
+    "description": "Improves something that already exists"
+  },
+  {
+    "name": "kind/infra",
+    "color": "546E7A",
+    "description": "Build, deploy, tooling, operations"
+  },
+  {
+    "name": "kind/meta",
+    "color": "EEEEEE",
+    "description": "Index, tracking, process"
+  },
+  {
+    "name": "status/shipped",
+    "color": "0B5D1E",
+    "description": "Implemented and verified - closed"
+  },
+  {
+    "name": "status/partial",
+    "color": "FEF2C0",
+    "description": "A reduced version exists"
+  },
+  {
+    "name": "status/spec-only",
+    "color": "C2E0C6",
+    "description": "docs/features spec exists, no code"
+  },
+  {
+    "name": "status/blocked",
+    "color": "E99695",
+    "description": "Has unresolved blockers"
+  },
+  {
+    "name": "status/blocked-others",
+    "color": "D876E3",
+    "description": "Other issues are blocked on this one"
+  },
+  {
+    "name": "differentiator",
+    "color": "FFD33D",
+    "description": "GateControl-only; kandev has no equivalent"
+  },
+  {
+    "name": "wont-do",
+    "color": "6E7781",
+    "description": "Deliberately out of scope — closed as not planned, reopenable"
+  },
+  {
+    "name": "parity/kandev",
+    "color": "006B75",
+    "description": "Needed to match kandev's capability surface"
+  },
+  {
+    "name": "good first issue",
+    "color": "7057FF",
+    "description": "Well-scoped, low prerequisite knowledge"
+  },
+  {
+    "name": "effort/S",
+    "color": "E8E1F9",
+    "description": "Up to 1 day"
+  },
+  {
+    "name": "effort/M",
+    "color": "CFC3F2",
+    "description": "2-5 days"
+  },
+  {
+    "name": "effort/L",
+    "color": "B3A0EA",
+    "description": "1-2 weeks"
+  },
+  {
+    "name": "effort/XL",
+    "color": "8B6FE0",
+    "description": "More than 2 weeks"
+  },
+  {
+    "name": "area/security",
+    "color": "0052CC",
+    "description": "Subsystem: credentials, tenancy, secret handling"
+  },
+  {
+    "name": "area/billing",
+    "color": "0052CC",
+    "description": "Subsystem: auth modes, quotas, cost"
+  },
+  {
+    "name": "area/orchestration",
+    "color": "BFD4F2",
+    "description": "Subsystem: task lifecycle and scheduling"
+  },
+  {
+    "name": "area/workflows",
+    "color": "BFD4F2",
+    "description": "Subsystem: multi-step agent pipelines"
+  },
+  {
+    "name": "area/board",
+    "color": "BFD4F2",
+    "description": "Subsystem: kanban board"
+  },
+  {
+    "name": "area/issues",
+    "color": "BFD4F2",
+    "description": "Subsystem: issue management"
+  },
+  {
+    "name": "area/agents",
+    "color": "BFD4F2",
+    "description": "Subsystem: agent catalog, protocol, profiles"
+  },
+  {
+    "name": "area/sessions",
+    "color": "BFD4F2",
+    "description": "Subsystem: session log and conversations"
+  },
+  {
+    "name": "area/review",
+    "color": "BFD4F2",
+    "description": "Subsystem: diff, review gate, integration"
+  },
+  {
+    "name": "area/executors",
+    "color": "BFD4F2",
+    "description": "Subsystem: execution environments"
+  },
+  {
+    "name": "area/repos",
+    "color": "BFD4F2",
+    "description": "Subsystem: repositories and worktrees"
+  },
+  {
+    "name": "area/integrations",
+    "color": "BFD4F2",
+    "description": "Subsystem: GitHub, GitLab, Jira, Linear, Sentry"
+  },
+  {
+    "name": "area/mcp",
+    "color": "BFD4F2",
+    "description": "Subsystem: Model Context Protocol surface"
+  },
+  {
+    "name": "area/platform",
+    "color": "BFD4F2",
+    "description": "Subsystem: deployment, packaging, system management"
+  },
+  {
+    "name": "area/observability",
+    "color": "BFD4F2",
+    "description": "Subsystem: logs, metrics, analytics"
+  },
+  {
+    "name": "area/ui",
+    "color": "BFD4F2",
+    "description": "Subsystem: shell, layout, components"
+  },
+  {
+    "name": "area/api",
+    "color": "BFD4F2",
+    "description": "Subsystem: tRPC surface and OpenAPI contract"
+  }
+]

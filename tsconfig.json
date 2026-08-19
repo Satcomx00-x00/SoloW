@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["bun-types"],
+    "baseUrl": ".",
+    "paths": {
+      "@gatecontrol/contracts": ["packages/contracts/src/index.ts"],
+      "@gatecontrol/core": ["packages/core/src/index.ts"],
+      "@gatecontrol/db": ["packages/db/src/index.ts"],
+      "@gatecontrol/db/testing": ["packages/db/src/testing.ts"]
+    }
+  },
+  "include": ["scripts"]
+}

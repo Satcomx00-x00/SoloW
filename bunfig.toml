@@ -1,0 +1,6 @@
+[test]
+# The web DAL modules import "server-only" (a Next.js marker that throws outside a
+# Server Component). Running `bun test` from the repo root does not pick up the
+# per-package apps/web/bunfig.toml, so preload the same stub here to keep the full
+# workspace suite green. Harmless for packages that never import "server-only".
+preload = ["./apps/web/test-setup.ts"]

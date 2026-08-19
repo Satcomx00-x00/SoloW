@@ -1,0 +1,24 @@
+[
+  {
+    "title": "Wave 1 — Foundations",
+    "description": "The eight architectural foundations almost every other issue is blocked on. Each is cheap now and expensive later. Executor interface (#1), session log (#2), contribution registries (#3), workflow model (#5), task-repository join (#7), agent catalog (#10), per-turn usage capture (#14), external MCP (#16). See #109.",
+    "issues": [1, 2, 3, 5, 7, 10, 14, 16]
+  },
+  {
+    "title": "Wave 2 — What the foundations unlock",
+    "description": "The work that becomes possible, or merely cheap, once Wave 1 lands: ACP client (#58), executor profile config (#73), task dependencies (#6), sub-tasks (#56), GitHub integration (#15), single-command launcher (#17), panel layout (#11), MCP workspace discovery (#82).",
+    "issues": [6, 11, 15, 17, 56, 58, 73, 82]
+  },
+  {
+    "title": "Wave 3 — Capability breadth",
+    "description": "Where the parity gap against kandev is widest: Docker (#96) and SSH (#97) executors, CLI passthrough (#59), MCP task creation (#99), push and pull-request integration (#71), notifications (#92), analytics (#91), multi-branch tasks (#57).",
+    "issues": [57, 59, 71, 91, 92, 96, 97, 99]
+  },
+  {
+    "title": "Wave 4 — The rest",
+    "description": "Everything else, ordered by the priority labels rather than by wave. Populated automatically: any open issue not claimed by an earlier wave lands here.",
+    "issues": [],
+    "catchAll": true,
+    "exclude": [109]
+  }
+]

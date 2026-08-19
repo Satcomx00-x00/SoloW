@@ -1,0 +1,15 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "declaration": false,
+    "types": ["bun-types"],
+    // The Playwright runner transpiles these files itself (to CJS, following the nearest
+    // package.json). Typechecking them as NodeNext/CJS would reject the ESM syntax the runner
+    // accepts, so the module mode is decoupled here — this config never emits.
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "verbatimModuleSyntax": false
+  },
+  "include": [".", "../playwright.config.ts"]
+}

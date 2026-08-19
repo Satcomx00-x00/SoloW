@@ -1,0 +1,35 @@
+# Dependency-audit allowlist (task TASK-029).
+#
+# One GitHub advisory id per line. An entry belongs here only when the vulnerable code cannot
+# be reached from a deployed GateControl surface — never merely because fixing it is awkward.
+# Every entry states what makes it unreachable and what would make it reachable again.
+#
+# Reviewed: 2026-08-18. Re-check whenever `bun audit` output changes or a listed assumption
+# below stops holding.
+
+# --- h3 (via inngest, trpc-to-openapi) -------------------------------------------------------
+# Both advisories are in h3's `serveStatic` and `EventStream` handlers. GateControl mounts no
+# h3 server: `trpc-to-openapi` is used for schema generation only (scripts/gen-openapi.ts), and
+# the Inngest `serve` HTTP handler is not wired yet.
+# REACHABLE AGAIN once the Inngest serve endpoint lands (TASK-019 follow-up) — upgrade h3 then.
+1115161  # h3: SSE injection via unsanitized newlines
+1116543  # h3 v1: request smuggling (TE.TE)
+
+# --- postcss (via next, @tailwindcss/postcss) ------------------------------------------------
+# Build-time CSS processing only. Both advisories require processing attacker-supplied CSS or
+# source maps; the only CSS compiled is this repository's own, at build time.
+1124252  # postcss: arbitrary file read via sourceMappingURL
+1139510  # postcss: path traversal in previous-source-map auto-loading
+
+# --- sharp (via next) ------------------------------------------------------------------------
+# Next.js loads sharp lazily for `next/image` optimization. The SPA renders no <Image> and
+# defines no remote image patterns, so the optimizer never runs.
+# REACHABLE AGAIN the moment `next/image` is used — upgrade next/sharp before adding one.
+1124066  # sharp: inherited libvips CVEs
+
+# --- vite / vitest (dev and transitive test tooling) -----------------------------------------
+# Neither is used by GateControl: tests run on `bun test`. They arrive transitively (better-auth
+# ships them in its dependency tree) and never ship in a build output. The vitest advisory
+# additionally requires its UI server to be listening, which nothing here starts.
+1123525  # vite: server.fs.deny bypass on Windows
+1139528  # vitest: UI server arbitrary file read/execute
