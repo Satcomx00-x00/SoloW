@@ -6,6 +6,7 @@ function assistantLine(over: Record<string, unknown> = {}): string {
   return JSON.stringify({
     type: "assistant",
     message: {
+      id: "msg_01",
       model: "claude-sonnet-4-20250514",
       content: [{ type: "text", text: "done" }],
       usage: {
@@ -32,6 +33,7 @@ describe("usage capture (issue #14)", () => {
     const usage = usageOf(updatesFor(assistantLine()));
     expect(usage).toEqual({
       kind: "usage",
+      messageId: "msg_01",
       model: "claude-sonnet-4-20250514",
       inputTokens: 120,
       outputTokens: 34,
@@ -61,6 +63,7 @@ describe("usage capture (issue #14)", () => {
     const updates = updatesFor(assistantLine({ usage: { input_tokens: 5 } }));
     expect(usageOf(updates)).toEqual({
       kind: "usage",
+      messageId: "msg_01",
       model: "claude-sonnet-4-20250514",
       inputTokens: 5,
       outputTokens: 0,
@@ -84,5 +87,29 @@ describe("usage capture (issue #14)", () => {
       assistantLine({ usage: { input_tokens: 1, some_future_counter: 99 } }),
     );
     expect(usageOf(updates)?.inputTokens).toBe(1);
+  });
+});
+
+describe("one turn, many events (the over-counting trap)", () => {
+  it("tags every block of a turn with the same message id, so a consumer can deduplicate", () => {
+    // The CLI does not emit one event per turn. It emits one per content block and repeats
+    // the whole turn's usage on each. Summing per event multiplies a turn's counts by its
+    // block count — on a real transcript, 2.5x input and 5x output.
+    const blocks = [
+      { type: "thinking", thinking: "considering" },
+      { type: "text", text: "here is the change" },
+      { type: "tool_use", name: "edit_file" },
+    ];
+    const ids = blocks.map((block) => {
+      const updates = updatesFor(assistantLine({ content: [block] }));
+      return usageOf(updates)?.messageId;
+    });
+
+    expect(ids).toEqual(["msg_01", "msg_01", "msg_01"]);
+  });
+
+  it("carries a null id when the CLI states none, so the consumer can fall back", () => {
+    const updates = updatesFor(assistantLine({ id: undefined }));
+    expect(usageOf(updates)?.messageId).toBeNull();
   });
 });

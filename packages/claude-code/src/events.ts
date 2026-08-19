@@ -58,6 +58,12 @@ export const assistantEventSchema = z
     type: z.literal("assistant"),
     message: z
       .object({
+        /**
+         * Identifies the *turn*. The CLI emits one assistant event per content block and
+         * repeats the whole message's usage on each, so this — not the event — is the unit
+         * a usage record corresponds to.
+         */
+        id: z.string().optional(),
         content: z.array(contentBlockSchema).optional(),
         model: z.string().optional(),
         usage: usageSchema.optional(),
@@ -112,6 +118,12 @@ export type ClaudeUpdate =
    */
   | {
       kind: "usage";
+      /**
+       * The assistant message this usage belongs to. The CLI repeats identical usage on every
+       * content block of one turn, so consumers MUST deduplicate on this: summing per event
+       * over-counts a multi-block turn by its block count.
+       */
+      messageId: string | null;
       model: string | null;
       inputTokens: number;
       outputTokens: number;
@@ -172,6 +184,7 @@ export function toUpdates(event: StreamEvent): ClaudeUpdate[] {
     if (usage) {
       updates.push({
         kind: "usage",
+        messageId: parsed.data.message.id ?? null,
         model: parsed.data.message.model ?? null,
         inputTokens: usage.input_tokens ?? 0,
         outputTokens: usage.output_tokens ?? 0,

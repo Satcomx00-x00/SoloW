@@ -16,6 +16,8 @@ export type AgentStreamEvent =
   /** One completed turn's token usage (issue #14). Counts and model only — never content. */
   | {
       kind: "usage";
+      /** The assistant turn this belongs to — the deduplication key. See events.ts. */
+      messageId: string | null;
       model: string | null;
       inputTokens: number;
       outputTokens: number;

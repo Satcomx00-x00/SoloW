@@ -149,6 +149,8 @@ export async function recordSessionUsage(
     sessionId: string;
     taskId: string;
     agentProfileId: string;
+    /** The assistant turn. Repeats for the same turn are ignored — see the schema comment. */
+    messageId: string;
     seq: number;
     model: string | null;
     inputTokens: number;
@@ -165,6 +167,7 @@ export async function recordSessionUsage(
       sessionId: input.sessionId,
       taskId: input.taskId,
       agentProfileId: input.agentProfileId,
+      messageId: input.messageId,
       seq: input.seq,
       model: input.model,
       inputTokens: input.inputTokens,
@@ -177,13 +180,11 @@ export async function recordSessionUsage(
 }
 
 /**
- * The next free usage `seq` for a Session.
+ * The next usage `seq` for a Session — an ordering hint, read from the database because a
+ * Session spans review rounds and each round re-enters the durable step with a fresh closure.
  *
- * Read from the database rather than kept in a counter, for the same reason the event log
- * does it: a Session spans review rounds, and each round re-enters the durable step with a
- * fresh closure. A counter restarting at 0 would collide with the previous round's turns on
- * the unique index, and `onConflictDoNothing` would discard the newer usage in silence —
- * losing exactly the data this table exists to preserve.
+ * Identity lives on `messageId`, not here: a repeated or replayed turn is rejected by the
+ * unique index regardless of what sequence number it arrives with.
  */
 export async function nextSessionUsageSeq(
   db: Db,

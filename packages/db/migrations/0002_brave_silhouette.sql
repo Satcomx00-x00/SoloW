@@ -4,6 +4,7 @@ CREATE TABLE `session_usage` (
 	`session_id` text NOT NULL,
 	`task_id` text NOT NULL,
 	`agent_profile_id` text NOT NULL,
+	`message_id` text NOT NULL,
 	`seq` integer NOT NULL,
 	`model` text,
 	`input_tokens` integer DEFAULT 0 NOT NULL,
@@ -18,5 +19,6 @@ CREATE TABLE `session_usage` (
 	FOREIGN KEY (`agent_profile_id`) REFERENCES `agent_profile`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `session_usage_seq` ON `session_usage` (`session_id`,`seq`);--> statement-breakpoint
+CREATE UNIQUE INDEX `session_usage_turn` ON `session_usage` (`session_id`,`message_id`);--> statement-breakpoint
+CREATE INDEX `session_usage_seq` ON `session_usage` (`session_id`,`seq`);--> statement-breakpoint
 CREATE INDEX `session_usage_ws_at` ON `session_usage` (`workspace_id`,`created_at`);

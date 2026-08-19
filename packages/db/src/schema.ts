@@ -247,7 +247,16 @@ export const sessionUsage = sqliteTable(
     agentProfileId: text("agent_profile_id")
       .notNull()
       .references(() => agentProfile.id),
-    /** Turn ordinal within the session, shared with `session_event.seq`. */
+    /**
+     * Identifies the assistant turn, and is what makes a row unique within a Session.
+     *
+     * The agent CLI emits one stream event per content block of a turn and repeats the whole
+     * turn's usage on each, so a row per event would multiply a turn's counts by its block
+     * count. Keying on the turn instead makes that impossible by construction — and makes a
+     * durable step's replay a no-op for free, which a sequence number could not (Principle III).
+     */
+    messageId: text("message_id").notNull(),
+    /** Ordering within the Session. Not unique — the turn id carries identity. */
     seq: integer("seq").notNull(),
     /** Whatever the agent called the model. Null when it did not say. */
     model: text("model"),
@@ -260,7 +269,8 @@ export const sessionUsage = sqliteTable(
     at: createdAt(),
   },
   (t) => ({
-    bySession: uniqueIndex("session_usage_seq").on(t.sessionId, t.seq),
+    byTurn: uniqueIndex("session_usage_turn").on(t.sessionId, t.messageId),
+    bySeq: index("session_usage_seq").on(t.sessionId, t.seq),
     byWorkspace: index("session_usage_ws_at").on(t.workspaceId, t.at),
   }),
 );

@@ -197,6 +197,8 @@ describe("recordSessionUsage (issue #14)", () => {
     sessionId: "sess-1",
     taskId: "task-1",
     agentProfileId: "ap-1",
+    // Identity follows the turn, so distinct turns need distinct ids by default.
+    messageId: `msg-${over.seq ?? 0}`,
     seq: 0,
     model: "claude-sonnet-4-20250514",
     inputTokens: 100,
@@ -226,13 +228,15 @@ describe("recordSessionUsage (issue #14)", () => {
     });
   });
 
-  it("is idempotent per (session, seq), so a replayed durable step never double-counts", async () => {
+  it("is idempotent per turn, so a replay or a repeated block never double-counts", async () => {
     const db = createTestDb();
     await seedSession(db);
 
-    // Principle III: the same step re-runs after an orchestrator restart.
+    // Principle III: the same step re-runs after an orchestrator restart. And the CLI
+    // repeats one turn's usage on every content block, arriving with a different seq.
     await recordSessionUsage(db, WS, turn());
     await recordSessionUsage(db, WS, turn());
+    await recordSessionUsage(db, WS, turn({ seq: 7, messageId: "msg-0" }));
 
     const rows = await listSessionUsage(db, WS, "sess-1");
     expect(rows).toHaveLength(1);
@@ -284,6 +288,7 @@ describe("nextSessionUsageSeq — turn numbering survives a review round (issue 
     sessionId: "sess-1",
     taskId: "task-1",
     agentProfileId: "ap-1",
+    messageId: `msg-${seq}`,
     seq,
     model: "claude-sonnet-4-20250514",
     inputTokens,

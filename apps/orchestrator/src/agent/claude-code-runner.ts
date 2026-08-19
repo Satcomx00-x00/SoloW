@@ -128,6 +128,7 @@ export function toStreamEvent(update: ClaudeUpdate): AgentStreamEvent | null {
     case "usage":
       return {
         kind: "usage",
+        messageId: update.messageId,
         model: update.model,
         inputTokens: update.inputTokens,
         outputTokens: update.outputTokens,

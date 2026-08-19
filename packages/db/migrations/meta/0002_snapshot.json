@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "686e67f2-43b7-40c3-8e2b-2579f1631b6f",
+  "id": "436bc7a4-4368-4cc7-89a1-e941fb644560",
   "prevId": "503f0683-30e0-4d30-96d6-e8dbd9346cb6",
   "tables": {
     "agent_profile": {
@@ -774,6 +774,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "message_id": {
+          "name": "message_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
         "seq": {
           "name": "seq",
           "type": "integer",
@@ -838,13 +845,21 @@
         }
       },
       "indexes": {
+        "session_usage_turn": {
+          "name": "session_usage_turn",
+          "columns": [
+            "session_id",
+            "message_id"
+          ],
+          "isUnique": true
+        },
         "session_usage_seq": {
           "name": "session_usage_seq",
           "columns": [
             "session_id",
             "seq"
           ],
-          "isUnique": true
+          "isUnique": false
         },
         "session_usage_ws_at": {
           "name": "session_usage_ws_at",
