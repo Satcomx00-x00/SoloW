@@ -58,7 +58,9 @@ const STEERABLE = "[steerable]";
  */
 class FixtureAgentRunner implements AgentRunner {
   start(opts: AgentStartOpts): AgentHandle {
-    const worktree = join(PATHS.worktrees, opts.worktreeName);
+    // A resume round passes no name: the worktree already exists and `cwd` points at it
+    // (see AgentStartOpts.worktreeName). Only a first round creates one.
+    const worktree = opts.worktreeName ? join(PATHS.worktrees, opts.worktreeName) : opts.cwd;
 
     let resolveWorkspace: (path: string | null) => void = () => {};
     const workspacePath = new Promise<string | null>((resolve) => {
@@ -71,8 +73,12 @@ class FixtureAgentRunner implements AgentRunner {
     });
 
     void (async () => {
-      // The agent creates its own worktree, exactly as `claude --worktree <name>` would.
-      await $`git -C ${opts.cwd} worktree add -b ${opts.worktreeName} ${worktree}`.quiet();
+      // The agent creates its own worktree, exactly as `claude --worktree <name>` would —
+      // but only on a first round. Asking git to add it again would fail, or branch a fresh
+      // one from the base ref and throw the earlier round's work away.
+      if (opts.worktreeName) {
+        await $`git -C ${opts.cwd} worktree add -b ${opts.worktreeName} ${worktree}`.quiet();
+      }
       resolveWorkspace(worktree);
 
       const label = basename(worktree);

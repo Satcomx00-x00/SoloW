@@ -71,8 +71,8 @@ export class FakeAgentRunner implements AgentRunner {
   readonly prompts: string[] = [];
   /** Operator input that reached the agent. */
   readonly inputs: string[] = [];
-  /** Worktree names the lifecycle asked for. */
-  readonly worktreeNames: string[] = [];
+  /** Worktree names the lifecycle asked for — `null` on a resume round, which asks for none. */
+  readonly worktreeNames: (string | null)[] = [];
   stopped = false;
 
   constructor(
