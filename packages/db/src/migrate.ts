@@ -15,10 +15,24 @@ import { dbEnv } from "./env.js";
 export function runMigrations(): void {
   const env = dbEnv();
   const sqlite = new Database(env.GATECONTROL_SQLITE_PATH, { create: true });
-  sqlite.exec("PRAGMA foreign_keys = ON;");
+  // Foreign keys stay OFF for the duration of the migration: drizzle-kit rewrites a changed
+  // table by building `__new_<table>`, copying rows, dropping the original and renaming — and
+  // the DROP trips enforcement on any database that already holds referencing rows (a fresh
+  // one has none, which is why CI never saw this). The pragma is a no-op inside a transaction,
+  // so it has to be set here rather than around `migrate`. `foreign_key_check` afterwards
+  // makes sure the migration did not actually leave a dangling reference behind.
+  sqlite.exec("PRAGMA foreign_keys = OFF;");
   const db = drizzle(sqlite);
   const migrationsFolder = join(dirname(fileURLToPath(import.meta.url)), "..", "migrations");
   migrate(db, { migrationsFolder });
+  const violations = sqlite.query("PRAGMA foreign_key_check;").all();
+  if (violations.length > 0) {
+    sqlite.close();
+    throw new Error(
+      `migrations left ${violations.length} foreign key violation(s): ${JSON.stringify(violations)}`,
+    );
+  }
+  sqlite.exec("PRAGMA foreign_keys = ON;");
   sqlite.close();
 }
 

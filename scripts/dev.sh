@@ -40,11 +40,15 @@ export GATECONTROL_WS_PORT="${GATECONTROL_WS_PORT:-5001}"
 export GATECONTROL_WS_URL="${GATECONTROL_WS_URL:-ws://localhost:5001}"
 export GATECONTROL_WEB_URL="${GATECONTROL_WEB_URL:-http://localhost:5000}"
 
-# First-run database setup.
+# Database setup. Migrations run on every start, not just the first: drizzle skips the ones
+# already recorded, so this is cheap, and without it an existing dev database silently drifts
+# behind main and the API 500s on tables that do not exist yet. Seeding stays first-run only.
 if [ ! -f "$GATECONTROL_SQLITE_PATH" ]; then
     echo "[dev] initializing database at $GATECONTROL_SQLITE_PATH"
     bun run db:migrate
     bun run db:seed
+else
+    bun run db:migrate
 fi
 
 # Track child PIDs and stop both services on exit.
