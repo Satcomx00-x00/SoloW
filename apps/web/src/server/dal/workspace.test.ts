@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it } from "bun:test";
 import { workspace } from "@gatecontrol/db";
 import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
 import { eq } from "drizzle-orm";
-import { isEnabled } from "../flags.js";
+import { FLAGS, type FlagKey, isEnabled } from "../flags.js";
 import { getWorkspaceFlags } from "./workspace.js";
 
 /**
@@ -50,6 +50,21 @@ describe("getWorkspaceFlags", () => {
     // A corrupt column must never be read as "the feature is on".
     await setFlags({ "ff-core-program": "yes", "ff-something-else": true });
     expect(await getWorkspaceFlags(db, WS)).toEqual({});
+  });
+
+  it("reads every registered flag, not just the first one (regression)", async () => {
+    // This function used to name `ff-core-program` literally, so every flag added afterwards was
+    // silently dropped: `ff-integrations` could be true in this column and still evaluate to OFF,
+    // with nothing to indicate why. Driving the check off the FLAGS registry is what fixes it, so
+    // the guard is written against the registry rather than against today's list of keys.
+    const everyFlagOn = Object.fromEntries(Object.keys(FLAGS).map((key) => [key, true]));
+    await setFlags(everyFlagOn);
+
+    const flags = await getWorkspaceFlags(db, WS);
+    expect(Object.keys(flags).sort()).toEqual(Object.keys(FLAGS).sort());
+    for (const key of Object.keys(FLAGS) as FlagKey[]) {
+      expect(isEnabled(key, { workspaceId: WS, overrides: flags })).toBe(true);
+    }
   });
 
   it("treats a malformed column as no overrides", async () => {

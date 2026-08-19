@@ -3,6 +3,7 @@ import type {
   ChangeRequestDto,
   IntegrationDto,
   IssueDto,
+  McpTokenDto,
   RepositoryBranchDto,
   RepositoryDto,
   TaskDto,
@@ -11,6 +12,7 @@ import type {
   changeRequest,
   integration,
   issue,
+  mcpToken,
   repository,
   repositoryBranch,
   secret,
@@ -24,6 +26,7 @@ type SecretRow = typeof secret.$inferSelect;
 type IntegrationRow = typeof integration.$inferSelect;
 type RepositoryBranchRow = typeof repositoryBranch.$inferSelect;
 type ChangeRequestRow = typeof changeRequest.$inferSelect;
+type McpTokenRow = typeof mcpToken.$inferSelect;
 
 /**
  * Row → DTO mappers. Explicit field selection only — no spread of the raw row, so a
@@ -120,6 +123,23 @@ export function changeRequestToDto(row: ChangeRequestRow): ChangeRequestDto {
     baseRef: row.baseRef,
     authorLogin: row.authorLogin,
     syncedAt: row.syncedAt,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+/**
+ * MCP token row → DTO. `tokenHash` is deliberately absent: the same discipline as `secretToRef`,
+ * enforced by explicit field selection rather than by remembering to strip it (Principle IV).
+ */
+export function mcpTokenToDto(row: McpTokenRow): McpTokenDto {
+  return {
+    id: row.id,
+    label: row.label,
+    scope: row.scope,
+    prefix: row.prefix,
+    lastUsedAt: row.lastUsedAt,
+    revokedAt: row.revokedAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };

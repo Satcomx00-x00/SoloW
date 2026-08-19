@@ -22,7 +22,16 @@ export const reviewRouter = router({
    * so the transition is applied here so the local loop is demonstrable end-to-end.
    */
   decide: ownerProcedure
-    .meta({ openapi: { method: "POST", path: "/review.decide", tags: ["review"], protect: true } })
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/review.decide",
+        tags: ["review"],
+        protect: true,
+        summary:
+          "Record the human decision on a Session's diff: approve (commit), reject (discard), or request_changes (resume the agent with feedback). This is the review gate — nothing is integrated without it.",
+      },
+    })
     .input(reviewDecisionInput)
     .output(reviewDto)
     .mutation(async ({ ctx, input }) => {

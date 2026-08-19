@@ -14,6 +14,7 @@
     "/issue.list": {
       "get": {
         "operationId": "issue-list",
+        "summary": "List Issues in the Workspace, newest first. Issues are imported from a connected GitHub/GitLab repository — there is no way to create one directly.",
         "tags": [
           "issue"
         ],
@@ -188,6 +189,7 @@
     "/issue.get": {
       "get": {
         "operationId": "issue-get",
+        "summary": "Fetch one Issue by id, including how many Tasks sit under it.",
         "tags": [
           "issue"
         ],
@@ -347,6 +349,7 @@
     "/integration.connect": {
       "post": {
         "operationId": "integration-connect",
+        "summary": "Connect a GitHub or GitLab account using a stored Personal Access Token Secret. The token is verified against the provider before the Integration is recorded.",
         "tags": [
           "integration"
         ],
@@ -489,6 +492,7 @@
     "/integration.list": {
       "get": {
         "operationId": "integration-list",
+        "summary": "List connected GitHub/GitLab Integrations.",
         "tags": [
           "integration"
         ],
@@ -608,6 +612,7 @@
     "/integration.linkRepository": {
       "post": {
         "operationId": "integration-linkRepository",
+        "summary": "Bind a connected Repository to a specific owner/repo (GitHub) or namespace/project (GitLab) on an Integration.",
         "tags": [
           "integration"
         ],
@@ -749,6 +754,7 @@
     "/integration.listExternalIssues": {
       "get": {
         "operationId": "integration-listExternalIssues",
+        "summary": "Preview the issues on a linked Repository's provider, flagging which have already been imported.",
         "tags": [
           "integration"
         ],
@@ -875,6 +881,7 @@
     "/integration.importIssues": {
       "post": {
         "operationId": "integration-importIssues",
+        "summary": "Import selected external issues as GateControl Issues. Idempotent per Repository — re-importing the same ids is a visible no-op, not a duplicate.",
         "tags": [
           "integration"
         ],
@@ -1044,6 +1051,7 @@
     "/integration.syncRepositorySignals": {
       "post": {
         "operationId": "integration-syncRepositorySignals",
+        "summary": "Refresh a linked Repository's change requests (pull/merge requests) and branches from its provider. On-demand pull; GateControl never creates or modifies anything on the provider here.",
         "tags": [
           "integration"
         ],
@@ -1240,9 +1248,421 @@
         }
       }
     },
+    "/mcpToken.list": {
+      "get": {
+        "operationId": "mcpToken-list",
+        "summary": "List issued MCP tokens as metadata only — label, scope, prefix, last use, revocation. Token values are never returned by a read.",
+        "tags": [
+          "mcp"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "label": {
+                        "type": "string"
+                      },
+                      "scope": {
+                        "type": "string",
+                        "enum": [
+                          "read",
+                          "read_write"
+                        ]
+                      },
+                      "prefix": {
+                        "type": "string"
+                      },
+                      "lastUsedAt": {
+                        "type": "string",
+                        "nullable": true,
+                        "format": "date-time"
+                      },
+                      "revokedAt": {
+                        "type": "string",
+                        "nullable": true,
+                        "format": "date-time"
+                      },
+                      "createdAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "updatedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "label",
+                      "scope",
+                      "prefix",
+                      "lastUsedAt",
+                      "revokedAt",
+                      "createdAt",
+                      "updatedAt"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.NOT_FOUND"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mcpToken.issue": {
+      "post": {
+        "operationId": "mcpToken-issue",
+        "summary": "Issue a scoped MCP token. The value is returned exactly once, in this response, and is not recoverable afterwards.",
+        "tags": [
+          "mcp"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "read",
+                      "read_write"
+                    ],
+                    "default": "read"
+                  }
+                },
+                "required": [
+                  "label"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "token": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "label": {
+                          "type": "string"
+                        },
+                        "scope": {
+                          "type": "string",
+                          "enum": [
+                            "read",
+                            "read_write"
+                          ]
+                        },
+                        "prefix": {
+                          "type": "string"
+                        },
+                        "lastUsedAt": {
+                          "type": "string",
+                          "nullable": true,
+                          "format": "date-time"
+                        },
+                        "revokedAt": {
+                          "type": "string",
+                          "nullable": true,
+                          "format": "date-time"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "label",
+                        "scope",
+                        "prefix",
+                        "lastUsedAt",
+                        "revokedAt",
+                        "createdAt",
+                        "updatedAt"
+                      ]
+                    },
+                    "value": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "token",
+                    "value"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mcpToken.revoke": {
+      "post": {
+        "operationId": "mcpToken-revoke",
+        "summary": "Revoke an MCP token. Takes effect on the token's next request; the row is kept so the audit trail survives.",
+        "tags": [
+          "mcp"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "scope": {
+                      "type": "string",
+                      "enum": [
+                        "read",
+                        "read_write"
+                      ]
+                    },
+                    "prefix": {
+                      "type": "string"
+                    },
+                    "lastUsedAt": {
+                      "type": "string",
+                      "nullable": true,
+                      "format": "date-time"
+                    },
+                    "revokedAt": {
+                      "type": "string",
+                      "nullable": true,
+                      "format": "date-time"
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "label",
+                    "scope",
+                    "prefix",
+                    "lastUsedAt",
+                    "revokedAt",
+                    "createdAt",
+                    "updatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/task.create": {
       "post": {
         "operationId": "task-create",
+        "summary": "Create a Task under an Issue, binding an Agent Profile, an Executor Profile, and a Repository. Creates it in the backlog; it does not start an agent — use task.launch for that.",
         "tags": [
           "task"
         ],
@@ -1424,6 +1844,7 @@
     "/task.list": {
       "get": {
         "operationId": "task-list",
+        "summary": "List Tasks on the board, optionally filtered by Issue or lifecycle state.",
         "tags": [
           "task"
         ],
@@ -1607,6 +2028,7 @@
     "/task.get": {
       "get": {
         "operationId": "task-get",
+        "summary": "Fetch one Task by id, including its current state and result branch.",
         "tags": [
           "task"
         ],
@@ -1764,6 +2186,7 @@
     "/task.launch": {
       "post": {
         "operationId": "task-launch",
+        "summary": "Start an agent on a ready Task in its own isolated worktree. Rate limited, and refused if the Agent Profile is already at its concurrency cap. The run ends at a human review gate — it never merges on its own.",
         "tags": [
           "task"
         ],
@@ -1919,6 +2342,7 @@
     "/task.move": {
       "post": {
         "operationId": "task-move",
+        "summary": "Move a Task to another lifecycle state. Illegal transitions are refused by the state machine rather than applied.",
         "tags": [
           "task"
         ],
@@ -2087,6 +2511,7 @@
     "/task.retry": {
       "post": {
         "operationId": "task-retry",
+        "summary": "Re-run a failed or parked Task in a fresh Session, clearing the previous failure reason.",
         "tags": [
           "task"
         ],
@@ -2242,6 +2667,7 @@
     "/profile.agent.create": {
       "post": {
         "operationId": "profile-agent-create",
+        "summary": "Create an Agent Profile: which catalog agent to run, its billing/auth mode, the Secret holding its credential, and its concurrency cap.",
         "tags": [
           "profile"
         ],
@@ -2396,6 +2822,7 @@
     "/profile.agent.list": {
       "get": {
         "operationId": "profile-agent-list",
+        "summary": "List Agent Profiles available to bind to a Task.",
         "tags": [
           "profile"
         ],
@@ -2519,6 +2946,7 @@
     "/profile.agentCatalog.list": {
       "get": {
         "operationId": "profile-agentCatalog-list",
+        "summary": "List the agents this Workspace can run — the catalog an Agent Profile points at. Read-only; rows are seeded per Workspace.",
         "tags": [
           "profile"
         ],
@@ -2687,6 +3115,7 @@
     "/profile.executor.create": {
       "post": {
         "operationId": "profile-executor-create",
+        "summary": "Create an Executor Profile — where an agent runs, with per-kind typed configuration. Credentials are given as Secret references, never inline values.",
         "tags": [
           "profile"
         ],
@@ -3185,6 +3614,7 @@
     "/profile.executor.update": {
       "post": {
         "operationId": "profile-executor-update",
+        "summary": "Update an Executor Profile's name or its per-kind configuration.",
         "tags": [
           "profile"
         ],
@@ -3683,6 +4113,7 @@
     "/profile.executor.list": {
       "get": {
         "operationId": "profile-executor-list",
+        "summary": "List Executor Profiles available to bind to a Task.",
         "tags": [
           "profile"
         ],
@@ -3986,6 +4417,7 @@
     "/repository.connect": {
       "post": {
         "operationId": "repository-connect",
+        "summary": "Connect a Git repository to the Workspace, by local path or remote URL, so Tasks can run against it.",
         "tags": [
           "repository"
         ],
@@ -4131,6 +4563,7 @@
     "/repository.list": {
       "get": {
         "operationId": "repository-list",
+        "summary": "List connected Repositories, including which Integration each is linked to.",
         "tags": [
           "repository"
         ],
@@ -4255,6 +4688,7 @@
     "/review.decide": {
       "post": {
         "operationId": "review-decide",
+        "summary": "Record the human decision on a Session's diff: approve (commit), reject (discard), or request_changes (resume the agent with feedback). This is the review gate — nothing is integrated without it.",
         "tags": [
           "review"
         ],
@@ -4623,6 +5057,7 @@
     "/session.listForTask": {
       "get": {
         "operationId": "session-listForTask",
+        "summary": "List every agent Session recorded for a Task, newest first.",
         "tags": [
           "session"
         ],
@@ -4752,6 +5187,7 @@
     "/session.get": {
       "get": {
         "operationId": "session-get",
+        "summary": "Fetch one Session with its full replayable event log, the diff captured at the review gate, and any recorded decision.",
         "tags": [
           "session"
         ],

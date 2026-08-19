@@ -1,7 +1,7 @@
 import "server-only";
 import { type Db, workspace } from "@gatecontrol/db";
 import { eq } from "drizzle-orm";
-import type { FlagKey } from "../flags.js";
+import { FLAGS, type FlagKey } from "../flags.js";
 
 /**
  * Workspace-level reads used before a `RequestContext` exists — the flag overrides are needed to
@@ -26,9 +26,13 @@ export async function getWorkspaceFlags(
   const raw = row?.enabledFlags;
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
 
+  // Validated against the flag registry rather than a hardcoded key. The previous version named
+  // `ff-core-program` literally, which silently dropped every later flag — `ff-integrations`
+  // (issue #15) could be set in this column and would still read as OFF. Driving the check off
+  // FLAGS means registering a flag is the only step needed for it to be readable here.
   const overrides: Partial<Record<FlagKey, boolean>> = {};
   for (const [key, value] of Object.entries(raw)) {
-    if (key === "ff-core-program" && typeof value === "boolean") overrides[key] = value;
+    if (key in FLAGS && typeof value === "boolean") overrides[key as FlagKey] = value;
   }
   return overrides;
 }

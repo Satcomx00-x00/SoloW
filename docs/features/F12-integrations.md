@@ -20,6 +20,13 @@ request** — the domain never encodes one provider's noun. Integrations are opt
 product functions fully without any of them, and behind the `ff-integrations` flag,
 default OFF.
 
+This feature also covers integration in the **opposite direction**: the external **MCP
+server** (issue #16), which lets outside agents and scripts drive GateControl rather than
+GateControl reaching out to them. It is the same product surface seen from the other side —
+the MCP tools are *derived* from the same tRPC procedures the SPA calls and `openapi.json`
+documents, so there is no second definition of any operation to drift. It sits behind its own
+`ff-mcp` flag, default OFF.
+
 ## Jobs served
 
 - **J2 — Organise agent work around issues.**
@@ -58,6 +65,26 @@ default OFF.
 - **FR-7** Integrations are optional; every core capability works without them (product
   [NFR-14](../product/03-product-requirements.md)).
 
+### External MCP server (issue #16)
+
+- **FR-8** GateControl exposes an MCP endpoint at `/api/mcp` over Streamable HTTP, answering
+  a POST as either `application/json` or a single-message SSE stream, and opening a
+  server→client SSE stream on GET.
+- **FR-9** The MCP tool definitions are derived from the tRPC procedures — name, input schema
+  and read/write classification all read off the router that generates `openapi.json`. Adding
+  a procedure adds a tool; no operation is defined twice.
+- **FR-10** Three namespaces are deliberately withheld from the tool surface: `secret` (a
+  token must not be able to plant a credential — Principle IV), `mcpToken` (a token must not
+  mint further tokens or undo its own revocation), and `stream` (a SPA WebSocket ticket an MCP
+  client cannot use).
+- **FR-11** An MCP request authorises through *the same* middleware as the SPA, by resolving
+  the token to a Workspace and then calling the router's own caller. There is no second
+  authorisation path — Workspace scoping, feature flags and rate limits are enforced once.
+- **FR-12** The Owner issues and revokes scoped tokens (`read` or `read_write`). A token value
+  is displayed exactly once at issue time; it is stored only as a SHA-256 hash, so a lost token
+  is reissued rather than recovered. Revocation takes effect on the token's next request, and a
+  revoked token is refused indistinguishably from an unknown one.
+
 ## Non-functional requirements
 
 - **NFR-1** An unavailable Integration degrades gracefully: dependent features show stale
@@ -90,6 +117,12 @@ default OFF.
 - Jira, Linear, Sentry, Slack (`wont-do` — issue #15).
 - Pushing a branch or opening a change request from GateControl (issue #71).
 - Webhook-driven or scheduled sync (v1 is on-demand only).
+- MCP prompts, resources, and sampling — GateControl has none to offer, and advertising
+  capabilities the server does not have makes clients probe endpoints that only ever fail.
+- Per-procedure MCP token permissions. Scope is `read` / `read_write`, mirroring the
+  query/mutation split the router already makes; a finer catalogue is additive later.
+- Task-scoped session MCP (issue #15's row 75) — the same token-issuing mechanism with a Task
+  id bound in, deliberately left until there is a caller for it.
 - The specific field mappings beyond title/description/state/branch/author (configuration
   detail).
 

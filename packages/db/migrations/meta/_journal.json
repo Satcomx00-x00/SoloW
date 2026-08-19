@@ -43,6 +43,13 @@
       "when": 1787166600161,
       "tag": "0005_chunky_randall",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1787167856067,
+      "tag": "0006_even_landau",
+      "breakpoints": true
     }
   ]
 }

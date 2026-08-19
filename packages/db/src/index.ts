@@ -28,6 +28,12 @@ export { ensureDefaultAgentCatalog } from "./agent-catalog-defaults.js";
 export * from "./auth-schema.js";
 export { dbEnv } from "./env.js";
 export { listWorkspaceFlags, setWorkspaceFlag, type WorkspaceFlags } from "./flags.js";
+export {
+  type GeneratedMcpToken,
+  generateMcpToken,
+  hashMcpToken,
+  mcpTokenHashEquals,
+} from "./mcp-token-store.js";
 export * from "./schema.js";
 export { schema } from "./schema.js";
 export { decryptForAgentRun, decryptForScmSync, encryptSecret } from "./secret-store.js";

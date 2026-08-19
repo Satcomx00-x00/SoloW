@@ -145,7 +145,7 @@ lucide-react, TanStack Query, Tailwind 4.
 | 71 | Linear | Closed as `wont-do` (#80) | 🚫 | Dropped with the scope decision. Linear was push-native and would have forced **webhook sync** into the interface. That requirement did not leave with it — it moved onto #15, since GitHub and GitLab both offer webhooks and polling leaves imported issues permanently stale | None |
 | 72 | Sentry | Closed as `wont-do` (#98) | 🚫 | Dropped with the scope decision. Sentry was always a different shape — an **event source that creates tasks from errors**, not an issue source. If error-driven task creation is ever wanted it belongs on the notification dispatcher as a trigger direction, never on the issue importer | None |
 | 73 | Slack | Closed as `wont-do` (#102) | 🚫 | Dropped with the scope decision, and it cost nothing — Slack was scoped as **a channel on the dispatcher, not an integration**. #92 keeps its registry and its in-app channel; there is simply one fewer channel to register. This is what correct scoping buys at the moment requirements change | None |
-| 74 | External MCP server (streamable HTTP + SSE) | — | ❌ | **The highest-leverage remaining item in the table.** The tRPC procedures and Zod contracts already exist, so this is an adapter with scoped tokens, not new domain logic — and it makes every other feature scriptable from outside, including from other agents | Settings → MCP: endpoint URL with a copy Button, a tokens **new** Table (issue / revoke), and per-client config snippets in `existing` Tabs |
+| 74 | External MCP server (streamable HTTP + SSE) | `/api/mcp`, 25 tools derived from the tRPC procedures, scoped `mcp_token` (#16) | ✅ ⭐ | Shipped as an adapter, not a parallel API: tool names, input schemas and read/write classification are all read off the same router that generates `openapi.json`, so adding a procedure adds a tool. Calls go through `appRouter.createCaller`, which means there is exactly **one** authorisation path — the flag guard, rate limit and Workspace scoping are the SPA's, not a second copy. Tokens are hashed at rest and shown once. `secret`, `stream` and `mcpToken` are deliberately withheld from the surface | Settings → MCP: endpoint URL with a copy Button, an issued-token list with revoke, and per-client config snippets in `existing` Tabs |
 | 75 | Automatic task-scoped session MCP | — | ❌ | Inject a server whose **token binds the task id**, and scope the tool set by the task's own permissions — an agent must not be able to reach a sibling task it was not given | A "Tools" `existing` Badge on the running session, expanding to what the agent may call |
 | 76 | Passthrough MCP for native-CLI agents | — | ❌ | Same endpoint, different injection point (env or config file for the CLI). Depends entirely on 21 | None |
 | 77 | MCP: discover workspace context | — | ❌ | Ship **first** — every other tool is useless without it, and it is a read-only mapping of existing list procedures, so it is also the cheapest | Invisible; appears in the task timeline as an agent-invoked action |
@@ -189,15 +189,16 @@ lucide-react, TanStack Query, Tailwind 4.
 
 | | Count | Share |
 |---|---|---|
-| ✅ Built | 35 | 33% |
-| 🟡 Partial | 12 | 11% |
+| ✅ Built | 37 | 35% |
+| 🟡 Partial | 11 | 10% |
 | 📄 Specified only (no code) | 9 | 9% |
-| ❌ Absent | 45 | 43% |
+| ❌ Absent | 44 | 42% |
 | 🚫 Out of scope | 4 | 4% |
 
-Of the **101 rows still in scope**, GateControl covers **47%** at some level (built or
+Of the **101 rows still in scope**, GateControl covers **48%** at some level (built or
 partial) — no longer concentrated entirely in the core review-first loop, now that GitHub
-and GitLab import stand alongside it. The four out-of-scope
+and GitLab import stand alongside it and the product is drivable from outside itself. The
+four out-of-scope
 rows are counted separately rather than dropped: a capability declined is not a
 capability held, and a parity table that quietly deletes what it decided against
 flatters itself.
