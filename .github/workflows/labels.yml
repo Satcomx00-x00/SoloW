@@ -1,0 +1,54 @@
+name: Sync issue labels
+
+# Labels-as-code. `.github/labels.json` is the single source of truth for the
+# issue-label taxonomy; this workflow applies it to the repository.
+#
+# Labels created implicitly by the issues API default to grey with no description,
+# so this reconciles them. Idempotent: creates what is missing, updates the rest.
+# Never deletes — removing a label is a deliberate act, not a side effect of a sync.
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - ".github/labels.json"
+      - ".github/workflows/labels.yml"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+concurrency:
+  group: sync-labels
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply label taxonomy
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          existing="$(gh label list --limit 200 --json name --jq '.[].name')"
+          created=0
+          updated=0
+
+          while IFS=$'\t' read -r name color description; do
+            if printf '%s\n' "$existing" | grep -qxF "$name"; then
+              gh label edit "$name" --color "$color" --description "$description"
+              printf 'updated  %-24s #%s\n' "$name" "$color"
+              updated=$((updated + 1))
+            else
+              gh label create "$name" --color "$color" --description "$description"
+              printf 'created  %-24s #%s\n' "$name" "$color"
+              created=$((created + 1))
+            fi
+          done < <(jq -r '.[] | [.name, .color, .description] | @tsv' .github/labels.json)
+
+          echo "::notice::Labels synced - $created created, $updated updated"
