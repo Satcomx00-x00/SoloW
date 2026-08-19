@@ -6,7 +6,7 @@
  * start. Granularity is per-Workspace (v1: single Workspace → effectively local-global).
  */
 
-export type FlagKey = "ff-core-program" | "ff-integrations";
+export type FlagKey = "ff-core-program" | "ff-integrations" | "ff-mcp";
 
 export interface FlagDefinition {
   key: FlagKey;
@@ -26,6 +26,13 @@ export const FLAGS: Record<FlagKey, FlagDefinition> = {
     key: "ff-integrations",
     description:
       "GitHub/GitLab integrations — connect, import Issues, sync branches and change requests (issue #15).",
+    default: false,
+    granularity: "workspace",
+  },
+  "ff-mcp": {
+    key: "ff-mcp",
+    description:
+      "External MCP server — drive GateControl from outside agents over a scoped token (issue #16).",
     default: false,
     granularity: "workspace",
   },

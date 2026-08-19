@@ -8,6 +8,7 @@ import type {
   ExecutorKind,
   IssueSource,
   IssueStatus,
+  McpScope,
   RepositorySource,
   ReviewDecision,
   ScmProvider,
@@ -495,6 +496,47 @@ export const secret = sqliteTable(
 );
 
 /**
+ * External MCP access tokens (issue #16, spec F12).
+ *
+ * Deliberately *not* a `secret` row: a Secret is encrypted so it can be decrypted and handed to
+ * something else, whereas nothing ever needs a token's plaintext back. Storing it reversibly
+ * would create a recoverable credential for no purpose, so this table keeps only a one-way
+ * `tokenHash` — a lost token is reissued, never looked up (Principle IV).
+ *
+ * SHA-256 rather than a password KDF on purpose: the value is 256 bits of `randomBytes`, not a
+ * user-chosen password, so it has no dictionary to attack and a slow KDF would only add latency
+ * to every MCP call.
+ */
+export const mcpToken = sqliteTable(
+  "mcp_token",
+  {
+    id: id(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspace.id),
+    label: text("label").notNull(),
+    scope: text("scope").$type<McpScope>().notNull().default("read"),
+    /** SHA-256 of the token value, hex. The value itself is never stored. */
+    tokenHash: text("token_hash").notNull(),
+    /** First characters of the value, in the clear, so the UI can tell two tokens apart. */
+    prefix: text("prefix").notNull(),
+    lastUsedAt: text("last_used_at"),
+    /** Set on revoke; the row is kept so a revoked token stays auditable (AC-5). */
+    revokedAt: text("revoked_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => ({
+    byWs: index("mcp_token_ws").on(t.workspaceId),
+    /**
+     * Lookup key on every MCP request, and unique because the hash *is* the identity: a
+     * collision would mean one presented value authenticating as two tokens.
+     */
+    byHash: uniqueIndex("mcp_token_hash").on(t.tokenHash),
+  }),
+);
+
+/**
  * The domain tables. BetterAuth's tables live in `auth-schema.ts` and are joined onto this in
  * `tables.ts` — kept in separate files because drizzle-kit reads each schema file standalone.
  */
@@ -515,4 +557,5 @@ export const schema = {
   sessionUsage,
   review,
   secret,
+  mcpToken,
 };

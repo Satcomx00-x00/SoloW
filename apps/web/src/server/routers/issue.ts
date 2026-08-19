@@ -9,12 +9,29 @@ import { ownerProcedure, router, unwrap } from "../trpc.js";
  */
 export const issueRouter = router({
   list: ownerProcedure
-    .meta({ openapi: { method: "GET", path: "/issue.list", tags: ["issue"], protect: true } })
+    .meta({
+      openapi: {
+        method: "GET",
+        path: "/issue.list",
+        tags: ["issue"],
+        protect: true,
+        summary:
+          "List Issues in the Workspace, newest first. Issues are imported from a connected GitHub/GitLab repository — there is no way to create one directly.",
+      },
+    })
     .input(listIssuesInput)
     .output(issueListDto)
     .query(async ({ ctx, input }) => unwrap(await listIssues(ctx.rctx, input))),
   get: ownerProcedure
-    .meta({ openapi: { method: "GET", path: "/issue.get", tags: ["issue"], protect: true } })
+    .meta({
+      openapi: {
+        method: "GET",
+        path: "/issue.get",
+        tags: ["issue"],
+        protect: true,
+        summary: "Fetch one Issue by id, including how many Tasks sit under it.",
+      },
+    })
     .input(getIssueInput)
     .output(issueDto)
     .query(async ({ ctx, input }) => unwrap(await getIssueById(ctx.rctx, input.id))),

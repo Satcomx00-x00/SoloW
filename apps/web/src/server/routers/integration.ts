@@ -32,6 +32,8 @@ export const integrationRouter = router({
         path: "/integration.connect",
         tags: ["integration"],
         protect: true,
+        summary:
+          "Connect a GitHub or GitLab account using a stored Personal Access Token Secret. The token is verified against the provider before the Integration is recorded.",
       },
     })
     .input(connectIntegrationInput)
@@ -39,7 +41,13 @@ export const integrationRouter = router({
     .mutation(async ({ ctx, input }) => unwrap(await connectIntegration(ctx.rctx, input))),
   list: integrationsProcedure
     .meta({
-      openapi: { method: "GET", path: "/integration.list", tags: ["integration"], protect: true },
+      openapi: {
+        method: "GET",
+        path: "/integration.list",
+        tags: ["integration"],
+        protect: true,
+        summary: "List connected GitHub/GitLab Integrations.",
+      },
     })
     .input(z.object({}))
     .output(z.array(integrationDto))
@@ -51,6 +59,8 @@ export const integrationRouter = router({
         path: "/integration.linkRepository",
         tags: ["integration"],
         protect: true,
+        summary:
+          "Bind a connected Repository to a specific owner/repo (GitHub) or namespace/project (GitLab) on an Integration.",
       },
     })
     .input(linkRepositoryInput)
@@ -63,6 +73,8 @@ export const integrationRouter = router({
         path: "/integration.listExternalIssues",
         tags: ["integration"],
         protect: true,
+        summary:
+          "Preview the issues on a linked Repository's provider, flagging which have already been imported.",
       },
     })
     .input(listExternalIssuesInput)
@@ -75,6 +87,8 @@ export const integrationRouter = router({
         path: "/integration.importIssues",
         tags: ["integration"],
         protect: true,
+        summary:
+          "Import selected external issues as GateControl Issues. Idempotent per Repository — re-importing the same ids is a visible no-op, not a duplicate.",
       },
     })
     .input(importIssuesInput)
@@ -87,6 +101,8 @@ export const integrationRouter = router({
         path: "/integration.syncRepositorySignals",
         tags: ["integration"],
         protect: true,
+        summary:
+          "Refresh a linked Repository's change requests (pull/merge requests) and branches from its provider. On-demand pull; GateControl never creates or modifies anything on the provider here.",
       },
     })
     .input(syncRepositorySignalsInput)

@@ -33,7 +33,16 @@ import { ownerProcedure, rateLimit, router, unwrap } from "../trpc.js";
 
 export const taskRouter = router({
   create: ownerProcedure
-    .meta({ openapi: { method: "POST", path: "/task.create", tags: ["task"], protect: true } })
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/task.create",
+        tags: ["task"],
+        protect: true,
+        summary:
+          "Create a Task under an Issue, binding an Agent Profile, an Executor Profile, and a Repository. Creates it in the backlog; it does not start an agent — use task.launch for that.",
+      },
+    })
     .input(createTaskInput)
     .output(taskDto)
     .mutation(async ({ ctx, input }) => {
@@ -49,19 +58,44 @@ export const taskRouter = router({
     }),
 
   list: ownerProcedure
-    .meta({ openapi: { method: "GET", path: "/task.list", tags: ["task"], protect: true } })
+    .meta({
+      openapi: {
+        method: "GET",
+        path: "/task.list",
+        tags: ["task"],
+        protect: true,
+        summary: "List Tasks on the board, optionally filtered by Issue or lifecycle state.",
+      },
+    })
     .input(listTasksInput)
     .output(taskListDto)
     .query(async ({ ctx, input }) => unwrap(await listTasks(ctx.rctx, input))),
 
   get: ownerProcedure
-    .meta({ openapi: { method: "GET", path: "/task.get", tags: ["task"], protect: true } })
+    .meta({
+      openapi: {
+        method: "GET",
+        path: "/task.get",
+        tags: ["task"],
+        protect: true,
+        summary: "Fetch one Task by id, including its current state and result branch.",
+      },
+    })
     .input(getTaskInput)
     .output(taskDto)
     .query(async ({ ctx, input }) => unwrap(await getTaskById(ctx.rctx, input.id))),
 
   launch: ownerProcedure
-    .meta({ openapi: { method: "POST", path: "/task.launch", tags: ["task"], protect: true } })
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/task.launch",
+        tags: ["task"],
+        protect: true,
+        summary:
+          "Start an agent on a ready Task in its own isolated worktree. Rate limited, and refused if the Agent Profile is already at its concurrency cap. The run ends at a human review gate — it never merges on its own.",
+      },
+    })
     .use(rateLimit("task.launch"))
     .input(launchTaskInput)
     .output(taskDto)
@@ -91,7 +125,16 @@ export const taskRouter = router({
     }),
 
   move: ownerProcedure
-    .meta({ openapi: { method: "POST", path: "/task.move", tags: ["task"], protect: true } })
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/task.move",
+        tags: ["task"],
+        protect: true,
+        summary:
+          "Move a Task to another lifecycle state. Illegal transitions are refused by the state machine rather than applied.",
+      },
+    })
     .input(moveTaskInput)
     .output(taskDto)
     .mutation(async ({ ctx, input }) => {
@@ -101,7 +144,16 @@ export const taskRouter = router({
     }),
 
   retry: ownerProcedure
-    .meta({ openapi: { method: "POST", path: "/task.retry", tags: ["task"], protect: true } })
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/task.retry",
+        tags: ["task"],
+        protect: true,
+        summary:
+          "Re-run a failed or parked Task in a fresh Session, clearing the previous failure reason.",
+      },
+    })
     .input(retryTaskInput)
     .output(taskDto)
     .mutation(async ({ ctx, input }) => {

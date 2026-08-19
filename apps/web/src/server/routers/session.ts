@@ -49,7 +49,13 @@ export const sessionRouter = router({
   /** All Sessions for a Task, newest first. */
   listForTask: ownerProcedure
     .meta({
-      openapi: { method: "GET", path: "/session.listForTask", tags: ["session"], protect: true },
+      openapi: {
+        method: "GET",
+        path: "/session.listForTask",
+        tags: ["session"],
+        protect: true,
+        summary: "List every agent Session recorded for a Task, newest first.",
+      },
     })
     .input(getTaskSessionsInput)
     .output(z.array(sessionDto))
@@ -62,7 +68,16 @@ export const sessionRouter = router({
 
   /** One Session with its full event log and any recorded review decision. */
   get: ownerProcedure
-    .meta({ openapi: { method: "GET", path: "/session.get", tags: ["session"], protect: true } })
+    .meta({
+      openapi: {
+        method: "GET",
+        path: "/session.get",
+        tags: ["session"],
+        protect: true,
+        summary:
+          "Fetch one Session with its full replayable event log, the diff captured at the review gate, and any recorded decision.",
+      },
+    })
     .input(getSessionInput)
     .output(sessionDetailDto)
     .query(async ({ ctx, input }) => {

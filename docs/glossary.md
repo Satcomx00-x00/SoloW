@@ -110,6 +110,16 @@ docs when they refer to these specific concepts.
 - **tRPC** — The typed request/response protocol the SPA uses for queries and mutations
   against the backend HTTP API.
 
+- **MCP (Model Context Protocol)** — The open protocol GateControl speaks at `/api/mcp` so
+  outside agents and scripts can drive it (issue #16). The tools it offers are *derived* from
+  the tRPC procedures rather than defined separately, so the API and the tool list cannot
+  disagree.
+
+- **MCP Token** — A scoped, revocable credential authorising an external MCP client. It names
+  one Workspace and one scope (`read` or `read_write`), is stored hashed and shown exactly once,
+  and grants nothing by itself — every call it carries still passes the same authorisation
+  middleware as the SPA.
+
 - **`openapi.json`** — The generated OpenAPI document describing the backend HTTP API,
   exported from the tRPC routers and published as a build artifact for external consumers and
   tooling. Covers the HTTP API only, not the realtime channel.

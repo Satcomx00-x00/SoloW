@@ -67,6 +67,12 @@ export const integrationsProcedure = publicProcedure
   .use(requireFlag("ff-integrations"));
 
 /**
+ * Token administration for the external MCP server (issue #16) — its own kill switch, so turning
+ * off `ff-mcp` stops new tokens being minted as well as stopping the endpoint serving.
+ */
+export const mcpProcedure = publicProcedure.use(requireSession).use(requireFlag("ff-mcp"));
+
+/**
  * Per-Owner rate limit for a sensitive write. Returns a middleware to chain after
  * `ownerProcedure` (session already required), tripping `TOO_MANY_REQUESTS` past the window
  * limit (plan §12).

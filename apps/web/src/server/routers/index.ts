@@ -2,6 +2,7 @@ import "server-only";
 import { router } from "../trpc.js";
 import { integrationRouter } from "./integration.js";
 import { issueRouter } from "./issue.js";
+import { mcpTokenRouter } from "./mcp-token.js";
 import { profileRouter } from "./profile.js";
 import { repositoryRouter } from "./repository.js";
 import { reviewRouter } from "./review.js";
@@ -14,6 +15,7 @@ import { taskRouter } from "./task.js";
 export const appRouter = router({
   issue: issueRouter,
   integration: integrationRouter,
+  mcpToken: mcpTokenRouter,
   task: taskRouter,
   profile: profileRouter,
   repository: repositoryRouter,
