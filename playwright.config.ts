@@ -21,8 +21,13 @@ export default defineConfig({
   forbidOnly: !!process.env["CI"],
   retries: 0,
   reporter: process.env["CI"] ? [["github"], ["list"]] : [["list"]],
-  timeout: 60_000,
-  expect: { timeout: 15_000 },
+  // CI runners are markedly slower than a development machine: a single launch-to-review
+  // round trip measures ~45s there against a few seconds locally, and the @critical
+  // isolation spec performs two of them inside one test before it can assert anything.
+  // The budget is raised for CI only — no assertion is weakened, the suite is simply
+  // allowed the wall-clock the hardware needs.
+  timeout: process.env["CI"] ? 180_000 : 60_000,
+  expect: { timeout: process.env["CI"] ? 30_000 : 15_000 },
   use: {
     baseURL: `http://127.0.0.1:${PORTS.web}`,
     trace: "retain-on-failure",
