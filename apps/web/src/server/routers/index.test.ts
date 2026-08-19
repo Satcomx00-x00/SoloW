@@ -2,7 +2,7 @@
 
 import { beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { verifyStreamTicket } from "@gatecontrol/core/stream";
-import { workspace } from "@gatecontrol/db";
+import { ensureDefaultAgentCatalog, workspace } from "@gatecontrol/db";
 import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
 import { RATE_LIMITS, resetRateLimits } from "../rate-limit.js";
 import type { BaseContext } from "../trpc.js";
@@ -54,12 +54,14 @@ async function errCode(fn: () => Promise<unknown>): Promise<string> {
   }
 }
 
-/** Full fixture chain for a task: secret → agent/executor profile → repo → issue. */
+/** Full fixture chain for a task: secret → agent catalog → agent/executor profile → repo → issue. */
 async function taskFixtures(db: TestDb, wsId: string) {
   const c = caller(db, wsId);
+  const agentCatalogId = await ensureDefaultAgentCatalog(db, wsId);
   const secret = await c.secret.set({ name: "sub", kind: "subscription_token", value: "tok" });
   const agent = await c.profile.agent.create({
     name: "Claude",
+    agentCatalogId,
     authMode: "subscription",
     secretId: secret.id,
     concurrencyCap: 3,

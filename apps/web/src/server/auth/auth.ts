@@ -1,6 +1,12 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { authSchema, createDb, type Db, workspace } from "@gatecontrol/db";
+import {
+  authSchema,
+  createDb,
+  type Db,
+  ensureDefaultAgentCatalog,
+  workspace,
+} from "@gatecontrol/db";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { count, eq } from "drizzle-orm";
@@ -65,14 +71,18 @@ export function createAuth(db: Db = createDb()) {
             }
           },
           after: async (user) => {
+            const workspaceId = randomUUID();
             await db.insert(workspace).values({
-              id: randomUUID(),
+              id: workspaceId,
               name: `${user.name || user.email}'s workspace`,
               ownerUserId: user.id,
               // Flags stay at their registry default (OFF) for a new Workspace — the core loop
               // is enabled deliberately, not by signing up (constitution: feature flags).
               enabledFlags: null,
             });
+            // Agent identity is a catalog row, not an enum (issue #10) — without this, a
+            // brand-new Workspace could not create even the one agent GateControl ships.
+            await ensureDefaultAgentCatalog(db, workspaceId);
           },
         },
       },

@@ -1,3 +1,4 @@
+import { ensureDefaultAgentCatalog } from "./agent-catalog-defaults.js";
 import type { Db } from "./index.js";
 import {
   agentProfile,
@@ -71,7 +72,7 @@ export async function seed(db: Db): Promise<SeedResult> {
       id: A.agent,
       workspaceId: WS_A,
       name: "Claude Code (subscription)",
-      agentKind: "claude_code",
+      agentCatalogId: await ensureDefaultAgentCatalog(db, WS_A),
       authMode: "subscription",
       secretId: A.secret,
       concurrencyCap: 3,
@@ -137,7 +138,7 @@ export async function seed(db: Db): Promise<SeedResult> {
       id: B.agent,
       workspaceId: WS_B,
       name: "Claude Code (API key)",
-      agentKind: "claude_code",
+      agentCatalogId: await ensureDefaultAgentCatalog(db, WS_B),
       authMode: "api_key",
       secretId: B.secret,
       concurrencyCap: 5,

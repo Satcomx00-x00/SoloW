@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BillingErrorCode } from "@gatecontrol/contracts";
 import {
+  agentCatalog,
   agentProfile,
   encryptSecret,
   executorProfile,
@@ -77,11 +78,26 @@ async function main(): Promise<void> {
       .returning();
     assert(sec, "secret insert returned a row");
 
+    const [cat] = await db
+      .insert(agentCatalog)
+      .values({
+        workspaceId,
+        key: "claude_code",
+        displayName: "Claude Code",
+        protocol: "claude_code_stream_json",
+        command: "claude",
+        subscriptionEnvVar: "CLAUDE_CODE_OAUTH_TOKEN",
+        meteredEnvVar: "ANTHROPIC_API_KEY",
+      })
+      .returning();
+    assert(cat, "agentCatalog insert returned a row");
+
     const [ap] = await db
       .insert(agentProfile)
       .values({
         workspaceId,
         name: "Claude (API key)",
+        agentCatalogId: cat.id,
         authMode: "api_key",
         secretId: sec.id,
         concurrencyCap: 3,
@@ -146,6 +162,8 @@ async function main(): Promise<void> {
       authMode: ctx.agentProfile.authMode,
       secretCiphertext: ctx.secretCiphertext,
       baseEnv: process.env,
+      subscriptionEnvVar: ctx.agentCatalog.subscriptionEnvVar,
+      meteredEnvVar: ctx.agentCatalog.meteredEnvVar,
     });
     assert(envResult.ok, "prepareAgentEnv returned ok");
     assert(

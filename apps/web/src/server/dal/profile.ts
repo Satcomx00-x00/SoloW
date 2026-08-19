@@ -1,5 +1,6 @@
 import "server-only";
 import {
+  type AgentCatalogEntryDto,
   type AgentProfileDto,
   CommonErrorCode,
   type CreateAgentProfileInput,
@@ -9,20 +10,43 @@ import {
   ok,
   type Result,
 } from "@gatecontrol/contracts";
-import { agentProfile, executorProfile } from "@gatecontrol/db";
+import { agentCatalog, agentProfile, executorProfile } from "@gatecontrol/db";
 import { and, desc, eq } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
+
+export async function listAgentCatalog(
+  ctx: RequestContext,
+): Promise<Result<AgentCatalogEntryDto[]>> {
+  const rows = await ctx.db
+    .select()
+    .from(agentCatalog)
+    .where(eq(agentCatalog.workspaceId, ctx.workspaceId))
+    .orderBy(desc(agentCatalog.createdAt));
+  return ok(rows);
+}
 
 export async function createAgentProfile(
   ctx: RequestContext,
   input: CreateAgentProfileInput,
 ): Promise<Result<AgentProfileDto>> {
+  // The FK alone only proves the catalog row exists *somewhere* — without this check, an
+  // Agent Profile could point at another Workspace's catalog entry and inherit its launch
+  // command and billing variable names (Principle V).
+  const [entry] = await ctx.db
+    .select({ id: agentCatalog.id })
+    .from(agentCatalog)
+    .where(
+      and(eq(agentCatalog.workspaceId, ctx.workspaceId), eq(agentCatalog.id, input.agentCatalogId)),
+    )
+    .limit(1);
+  if (!entry) return err(CommonErrorCode.ValidationFailed);
+
   const [row] = await ctx.db
     .insert(agentProfile)
     .values({
       workspaceId: ctx.workspaceId,
       name: input.name,
-      agentKind: input.agentKind,
+      agentCatalogId: input.agentCatalogId,
       authMode: input.authMode,
       secretId: input.secretId,
       concurrencyCap: input.concurrencyCap,

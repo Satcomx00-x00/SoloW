@@ -163,7 +163,6 @@ function deps(): TaskRunDeps {
     // The same process-wide registry the WebSocket hub looks in, so a frame the SPA sends
     // reaches this run's agent exactly as it would in a deployment.
     registry: agentRegistry,
-    agentInvocation: () => ({ command: "fixture-agent", args: [] }),
   };
 }
 

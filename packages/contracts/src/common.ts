@@ -51,9 +51,10 @@ export type RepositorySource = z.infer<typeof repositorySourceSchema>;
 export const executorKindSchema = z.enum(["local"]);
 export type ExecutorKind = z.infer<typeof executorKindSchema>;
 
-/** Agent kinds — v1 supports Claude Code only, driven via ACP. */
-export const agentKindSchema = z.enum(["claude_code"]);
-export type AgentKind = z.infer<typeof agentKindSchema>;
+/**
+ * Agent identity lives in `agent-catalog.ts` (issue #10) as a data row rather than an enum here
+ * — the whole point of that change was that adding an agent stops being a schema edit.
+ */
 
 /**
  * Result envelope. Business logic returns this instead of throwing

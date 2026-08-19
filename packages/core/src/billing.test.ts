@@ -7,12 +7,21 @@ import {
   withinConcurrencyCap,
 } from "./billing.js";
 
+// Claude Code's own variable names, used throughout as a stand-in for "whatever the running
+// Agent's catalog row declares" (issue #10) — the point under test is that the guard uses the
+// parameters, not that it happens to know Claude Code's names.
+const CLAUDE_CODE_VARS = {
+  subscriptionEnvVar: "CLAUDE_CODE_OAUTH_TOKEN",
+  meteredEnvVar: "ANTHROPIC_API_KEY",
+};
+
 describe("resolveAgentRunEnv — billing integrity (Principle IV)", () => {
-  it("subscription mode injects the OAuth token and STRIPS ANTHROPIC_API_KEY", () => {
+  it("subscription mode injects the subscription variable and STRIPS the metered one", () => {
     const r = resolveAgentRunEnv({
       authMode: "subscription",
       credentialValue: "sk-ant-oat01-abc",
       baseEnv: { ANTHROPIC_API_KEY: "sk-should-be-removed", PATH: "/usr/bin" },
+      ...CLAUDE_CODE_VARS,
     });
     expect(r.ok).toBe(true);
     if (r.ok) {
@@ -22,11 +31,12 @@ describe("resolveAgentRunEnv — billing integrity (Principle IV)", () => {
     }
   });
 
-  it("api_key mode injects the key and drops any stale OAuth token", () => {
+  it("api_key mode injects the metered variable and drops any stale subscription one", () => {
     const r = resolveAgentRunEnv({
       authMode: "api_key",
       credentialValue: "sk-ant-key",
       baseEnv: { CLAUDE_CODE_OAUTH_TOKEN: "stale" },
+      ...CLAUDE_CODE_VARS,
     });
     expect(r.ok).toBe(true);
     if (r.ok) {
@@ -35,11 +45,29 @@ describe("resolveAgentRunEnv — billing integrity (Principle IV)", () => {
     }
   });
 
+  it("uses whichever variable names the running Agent's catalog row declares", () => {
+    // A hypothetical second agent with entirely different variable names — proves the guard is
+    // driven by its parameters and not still secretly hardcoded to Claude Code's.
+    const r = resolveAgentRunEnv({
+      authMode: "subscription",
+      credentialValue: "tok-123",
+      baseEnv: { OTHER_AGENT_API_KEY: "should-be-stripped" },
+      subscriptionEnvVar: "OTHER_AGENT_OAUTH_TOKEN",
+      meteredEnvVar: "OTHER_AGENT_API_KEY",
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.data["OTHER_AGENT_OAUTH_TOKEN"]).toBe("tok-123");
+      expect(r.data).not.toHaveProperty("OTHER_AGENT_API_KEY");
+    }
+  });
+
   it("errors when the credential is missing", () => {
     const r = resolveAgentRunEnv({
       authMode: "subscription",
       credentialValue: null,
       baseEnv: {},
+      ...CLAUDE_CODE_VARS,
     });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toBe(BillingErrorCode.MissingCredential);
