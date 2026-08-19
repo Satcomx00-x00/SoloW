@@ -58,7 +58,10 @@ const STEERABLE = "[steerable]";
  */
 class FixtureAgentRunner implements AgentRunner {
   start(opts: AgentStartOpts): AgentHandle {
-    const worktree = join(PATHS.worktrees, opts.worktreeName);
+    // First round: create the worktree, as `claude --worktree <name>` does. Later rounds are
+    // already running inside it, so `cwd` is the worktree and there is nothing to create.
+    const creating = opts.worktreeName;
+    const worktree = creating ? join(PATHS.worktrees, creating) : opts.cwd;
 
     let resolveWorkspace: (path: string | null) => void = () => {};
     const workspacePath = new Promise<string | null>((resolve) => {
@@ -71,8 +74,10 @@ class FixtureAgentRunner implements AgentRunner {
     });
 
     void (async () => {
-      // The agent creates its own worktree, exactly as `claude --worktree <name>` would.
-      await $`git -C ${opts.cwd} worktree add -b ${opts.worktreeName} ${worktree}`.quiet();
+      if (creating) {
+        // The agent creates its own worktree, exactly as `claude --worktree <name>` would.
+        await $`git -C ${opts.cwd} worktree add -b ${creating} ${worktree}`.quiet();
+      }
       resolveWorkspace(worktree);
 
       const label = basename(worktree);

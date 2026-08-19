@@ -72,7 +72,7 @@ export class FakeAgentRunner implements AgentRunner {
   /** Operator input that reached the agent. */
   readonly inputs: string[] = [];
   /** Worktree names the lifecycle asked for. */
-  readonly worktreeNames: string[] = [];
+  readonly worktreeNames: Array<string | null> = [];
   stopped = false;
 
   constructor(
