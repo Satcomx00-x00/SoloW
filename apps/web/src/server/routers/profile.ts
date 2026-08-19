@@ -5,6 +5,7 @@ import {
   createAgentProfileInput,
   createExecutorProfileInput,
   executorProfileDto,
+  updateExecutorProfileInput,
 } from "@gatecontrol/contracts";
 import { z } from "zod";
 import {
@@ -13,6 +14,7 @@ import {
   listAgentCatalog,
   listAgentProfiles,
   listExecutorProfiles,
+  updateExecutorProfile,
 } from "../dal/profile.js";
 import { ownerProcedure, router, unwrap } from "../trpc.js";
 
@@ -66,6 +68,18 @@ export const profileRouter = router({
       .input(createExecutorProfileInput)
       .output(executorProfileDto)
       .mutation(async ({ ctx, input }) => unwrap(await createExecutorProfile(ctx.rctx, input))),
+    update: ownerProcedure
+      .meta({
+        openapi: {
+          method: "POST",
+          path: "/profile.executor.update",
+          tags: ["profile"],
+          protect: true,
+        },
+      })
+      .input(updateExecutorProfileInput)
+      .output(executorProfileDto)
+      .mutation(async ({ ctx, input }) => unwrap(await updateExecutorProfile(ctx.rctx, input))),
     list: ownerProcedure
       .meta({
         openapi: {

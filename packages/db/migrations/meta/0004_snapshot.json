@@ -1,9 +1,144 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "d3ca5d18-b277-43ca-a0f6-d13b3228b3ba",
-  "prevId": "436bc7a4-4368-4cc7-89a1-e941fb644560",
+  "id": "984ce9a7-f3fd-4e77-a6df-ec0b05737295",
+  "prevId": "d3ca5d18-b277-43ca-a0f6-d13b3228b3ba",
   "tables": {
+    "agent_catalog": {
+      "name": "agent_catalog",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "workspace_id": {
+          "name": "workspace_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "display_name": {
+          "name": "display_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "protocol": {
+          "name": "protocol",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "command": {
+          "name": "command",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "args_template": {
+          "name": "args_template",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'[]'"
+        },
+        "install_hint": {
+          "name": "install_hint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "subscription_env_var": {
+          "name": "subscription_env_var",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "metered_env_var": {
+          "name": "metered_env_var",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "capabilities": {
+          "name": "capabilities",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'{\"models\":[],\"modes\":[]}'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ','now'))"
+        }
+      },
+      "indexes": {
+        "agent_catalog_ws": {
+          "name": "agent_catalog_ws",
+          "columns": [
+            "workspace_id"
+          ],
+          "isUnique": false
+        },
+        "agent_catalog_ws_key": {
+          "name": "agent_catalog_ws_key",
+          "columns": [
+            "workspace_id",
+            "key"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "agent_catalog_workspace_id_workspace_id_fk": {
+          "name": "agent_catalog_workspace_id_workspace_id_fk",
+          "tableFrom": "agent_catalog",
+          "tableTo": "workspace",
+          "columnsFrom": [
+            "workspace_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "agent_profile": {
       "name": "agent_profile",
       "columns": {
@@ -28,13 +163,12 @@
           "notNull": true,
           "autoincrement": false
         },
-        "agent_kind": {
-          "name": "agent_kind",
+        "agent_catalog_id": {
+          "name": "agent_catalog_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false,
-          "default": "'claude_code'"
+          "autoincrement": false
         },
         "auth_mode": {
           "name": "auth_mode",
@@ -91,6 +225,19 @@
           "tableTo": "workspace",
           "columnsFrom": [
             "workspace_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "agent_profile_agent_catalog_id_agent_catalog_id_fk": {
+          "name": "agent_profile_agent_catalog_id_agent_catalog_id_fk",
+          "tableFrom": "agent_profile",
+          "tableTo": "agent_catalog",
+          "columnsFrom": [
+            "agent_catalog_id"
           ],
           "columnsTo": [
             "id"

@@ -1883,12 +1883,193 @@
                     "minLength": 1,
                     "maxLength": 120
                   },
-                  "kind": {
-                    "type": "string",
-                    "enum": [
-                      "local"
+                  "config": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "local"
+                            ]
+                          },
+                          "prepareScript": {
+                            "type": "string",
+                            "maxLength": 20000
+                          },
+                          "env": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "string"
+                            },
+                            "default": {}
+                          }
+                        },
+                        "required": [
+                          "kind"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "docker"
+                            ]
+                          },
+                          "image": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "mounts": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "source": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "target": {
+                                  "type": "string",
+                                  "pattern": "^/"
+                                },
+                                "readOnly": {
+                                  "type": "boolean",
+                                  "default": false
+                                }
+                              },
+                              "required": [
+                                "source",
+                                "target"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "maxItems": 32,
+                            "default": []
+                          },
+                          "network": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "prepareScript": {
+                            "type": "string",
+                            "maxLength": 20000
+                          },
+                          "env": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "string"
+                            },
+                            "default": {}
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "image"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "ssh"
+                            ]
+                          },
+                          "host": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "port": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 65535,
+                            "default": 22
+                          },
+                          "user": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "keySecretId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "prepareScript": {
+                            "type": "string",
+                            "maxLength": 20000
+                          },
+                          "env": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "string"
+                            },
+                            "default": {}
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "host",
+                          "user",
+                          "keySecretId"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "cloud"
+                            ]
+                          },
+                          "provider": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "region": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "size": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "credentialSecretId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "prepareScript": {
+                            "type": "string",
+                            "maxLength": 20000
+                          },
+                          "env": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "string"
+                            },
+                            "default": {}
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "provider",
+                          "size",
+                          "credentialSecretId"
+                        ],
+                        "additionalProperties": false
+                      }
                     ],
-                    "default": "local"
+                    "default": {
+                      "kind": "local",
+                      "env": {}
+                    }
                   }
                 },
                 "required": [
@@ -1916,7 +2097,201 @@
                     "kind": {
                       "type": "string",
                       "enum": [
-                        "local"
+                        "local",
+                        "docker",
+                        "ssh",
+                        "cloud"
+                      ]
+                    },
+                    "config": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "local"
+                              ]
+                            },
+                            "prepareScript": {
+                              "type": "string",
+                              "maxLength": 20000
+                            },
+                            "env": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "string"
+                              },
+                              "default": {}
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "env"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "docker"
+                              ]
+                            },
+                            "image": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "mounts": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "source": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "target": {
+                                    "type": "string",
+                                    "pattern": "^/"
+                                  },
+                                  "readOnly": {
+                                    "type": "boolean",
+                                    "default": false
+                                  }
+                                },
+                                "required": [
+                                  "source",
+                                  "target",
+                                  "readOnly"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "maxItems": 32,
+                              "default": []
+                            },
+                            "network": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "prepareScript": {
+                              "type": "string",
+                              "maxLength": 20000
+                            },
+                            "env": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "string"
+                              },
+                              "default": {}
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "image",
+                            "mounts",
+                            "env"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "ssh"
+                              ]
+                            },
+                            "host": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "port": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 65535,
+                              "default": 22
+                            },
+                            "user": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "keySecretId": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "prepareScript": {
+                              "type": "string",
+                              "maxLength": 20000
+                            },
+                            "env": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "string"
+                              },
+                              "default": {}
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "host",
+                            "port",
+                            "user",
+                            "keySecretId",
+                            "env"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "cloud"
+                              ]
+                            },
+                            "provider": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "region": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "size": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "credentialSecretId": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "prepareScript": {
+                              "type": "string",
+                              "maxLength": 20000
+                            },
+                            "env": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "string"
+                              },
+                              "default": {}
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "provider",
+                            "size",
+                            "credentialSecretId",
+                            "env"
+                          ],
+                          "additionalProperties": false
+                        }
                       ]
                     },
                     "createdAt": {
@@ -1932,6 +2307,505 @@
                     "id",
                     "name",
                     "kind",
+                    "config",
+                    "createdAt",
+                    "updatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/profile.executor.update": {
+      "post": {
+        "operationId": "profile-executor-update",
+        "tags": [
+          "profile"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "config": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "local"
+                            ]
+                          },
+                          "prepareScript": {
+                            "type": "string",
+                            "maxLength": 20000
+                          },
+                          "env": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "string"
+                            },
+                            "default": {}
+                          }
+                        },
+                        "required": [
+                          "kind"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "docker"
+                            ]
+                          },
+                          "image": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "mounts": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "source": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "target": {
+                                  "type": "string",
+                                  "pattern": "^/"
+                                },
+                                "readOnly": {
+                                  "type": "boolean",
+                                  "default": false
+                                }
+                              },
+                              "required": [
+                                "source",
+                                "target"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "maxItems": 32,
+                            "default": []
+                          },
+                          "network": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "prepareScript": {
+                            "type": "string",
+                            "maxLength": 20000
+                          },
+                          "env": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "string"
+                            },
+                            "default": {}
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "image"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "ssh"
+                            ]
+                          },
+                          "host": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "port": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 65535,
+                            "default": 22
+                          },
+                          "user": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "keySecretId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "prepareScript": {
+                            "type": "string",
+                            "maxLength": 20000
+                          },
+                          "env": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "string"
+                            },
+                            "default": {}
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "host",
+                          "user",
+                          "keySecretId"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "cloud"
+                            ]
+                          },
+                          "provider": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "region": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "size": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "credentialSecretId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "prepareScript": {
+                            "type": "string",
+                            "maxLength": 20000
+                          },
+                          "env": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "string"
+                            },
+                            "default": {}
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "provider",
+                          "size",
+                          "credentialSecretId"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "local",
+                        "docker",
+                        "ssh",
+                        "cloud"
+                      ]
+                    },
+                    "config": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "local"
+                              ]
+                            },
+                            "prepareScript": {
+                              "type": "string",
+                              "maxLength": 20000
+                            },
+                            "env": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "string"
+                              },
+                              "default": {}
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "env"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "docker"
+                              ]
+                            },
+                            "image": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "mounts": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "source": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "target": {
+                                    "type": "string",
+                                    "pattern": "^/"
+                                  },
+                                  "readOnly": {
+                                    "type": "boolean",
+                                    "default": false
+                                  }
+                                },
+                                "required": [
+                                  "source",
+                                  "target",
+                                  "readOnly"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "maxItems": 32,
+                              "default": []
+                            },
+                            "network": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "prepareScript": {
+                              "type": "string",
+                              "maxLength": 20000
+                            },
+                            "env": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "string"
+                              },
+                              "default": {}
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "image",
+                            "mounts",
+                            "env"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "ssh"
+                              ]
+                            },
+                            "host": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "port": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 65535,
+                              "default": 22
+                            },
+                            "user": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "keySecretId": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "prepareScript": {
+                              "type": "string",
+                              "maxLength": 20000
+                            },
+                            "env": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "string"
+                              },
+                              "default": {}
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "host",
+                            "port",
+                            "user",
+                            "keySecretId",
+                            "env"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "cloud"
+                              ]
+                            },
+                            "provider": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "region": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "size": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "credentialSecretId": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "prepareScript": {
+                              "type": "string",
+                              "maxLength": 20000
+                            },
+                            "env": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "string"
+                              },
+                              "default": {}
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "provider",
+                            "size",
+                            "credentialSecretId",
+                            "env"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "kind",
+                    "config",
                     "createdAt",
                     "updatedAt"
                   ]
@@ -2013,7 +2887,201 @@
                       "kind": {
                         "type": "string",
                         "enum": [
-                          "local"
+                          "local",
+                          "docker",
+                          "ssh",
+                          "cloud"
+                        ]
+                      },
+                      "config": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "local"
+                                ]
+                              },
+                              "prepareScript": {
+                                "type": "string",
+                                "maxLength": 20000
+                              },
+                              "env": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "type": "string"
+                                },
+                                "default": {}
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "env"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "docker"
+                                ]
+                              },
+                              "image": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "mounts": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "source": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "target": {
+                                      "type": "string",
+                                      "pattern": "^/"
+                                    },
+                                    "readOnly": {
+                                      "type": "boolean",
+                                      "default": false
+                                    }
+                                  },
+                                  "required": [
+                                    "source",
+                                    "target",
+                                    "readOnly"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "maxItems": 32,
+                                "default": []
+                              },
+                              "network": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "prepareScript": {
+                                "type": "string",
+                                "maxLength": 20000
+                              },
+                              "env": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "type": "string"
+                                },
+                                "default": {}
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "image",
+                              "mounts",
+                              "env"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "ssh"
+                                ]
+                              },
+                              "host": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "port": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 65535,
+                                "default": 22
+                              },
+                              "user": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "keySecretId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "prepareScript": {
+                                "type": "string",
+                                "maxLength": 20000
+                              },
+                              "env": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "type": "string"
+                                },
+                                "default": {}
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "host",
+                              "port",
+                              "user",
+                              "keySecretId",
+                              "env"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "cloud"
+                                ]
+                              },
+                              "provider": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "region": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "size": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "credentialSecretId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "prepareScript": {
+                                "type": "string",
+                                "maxLength": 20000
+                              },
+                              "env": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "type": "string"
+                                },
+                                "default": {}
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "provider",
+                              "size",
+                              "credentialSecretId",
+                              "env"
+                            ],
+                            "additionalProperties": false
+                          }
                         ]
                       },
                       "createdAt": {
@@ -2029,6 +3097,7 @@
                       "id",
                       "name",
                       "kind",
+                      "config",
                       "createdAt",
                       "updatedAt"
                     ]
@@ -2504,7 +3573,9 @@
                     "type": "string",
                     "enum": [
                       "subscription_token",
-                      "api_key"
+                      "api_key",
+                      "ssh_key",
+                      "cloud_credential"
                     ]
                   },
                   "value": {
@@ -2541,7 +3612,9 @@
                       "type": "string",
                       "enum": [
                         "subscription_token",
-                        "api_key"
+                        "api_key",
+                        "ssh_key",
+                        "cloud_credential"
                       ]
                     }
                   },
@@ -2629,7 +3702,9 @@
                         "type": "string",
                         "enum": [
                           "subscription_token",
-                          "api_key"
+                          "api_key",
+                          "ssh_key",
+                          "cloud_credential"
                         ]
                       }
                     },

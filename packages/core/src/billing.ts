@@ -1,4 +1,11 @@
-import { type AuthMode, BillingErrorCode, err, ok, type Result } from "@gatecontrol/contracts";
+import {
+  type AuthMode,
+  BillingErrorCode,
+  err,
+  isGuardedEnvVar,
+  ok,
+  type Result,
+} from "@gatecontrol/contracts";
 
 /**
  * Billing & credential shaping (constitution Principle IV — NON-NEGOTIABLE; spec F06).
@@ -26,17 +33,37 @@ export interface ResolveEnvParams {
   subscriptionEnvVar: string;
   /** From the running Agent's catalog row — the variable that must never carry a value. */
   meteredEnvVar: string;
+  /**
+   * Extra environment from the Task's Executor Profile (issue #73). Applied *over* the base
+   * environment and *under* the credential shaping below, so a profile can never set the
+   * credential variables or preserve one the guard means to strip — AC-6 holds by ordering
+   * rather than by review.
+   *
+   * The contract already refuses a profile that names a guarded variable, so a value reaching
+   * here would have to predate that check or bypass the API. It is dropped anyway: this is the
+   * last point at which billing integrity is still enforceable — and since the guarded names are
+   * catalog-driven (issue #10), not just the Claude Code pair the contract's static check knows
+   * about, this also strips `subscriptionEnvVar`/`meteredEnvVar` for whichever agent is actually
+   * running, not only the two names the contract layer recognises.
+   */
+  profileEnv?: Readonly<Record<string, string>>;
 }
 
 export function resolveAgentRunEnv(
   params: ResolveEnvParams,
 ): Result<Record<string, string>, typeof BillingErrorCode.MissingCredential> {
-  const { authMode, credentialValue, baseEnv, subscriptionEnvVar, meteredEnvVar } = params;
+  const { authMode, credentialValue, baseEnv, subscriptionEnvVar, meteredEnvVar, profileEnv } =
+    params;
   if (!credentialValue) return err(BillingErrorCode.MissingCredential);
 
   // Copy the base env, dropping undefined values.
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(baseEnv)) if (v !== undefined) env[k] = v;
+
+  for (const [k, v] of Object.entries(profileEnv ?? {})) {
+    if (isGuardedEnvVar(k) || k === subscriptionEnvVar || k === meteredEnvVar) continue;
+    env[k] = v;
+  }
 
   if (authMode === "subscription") {
     env[subscriptionEnvVar] = credentialValue;

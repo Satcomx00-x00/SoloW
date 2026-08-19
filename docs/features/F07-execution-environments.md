@@ -48,6 +48,50 @@ Two properties every implementation must hold:
 A second Executor kind (Container #46, Remote SSH #47, Cloud #48) is a new file implementing
 this interface — a driver, not a second copy of "how do I reach the place the agent runs".
 
+## Executor Profile configuration (issue #73)
+
+An Executor Profile answers *where* an agent runs; its `config` column answers *how*. The column
+holds one typed payload per kind, validated by a **discriminated union** in
+`packages/contracts/src/executor-config.ts`:
+
+```ts
+executorConfigSchema = z.discriminatedUnion("kind", [
+  { kind: "local",  prepareScript?, env },
+  { kind: "docker", image, mounts, network?, prepareScript?, env },
+  { kind: "ssh",    host, port, user, keySecretId, prepareScript?, env },
+  { kind: "cloud",  provider, region?, size, credentialSecretId, prepareScript?, env },
+])
+```
+
+**One table, N shapes.** The alternative — a column per kind, or a table per kind — makes every
+new runtime a migration plus a DAL change plus a form rewrite. Here a new runtime is a union
+member plus a driver, which is what makes the executor matrix (#96 Docker, #97 SSH, #107
+Kubernetes) additive rather than schema-breaking.
+
+Four properties hold, each enforced by something other than review:
+
+- **The kind lives inside the configuration.** `executor_profile.kind` is a denormalised copy the
+  DAL derives on write, kept only so the kind is queryable. A separate input field could disagree
+  with `config.kind`, and there would be no principled answer to which one a driver should
+  believe.
+- **Credentials are references, never values** (Principle IV). No member has a field for a key or
+  a token — only an id pointing at the encrypted `secret` table, and `secret.kind` gained
+  `ssh_key` and `cloud_credential` so those credentials have somewhere to live. Members are
+  `.strict()`, so a config carrying `privateKey` is *rejected* at the API boundary rather than
+  silently stripped and forgotten about.
+- **A profile's environment is for the runtime, not for the agent's credential.** The variables
+  the billing guard owns (`ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`) cannot be named in a
+  profile at all, and `resolveAgentRunEnv` applies profile variables *under* the credential
+  shaping — so even a row written outside the API cannot become a route to metered billing.
+- **A configurable kind is not a runnable one.** `apps/orchestrator/src/executor/drivers.ts`
+  lists the kinds a driver exists for, and the lifecycle fails a Task pointed at any other kind
+  before anything is cloned. Without that check a Task on a Docker profile would run on the
+  orchestrator's own host and report success — the user asked for isolation and would not have
+  got it.
+
+The settings form renders from the selected kind: a kind `Select`, then the fields that kind's
+schema declares, then the shared prepare script and environment repeater.
+
 ## Jobs served
 
 - **J7 — Offload heavy work.**

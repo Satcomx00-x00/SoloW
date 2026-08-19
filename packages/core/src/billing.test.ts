@@ -62,6 +62,67 @@ describe("resolveAgentRunEnv — billing integrity (Principle IV)", () => {
     }
   });
 
+  it("applies an Executor Profile's environment over the base environment (issue #73)", () => {
+    const r = resolveAgentRunEnv({
+      authMode: "subscription",
+      credentialValue: "sk-ant-oat01-abc",
+      baseEnv: { PATH: "/usr/bin", NODE_ENV: "development" },
+      profileEnv: { NODE_ENV: "production", GOPATH: "/go" },
+      ...CLAUDE_CODE_VARS,
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.data["NODE_ENV"]).toBe("production");
+      expect(r.data["GOPATH"]).toBe("/go");
+      expect(r.data["PATH"]).toBe("/usr/bin");
+    }
+  });
+
+  it("AC-6: a profile env cannot set the credential the guard owns", () => {
+    // The contract already refuses such a profile, so this is the second lock: a row written
+    // before that check existed, or by anything bypassing the API, still cannot divert billing.
+    const r = resolveAgentRunEnv({
+      authMode: "subscription",
+      credentialValue: "sk-ant-oat01-abc",
+      baseEnv: {},
+      profileEnv: { ANTHROPIC_API_KEY: "sk-metered-billing" },
+      ...CLAUDE_CODE_VARS,
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.data).not.toHaveProperty("ANTHROPIC_API_KEY");
+  });
+
+  it("AC-6: a profile env cannot replace the credential the guard just injected", () => {
+    const r = resolveAgentRunEnv({
+      authMode: "subscription",
+      credentialValue: "sk-ant-oat01-real",
+      baseEnv: {},
+      profileEnv: { CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-someone-elses" },
+      ...CLAUDE_CODE_VARS,
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.data["CLAUDE_CODE_OAUTH_TOKEN"]).toBe("sk-ant-oat01-real");
+  });
+
+  it("AC-6: a profile env cannot set the *running agent's* credential var, even if it's not Claude Code's", () => {
+    // The contract's static GUARDED_ENV_VARS check only knows Claude Code's two names. This
+    // proves the runtime guard also strips whichever names the actual running agent's catalog
+    // row declares, closing the gap for #10's catalog-driven agents.
+    const r = resolveAgentRunEnv({
+      authMode: "subscription",
+      credentialValue: "tok-123",
+      baseEnv: {},
+      profileEnv: { OTHER_AGENT_OAUTH_TOKEN: "sk-someone-elses", OTHER_AGENT_API_KEY: "leaked" },
+      subscriptionEnvVar: "OTHER_AGENT_OAUTH_TOKEN",
+      meteredEnvVar: "OTHER_AGENT_API_KEY",
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.data["OTHER_AGENT_OAUTH_TOKEN"]).toBe("tok-123");
+      expect(r.data).not.toHaveProperty("OTHER_AGENT_API_KEY");
+    }
+  });
+
   it("errors when the credential is missing", () => {
     const r = resolveAgentRunEnv({
       authMode: "subscription",

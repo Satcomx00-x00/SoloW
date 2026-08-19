@@ -3,6 +3,7 @@ import {
   agentCatalog,
   agentProfile,
   type Db,
+  executorProfile,
   issue,
   repository,
   secret,
@@ -26,6 +27,8 @@ export interface TaskRunContext {
   agentProfile: typeof agentProfile.$inferSelect;
   /** Which agent this Profile runs, and how — launch command and billing variables (#10). */
   agentCatalog: typeof agentCatalog.$inferSelect;
+  /** Where the agent runs, and the per-kind configuration it runs under (issue #73). */
+  executorProfile: typeof executorProfile.$inferSelect;
   repository: typeof repository.$inferSelect;
   secretCiphertext: string | null;
 }
@@ -63,6 +66,18 @@ export async function loadTaskRunContext(
     .limit(1);
   if (!cat) throw new Error(`agent catalog entry ${ap.agentCatalogId} not found`);
 
+  const [ep] = await db
+    .select()
+    .from(executorProfile)
+    .where(
+      and(
+        eq(executorProfile.workspaceId, workspaceId),
+        eq(executorProfile.id, t.executorProfileId),
+      ),
+    )
+    .limit(1);
+  if (!ep) throw new Error(`executor profile ${t.executorProfileId} not found`);
+
   const [repo] = await db
     .select()
     .from(repository)
@@ -81,6 +96,7 @@ export async function loadTaskRunContext(
     issue: iss,
     agentProfile: ap,
     agentCatalog: cat,
+    executorProfile: ep,
     repository: repo,
     secretCiphertext: sec?.ciphertext ?? null,
   };
