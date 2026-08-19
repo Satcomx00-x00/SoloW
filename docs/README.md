@@ -28,8 +28,10 @@ of information has one predictable home:
 - **New to the product?** Start with [Vision & Scope](./product/01-vision-and-scope.md),
   then the [Feature Index](./features/README.md).
 - **Evaluating against kandev?** See [Vision & Scope](./product/01-vision-and-scope.md)
-  (competitive positioning) and the feature status matrix in the
-  [Feature Index](./features/README.md).
+  (competitive positioning), the feature status matrix in the
+  [Feature Index](./features/README.md), and the row-by-row
+  [Feature Comparison vs. kandev](./product/06-kandev-feature-comparison.md) for what the
+  current build actually implements.
 - **Understanding the system shape?** Read the [Architecture overview](./architecture/README.md).
 - **Understanding a specific choice?** Browse the [Decision Log](./decisions/README.md).
 
