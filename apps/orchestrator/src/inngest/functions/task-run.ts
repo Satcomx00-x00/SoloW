@@ -18,6 +18,7 @@ import {
   appendSessionEvent,
   loadTaskRunContext,
   nextSessionEventSeq,
+  nextSessionUsageSeq,
   recordSessionUsage,
   setSessionState,
   setTaskState,
@@ -217,7 +218,9 @@ export async function runTaskLifecycle(
       let writes: Promise<unknown> = Promise.resolve();
       // Usage is recorded per turn as it is reported (issue #14) — the agent states it once,
       // in its own stream, and nothing else in the system can reconstruct it afterwards.
-      let usageTurns = 0;
+      // Continues across review rounds — see nextSessionUsageSeq. A counter restarting at 0
+      // each round would collide with the previous round's turns and lose them silently.
+      let usageTurns = await nextSessionUsageSeq(db, workspaceId, sessionId);
       const recordUsage = (u: {
         model: string | null;
         inputTokens: number;

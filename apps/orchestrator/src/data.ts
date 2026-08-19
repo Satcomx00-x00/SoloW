@@ -176,6 +176,29 @@ export async function recordSessionUsage(
     .onConflictDoNothing();
 }
 
+/**
+ * The next free usage `seq` for a Session.
+ *
+ * Read from the database rather than kept in a counter, for the same reason the event log
+ * does it: a Session spans review rounds, and each round re-enters the durable step with a
+ * fresh closure. A counter restarting at 0 would collide with the previous round's turns on
+ * the unique index, and `onConflictDoNothing` would discard the newer usage in silence —
+ * losing exactly the data this table exists to preserve.
+ */
+export async function nextSessionUsageSeq(
+  db: Db,
+  workspaceId: string,
+  sessionId: string,
+): Promise<number> {
+  const [row] = await db
+    .select({ seq: sessionUsage.seq })
+    .from(sessionUsage)
+    .where(and(eq(sessionUsage.workspaceId, workspaceId), eq(sessionUsage.sessionId, sessionId)))
+    .orderBy(desc(sessionUsage.seq))
+    .limit(1);
+  return row ? row.seq + 1 : 0;
+}
+
 /** Every usage row for a Session, oldest turn first. */
 export async function listSessionUsage(
   db: Db,

@@ -12,7 +12,13 @@ import {
 } from "@gatecontrol/db";
 import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
 import { and, eq } from "drizzle-orm";
-import { listSessionUsage, loadTaskRunContext, recordSessionUsage, setTaskState } from "./data.js";
+import {
+  listSessionUsage,
+  loadTaskRunContext,
+  nextSessionUsageSeq,
+  recordSessionUsage,
+  setTaskState,
+} from "./data.js";
 
 // The secret store reads GATECONTROL_SECRET_KEY lazily; set it before any encryptSecret call.
 beforeAll(() => {
@@ -265,5 +271,61 @@ describe("recordSessionUsage (issue #14)", () => {
     await recordSessionUsage(db, WS, turn());
 
     expect(await listSessionUsage(db, OTHER_WS, "sess-1")).toHaveLength(0);
+  });
+});
+
+describe("nextSessionUsageSeq — turn numbering survives a review round (issue #14)", () => {
+  async function seedSession(db: TestDb) {
+    await seed(db);
+    await db.insert(session).values({ id: "sess-1", workspaceId: WS, taskId: "task-1" });
+  }
+
+  const turn = (seq: number, inputTokens: number) => ({
+    sessionId: "sess-1",
+    taskId: "task-1",
+    agentProfileId: "ap-1",
+    seq,
+    model: "claude-sonnet-4-20250514",
+    inputTokens,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    reported: true,
+  });
+
+  it("starts at 0 for a fresh Session", async () => {
+    const db = createTestDb();
+    await seedSession(db);
+    expect(await nextSessionUsageSeq(db, WS, "sess-1")).toBe(0);
+  });
+
+  it("continues after the previous round rather than colliding with it", async () => {
+    const db = createTestDb();
+    await seedSession(db);
+
+    // Round 0: two turns, numbered from a fresh session.
+    let seq = await nextSessionUsageSeq(db, WS, "sess-1");
+    await recordSessionUsage(db, WS, turn(seq++, 10));
+    await recordSessionUsage(db, WS, turn(seq++, 20));
+
+    // Round 1 — a reviewer asked for changes. The durable step re-enters with a fresh
+    // closure; numbering must resume from the database, not restart at 0. A counter that
+    // restarted here would collide on the unique index and onConflictDoNothing would
+    // discard this round's usage in silence.
+    seq = await nextSessionUsageSeq(db, WS, "sess-1");
+    expect(seq).toBe(2);
+    await recordSessionUsage(db, WS, turn(seq++, 30));
+
+    const rows = await listSessionUsage(db, WS, "sess-1");
+    expect(rows.map((r) => r.inputTokens)).toEqual([10, 20, 30]);
+  });
+
+  it("counts each Session separately", async () => {
+    const db = createTestDb();
+    await seedSession(db);
+    await db.insert(session).values({ id: "sess-2", workspaceId: WS, taskId: "task-1" });
+
+    await recordSessionUsage(db, WS, turn(0, 10));
+    expect(await nextSessionUsageSeq(db, WS, "sess-2")).toBe(0);
   });
 });
