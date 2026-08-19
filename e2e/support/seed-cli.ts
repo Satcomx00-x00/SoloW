@@ -23,6 +23,7 @@ import {
   agentProfile,
   createDb,
   encryptSecret,
+  ensureDefaultAgentCatalog,
   executorProfile,
   issue,
   repository,
@@ -52,11 +53,13 @@ async function seedTask(workspaceId: string, title: string): Promise<void> {
     .returning();
   if (!sec) throw new Error("failed to seed secret");
 
+  const agentCatalogId = await ensureDefaultAgentCatalog(db, workspaceId);
   const [agent] = await db
     .insert(agentProfile)
     .values({
       workspaceId,
       name: `e2e-agent-${suffix}`,
+      agentCatalogId,
       authMode: "subscription",
       secretId: sec.id,
     })
