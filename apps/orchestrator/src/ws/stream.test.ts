@@ -16,7 +16,7 @@ import {
 } from "@gatecontrol/db";
 import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
 import { AgentRegistry } from "../agent/registry.js";
-import type { AgentHandle } from "../agent/runner.js";
+import type { AgentHandle, PermissionAnswer } from "../agent/runner.js";
 import { attachSubscriber, authorizeUpgrade, handleClientFrame } from "../index.js";
 import { hub } from "./hub.js";
 
@@ -333,5 +333,160 @@ describe("handleClientFrame (operator input and stop)", () => {
         error: "frame_malformed",
       });
     }
+  });
+});
+
+/**
+ * Answering a permission over the same socket that carries input and stop (issue #58, AC-4).
+ * The tenancy question is the same one the other two frames face, so it is asked the same way.
+ */
+describe("handleClientFrame (permission answers)", () => {
+  const claims = (over: Partial<{ workspaceId: string; taskId: string | null }> = {}) => ({
+    workspaceId: "ws-a",
+    taskId: "task-1" as string | null,
+    exp: NOW + 60_000,
+    ...over,
+  });
+
+  function permissionAgent(answer: PermissionAnswer = "answered") {
+    const answers: Array<{ requestId: string; optionId: string }> = [];
+    const handle: AgentHandle = {
+      outcome: Promise.resolve({ kind: "completed" as const }),
+      workspacePath: Promise.resolve<string | null>("/wt/gatecontrol-task-1"),
+      async send() {
+        return true;
+      },
+      async respondPermission(requestId: string, optionId: string) {
+        answers.push({ requestId, optionId });
+        return answer;
+      },
+      async stop() {},
+    };
+    return { handle, answers };
+  }
+
+  it("delivers the operator's choice to the agent of the Task the ticket authorized", async () => {
+    const registry = new AgentRegistry();
+    const { handle, answers } = permissionAgent();
+    registry.register("ws-a", { taskId: "task-1", sessionId: "sess-1", handle });
+
+    const result = await handleClientFrame(
+      { registry },
+      claims(),
+      JSON.stringify({
+        kind: "permission",
+        taskId: "task-1",
+        requestId: "req-1",
+        optionId: "allow",
+      }),
+    );
+
+    expect(result).toEqual({ ok: true, action: "permission" });
+    expect(answers).toEqual([{ requestId: "req-1", optionId: "allow" }]);
+  });
+
+  it("refuses to answer a permission for a Task the ticket does not cover (Principle V)", async () => {
+    const registry = new AgentRegistry();
+    const { handle, answers } = permissionAgent();
+    registry.register("ws-a", { taskId: "task-9", sessionId: "sess-9", handle });
+
+    const result = await handleClientFrame(
+      { registry },
+      claims(),
+      JSON.stringify({
+        kind: "permission",
+        taskId: "task-9",
+        requestId: "req-1",
+        optionId: "allow",
+      }),
+    );
+
+    expect(result).toEqual({ ok: false, error: "frame_not_authorized" });
+    expect(answers).toEqual([]);
+  });
+
+  it("tells the operator when their answer reached no running agent", async () => {
+    // A dialog left open across the end of a run must not look as though it were answered.
+    const result = await handleClientFrame(
+      { registry: new AgentRegistry() },
+      claims(),
+      JSON.stringify({
+        kind: "permission",
+        taskId: "task-1",
+        requestId: "req-1",
+        optionId: "allow",
+      }),
+    );
+    expect(result).toEqual({ ok: false, error: "agent_not_running" });
+  });
+
+  it("does not call a running agent absent just because its question was already settled", async () => {
+    // The operator's dialog sat open past the deadline and the policy answered for them. The
+    // agent is mid-turn, streaming into the terminal they are looking at; reporting it as gone
+    // is a statement they can see is false, and it hides the thing that actually happened.
+    const registry = new AgentRegistry();
+    const { handle } = permissionAgent("not_pending");
+    registry.register("ws-a", { taskId: "task-1", sessionId: "sess-1", handle });
+
+    const result = await handleClientFrame(
+      { registry },
+      claims(),
+      JSON.stringify({
+        kind: "permission",
+        taskId: "task-1",
+        requestId: "req-1",
+        optionId: "allow",
+      }),
+    );
+
+    expect(result).toEqual({ ok: false, error: "permission_not_pending" });
+  });
+
+  it("says so when the option clicked is not one the agent offered", async () => {
+    const registry = new AgentRegistry();
+    const { handle } = permissionAgent("option_not_offered");
+    registry.register("ws-a", { taskId: "task-1", sessionId: "sess-1", handle });
+
+    const result = await handleClientFrame(
+      { registry },
+      claims(),
+      JSON.stringify({
+        kind: "permission",
+        taskId: "task-1",
+        requestId: "req-1",
+        optionId: "sudo",
+      }),
+    );
+
+    expect(result).toEqual({ ok: false, error: "permission_option_unknown" });
+  });
+
+  it("says so when the agent's protocol has no permission channel at all", async () => {
+    const registry = new AgentRegistry();
+    registry.register("ws-a", {
+      taskId: "task-1",
+      sessionId: "sess-1",
+      handle: {
+        outcome: Promise.resolve({ kind: "completed" as const }),
+        workspacePath: Promise.resolve<string | null>("/wt/gatecontrol-task-1"),
+        async send() {
+          return true;
+        },
+        async stop() {},
+      },
+    });
+
+    const result = await handleClientFrame(
+      { registry },
+      claims(),
+      JSON.stringify({
+        kind: "permission",
+        taskId: "task-1",
+        requestId: "req-1",
+        optionId: "allow",
+      }),
+    );
+
+    expect(result).toEqual({ ok: false, error: "permission_unsupported" });
   });
 });

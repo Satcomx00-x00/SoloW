@@ -6,7 +6,11 @@ import {
   verifyStreamTicket,
 } from "@gatecontrol/core/stream";
 import { createDb, type Db } from "@gatecontrol/db";
-import { type AgentRegistry, agentRegistry } from "./agent/registry.js";
+import {
+  type AgentRegistry,
+  agentRegistry,
+  type PermissionAnswerResult,
+} from "./agent/registry.js";
 import { listTaskEventsSince } from "./data.js";
 import { orchestratorEnv } from "./env.js";
 import { inngest } from "./inngest/client.js";
@@ -119,7 +123,9 @@ export async function handleClientFrame(
   deps: Pick<WsServerDeps, "registry">,
   claims: StreamTicketClaims,
   raw: unknown,
-): Promise<{ ok: true; action: "input" | "stop" } | { ok: false; error: ClientFrameError }> {
+): Promise<
+  { ok: true; action: "input" | "stop" | "permission" } | { ok: false; error: ClientFrameError }
+> {
   const parsed = taskInputSchema.safeParse(safeJson(raw));
   if (!parsed.success) return { ok: false, error: "frame_malformed" };
   const frame = parsed.data;
@@ -132,11 +138,44 @@ export async function handleClientFrame(
     const stopped = await deps.registry.stop(claims.workspaceId, frame.taskId);
     return stopped ? { ok: true, action: "stop" } : { ok: false, error: "agent_not_running" };
   }
+  if (frame.kind === "permission") {
+    // The operator's answer to something the agent asked (issue #58, AC-4), routed the same way
+    // as input and stop and under the same tenant key: a client can only ever answer for the
+    // one agent its ticket authorized (Principle V).
+    const answered = await deps.registry.respondPermission(
+      claims.workspaceId,
+      frame.taskId,
+      frame.requestId,
+      frame.optionId,
+    );
+    if (answered === "answered") return { ok: true, action: "permission" };
+    // Four refusals, four things to say. An answer that arrived a moment after the deadline
+    // settled the request must not be reported as an agent that is no longer running — the
+    // agent is mid-turn, streaming into the terminal the operator is looking at.
+    return { ok: false, error: PERMISSION_FRAME_ERROR[answered] };
+  }
   const accepted = await deps.registry.send(claims.workspaceId, frame.taskId, frame.data);
   return accepted ? { ok: true, action: "input" } : { ok: false, error: "agent_not_running" };
 }
 
-export type ClientFrameError = "frame_malformed" | "frame_not_authorized" | "agent_not_running";
+export type ClientFrameError =
+  | "frame_malformed"
+  | "frame_not_authorized"
+  | "agent_not_running"
+  | "permission_not_pending"
+  | "permission_option_unknown"
+  | "permission_unsupported";
+
+/** Why a permission answer did not land, in the vocabulary the ack carries. */
+const PERMISSION_FRAME_ERROR: Record<
+  Exclude<PermissionAnswerResult, "answered">,
+  ClientFrameError
+> = {
+  no_agent: "agent_not_running",
+  no_permission_channel: "permission_unsupported",
+  not_pending: "permission_not_pending",
+  option_not_offered: "permission_option_unknown",
+};
 
 function safeJson(raw: unknown): unknown {
   const text = typeof raw === "string" ? raw : raw instanceof Uint8Array ? decodeUtf8(raw) : null;
@@ -164,6 +203,37 @@ function toTaskEvent(
   }
   if (kind === "diff") {
     return { kind: "diff", taskId, sessionId, diffRef: String(p["diffRef"] ?? "") };
+  }
+  if (kind === "permission_request") {
+    // Replayed as itself rather than degraded to a stdout line: a reconnecting operator has to
+    // still be able to answer the question, not merely read that it was asked.
+    return {
+      kind: "permission_request",
+      taskId,
+      sessionId,
+      seq,
+      requestId: String(p["requestId"] ?? ""),
+      title: String(p["title"] ?? ""),
+      toolKind: typeof p["toolKind"] === "string" ? p["toolKind"] : null,
+      options: Array.isArray(p["options"])
+        ? (p["options"] as Array<Record<string, unknown>>).map((o) => ({
+            optionId: String(o["optionId"] ?? ""),
+            name: String(o["name"] ?? ""),
+            kind: String(o["kind"] ?? ""),
+          }))
+        : [],
+    };
+  }
+  if (kind === "permission_resolved") {
+    return {
+      kind: "permission_resolved",
+      taskId,
+      sessionId,
+      seq,
+      requestId: String(p["requestId"] ?? ""),
+      optionId: typeof p["optionId"] === "string" ? p["optionId"] : null,
+      decidedBy: p["decidedBy"] === "operator" ? "operator" : "policy",
+    };
   }
   return { kind: "stdout", taskId, sessionId, seq, text: String(p["text"] ?? "") };
 }

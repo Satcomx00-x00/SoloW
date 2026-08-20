@@ -111,6 +111,23 @@ async function resolveRepoPath(executor: Executor, params: ProvisionParams): Pro
   return cachePath;
 }
 
+/**
+ * The Task's worktree, created if it is not already there (issue #58).
+ *
+ * Idempotent, because the branch name and the directory are both pure functions of the Task id
+ * and nothing ever deletes the branch: `cleanupWorktree` removes the directory and leaves
+ * `gatecontrol/task-<id>` behind. A second launch of the same Task — a relaunch after a review
+ * rejection, a `task.retry` after a failure, or an Inngest step retry inside one run
+ * (Principle III) — would otherwise meet `fatal: a branch named '…' already exists` and fail
+ * before the lifecycle could report anything.
+ *
+ * Existing work is reused rather than thrown away. If git already has this exact worktree on
+ * this exact branch, that is the Task's workspace and it is returned as-is; the retry then
+ * carries on from where the failed attempt stopped, the same way a review round does. Only when
+ * the directory is registered against some *other* branch is it replaced, because then it is not
+ * this Task's workspace at all. `-B` rather than `-b` covers the remaining case — the branch
+ * survived a cleanup and the directory did not — by pointing it back at the base ref.
+ */
 export async function provisionWorktree(
   executor: Executor,
   params: ProvisionParams,
@@ -119,8 +136,32 @@ export async function provisionWorktree(
   const branch = worktreeBranch(params.taskId);
   const path = worktreePath(params.worktreeRoot, params.taskId);
   const base = params.baseRef ?? "HEAD";
-  // Create a new branch for the Task, checked out into its own worktree.
-  await run(executor, ["git", "-C", repoPath, "worktree", "add", "-b", branch, path, base]);
+
+  // Best-effort: clears git's record of a worktree whose directory was deleted from underneath
+  // it, which would otherwise make `worktree add` refuse the path it no longer occupies.
+  await executor.exec(["git", "-C", repoPath, "worktree", "prune"]);
+
+  const existing = (await listWorktrees(executor, repoPath)).find((w) => samePath(w.path, path));
+  if (existing) {
+    if (existing.branch === branch) return { path, branch, repoPath };
+    await run(executor, ["git", "-C", repoPath, "worktree", "remove", "--force", path]);
+  }
+
+  // `--force` so a branch still checked out in a worktree that has since moved does not block
+  // the Task from getting its own; `-B` so a branch left behind by a cleanup is reset to the
+  // base ref rather than colliding with itself.
+  await run(executor, [
+    "git",
+    "-C",
+    repoPath,
+    "worktree",
+    "add",
+    "--force",
+    "-B",
+    branch,
+    path,
+    base,
+  ]);
   return { path, branch, repoPath };
 }
 

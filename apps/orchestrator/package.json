@@ -13,6 +13,7 @@
     "test": "bun test"
   },
   "dependencies": {
+    "@gatecontrol/acp": "workspace:*",
     "@gatecontrol/claude-code": "workspace:*",
     "@gatecontrol/contracts": "workspace:*",
     "@gatecontrol/core": "workspace:*",

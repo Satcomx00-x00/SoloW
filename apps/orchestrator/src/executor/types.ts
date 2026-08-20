@@ -19,7 +19,12 @@ export interface ProcessHandle {
   stdout: AsyncIterable<Uint8Array>;
   stderr: AsyncIterable<Uint8Array>;
   exited: Promise<number>;
-  kill(): void;
+  /**
+   * End the process, optionally naming the signal. Callers send none for the ordinary stop and
+   * escalate to `SIGKILL` only for an agent that ignored it — a driver that cannot route a
+   * signal (a container or cloud executor whose API exposes one verb) may ignore the argument.
+   */
+  kill(signal?: number | string): void;
 }
 
 export interface SpawnOpts {

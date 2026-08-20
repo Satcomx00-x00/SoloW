@@ -10,21 +10,42 @@ import type { AgentHandle } from "./runner.js";
  * carry the Workspace, and an entry disappears the moment its run ends.
  */
 
-function fakeHandle(): AgentHandle & { inputs: string[]; stopped: boolean } {
+function fakeHandle(): AgentHandle & {
+  inputs: string[];
+  stopped: boolean;
+  answers: Array<{ requestId: string; optionId: string }>;
+} {
   const state = {
     inputs: [] as string[],
     stopped: false,
+    answers: [] as Array<{ requestId: string; optionId: string }>,
     outcome: Promise.resolve({ kind: "completed" as const }),
     workspacePath: Promise.resolve<string | null>("/wt/task-1"),
     async send(text: string) {
       state.inputs.push(text);
       return true;
     },
+    async respondPermission(requestId: string, optionId: string) {
+      state.answers.push({ requestId, optionId });
+      return "answered" as const;
+    },
     async stop() {
       state.stopped = true;
     },
   };
   return state;
+}
+
+/** A runner whose protocol has no permission channel — Claude Code's stream-JSON, in practice. */
+function handleWithoutPermissions(): AgentHandle {
+  return {
+    outcome: Promise.resolve({ kind: "completed" as const }),
+    workspacePath: Promise.resolve<string | null>("/wt/task-1"),
+    async send() {
+      return true;
+    },
+    async stop() {},
+  };
 }
 
 describe("AgentRegistry", () => {
@@ -66,6 +87,43 @@ describe("AgentRegistry", () => {
 
     expect(await registry.stop("ws-a", "task-1")).toBe(true);
     expect(handle.stopped).toBe(true);
+  });
+
+  it("routes a permission answer to the agent of the named Task (issue #58, AC-4)", async () => {
+    const registry = new AgentRegistry();
+    const mine = fakeHandle();
+    registry.register("ws-a", { taskId: "task-1", sessionId: "s1", handle: mine });
+
+    expect(await registry.respondPermission("ws-a", "task-1", "req-1", "allow")).toBe("answered");
+    expect(mine.answers).toEqual([{ requestId: "req-1", optionId: "allow" }]);
+  });
+
+  it("does not let one Workspace answer another's permission prompt (Principle V)", async () => {
+    // Granting a file write on someone else's agent is a strictly worse version of steering it.
+    const registry = new AgentRegistry();
+    const theirs = fakeHandle();
+    registry.register("ws-b", { taskId: "task-1", sessionId: "s1", handle: theirs });
+
+    // Indistinguishable from no agent at all, deliberately: a client must not learn that
+    // another Workspace has a Task of that id (Principle V).
+    expect(await registry.respondPermission("ws-a", "task-1", "req-1", "allow")).toBe("no_agent");
+    expect(theirs.answers).toEqual([]);
+  });
+
+  it("reports that a permission answer reached nothing when the protocol has no channel", async () => {
+    const registry = new AgentRegistry();
+    registry.register("ws-a", {
+      taskId: "task-1",
+      sessionId: "s1",
+      handle: handleWithoutPermissions(),
+    });
+
+    // Two different nothings: a live agent whose protocol has no permission channel, and no
+    // agent at all. The operator's terminal says something true about each.
+    expect(await registry.respondPermission("ws-a", "task-1", "req-1", "allow")).toBe(
+      "no_permission_channel",
+    );
+    expect(await registry.respondPermission("ws-a", "task-9", "req-1", "allow")).toBe("no_agent");
   });
 
   it("deregistering removes the entry", async () => {

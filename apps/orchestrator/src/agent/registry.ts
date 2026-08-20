@@ -1,4 +1,4 @@
-import type { AgentHandle } from "./runner.js";
+import type { AgentHandle, PermissionAnswer } from "./runner.js";
 
 /**
  * Live agent registry (tasks TASK-014 / TASK-022). The durable lifecycle owns the agent handle,
@@ -11,6 +11,12 @@ import type { AgentHandle } from "./runner.js";
  * In-memory and process-local by design: a handle is a live process, and a run whose
  * orchestrator restarted has no agent to steer until the workflow resumes and registers again.
  */
+
+/**
+ * What became of a permission answer that had to find an agent first — the handle's own three
+ * outcomes, plus the two only the registry can see.
+ */
+export type PermissionAnswerResult = PermissionAnswer | "no_agent" | "no_permission_channel";
 
 export interface LiveAgent {
   taskId: string;
@@ -44,6 +50,28 @@ export class AgentRegistry {
     const agent = this.get(workspaceId, taskId);
     if (!agent) return false;
     return agent.handle.send(text);
+  }
+
+  /**
+   * Answer a permission the agent asked for (issue #58, AC-4). Keyed by Workspace exactly like
+   * `send` and `stop`, so a client can only ever answer for the one agent its signed ticket
+   * granted (Principle V).
+   *
+   * The four outcomes are kept apart all the way to the operator's terminal: nothing running,
+   * a protocol with no permission channel, a question already settled, and an option the agent
+   * never offered are four different things to be told, and telling an operator mid-run that
+   * "no agent is running" because their dialog was two seconds late is not one of them.
+   */
+  async respondPermission(
+    workspaceId: string,
+    taskId: string,
+    requestId: string,
+    optionId: string,
+  ): Promise<PermissionAnswerResult> {
+    const agent = this.get(workspaceId, taskId);
+    if (!agent) return "no_agent";
+    if (!agent.handle.respondPermission) return "no_permission_channel";
+    return agent.handle.respondPermission(requestId, optionId);
   }
 
   /** Stop the agent. `false` means there was nothing running to stop. */

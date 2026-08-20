@@ -288,3 +288,76 @@ describe("TaskWorkspace agent steering (TASK-022)", () => {
     expect(await screen.findByText(/No agent is running/)).toBeDefined();
   });
 });
+
+/**
+ * An agent asking for permission, from the operator's chair (issue #58, AC-4). The frame goes
+ * through the component's real parsing path, so what is under test is that the contract, the
+ * hook and the dialog agree — not that a mock was called.
+ */
+describe("TaskWorkspace permission prompt (issue #58)", () => {
+  const handlers = {
+    "task.get": () => task({ state: "running" }),
+    "session.listForTask": () => [session],
+    "session.get": () => detail(),
+    "stream.ticket": () => ({
+      url: "ws://hub.test/?ticket=t",
+      expiresAt: "2026-01-01T00:01:00.000Z",
+    }),
+  };
+
+  const permissionFrame = {
+    kind: "permission_request",
+    taskId: TASK_ID,
+    sessionId: SESSION_ID,
+    seq: 1,
+    requestId: "req-1",
+    title: "Write .env in the worktree",
+    toolKind: "edit",
+    options: [
+      { optionId: "once", name: "Allow once", kind: "allow_once" },
+      { optionId: "no", name: "Reject", kind: "reject_once" },
+    ],
+  };
+
+  it("opens the prompt when the agent asks, and sends the chosen option back", async () => {
+    renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, handlers);
+    await waitFor(() => expect(sockets[0]).toBeDefined());
+
+    act(() => sockets[0]?.emit(permissionFrame));
+
+    expect(await screen.findByRole("alertdialog")).toBeDefined();
+    fireEvent.click(await screen.findByRole("button", { name: "Allow once" }));
+
+    await waitFor(() =>
+      expect(sockets[0]?.sent).toEqual([
+        { kind: "permission", taskId: TASK_ID, requestId: "req-1", optionId: "once" },
+      ]),
+    );
+  });
+
+  it("closes the prompt once the request is resolved, however it was resolved", async () => {
+    // The deadline policy can settle it while nobody is looking; the dialog must not sit there
+    // offering a choice that no longer reaches anything.
+    renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, handlers);
+    await waitFor(() => expect(sockets[0]).toBeDefined());
+
+    act(() => sockets[0]?.emit(permissionFrame));
+    expect(await screen.findByRole("alertdialog")).toBeDefined();
+
+    act(() =>
+      sockets[0]?.emit({
+        kind: "permission_resolved",
+        taskId: TASK_ID,
+        sessionId: SESSION_ID,
+        seq: 2,
+        requestId: "req-1",
+        optionId: "once",
+        decidedBy: "policy",
+      }),
+    );
+
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    // ...and the transcript records what happened, so a reviewer sees it afterwards.
+    expect(await screen.findByText(/permission once \(policy\)/)).toBeDefined();
+  });
+});

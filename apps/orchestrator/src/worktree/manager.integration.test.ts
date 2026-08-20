@@ -271,3 +271,68 @@ describe("prepareRepository and adoptWorktree", () => {
     await cleanupWorktree(executor, repoDir, b);
   });
 });
+
+/**
+ * Provisioning the same Task twice (issue #58).
+ *
+ * The branch name and the directory are both pure functions of the Task id, and nothing ever
+ * deletes the branch — `cleanupWorktree` removes the directory and leaves `gatecontrol/task-<id>`
+ * behind. So the second launch of an ACP Task is not a hypothetical: it is what a relaunch after
+ * a review rejection, a `task.retry` after a failure, and an Inngest step retry all look like
+ * from git's side. Against real git, because what was wrong is what git does with `-b`.
+ */
+describe("provisionWorktree is idempotent for the same Task", () => {
+  const params = (taskId: string) => ({
+    taskId,
+    repository: { source: "local_path" as const, location: repoDir },
+    worktreeRoot,
+    repoCacheRoot,
+  });
+
+  it("relaunches a Task whose worktree was cleaned up but whose branch survived", async () => {
+    // Reject → discard → state `ready` → cleanup removes the directory, keeps the branch. The
+    // operator relaunches. `git worktree add -b` answered "a branch named … already exists" and
+    // threw outside any try, leaving the Task in `running` with nothing recorded.
+    const first = await provisionWorktree(executor, params("relaunch-1"));
+    await cleanupWorktree(executor, first.repoPath, first.path);
+    const branches = await $`git -C ${repoDir} branch --list gatecontrol/task-relaunch-1`
+      .quiet()
+      .text();
+    expect(branches.trim()).not.toBe("");
+
+    const second = await provisionWorktree(executor, params("relaunch-1"));
+
+    expect(second).toEqual(first);
+    expect(existsSync(second.path)).toBe(true);
+    expect(await hasChanges(executor, second.path)).toBe(false);
+    await cleanupWorktree(executor, second.repoPath, second.path);
+  });
+
+  it("retries a failed Task onto the worktree it already had, without discarding its work", async () => {
+    // A hard failure leaves both the directory and the branch in place, and `task.retry` is
+    // explicitly allowed from `failed`. Reusing the worktree is what makes the retry a
+    // continuation rather than a collision — and the partial work is the agent's, not ours to
+    // throw away (Principle I).
+    const first = await provisionWorktree(executor, params("retry-1"));
+    writeFileSync(join(first.path, "half-finished.txt"), "the failed run got this far\n");
+
+    const second = await provisionWorktree(executor, params("retry-1"));
+
+    expect(second).toEqual(first);
+    expect(existsSync(join(second.path, "half-finished.txt"))).toBe(true);
+    await cleanupWorktree(executor, second.repoPath, second.path);
+  });
+
+  it("rebuilds a worktree directory that was deleted from underneath git", async () => {
+    // An operator clearing disk space, or a container that lost its volume. Git still has the
+    // worktree in its administrative record until something prunes it.
+    const first = await provisionWorktree(executor, params("pruned-1"));
+    rmSync(first.path, { recursive: true, force: true });
+
+    const second = await provisionWorktree(executor, params("pruned-1"));
+
+    expect(second.path).toBe(first.path);
+    expect(existsSync(join(second.path, "README.md"))).toBe(true);
+    await cleanupWorktree(executor, second.repoPath, second.path);
+  });
+});

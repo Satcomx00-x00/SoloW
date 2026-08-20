@@ -1,4 +1,4 @@
-import { reviewDecisionSchema, type TaskState } from "@gatecontrol/contracts";
+import { type AgentProtocol, reviewDecisionSchema, type TaskState } from "@gatecontrol/contracts";
 import { classifyRunFailure } from "@gatecontrol/core";
 import { createDb, type Db, decryptForScmSync } from "@gatecontrol/db";
 import {
@@ -10,10 +10,15 @@ import {
   withRunContext,
 } from "@gatecontrol/observability";
 import { z } from "zod";
-import { ClaudeCodeRunner, worktreeNameForTask } from "../../agent/claude-code-runner.js";
-import { hasAgentRunner, missingAgentRunnerReason } from "../../agent/protocols.js";
+import { worktreeNameForTask } from "../../agent/claude-code-runner.js";
+import {
+  agentCreatesOwnWorktree,
+  hasAgentRunner,
+  missingAgentRunnerReason,
+} from "../../agent/protocols.js";
 import { type AgentRegistry, agentRegistry } from "../../agent/registry.js";
 import type { AgentRunner } from "../../agent/runner.js";
+import { createAgentRunner } from "../../agent/runners.js";
 import { prepareAgentEnv } from "../../billing/guard.js";
 import {
   appendSessionEvent,
@@ -24,6 +29,7 @@ import {
   setSessionState,
   setTaskState,
   type TaskRunContext,
+  unsatisfiedDependencyIds,
 } from "../../data.js";
 import { orchestratorEnv } from "../../env.js";
 import { hasDriver, missingDriverReason } from "../../executor/drivers.js";
@@ -38,6 +44,7 @@ import {
   hasChanges,
   type ProvisionParams,
   prepareRepository,
+  provisionWorktree,
   type Worktree,
   type WorktreeDiff,
 } from "../../worktree/manager.js";
@@ -90,10 +97,17 @@ const MAX_REVIEW_ROUNDS = 5;
  */
 export interface WorktreeOps {
   /**
-   * Resolve the repository the agent will run in. GateControl no longer creates the Task's
-   * worktree — `claude --worktree` does — so there is no `provision` step here any more.
+   * Resolve the repository the agent will run in. Claude Code creates the Task's worktree
+   * itself (`--worktree`), so for that protocol this is all the preparation there is.
    */
   prepare(params: ProvisionParams): Promise<string>;
+  /**
+   * Create the Task's worktree, for a protocol whose agent cannot (issue #58). ACP has no
+   * notion of a worktree: the agent works in the `cwd` it is handed, so GateControl makes the
+   * directory and points it there. The isolation guarantee is unchanged (Principle II) — only
+   * who runs `git worktree add` moves.
+   */
+  provision(params: ProvisionParams): Promise<Worktree>;
   /** Confirm with git that the path the agent reported really is a worktree of the repository. */
   adopt(repoPath: string, reportedPath: string | null): Promise<Worktree>;
   /** Copy the Repository's allowlisted setup files into a freshly created worktree (issue #52). */
@@ -119,7 +133,12 @@ export interface HubLike {
 /** Injected collaborators for the Task lifecycle. */
 export interface TaskRunDeps {
   db: Db;
-  runner: AgentRunner;
+  /**
+   * The adapter for a protocol, or null when this build cannot drive it (issue #58, AC-3). A
+   * function rather than a runner because the protocol comes from the Task's own Agent catalog
+   * row: two Tasks in one Workspace can be driven over two different protocols.
+   */
+  runner: (protocol: AgentProtocol) => AgentRunner | null;
   worktreeRoot: string;
   repoCacheRoot: string;
   logger: Logger;
@@ -137,12 +156,17 @@ export function defaultDeps(): TaskRunDeps {
   const executor = createLocalExecutor(env.GATECONTROL_WORKTREE_ROOT);
   return {
     db: createDb(),
-    runner: new ClaudeCodeRunner({ executor }),
+    runner: (protocol) =>
+      createAgentRunner(protocol, {
+        executor,
+        unattendedPermissionPosture: env.GATECONTROL_ACP_UNATTENDED_PERMISSION,
+      }),
     worktreeRoot: env.GATECONTROL_WORKTREE_ROOT,
     repoCacheRoot: env.GATECONTROL_REPO_CACHE_ROOT,
     logger: createLogger({ service: "orchestrator" }),
     worktree: {
       prepare: (params) => prepareRepository(executor, params),
+      provision: (params) => provisionWorktree(executor, params),
       adopt: (repoPath, reportedPath) => adoptWorktree(executor, repoPath, reportedPath),
       seed: (params) => seedSetupFiles(executor, params),
       commit: (path, message, patterns) => commitWorktree(executor, path, message, patterns),
@@ -195,12 +219,14 @@ export async function runTaskLifecycle(
 
   /**
    * An Agent Profile names the protocol its catalog row declares, and only some protocols have
-   * a runner behind them yet (issue #10). Checked here, before anything is cloned: a Task
-   * pointed at an `acp` catalog entry must fail with a legible reason, not crash deep inside a
-   * runner that was never built to speak it.
+   * a runner behind them (issues #10 and #58). Checked here, before anything is cloned: a Task
+   * pointed at a protocol nothing speaks must fail with a legible reason, not crash deep inside
+   * a runner that was never built for it.
    */
-  if (!hasAgentRunner(ctx.agentCatalog.protocol)) {
-    const reason = missingAgentRunnerReason(ctx.agentCatalog.protocol);
+  const protocol = ctx.agentCatalog.protocol;
+  const runner = deps.runner(protocol);
+  if (!hasAgentRunner(protocol) || !runner) {
+    const reason = missingAgentRunnerReason(protocol);
     await step.run("agent-runner-unavailable", () =>
       setTaskState(db, workspaceId, taskId, "failed", { failureReason: reason }),
     );
@@ -250,6 +276,46 @@ export async function runTaskLifecycle(
   );
 
   /**
+   * For a protocol whose agent makes no worktree of its own, GateControl makes it here — in its
+   * own durable step, before the first round, so an orchestrator restart resumes with the same
+   * directory rather than branching a second one from the base ref (Principle III).
+   *
+   * Caught, not left to escape. A Task that cannot be given a workspace has to *say so*: an
+   * uncaught throw here exhausts the function's retries and leaves the Task sitting in `running`
+   * with no failure reason at all, which is the one outcome an operator cannot act on. The
+   * provisioning itself is idempotent (`provisionWorktree`), so relaunching or retrying the Task
+   * after a fix reuses the same worktree instead of colliding with the branch it left behind.
+   */
+  let provisioned: Worktree | null = null;
+  if (!agentCreatesOwnWorktree(protocol)) {
+    try {
+      provisioned = await step.run("provision-worktree", () =>
+        deps.worktree.provision({
+          taskId,
+          repository: { source: ctx.repository.source, location: ctx.repository.location },
+          baseRef: ctx.task.baseRef ?? undefined,
+          worktreeRoot: deps.worktreeRoot,
+          repoCacheRoot: deps.repoCacheRoot,
+          cloneCredential: cloneCredentialFor(ctx),
+        }),
+      );
+    } catch (cause) {
+      // The reason is deliberately prose rather than the git error: a failed clone or worktree
+      // command echoes back the command line, and that is not a place to be paraphrasing
+      // credential-helper arguments into a column the UI renders (Principle IV). The detail
+      // goes to the log, where it belongs.
+      captureException(log, cause, { stage: "worktree-provision" });
+      const reason = "could not provision an isolated worktree for this Task";
+      await step.run("provision-failed", () =>
+        setTaskState(db, workspaceId, taskId, "failed", { failureReason: reason }),
+      );
+      logStateTransition(log, { workspaceId, taskId, from: "running", to: "failed" });
+      announce("failed");
+      return { taskId, result: "worktree_unavailable" };
+    }
+  }
+
+  /**
    * The Repository's setup-file allowlist (issue #52): copied into the worktree the agent
    * creates, and subtracted from the diff and the commit, so a `.env` the agent needs to run
    * the tests never reaches the review UI or the branch.
@@ -292,10 +358,11 @@ export async function runTaskLifecycle(
   };
 
   /**
-   * Set once the first round adopts the worktree the agent made. Every later step — diff,
-   * commit, discard, cleanup — acts on this, so it is read from the agent rather than assumed.
+   * The worktree every later step — diff, commit, discard, cleanup — acts on. Read back from
+   * the agent (Claude Code makes its own) or set from what GateControl provisioned (ACP), and
+   * confirmed with git either way before anything is written into it.
    */
-  let wt: { path: string; branch: string; repoPath: string } | null = null;
+  let wt: { path: string; branch: string; repoPath: string } | null = provisioned;
 
   /** Feedback from the previous review round; it becomes the next round's brief. */
   let pendingFeedback: string | undefined;
@@ -364,7 +431,13 @@ export async function runTaskLifecycle(
           .catch((cause) => captureException(log, cause, { stage: "session-usage-record" }));
       };
 
-      const emit = (kind: "stdout" | "tool_use", payload: Record<string, unknown>) => {
+      // `session_event.kind` is free text and its DTO a plain string, so a new event kind needs
+      // no schema change — and being in the log is what makes a permission request survive a
+      // reconnect instead of vanishing with the socket that carried it.
+      const emit = (
+        kind: "stdout" | "tool_use" | "permission_request" | "permission_resolved",
+        payload: Record<string, unknown>,
+      ) => {
         const at = seq++;
         deps.hub.publish(channel, { kind, taskId, sessionId, seq: at, ...payload });
         writes = writes
@@ -376,12 +449,14 @@ export async function runTaskLifecycle(
       // global env var, since two Agent Profiles in the same Workspace can point at different
       // catalog entries.
       const { command, argsTemplate: args } = ctx.agentCatalog;
-      // First round: run in the repository and have the agent create the Task's worktree.
-      // Later rounds continue *inside* that worktree — a reviewer asking for changes wants the
-      // work carried on, and asking for the worktree again would branch a fresh one from the
-      // base ref and throw the earlier round away.
+      // First round with a `--worktree`-capable agent: run in the repository and have it create
+      // the Task's worktree. Later rounds continue *inside* that worktree — a reviewer asking
+      // for changes wants the work carried on, and asking for the worktree again would branch a
+      // fresh one from the base ref and throw the earlier round away. An ACP Task arrives here
+      // with `wt` already set to the worktree GateControl provisioned, so it takes the same
+      // path from its very first round.
       const resuming = wt;
-      const handle = deps.runner.start({
+      const handle = runner.start({
         command,
         args,
         cwd: resuming ? resuming.path : repoPath,
@@ -391,7 +466,20 @@ export async function runTaskLifecycle(
         onEvent: (e) => {
           if (e.kind === "stdout") emit("stdout", { text: e.text });
           else if (e.kind === "tool_use") emit("tool_use", { name: e.name });
-          else recordUsage(e);
+          else if (e.kind === "permission_request") {
+            emit("permission_request", {
+              requestId: e.requestId,
+              title: e.title,
+              toolKind: e.toolKind,
+              options: e.options,
+            });
+          } else if (e.kind === "permission_resolved") {
+            emit("permission_resolved", {
+              requestId: e.requestId,
+              optionId: e.optionId,
+              decidedBy: e.decidedBy,
+            });
+          } else recordUsage(e);
         },
       });
       // Publish the handle for the lifetime of the run so the hub can deliver the operator's
@@ -404,11 +492,11 @@ export async function runTaskLifecycle(
         // agent dies mid-run we still know which worktree to clean up.
         reported = await handle.workspacePath;
         // ...and, on the first round, use that same moment to copy the Repository's setup files
-        // in. The CLI announces its worktree in the session event it emits before the model's
-        // first turn, so this is the earliest point at which the directory exists — and, in
-        // practice, before the agent has looked at it. A resuming round skips it: the files are
-        // already there, and re-copying would overwrite anything the agent changed.
-        if (!resuming && reported) await seed(reported);
+        // in. An agent announces its worktree before the model's first turn, so this is the
+        // earliest point at which the directory exists — and, in practice, before the agent has
+        // looked at it. A later round skips it: the files are already there, and re-copying
+        // would overwrite anything the agent changed.
+        if (round === 0 && reported) await seed(reported);
         outcome = await handle.outcome;
       } finally {
         deregister();
@@ -528,6 +616,30 @@ export async function runTaskLifecycle(
     }
     // request_changes: resume the agent for another round, carrying the reviewer's feedback —
     // without it the next round would repeat the same brief and produce the same work.
+    //
+    // Resuming is a *start*, so it is gated on the Task's dependencies exactly as a launch is
+    // (issue #6 AC-3). `review.decide` already refuses this before publishing the event, which
+    // makes the check here a second line rather than the first — but the transition into
+    // `running` is applied on this side, and a guard that lives only at the API boundary holds
+    // only while the API is the sole producer of `review.decided`.
+    const outstanding = await step.run(`resume-blockers-${round}`, () =>
+      unsatisfiedDependencyIds(db, workspaceId, taskId),
+    );
+    if (outstanding.length > 0) {
+      const reason = "blocked_by_dependency";
+      await step.run(`resume-blocked-${round}`, () =>
+        setTaskState(db, workspaceId, taskId, "failed", { failureReason: reason }),
+      );
+      logStateTransition(log, { workspaceId, taskId, from: "review", to: "failed" });
+      announce("failed");
+      // The blocking ids are Task ids, not content — safe to log, and the only way an operator
+      // learns *which* predecessor stopped the resume.
+      captureException(log, new Error(`resume refused: ${reason}`), {
+        failureReason: reason,
+        blockedBy: outstanding,
+      });
+      return { taskId, result: reason };
+    }
     pendingFeedback = feedback ?? undefined;
     await step.run(`resume-${round}`, () => setTaskState(db, workspaceId, taskId, "running"));
     logStateTransition(log, { workspaceId, taskId, from: "review", to: "running" });

@@ -12,6 +12,7 @@ import {
   sessionEvent,
   sessionUsage,
   task,
+  taskDependency,
 } from "@gatecontrol/db";
 import { and, asc, desc, eq, gt, inArray } from "drizzle-orm";
 
@@ -158,6 +159,28 @@ export async function setTaskState(
       updatedAt: new Date().toISOString(),
     })
     .where(and(eq(task.workspaceId, workspaceId), eq(task.id, taskId)));
+}
+
+/**
+ * The Task's predecessors that are not yet `done` (issue #6 AC-3).
+ *
+ * Read here as well as in the web DAL, and deliberately so. `review.decide` refuses a
+ * `request_changes` that would start a blocked Task, but that refusal lives at the API boundary,
+ * and the transition into `running` is applied *here* — the durable engine is what actually
+ * starts the agent (Principle III). A guard on the API only holds while the API is the sole
+ * producer of `review.decided`; a guard at the transition holds whatever publishes it.
+ */
+export async function unsatisfiedDependencyIds(
+  db: Db,
+  workspaceId: string,
+  taskId: string,
+): Promise<string[]> {
+  const rows = await db
+    .select({ blockedByTaskId: taskDependency.blockedByTaskId, state: task.state })
+    .from(taskDependency)
+    .innerJoin(task, eq(task.id, taskDependency.blockedByTaskId))
+    .where(and(eq(taskDependency.workspaceId, workspaceId), eq(taskDependency.taskId, taskId)));
+  return rows.filter((row) => row.state !== "done").map((row) => row.blockedByTaskId);
 }
 
 export async function setSessionState(

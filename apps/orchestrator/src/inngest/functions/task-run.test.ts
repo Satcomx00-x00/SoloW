@@ -14,6 +14,7 @@ import {
   session,
   sessionEvent,
   task,
+  taskDependency,
   workspace,
 } from "@gatecontrol/db";
 import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
@@ -21,7 +22,13 @@ import { createLogger } from "@gatecontrol/observability";
 import { asc, eq } from "drizzle-orm";
 import { worktreeNameForTask } from "../../agent/claude-code-runner.js";
 import { AgentRegistry } from "../../agent/registry.js";
-import type { AgentHandle, AgentOutcome, AgentRunner, AgentStartOpts } from "../../agent/runner.js";
+import type {
+  AgentHandle,
+  AgentOutcome,
+  AgentRunner,
+  AgentStartOpts,
+  AgentStreamEvent,
+} from "../../agent/runner.js";
 import { listTaskEventsSince } from "../../data.js";
 import { runTaskLifecycle, type StepLike, type TaskRunDeps } from "./task-run.js";
 
@@ -133,6 +140,11 @@ async function taskState(db: TestDb, taskId: string): Promise<string> {
   return row?.state ?? "MISSING";
 }
 
+async function taskFailureReason(db: TestDb, taskId: string): Promise<string> {
+  const [row] = await db.select().from(task).where(eq(task.id, taskId)).limit(1);
+  return row?.failureReason ?? "";
+}
+
 /** A review decision, optionally with the feedback the reviewer wrote. */
 type ScriptedDecision = string | null | { decision: string; feedback: string };
 
@@ -160,13 +172,22 @@ class ScriptedRunner implements AgentRunner {
    * billing guard's output become observable. */
   readonly commands: string[] = [];
   readonly envs: Record<string, string>[] = [];
-  constructor(private readonly outcomes: AgentOutcome[]) {}
+  /** Where each run was pointed, and what worktree it was asked to make (null = none). */
+  readonly cwds: string[] = [];
+  readonly worktreeNames: (string | null)[] = [];
+  constructor(
+    private readonly outcomes: AgentOutcome[],
+    /** Events each run emits, so a test can script an agent asking for a permission (#58). */
+    private readonly events: AgentStreamEvent[] = [{ kind: "stdout", text: "working" }],
+  ) {}
   start(opts: AgentStartOpts): AgentHandle {
     this.starts += 1;
     this.prompts.push(opts.prompt);
     this.commands.push(opts.command);
     this.envs.push(opts.env);
-    opts.onEvent({ kind: "stdout", text: "working" });
+    this.cwds.push(opts.cwd);
+    this.worktreeNames.push(opts.worktreeName);
+    for (const event of this.events) opts.onEvent(event);
     const outcome = this.outcomes.shift() ?? { kind: "completed" };
     return {
       outcome: Promise.resolve(outcome),
@@ -188,6 +209,8 @@ interface Spies {
   published: Array<{ channel: string; event: Record<string, unknown> }>;
   /** Every setup-file copy the lifecycle asked for (issue #52), in order. */
   seeded: Array<{ repoPath: string; worktreePath: string; patterns: string[] }>;
+  /** Worktrees GateControl created itself, for a protocol whose agent cannot (issue #58). */
+  provisioned: string[];
   /** The patterns each diff/commit was told to exclude — how AC-4 becomes observable. */
   excluded: string[][];
 }
@@ -203,16 +226,22 @@ function makeDeps(
     cleanup: 0,
     published: [],
     seeded: [],
+    provisioned: [],
     excluded: [],
   };
   const deps: TaskRunDeps = {
     db,
-    runner,
+    runner: () => runner,
     worktreeRoot: "/wt",
     repoCacheRoot: "/cache",
     logger: createLogger({ service: "orchestrator", destination: logStream }),
     worktree: {
       prepare: async (p) => `/repo/${p.taskId}`,
+      provision: async (p) => {
+        const path = `/wt/gatecontrol-task-${p.taskId}`;
+        spies.provisioned.push(path);
+        return { path, branch: `gatecontrol/task-${p.taskId}`, repoPath: `/repo/${p.taskId}` };
+      },
       // Stands in for git confirming the agent's worktree really belongs to the repository.
       adopt: async (repoPath, reported) => {
         if (!reported) throw new Error("agent did not report a workspace");
@@ -696,6 +725,107 @@ describe("the diff a reviewer is shown", () => {
  * gets copied is `setup-files.integration.test.ts`'s job; this asks the narrower question of
  * *when* the lifecycle asks for it, and what it subtracts afterwards.
  */
+/**
+ * The dependency gate on the resume path (issue #6 AC-3, hardening after review).
+ *
+ * `review.decide` refuses a `request_changes` that would start a blocked Task, but the
+ * transition into `running` is applied by this lifecycle, and a guard at the API boundary holds
+ * only for as long as the API is the sole producer of the `review.decided` event.
+ */
+describe("resuming a Task that has become blocked (issue #6)", () => {
+  let db: TestDb;
+
+  beforeAll(() => {
+    process.env.GATECONTROL_SECRET_KEY ??= Buffer.alloc(32, 3).toString("base64");
+  });
+  beforeEach(() => {
+    db = createTestDb();
+  });
+
+  /** A second Task in the same Workspace, in a state of the caller's choosing, to block against. */
+  async function blockerFor(ids: Ids, state: "backlog" | "done"): Promise<string> {
+    const [row] = await db.select().from(task).where(eq(task.id, ids.taskId)).limit(1);
+    if (!row) throw new Error("task fixture missing");
+    const blockerId = `blocker-${ids.taskId}`;
+    await db.insert(task).values({
+      id: blockerId,
+      workspaceId: ids.workspaceId,
+      issueId: row.issueId,
+      title: "Blocker",
+      state,
+      agentProfileId: row.agentProfileId,
+      executorProfileId: row.executorProfileId,
+      repositoryId: row.repositoryId,
+    });
+    await db.insert(taskDependency).values({
+      id: `dep-${ids.taskId}`,
+      workspaceId: ids.workspaceId,
+      taskId: ids.taskId,
+      blockedByTaskId: blockerId,
+    });
+    return blockerId;
+  }
+
+  it("refuses to resume, with a reason, while a predecessor is outstanding", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    await blockerFor(ids, "backlog");
+    const runner = new ScriptedRunner([{ kind: "completed" }, { kind: "completed" }]);
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    const result = await runTaskLifecycle(deps, {
+      event: { data: ids },
+      step: scriptedStep([{ decision: "request_changes", feedback: "again" }, "approve"]),
+    });
+
+    expect(result.result).toBe("blocked_by_dependency");
+    expect(await taskState(db, ids.taskId)).toBe("failed");
+    // The agent must not have been started a second time — a refused resume that still ran the
+    // agent would be the gate reporting a refusal it did not actually apply.
+    expect(runner.starts).toBe(1);
+  });
+
+  it("resumes normally once every predecessor is done", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    await blockerFor(ids, "done");
+    const runner = new ScriptedRunner([{ kind: "completed" }, { kind: "completed" }]);
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    const result = await runTaskLifecycle(deps, {
+      event: { data: ids },
+      step: scriptedStep([{ decision: "request_changes", feedback: "again" }, "approve"]),
+    });
+
+    expect(result.result).toBe("done");
+    expect(runner.starts).toBe(2);
+  });
+
+  it("does not consult the dependency graph of another Workspace (Principle V)", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const blockerId = await blockerFor(ids, "backlog");
+    // Re-home the edge onto a Workspace this run knows nothing about: the blocker itself is
+    // unchanged and still not done, so a query that forgot its tenant key would still refuse.
+    await db
+      .insert(workspace)
+      .values({ id: `other-${ids.taskId}`, name: "Other", ownerUserId: "other" });
+    await db
+      .update(taskDependency)
+      .set({ workspaceId: `other-${ids.taskId}` })
+      .where(eq(taskDependency.blockedByTaskId, blockerId));
+    const runner = new ScriptedRunner([{ kind: "completed" }, { kind: "completed" }]);
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    const result = await runTaskLifecycle(deps, {
+      event: { data: ids },
+      step: scriptedStep([{ decision: "request_changes", feedback: "again" }, "approve"]),
+    });
+
+    expect(result.result).toBe("done");
+  });
+});
+
 describe("setup files copied into the agent's worktree (issue #52)", () => {
   let db: TestDb;
 
@@ -904,9 +1034,10 @@ describe("the worktree a Task runs in", () => {
   describe("agent catalog (issue #10)", () => {
     it("fails a Task whose Agent catalog protocol has no runner, rather than crashing inside one", async () => {
       const ids = freshIds();
-      // `acp` names a real member of AgentProtocol (issue #58's target), but no runner speaks
-      // it yet — this must fail cleanly before an agent is ever started.
-      await seedRun(db, ids, { agentProtocol: "acp" });
+      // `cli_passthrough` (#21) names a real member of AgentProtocol but has no driver behind
+      // it yet — this must fail cleanly before an agent is ever started. (`acp` used to be the
+      // subject of this case; issue #58 is the work that made it drivable.)
+      await seedRun(db, ids, { agentProtocol: "cli_passthrough" });
       const runner = new ScriptedRunner([{ kind: "completed" }]);
       const { deps, spies } = makeDeps(db, runner, nullStream());
 
@@ -920,7 +1051,7 @@ describe("the worktree a Task runs in", () => {
       expect(runner.starts).toBe(0);
       expect(spies.commit).toBe(0);
       const [row] = await db.select().from(task).where(eq(task.id, ids.taskId)).limit(1);
-      expect(row?.failureReason).toContain("acp");
+      expect(row?.failureReason).toContain("cli_passthrough");
     });
 
     it("launches the agent with the command the catalog row declares, not a global env var", async () => {
@@ -947,5 +1078,195 @@ describe("the worktree a Task runs in", () => {
       expect(runner.envs[0]?.["CLAUDE_CODE_OAUTH_TOKEN"]).toBe("oauth-token");
       expect(runner.envs[0]).not.toHaveProperty("ANTHROPIC_API_KEY");
     });
+  });
+});
+
+/**
+ * The lifecycle over ACP (issue #58). What changes between the two protocols is exactly one
+ * thing — who creates the worktree — and these pin that down along with the two consequences
+ * that matter downstream: the same credential shaping applies, and a permission the agent asks
+ * for reaches both the live stream and the durable session log.
+ */
+describe("a Task driven over ACP (issue #58)", () => {
+  let db: TestDb;
+
+  beforeAll(() => {
+    process.env.GATECONTROL_SECRET_KEY ??= Buffer.alloc(32, 3).toString("base64");
+  });
+
+  beforeEach(() => {
+    db = createTestDb();
+  });
+
+  it("runs instead of failing, now that a runner speaks the protocol", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids, { agentProtocol: "acp" });
+    const runner = new ScriptedRunner([{ kind: "completed" }]);
+    const { deps, spies } = makeDeps(db, runner, nullStream());
+
+    const result = await runTaskLifecycle(deps, {
+      event: { data: ids },
+      step: scriptedStep(["approve"]),
+    });
+
+    expect(result.result).toBe("done");
+    expect(runner.starts).toBe(1);
+    expect(spies.commit).toBe(1);
+  });
+
+  it("provisions the worktree itself and asks the agent to make none", async () => {
+    // An ACP agent has no `--worktree`: it works where it is told. The isolation guarantee is
+    // unchanged (Principle II) — only who runs `git worktree add` moves.
+    const ids = freshIds();
+    await seedRun(db, ids, { agentProtocol: "acp" });
+    const runner = new ScriptedRunner([{ kind: "completed" }]);
+    const { deps, spies } = makeDeps(db, runner, nullStream());
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    expect(spies.provisioned).toEqual([`/wt/gatecontrol-task-${ids.taskId}`]);
+    expect(runner.worktreeNames).toEqual([null]);
+    expect(runner.cwds).toEqual([`/wt/gatecontrol-task-${ids.taskId}`]);
+  });
+
+  it("leaves the Claude Code path creating its own worktree, exactly as before", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const runner = new ScriptedRunner([{ kind: "completed" }]);
+    const { deps, spies } = makeDeps(db, runner, nullStream());
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    expect(spies.provisioned).toEqual([]);
+    expect(runner.worktreeNames).toEqual([worktreeNameForTask(ids.taskId)]);
+    expect(runner.cwds).toEqual([`/repo/${ids.taskId}`]);
+  });
+
+  it("still hands the agent only the credential the billing guard shaped (AC-5)", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids, {
+      agentProtocol: "acp",
+      executorConfig: {
+        kind: "local",
+        env: { ANTHROPIC_API_KEY: "sk-metered" } as Record<string, string>,
+      },
+    });
+    const runner = new ScriptedRunner([{ kind: "completed" }]);
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    expect(runner.envs[0]?.["CLAUDE_CODE_OAUTH_TOKEN"]).toBe("oauth-token");
+    expect(runner.envs[0]).not.toHaveProperty("ANTHROPIC_API_KEY");
+  });
+
+  it("publishes a permission request and writes it to the session log (AC-4)", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids, { agentProtocol: "acp" });
+    const runner = new ScriptedRunner(
+      [{ kind: "completed" }],
+      [
+        {
+          kind: "permission_request",
+          requestId: "req-1",
+          title: "Write .env",
+          toolKind: "edit",
+          options: [{ optionId: "allow", name: "Allow once", kind: "allow_once" }],
+        },
+        {
+          kind: "permission_resolved",
+          requestId: "req-1",
+          optionId: "allow",
+          decidedBy: "operator",
+        },
+      ],
+    );
+    const { deps, spies } = makeDeps(db, runner, nullStream());
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    // Live, for the operator watching…
+    expect(spies.published.map((p) => p.event["kind"])).toContain("permission_request");
+    const published = spies.published.find((p) => p.event["kind"] === "permission_request");
+    expect(published?.event).toMatchObject({ requestId: "req-1", title: "Write .env" });
+
+    // …and durable, so a reconnect replays it rather than losing the question with the socket.
+    const logged = await listTaskEventsSince(db, ids.workspaceId, ids.taskId, -1);
+    expect(logged.map((e) => e.kind)).toContain("permission_request");
+    expect(logged.map((e) => e.kind)).toContain("permission_resolved");
+    const resolved = logged.find((e) => e.kind === "permission_resolved");
+    expect(resolved?.payload).toMatchObject({ optionId: "allow", decidedBy: "operator" });
+  });
+
+  it("launches a second time after a rejected review, over the same worktree", async () => {
+    // The branch and the directory are both named after the Task and nothing deletes the
+    // branch, so a relaunch is where provisioning meets its own leftovers. The lifecycle must
+    // reach a second run at all — the step used to throw before anything could be recorded.
+    const ids = freshIds();
+    await seedRun(db, ids, { agentProtocol: "acp" });
+    const runner = new ScriptedRunner([{ kind: "completed" }, { kind: "completed" }]);
+    const { deps, spies } = makeDeps(db, runner, nullStream());
+
+    const rejected = await runTaskLifecycle(deps, {
+      event: { data: ids },
+      step: scriptedStep(["reject"]),
+    });
+    expect(rejected.result).toBe("done");
+    expect(await taskState(db, ids.taskId)).toBe("ready");
+
+    const relaunched = await runTaskLifecycle(deps, {
+      event: { data: ids },
+      step: scriptedStep(["approve"]),
+    });
+
+    expect(relaunched.result).toBe("done");
+    expect(runner.starts).toBe(2);
+    // Both launches asked for the same worktree, and the second one committed.
+    expect(spies.provisioned).toEqual([
+      `/wt/gatecontrol-task-${ids.taskId}`,
+      `/wt/gatecontrol-task-${ids.taskId}`,
+    ]);
+    expect(spies.commit).toBe(1);
+  });
+
+  it("fails the Task with a reason when its worktree cannot be provisioned", async () => {
+    // The release-blocking shape of the old bug: the provisioning step threw outside any try,
+    // so after Inngest burned its retries the Task sat in `running` forever with no
+    // failureReason — the one outcome an operator can neither read nor act on.
+    const ids = freshIds();
+    await seedRun(db, ids, { agentProtocol: "acp" });
+    const runner = new ScriptedRunner([{ kind: "completed" }]);
+    const { deps, spies } = makeDeps(db, runner, nullStream());
+    deps.worktree.provision = async () => {
+      throw new Error("fatal: a branch named 'gatecontrol/task-1' already exists");
+    };
+
+    const result = await runTaskLifecycle(deps, {
+      event: { data: ids },
+      step: scriptedStep(["approve"]),
+    });
+
+    expect(result.result).toBe("worktree_unavailable");
+    expect(await taskState(db, ids.taskId)).toBe("failed");
+    expect(await taskFailureReason(db, ids.taskId)).toContain("worktree");
+    // No agent was started, and the board heard about the failure.
+    expect(runner.starts).toBe(0);
+    expect(spies.published.some((p) => p.event["state"] === "failed")).toBe(true);
+  });
+
+  it("keeps the git error out of the reason it shows the operator", async () => {
+    // A failed clone or worktree command echoes back its own command line, and that command
+    // line carries the credential-helper arguments for an imported repository (Principle IV).
+    // The detail belongs in the log, not in a column the UI renders.
+    const ids = freshIds();
+    await seedRun(db, ids, { agentProtocol: "acp" });
+    const { deps } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+    deps.worktree.provision = async () => {
+      throw new Error("command failed (128): git -c credential.helper=echo password=$TOKEN");
+    };
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    expect(await taskFailureReason(db, ids.taskId)).not.toContain("credential.helper");
   });
 });

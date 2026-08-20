@@ -26,6 +26,7 @@ import {
   discardWorktreeChanges,
   hasChanges,
   prepareRepository,
+  provisionWorktree,
 } from "../../apps/orchestrator/src/worktree/manager.js";
 import { seedSetupFiles } from "../../apps/orchestrator/src/worktree/setup-files.js";
 import { hub } from "../../apps/orchestrator/src/ws/hub.js";
@@ -145,12 +146,15 @@ const executor = createLocalExecutor(PATHS.worktrees);
 function deps(): TaskRunDeps {
   return {
     db: createDb(),
-    runner: new FixtureAgentRunner(),
+    // One fixture runner whatever the catalog row's protocol says: the E2E proves the lifecycle,
+    // not the protocol, and `packages/acp` covers that against a scripted peer (issue #58).
+    runner: () => new FixtureAgentRunner(),
     worktreeRoot: PATHS.worktrees,
     repoCacheRoot: PATHS.repoCache,
     logger: createLogger({ service: "e2e-orchestrator", destination: quietLogs }),
     worktree: {
       prepare: (params) => prepareRepository(executor, params),
+      provision: (params) => provisionWorktree(executor, params),
       adopt: (repoPath, reportedPath) => adoptWorktree(executor, repoPath, reportedPath),
       seed: (params) => seedSetupFiles(executor, params),
       commit: (path, message, patterns) => commitWorktree(executor, path, message, patterns),

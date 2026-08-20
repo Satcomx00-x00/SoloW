@@ -104,7 +104,12 @@ export function createLocalExecutor(root: string): Executor {
         stdout: proc.stdout,
         stderr: proc.stderr,
         exited: proc.exited,
-        kill: () => proc.kill(),
+        // Bun's default is SIGTERM; the caller names SIGKILL only once the polite signal has
+        // been ignored, so the signal is passed through rather than flattened here.
+        kill: (signal?: number | string) => {
+          if (signal === undefined) proc.kill();
+          else proc.kill(signal as Parameters<typeof proc.kill>[0]);
+        },
       };
     },
 

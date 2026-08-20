@@ -10,6 +10,12 @@ const schema = z.object({
    * with. Required: without it the hub could not authenticate a subscriber at all.
    */
   GATECONTROL_STREAM_SECRET: z.string().min(1),
+  /**
+   * What an ACP permission nobody answered decays to (issue #58, AC-4). Refusal unless a
+   * deployment names the permissive posture — a deployment can widen its own posture on
+   * purpose, and none can widen it by leaving this unset. See `agent/permissions.ts`.
+   */
+  GATECONTROL_ACP_UNATTENDED_PERMISSION: z.enum(["refuse", "allow_once"]).default("refuse"),
 });
 export type OrchestratorEnv = z.infer<typeof schema>;
 let cached: OrchestratorEnv | undefined;

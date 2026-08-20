@@ -25,6 +25,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
 import { DiffView } from "./diff-view";
+import { PermissionRequestDialog, pendingPermission } from "./permission-request-dialog";
 
 function eventText(e: SessionEventDto): string {
   const p = e.payload;
@@ -37,6 +38,12 @@ function eventText(e: SessionEventDto): string {
 function liveText(e: TaskEvent): string {
   if (e.kind === "stdout") return e.text;
   if (e.kind === "tool_use") return `tool: ${e.name}\n`;
+  // A permission and its answer belong in the terminal transcript too: the dialog is a moment,
+  // and a reviewer reading the run afterwards should still see what was asked and what was said.
+  if (e.kind === "permission_request") return `permission requested: ${e.title}\n`;
+  if (e.kind === "permission_resolved") {
+    return `permission ${e.optionId ?? "declined"} (${e.decidedBy})\n`;
+  }
   return "";
 }
 
@@ -62,6 +69,10 @@ const ACK_MESSAGE: Record<string, string> = {
   agent_not_running: "No agent is running for this task. Nothing was sent.",
   frame_not_authorized: "This connection is not allowed to steer that task.",
   frame_malformed: "The message could not be read by the orchestrator.",
+  // The agent is still running in all three of these; only the question is over.
+  permission_not_pending: "That request was already settled — by the deadline, or by someone else.",
+  permission_option_unknown: "The agent no longer offers that option.",
+  permission_unsupported: "This agent's protocol has no permission channel to answer on.",
 };
 
 /** Live connection indicator: a dot that pulses only while the stream is actually open. */
@@ -152,6 +163,9 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   const isRunning = t.state === "running";
   const canSteer = isRunning && live.status === "open";
   const branch = t.resultBranch ?? latest?.diffRef ?? null;
+  // Derived from the stream rather than held in state, so a reconnect replay reopens a question
+  // that is still outstanding and never reopens one already settled (issue #58, AC-4).
+  const permission = pendingPermission(live.events);
 
   const runDecision = (decision: "approve" | "reject" | "request_changes") => {
     if (!latest?.id) return;
@@ -171,6 +185,15 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
 
   return (
     <div className="flex h-full flex-col">
+      {/* The agent asking for something it cannot decide alone (issue #58, AC-4). */}
+      <PermissionRequestDialog
+        request={permission}
+        onChoose={(requestId, optionId) => {
+          setAck(null);
+          live.respondPermission(requestId, optionId);
+        }}
+      />
+
       {/* Task header */}
       <div className="flex items-center gap-3 border-b px-4 py-3">
         <Button asChild variant="ghost" size="icon" className="shrink-0">

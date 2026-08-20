@@ -187,6 +187,12 @@ export function useTaskStream(
   sendInput: (text: string) => boolean;
   /** Ask the agent to stop. `false` if the stream is not connected. */
   stopAgent: () => boolean;
+  /**
+   * Answer a permission the agent asked for (issue #58, AC-4). Sent on the same socket as input
+   * and stop — a second connection for one frame would need a second ticket and a second
+   * tenancy check for no benefit. `false` if the stream is not connected.
+   */
+  respondPermission: (requestId: string, optionId: string) => boolean;
 } {
   const [events, setEvents] = useState<TaskEvent[]>([]);
   const callerRef = useRef(options.onEvent);
@@ -207,6 +213,11 @@ export function useTaskStream(
     [send, taskId],
   );
   const stopAgent = useCallback(() => send({ kind: "stop", taskId }), [send, taskId]);
+  const respondPermission = useCallback(
+    (requestId: string, optionId: string) =>
+      send({ kind: "permission", taskId, requestId, optionId }),
+    [send, taskId],
+  );
 
-  return { events, status, sendInput, stopAgent };
+  return { events, status, sendInput, stopAgent, respondPermission };
 }

@@ -14,7 +14,17 @@ import type {
 } from "./runner.js";
 
 /**
- * Claude Code as GateControl's agent (task TASK-014).
+ * Claude Code as GateControl's agent (task TASK-014) — now one adapter among N (issue #58).
+ *
+ * ACP is the uniform boundary Decision 0003 chose, and `AcpRunner` implements it; this runner
+ * stays a peer behind the same `AgentRunner` interface rather than being routed through ACP,
+ * because subscription billing works through the vendor CLI's own authentication (Decision
+ * 0005) and Claude Code's ACP bridge ships as a separate binary. Nothing below changed when the
+ * ACP client landed, which is what AC-3's "no behaviour change" means in practice.
+ *
+ * The handle it returns has no `respondPermission`: the CLI decides permissions inside itself
+ * (see `DEFAULT_PERMISSION_MODE`) and offers no channel to ask an operator on, so the method is
+ * simply absent rather than present and always answering `false`.
  *
  * Runs the CLI in its headless stream-JSON mode and **always with `--worktree`**. That flag is
  * the concurrency story: several Tasks run against one repository at a time, and two agents
@@ -34,6 +44,10 @@ import type {
  * (Principle I). So the review gate, not a prompt no one will see, is the safety boundary.
  * `acceptEdits` lets it edit inside its worktree while still refusing the genuinely dangerous
  * things `bypassPermissions` would wave through.
+ *
+ * The ACP path is where that changes: it has a request channel, so an operator watching the
+ * stream can be asked (`acp-runner.ts`, AC-4). stream-json has no equivalent, so this constant
+ * stays what it is.
  */
 export const DEFAULT_PERMISSION_MODE = "acceptEdits";
 

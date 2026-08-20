@@ -33,6 +33,31 @@ export const taskEventSchema = z.discriminatedUnion("kind", [
     sessionId: idSchema,
     diffRef: idSchema,
   }),
+  /**
+   * The agent is asking to do something (issue #58, AC-4). Surfaced to the operator rather than
+   * silently granted — carrying the agent's own options, never a tool call's raw input, which
+   * can hold the contents of a file being written (Principle IV).
+   */
+  z.object({
+    kind: z.literal("permission_request"),
+    taskId: idSchema,
+    sessionId: idSchema,
+    seq: z.number().int().nonnegative(),
+    requestId: z.string().min(1),
+    title: z.string(),
+    toolKind: z.string().nullable(),
+    options: z.array(z.object({ optionId: z.string().min(1), name: z.string(), kind: z.string() })),
+  }),
+  /** How that permission was settled, and by whom — so the log can tell the two apart. */
+  z.object({
+    kind: z.literal("permission_resolved"),
+    taskId: idSchema,
+    sessionId: idSchema,
+    seq: z.number().int().nonnegative(),
+    requestId: z.string().min(1),
+    optionId: z.string().nullable(),
+    decidedBy: z.enum(["operator", "policy"]),
+  }),
 ]);
 export type TaskEvent = z.infer<typeof taskEventSchema>;
 
@@ -55,6 +80,13 @@ export type StreamTicketDto = z.infer<typeof streamTicketDto>;
 export const taskInputSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("input"), taskId: idSchema, data: z.string() }),
   z.object({ kind: z.literal("stop"), taskId: idSchema }),
+  /** The operator's answer to a permission the agent asked for (issue #58, AC-4). */
+  z.object({
+    kind: z.literal("permission"),
+    taskId: idSchema,
+    requestId: z.string().min(1),
+    optionId: z.string().min(1),
+  }),
 ]);
 export type TaskInput = z.infer<typeof taskInputSchema>;
 
@@ -66,8 +98,21 @@ export type TaskInput = z.infer<typeof taskInputSchema>;
 export const taskInputAckSchema = z.object({
   kind: z.literal("ack"),
   ok: z.boolean(),
-  action: z.enum(["input", "stop"]).optional(),
-  error: z.enum(["frame_malformed", "frame_not_authorized", "agent_not_running"]).optional(),
+  action: z.enum(["input", "stop", "permission"]).optional(),
+  error: z
+    .enum([
+      "frame_malformed",
+      "frame_not_authorized",
+      "agent_not_running",
+      // A permission answer that found the agent and still could not land (issue #58, AC-4):
+      // the question was already settled, the option was not one the agent offered, or the
+      // protocol has no permission channel at all. Distinct from `agent_not_running`, which is
+      // what all three used to be reported as.
+      "permission_not_pending",
+      "permission_option_unknown",
+      "permission_unsupported",
+    ])
+    .optional(),
 });
 export type TaskInputAck = z.infer<typeof taskInputAckSchema>;
 

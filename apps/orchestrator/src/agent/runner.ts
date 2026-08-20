@@ -2,10 +2,11 @@
 import type { FailureSignal } from "@gatecontrol/core";
 
 /**
- * Agent runner (spec F04 / task TASK-014). GateControl drives an external coding-agent CLI —
- * Claude Code by default, over its headless stream-JSON mode. This interface keeps orchestration
- * independent of the concrete agent and transport; `ClaudeCodeRunner` is the real implementation
- * and `FakeAgentRunner` the deterministic one the lifecycle tests drive.
+ * Agent runner (spec F04 / task TASK-014, issue #58). GateControl drives an external coding
+ * agent over whichever protocol its catalog row declares. This interface is the seam that keeps
+ * orchestration independent of both: `AcpRunner` speaks the Agent Client Protocol (Decision
+ * 0003), `ClaudeCodeRunner` speaks Claude Code's own stream-JSON mode, `createAgentRunner`
+ * picks between them, and `FakeAgentRunner` is the deterministic one the lifecycle tests drive.
  *
  * Credential-isolation note (finding C1): `env` carries only the single credential shaped by
  * the billing guard; the orchestrator's secret store is never exposed to the agent process.
@@ -25,9 +26,41 @@ export type AgentStreamEvent =
       outputTokens: number;
       cacheReadTokens: number;
       cacheWriteTokens: number;
+    }
+  /**
+   * The agent is asking to do something its own policy will not wave through (issue #58, AC-4).
+   *
+   * Published and logged *before* it is answered, whichever way it is answered: a permission
+   * that was granted without the operator ever seeing it is exactly what this event exists to
+   * make impossible. Carries the title, the kind and the options the agent offered — never the
+   * tool call's raw input, which can hold the contents of a file being written (Principle IV).
+   */
+  | {
+      kind: "permission_request";
+      requestId: string;
+      title: string;
+      toolKind: string | null;
+      options: Array<{ optionId: string; name: string; kind: string }>;
+    }
+  /** How a permission was settled, and by whom — the audit half of AC-4. */
+  | {
+      kind: "permission_resolved";
+      requestId: string;
+      optionId: string | null;
+      decidedBy: "operator" | "policy";
     };
 
 export type AgentOutcome = { kind: "completed" } | { kind: "failed"; signal: FailureSignal };
+
+/**
+ * What became of an operator's answer to a permission (issue #58, AC-4).
+ *
+ * Three outcomes rather than a boolean, because the terminal has to say something true about
+ * each: the answer landed, the question was already over, or the option clicked was not one the
+ * agent offered. A run mid-turn that answers "already settled" must not be reported to the
+ * operator as an agent that is no longer running.
+ */
+export type PermissionAnswer = "answered" | "not_pending" | "option_not_offered";
 
 export interface AgentStartOpts {
   command: string;
@@ -71,6 +104,14 @@ export interface AgentHandle {
    * `false` when the run has already finished and the input could not be accepted.
    */
   send(text: string): Promise<boolean>;
+  /**
+   * Answer a permission the agent asked for (issue #58, AC-4), reporting what became of it.
+   *
+   * Optional because not every protocol has a permission channel to answer on: Claude Code's
+   * stream-JSON mode decides permissions inside the CLI, and saying so by omitting the method
+   * is more honest than a shared no-op that pretends every agent could be asked.
+   */
+  respondPermission?(requestId: string, optionId: string): Promise<PermissionAnswer>;
   stop(): Promise<void>;
 }
 
@@ -86,6 +127,8 @@ export class FakeAgentRunner implements AgentRunner {
   readonly inputs: string[] = [];
   /** Worktree names the lifecycle asked for — `null` on a resume round, which asks for none. */
   readonly worktreeNames: (string | null)[] = [];
+  /** Permission answers that reached the agent, so the AC-4 round trip is assertable. */
+  readonly permissionAnswers: Array<{ requestId: string; optionId: string }> = [];
   stopped = false;
 
   constructor(
@@ -107,6 +150,11 @@ export class FakeAgentRunner implements AgentRunner {
         this.inputs.push(text);
         opts.onEvent({ kind: "stdout", text });
         return true;
+      },
+      respondPermission: async (requestId: string, optionId: string) => {
+        this.permissionAnswers.push({ requestId, optionId });
+        opts.onEvent({ kind: "permission_resolved", requestId, optionId, decidedBy: "operator" });
+        return "answered" as const;
       },
       stop: async () => {
         this.stopped = true;
