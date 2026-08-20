@@ -27,6 +27,15 @@ export type Db = ReturnType<typeof createDb>;
 export { ensureDefaultAgentCatalog } from "./agent-catalog-defaults.js";
 export * from "./auth-schema.js";
 export { dbEnv } from "./env.js";
+export {
+  FLAGS,
+  type FlagContext,
+  type FlagDefinition,
+  type FlagKey,
+  flagKeys,
+  isEnabled,
+  isFlagKey,
+} from "./flag-registry.js";
 export { listWorkspaceFlags, setWorkspaceFlag, type WorkspaceFlags } from "./flags.js";
 export {
   type GeneratedMcpToken,

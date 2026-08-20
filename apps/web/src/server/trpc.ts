@@ -1,11 +1,11 @@
 import "server-only";
 import { CommonErrorCode, type Result } from "@gatecontrol/contracts";
 import type { Db } from "@gatecontrol/db";
+import { type FlagKey, isEnabled } from "@gatecontrol/db";
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import type { OpenApiMeta } from "trpc-to-openapi";
 import type { RequestContext } from "./dal/context.js";
-import { type FlagKey, isEnabled } from "./flags.js";
 import { checkRateLimit, RATE_LIMITS, type RateLimitedProcedure } from "./rate-limit.js";
 
 /**

@@ -68,10 +68,12 @@ async function createTask(
   await page.getByRole("button", { name: "New task" }).click();
   const dialog = page.getByRole("dialog", { name: "New task" });
   await dialog.getByLabel("Title").fill(title);
+  // Repository before Issue: the Issue picker now narrows to the chosen Repository (issue #15),
+  // and picking a Repository resets any already-picked Issue — so Repository has to go first.
+  await pickOption(page, "Repository", REPO_NAME);
   await pickOption(page, "Issue", issue);
   await pickOption(page, "Agent profile", "Claude Code (subscription)");
   await pickOption(page, "Executor", "Local executor");
-  await pickOption(page, "Repository", REPO_NAME);
   for (const name of alsoWorksIn) {
     await dialog.getByRole("checkbox", { name, exact: true }).click();
   }

@@ -50,6 +50,18 @@ export interface ExternalBranch {
 }
 
 /**
+ * A label the repository already carries on its provider (issue #15 reversal — the Issue label
+ * picker fetches these instead of asking a user linked to GitHub/GitLab to retype tags that
+ * already exist). `color` is normalized to `#RRGGBB` at the driver boundary — GitHub returns it
+ * unprefixed, GitLab already prefixed — so every caller gets one consistent swatch format.
+ */
+export interface ExternalLabel {
+  name: string;
+  color: string | null;
+  description: string | null;
+}
+
+/**
  * A repository the connected token can actually see — what makes linking a *pick* rather than a
  * typed guess. `fullName` is the same "owner/repo" (GitHub) or "namespace/path" (GitLab) string
  * every other method here takes as its `RepoRef`, so the value chosen from a list is exactly the
@@ -92,6 +104,8 @@ export interface ChangeProvider {
   listIssues(credential: ScmCredential, repo: RepoRef): Promise<ExternalIssue[]>;
   listChangeRequests(credential: ScmCredential, repo: RepoRef): Promise<ExternalChangeRequest[]>;
   listBranches(credential: ScmCredential, repo: RepoRef): Promise<ExternalBranch[]>;
+  /** The repository's own labels, for the Issue label picker (issue #15 reversal). */
+  listLabels(credential: ScmCredential, repo: RepoRef): Promise<ExternalLabel[]>;
 }
 
 /** Thrown by a driver when the provider's API rejects the request outright. */

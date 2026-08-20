@@ -27,9 +27,11 @@ import {
 import { trpc } from "@/trpc/react";
 
 /**
- * Import Issues from a linked GitHub/GitLab repository (issue #15 AC-2). There is no free-text
- * Issue form any more — this is the only way an Issue enters GateControl. A repository shows up
- * here once it has been linked to an Integration in Settings → Integrations.
+ * Import Issues from a linked GitHub/GitLab repository (issue #15 AC-2). A repository shows up
+ * here once it has been linked to an Integration in Settings → Integrations. This is the
+ * provider-backed path; `IssueFormDialog` is the other one — the issue #15 reversal brought
+ * back a free-text Issue form alongside this, for a locally created Issue with no provider
+ * behind it (packages/contracts/src/issue.ts documents the reversal).
  */
 export function ImportIssuesDialog() {
   const [open, setOpen] = useState(false);

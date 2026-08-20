@@ -33,3 +33,10 @@ launches and supervises agents, manages working copies, and streams activity. Ta
 - Negative: two parts to run and coordinate; more configuration surface (see risk R-6).
 - Drives the [building block view](../architecture/05-building-blocks.md) and the
   [deployment view](../architecture/07-deployment-view.md).
+
+## Implementation status (2026-08-20)
+
+The orchestrator's `Bun.serve` now exposes the HTTP surface the interactive application needs
+to actually reach it: `POST /events` (where the application's event emitter lands) alongside
+the existing WebSocket hub, on the same port. See [Decision 0004](./0004-durable-orchestration-engine.md)'s
+own status note for what receives those events.

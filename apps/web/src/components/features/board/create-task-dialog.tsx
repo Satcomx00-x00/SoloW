@@ -61,7 +61,10 @@ export function CreateTaskDialog() {
   const utils = trpc.useUtils();
   // The command palette can ask for this dialog from anywhere in the shell.
   useEffect(() => onOpenCreateDialog("task", () => setOpen(true)), []);
-  const issues = trpc.issue.list.useQuery({});
+  // Unfiltered — used only to decide whether the Workspace has *any* Issue at all (the
+  // "missingConfig" gate below). The picker itself reads from `issues` (filtered), so a
+  // Repository with zero Issues narrows the picker to empty without hiding the whole form.
+  const allIssues = trpc.issue.list.useQuery({});
   const agents = trpc.profile.agent.list.useQuery({});
   const executors = trpc.profile.executor.list.useQuery({});
   const repos = trpc.repository.list.useQuery({});
@@ -79,6 +82,12 @@ export function CreateTaskDialog() {
     },
   });
 
+  // The Issue picker narrows to the chosen Repository the moment one is picked (user report:
+  // "the issue picker in Task creation should auto-populate from the selected Repository") —
+  // same `issue.list` query, one more input field, watched reactively off the form.
+  const repositoryId = form.watch("repositoryId");
+  const issues = trpc.issue.list.useQuery(repositoryId ? { repositoryId } : {});
+
   const create = trpc.task.create.useMutation({
     onSuccess: () => {
       utils.task.list.invalidate();
@@ -88,7 +97,7 @@ export function CreateTaskDialog() {
   });
 
   const missingConfig =
-    (issues.data?.length ?? 0) === 0 ||
+    (allIssues.data?.length ?? 0) === 0 ||
     (agents.data?.length ?? 0) === 0 ||
     (executors.data?.length ?? 0) === 0 ||
     (repos.data?.length ?? 0) === 0;
@@ -98,6 +107,8 @@ export function CreateTaskDialog() {
     label: string,
     placeholder: string,
     options: { id: string; label: string }[],
+    /** Extra side effect on selection, beyond updating this field's own value. */
+    onChange?: (value: string) => void,
   ) => (
     <FormField
       control={form.control}
@@ -105,7 +116,13 @@ export function CreateTaskDialog() {
       render={({ field }) => (
         <FormItem>
           <FormLabel>{label}</FormLabel>
-          <Select value={field.value} onValueChange={field.onChange}>
+          <Select
+            value={field.value}
+            onValueChange={(value) => {
+              field.onChange(value);
+              onChange?.(value);
+            }}
+          >
             <FormControl>
               <SelectTrigger className="w-full">
                 <SelectValue placeholder={placeholder} />
@@ -141,12 +158,14 @@ export function CreateTaskDialog() {
         </DialogHeader>
         {missingConfig ? (
           <p className="text-muted-foreground text-sm">
-            {(issues.data?.length ?? 0) === 0 ? (
+            {(allIssues.data?.length ?? 0) === 0 ? (
               <>
-                Import an Issue from the <span className="font-medium text-foreground">Issues</span>{" "}
-                page first — connect GitHub or GitLab in{" "}
-                <span className="font-medium text-foreground">Settings → Integrations</span> if you
-                haven't yet.
+                Create or import an Issue from the{" "}
+                <span className="font-medium text-foreground">Issues</span> page first — or use the{" "}
+                <span className="font-medium text-foreground">new issue</span> button in the board's
+                Backlog column. Connect GitHub or GitLab in{" "}
+                <span className="font-medium text-foreground">Settings → Integrations</span> to
+                import instead of typing one in.
               </>
             ) : (
               <>
@@ -188,10 +207,21 @@ export function CreateTaskDialog() {
                   </FormItem>
                 )}
               />
+              {/* Repository precedes Issue: the Issue picker's list depends on which Repository
+                  is chosen, so the field that decides has to come first. */}
+              {selectField(
+                "repositoryId",
+                "Repository",
+                "Select a repository",
+                (repos.data ?? []).map((r) => ({ id: r.id, label: r.name })),
+                // A previously chosen Issue from a different Repository must not silently ride
+                // along once the Repository changes underneath it.
+                () => form.setValue("issueId", ""),
+              )}
               {selectField(
                 "issueId",
                 "Issue",
-                "Select an issue",
+                repositoryId ? "Select an issue" : "Select a repository first",
                 (issues.data ?? []).map((i) => ({ id: i.id, label: i.title })),
               )}
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -208,12 +238,6 @@ export function CreateTaskDialog() {
                   (executors.data ?? []).map((x) => ({ id: x.id, label: x.name })),
                 )}
               </div>
-              {selectField(
-                "repositoryId",
-                "Repository",
-                "Select a repository",
-                (repos.data ?? []).map((r) => ({ id: r.id, label: r.name })),
-              )}
               <FormField
                 control={form.control}
                 name="baseRef"

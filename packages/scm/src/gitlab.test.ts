@@ -65,6 +65,12 @@ beforeAll(() => {
           },
         ]);
       }
+      if (url.pathname === `/api/v4/projects/${encodeURIComponent(PROJECT)}/labels`) {
+        return Response.json([
+          { name: "bug", color: "#d73a4a", description: "Something isn't working" },
+          { name: "no-description", color: "#00ff00", description: null },
+        ]);
+      }
       if (url.pathname === `/api/v4/projects/${encodeURIComponent(PROJECT)}/repository/branches`) {
         return Response.json([
           {
@@ -226,6 +232,14 @@ describe("GitlabProvider", () => {
     const open = repos.find((r) => r.fullName === "acme/docs");
     expect(internal?.isPrivate).toBe(true);
     expect(open?.isPrivate).toBe(false);
+  });
+
+  it("passes GitLab's already-#-prefixed label color through unchanged", async () => {
+    const labels = await new GitlabProvider().listLabels(credential(), PROJECT);
+    expect(labels).toEqual([
+      { name: "bug", color: "#d73a4a", description: "Something isn't working" },
+      { name: "no-description", color: "#00ff00", description: null },
+    ]);
   });
 
   it("throws ScmProviderError on a non-2xx response, token never in the message", async () => {

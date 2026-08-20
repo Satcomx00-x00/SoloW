@@ -97,6 +97,12 @@ beforeAll(() => {
       if (url.pathname === "/api/v3/repos/acme/gate") {
         return Response.json({ default_branch: "main" });
       }
+      if (url.pathname === "/api/v3/repos/acme/gate/labels") {
+        return Response.json([
+          { name: "bug", color: "d73a4a", description: "Something isn't working" },
+          { name: "no-description", color: null, description: null },
+        ]);
+      }
       if (url.pathname === "/api/v3/repos/acme/gate/branches") {
         return Response.json([
           { name: "main", commit: { sha: "abc123" } },
@@ -170,6 +176,14 @@ describe("GithubProvider", () => {
     expect(branches).toEqual([
       { name: "main", isDefault: true, headSha: "abc123", headCommittedAt: null },
       { name: "feat", isDefault: false, headSha: "def456", headCommittedAt: null },
+    ]);
+  });
+
+  it("maps GitHub's un-prefixed label color to #RRGGBB", async () => {
+    const labels = await new GithubProvider().listLabels(credential(), "acme/gate");
+    expect(labels).toEqual([
+      { name: "bug", color: "#d73a4a", description: "Something isn't working" },
+      { name: "no-description", color: null, description: null },
     ]);
   });
 

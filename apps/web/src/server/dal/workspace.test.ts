@@ -1,10 +1,9 @@
 /// <reference types="bun-types" />
 
 import { beforeEach, describe, expect, it } from "bun:test";
-import { workspace } from "@gatecontrol/db";
+import { FLAGS, type FlagKey, isEnabled, workspace } from "@gatecontrol/db";
 import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
 import { eq } from "drizzle-orm";
-import { FLAGS, type FlagKey, isEnabled } from "../flags.js";
 import { getWorkspaceFlags } from "./workspace.js";
 
 /**

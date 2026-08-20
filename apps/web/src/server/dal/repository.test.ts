@@ -1,7 +1,39 @@
 import { beforeEach, describe, expect, it } from "bun:test";
+import { spawnSync } from "node:child_process";
+import path from "node:path";
+import { IntegrationErrorCode } from "@gatecontrol/contracts";
 import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
-import { getRepository, listRepositories, updateRepositorySetup } from "./repository.js";
+import {
+  getRepository,
+  listRepositories,
+  listRepositoryLabels,
+  updateRepositorySetup,
+} from "./repository.js";
 import { ctxFor, seedWorkspaceGraph } from "./test-fixtures.js";
+
+/**
+ * `repository.regression.ts` needs real network I/O against a fixture provider server and can't
+ * run under this workspace's default `bun test` (happy-dom, preloaded globally for React
+ * component tests, cannot parse Bun.serve's responses over loopback — see
+ * `integration.regression.ts`'s header comment for the underlying compat bug). Same fix: run it
+ * in an isolated subprocess with the no-happy-dom bunfig, and surface its result here.
+ */
+describe("repository DAL — listRepositoryLabels against a real provider (isolated subprocess)", () => {
+  it("passes without happy-dom's fetch polyfill in the way", () => {
+    const webRoot = path.resolve(import.meta.dir, "../../..");
+    const result = spawnSync(
+      "bun",
+      ["--config=./bunfig.test-no-dom.toml", "test", "./src/server/dal/repository.regression.ts"],
+      { cwd: webRoot, encoding: "utf8" },
+    );
+
+    if (result.status !== 0) {
+      throw new Error(
+        `repository.regression.ts failed (exit ${String(result.status)}):\n${result.stdout}\n${result.stderr}`,
+      );
+    }
+  });
+});
 
 /**
  * The setup-file allowlist (issue #52) decides which files are copied out of a Repository and
@@ -57,5 +89,32 @@ describe("repository setup files", () => {
     expect(attempt.ok).toBe(false);
     const untouched = await getRepository(ctxFor(db, alpha.workspaceId), alpha.repositoryId);
     if (untouched.ok) expect(untouched.data.setupFilePatterns).toEqual([]);
+  });
+});
+
+describe("listRepositoryLabels — non-network cases", () => {
+  let db: TestDb;
+
+  beforeEach(() => {
+    db = createTestDb();
+  });
+
+  it("returns NOT_LINKED for a local-path Repository with no Integration — nothing to fetch", async () => {
+    const { workspaceId, repositoryId } = await seedWorkspaceGraph(db, "no-integration");
+
+    const result = await listRepositoryLabels(ctxFor(db, workspaceId), repositoryId);
+
+    expect(result).toEqual({ ok: false, error: IntegrationErrorCode.NotLinked });
+  });
+
+  it("returns NOT_FOUND for a Repository from another Workspace (Principle V)", async () => {
+    const owner = await seedWorkspaceGraph(db, "labels-owner");
+    const intruder = await seedWorkspaceGraph(db, "labels-intruder");
+
+    const result = await listRepositoryLabels(ctxFor(db, intruder.workspaceId), owner.repositoryId);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toBe("NOT_FOUND");
   });
 });

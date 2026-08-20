@@ -1,8 +1,10 @@
 import "server-only";
 import {
+  type AutoSyncedRepositoryDto,
   type ChangeRequestDto,
   CommonErrorCode,
   type ConnectIntegrationInput,
+  type ConnectIntegrationResultDto,
   type DeleteIntegrationInput,
   type DeleteIntegrationResultDto,
   type ExternalIssuePreviewDto,
@@ -30,7 +32,12 @@ import {
   repositoryBranch,
   secret,
 } from "@gatecontrol/db";
-import { providerFor, type ScmCredential } from "@gatecontrol/scm";
+import {
+  type ExternalRepository,
+  providerFor,
+  type ScmCredential,
+  type ScmProvider,
+} from "@gatecontrol/scm";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
 import {
@@ -99,13 +106,161 @@ async function loadLinkedRepository(
   });
 }
 
-/** Connect an Integration — verifies the PAT actually authenticates before storing it as connected (AC-1). */
+/**
+ * How many Repositories `connectIntegration` imports automatically, on top of the one this
+ * cascade always makes: the credential-verifying `listRepositories` call itself.
+ *
+ * A personal account can plausibly have hundreds of repositories, and `connect` is a single
+ * synchronous mutation the caller's HTTP request blocks on — there is no queue or background
+ * worker in apps/web to hand this off to (that infrastructure does not exist yet). Each
+ * repository beyond the listing call costs at least one more provider round trip for the
+ * repository row itself, plus (via `autoImportIssuesForRepository`) a second round trip to list
+ * its Issues and, when there are any, a third to import them — so the batch's latency grows
+ * roughly linearly with how many repositories are imported, not with the account's true size
+ * (`listRepositories` already returns up to 100 in one page). 20 keeps that worst case to a
+ * bounded, human-watchable number of sequential calls while covering the common case — most
+ * Workspaces connect a handful of repositories, not hundreds — and leaves the long tail of a
+ * large account to the still fully-functional manual `listExternalRepositories` /
+ * `importRepository` pair, which this cascade is additive to, never a replacement for.
+ */
+const AUTO_IMPORT_REPOSITORY_CAP = 20;
+
+/**
+ * Insert the Repository row for a picked external repository. Extracted so both the manual
+ * `importRepository` path and the `connect`-time auto-sync cascade create identical rows through
+ * one place — the alternative, having the cascade call `importRepository()` once per repository,
+ * would repeat `listRepositories()` once per repository too, which is exactly the "single
+ * mutation blocking on hundreds of repositories" risk this feature has to avoid.
+ */
+async function insertRepositoryRow(
+  ctx: RequestContext,
+  integrationId: string,
+  picked: ExternalRepository,
+  nameOverride?: string,
+): Promise<typeof repository.$inferSelect | undefined> {
+  const [row] = await ctx.db
+    .insert(repository)
+    .values({
+      workspaceId: ctx.workspaceId,
+      name: nameOverride ?? picked.name,
+      source: "remote_url",
+      location: picked.cloneUrl,
+      integrationId,
+      externalFullName: picked.fullName,
+    })
+    .returning();
+  return row;
+}
+
+/**
+ * Auto-import every Issue currently visible on a just-created Repository (issue #15's
+ * "connecting a Repository should automatically fetch its issues"), by calling the real,
+ * exported `importIssues` rather than re-implementing its insert — the one accepted cost of that
+ * reuse is that `importIssues` re-lists the same Issues from the provider a second time, since it
+ * always lists for itself rather than taking a pre-fetched set. Returns how many were imported;
+ * throws on a provider or DB failure so each caller decides for itself whether that failure
+ * should abort its own unit of work or just be recorded and swallowed.
+ */
+async function autoImportIssuesForRepository(
+  ctx: RequestContext,
+  provider: ScmProvider,
+  credential: ScmCredential,
+  repo: { id: string; externalFullName: string },
+): Promise<number> {
+  const external = await providerFor(provider).listIssues(credential, repo.externalFullName);
+  if (external.length === 0) return 0;
+
+  const imported = await importIssues(ctx, {
+    repositoryId: repo.id,
+    externalIds: external.map((i) => i.externalId),
+  });
+  if (!imported.ok) {
+    throw new Error(`auto-import of issues for ${repo.externalFullName} failed: ${imported.error}`);
+  }
+  return imported.data.length;
+}
+
+/**
+ * Every Repository the just-connected token can see, imported up to `AUTO_IMPORT_REPOSITORY_CAP`
+ * (issue #15's "connecting a GitHub integration should automatically fetch all its
+ * repositories"). Sequential, not `Promise.all`: this repo runs on SQLite, where concurrent
+ * writers risk `SQLITE_BUSY`, and GitHub applies secondary rate limits to bursty concurrent calls
+ * from one token — sequential is also what keeps the cap's latency bound legible.
+ *
+ * Each repository is wrapped in its own try/catch so one throwing (malformed provider data, a DB
+ * constraint failure) does not take the rest of the batch down with it — the task's explicit
+ * "partial failure... not abort the rest" requirement. A listing failure for the *whole*
+ * Integration (the token was revoked between `authenticate` and this call, say) is likewise
+ * caught rather than allowed to fail `connect` — the Integration itself is already stored and
+ * valid; the operator can always fall back to `listExternalRepositories` by hand.
+ */
+async function autoSyncNewIntegration(
+  ctx: RequestContext,
+  row: typeof integration.$inferSelect,
+  credential: ScmCredential,
+): Promise<AutoSyncedRepositoryDto[]> {
+  let external: ExternalRepository[];
+  try {
+    external = await providerFor(row.provider).listRepositories(credential);
+  } catch {
+    return [];
+  }
+
+  const toImport = external.slice(0, AUTO_IMPORT_REPOSITORY_CAP);
+  const overCap = external.slice(AUTO_IMPORT_REPOSITORY_CAP);
+
+  const results: AutoSyncedRepositoryDto[] = [];
+  for (const picked of toImport) {
+    try {
+      const repoRow = await insertRepositoryRow(ctx, row.id, picked);
+      if (!repoRow) throw new Error("insert returned no row");
+
+      let issuesImported = 0;
+      try {
+        issuesImported = await autoImportIssuesForRepository(ctx, row.provider, credential, {
+          id: repoRow.id,
+          externalFullName: repoRow.externalFullName ?? picked.fullName,
+        });
+      } catch {
+        // The Repository itself landed — that is what this entry's "imported" status promises.
+        // A failed Issue sync for it is recoverable by hand (listExternalIssues/importIssues)
+        // and must not be reported as the Repository having failed to import.
+      }
+
+      results.push({
+        externalFullName: picked.fullName,
+        status: "imported",
+        repositoryId: repoRow.id,
+        issuesImported,
+      });
+    } catch (cause) {
+      results.push({
+        externalFullName: picked.fullName,
+        status: "failed",
+        error: cause instanceof Error ? cause.message : String(cause),
+      });
+    }
+  }
+  for (const skipped of overCap) {
+    results.push({ externalFullName: skipped.fullName, status: "skipped_over_cap" });
+  }
+  return results;
+}
+
+/**
+ * Connect an Integration — verifies the PAT actually authenticates before storing it as
+ * connected (AC-1) — and then automatically imports every Repository the token can see (capped,
+ * partial-failure-tolerant — see `autoSyncNewIntegration`), and each imported Repository's
+ * Issues. This is additive automation: the manual `listExternalRepositories` / `importRepository`
+ * / `listExternalIssues` / `importIssues` procedures are unchanged and still the way to finish
+ * what the cap left out, or to re-sync by hand later.
+ */
 export async function connectIntegration(
   ctx: RequestContext,
   input: ConnectIntegrationInput,
 ): Promise<
   Result<
-    IntegrationDto,
+    ConnectIntegrationResultDto,
     | typeof CommonErrorCode.NotFound
     | typeof CommonErrorCode.ValidationFailed
     | typeof IntegrationErrorCode.AuthenticationFailed
@@ -135,7 +290,10 @@ export async function connectIntegration(
       writeBackEnabled: input.writeBackEnabled,
     })
     .returning();
-  return row ? ok(integrationToDto(row)) : err(CommonErrorCode.ValidationFailed);
+  if (!row) return err(CommonErrorCode.ValidationFailed);
+
+  const autoSyncedRepositories = await autoSyncNewIntegration(ctx, row, credential);
+  return ok({ integration: integrationToDto(row), autoSyncedRepositories });
 }
 
 /**
@@ -302,18 +460,25 @@ export async function importRepository(
   const picked = external.find((r) => r.fullName === input.externalFullName);
   if (!picked) return err(CommonErrorCode.NotFound);
 
-  const [row] = await ctx.db
-    .insert(repository)
-    .values({
-      workspaceId: ctx.workspaceId,
-      name: input.name ?? picked.name,
-      source: "remote_url",
-      location: picked.cloneUrl,
-      integrationId: input.integrationId,
-      externalFullName: picked.fullName,
-    })
-    .returning();
-  return row ? ok(repositoryToDto(row)) : err(CommonErrorCode.NotFound);
+  const row = await insertRepositoryRow(ctx, input.integrationId, picked, input.name);
+  if (!row) return err(CommonErrorCode.NotFound);
+
+  // Best-effort: the Repository import this function promises already succeeded, so a transient
+  // failure fetching or inserting its Issues must not turn that success into an error the caller
+  // has to retry from scratch. `importIssues` is itself idempotent, and the manual
+  // `listExternalIssues` / `importIssues` pair remains available to finish this by hand — see
+  // `autoImportIssuesForRepository`'s doc comment for why the failure is swallowed here rather
+  // than surfaced on this return value (there is no field on `RepositoryDto` to carry it).
+  try {
+    await autoImportIssuesForRepository(ctx, cred.data.row.provider, cred.data.credential, {
+      id: row.id,
+      externalFullName: row.externalFullName ?? picked.fullName,
+    });
+  } catch {
+    // Swallowed by design — see comment above.
+  }
+
+  return ok(repositoryToDto(row));
 }
 
 /** Preview a linked Repository's provider issues, flagging which are already imported. */

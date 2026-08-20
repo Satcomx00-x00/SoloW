@@ -1,7 +1,6 @@
 import "server-only";
-import { type Db, workspace } from "@gatecontrol/db";
+import { type Db, FLAGS, type FlagKey, workspace } from "@gatecontrol/db";
 import { eq } from "drizzle-orm";
-import { FLAGS, type FlagKey } from "../flags.js";
 
 /**
  * Workspace-level reads used before a `RequestContext` exists — the flag overrides are needed to

@@ -8,16 +8,18 @@ import {
   type TaskState,
 } from "@gatecontrol/contracts";
 import { unsatisfiedDependencies } from "@gatecontrol/core";
-import { ArrowRight, Link2, Play, TriangleAlert } from "lucide-react";
+import { ArrowRight, Link2, Play, Trash2, TriangleAlert } from "lucide-react";
 import type { ReactNode } from "react";
 import { useCallback, useState } from "react";
 import { ConfirmDialog } from "@/components/features/confirm-action";
+import { DeleteTaskAction } from "@/components/features/task/delete-task-action";
 import { useEventStream } from "@/components/hooks/use-task-stream";
 import { HeaderActions } from "@/components/shell/header-actions";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { BOARD_COLUMNS, STATE_LABELS } from "@/lib/task-states";
 import { trpc } from "@/trpc/react";
+import { BacklogActions } from "./backlog-actions";
 import { BlockedByDialog } from "./blocked-by-dialog";
 import { moveRefusal, waitingOn } from "./blockers";
 import { Column } from "./column";
@@ -30,10 +32,13 @@ export function BoardView({
   tasks,
   renderActions,
   blockersFor,
+  headerActionFor,
 }: {
   tasks: TaskDto[];
   renderActions?: ((task: TaskDto) => ReactNode) | undefined;
   blockersFor?: ((taskId: string) => readonly TaskDependencyDto[] | undefined) | undefined;
+  /** e.g. the Backlog column's "new issue" / "connect repository" buttons. */
+  headerActionFor?: ((state: TaskState) => ReactNode) | undefined;
 }) {
   return (
     <section
@@ -48,6 +53,7 @@ export function BoardView({
           tasks={tasks.filter((task) => task.state === state)}
           renderActions={renderActions}
           blockersFor={blockersFor}
+          headerAction={headerActionFor?.(state)}
         />
       ))}
     </section>
@@ -218,6 +224,31 @@ export function Board() {
     </Button>
   );
 
+  /**
+   * Delete, on every card regardless of state. It sits after the lifecycle buttons and is styled
+   * down to a muted icon that only gains its destructive colour on hover — a Task's own delete is
+   * reachable in one place on the board, but it should never be the thing the eye lands on first.
+   */
+  const deleteAction = (task: TaskDto): ReactNode => (
+    <DeleteTaskAction
+      key={`delete-${task.id}`}
+      taskId={task.id}
+      taskTitle={task.title}
+      trigger={(open) => (
+        <Button
+          aria-label={`Delete ${task.title}`}
+          className="ml-auto text-muted-foreground hover:text-destructive"
+          disabled={busy}
+          onClick={open}
+          size="xs"
+          variant="ghost"
+        >
+          <Trash2 />
+        </Button>
+      )}
+    />
+  );
+
   const renderActions = (task: TaskDto): ReactNode => {
     if (task.state === "backlog") {
       return (
@@ -232,6 +263,7 @@ export function Board() {
             Ready <ArrowRight />
           </Button>
           {blockedByAction(task)}
+          {deleteAction(task)}
         </>
       );
     }
@@ -256,6 +288,7 @@ export function Board() {
               </Tooltip>
             </TooltipProvider>
             {blockedByAction(task)}
+            {deleteAction(task)}
           </>
         );
       }
@@ -270,11 +303,17 @@ export function Board() {
             <Play /> Launch
           </Button>
           {blockedByAction(task)}
+          {deleteAction(task)}
         </>
       );
     }
     // Nothing to declare on a finished Task: an edge into it would only ever be satisfied.
-    return task.state === "done" ? null : blockedByAction(task);
+    return (
+      <>
+        {task.state === "done" ? null : blockedByAction(task)}
+        {deleteAction(task)}
+      </>
+    );
   };
 
   // The server's refusal is a wire code; `TASK_BLOCKED` reaching this banner would be the only
@@ -307,6 +346,7 @@ export function Board() {
           renderActions={renderActions}
           blockersFor={blockersFor}
           onMove={onMove}
+          headerActionFor={(state) => (state === "backlog" ? <BacklogActions /> : undefined)}
         />
       )}
       <ConfirmDialog

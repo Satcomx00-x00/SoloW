@@ -2,6 +2,7 @@
 
 import { AgentProfilesSection } from "./agent-profiles-section";
 import { ExecutorProfilesSection } from "./executor-profiles-section";
+import { FlagsSection } from "./flags-section";
 import { IntegrationsSection } from "./integrations-section";
 import { McpSection } from "./mcp-section";
 import { RepositoriesSection } from "./repositories-section";
@@ -33,6 +34,7 @@ export function Settings() {
       <IntegrationsSection />
       <McpSection />
       <StatusBarSection />
+      <FlagsSection />
     </div>
   );
 }

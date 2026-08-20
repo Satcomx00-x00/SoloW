@@ -3,12 +3,14 @@ import {
   type AddTaskDependencyInput,
   CommonErrorCode,
   type CreateTaskInput,
+  type DeleteTaskInput,
   err,
   type ListTaskDependenciesInput,
   type ListTasksInput,
   ok,
   type Result,
   type SetTaskRepositoriesInput,
+  type TaskDeletionImpactDto,
   type TaskDependencyCycleError,
   type TaskDependencyListDto,
   type TaskDto,
@@ -17,10 +19,11 @@ import {
   type TaskState,
 } from "@gatecontrol/contracts";
 import { buildDependencyGraph, checkDependencyEdge, taskCheckoutBranch } from "@gatecontrol/core";
-import { task, taskDependency, taskRepository } from "@gatecontrol/db";
+import { session, task, taskDependency, taskRepository, worktree } from "@gatecontrol/db";
 import { and, asc, desc, eq, inArray, like } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
 import { taskToDto } from "./mappers.js";
+import { cascadeDeleteTasks } from "./task-cascade.js";
 
 /**
  * The Repository attachments of a set of Tasks, keyed by Task id (issue #7).
@@ -348,4 +351,141 @@ export async function removeTaskDependencyEdge(
     .returning({ id: taskDependency.id });
   if (removed.length === 0) return err(CommonErrorCode.NotFound);
   return ok(undefined);
+}
+
+/**
+ * Delete one Task and everything hanging off it — the board's card menu and the Task page both
+ * call this, so a Task no longer has to be deleted by way of its Issue.
+ *
+ * Two guards, and they are not the same kind of thing:
+ *
+ * - **Running** is refused outright (`StillRunning`). The router stops the agent first; this
+ *   re-check inside the transaction is what makes that safe rather than merely likely, since a
+ *   Task can re-enter `running` between the stop and the delete. No flag overrides it — an
+ *   orphaned agent process is never what the Owner meant.
+ * - **Dependents** are refused unless `force` (`HasDependents`). Other Tasks declaring a
+ *   `blocked_by` edge on this one are gated on it deliberately; deleting it silently starts
+ *   them. With `force` those edges go, and the dependents become runnable — which is a decision,
+ *   so it is stated in the dialog rather than assumed.
+ *
+ * The Issue above is left alone even when this was its last Task: an Issue with no Tasks is a
+ * perfectly ordinary state (it is how every Issue starts), unlike an orphaned Task.
+ */
+export async function deleteTask(
+  ctx: RequestContext,
+  input: DeleteTaskInput,
+): Promise<
+  Result<
+    { id: string },
+    | typeof CommonErrorCode.NotFound
+    | typeof TaskErrorCode.StillRunning
+    | typeof TaskErrorCode.HasDependents
+  >
+> {
+  return ctx.db.transaction((tx) => {
+    const [existing] = tx
+      .select({ id: task.id, state: task.state })
+      .from(task)
+      .where(and(eq(task.workspaceId, ctx.workspaceId), eq(task.id, input.id)))
+      .limit(1)
+      .all();
+    if (!existing) return err(CommonErrorCode.NotFound);
+
+    const activeSession = tx
+      .select({ id: session.id })
+      .from(session)
+      .where(
+        and(
+          eq(session.workspaceId, ctx.workspaceId),
+          eq(session.taskId, input.id),
+          eq(session.state, "active"),
+        ),
+      )
+      .limit(1)
+      .all();
+    if (existing.state === "running" || activeSession.length > 0) {
+      return err(TaskErrorCode.StillRunning);
+    }
+
+    if (!input.force) {
+      const dependents = tx
+        .select({ id: taskDependency.id })
+        .from(taskDependency)
+        .where(
+          and(
+            eq(taskDependency.workspaceId, ctx.workspaceId),
+            eq(taskDependency.blockedByTaskId, input.id),
+          ),
+        )
+        .limit(1)
+        .all();
+      if (dependents.length > 0) return err(TaskErrorCode.HasDependents);
+    }
+
+    cascadeDeleteTasks(tx, ctx.workspaceId, [input.id]);
+    return ok({ id: input.id });
+  });
+}
+
+/** What deleting this Task would destroy, for the confirmation to state. */
+export async function taskDeletionImpact(
+  ctx: RequestContext,
+  taskId: string,
+): Promise<Result<TaskDeletionImpactDto, typeof CommonErrorCode.NotFound>> {
+  const [existing] = await ctx.db
+    .select({ id: task.id, state: task.state })
+    .from(task)
+    .where(and(eq(task.workspaceId, ctx.workspaceId), eq(task.id, taskId)))
+    .limit(1);
+  if (!existing) return err(CommonErrorCode.NotFound);
+
+  const sessions = await ctx.db
+    .select({ id: session.id, state: session.state })
+    .from(session)
+    .where(and(eq(session.workspaceId, ctx.workspaceId), eq(session.taskId, taskId)));
+  const worktrees = await ctx.db
+    .select({ id: worktree.id })
+    .from(worktree)
+    .where(
+      and(
+        eq(worktree.workspaceId, ctx.workspaceId),
+        eq(worktree.taskId, taskId),
+        eq(worktree.status, "active"),
+      ),
+    );
+  const dependents = await ctx.db
+    .select({ id: taskDependency.id })
+    .from(taskDependency)
+    .where(
+      and(
+        eq(taskDependency.workspaceId, ctx.workspaceId),
+        eq(taskDependency.blockedByTaskId, taskId),
+      ),
+    );
+
+  return ok({
+    sessionCount: sessions.length,
+    worktreeCount: worktrees.length,
+    dependentCount: dependents.length,
+    running: existing.state === "running" || sessions.some((s) => s.state === "active"),
+  });
+}
+
+/** The active Session to stop before deleting this Task, if there is one. */
+export async function activeSessionForTask(
+  ctx: RequestContext,
+  taskId: string,
+): Promise<string | undefined> {
+  const [row] = await ctx.db
+    .select({ id: session.id })
+    .from(session)
+    .where(
+      and(
+        eq(session.workspaceId, ctx.workspaceId),
+        eq(session.taskId, taskId),
+        eq(session.state, "active"),
+      ),
+    )
+    .limit(1);
+  return row?.id;
 }

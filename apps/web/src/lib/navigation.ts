@@ -17,6 +17,12 @@ export interface Section {
   /** What the navigator's header says underneath the section name. */
   caption: string;
   icon: LucideIcon;
+  /**
+   * True for a section whose UI is live but not functionally complete — see
+   * docs/features/F03-workflow-designer.md. Renderers read this to show a WIP marker instead of
+   * letting the section pass for finished work.
+   */
+  wip?: boolean;
 }
 
 export const SECTIONS: readonly Section[] = [
@@ -27,6 +33,7 @@ export const SECTIONS: readonly Section[] = [
     label: "Workflows",
     caption: "Repeatable multi-agent pipelines",
     icon: Workflow,
+    wip: true,
   },
   {
     href: "/settings",

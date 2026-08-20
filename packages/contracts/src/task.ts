@@ -152,6 +152,36 @@ export type MoveTaskInput = z.infer<typeof moveTaskInput>;
 export const retryTaskInput = z.object({ id: idSchema });
 export type RetryTaskInput = z.infer<typeof retryTaskInput>;
 
+/**
+ * Delete a Task outright — the board and the Task page both offer it, so a Task no longer has to
+ * be deleted by way of the Issue above it.
+ *
+ * `force` mirrors `deleteIssueInput`'s: without it a Task that other Tasks are blocked on is
+ * refused, because deleting it would silently unblock work the Owner deliberately gated. With
+ * it, those `blocked_by` edges go too. A *running* Task is never merely refused — the delete
+ * stops it first — so no flag covers that.
+ */
+export const deleteTaskInput = z.object({ id: idSchema, force: z.boolean().default(false) });
+export type DeleteTaskInput = z.infer<typeof deleteTaskInput>;
+
+export const taskDeletionImpactInput = z.object({ id: idSchema });
+export type TaskDeletionImpactInput = z.infer<typeof taskDeletionImpactInput>;
+
+/**
+ * What deleting this Task would destroy, for the confirmation to state. `worktreeCount` counts
+ * `worktree` rows still marked active: deleting them drops GateControl's record of those working
+ * trees, not the directories, which is why the dialog warns rather than promises.
+ */
+export const taskDeletionImpactDto = z.object({
+  sessionCount: z.number().int().nonnegative(),
+  worktreeCount: z.number().int().nonnegative(),
+  /** Tasks blocked *by* this one — they are unblocked by the delete. */
+  dependentCount: z.number().int().nonnegative(),
+  /** Whether an agent has to be stopped before the delete can proceed. */
+  running: z.boolean(),
+});
+export type TaskDeletionImpactDto = z.infer<typeof taskDeletionImpactDto>;
+
 export const listTasksInput = z.object({
   issueId: idSchema.optional(),
   state: taskStateSchema.optional(),

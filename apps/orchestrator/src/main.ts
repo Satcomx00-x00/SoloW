@@ -2,10 +2,12 @@
 import { functions, startWebSocketServer } from "./index.js";
 
 /**
- * Orchestrator entrypoint (Decision 0002). Starts the long-lived WebSocket hub. The Inngest
- * functions are exported for a separate Inngest serve handler; wiring that HTTP endpoint is a
- * Phase 3 follow-up (the durable engine runs the `functions` below).
+ * Orchestrator entrypoint (Decision 0002). One `Bun.serve` hosts three things on one port: the
+ * WebSocket hub, `/events` (where the web app's `emit()` lands), and `/api/inngest` (what the
+ * Inngest Dev Server — or, hosted, Inngest Cloud — polls to discover and invoke `functions`
+ * below). All three routes live in `index.ts`; this file only starts the server and reports it.
  */
 const server = startWebSocketServer();
 console.log(`[gatecontrol/orchestrator] WebSocket hub listening on :${server.port}`);
+console.log(`[gatecontrol/orchestrator] /events and /api/inngest live on :${server.port}`);
 console.log(`[gatecontrol/orchestrator] ${functions.length} Inngest function(s) registered`);

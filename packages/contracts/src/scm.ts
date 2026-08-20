@@ -49,6 +49,40 @@ export const integrationDto = z
 export type IntegrationDto = z.infer<typeof integrationDto>;
 
 /**
+ * One Repository's outcome inside `connect`'s automatic sync (issue #15's "connecting an
+ * Integration should automatically fetch all its repositories"). A per-repository row rather
+ * than a single pass/fail for the whole batch, because the batch is explicitly allowed to
+ * partially fail — one bad repository must not hide whether the other nineteen landed.
+ *
+ * `repositoryId`/`issuesImported` are only present when `status` is `"imported"`; `error` is
+ * only present when it is `"failed"`. `"skipped_over_cap"` carries neither — the operator's next
+ * step for those is the existing manual `listExternalRepositories` / `importRepository`, not a
+ * reason to read.
+ */
+export const autoSyncedRepositoryDto = z.object({
+  externalFullName: z.string(),
+  status: z.enum(["imported", "failed", "skipped_over_cap"]),
+  repositoryId: idSchema.optional(),
+  /** Issues auto-imported for this Repository. Present only when `status` is `"imported"`. */
+  issuesImported: z.number().int().nonnegative().optional(),
+  error: z.string().optional(),
+});
+export type AutoSyncedRepositoryDto = z.infer<typeof autoSyncedRepositoryDto>;
+
+/**
+ * `connect`'s result: the Integration itself, plus what its automatic Repository (and, per
+ * Repository, Issue) sync did. Auto-sync failures are reported *inside* this payload rather than
+ * failing the mutation — the Integration is connected either way, so a caller checking `.ok`
+ * alone still sees the correct, successful outcome; reading `autoSyncedRepositories` is how an
+ * operator finds out whether anything needs a manual follow-up.
+ */
+export const connectIntegrationResultDto = z.object({
+  integration: integrationDto,
+  autoSyncedRepositories: z.array(autoSyncedRepositoryDto),
+});
+export type ConnectIntegrationResultDto = z.infer<typeof connectIntegrationResultDto>;
+
+/**
  * Import a repository from an Integration: pick one the token can see, and GateControl creates
  * the Repository for it, already bound to the provider.
  *

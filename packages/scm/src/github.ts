@@ -4,6 +4,7 @@ import type {
   ExternalBranch,
   ExternalChangeRequest,
   ExternalIssue,
+  ExternalLabel,
   ExternalRepository,
   RepoRef,
   ScmCredential,
@@ -54,6 +55,13 @@ interface GithubRepoSummary {
   private: boolean;
   html_url: string;
   clone_url: string;
+}
+
+interface GithubLabel {
+  name: string;
+  /** Un-prefixed hex, e.g. "d73a4a" — GitHub never includes the leading "#". */
+  color: string | null;
+  description: string | null;
 }
 
 function apiRoot(baseUrl: string | null): string {
@@ -135,6 +143,21 @@ export class GithubProvider implements ChangeProvider {
       headRef: r.head.ref,
       baseRef: r.base.ref,
       authorLogin: r.user?.login ?? null,
+    }));
+  }
+
+  /**
+   * `color` comes back un-prefixed ("d73a4a") — normalized to `#RRGGBB` here so every caller
+   * gets one consistent swatch format instead of reimplementing the prefix (GitLab's driver
+   * passes its own `#`-prefixed color through unchanged for the same reason).
+   */
+  async listLabels(credential: ScmCredential, repo: RepoRef): Promise<ExternalLabel[]> {
+    const url = `${apiRoot(credential.baseUrl)}/repos/${repo}/labels?per_page=100`;
+    const rows = (await scmFetch("github", url, authHeaders(credential))) as GithubLabel[];
+    return rows.map((r) => ({
+      name: r.name,
+      color: r.color ? `#${r.color}` : null,
+      description: r.description,
     }));
   }
 

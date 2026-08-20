@@ -42,6 +42,12 @@ service and no telemetry.
   configuration.
 - **FR-8** GateControl is distributed so a user can obtain and run it without a proprietary
   gatekeeper, consistent with its open-source nature.
+- **FR-9** A signed-in member can view and toggle their Workspace's feature flags from Settings
+  (issue #21), not only via `scripts/flag.ts` on the machine running the instance. Turning
+  `ff-core-program` off is confirmed before it takes effect: it is a self-lockout, disabling
+  most of the rest of Settings along with the core Task loop for everyone in that Workspace
+  until it is turned back on — the only in-app-independent recovery path is
+  `bun run flag enable ff-core-program`.
 
 ## Non-functional requirements
 

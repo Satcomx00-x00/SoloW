@@ -151,4 +151,10 @@ describe("WorkflowsView", () => {
     const labels = await screen.findAllByText("Agent profile");
     expect(labels).toHaveLength(4);
   });
+
+  it("shows a WIP badge, because advancing a Task through Steps has no run loop behind it yet", async () => {
+    renderWithTrpc(<WorkflowsView />, handlersFor());
+
+    expect(await screen.findByText("WIP")).toBeTruthy();
+  });
 });

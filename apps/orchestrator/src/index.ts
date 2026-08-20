@@ -13,7 +13,9 @@ import {
 } from "./agent/registry.js";
 import { orchestratorEnv } from "./env.js";
 import { inngest } from "./inngest/client.js";
+import { handleEventPost } from "./inngest/events.js";
 import { taskRun } from "./inngest/functions/task-run.js";
+import { inngestServeHandler } from "./inngest/serve.js";
 import { attachSubscriber } from "./ws/replay.js";
 
 export { inngest };
@@ -167,6 +169,14 @@ export function startWebSocketServer(
   return Bun.serve<WsData>({
     port,
     fetch(req, server) {
+      const { pathname } = new URL(req.url);
+      // The two HTTP routes the durable engine needs (Decision 0004), handled before the
+      // upgrade check below so they never fall into the "websocket only" 426: `/events` is
+      // where `orchestrator-client.ts`'s `emit()` lands, and `/api/inngest` is what the
+      // Inngest Dev Server (or, hosted, Inngest Cloud) polls to discover and invoke `taskRun`.
+      if (pathname === "/events" && req.method === "POST") return handleEventPost(req);
+      if (pathname === "/api/inngest") return inngestServeHandler(req);
+
       const auth = authorizeUpgrade(req.url, deps);
       if (!auth.ok) return new Response(auth.error, { status: auth.status });
       if (server.upgrade(req, { data: auth.data })) return undefined;

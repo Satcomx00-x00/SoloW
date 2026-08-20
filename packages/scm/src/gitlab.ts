@@ -4,6 +4,7 @@ import type {
   ExternalBranch,
   ExternalChangeRequest,
   ExternalIssue,
+  ExternalLabel,
   ExternalRepository,
   RepoRef,
   ScmCredential,
@@ -48,6 +49,13 @@ interface GitlabProject {
   visibility: "private" | "internal" | "public";
   web_url: string;
   http_url_to_repo: string;
+}
+
+interface GitlabLabel {
+  name: string;
+  /** GitLab already returns "#RRGGBB" — nothing to normalize, unlike GitHub's driver. */
+  color: string | null;
+  description: string | null;
 }
 
 function apiRoot(baseUrl: string | null): string {
@@ -139,6 +147,13 @@ export class GitlabProvider implements ChangeProvider {
       baseRef: r.target_branch,
       authorLogin: r.author?.username ?? null,
     }));
+  }
+
+  /** GitLab returns `color` already prefixed with "#" — passed through as-is, unlike GitHub's. */
+  async listLabels(credential: ScmCredential, repo: RepoRef): Promise<ExternalLabel[]> {
+    const url = `${apiRoot(credential.baseUrl)}/projects/${projectPath(repo)}/labels?per_page=100`;
+    const rows = (await scmFetch("gitlab", url, authHeaders(credential))) as GitlabLabel[];
+    return rows.map((r) => ({ name: r.name, color: r.color, description: r.description }));
   }
 
   async listBranches(credential: ScmCredential, repo: RepoRef): Promise<ExternalBranch[]> {

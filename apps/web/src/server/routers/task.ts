@@ -2,6 +2,7 @@ import "server-only";
 import {
   addTaskDependencyInput,
   createTaskInput,
+  deleteTaskInput,
   getTaskInput,
   launchTaskInput,
   listTaskDependenciesInput,
@@ -12,6 +13,8 @@ import {
   setTaskRepositoriesInput,
   TaskDependencyErrorCode,
   TaskErrorCode,
+  taskDeletionImpactDto,
+  taskDeletionImpactInput,
   taskDependencyListDto,
   taskDto,
   taskListDto,
@@ -25,20 +28,24 @@ import {
   withinConcurrencyCap,
 } from "@gatecontrol/core";
 import { TRPCError } from "@trpc/server";
+import { z } from "zod";
 import type { RequestContext } from "../dal/context.js";
 import { getIssueById } from "../dal/issue.js";
 import { getAgentProfile, getExecutorProfile } from "../dal/profile.js";
 import { getRepository } from "../dal/repository.js";
 import { createSession } from "../dal/session.js";
 import {
+  activeSessionForTask,
   addTaskDependencyEdge,
   countRunningForAgentProfile,
   createTaskRecord,
+  deleteTask,
   getTaskById,
   listTaskDependencies,
   listTasks,
   removeTaskDependencyEdge,
   setTaskRepositories,
+  taskDeletionImpact,
   updateTaskState,
 } from "../dal/task.js";
 import { orchestrator } from "../orchestrator-client.js";
@@ -308,5 +315,57 @@ export const taskRouter = router({
       const task = unwrap(await getTaskById(ctx.rctx, input.taskId));
       unwrap(await removeTaskDependencyEdge(ctx.rctx, input));
       return unwrap(await listTaskDependencies(ctx.rctx, { taskId: task.id }));
+    }),
+  deletionImpact: ownerProcedure
+    .meta({
+      openapi: {
+        method: "GET",
+        path: "/task.deletionImpact",
+        tags: ["task"],
+        protect: true,
+        summary:
+          "Count what deleting this Task would destroy — sessions, active worktrees, and the Tasks currently blocked by it.",
+      },
+    })
+    .input(taskDeletionImpactInput)
+    .output(taskDeletionImpactDto)
+    .query(async ({ ctx, input }) => unwrap(await taskDeletionImpact(ctx.rctx, input.id))),
+
+  delete: ownerProcedure
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/task.delete",
+        tags: ["task"],
+        protect: true,
+        summary:
+          "Delete a Task with its sessions, reviews and worktree records. A running Task is stopped first. Refused while other Tasks are blocked by it unless `force` is set, which drops those edges too.",
+      },
+    })
+    .input(deleteTaskInput)
+    .output(z.object({ id: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      // Stopping lives here, not in the DAL: reaching a running agent is an orchestrator
+      // hand-off, and the DAL stays pure database. It re-checks the same condition inside its
+      // transaction, which is what makes this safe rather than merely polite.
+      const sessionId = await activeSessionForTask(ctx.rctx, input.id);
+      if (sessionId) {
+        try {
+          await orchestrator.stopTaskRun({
+            workspaceId: ctx.rctx.workspaceId,
+            taskId: input.id,
+            sessionId,
+          });
+        } catch (cause) {
+          // Nothing has been deleted yet, so refusing leaves the Task exactly as it was — the
+          // one outcome that cannot orphan a running agent.
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: TaskErrorCode.StopFailed,
+            cause,
+          });
+        }
+      }
+      return unwrap(await deleteTask(ctx.rctx, input));
     }),
 });

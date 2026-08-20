@@ -1,12 +1,19 @@
 import "server-only";
 import {
   connectRepositoryInput,
+  listRepositoryLabelsInput,
   repositoryDto,
+  repositoryLabelDto,
   updateRepositorySetupInput,
 } from "@gatecontrol/contracts";
 import { z } from "zod";
-import { connectRepository, listRepositories, updateRepositorySetup } from "../dal/repository.js";
-import { ownerProcedure, router, unwrap } from "../trpc.js";
+import {
+  connectRepository,
+  listRepositories,
+  listRepositoryLabels,
+  updateRepositorySetup,
+} from "../dal/repository.js";
+import { integrationsProcedure, ownerProcedure, router, unwrap } from "../trpc.js";
 
 export const repositoryRouter = router({
   connect: ownerProcedure
@@ -50,4 +57,23 @@ export const repositoryRouter = router({
     .input(updateRepositorySetupInput)
     .output(repositoryDto)
     .mutation(async ({ ctx, input }) => unwrap(await updateRepositorySetup(ctx.rctx, input))),
+  // `integrationsProcedure`, not `ownerProcedure` — despite living in the repository router,
+  // this decrypts a credential and calls out to a provider, exactly the class of endpoint
+  // `ff-integrations`-gated procedures already are.
+  listLabels: integrationsProcedure
+    .meta({
+      openapi: {
+        method: "GET",
+        path: "/repository.listLabels",
+        tags: ["repository"],
+        protect: true,
+        summary:
+          "Fetch a linked Repository's real labels from its GitHub/GitLab Integration, for the Issue label picker.",
+      },
+    })
+    .input(listRepositoryLabelsInput)
+    .output(z.array(repositoryLabelDto))
+    .query(async ({ ctx, input }) =>
+      unwrap(await listRepositoryLabels(ctx.rctx, input.repositoryId)),
+    ),
 });

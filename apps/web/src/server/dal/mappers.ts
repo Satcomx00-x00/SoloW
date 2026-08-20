@@ -52,6 +52,7 @@ export function issueToDto(row: IssueRow, taskCount: number, status = row.status
     externalNumber: row.externalNumber,
     externalUrl: row.externalUrl,
     syncedAt: row.syncedAt,
+    labels: row.labels,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };

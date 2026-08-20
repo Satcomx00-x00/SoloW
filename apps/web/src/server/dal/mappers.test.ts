@@ -28,6 +28,7 @@ describe("mappers", () => {
         externalNumber: null,
         externalUrl: null,
         syncedAt: null,
+        labels: ["hardware"],
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-02T00:00:00.000Z",
       };
@@ -44,6 +45,7 @@ describe("mappers", () => {
         externalNumber: null,
         externalUrl: null,
         syncedAt: null,
+        labels: ["hardware"],
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-02T00:00:00.000Z",
       });
@@ -67,6 +69,7 @@ describe("mappers", () => {
         externalNumber: 42,
         externalUrl: "https://github.com/acme/gate/issues/42",
         syncedAt: "2026-01-03T00:00:00.000Z",
+        labels: [],
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
       };
@@ -77,6 +80,7 @@ describe("mappers", () => {
       expect(dto.externalNumber).toBe(42);
       expect(dto.externalUrl).toBe("https://github.com/acme/gate/issues/42");
       expect(dto.syncedAt).toBe("2026-01-03T00:00:00.000Z");
+      expect(dto.labels).toEqual([]);
     });
   });
 

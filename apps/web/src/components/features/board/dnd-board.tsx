@@ -19,7 +19,7 @@ import type { ReactNode } from "react";
 import { useState } from "react";
 import { BOARD_COLUMNS, STATE_LABELS } from "@/lib/task-states";
 import { cn } from "@/lib/utils";
-import { ColumnEmpty, ColumnHeader } from "./column";
+import { CARD_ENTRANCE_CLASS, ColumnEmpty, ColumnHeader } from "./column";
 import { TaskCard } from "./task-card";
 
 /**
@@ -69,12 +69,14 @@ function DroppableColumn({
   tasks,
   renderActions,
   blockersFor,
+  headerAction,
 }: {
   state: TaskState;
   label: string;
   tasks: TaskDto[];
   renderActions?: ((task: TaskDto) => ReactNode) | undefined;
   blockersFor?: ((taskId: string) => readonly TaskDependencyDto[] | undefined) | undefined;
+  headerAction?: ReactNode;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: state });
   return (
@@ -87,13 +89,13 @@ function DroppableColumn({
         isOver && "border-ring/60 bg-accent/30",
       )}
     >
-      <ColumnHeader state={state} label={label} count={tasks.length} />
+      <ColumnHeader state={state} label={label} count={tasks.length} headerAction={headerAction} />
       {tasks.length === 0 ? (
         <ColumnEmpty label={label} />
       ) : (
         <ul className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-2 pb-2">
           {tasks.map((task) => (
-            <li key={task.id}>
+            <li key={task.id} className={CARD_ENTRANCE_CLASS}>
               <DraggableCard
                 task={task}
                 actions={renderActions?.(task)}
@@ -113,12 +115,15 @@ export function DndBoard({
   renderActions,
   blockersFor,
   onMove,
+  headerActionFor,
 }: {
   tasks: TaskDto[];
   renderActions?: ((task: TaskDto) => ReactNode) | undefined;
   // Same lookup the plain board takes, so the two cannot drift on whether a card looks blocked.
   blockersFor?: ((taskId: string) => readonly TaskDependencyDto[] | undefined) | undefined;
   onMove: (taskId: string, from: TaskState, to: TaskState) => void;
+  /** e.g. the Backlog column's "new issue" / "connect repository" buttons. */
+  headerActionFor?: ((state: TaskState) => ReactNode) | undefined;
 }) {
   const [activeId, setActiveId] = useState<string | null>(null);
   // A small activation distance keeps a click on the handle from starting a drag.
@@ -159,6 +164,7 @@ export function DndBoard({
             tasks={tasks.filter((task) => task.state === state)}
             renderActions={renderActions}
             blockersFor={blockersFor}
+            headerAction={headerActionFor?.(state)}
           />
         ))}
       </section>

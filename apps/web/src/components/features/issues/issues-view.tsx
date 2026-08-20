@@ -2,14 +2,16 @@
 
 import type { IssueDto, IssueStatus } from "@gatecontrol/contracts";
 import { CommonErrorCode } from "@gatecontrol/contracts";
-import { ChevronRight, TriangleAlert } from "lucide-react";
+import { ChevronRight, Plus, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { HeaderActions } from "@/components/shell/header-actions";
+import { Button } from "@/components/ui/button";
 import { ISSUE_STATUS_LABELS, ISSUE_STATUS_STYLE, ISSUE_STATUSES } from "@/lib/issue-status";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
 import { ImportIssuesDialog } from "./import-issues-dialog";
+import { IssueFormDialog } from "./issue-form-dialog";
 
 /**
  * The Issues section (spec F01).
@@ -89,6 +91,13 @@ export function IssuesView() {
     <div className="mx-auto w-full max-w-3xl space-y-5 px-6 py-5">
       <HeaderActions>
         <ImportIssuesDialog />
+        <IssueFormDialog
+          trigger={
+            <Button size="sm" className="h-8">
+              <Plus /> New issue
+            </Button>
+          }
+        />
       </HeaderActions>
 
       <StatusFilter active={status} />

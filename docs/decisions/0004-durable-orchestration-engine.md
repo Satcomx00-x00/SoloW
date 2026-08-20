@@ -34,3 +34,13 @@ significant state change is recorded so Runs and Tasks can resume and be reconst
   completed steps must be validated (risk R-4).
 - Realises the [durability cross-cutting concept](../architecture/08-crosscutting-concepts.md)
   and [F03](../features/F03-workflow-designer.md).
+
+## Implementation status (2026-08-20)
+
+The engine now actually receives and executes: the orchestrator's `/api/inngest` endpoint
+(`apps/orchestrator/src/inngest/serve.ts`, `inngest/bun`'s `serve()`) is what the local Inngest
+Dev Server (`bunx inngest-cli dev`, started by `scripts/dev.sh`) polls to discover
+`taskRun`, and `/events` (`apps/orchestrator/src/inngest/events.ts`) is what turns the
+application's `emit()` POSTs into real `inngest.send()` calls. Previously neither endpoint
+existed, so events emitted by the application had nowhere to go and no Task or Workflow step
+ever actually ran — this closes that gap without changing `task-run.ts`'s own logic.

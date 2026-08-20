@@ -18,6 +18,12 @@ store choice.
 > **Local shape:** one machine hosts the application, the orchestrator, and the embedded
 > store; agents run in the chosen Executors; the user works entirely on their own hardware.
 
+> **Implementation note (2026-08-20):** the durable-execution engine [Decision 0004](../decisions/0004-durable-orchestration-engine.md)
+> chose (Inngest) runs locally as its own Dev Server process, polled by and forwarding runs
+> into the Orchestration Component's `/api/inngest` endpoint. It is an implementation detail
+> of that component, not a fourth deployable unit in this model — hosted deployments point the
+> same client at Inngest Cloud instead.
+
 ## Hosted deployment (multi-user)
 
 - The Interactive Application and the Orchestration Component run as a shared service;

@@ -1,14 +1,18 @@
 "use client";
 
 import type { TaskDependencyDto } from "@gatecontrol/contracts";
-import { ArrowLeft, TriangleAlert } from "lucide-react";
+import { ArrowLeft, Pencil, Trash2, TriangleAlert } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { TaskCard } from "@/components/features/board/task-card";
 import { TaskStateBadge } from "@/components/features/board/task-state-badge";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ISSUE_STATUS_LABELS, ISSUE_STATUS_STYLE } from "@/lib/issue-status";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
+import { DeleteIssueAction } from "./delete-issue-action";
+import { IssueFormDialog } from "./issue-form-dialog";
 
 /**
  * One Issue and the Tasks cut from it.
@@ -18,6 +22,7 @@ import { trpc } from "@/trpc/react";
  * same `task.list`, filtered by `issueId` here.
  */
 export function IssueDetail({ issueId }: { issueId: string }) {
+  const router = useRouter();
   const issue = trpc.issue.get.useQuery({ id: issueId });
   const tasks = trpc.task.list.useQuery({ issueId }, { enabled: issue.isSuccess });
   // The Workspace's `blocked_by` edges (issue #6), so a blocked Task reads as blocked here too
@@ -88,6 +93,42 @@ export function IssueDetail({ issueId }: { issueId: string }) {
               {data.description}
             </p>
           )}
+          {data.labels.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {data.labels.map((label) => (
+                <Badge key={label} variant="secondary">
+                  {label}
+                </Badge>
+              ))}
+            </div>
+          )}
+        </div>
+        {/* `max-w-48` + `flex-wrap` so DeleteIssueAction's error text (if the delete is refused)
+            drops to its own line instead of stretching this header row. */}
+        <div className="flex max-w-48 shrink-0 flex-wrap items-center justify-end gap-1">
+          <IssueFormDialog
+            issue={data}
+            trigger={
+              <Button variant="ghost" size="icon" aria-label="Edit issue">
+                <Pencil />
+              </Button>
+            }
+          />
+          <DeleteIssueAction
+            issueId={data.id}
+            issueTitle={data.title}
+            onSuccess={() => router.push("/issues")}
+            trigger={
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Delete issue"
+                className="text-destructive hover:text-destructive"
+              >
+                <Trash2 />
+              </Button>
+            }
+          />
         </div>
       </div>
 

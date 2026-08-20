@@ -151,6 +151,10 @@ function), the Monitor strip of FR-9, board columns derived from Steps rather th
 `taskStateSchema` enum, non-agent Step kinds (Gate, Condition, Fork/Join — FR-2), validity
 checking (FR-5), import/export (FR-7), and per-Step run history.
 
+Until that run loop ships, the /workflows UI itself carries a WIP badge (`Section.wip` in
+`apps/web/src/lib/navigation.ts`) so a user finds a clearly-marked in-progress surface rather than
+one that looks broken.
+
 ## Related
 
 - [F02 — Kanban Task Administration](./F02-kanban-task-administration.md)

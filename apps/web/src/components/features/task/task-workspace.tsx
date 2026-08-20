@@ -16,9 +16,11 @@ import {
   RotateCcw,
   Square,
   Terminal,
+  Trash2,
   X,
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useState } from "react";
 import { TaskStateBadge } from "@/components/features/board/task-state-badge";
 import { ConfirmAction } from "@/components/features/confirm-action";
@@ -30,6 +32,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
+import { DeleteTaskAction } from "./delete-task-action";
 import { DiffView } from "./diff-view";
 import { PermissionRequestDialog, pendingPermission } from "./permission-request-dialog";
 import { SessionLog } from "./session-log";
@@ -147,6 +150,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   const [ack, setAck] = useState<TaskInputAck | null>(null);
   const onAck = useCallback((next: TaskInputAck) => setAck(next), []);
   const live = useTaskStream(taskId, { onEvent: onLive, onAck });
+  const router = useRouter();
 
   // Read one summarised range back when an operator opens it (issue #2, AC-3). `session.get`
   // leaves those events out — that is what compaction buys — and this is how they come back,
@@ -259,8 +263,28 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
             {branch ?? `base ${primary?.baseRef ?? "HEAD"}`}
           </p>
         </div>
-        <div className="ml-auto shrink-0">
+        <div className="ml-auto flex shrink-0 items-center gap-1.5">
           <StreamIndicator status={live.status} />
+          {/*
+            Deleting the Task the page is *about* leaves nowhere to stand, so it navigates back
+            to the board rather than re-rendering against a Task that no longer exists.
+          */}
+          <DeleteTaskAction
+            onDeleted={() => router.push("/board")}
+            taskId={t.id}
+            taskTitle={t.title}
+            trigger={(openDialog) => (
+              <Button
+                aria-label={`Delete ${t.title}`}
+                className="text-muted-foreground hover:text-destructive"
+                onClick={openDialog}
+                size="icon"
+                variant="ghost"
+              >
+                <Trash2 />
+              </Button>
+            )}
+          />
         </div>
       </div>
 

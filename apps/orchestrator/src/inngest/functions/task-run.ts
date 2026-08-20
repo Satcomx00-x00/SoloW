@@ -1163,6 +1163,20 @@ export function agentBrief(
 }
 
 export const taskRun = inngest.createFunction(
-  { id: "task-run", retries: TASK_RUN_RETRIES, triggers: [{ event: "task.launch.requested" }] },
+  {
+    id: "task-run",
+    retries: TASK_RUN_RETRIES,
+    triggers: [{ event: "task.launch.requested" }],
+    /**
+     * Cancellation channel for a run the operator wants gone — today, the force delete of the
+     * Issue the Task belongs to (`issue.delete` with `force`). Scoped by `taskId` so a stop for
+     * one Task never unwinds another's run.
+     *
+     * Inngest cancels *between* steps, so this is not instantaneous: the current step finishes,
+     * then the run stops. That is why the deleting side re-checks Task state inside its own
+     * transaction instead of treating the accepted stop as proof the agent is already gone.
+     */
+    cancelOn: [{ event: "task.stop.requested", if: "async.data.taskId == event.data.taskId" }],
+  },
   (args) => runTaskLifecycle(defaultDeps(), args as unknown as TaskRunArgs),
 );

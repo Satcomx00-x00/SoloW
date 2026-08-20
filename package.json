@@ -38,6 +38,10 @@
   "devDependencies": {
     "@biomejs/biome": "^2.5.9",
     "@playwright/test": "^1.62.1",
+    "inngest-cli": "^1.43.0",
     "typescript": "^5.9.3"
-  }
+  },
+  "trustedDependencies": [
+    "inngest-cli"
+  ]
 }

@@ -1,6 +1,6 @@
 # F12 — External Integrations
 
-**Status:** Draft · **Owner:** Product · **Maturity:** Core · **Last reviewed:** 2026-08-19
+**Status:** Draft · **Owner:** Product · **Maturity:** Core · **Last reviewed:** 2026-08-20
 
 ## Summary
 
@@ -49,11 +49,13 @@ documents, so there is no second definition of any operation to drift. It sits b
 - **FR-2** A user connects an Integration by selecting a provider (GitHub or GitLab), a
   stored Personal Access Token Secret (never a pasted-in-place value — Principle IV), and
   an optional base URL for a self-managed instance. The token is verified against the
-  provider before the Integration is stored as connected.
+  provider before the Integration is stored as connected, and connecting then automatically
+  imports Repositories and their Issues — see FR-13.
 - **FR-3** A user imports a Repository by picking one the Integration's token can see. The
   Repository is created already bound to the provider, recording its clone URL; no local
   clone has to exist first, and nothing is cloned at import time — the orchestrator clones
   it, authenticating with the Integration's token, the first time a Task runs against it.
+  Importing a Repository, this way or automatically (FR-13), also imports its Issues.
 - **FR-4** A user previews a linked Repository's open provider Issues and selects which to
   import; import is idempotent on `(Integration, external id)` — importing an id already
   imported is a no-op, not a duplicate.
@@ -66,6 +68,19 @@ documents, so there is no second definition of any operation to drift. It sits b
   default, ready for when write-back is built, but nothing reads it yet.
 - **FR-7** Integrations are optional; every core capability works without them (product
   [NFR-14](../product/03-product-requirements.md)).
+- **FR-13** Connecting an Integration automatically imports the Repositories its token can
+  see, up to 20 (the request is a single synchronous mutation the caller's browser blocks
+  on, and there is no queue in apps/web to hand the rest off to — 20 keeps the worst case a
+  bounded, watchable number of sequential provider calls while covering the common case of a
+  handful of repositories per Workspace). Each imported Repository's Issues are imported
+  the same way, whether the Repository arrived through this automatic sync or through a
+  manual `importRepository` call. One Repository failing to import does not abort the
+  batch: `connect`'s result reports every visible Repository's outcome individually
+  (`imported`, `failed` with a reason, or `skipped_over_cap`), and the mutation itself still
+  succeeds as long as the Integration connected. This is additive automation — the manual
+  `listExternalRepositories` / `importRepository` / `listExternalIssues` / `importIssues`
+  procedures (FR-3, FR-4) are unchanged and are how an operator finishes what the cap left
+  out, or re-syncs by hand later.
 
 ### External MCP server (issue #16)
 
@@ -116,12 +131,22 @@ documents, so there is no second definition of any operation to drift. It sits b
   later.
 - If a sync call fails (network, revoked token, rate limit), the Repository's branches and
   change requests keep showing their last-synced values with no partial overwrite.
+- If a Repository fails during `connect`'s automatic sync (FR-13), it is reported by name in
+  the mutation's result with its failure reason, not silently dropped, and the Repositories
+  that did import are kept — a caller checking only whether `connect` itself succeeded still
+  sees the correct outcome (the Integration connected); reading the per-Repository list is
+  how a failed import is noticed and, if needed, retried by hand through
+  `importRepository`.
 
 ## Out of scope
 
 - Jira, Linear, Sentry, Slack (`wont-do` — issue #15).
 - Pushing a branch or opening a change request from GateControl (issue #71).
 - Webhook-driven or scheduled sync (v1 is on-demand only).
+- Queued or background auto-sync: `connect`'s automatic Repository/Issue import (FR-13) is
+  synchronous and capped at 20 Repositories; there is no job queue in apps/web to route the
+  rest through, so a Workspace connecting an account with more than 20 repositories finishes
+  the remainder through the manual picker, not a background process.
 - MCP prompts, resources, and sampling — GateControl has none to offer, and advertising
   capabilities the server does not have makes clients probe endpoints that only ever fail.
 - Per-procedure MCP token permissions. Scope is `read` / `read_write`, mirroring the

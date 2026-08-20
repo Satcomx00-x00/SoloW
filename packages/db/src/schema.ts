@@ -102,6 +102,15 @@ export const issue = sqliteTable(
     externalNumber: integer("external_number"),
     externalUrl: text("external_url"),
     syncedAt: text("synced_at"),
+    /**
+     * Free-text labels (issue #15 reversal, 2026-08-20). A JSON array rather than a
+     * label/issue_label join table: at this scale (a handful of short strings per Issue, never
+     * queried by label) a normalized many-to-many buys referential integrity nobody needs and
+     * costs a join on every list read. Set directly for a local Issue; mirrored from the
+     * provider's own label names for an imported one (the picker fetches real labels via
+     * `repository.listLabels`, but nothing here enforces they still exist on the provider).
+     */
+    labels: text("labels", { mode: "json" }).$type<string[]>().notNull().default(sql`'[]'`),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

@@ -5,6 +5,21 @@ import { cn } from "@/lib/utils";
 import { TaskCard } from "./task-card";
 
 /**
+ * A card's `<li>` is freshly mounted exactly when it (re)appears in a column: on the board's
+ * first paint, and whenever a successful move re-renders it into a different column's list
+ * (React keys the list by `task.id`, so a card moving columns is a new element in the
+ * destination `<ul>`, not a re-positioned one in the source). That is precisely the "a card
+ * moves between columns" moment the report asks to see animated — tw-animate-css (imported once
+ * in globals.css, already used unconditionally by dialog.tsx/tooltip.tsx/select.tsx) drives it,
+ * so no new dependency and no per-component animation wiring.
+ *
+ * `prefers-reduced-motion` needs nothing further here: globals.css's existing
+ * `@media (prefers-reduced-motion: reduce)` block already zeroes every animation/transition
+ * duration site-wide.
+ */
+export const CARD_ENTRANCE_CLASS = "animate-in fade-in-0 slide-in-from-top-1 duration-200 ease-out";
+
+/**
  * The head of a lifecycle column: the state's own glyph, its name, and how many sit in it.
  *
  * Shared by the plain column and the draggable one so the two cannot drift apart — they are the
@@ -14,10 +29,13 @@ export function ColumnHeader({
   state,
   label,
   count,
+  headerAction,
 }: {
   state: TaskState;
   label: string;
   count: number;
+  /** e.g. the Backlog column's "new issue" / "connect repository" buttons. Additive — most columns pass none. */
+  headerAction?: ReactNode;
 }) {
   const { icon: Icon, textClassName, barClassName, hint } = STATE_STYLE[state];
   return (
@@ -39,6 +57,7 @@ export function ColumnHeader({
       >
         {label}
       </span>
+      {headerAction}
       <span
         className={cn(
           "ml-auto font-mono text-2xs tabular-nums",
@@ -81,12 +100,14 @@ export function Column({
   tasks,
   renderActions,
   blockersFor,
+  headerAction,
 }: {
   state: TaskState;
   label: string;
   tasks: TaskDto[];
   renderActions?: ((task: TaskDto) => ReactNode) | undefined;
   blockersFor?: ((taskId: string) => readonly TaskDependencyDto[] | undefined) | undefined;
+  headerAction?: ReactNode;
 }) {
   return (
     <section
@@ -94,13 +115,13 @@ export function Column({
       data-state={state}
       className="relative flex w-72 shrink-0 flex-col overflow-hidden rounded-xl border bg-sidebar/60"
     >
-      <ColumnHeader state={state} label={label} count={tasks.length} />
+      <ColumnHeader state={state} label={label} count={tasks.length} headerAction={headerAction} />
       {tasks.length === 0 ? (
         <ColumnEmpty label={label} />
       ) : (
         <ul className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-2 pb-2">
           {tasks.map((task) => (
-            <li key={task.id}>
+            <li key={task.id} className={CARD_ENTRANCE_CLASS}>
               <TaskCard
                 task={task}
                 actions={renderActions?.(task)}

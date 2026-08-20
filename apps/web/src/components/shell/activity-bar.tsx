@@ -3,6 +3,7 @@
 import { LogOut, type LucideIcon, Search } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { signOut } from "@/lib/auth-client";
 import { SECTIONS } from "@/lib/navigation";
@@ -62,18 +63,24 @@ function RailLink({
   label,
   icon: Icon,
   active,
+  wip,
 }: {
   href: string;
   label: string;
   icon: LucideIcon;
   active: boolean;
+  /** Section.wip — see apps/web/src/lib/navigation.ts. */
+  wip?: boolean | undefined;
 }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <Link
           href={href}
-          aria-label={label}
+          // The corner Badge below is `aria-hidden` (it would otherwise announce "WIP" a second
+          // time on top of this), so the WIP-ness has to fold into the one accessible name a
+          // screen reader gets from the link itself.
+          aria-label={wip ? `${label} (work in progress)` : label}
           aria-current={active ? "page" : undefined}
           className={cn(
             railItem,
@@ -84,9 +91,21 @@ function RailLink({
         >
           <ActiveMarker active={active} />
           <Icon className="size-[17px]" strokeWidth={2} />
+          {wip && (
+            <Badge
+              aria-hidden
+              variant="outline"
+              className="-top-1 -right-1 absolute h-3 min-w-0 rounded-full border-none bg-amber-500 px-1 py-0 font-semibold text-[7px] text-white leading-none dark:bg-amber-400 dark:text-amber-950"
+            >
+              WIP
+            </Badge>
+          )}
         </Link>
       </TooltipTrigger>
-      <TooltipContent side="right">{label}</TooltipContent>
+      <TooltipContent side="right">
+        {label}
+        {wip && " (WIP)"}
+      </TooltipContent>
     </Tooltip>
   );
 }
@@ -172,6 +191,7 @@ export function ActivityBar({ signedIn }: { signedIn: boolean }) {
           label={section.label}
           icon={section.icon}
           active={isActive(section.href)}
+          wip={section.wip}
         />
       ))}
       <SearchRailButton />
@@ -182,6 +202,7 @@ export function ActivityBar({ signedIn }: { signedIn: boolean }) {
             label={settings.label}
             icon={settings.icon}
             active={isActive(settings.href)}
+            wip={settings.wip}
           />
         )}
         {signedIn && <SignOutButton />}

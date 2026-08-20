@@ -5,6 +5,7 @@ import type { TaskDto, TaskState } from "@gatecontrol/contracts";
 import { cleanup, render, screen } from "@testing-library/react";
 import { BOARD_COLUMNS } from "@/lib/task-states";
 import { BoardView } from "./board";
+import { CARD_ENTRANCE_CLASS } from "./column";
 
 /**
  * Board rendering tests (task TASK-024). Exercises the pure presentational board with props,
@@ -78,5 +79,28 @@ describe("BoardView", () => {
       />,
     );
     expect(screen.getByRole("button", { name: "act-4" })).toBeDefined();
+  });
+
+  it("wraps a card's <li> in the entrance-transition utility classes (user report: animate a card moving between columns)", () => {
+    render(<BoardView tasks={[makeTask({ id: "5", state: "backlog", title: "Fresh card" })]} />);
+    const item = screen.getByText("Fresh card").closest("li");
+    expect(item).not.toBeNull();
+    for (const cls of CARD_ENTRANCE_CLASS.split(" ")) {
+      expect(item?.className).toContain(cls);
+    }
+  });
+
+  it("renders a column's headerAction inside that column only", () => {
+    render(
+      <BoardView
+        tasks={[]}
+        headerActionFor={(state) =>
+          state === "backlog" ? <button type="button">New issue</button> : null
+        }
+      />,
+    );
+    const button = screen.getByRole("button", { name: "New issue" });
+    expect(button.closest("[data-state='backlog']")).not.toBeNull();
+    expect(button.closest("[data-state='ready']")).toBeNull();
   });
 });

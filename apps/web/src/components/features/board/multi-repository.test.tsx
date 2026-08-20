@@ -109,10 +109,13 @@ describe("creating a Task across several Repositories", () => {
     fireEvent.change(await screen.findByLabelText("Title"), {
       target: { value: "Cross-repository change" },
     });
+    // Repository before Issue: choosing a Repository resets any already-picked Issue (issue #15
+    // — the Issue picker narrows to the chosen Repository), so the Repository has to be picked
+    // first for the Issue picked afterward to survive submission.
+    await pick("Repository", "api");
     await pick("Issue", "Ship it");
     await pick("Agent profile", "Claude");
     await pick("Executor", "Local");
-    await pick("Repository", "api");
     fireEvent.change(screen.getByLabelText("Base ref"), { target: { value: "main" } });
     fireEvent.click(await screen.findByRole("checkbox", { name: "shared-lib" }));
     fireEvent.click(screen.getByRole("button", { name: "Create task" }));
@@ -136,10 +139,10 @@ describe("creating a Task across several Repositories", () => {
     fireEvent.click(await screen.findByRole("button", { name: "New task" }));
 
     fireEvent.change(await screen.findByLabelText("Title"), { target: { value: "One repo" } });
+    await pick("Repository", "api");
     await pick("Issue", "Ship it");
     await pick("Agent profile", "Claude");
     await pick("Executor", "Local");
-    await pick("Repository", "api");
     fireEvent.click(screen.getByRole("button", { name: "Create task" }));
 
     await waitFor(() => {

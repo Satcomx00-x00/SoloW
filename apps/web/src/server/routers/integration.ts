@@ -2,6 +2,7 @@ import "server-only";
 import {
   changeRequestDto,
   connectIntegrationInput,
+  connectIntegrationResultDto,
   deleteIntegrationInput,
   deleteIntegrationResultDto,
   externalIssuePreviewDto,
@@ -39,11 +40,11 @@ export const integrationRouter = router({
         tags: ["integration"],
         protect: true,
         summary:
-          "Connect a GitHub or GitLab account using a stored Personal Access Token Secret. The token is verified against the provider before the Integration is recorded.",
+          "Connect a GitHub or GitLab account using a stored Personal Access Token Secret. The token is verified against the provider before the Integration is recorded, then every Repository the token can see is imported automatically (capped; partial failures are reported per Repository, not raised as a mutation error), each with its own Issues.",
       },
     })
     .input(connectIntegrationInput)
-    .output(integrationDto)
+    .output(connectIntegrationResultDto)
     .mutation(async ({ ctx, input }) => unwrap(await connectIntegration(ctx.rctx, input))),
   list: integrationsProcedure
     .meta({
@@ -94,7 +95,7 @@ export const integrationRouter = router({
         tags: ["integration"],
         protect: true,
         summary:
-          "Import a repository from an Integration, creating the Repository already bound to it. Records the provider's clone URL; the orchestrator clones it the first time a Task needs it. Importing the same repository twice returns the existing Repository.",
+          "Import a repository from an Integration, creating the Repository already bound to it and then importing its Issues automatically. Records the provider's clone URL; the orchestrator clones it the first time a Task needs it. Importing the same repository twice returns the existing Repository.",
       },
     })
     .input(importRepositoryInput)
