@@ -1908,6 +1908,322 @@
         }
       }
     },
+    "/preference.getSurfaceLayout": {
+      "get": {
+        "operationId": "preference-getSurfaceLayout",
+        "summary": "Read the signed-in user's arrangement of a contributed surface. Returns the default arrangement when nothing is saved.",
+        "tags": [
+          "preference"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "surface",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "status-bar",
+                "commands",
+                "notifications"
+              ]
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "surface": {
+                      "type": "string",
+                      "enum": [
+                        "status-bar",
+                        "commands",
+                        "notifications"
+                      ]
+                    },
+                    "workspaceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "userId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "layout": {
+                      "type": "object",
+                      "properties": {
+                        "order": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$",
+                            "minLength": 1,
+                            "maxLength": 64
+                          },
+                          "maxItems": 200
+                        },
+                        "hidden": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$",
+                            "minLength": 1,
+                            "maxLength": 64
+                          },
+                          "maxItems": 200
+                        }
+                      },
+                      "required": [
+                        "order",
+                        "hidden"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "surface",
+                    "workspaceId",
+                    "userId",
+                    "layout"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.NOT_FOUND"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/preference.setSurfaceLayout": {
+      "post": {
+        "operationId": "preference-setSurfaceLayout",
+        "summary": "Save the signed-in user's arrangement of a contributed surface — the complete order and hidden list, not a delta.",
+        "tags": [
+          "preference"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "surface": {
+                    "type": "string",
+                    "enum": [
+                      "status-bar",
+                      "commands",
+                      "notifications"
+                    ]
+                  },
+                  "layout": {
+                    "type": "object",
+                    "properties": {
+                      "order": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$",
+                          "minLength": 1,
+                          "maxLength": 64
+                        },
+                        "maxItems": 200
+                      },
+                      "hidden": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$",
+                          "minLength": 1,
+                          "maxLength": 64
+                        },
+                        "maxItems": 200
+                      }
+                    },
+                    "required": [
+                      "order",
+                      "hidden"
+                    ]
+                  }
+                },
+                "required": [
+                  "surface",
+                  "layout"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "surface": {
+                      "type": "string",
+                      "enum": [
+                        "status-bar",
+                        "commands",
+                        "notifications"
+                      ]
+                    },
+                    "workspaceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "userId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "layout": {
+                      "type": "object",
+                      "properties": {
+                        "order": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$",
+                            "minLength": 1,
+                            "maxLength": 64
+                          },
+                          "maxItems": 200
+                        },
+                        "hidden": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$",
+                            "minLength": 1,
+                            "maxLength": 64
+                          },
+                          "maxItems": 200
+                        }
+                      },
+                      "required": [
+                        "order",
+                        "hidden"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "surface",
+                    "workspaceId",
+                    "userId",
+                    "layout"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/task.create": {
       "post": {
         "operationId": "task-create",
@@ -2866,6 +3182,389 @@
                     "createdAt",
                     "updatedAt"
                   ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/task.dependencies": {
+      "get": {
+        "operationId": "task-dependencies",
+        "summary": "List blocked_by dependencies — for one Task, or for every Task in the Workspace when no id is given. Each edge carries the blocking Task's title and current state, so a caller can see what is still outstanding.",
+        "tags": [
+          "task"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "taskId",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "taskId": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "blockedByTaskId": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "blockedByTitle": {
+                        "type": "string"
+                      },
+                      "blockedByState": {
+                        "type": "string",
+                        "enum": [
+                          "backlog",
+                          "ready",
+                          "running",
+                          "review",
+                          "parked",
+                          "failed",
+                          "done"
+                        ]
+                      },
+                      "createdAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      }
+                    },
+                    "required": [
+                      "taskId",
+                      "blockedByTaskId",
+                      "blockedByTitle",
+                      "blockedByState",
+                      "createdAt"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.NOT_FOUND"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/task.addDependency": {
+      "post": {
+        "operationId": "task-addDependency",
+        "summary": "Declare that a Task is blocked by another Task in the same Workspace. Refused if the edge would create a cycle, naming the offending path. Re-declaring an existing dependency is a no-op.",
+        "tags": [
+          "task"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "taskId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "blockedByTaskId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "taskId",
+                  "blockedByTaskId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "taskId": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "blockedByTaskId": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "blockedByTitle": {
+                        "type": "string"
+                      },
+                      "blockedByState": {
+                        "type": "string",
+                        "enum": [
+                          "backlog",
+                          "ready",
+                          "running",
+                          "review",
+                          "parked",
+                          "failed",
+                          "done"
+                        ]
+                      },
+                      "createdAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      }
+                    },
+                    "required": [
+                      "taskId",
+                      "blockedByTaskId",
+                      "blockedByTitle",
+                      "blockedByState",
+                      "createdAt"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/task.removeDependency": {
+      "post": {
+        "operationId": "task-removeDependency",
+        "summary": "Withdraw a blocked_by dependency between two Tasks, returning the Task's remaining dependencies.",
+        "tags": [
+          "task"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "taskId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "blockedByTaskId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "taskId",
+                  "blockedByTaskId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "taskId": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "blockedByTaskId": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "blockedByTitle": {
+                        "type": "string"
+                      },
+                      "blockedByState": {
+                        "type": "string",
+                        "enum": [
+                          "backlog",
+                          "ready",
+                          "running",
+                          "review",
+                          "parked",
+                          "failed",
+                          "done"
+                        ]
+                      },
+                      "createdAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      }
+                    },
+                    "required": [
+                      "taskId",
+                      "blockedByTaskId",
+                      "blockedByTitle",
+                      "blockedByState",
+                      "createdAt"
+                    ]
+                  }
                 }
               }
             }

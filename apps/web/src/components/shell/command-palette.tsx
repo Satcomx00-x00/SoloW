@@ -1,8 +1,9 @@
 "use client";
 
-import { CornerDownLeft, Inbox, Plus, Search } from "lucide-react";
+import type { SurfaceLayout } from "@gatecontrol/core";
+import { CornerDownLeft, Inbox, Search } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { openCreateDialog } from "@/components/features/board/create-dialog-bus";
 import {
   CommandDialog,
@@ -13,14 +14,23 @@ import {
   CommandList,
   CommandSeparator,
 } from "@/components/ui/command";
+import { useSurfaceLayout } from "@/hooks/use-surface-layout";
+import { useAppContext } from "@/lib/app-context";
+import { COMMAND_GROUPS, type CommandActions, commandRegistry } from "@/lib/contributions";
+import "@/lib/contributions-boot";
 import { ISSUE_STATUS_LABELS, ISSUE_STATUS_STYLE } from "@/lib/issue-status";
-import { SECTIONS } from "@/lib/navigation";
 import { STATE_LABELS, STATE_STYLE } from "@/lib/task-states";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
 
 /**
- * Command palette (⌘K) — the app's search surface.
+ * Command palette (⌘K) — the app's search surface, and a consumer of the command registry
+ * (issue #3).
+ *
+ * The palette holds no list of commands. Destinations, "New task" and the Settings entries are
+ * registrations resolved against the shell's `AppContext`, so a feature — or later a plugin —
+ * adds an entry without this file being edited, and whether an entry applies is its own `when`
+ * predicate rather than a branch here (AC-2, AC-4).
  *
  * Searching happens on the server. Filtering the client's copy of the list only works while the
  * whole list is in the client, which stops being true the moment a Workspace has a few hundred
@@ -107,6 +117,20 @@ export function CommandPalette() {
     [router],
   );
 
+  /**
+   * What a command is allowed to do, handed in rather than imported: a contributed command that
+   * reached for the router itself would be exactly the coupling the registry removes, and it is
+   * this object that a plugin permission prompt (#93) eventually attaches to.
+   */
+  const actions = useMemo<CommandActions>(
+    () => ({ navigate: go, createTask: () => create("task") }),
+    [go, create],
+  );
+
+  // Read here and passed down, so the resolved list is arranged the way the operator arranged it
+  // while `ContributedCommands` itself stays free of a query client (issue #3 AC-3).
+  const { layout: commandLayout } = useSurfaceLayout(commandRegistry.surface);
+
   const taskRows = tasks.data ?? [];
   const issueRows = issues.data ?? [];
   const loading = tasks.isFetching || issues.isFetching;
@@ -122,27 +146,10 @@ export function CommandPalette() {
       <CommandList>
         {nothingFound && <CommandEmpty>No task or issue matches “{debouncedQuery}”.</CommandEmpty>}
 
-        {/* Destinations and creation only when browsing; during a search they are noise. */}
-        {!searching && (
-          <>
-            <CommandGroup heading="Go to">
-              {SECTIONS.map((section) => (
-                <CommandItem key={section.href} onSelect={() => go(section.href)}>
-                  <section.icon className="text-muted-foreground" />
-                  {section.label}
-                </CommandItem>
-              ))}
-            </CommandGroup>
-            <CommandSeparator />
-            <CommandGroup heading="Create">
-              <CommandItem onSelect={() => create("task")}>
-                <Plus className="text-muted-foreground" />
-                New task
-              </CommandItem>
-            </CommandGroup>
-            <CommandSeparator />
-          </>
-        )}
+        {/* Commands only when browsing; during a search they are noise. This is the palette's
+            own mode, not a judgement about any one command — which is why it gates the whole
+            resolved list rather than naming anything in it. */}
+        {!searching && <ContributedCommands actions={actions} layout={commandLayout} />}
 
         {taskRows.length > 0 && (
           <CommandGroup heading={searching ? `Tasks (${taskRows.length})` : "Recent tasks"}>
@@ -203,6 +210,65 @@ export function CommandPalette() {
         {loading && <span className="ml-auto">Searching…</span>}
       </div>
     </CommandDialog>
+  );
+}
+
+/**
+ * Everything the command registry resolved, grouped under its headings (issue #3).
+ *
+ * Exported so it can be tested against a registry without a router or a query client — the
+ * palette around it is search, and this is the part that has to prove a contributed command
+ * appears, a predicate keeps one out, and the order is the arranged one.
+ *
+ * A command that throws while running costs itself and nothing else, for the same reason the
+ * registry swallows a throwing predicate: #93 will run these from a plugin.
+ */
+export function ContributedCommands({
+  actions,
+  layout,
+}: {
+  actions: CommandActions;
+  /**
+   * The surface's saved arrangement. Passed in rather than read here, so this stays renderable
+   * against a registry with no router and no query client — which is what makes it testable at
+   * all. `commands` is one of the arrangeable surfaces the preference API accepts, so a caller
+   * that omits it would let a user set an order they never see applied.
+   */
+  layout?: SurfaceLayout | undefined;
+}) {
+  const appContext = useAppContext();
+  const commands = commandRegistry.resolve(appContext, layout);
+
+  return (
+    <>
+      {COMMAND_GROUPS.map((group) => {
+        const items = commands.filter((command) => command.render.group === group);
+        if (items.length === 0) return null;
+        return (
+          <Fragment key={group}>
+            <CommandGroup heading={group}>
+              {items.map(({ id, render }) => (
+                <CommandItem
+                  key={id}
+                  value={id}
+                  onSelect={() => {
+                    try {
+                      render.run(actions);
+                    } catch (error) {
+                      console.error(`[contributions] "${id}" threw while running`, error);
+                    }
+                  }}
+                >
+                  <render.icon className="text-muted-foreground" />
+                  {render.title}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+            <CommandSeparator />
+          </Fragment>
+        );
+      })}
+    </>
   );
 }
 

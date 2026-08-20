@@ -6,6 +6,7 @@ import { IntegrationsSection } from "./integrations-section";
 import { McpSection } from "./mcp-section";
 import { RepositoriesSection } from "./repositories-section";
 import { SecretsSection } from "./secrets-section";
+import { StatusBarSection } from "./status-bar-section";
 
 /**
  * Settings (TASK-023): manage the resources a Task needs — Secrets (write-only), Agent Profiles
@@ -31,6 +32,7 @@ export function Settings() {
       <RepositoriesSection />
       <IntegrationsSection />
       <McpSection />
+      <StatusBarSection />
     </div>
   );
 }

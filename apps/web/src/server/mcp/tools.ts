@@ -28,8 +28,11 @@ import { appRouter } from "../routers/index.js";
  *   `ff-mcp` is by definition enabled whenever anything is talking MCP, so exposing these would
  *   let a token mint further tokens and revoke its own revocation — turning a scoped, revocable
  *   grant into an unbounded, unrevocable one. Issuing a token stays a signed-in, first-party act.
+ * - `preference` — one person's arrangement of their own interface (issue #3). A token is held
+ *   by software, which has no interface to arrange; exposing it would let a tool rearrange a
+ *   human's shell, which is not work management by any reading.
  */
-const WITHHELD_NAMESPACES = new Set(["secret", "stream", "mcpToken"]);
+const WITHHELD_NAMESPACES = new Set(["secret", "stream", "mcpToken", "preference"]);
 
 export interface McpToolDefinition {
   /** MCP tool name — the tRPC path with `.` swapped for `_` (`issue.get` → `issue_get`). */

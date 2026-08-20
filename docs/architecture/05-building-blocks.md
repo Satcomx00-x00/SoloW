@@ -53,6 +53,15 @@ deliberately implementation-agnostic: it names responsibilities, not code.
 - **Review workspace** — terminal, editor, diff, preview, conversation (F09, F10).
 - **Configuration surfaces** — Profiles, Integrations, Settings (F05, F12, F16, F17).
 - **Insights** — reporting (F14).
+- **Contribution registries** — the seam that assembles the surfaces which are not fixed lists:
+  the command palette, the status bar, and notification delivery ([F19](../features/F19-extension-contributions.md)).
+  A feature module *registers* what it contributes — an id, a default priority, an optional
+  visibility predicate, and whatever the surface renders or runs it with — and a surface renders
+  whatever the registry resolved for the current context and the user's saved arrangement. The
+  dependency runs one way: a feature never imports a surface, and a surface never imports a
+  feature. That is what makes a plugin system a matter of supplying registrations at runtime
+  rather than of editing every surface, and it is why a user's arrangement of a surface is a
+  per-user preference in the State Store rather than browser state.
 
 ### Within the Orchestration Component
 - **Task runner** — starts, supervises, and finishes Sessions for Tasks (F04, F11).
@@ -67,6 +76,8 @@ deliberately implementation-agnostic: it names responsibilities, not code.
 
 - The Interactive Application never launches or holds agent processes; it directs and
   observes them through the Orchestration Component.
+- A feature module never reaches into a surface it does not own; it contributes to one, and a
+  failing contribution costs its own slot rather than the surface (F19).
 - The Orchestration Component never renders user interface; it does the durable, long-lived
   work and reports state.
 - All parts read the same authoritative State Store, so the interface, orchestration, and

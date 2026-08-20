@@ -28,10 +28,12 @@ without users having to watch the board constantly.
   credential expiring.
 - **FR-2** GateControl notifies users of completion events: a Task reaching Done and a
   Workflow Run completing.
-- **FR-3** Notifications can be delivered in-product and through configured Integrations
-  (for example, chat — see [F12](./F12-integrations.md)).
-- **FR-4** A user can configure which events they are notified about and through which
-  channels.
+- **FR-3** Notifications are delivered through *channels*. A channel is a contribution to the
+  notification registry (see [F19](./F19-extension-contributions.md)), not a feature of its
+  own: in-app is the first channel, and chat or email are further registrations that reuse a
+  configured Integration (see [F12](./F12-integrations.md)).
+- **FR-4** A user can configure which events they are notified about and which of the
+  registered channels each is delivered through.
 - **FR-5** Notifications link directly to the relevant Task, Run, or setting.
 
 ## Non-functional requirements
@@ -60,3 +62,4 @@ without users having to watch the board constantly.
 - [F03 — Visual Workflow Designer & Monitor](./F03-workflow-designer.md)
 - [F10 — Review & Approval](./F10-review-approval.md)
 - [F12 — External Integrations](./F12-integrations.md)
+- [F19 — Extension Contributions](./F19-extension-contributions.md)

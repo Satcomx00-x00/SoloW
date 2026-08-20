@@ -31,6 +31,7 @@ differentiator) · **Later** (planned after first release).
 | [F16](./F16-platform-deployment.md) | Platform, Deployment & Multi-Tenancy | Core / Edge | J10 |
 | [F17](./F17-security-secrets.md) | Security & Secrets | Core | J6, J10 |
 | [F18](./F18-onboarding-setup-workflow.md) | First-Run Onboarding & Setup Workflow | Core | J6, J10 |
+| [F19](./F19-extension-contributions.md) | Extension Contributions | Core | J4, J10 |
 
 ## Specification template
 
