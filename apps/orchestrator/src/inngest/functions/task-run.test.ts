@@ -19,6 +19,7 @@ import {
 import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
 import { createLogger } from "@gatecontrol/observability";
 import { asc, eq } from "drizzle-orm";
+import { worktreeNameForTask } from "../../agent/claude-code-runner.js";
 import { AgentRegistry } from "../../agent/registry.js";
 import type { AgentHandle, AgentOutcome, AgentRunner, AgentStartOpts } from "../../agent/runner.js";
 import { listTaskEventsSince } from "../../data.js";
@@ -50,7 +51,11 @@ function freshIds(): Ids {
 async function seedRun(
   db: TestDb,
   ids: Ids,
-  opts: { agentProtocol?: AgentProtocol; executorConfig?: ExecutorConfig } = {},
+  opts: {
+    agentProtocol?: AgentProtocol;
+    executorConfig?: ExecutorConfig;
+    setupFilePatterns?: string[];
+  } = {},
 ): Promise<void> {
   await db.insert(workspace).values({ id: ids.workspaceId, name: "WS", ownerUserId: "owner" });
   const secretId = `secret-${ids.taskId}`;
@@ -98,6 +103,7 @@ async function seedRun(
     name: "repo",
     source: "local_path",
     location: `/srv/${ids.taskId}`,
+    ...(opts.setupFilePatterns ? { setupFilePatterns: opts.setupFilePatterns } : {}),
   });
   const issueId = `issue-${ids.taskId}`;
   await db
@@ -180,6 +186,10 @@ interface Spies {
   discard: number;
   cleanup: number;
   published: Array<{ channel: string; event: Record<string, unknown> }>;
+  /** Every setup-file copy the lifecycle asked for (issue #52), in order. */
+  seeded: Array<{ repoPath: string; worktreePath: string; patterns: string[] }>;
+  /** The patterns each diff/commit was told to exclude — how AC-4 becomes observable. */
+  excluded: string[][];
 }
 
 function makeDeps(
@@ -187,7 +197,14 @@ function makeDeps(
   runner: AgentRunner,
   logStream: NodeJS.WritableStream,
 ): { deps: TaskRunDeps; spies: Spies } {
-  const spies: Spies = { commit: 0, discard: 0, cleanup: 0, published: [] };
+  const spies: Spies = {
+    commit: 0,
+    discard: 0,
+    cleanup: 0,
+    published: [],
+    seeded: [],
+    excluded: [],
+  };
   const deps: TaskRunDeps = {
     db,
     runner,
@@ -203,8 +220,13 @@ function makeDeps(
         // reads whatever git reports; the fake mirrors that shape.
         return { path: reported, branch: reported.split("/").pop() ?? "", repoPath };
       },
-      commit: async () => {
+      seed: async (params) => {
+        spies.seeded.push(params);
+        return { copied: params.patterns.length, unmatched: [], failed: 0 };
+      },
+      commit: async (_path, _message, patterns) => {
         spies.commit += 1;
+        spies.excluded.push(patterns);
       },
       discard: async () => {
         spies.discard += 1;
@@ -213,11 +235,16 @@ function makeDeps(
         spies.cleanup += 1;
       },
       hasChanges: async () => true,
-      diff: async () => ({
-        files: [{ path: "src/latch.ts", status: "modified" as const, additions: 4, deletions: 1 }],
-        patch: "--- a/src/latch.ts\n+++ b/src/latch.ts\n",
-        truncated: false,
-      }),
+      diff: async (_path, patterns) => {
+        spies.excluded.push(patterns);
+        return {
+          files: [
+            { path: "src/latch.ts", status: "modified" as const, additions: 4, deletions: 1 },
+          ],
+          patch: "--- a/src/latch.ts\n+++ b/src/latch.ts\n",
+          truncated: false,
+        };
+      },
     },
     hub: {
       taskChannel: (w, t) => `ws:${w}:task:${t}`,
@@ -661,6 +688,103 @@ describe("the diff a reviewer is shown", () => {
       expect(runner.envs[0]).not.toHaveProperty("ANTHROPIC_API_KEY");
       expect(runner.envs[0]?.["CLAUDE_CODE_OAUTH_TOKEN"]).toBe("oauth-token");
     });
+  });
+});
+
+/**
+ * The Repository's setup-file allowlist, from the lifecycle's point of view (issue #52). What
+ * gets copied is `setup-files.integration.test.ts`'s job; this asks the narrower question of
+ * *when* the lifecycle asks for it, and what it subtracts afterwards.
+ */
+describe("setup files copied into the agent's worktree (issue #52)", () => {
+  let db: TestDb;
+
+  beforeAll(() => {
+    process.env.GATECONTROL_SECRET_KEY ??= Buffer.alloc(32, 3).toString("base64");
+  });
+  beforeEach(() => {
+    db = createTestDb();
+  });
+
+  it("copies them into the worktree the agent reported, from the repository it prepared", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids, { setupFilePatterns: [".env", "config/local.json"] });
+    const { deps, spies } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    expect(spies.seeded).toEqual([
+      {
+        repoPath: `/repo/${ids.taskId}`,
+        worktreePath: `/wt/${worktreeNameForTask(ids.taskId)}`,
+        patterns: [".env", "config/local.json"],
+      },
+    ]);
+  });
+
+  it("does not ask when the Repository configured no patterns", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const { deps, spies } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    expect(spies.seeded).toEqual([]);
+  });
+
+  it("copies once, on the round that creates the worktree — not on a resumed one", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids, { setupFilePatterns: [".env"] });
+    const { deps, spies } = makeDeps(
+      db,
+      new ScriptedRunner([{ kind: "completed" }, { kind: "completed" }]),
+      nullStream(),
+    );
+
+    // Round one creates the worktree; round two resumes inside it, where the files already are.
+    await runTaskLifecycle(deps, {
+      event: { data: ids },
+      step: scriptedStep([{ decision: "request_changes", feedback: "again" }, "approve"]),
+    });
+
+    expect(spies.seeded.length).toBe(1);
+  });
+
+  it("subtracts the patterns from every diff and commit (AC-4)", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids, { setupFilePatterns: [".env"] });
+    const { deps, spies } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    // One diff capture at the review gate, one commit on approval — both told to leave the
+    // copied files alone.
+    expect(spies.excluded.length).toBe(2);
+    for (const patterns of spies.excluded) expect(patterns).toEqual([".env"]);
+  });
+
+  it("logs counts and patterns, never a resolved path or a value (AC-3)", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids, { setupFilePatterns: [".env"] });
+    const lines: string[] = [];
+    const stream = new Writable({
+      write(chunk, _e, cb) {
+        for (const line of chunk.toString().split("\n")) if (line.trim()) lines.push(line);
+        cb();
+      },
+    });
+    const { deps } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), stream);
+    // A copy that partly failed is the only case that logs at all — and the warning must still
+    // say nothing about which files were involved.
+    deps.worktree.seed = async () => ({ copied: 1, unmatched: ["absent.env"], failed: 1 });
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    const warning = lines.find((l) => l.includes("setup-files.incomplete"));
+    expect(warning).toBeDefined();
+    expect(warning).toContain("absent.env");
+    // The worktree path is what a naive "copied X to Y" log line would carry.
+    expect(warning).not.toContain(`/wt/${worktreeNameForTask(ids.taskId)}`);
   });
 });
 

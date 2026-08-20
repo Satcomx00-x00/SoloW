@@ -1,7 +1,11 @@
 import "server-only";
-import { connectRepositoryInput, repositoryDto } from "@gatecontrol/contracts";
+import {
+  connectRepositoryInput,
+  repositoryDto,
+  updateRepositorySetupInput,
+} from "@gatecontrol/contracts";
 import { z } from "zod";
-import { connectRepository, listRepositories } from "../dal/repository.js";
+import { connectRepository, listRepositories, updateRepositorySetup } from "../dal/repository.js";
 import { ownerProcedure, router, unwrap } from "../trpc.js";
 
 export const repositoryRouter = router({
@@ -32,4 +36,18 @@ export const repositoryRouter = router({
     .input(z.object({}))
     .output(z.array(repositoryDto))
     .query(async ({ ctx }) => unwrap(await listRepositories(ctx.rctx))),
+  updateSetup: ownerProcedure
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/repository.updateSetup",
+        tags: ["repository"],
+        protect: true,
+        summary:
+          "Replace the allowlist of files copied from the Repository into every new worktree, such as a .env the agent needs to run the test suite.",
+      },
+    })
+    .input(updateRepositorySetupInput)
+    .output(repositoryDto)
+    .mutation(async ({ ctx, input }) => unwrap(await updateRepositorySetup(ctx.rctx, input))),
 });

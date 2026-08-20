@@ -27,6 +27,7 @@ import {
   hasChanges,
   prepareRepository,
 } from "../../apps/orchestrator/src/worktree/manager.js";
+import { seedSetupFiles } from "../../apps/orchestrator/src/worktree/setup-files.js";
 import { hub } from "../../apps/orchestrator/src/ws/hub.js";
 import { PATHS, PORTS } from "./fixture.js";
 
@@ -151,13 +152,14 @@ function deps(): TaskRunDeps {
     worktree: {
       prepare: (params) => prepareRepository(executor, params),
       adopt: (repoPath, reportedPath) => adoptWorktree(executor, repoPath, reportedPath),
-      commit: (path, message) => commitWorktree(executor, path, message),
+      seed: (params) => seedSetupFiles(executor, params),
+      commit: (path, message, patterns) => commitWorktree(executor, path, message, patterns),
       discard: (path) => discardWorktreeChanges(executor, path),
       cleanup: (repoPath, worktree) => cleanupWorktree(executor, repoPath, worktree),
-      hasChanges: (path) => hasChanges(executor, path),
+      hasChanges: (path, patterns) => hasChanges(executor, path, patterns),
       // The real capture against the real worktree, so the E2E proves the diff a reviewer sees
       // is the diff git reports.
-      diff: (path) => diffWorktree(executor, path),
+      diff: (path, patterns) => diffWorktree(executor, path, patterns),
     },
     hub,
     // The same process-wide registry the WebSocket hub looks in, so a frame the SPA sends

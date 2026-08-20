@@ -41,6 +41,7 @@ import {
   type Worktree,
   type WorktreeDiff,
 } from "../../worktree/manager.js";
+import { type SetupFileSeedResult, seedSetupFiles } from "../../worktree/setup-files.js";
 import { hub } from "../../ws/hub.js";
 import { inngest } from "../client.js";
 
@@ -95,11 +96,17 @@ export interface WorktreeOps {
   prepare(params: ProvisionParams): Promise<string>;
   /** Confirm with git that the path the agent reported really is a worktree of the repository. */
   adopt(repoPath: string, reportedPath: string | null): Promise<Worktree>;
-  commit(path: string, message: string): Promise<void>;
+  /** Copy the Repository's allowlisted setup files into a freshly created worktree (issue #52). */
+  seed(params: {
+    repoPath: string;
+    worktreePath: string;
+    patterns: string[];
+  }): Promise<SetupFileSeedResult>;
+  commit(path: string, message: string, setupFilePatterns: string[]): Promise<void>;
   discard(path: string): Promise<void>;
   cleanup(repoPath: string, worktree: string): Promise<void>;
-  hasChanges(path: string): Promise<boolean>;
-  diff(path: string): Promise<WorktreeDiff>;
+  hasChanges(path: string, setupFilePatterns: string[]): Promise<boolean>;
+  diff(path: string, setupFilePatterns: string[]): Promise<WorktreeDiff>;
 }
 
 /** The bits of the WS hub the lifecycle uses. */
@@ -137,11 +144,12 @@ export function defaultDeps(): TaskRunDeps {
     worktree: {
       prepare: (params) => prepareRepository(executor, params),
       adopt: (repoPath, reportedPath) => adoptWorktree(executor, repoPath, reportedPath),
-      commit: (path, message) => commitWorktree(executor, path, message),
+      seed: (params) => seedSetupFiles(executor, params),
+      commit: (path, message, patterns) => commitWorktree(executor, path, message, patterns),
       discard: (path) => discardWorktreeChanges(executor, path),
       cleanup: (repoPath, worktree) => cleanupWorktree(executor, repoPath, worktree),
-      hasChanges: (path) => hasChanges(executor, path),
-      diff: (path) => diffWorktree(executor, path),
+      hasChanges: (path, patterns) => hasChanges(executor, path, patterns),
+      diff: (path, patterns) => diffWorktree(executor, path, patterns),
     },
     hub,
     registry: agentRegistry,
@@ -240,6 +248,48 @@ export async function runTaskLifecycle(
       cloneCredential: cloneCredentialFor(ctx),
     }),
   );
+
+  /**
+   * The Repository's setup-file allowlist (issue #52): copied into the worktree the agent
+   * creates, and subtracted from the diff and the commit, so a `.env` the agent needs to run
+   * the tests never reaches the review UI or the branch.
+   */
+  const setupFilePatterns = ctx.repository.setupFilePatterns ?? [];
+
+  /**
+   * Copy the setup files into the worktree the agent reported, having first made git confirm it
+   * really is a worktree of this repository — writing a `.env` into a directory the agent merely
+   * claimed is precisely the mistake the adoption check exists to prevent (Principle II).
+   *
+   * Everything here is best-effort. A pattern that matches nothing, a file that cannot be read,
+   * a worktree that fails adoption: none of them should fail a Task that would otherwise run
+   * (AC-5). Warnings carry counts and the operator's own patterns — never a resolved path, and
+   * never any content (AC-3).
+   */
+  const seed = async (reportedPath: string): Promise<void> => {
+    if (setupFilePatterns.length === 0) return;
+    try {
+      const confirmed = await deps.worktree.adopt(repoPath, reportedPath);
+      const result = await deps.worktree.seed({
+        repoPath,
+        worktreePath: confirmed.path,
+        patterns: setupFilePatterns,
+      });
+      if (result.unmatched.length > 0 || result.failed > 0) {
+        log.warn(
+          {
+            event: "setup-files.incomplete",
+            copied: result.copied,
+            failed: result.failed,
+            unmatched: result.unmatched,
+          },
+          "some setup-file patterns copied nothing",
+        );
+      }
+    } catch (cause) {
+      captureException(log, cause, { stage: "setup-files-seed" });
+    }
+  };
 
   /**
    * Set once the first round adopts the worktree the agent made. Every later step — diff,
@@ -353,6 +403,12 @@ export async function runTaskLifecycle(
         // Learn where the agent went as soon as it says so, before waiting on the run: if the
         // agent dies mid-run we still know which worktree to clean up.
         reported = await handle.workspacePath;
+        // ...and, on the first round, use that same moment to copy the Repository's setup files
+        // in. The CLI announces its worktree in the session event it emits before the model's
+        // first turn, so this is the earliest point at which the directory exists — and, in
+        // practice, before the agent has looked at it. A resuming round skips it: the files are
+        // already there, and re-copying would overwrite anything the agent changed.
+        if (!resuming && reported) await seed(reported);
         outcome = await handle.outcome;
       } finally {
         deregister();
@@ -381,7 +437,7 @@ export async function runTaskLifecycle(
           worktree: adopted,
         };
       }
-      const changed = await deps.worktree.hasChanges(adopted.path);
+      const changed = await deps.worktree.hasChanges(adopted.path, setupFilePatterns);
       return { kind: "completed" as const, changed, worktree: adopted };
     });
 
@@ -424,7 +480,7 @@ export async function runTaskLifecycle(
       // A capture failure must not block the review gate — the branch name alone is enough to
       // decide on, so this degrades to "no diff shown" rather than stalling the Task.
       try {
-        const captured = await deps.worktree.diff(worktree.path);
+        const captured = await deps.worktree.diff(worktree.path, setupFilePatterns);
         await appendSessionEvent(db, workspaceId, {
           sessionId,
           seq: await nextSessionEventSeq(db, workspaceId, sessionId),
@@ -451,7 +507,7 @@ export async function runTaskLifecycle(
 
     if (decision === "approve") {
       await step.run(`approve-${round}`, async () => {
-        await deps.worktree.commit(worktree.path, `GateControl: task ${taskId}`);
+        await deps.worktree.commit(worktree.path, `GateControl: task ${taskId}`, setupFilePatterns);
         await setTaskState(db, workspaceId, taskId, "done", { resultBranch: worktree.branch });
         await setSessionState(db, workspaceId, sessionId, "closed", {
           endedAt: new Date().toISOString(),

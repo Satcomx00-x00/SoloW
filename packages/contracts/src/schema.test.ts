@@ -4,8 +4,11 @@ import {
   connectRepositoryInput,
   createTaskInput,
   importIssuesInput,
+  MAX_SETUP_FILE_PATTERNS,
   reviewDecisionInput,
   setSecretInput,
+  setupFilePatternSchema,
+  setupFilePatternsSchema,
   taskEventSchema,
 } from "./index.js";
 
@@ -315,5 +318,58 @@ describe("taskEventSchema discriminated union", () => {
       at: "2026-08-17T12:00:00.000Z",
     });
     expect(res.success).toBe(false);
+  });
+});
+
+/**
+ * The allowlist that decides which files are copied into an agent's worktree (issue #52). Every
+ * rejection here is a path jail expressed as a type: a pattern that cannot name a file outside
+ * the repository cannot copy a credential out of one.
+ */
+describe("setupFilePatternSchema (issue #52 AC-6)", () => {
+  it("accepts the patterns the feature exists for", () => {
+    for (const pattern of [".env", ".env.*", "config/local.json", "apps/**/.env.local"]) {
+      expect(setupFilePatternSchema.safeParse(pattern).success).toBe(true);
+    }
+  });
+
+  it("trims surrounding whitespace rather than matching on it", () => {
+    const res = setupFilePatternSchema.safeParse("  .env  ");
+    expect(res.success).toBe(true);
+    if (res.success) expect(res.data).toBe(".env");
+  });
+
+  it("rejects an absolute path", () => {
+    expect(setupFilePatternSchema.safeParse("/etc/shadow").success).toBe(false);
+  });
+
+  it("rejects a pattern that climbs out of the repository", () => {
+    expect(setupFilePatternSchema.safeParse("../../.ssh/id_rsa").success).toBe(false);
+    expect(setupFilePatternSchema.safeParse("config/../../.env").success).toBe(false);
+  });
+
+  it("keeps a filename that merely starts with dots", () => {
+    // `..env` is a legitimate filename; only a `..` *segment* escapes.
+    expect(setupFilePatternSchema.safeParse("..env").success).toBe(true);
+  });
+
+  it("rejects a pattern git would read as pathspec magic", () => {
+    expect(setupFilePatternSchema.safeParse(":(top)/etc/passwd").success).toBe(false);
+  });
+
+  it("rejects a pattern that could be read as an option", () => {
+    expect(setupFilePatternSchema.safeParse("--output=/tmp/x").success).toBe(false);
+  });
+
+  it("rejects an embedded newline or NUL", () => {
+    expect(setupFilePatternSchema.safeParse(".env\n.ssh/id_rsa").success).toBe(false);
+    expect(setupFilePatternSchema.safeParse(".env\0").success).toBe(false);
+  });
+
+  it("caps the list — an allowlist needing fifty entries is not one", () => {
+    const tooMany = Array.from({ length: MAX_SETUP_FILE_PATTERNS + 1 }, (_, i) => `.env.${i}`);
+    expect(setupFilePatternsSchema.safeParse(tooMany).success).toBe(false);
+    expect(setupFilePatternsSchema.safeParse(tooMany.slice(0, -1)).success).toBe(true);
+    expect(setupFilePatternsSchema.safeParse([]).success).toBe(true);
   });
 });

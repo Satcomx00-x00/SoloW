@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { trpc } from "@/trpc/react";
+import { SetupFileRows } from "./setup-file-rows";
 
 /** Connect Repositories from a local clone path or a remote git URL. */
 export function RepositoriesSection() {
@@ -101,12 +102,18 @@ export function RepositoriesSection() {
             {list.data.length === 0 ? (
               <p className="text-muted-foreground text-sm">No repositories connected yet.</p>
             ) : (
-              <ul className="flex flex-wrap gap-2">
+              <ul className="grid gap-4">
                 {list.data.map((r) => (
-                  <li key={r.id}>
-                    <Badge variant="secondary">
-                      {r.name} · {r.source}
-                    </Badge>
+                  <li className="grid gap-3 rounded-md border p-3" key={r.id}>
+                    <div className="flex items-center gap-2">
+                      <Badge variant="secondary">
+                        {r.name} · {r.source}
+                      </Badge>
+                      <span className="truncate text-muted-foreground text-xs">{r.location}</span>
+                    </div>
+                    {/* Per-repository, because which files an agent needs is a property of the
+                        repository, not of the Workspace (issue #52). */}
+                    <SetupFileRows patterns={r.setupFilePatterns} repositoryId={r.id} />
                   </li>
                 ))}
               </ul>

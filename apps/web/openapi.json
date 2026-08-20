@@ -927,6 +927,12 @@
                       "type": "string",
                       "nullable": true
                     },
+                    "setupFilePatterns": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
                     "createdAt": {
                       "type": "string",
                       "format": "date-time"
@@ -943,6 +949,7 @@
                     "location",
                     "integrationId",
                     "externalFullName",
+                    "setupFilePatterns",
                     "createdAt",
                     "updatedAt"
                   ]
@@ -4736,6 +4743,12 @@
                       "type": "string",
                       "nullable": true
                     },
+                    "setupFilePatterns": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
                     "createdAt": {
                       "type": "string",
                       "format": "date-time"
@@ -4752,6 +4765,7 @@
                     "location",
                     "integrationId",
                     "externalFullName",
+                    "setupFilePatterns",
                     "createdAt",
                     "updatedAt"
                   ]
@@ -4850,6 +4864,12 @@
                         "type": "string",
                         "nullable": true
                       },
+                      "setupFilePatterns": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
                       "createdAt": {
                         "type": "string",
                         "format": "date-time"
@@ -4866,6 +4886,7 @@
                       "location",
                       "integrationId",
                       "externalFullName",
+                      "setupFilePatterns",
                       "createdAt",
                       "updatedAt"
                     ]
@@ -4910,6 +4931,154 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/error.NOT_FOUND"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/repository.updateSetup": {
+      "post": {
+        "operationId": "repository-updateSetup",
+        "summary": "Replace the allowlist of files copied from the Repository into every new worktree, such as a .env the agent needs to run the test suite.",
+        "tags": [
+          "repository"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "repositoryId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "setupFilePatterns": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "maxItems": 20
+                  }
+                },
+                "required": [
+                  "repositoryId",
+                  "setupFilePatterns"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string",
+                      "enum": [
+                        "local_path",
+                        "remote_url"
+                      ]
+                    },
+                    "location": {
+                      "type": "string"
+                    },
+                    "integrationId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
+                    "externalFullName": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "setupFilePatterns": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "source",
+                    "location",
+                    "integrationId",
+                    "externalFullName",
+                    "setupFilePatterns",
+                    "createdAt",
+                    "updatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
                 }
               }
             }

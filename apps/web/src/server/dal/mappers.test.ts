@@ -112,6 +112,7 @@ describe("mappers", () => {
         location: "/srv/repos/gatecontrol",
         integrationId: null,
         externalFullName: null,
+        setupFilePatterns: [".env"],
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
       });
@@ -122,6 +123,7 @@ describe("mappers", () => {
         location: "/srv/repos/gatecontrol",
         integrationId: null,
         externalFullName: null,
+        setupFilePatterns: [".env"],
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
       });

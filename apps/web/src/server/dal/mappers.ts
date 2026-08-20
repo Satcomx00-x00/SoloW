@@ -79,6 +79,9 @@ export function repositoryToDto(row: RepositoryRow): RepositoryDto {
     location: row.location,
     integrationId: row.integrationId,
     externalFullName: row.externalFullName,
+    // Coalesced because the column was added to a populated table (issue #52): a row written
+    // before the migration reads back as null, and the DTO promises a list.
+    setupFilePatterns: row.setupFilePatterns ?? [],
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };

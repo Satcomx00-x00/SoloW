@@ -232,6 +232,17 @@ export const repository = sqliteTable(
     integrationId: text("integration_id").references(() => integration.id),
     /** The provider's own identifier — "owner/repo" for GitHub, "namespace/path" for GitLab. */
     externalFullName: text("external_full_name"),
+    /**
+     * Repository-relative globs for files copied into each new worktree (issue #52) — a `.env`
+     * the agent needs to run the test suite, not a general "copy what git ignores".
+     *
+     * Stored as a list rather than a single joined string so a pattern containing a separator
+     * cannot silently become two, and so the maximum length is a property of the list.
+     */
+    setupFilePatterns: text("setup_file_patterns", { mode: "json" })
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'`),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

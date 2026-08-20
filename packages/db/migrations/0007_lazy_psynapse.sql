@@ -1,0 +1,1 @@
+ALTER TABLE `repository` ADD `setup_file_patterns` text DEFAULT '[]' NOT NULL;

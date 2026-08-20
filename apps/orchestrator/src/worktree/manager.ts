@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import type { RepositorySource } from "@gatecontrol/contracts";
 import type { Executor } from "../executor/types.js";
+import { setupFileExclusions } from "./setup-files.js";
 
 /**
  * Git worktree manager (spec F08 / task TASK-015). Each Task gets an isolated worktree so
@@ -213,19 +214,56 @@ function samePath(a: string, b: string): boolean {
   return normalise(a) === normalise(b);
 }
 
-/** True when the worktree has uncommitted changes (i.e. the agent produced a diff). */
-export async function hasChanges(executor: Executor, path: string): Promise<boolean> {
-  const out = await run(executor, ["git", "-C", path, "status", "--porcelain"]);
+/**
+ * True when the worktree has uncommitted changes (i.e. the agent produced a diff).
+ *
+ * `setupFilePatterns` are subtracted for the same reason they are subtracted from the diff: a
+ * copied `.env` is not work the agent did, and counting it would send a Task that changed
+ * nothing to review with an empty patch (issue #52 AC-4).
+ */
+export async function hasChanges(
+  executor: Executor,
+  path: string,
+  setupFilePatterns: string[] = [],
+): Promise<boolean> {
+  const out = await run(executor, [
+    "git",
+    "-C",
+    path,
+    "status",
+    "--porcelain",
+    "--",
+    ".",
+    ...setupFileExclusions(setupFilePatterns),
+  ]);
   return out.trim().length > 0;
 }
 
-/** Commit the agent's changes onto the Task's new local branch (no push/PR — spec FR-009). */
+/**
+ * Commit the agent's changes onto the Task's new local branch (no push/PR — spec FR-009).
+ *
+ * `setupFilePatterns` are excluded from the `add` — the one place in the lifecycle where the
+ * exclusion is about more than presentation. A copied `.env` is usually git-ignored and would
+ * not be staged anyway, but a pattern naming a *tracked* file would otherwise commit the
+ * operator's local copy of it onto the branch, and from there into a pull request (issue #52,
+ * Principle IV).
+ */
 export async function commitWorktree(
   executor: Executor,
   path: string,
   message: string,
+  setupFilePatterns: string[] = [],
 ): Promise<void> {
-  await run(executor, ["git", "-C", path, "add", "-A"]);
+  await run(executor, [
+    "git",
+    "-C",
+    path,
+    "add",
+    "-A",
+    "--",
+    ".",
+    ...setupFileExclusions(setupFilePatterns),
+  ]);
   await run(executor, ["git", "-C", path, "commit", "-m", message]);
 }
 
@@ -312,11 +350,27 @@ function parseNumstat(out: string): Map<string, { additions: number; deletions: 
  * takes it out of the unstaged diff entirely: a plain `git diff` reported a deleted file as no
  * change at all. Against HEAD both staged and unstaged work is included, so a deletion survives.
  */
-export async function diffWorktree(executor: Executor, path: string): Promise<WorktreeDiff> {
-  await executor.exec(["git", "-C", path, "add", "-N", "."]);
+export async function diffWorktree(
+  executor: Executor,
+  path: string,
+  setupFilePatterns: string[] = [],
+): Promise<WorktreeDiff> {
+  // Files copied in by the setup-file allowlist are subtracted from every one of these commands
+  // (issue #52 AC-4). They were not authored by the agent, and a reviewer being shown the
+  // contents of a `.env` would put a secret on screen — and into any snapshot taken of it.
+  const only = ["--", ".", ...setupFileExclusions(setupFilePatterns)];
+  await executor.exec(["git", "-C", path, "add", "-N", ...only]);
 
-  const numstat = await run(executor, ["git", "-C", path, "diff", "HEAD", "--numstat"]);
-  const nameStatus = await run(executor, ["git", "-C", path, "diff", "HEAD", "--name-status"]);
+  const numstat = await run(executor, ["git", "-C", path, "diff", "HEAD", "--numstat", ...only]);
+  const nameStatus = await run(executor, [
+    "git",
+    "-C",
+    path,
+    "diff",
+    "HEAD",
+    "--name-status",
+    ...only,
+  ]);
   const stats = parseNumstat(numstat);
 
   const files: DiffFile[] = [];
@@ -333,7 +387,7 @@ export async function diffWorktree(executor: Executor, path: string): Promise<Wo
     });
   }
 
-  const full = await run(executor, ["git", "-C", path, "diff", "HEAD"]);
+  const full = await run(executor, ["git", "-C", path, "diff", "HEAD", ...only]);
   const truncated = full.length > DIFF_PATCH_LIMIT;
   return { files, patch: truncated ? full.slice(0, DIFF_PATCH_LIMIT) : full, truncated };
 }

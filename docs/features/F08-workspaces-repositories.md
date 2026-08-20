@@ -1,6 +1,6 @@
 # F08 — Worktrees & Repositories
 
-**Status:** Draft · **Owner:** Product · **Maturity:** Core · **Last reviewed:** 2026-08-17
+**Status:** Draft · **Owner:** Product · **Maturity:** Core · **Last reviewed:** 2026-08-20
 
 ## Summary
 
@@ -21,6 +21,9 @@ first-class capability.
   is handled together.
 - As a Reviewer, I want each Task's changes on their own branch, so I can review and merge
   them cleanly.
+- As a Solo Power User, I want the local configuration a repository needs — its `.env`, say —
+  to be present in every new Worktree, so the agent can run the test suite and verify its own
+  work instead of guessing.
 
 ## Functional requirements
 
@@ -35,12 +38,18 @@ first-class capability.
   (for example, creating a branch and a pull request per Repository) — see
   [F12](./F12-integrations.md) for source-host integration.
 - **FR-7** When a Task is completed or discarded, its Worktrees are cleaned up.
+- **FR-8** A Repository carries an allowlist of file patterns — its **setup files** — copied
+  from the Repository into each new Worktree before the Agent works in it. The allowlist is
+  explicit: GateControl never copies "everything Git ignores".
 
 ## Non-functional requirements
 
 - **NFR-1** Worktree isolation holds across all Executor types.
 - **NFR-2** Provisioning and cleaning up Worktrees does not affect other Tasks.
 - **NFR-3** Repositories are cached where possible so repeated Tasks start quickly.
+- **NFR-4** Setup files are treated as credential-bearing: their contents and their resolved
+  paths are never logged, they are excluded from the diff presented for review, and they are
+  excluded from the commit made on approval (Principle IV).
 
 ## States & rules
 
@@ -49,12 +58,20 @@ first-class capability.
   discard.
 - Multi-repository Tasks keep each Repository's changes independent for review and
   integration.
+- Setup-file patterns are resolved within the Repository root only. A pattern that is absolute,
+  that climbs out of the Repository, or that Git would read as pathspec magic is rejected when
+  it is saved.
+- Setup files are copied once, on the round that creates the Worktree. A Worktree resumed for
+  another review round keeps whatever it already has.
 
 ## Edge cases & failure handling
 
 - If a Repository is unreachable at Task start, the Task fails before running the Agent,
   with a clear reason.
 - If Worktree cleanup fails, the failure is surfaced and does not block other Tasks.
+- If a setup-file pattern matches nothing — or a matched file cannot be copied — GateControl
+  warns and the Task continues. A Repository configured on a machine that lacks one of the
+  files should still run, with less for the Agent to go on.
 
 ## Out of scope
 
