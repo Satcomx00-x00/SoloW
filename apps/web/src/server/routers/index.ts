@@ -11,6 +11,7 @@ import { secretRouter } from "./secret.js";
 import { sessionRouter } from "./session.js";
 import { streamRouter } from "./stream.js";
 import { taskRouter } from "./task.js";
+import { workflowRouter } from "./workflow.js";
 
 /** The core-program API surface (Decision 0011). openapi.json is generated from this. */
 export const appRouter = router({
@@ -25,6 +26,7 @@ export const appRouter = router({
   secret: secretRouter,
   session: sessionRouter,
   stream: streamRouter,
+  workflow: workflowRouter,
 });
 
 export type AppRouter = typeof appRouter;

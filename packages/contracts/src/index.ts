@@ -13,3 +13,4 @@ export * from "./scm.js";
 export * from "./secret.js";
 export * from "./session.js";
 export * from "./task.js";
+export * from "./workflow.js";

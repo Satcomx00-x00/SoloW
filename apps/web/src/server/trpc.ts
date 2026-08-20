@@ -73,6 +73,17 @@ export const integrationsProcedure = publicProcedure
 export const mcpProcedure = publicProcedure.use(requireSession).use(requireFlag("ff-mcp"));
 
 /**
+ * Workflow design and execution (issue #5). Two flags, deliberately: a Workflow procedure moves
+ * a Task's cursor, so it must not stay reachable once the core kill switch is off — turning
+ * `ff-core-program` off has to stop the whole loop, not just the half of it that predates
+ * Workflows.
+ */
+export const workflowProcedure = publicProcedure
+  .use(requireSession)
+  .use(requireFlag("ff-core-program"))
+  .use(requireFlag("ff-workflows"));
+
+/**
  * Per-Owner rate limit for a sensitive write. Returns a middleware to chain after
  * `ownerProcedure` (session already required), tripping `TOO_MANY_REQUESTS` past the window
  * limit (plan §12).

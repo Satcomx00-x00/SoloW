@@ -16,7 +16,7 @@ import { createDb, listWorkspaceFlags, setWorkspaceFlag } from "@gatecontrol/db"
  * With no workspaceId the change applies to every Workspace — the single-Owner local case.
  */
 
-const KNOWN_FLAGS = ["ff-core-program"] as const;
+const KNOWN_FLAGS = ["ff-core-program", "ff-workflows"] as const;
 
 function usage(message: string): never {
   console.error(`${message}

@@ -87,6 +87,70 @@ steerable without reading logs.
   see [Decision 0004](../decisions/0004-durable-orchestration-engine.md)).
 - The specific visual styling of the canvas (owned by Design).
 
+## What ships in v1 (issue #5)
+
+The model and its seam ship; the canvas does not. Concretely:
+
+- **Designing is an ordered Step list, not a node graph.** `workflow` + `workflow_step` tables,
+  Workspace-scoped (Principle V), edited at `/workflows`: a Step Card per row with an Agent
+  Profile select, a prompt template, a gate, an advance rule, and Move up / Move down. FR-1 and
+  FR-4 (the canvas, panning, zooming) and [Decision 0007](../decisions/0007-reactflow-workflow-visualisation.md)
+  move to Later — the pipeline the product needs first is linear, and a graph editor for a linear
+  pipeline is a layout engine to maintain rather than an affordance anyone uses.
+- **Step order is a lexicographic rank string**, not a position. Inserting a Step in the middle
+  writes exactly one row and renumbers nothing; a reorder names the two Steps the moved one lands
+  between, and is refused as stale if those two are no longer adjacent.
+- **Every Step names an Agent Profile** from the catalog of [F05](./F05-agent-executor-profiles.md)
+  (issue #10). There is no second way of naming an agent, which is what makes "a single Task uses
+  different agents across Steps" a difference between two rows.
+- **Gates.** A Step's gate is `human`, `auto`, or `auto-unless-changes`; its advance rule is
+  `agent-signal` or `review`. A gate decides whether an *intermediate* Step waits for a person.
+- **The human decision before integration is unconditional, and it is an approval.** The last Step
+  of a Workflow reports `completed` only once an `approve` review is recorded for the Task,
+  whatever every Step's gate says; the gate value is not consulted on that branch at all
+  (Principle I, FR-10). `reject` and `request_changes` are decisions *not* to integrate, and open
+  nothing. The newest decision is the one that counts, so an approval that has since been
+  withdrawn stops releasing gates.
+- **An approval releases one gate, not the pipeline behind it.** A Task records which `review` row
+  it spent (`task.workflow_decision_id`), so approving the plan does not silently authorise the
+  implementation and the final integration. A Workflow of three `human` Steps costs three
+  decisions; a Workflow of `auto` Steps spends nothing until the last one, which costs one.
+- **`producedChanges` is corroborated, not believed.** The `auto-unless-changes` gate exists to
+  catch a Step that wrote something, and the party reporting the Step finished is the party the
+  gate is for. The claim is OR-ed with the server's own record — a `diff` event in the Session log
+  naming at least one file — so it can only ever close a gate, never open one.
+- **The cursor is durable, and advancing it is replay-safe.** A Task carries `workflow_step_id`,
+  written in the same transaction as the decision that moved it, so an interrupted run resumes on
+  the Step it was on (FR-13, Principle III). A cursor whose Step has been deleted is an error,
+  never a silent restart at Step one. `workflow.advanceTask` names the Step the caller believes it
+  is finishing, so a redelivered call from a durable step that re-ran is refused with
+  `WORKFLOW_STALE_CURSOR` rather than skipping a Step.
+- **A Step's handoff survives a closed gate.** The summary a Step reports is held in
+  `task.workflow_pending_handoff` until the cursor actually moves, because the caller that replays
+  the signal once a human has decided no longer has the agent's words.
+- **Attaching and detaching are symmetric.** Both are refused once the Task has left
+  `backlog`/`ready`; attaching is refused once a Task has begun a pipeline at all, so re-attaching
+  cannot silently rewind a cursor, and detaching is refused for a Task that follows nothing — which
+  is also what stops detach-then-delete from walking around the Step-in-use guard.
+- **Versioning is bump-and-detect, not copy-on-write.** A Step write that changes something
+  increments `workflow.version`; a Task records the version it attached at and reports
+  `definitionDrifted` when the two differ, and `workflow.acknowledgeDrift` lowers the flag without
+  moving the cursor. A no-op edit bumps nothing — a warning that cannot be cleared, raised by an
+  edit that did not happen, is one an operator learns to ignore. The immutable-version-per-Run rule
+  under *States & rules* is still the target; a snapshot table with no producer would be a table
+  nothing writes.
+- **The Workflow namespace is withheld from the external MCP surface** (issue #16). The holder of
+  an MCP token is the agent whose work the gates exist to hold, and `workflow.advanceTask` is the
+  call that opens them. Driving a pipeline from MCP is issue #86, and it needs the run loop that
+  produces one Session per Step so a completion report can be attributed to the Step it came from.
+- **Automations are a Step property.** `workflow_step.on_enter` is reserved for the automations of
+  row 08, so an automation is a field on a Step rather than a second rules engine.
+
+Later, in the order they unblock things: the run loop over Steps (the Inngest `task-run`
+function), the Monitor strip of FR-9, board columns derived from Steps rather than the
+`taskStateSchema` enum, non-agent Step kinds (Gate, Condition, Fork/Join — FR-2), validity
+checking (FR-5), import/export (FR-7), and per-Step run history.
+
 ## Related
 
 - [F02 — Kanban Task Administration](./F02-kanban-task-administration.md)

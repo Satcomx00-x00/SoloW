@@ -6,7 +6,7 @@
  * start. Granularity is per-Workspace (v1: single Workspace → effectively local-global).
  */
 
-export type FlagKey = "ff-core-program" | "ff-integrations" | "ff-mcp";
+export type FlagKey = "ff-core-program" | "ff-integrations" | "ff-mcp" | "ff-workflows";
 
 export interface FlagDefinition {
   key: FlagKey;
@@ -33,6 +33,13 @@ export const FLAGS: Record<FlagKey, FlagDefinition> = {
     key: "ff-mcp",
     description:
       "External MCP server — drive GateControl from outside agents over a scoped token (issue #16).",
+    default: false,
+    granularity: "workspace",
+  },
+  "ff-workflows": {
+    key: "ff-workflows",
+    description:
+      "Agentic workflows — multi-step pipelines with a different agent per Step (issue #5).",
     default: false,
     granularity: "workspace",
   },

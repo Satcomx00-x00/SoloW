@@ -31,8 +31,19 @@ import { appRouter } from "../routers/index.js";
  * - `preference` — one person's arrangement of their own interface (issue #3). A token is held
  *   by software, which has no interface to arrange; exposing it would let a tool rearrange a
  *   human's shell, which is not work management by any reading.
+ * - `workflow` — the Workflow definition *and* the Step cursor of every Task following one
+ *   (issue #5). `workflow.advanceTask` is the call that opens a Task's gates, and the party
+ *   holding an MCP token is the agent whose work those gates exist to hold: letting it report its
+ *   own Step finished, and claim its own Step produced nothing to look at, is asking the subject
+ *   of a review to sign it off. `workflow.delete` and `workflow.deleteStep` are on the same
+ *   surface and would let a token rewrite the pipeline rather than run it.
+ *
+ *   This is not "MCP never drives a Workflow" — issue #86 is exactly that, and it needs the run
+ *   loop that produces one Session per Step, so a completion report can be attributed to the Step
+ *   it came from and checked against it. Until then the namespace is withheld by decision rather
+ *   than admitted by omission, which is what the rest of this list records.
  */
-const WITHHELD_NAMESPACES = new Set(["secret", "stream", "mcpToken", "preference"]);
+const WITHHELD_NAMESPACES = new Set(["secret", "stream", "mcpToken", "preference", "workflow"]);
 
 export interface McpToolDefinition {
   /** MCP tool name — the tRPC path with `.` swapped for `_` (`issue.get` → `issue_get`). */

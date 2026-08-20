@@ -8816,6 +8816,2860 @@
           }
         }
       }
+    },
+    "/workflow.list": {
+      "get": {
+        "operationId": "workflow-list",
+        "summary": "List this Workspace's Workflows — repeatable pipelines of Steps, each Step run by its own Agent Profile. Returns the definition version and how many Steps each has, not the Steps themselves.",
+        "tags": [
+          "workflow"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "description": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "version": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "exclusiveMinimum": true
+                      },
+                      "stepCount": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "createdAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "updatedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "name",
+                      "description",
+                      "version",
+                      "stepCount",
+                      "createdAt",
+                      "updatedAt"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.NOT_FOUND"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workflow.get": {
+      "get": {
+        "operationId": "workflow-get",
+        "summary": "Read one Workflow with its Steps, in pipeline order.",
+        "tags": [
+          "workflow"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "version": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "exclusiveMinimum": true
+                    },
+                    "stepCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "steps": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "workflowId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "position": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "rank": {
+                            "type": "string"
+                          },
+                          "agentProfileId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "promptTemplate": {
+                            "type": "string"
+                          },
+                          "gate": {
+                            "type": "string",
+                            "enum": [
+                              "human",
+                              "auto",
+                              "auto-unless-changes"
+                            ]
+                          },
+                          "advanceOn": {
+                            "type": "string",
+                            "enum": [
+                              "agent-signal",
+                              "review"
+                            ]
+                          },
+                          "onEnter": {
+                            "type": "object",
+                            "nullable": true,
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 64
+                              },
+                              "config": {
+                                "type": "object",
+                                "additionalProperties": {},
+                                "default": {}
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "config"
+                            ]
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "updatedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "workflowId",
+                          "name",
+                          "position",
+                          "rank",
+                          "agentProfileId",
+                          "promptTemplate",
+                          "gate",
+                          "advanceOn",
+                          "onEnter",
+                          "createdAt",
+                          "updatedAt"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "description",
+                    "version",
+                    "stepCount",
+                    "createdAt",
+                    "updatedAt",
+                    "steps"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.NOT_FOUND"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workflow.create": {
+      "post": {
+        "operationId": "workflow-create",
+        "summary": "Create an empty Workflow. Steps are added afterwards with workflow.addStep; a Workflow with no Steps cannot be attached to a Task.",
+        "tags": [
+          "workflow"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 2000
+                  }
+                },
+                "required": [
+                  "name"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "version": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "exclusiveMinimum": true
+                    },
+                    "stepCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "description",
+                    "version",
+                    "stepCount",
+                    "createdAt",
+                    "updatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workflow.rename": {
+      "post": {
+        "operationId": "workflow-rename",
+        "summary": "Rename a Workflow, and optionally replace its description.",
+        "tags": [
+          "workflow"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "description": {
+                    "type": "string",
+                    "nullable": true,
+                    "maxLength": 2000
+                  }
+                },
+                "required": [
+                  "id",
+                  "name"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "version": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "exclusiveMinimum": true
+                    },
+                    "stepCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "description",
+                    "version",
+                    "stepCount",
+                    "createdAt",
+                    "updatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workflow.delete": {
+      "post": {
+        "operationId": "workflow-delete",
+        "summary": "Delete a Workflow and its Steps. Refused while any Task still follows it, so no Task is left with a cursor pointing at nothing.",
+        "tags": [
+          "workflow"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "description": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "version": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "exclusiveMinimum": true
+                      },
+                      "stepCount": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "createdAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "updatedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "name",
+                      "description",
+                      "version",
+                      "stepCount",
+                      "createdAt",
+                      "updatedAt"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workflow.addStep": {
+      "post": {
+        "operationId": "workflow-addStep",
+        "summary": "Add a Step to a Workflow, bound to an Agent Profile with its own prompt template and gate rule. Appends unless afterStepId names the Step it should follow; inserting in the middle writes one row and reorders nothing.",
+        "tags": [
+          "workflow"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "workflowId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "agentProfileId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "promptTemplate": {
+                    "type": "string",
+                    "maxLength": 20000
+                  },
+                  "gate": {
+                    "type": "string",
+                    "enum": [
+                      "human",
+                      "auto",
+                      "auto-unless-changes"
+                    ]
+                  },
+                  "advanceOn": {
+                    "type": "string",
+                    "enum": [
+                      "agent-signal",
+                      "review"
+                    ]
+                  },
+                  "onEnter": {
+                    "type": "object",
+                    "nullable": true,
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      },
+                      "config": {
+                        "type": "object",
+                        "additionalProperties": {},
+                        "default": {}
+                      }
+                    },
+                    "required": [
+                      "kind"
+                    ]
+                  },
+                  "afterStepId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "workflowId",
+                  "name",
+                  "agentProfileId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "version": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "exclusiveMinimum": true
+                    },
+                    "stepCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "steps": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "workflowId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "position": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "rank": {
+                            "type": "string"
+                          },
+                          "agentProfileId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "promptTemplate": {
+                            "type": "string"
+                          },
+                          "gate": {
+                            "type": "string",
+                            "enum": [
+                              "human",
+                              "auto",
+                              "auto-unless-changes"
+                            ]
+                          },
+                          "advanceOn": {
+                            "type": "string",
+                            "enum": [
+                              "agent-signal",
+                              "review"
+                            ]
+                          },
+                          "onEnter": {
+                            "type": "object",
+                            "nullable": true,
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 64
+                              },
+                              "config": {
+                                "type": "object",
+                                "additionalProperties": {},
+                                "default": {}
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "config"
+                            ]
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "updatedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "workflowId",
+                          "name",
+                          "position",
+                          "rank",
+                          "agentProfileId",
+                          "promptTemplate",
+                          "gate",
+                          "advanceOn",
+                          "onEnter",
+                          "createdAt",
+                          "updatedAt"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "description",
+                    "version",
+                    "stepCount",
+                    "createdAt",
+                    "updatedAt",
+                    "steps"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workflow.updateStep": {
+      "post": {
+        "operationId": "workflow-updateStep",
+        "summary": "Change a Step's name, Agent Profile, prompt template, gate or advance rule. Bumps the Workflow's definition version, so an attached Task reports the drift.",
+        "tags": [
+          "workflow"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "stepId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "agentProfileId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "promptTemplate": {
+                    "type": "string",
+                    "maxLength": 20000
+                  },
+                  "gate": {
+                    "type": "string",
+                    "enum": [
+                      "human",
+                      "auto",
+                      "auto-unless-changes"
+                    ]
+                  },
+                  "advanceOn": {
+                    "type": "string",
+                    "enum": [
+                      "agent-signal",
+                      "review"
+                    ]
+                  },
+                  "onEnter": {
+                    "type": "object",
+                    "nullable": true,
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      },
+                      "config": {
+                        "type": "object",
+                        "additionalProperties": {},
+                        "default": {}
+                      }
+                    },
+                    "required": [
+                      "kind"
+                    ]
+                  }
+                },
+                "required": [
+                  "stepId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "version": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "exclusiveMinimum": true
+                    },
+                    "stepCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "steps": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "workflowId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "position": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "rank": {
+                            "type": "string"
+                          },
+                          "agentProfileId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "promptTemplate": {
+                            "type": "string"
+                          },
+                          "gate": {
+                            "type": "string",
+                            "enum": [
+                              "human",
+                              "auto",
+                              "auto-unless-changes"
+                            ]
+                          },
+                          "advanceOn": {
+                            "type": "string",
+                            "enum": [
+                              "agent-signal",
+                              "review"
+                            ]
+                          },
+                          "onEnter": {
+                            "type": "object",
+                            "nullable": true,
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 64
+                              },
+                              "config": {
+                                "type": "object",
+                                "additionalProperties": {},
+                                "default": {}
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "config"
+                            ]
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "updatedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "workflowId",
+                          "name",
+                          "position",
+                          "rank",
+                          "agentProfileId",
+                          "promptTemplate",
+                          "gate",
+                          "advanceOn",
+                          "onEnter",
+                          "createdAt",
+                          "updatedAt"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "description",
+                    "version",
+                    "stepCount",
+                    "createdAt",
+                    "updatedAt",
+                    "steps"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workflow.reorderStep": {
+      "post": {
+        "operationId": "workflow-reorderStep",
+        "summary": "Move a Step between the two Steps it should sit between; either may be null for the ends of the list. Refused if those two are not adjacent any more, which means the caller was looking at a stale order.",
+        "tags": [
+          "workflow"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "stepId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "afterStepId": {
+                    "type": "string",
+                    "nullable": true,
+                    "minLength": 1
+                  },
+                  "beforeStepId": {
+                    "type": "string",
+                    "nullable": true,
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "stepId",
+                  "afterStepId",
+                  "beforeStepId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "version": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "exclusiveMinimum": true
+                    },
+                    "stepCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "steps": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "workflowId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "position": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "rank": {
+                            "type": "string"
+                          },
+                          "agentProfileId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "promptTemplate": {
+                            "type": "string"
+                          },
+                          "gate": {
+                            "type": "string",
+                            "enum": [
+                              "human",
+                              "auto",
+                              "auto-unless-changes"
+                            ]
+                          },
+                          "advanceOn": {
+                            "type": "string",
+                            "enum": [
+                              "agent-signal",
+                              "review"
+                            ]
+                          },
+                          "onEnter": {
+                            "type": "object",
+                            "nullable": true,
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 64
+                              },
+                              "config": {
+                                "type": "object",
+                                "additionalProperties": {},
+                                "default": {}
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "config"
+                            ]
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "updatedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "workflowId",
+                          "name",
+                          "position",
+                          "rank",
+                          "agentProfileId",
+                          "promptTemplate",
+                          "gate",
+                          "advanceOn",
+                          "onEnter",
+                          "createdAt",
+                          "updatedAt"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "description",
+                    "version",
+                    "stepCount",
+                    "createdAt",
+                    "updatedAt",
+                    "steps"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workflow.deleteStep": {
+      "post": {
+        "operationId": "workflow-deleteStep",
+        "summary": "Remove a Step from a Workflow. Refused while a Task's cursor sits on it, because that Task would then be unable to resume.",
+        "tags": [
+          "workflow"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "stepId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "stepId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "version": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "exclusiveMinimum": true
+                    },
+                    "stepCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "steps": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "workflowId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "position": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "rank": {
+                            "type": "string"
+                          },
+                          "agentProfileId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "promptTemplate": {
+                            "type": "string"
+                          },
+                          "gate": {
+                            "type": "string",
+                            "enum": [
+                              "human",
+                              "auto",
+                              "auto-unless-changes"
+                            ]
+                          },
+                          "advanceOn": {
+                            "type": "string",
+                            "enum": [
+                              "agent-signal",
+                              "review"
+                            ]
+                          },
+                          "onEnter": {
+                            "type": "object",
+                            "nullable": true,
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 64
+                              },
+                              "config": {
+                                "type": "object",
+                                "additionalProperties": {},
+                                "default": {}
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "config"
+                            ]
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "updatedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "workflowId",
+                          "name",
+                          "position",
+                          "rank",
+                          "agentProfileId",
+                          "promptTemplate",
+                          "gate",
+                          "advanceOn",
+                          "onEnter",
+                          "createdAt",
+                          "updatedAt"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "description",
+                    "version",
+                    "stepCount",
+                    "createdAt",
+                    "updatedAt",
+                    "steps"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workflow.attachTask": {
+      "post": {
+        "operationId": "workflow-attachTask",
+        "summary": "Put a Task on a Workflow, at its first Step, recording the definition version in force. Refused once the Task has left backlog or ready, and refused once it has begun a pipeline — a cursor that has moved, a handoff, or a spent approval — so re-attaching cannot silently discard work already done.",
+        "tags": [
+          "workflow"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "taskId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "workflowId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "taskId",
+                  "workflowId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "taskId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "workflowId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "workflowName": {
+                      "type": "string"
+                    },
+                    "attachedVersion": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "exclusiveMinimum": true
+                    },
+                    "currentVersion": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "exclusiveMinimum": true
+                    },
+                    "definitionDrifted": {
+                      "type": "boolean"
+                    },
+                    "currentStep": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "workflowId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "position": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "rank": {
+                          "type": "string"
+                        },
+                        "agentProfileId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "promptTemplate": {
+                          "type": "string"
+                        },
+                        "gate": {
+                          "type": "string",
+                          "enum": [
+                            "human",
+                            "auto",
+                            "auto-unless-changes"
+                          ]
+                        },
+                        "advanceOn": {
+                          "type": "string",
+                          "enum": [
+                            "agent-signal",
+                            "review"
+                          ]
+                        },
+                        "onEnter": {
+                          "type": "object",
+                          "nullable": true,
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 64
+                            },
+                            "config": {
+                              "type": "object",
+                              "additionalProperties": {},
+                              "default": {}
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "config"
+                          ]
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "workflowId",
+                        "name",
+                        "position",
+                        "rank",
+                        "agentProfileId",
+                        "promptTemplate",
+                        "gate",
+                        "advanceOn",
+                        "onEnter",
+                        "createdAt",
+                        "updatedAt"
+                      ]
+                    },
+                    "steps": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "workflowId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "position": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "rank": {
+                            "type": "string"
+                          },
+                          "agentProfileId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "promptTemplate": {
+                            "type": "string"
+                          },
+                          "gate": {
+                            "type": "string",
+                            "enum": [
+                              "human",
+                              "auto",
+                              "auto-unless-changes"
+                            ]
+                          },
+                          "advanceOn": {
+                            "type": "string",
+                            "enum": [
+                              "agent-signal",
+                              "review"
+                            ]
+                          },
+                          "onEnter": {
+                            "type": "object",
+                            "nullable": true,
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 64
+                              },
+                              "config": {
+                                "type": "object",
+                                "additionalProperties": {},
+                                "default": {}
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "config"
+                            ]
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "updatedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "workflowId",
+                          "name",
+                          "position",
+                          "rank",
+                          "agentProfileId",
+                          "promptTemplate",
+                          "gate",
+                          "advanceOn",
+                          "onEnter",
+                          "createdAt",
+                          "updatedAt"
+                        ]
+                      }
+                    },
+                    "handoff": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "brief": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "taskId",
+                    "workflowId",
+                    "workflowName",
+                    "attachedVersion",
+                    "currentVersion",
+                    "definitionDrifted",
+                    "currentStep",
+                    "steps",
+                    "handoff",
+                    "brief"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workflow.detachTask": {
+      "post": {
+        "operationId": "workflow-detachTask",
+        "summary": "Take a Task off its Workflow, clearing its step cursor and carried handoff. Refused for a Task that follows no Workflow, and for one that has left backlog or ready — detaching mid-run would throw away the durable cursor and defeat the guards that refuse to delete a Step a run is on.",
+        "tags": [
+          "workflow"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "taskId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "taskId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "taskId": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "taskId"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workflow.taskBinding": {
+      "get": {
+        "operationId": "workflow-taskBinding",
+        "summary": "Where a Task is in its Workflow: the current Step with its Agent Profile, the whole Step list, the carried handoff, and the brief the current Step's agent should be given.",
+        "tags": [
+          "workflow"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "taskId",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "taskId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "workflowId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "workflowName": {
+                      "type": "string"
+                    },
+                    "attachedVersion": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "exclusiveMinimum": true
+                    },
+                    "currentVersion": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "exclusiveMinimum": true
+                    },
+                    "definitionDrifted": {
+                      "type": "boolean"
+                    },
+                    "currentStep": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "workflowId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "position": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "rank": {
+                          "type": "string"
+                        },
+                        "agentProfileId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "promptTemplate": {
+                          "type": "string"
+                        },
+                        "gate": {
+                          "type": "string",
+                          "enum": [
+                            "human",
+                            "auto",
+                            "auto-unless-changes"
+                          ]
+                        },
+                        "advanceOn": {
+                          "type": "string",
+                          "enum": [
+                            "agent-signal",
+                            "review"
+                          ]
+                        },
+                        "onEnter": {
+                          "type": "object",
+                          "nullable": true,
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 64
+                            },
+                            "config": {
+                              "type": "object",
+                              "additionalProperties": {},
+                              "default": {}
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "config"
+                          ]
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "workflowId",
+                        "name",
+                        "position",
+                        "rank",
+                        "agentProfileId",
+                        "promptTemplate",
+                        "gate",
+                        "advanceOn",
+                        "onEnter",
+                        "createdAt",
+                        "updatedAt"
+                      ]
+                    },
+                    "steps": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "workflowId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "position": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "rank": {
+                            "type": "string"
+                          },
+                          "agentProfileId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "promptTemplate": {
+                            "type": "string"
+                          },
+                          "gate": {
+                            "type": "string",
+                            "enum": [
+                              "human",
+                              "auto",
+                              "auto-unless-changes"
+                            ]
+                          },
+                          "advanceOn": {
+                            "type": "string",
+                            "enum": [
+                              "agent-signal",
+                              "review"
+                            ]
+                          },
+                          "onEnter": {
+                            "type": "object",
+                            "nullable": true,
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 64
+                              },
+                              "config": {
+                                "type": "object",
+                                "additionalProperties": {},
+                                "default": {}
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "config"
+                            ]
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "updatedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "workflowId",
+                          "name",
+                          "position",
+                          "rank",
+                          "agentProfileId",
+                          "promptTemplate",
+                          "gate",
+                          "advanceOn",
+                          "onEnter",
+                          "createdAt",
+                          "updatedAt"
+                        ]
+                      }
+                    },
+                    "handoff": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "brief": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "taskId",
+                    "workflowId",
+                    "workflowName",
+                    "attachedVersion",
+                    "currentVersion",
+                    "definitionDrifted",
+                    "currentStep",
+                    "steps",
+                    "handoff",
+                    "brief"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.NOT_FOUND"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workflow.acknowledgeDrift": {
+      "post": {
+        "operationId": "workflow-acknowledgeDrift",
+        "summary": "Accept the Workflow definition as it now stands for one Task, clearing its drift warning. The step cursor is untouched — this records that a person read what changed underneath the run and chose to carry on.",
+        "tags": [
+          "workflow"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "taskId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "taskId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "taskId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "workflowId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "workflowName": {
+                      "type": "string"
+                    },
+                    "attachedVersion": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "exclusiveMinimum": true
+                    },
+                    "currentVersion": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "exclusiveMinimum": true
+                    },
+                    "definitionDrifted": {
+                      "type": "boolean"
+                    },
+                    "currentStep": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "workflowId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "position": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "rank": {
+                          "type": "string"
+                        },
+                        "agentProfileId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "promptTemplate": {
+                          "type": "string"
+                        },
+                        "gate": {
+                          "type": "string",
+                          "enum": [
+                            "human",
+                            "auto",
+                            "auto-unless-changes"
+                          ]
+                        },
+                        "advanceOn": {
+                          "type": "string",
+                          "enum": [
+                            "agent-signal",
+                            "review"
+                          ]
+                        },
+                        "onEnter": {
+                          "type": "object",
+                          "nullable": true,
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 64
+                            },
+                            "config": {
+                              "type": "object",
+                              "additionalProperties": {},
+                              "default": {}
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "config"
+                          ]
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "workflowId",
+                        "name",
+                        "position",
+                        "rank",
+                        "agentProfileId",
+                        "promptTemplate",
+                        "gate",
+                        "advanceOn",
+                        "onEnter",
+                        "createdAt",
+                        "updatedAt"
+                      ]
+                    },
+                    "steps": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "workflowId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "position": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "rank": {
+                            "type": "string"
+                          },
+                          "agentProfileId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "promptTemplate": {
+                            "type": "string"
+                          },
+                          "gate": {
+                            "type": "string",
+                            "enum": [
+                              "human",
+                              "auto",
+                              "auto-unless-changes"
+                            ]
+                          },
+                          "advanceOn": {
+                            "type": "string",
+                            "enum": [
+                              "agent-signal",
+                              "review"
+                            ]
+                          },
+                          "onEnter": {
+                            "type": "object",
+                            "nullable": true,
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 64
+                              },
+                              "config": {
+                                "type": "object",
+                                "additionalProperties": {},
+                                "default": {}
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "config"
+                            ]
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "updatedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "workflowId",
+                          "name",
+                          "position",
+                          "rank",
+                          "agentProfileId",
+                          "promptTemplate",
+                          "gate",
+                          "advanceOn",
+                          "onEnter",
+                          "createdAt",
+                          "updatedAt"
+                        ]
+                      }
+                    },
+                    "handoff": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "brief": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "taskId",
+                    "workflowId",
+                    "workflowName",
+                    "attachedVersion",
+                    "currentVersion",
+                    "definitionDrifted",
+                    "currentStep",
+                    "steps",
+                    "handoff",
+                    "brief"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workflow.advanceTask": {
+      "post": {
+        "operationId": "workflow-advanceTask",
+        "summary": "Report that a Task's current Step finished, moving it to the next Step and carrying the handoff. fromStepId names the Step the caller believes it is finishing, so a redelivered call is refused rather than skipping a Step. The same Task is moved; no new Task is created. The last Step reports completed only once a human approval has been recorded that no earlier gate already spent, whatever the Step's gate says.",
+        "tags": [
+          "workflow"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "taskId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "fromStepId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "signal": {
+                    "type": "string",
+                    "enum": [
+                      "agent-signal",
+                      "review"
+                    ]
+                  },
+                  "producedChanges": {
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "handoff": {
+                    "type": "string",
+                    "maxLength": 20000
+                  }
+                },
+                "required": [
+                  "taskId",
+                  "fromStepId",
+                  "signal"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "taskId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "advanced",
+                        "awaiting-decision",
+                        "held",
+                        "completed"
+                      ]
+                    },
+                    "currentStepId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "brief": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "taskId",
+                    "status",
+                    "currentStepId",
+                    "brief"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {

@@ -15,6 +15,9 @@ import type {
   SecretKind,
   SessionState,
   TaskState,
+  WorkflowAdvanceOn,
+  WorkflowStepAutomation,
+  WorkflowStepGate,
 } from "@gatecontrol/contracts";
 import { sql } from "drizzle-orm";
 import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
@@ -331,12 +334,141 @@ export const task = sqliteTable(
       .notNull()
       .references(() => executorProfile.id),
     failureReason: text("failure_reason"),
+    /**
+     * The Workflow this Task follows, and where it has got to (issue #5). All four are nullable
+     * and every Task that exists today has them null, which is exactly "this Task follows no
+     * Workflow" — `task.agent_profile_id` remains the agent for a Task that has none.
+     *
+     * The cursor is a Step *id* rather than an ordinal on purpose: an ordinal is invalidated by
+     * the next Step inserted above it, so a restart would resume a Task at whatever now sits at
+     * position 2 rather than at the Step it was actually running (Principle III, AC-5).
+     */
+    workflowId: text("workflow_id").references(() => workflow.id),
+    workflowStepId: text("workflow_step_id").references(() => workflowStep.id),
+    /** The `workflow.version` in force when this Task was attached, so a mid-run edit is detectable. */
+    workflowVersion: integer("workflow_version"),
+    /**
+     * The previous Step's summary, carried into the next Step's brief (AC-2). A column rather
+     * than a variable in the run loop because a handoff that lives only in the loop is lost by
+     * the very restart Principle III exists to survive.
+     */
+    workflowHandoff: text("workflow_handoff"),
+    /**
+     * What the *current* Step has reported, not yet promoted into `workflow_handoff`.
+     *
+     * Two columns rather than one because a Step reports it has finished before it is allowed to
+     * move: an `agent-signal` Step behind a `human` gate hands over its summary, waits for the
+     * decision, and is then replayed by whatever noticed the decision — a caller that no longer
+     * has the agent's words. Writing the summary into `workflow_handoff` immediately would
+     * instead corrupt the brief of the Step still running, which is built from the *previous*
+     * Step's handoff.
+     */
+    workflowPendingHandoff: text("workflow_pending_handoff"),
+    /**
+     * The `review` row this Task has already spent on a gate (Principle I, AC-4).
+     *
+     * An approval releases one gate. Without recording which one was used, the question the gate
+     * asks degrades from "has this change been approved" to "has anyone ever looked at this
+     * Task", and the first approval in a pipeline silently authorises every Step after it.
+     *
+     * Deliberately not a foreign key to `review`: this is a record of something that happened,
+     * and it must keep its meaning even if the row it names is one day archived away.
+     */
+    workflowDecisionId: text("workflow_decision_id"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => ({
     byState: index("task_ws_state").on(t.workspaceId, t.state),
     byIssue: index("task_issue").on(t.issueId),
+    /** Serves the "is this Workflow still in use" check that refuses a delete. */
+    byWorkflow: index("task_workflow").on(t.workspaceId, t.workflowId),
+    /**
+     * Serves the narrower "is a Task parked on this Step" check that refuses a Step delete.
+     * `task_workflow` cannot: a prefix of `(workspace_id, workflow_id)` says nothing about the
+     * cursor, so without this every Step edit scans the Workspace's whole `task` table.
+     */
+    byWorkflowStep: index("task_workflow_step").on(t.workspaceId, t.workflowStepId),
+  }),
+);
+
+/**
+ * A Workflow — a repeatable pipeline of Steps, each run by its own Agent Profile (issue #5,
+ * spec F03). The kandev example the issue is written around is one row here with three Steps:
+ * one agent plans, another implements, a third reviews.
+ *
+ * `version` is bumped by every Step write and recorded on a Task when it attaches, so editing a
+ * definition underneath a running Task is *detectable* rather than silently applied. It is not
+ * copy-on-write versioning — a snapshot table with no producer would be a table nothing writes —
+ * but it is the half of it that cannot be added retroactively once Tasks are already attached.
+ */
+export const workflow = sqliteTable(
+  "workflow",
+  {
+    id: id(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspace.id),
+    name: text("name").notNull(),
+    description: text("description"),
+    version: integer("version").notNull().default(1),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => ({
+    byWs: index("workflow_ws").on(t.workspaceId),
+    /**
+     * A Workflow is chosen by name in a Select, and two rows sharing one name make that choice a
+     * coin flip — the same reasoning as `agent_catalog_ws_key`.
+     */
+    byName: uniqueIndex("workflow_ws_name").on(t.workspaceId, t.name),
+  }),
+);
+
+/**
+ * One Step of a Workflow.
+ *
+ * `agent_profile_id` is a foreign key to the Agent Profile catalog (issue #10) rather than a
+ * second way of naming an agent. That is what AC-3 actually asks for: a Task using different
+ * agents across Steps is this column differing between two rows, not a parallel agent registry
+ * that would have to be kept in step with the first.
+ *
+ * `rank` is a lexicographic string, not an integer position — see `rankBetween` in
+ * `@gatecontrol/core` for why. Inserting a Step in the middle writes exactly one row and leaves
+ * every other row's `rank` and `updated_at` untouched.
+ */
+export const workflowStep = sqliteTable(
+  "workflow_step",
+  {
+    id: id(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspace.id),
+    workflowId: text("workflow_id")
+      .notNull()
+      .references(() => workflow.id),
+    rank: text("rank").notNull(),
+    name: text("name").notNull(),
+    agentProfileId: text("agent_profile_id")
+      .notNull()
+      .references(() => agentProfile.id),
+    promptTemplate: text("prompt_template").notNull().default(""),
+    gate: text("gate").$type<WorkflowStepGate>().notNull().default("human"),
+    advanceOn: text("advance_on").$type<WorkflowAdvanceOn>().notNull().default("review"),
+    /**
+     * The automation fired when a Task enters this Step (issue #63). Reserved before anything
+     * fires it, because issue #5's third constraint is that automations are a Step property
+     * rather than a second rules engine — and adding the column after Tasks are attached is a
+     * migration on a populated table plus that argument reopened.
+     */
+    onEnter: text("on_enter", { mode: "json" }).$type<WorkflowStepAutomation>(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => ({
+    byWs: index("workflow_step_ws").on(t.workspaceId),
+    /** Unique, because uniqueness is what makes the order total rather than insertion-dependent. */
+    byOrder: uniqueIndex("workflow_step_order").on(t.workflowId, t.rank),
   }),
 );
 
@@ -731,6 +863,8 @@ export const schema = {
   task,
   taskRepository,
   taskDependency,
+  workflow,
+  workflowStep,
   worktree,
   session,
   sessionEvent,

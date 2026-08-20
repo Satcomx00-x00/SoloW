@@ -1,4 +1,4 @@
-import { Columns3, Inbox, type LucideIcon, Settings } from "lucide-react";
+import { Columns3, Inbox, type LucideIcon, Settings, Workflow } from "lucide-react";
 
 /**
  * The top-level sections of the app, in rail order.
@@ -22,6 +22,12 @@ export interface Section {
 export const SECTIONS: readonly Section[] = [
   { href: "/board", label: "Board", caption: "Task board", icon: Columns3 },
   { href: "/issues", label: "Issues", caption: "Work to be done", icon: Inbox },
+  {
+    href: "/workflows",
+    label: "Workflows",
+    caption: "Repeatable multi-agent pipelines",
+    icon: Workflow,
+  },
   {
     href: "/settings",
     label: "Settings",

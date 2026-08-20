@@ -3,3 +3,4 @@ export * from "./issue.js";
 export * from "./pricing.js";
 export * from "./registry.js";
 export * from "./task.js";
+export * from "./workflow.js";
