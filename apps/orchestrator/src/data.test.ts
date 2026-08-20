@@ -4,6 +4,7 @@ import {
   agentProfile,
   encryptSecret,
   executorProfile,
+  integration,
   issue,
   repository,
   secret,
@@ -101,6 +102,74 @@ async function seed(db: TestDb) {
 
   return { ciphertext };
 }
+
+/**
+ * Point the seeded Task at a Repository imported from an Integration (issue #15), so the clone
+ * credential has something to resolve.
+ */
+async function seedImportedRepository(db: TestDb, scmCiphertext: string) {
+  await db.insert(secret).values({
+    id: "sec-scm",
+    workspaceId: WS,
+    name: "github-pat",
+    kind: "scm_pat",
+    ciphertext: scmCiphertext,
+  });
+  await db.insert(integration).values({
+    id: "int-1",
+    workspaceId: WS,
+    provider: "github",
+    secretId: "sec-scm",
+  });
+  await db.insert(repository).values({
+    id: "repo-imported",
+    workspaceId: WS,
+    name: "gate",
+    source: "remote_url",
+    location: "https://github.com/acme/gate.git",
+    integrationId: "int-1",
+    externalFullName: "acme/gate",
+  });
+  await db.update(task).set({ repositoryId: "repo-imported" }).where(eq(task.id, "task-1"));
+}
+
+describe("loadTaskRunContext — clone credential for an imported Repository", () => {
+  it("resolves the Integration's provider and still-encrypted token", async () => {
+    const db = createTestDb();
+    await seed(db);
+    const scmCiphertext = encryptSecret("ghp-clone-me");
+    await seedImportedRepository(db, scmCiphertext);
+
+    const ctx = await loadTaskRunContext(db, WS, "task-1");
+
+    expect(ctx.scmClone).toEqual({ provider: "github", secretCiphertext: scmCiphertext });
+    // Encrypted here, decrypted only at the point the clone runs (Principle IV).
+    expect(JSON.stringify(ctx.scmClone)).not.toContain("ghp-clone-me");
+  });
+
+  it("is null for a local path — nothing to authenticate against", async () => {
+    const db = createTestDb();
+    await seed(db);
+
+    const ctx = await loadTaskRunContext(db, WS, "task-1");
+    expect(ctx.scmClone).toBeNull();
+  });
+
+  it("is null once the Integration has been disconnected", async () => {
+    const db = createTestDb();
+    await seed(db);
+    await seedImportedRepository(db, encryptSecret("ghp-clone-me"));
+    // `integration.delete` unlinks the Repository; the row keeps its remote location and simply
+    // has no token any more, which must read as "clone unauthenticated", not as a crash.
+    await db
+      .update(repository)
+      .set({ integrationId: null })
+      .where(eq(repository.id, "repo-imported"));
+
+    const ctx = await loadTaskRunContext(db, WS, "task-1");
+    expect(ctx.scmClone).toBeNull();
+  });
+});
 
 describe("loadTaskRunContext", () => {
   it("returns the task, agent profile, repository and the secret ciphertext", async () => {

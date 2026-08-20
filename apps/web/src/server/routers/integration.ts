@@ -2,12 +2,14 @@ import "server-only";
 import {
   changeRequestDto,
   connectIntegrationInput,
+  deleteIntegrationInput,
+  deleteIntegrationResultDto,
   externalIssuePreviewDto,
   externalRepositoryDto,
   importIssuesInput,
+  importRepositoryInput,
   integrationDto,
   issueDto,
-  linkRepositoryInput,
   listExternalIssuesInput,
   listExternalRepositoriesInput,
   repositoryBranchDto,
@@ -17,8 +19,9 @@ import {
 import { z } from "zod";
 import {
   connectIntegration,
+  deleteIntegration,
   importIssues,
-  linkRepository,
+  importRepository,
   listExternalIssues,
   listExternalRepositories,
   listIntegrations,
@@ -55,6 +58,20 @@ export const integrationRouter = router({
     .input(z.object({}))
     .output(z.array(integrationDto))
     .query(async ({ ctx }) => unwrap(await listIntegrations(ctx.rctx))),
+  delete: integrationsProcedure
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/integration.delete",
+        tags: ["integration"],
+        protect: true,
+        summary:
+          "Disconnect an Integration. Its Repositories are unlinked and the branches and change requests synced from it are removed, since nothing can refresh them once the credential is gone. Imported Issues are kept and detached — Tasks point at them.",
+      },
+    })
+    .input(deleteIntegrationInput)
+    .output(deleteIntegrationResultDto)
+    .mutation(async ({ ctx, input }) => unwrap(await deleteIntegration(ctx.rctx, input))),
   listExternalRepositories: integrationsProcedure
     .meta({
       openapi: {
@@ -69,20 +86,20 @@ export const integrationRouter = router({
     .input(listExternalRepositoriesInput)
     .output(z.array(externalRepositoryDto))
     .query(async ({ ctx, input }) => unwrap(await listExternalRepositories(ctx.rctx, input))),
-  linkRepository: integrationsProcedure
+  importRepository: integrationsProcedure
     .meta({
       openapi: {
         method: "POST",
-        path: "/integration.linkRepository",
+        path: "/integration.importRepository",
         tags: ["integration"],
         protect: true,
         summary:
-          "Bind a connected Repository to a specific owner/repo (GitHub) or namespace/project (GitLab) on an Integration.",
+          "Import a repository from an Integration, creating the Repository already bound to it. Records the provider's clone URL; the orchestrator clones it the first time a Task needs it. Importing the same repository twice returns the existing Repository.",
       },
     })
-    .input(linkRepositoryInput)
+    .input(importRepositoryInput)
     .output(repositoryDto)
-    .mutation(async ({ ctx, input }) => unwrap(await linkRepository(ctx.rctx, input))),
+    .mutation(async ({ ctx, input }) => unwrap(await importRepository(ctx.rctx, input))),
   listExternalIssues: integrationsProcedure
     .meta({
       openapi: {

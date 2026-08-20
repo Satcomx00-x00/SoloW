@@ -1,11 +1,12 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { encryptSecret, repository, secret, workspace } from "@gatecontrol/db";
 import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
+import { eq } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
 import {
   connectIntegration,
   importIssues,
-  linkRepository,
+  importRepository,
   listExternalIssues,
   listExternalRepositories,
   syncRepositorySignals,
@@ -71,6 +72,7 @@ beforeAll(() => {
             default_branch: "main",
             visibility: "private",
             web_url: `u/${path}`,
+            http_url_to_repo: `http://localhost:${server.port}/${path}.git`,
           })),
         );
       }
@@ -98,7 +100,7 @@ beforeEach(() => {
   db = createTestDb();
 });
 
-async function seedLinkedRepos(): Promise<{
+async function seedImportedRepos(): Promise<{
   ctx: RequestContext;
   repoAId: string;
   repoBId: string;
@@ -130,34 +132,119 @@ async function seedLinkedRepos(): Promise<{
   });
   if (!connected.ok) throw new Error("failed to connect integration");
 
-  const [repoA] = await db
-    .insert(repository)
-    .values({ workspaceId: ws.id, name: "A", source: "remote_url", location: "https://x/a.git" })
-    .returning();
-  const [repoB] = await db
-    .insert(repository)
-    .values({ workspaceId: ws.id, name: "B", source: "remote_url", location: "https://x/b.git" })
-    .returning();
-  if (!repoA || !repoB) throw new Error("failed to seed repositories");
-
-  const linkedA = await linkRepository(ctx, {
-    repositoryId: repoA.id,
+  const repoA = await importRepository(ctx, {
     integrationId: connected.data.id,
     externalFullName: "group/project-a",
   });
-  const linkedB = await linkRepository(ctx, {
-    repositoryId: repoB.id,
+  const repoB = await importRepository(ctx, {
     integrationId: connected.data.id,
     externalFullName: "group/project-b",
   });
-  if (!linkedA.ok || !linkedB.ok) throw new Error("failed to link repositories");
+  if (!repoA.ok || !repoB.ok) throw new Error("failed to import repositories");
 
-  return { ctx, repoAId: repoA.id, repoBId: repoB.id, integrationId: connected.data.id };
+  return {
+    ctx,
+    repoAId: repoA.data.id,
+    repoBId: repoB.data.id,
+    integrationId: connected.data.id,
+  };
 }
+
+describe("importRepository", () => {
+  it("creates the Repository from the provider's own clone URL", async () => {
+    const { repoAId } = await seedImportedRepos();
+    const [row] = await db.select().from(repository).where(eq(repository.id, repoAId));
+
+    expect(row?.name).toBe("project-a");
+    expect(row?.externalFullName).toBe("group/project-a");
+    // remote_url, not local_path: nothing was cloned here — the orchestrator does that, from
+    // exactly this location, the first time a Task runs against it.
+    expect(row?.source).toBe("remote_url");
+    expect(row?.location).toBe(`http://localhost:${server.port}/group/project-a.git`);
+    // The location is what ends up in .git/config; a token in it would live there forever.
+    expect(row?.location).not.toContain("glpat-fixture");
+  });
+
+  it("is idempotent — a second import returns the same Repository, not a duplicate", async () => {
+    const { ctx, repoAId, integrationId } = await seedImportedRepos();
+
+    const again = await importRepository(ctx, {
+      integrationId,
+      externalFullName: "group/project-a",
+    });
+    expect(again.ok && again.data.id).toBe(repoAId);
+
+    const rows = await db
+      .select()
+      .from(repository)
+      .where(eq(repository.workspaceId, ctx.workspaceId));
+    expect(rows).toHaveLength(2);
+  });
+
+  it("refuses a repository the token cannot see, rather than importing it blind", async () => {
+    const { ctx, integrationId } = await seedImportedRepos();
+
+    // Not in the provider's list for this token. Reading the clone URL from the provider rather
+    // than from the caller is what makes this a NotFound instead of a repository GateControl
+    // would go and try to clone on someone's behalf.
+    const result = await importRepository(ctx, {
+      integrationId,
+      externalFullName: "someone-else/private",
+    });
+    expect(result).toEqual({ ok: false, error: "NOT_FOUND" });
+  });
+
+  it("takes a name override, for the same repository reached through a second Integration", async () => {
+    const { ctx } = await seedImportedRepos();
+    const [sec] = await db
+      .insert(secret)
+      .values({
+        workspaceId: ctx.workspaceId,
+        name: "gitlab-pat-other-host",
+        kind: "scm_pat",
+        ciphertext: encryptSecret("glpat-fixture-3"),
+      })
+      .returning();
+    if (!sec) throw new Error("failed to seed secret");
+    const second = await connectIntegration(ctx, {
+      provider: "gitlab",
+      secretId: sec.id,
+      baseUrl: `http://localhost:${server.port}`,
+      writeBackEnabled: false,
+    });
+    if (!second.ok) throw new Error("failed to connect second integration");
+
+    // Two Integrations exposing the same `group/project-a` is exactly the case the override is
+    // for: without it the Workspace would hold two Repositories both called "project-a".
+    const named = await importRepository(ctx, {
+      integrationId: second.data.id,
+      externalFullName: "group/project-a",
+      name: "project-a-on-the-other-host",
+    });
+    expect(named.ok && named.data.name).toBe("project-a-on-the-other-host");
+    expect(named.ok && named.data.externalFullName).toBe("group/project-a");
+  });
+
+  it("refuses an Integration from another Workspace (Principle V)", async () => {
+    const { integrationId } = await seedImportedRepos();
+    const [otherWs] = await db
+      .insert(workspace)
+      .values({ name: "intruder", ownerUserId: "owner-4" })
+      .returning();
+    if (!otherWs) throw new Error("failed to seed workspace");
+
+    const intruder: RequestContext = { db, workspaceId: otherWs.id, userId: "user-3" };
+    const result = await importRepository(intruder, {
+      integrationId,
+      externalFullName: "group/project-a",
+    });
+    expect(result).toEqual({ ok: false, error: "NOT_FOUND" });
+  });
+});
 
 describe("importIssues — two Repositories sharing one Integration (regression)", () => {
   it("imports both projects' iid=1 as distinct Issues, not a collision", async () => {
-    const { ctx, repoAId, repoBId } = await seedLinkedRepos();
+    const { ctx, repoAId, repoBId } = await seedImportedRepos();
 
     const importedA = await importIssues(ctx, { repositoryId: repoAId, externalIds: ["1"] });
     const importedB = await importIssues(ctx, { repositoryId: repoBId, externalIds: ["1"] });
@@ -174,7 +261,7 @@ describe("importIssues — two Repositories sharing one Integration (regression)
   });
 
   it("does not flag project B's un-imported issue as alreadyImported after importing A's", async () => {
-    const { ctx, repoAId, repoBId } = await seedLinkedRepos();
+    const { ctx, repoAId, repoBId } = await seedImportedRepos();
 
     await importIssues(ctx, { repositoryId: repoAId, externalIds: ["1"] });
     const preview = await listExternalIssues(ctx, { repositoryId: repoBId });
@@ -183,7 +270,7 @@ describe("importIssues — two Repositories sharing one Integration (regression)
   });
 
   it("re-importing the same id for the same repository is a real no-op", async () => {
-    const { ctx, repoAId } = await seedLinkedRepos();
+    const { ctx, repoAId } = await seedImportedRepos();
 
     const first = await importIssues(ctx, { repositoryId: repoAId, externalIds: ["1"] });
     const second = await importIssues(ctx, { repositoryId: repoAId, externalIds: ["1"] });
@@ -194,7 +281,7 @@ describe("importIssues — two Repositories sharing one Integration (regression)
 
 describe("syncRepositorySignals — branches scoped per Repository", () => {
   it("does not mix up two Repositories' branches sharing an Integration", async () => {
-    const { ctx, repoAId, repoBId } = await seedLinkedRepos();
+    const { ctx, repoAId, repoBId } = await seedImportedRepos();
 
     const syncedA = await syncRepositorySignals(ctx, { repositoryId: repoAId });
     const syncedB = await syncRepositorySignals(ctx, { repositoryId: repoBId });
@@ -206,7 +293,7 @@ describe("syncRepositorySignals — branches scoped per Repository", () => {
 
 describe("listExternalRepositories — the link picker's source of truth", () => {
   it("returns the repositories the token can see, keyed on the provider's full name", async () => {
-    const { ctx, integrationId } = await seedLinkedRepos();
+    const { ctx, integrationId } = await seedImportedRepos();
     const listed = await listExternalRepositories(ctx, { integrationId });
 
     expect(listed.ok).toBe(true);
@@ -217,21 +304,21 @@ describe("listExternalRepositories — the link picker's source of truth", () =>
     ]);
   });
 
-  it("flags an already-linked repository instead of hiding it", async () => {
-    // seedLinkedRepos links BOTH projects, so both must come back flagged — a picker that
-    // silently dropped them would look broken to someone re-checking last week's link.
-    const { ctx, integrationId } = await seedLinkedRepos();
+  it("flags an already-imported repository instead of hiding it", async () => {
+    // seedImportedRepos imports BOTH projects, so both must come back flagged — a picker that
+    // silently dropped them would look broken to someone re-checking last week's import.
+    const { ctx, integrationId } = await seedImportedRepos();
     const listed = await listExternalRepositories(ctx, { integrationId });
 
     expect(listed.ok).toBe(true);
     if (!listed.ok) return;
-    expect(listed.data.every((r) => r.alreadyLinked)).toBe(true);
+    expect(listed.data.every((r) => r.alreadyImported)).toBe(true);
   });
 
-  it("does not flag a repository linked under a different Integration", async () => {
-    const { ctx, integrationId } = await seedLinkedRepos();
+  it("does not flag a repository imported under a different Integration", async () => {
+    const { ctx, integrationId } = await seedImportedRepos();
 
-    // A second Integration (same fixture host) has linked nothing of its own.
+    // A second Integration (same fixture host) has imported nothing of its own.
     const [sec] = await db
       .insert(secret)
       .values({
@@ -253,13 +340,13 @@ describe("listExternalRepositories — the link picker's source of truth", () =>
     const listed = await listExternalRepositories(ctx, { integrationId: second.data.id });
     expect(listed.ok).toBe(true);
     if (!listed.ok) return;
-    // Same names, different Integration — linking is per-Integration, so nothing is flagged.
-    expect(listed.data.some((r) => r.alreadyLinked)).toBe(false);
+    // Same names, different Integration — importing is per-Integration, so nothing is flagged.
+    expect(listed.data.some((r) => r.alreadyImported)).toBe(false);
     expect(integrationId).not.toBe(second.data.id);
   });
 
   it("refuses an Integration from another Workspace (Principle V)", async () => {
-    const { integrationId } = await seedLinkedRepos();
+    const { integrationId } = await seedImportedRepos();
     const [otherWs] = await db
       .insert(workspace)
       .values({ name: "other", ownerUserId: "owner-2" })

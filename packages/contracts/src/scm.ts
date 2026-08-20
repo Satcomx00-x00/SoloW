@@ -48,21 +48,32 @@ export const integrationDto = z
   .merge(timestampsSchema);
 export type IntegrationDto = z.infer<typeof integrationDto>;
 
-/** Bind a connected Repository to a specific `owner/repo` (or GitLab `namespace/path`) on an Integration. */
-export const linkRepositoryInput = z.object({
-  repositoryId: idSchema,
+/**
+ * Import a repository from an Integration: pick one the token can see, and GateControl creates
+ * the Repository for it, already bound to the provider.
+ *
+ * This replaced a two-step "connect a local clone, then link it to a provider repo" flow. The
+ * old shape asked the user to have the repository on disk *first*, which made the common case —
+ * "I want to work on this GitHub repo" — the one the product could not express. Nothing is
+ * cloned here: the location recorded is the provider's clone URL, and the orchestrator clones it
+ * into its cache the first time a Task needs it, the same way it already handles any remote URL.
+ *
+ * `name` is optional because the provider already has one; it exists for the case where two
+ * Integrations expose repositories that would otherwise be called the same thing.
+ */
+export const importRepositoryInput = z.object({
   integrationId: idSchema,
   externalFullName: z.string().min(1).max(300),
+  name: z.string().min(1).max(120).optional(),
 });
-export type LinkRepositoryInput = z.infer<typeof linkRepositoryInput>;
+export type ImportRepositoryInput = z.infer<typeof importRepositoryInput>;
 
 /**
- * A repository the connected token can actually see, for the link picker.
+ * A repository the connected token can actually see, for the import picker.
  *
- * Linking used to take `externalFullName` as free text, which made a typo indistinguishable from
- * a repository the token simply cannot reach: both surfaced as a 404 later, at first sync, far
- * from the form that caused it. Offering the real list turns that class of error into something
- * the UI cannot express.
+ * Importing takes a pick from this list rather than a typed `owner/repo`, which is what makes a
+ * typo impossible to express: a name that is not here is a repository the token cannot reach,
+ * and that used to surface as a 404 much later, at first sync, far from the form that caused it.
  */
 export const externalRepositoryDto = z.object({
   fullName: z.string(),
@@ -70,9 +81,12 @@ export const externalRepositoryDto = z.object({
   description: z.string().nullable(),
   defaultBranch: z.string().nullable(),
   isPrivate: z.boolean(),
+  /** The provider's web page — for a human to open. `cloneUrl` is what git is given. */
   url: z.string(),
-  /** True when some Repository in this Workspace is already linked to this provider repo. */
-  alreadyLinked: z.boolean(),
+  /** The https URL a Repository imported from here will be cloned from. Never carries a token. */
+  cloneUrl: z.string(),
+  /** True when this Workspace already imported this provider repo through this Integration. */
+  alreadyImported: z.boolean(),
 });
 export type ExternalRepositoryDto = z.infer<typeof externalRepositoryDto>;
 
@@ -140,3 +154,26 @@ export const repositoryBranchDto = z.object({
   syncedAt: z.string(),
 });
 export type RepositoryBranchDto = z.infer<typeof repositoryBranchDto>;
+
+/**
+ * Disconnect an Integration and drop what only existed because of it.
+ *
+ * Deliberately not a full cascade. Branches and change requests are a cache of the provider's
+ * state — once the credential is gone they can never be refreshed again, so keeping them would
+ * leave the UI showing data it can no longer verify. Imported Issues are the opposite: they are
+ * GateControl work items that Tasks point at (`task.issue_id` is NOT NULL), so they are kept and
+ * detached rather than deleted, and the Repositories are unlinked rather than removed.
+ */
+export const deleteIntegrationInput = z.object({ id: idSchema });
+export type DeleteIntegrationInput = z.infer<typeof deleteIntegrationInput>;
+
+/** What the disconnect actually touched, so the UI can report it rather than claim it. */
+export const deleteIntegrationResultDto = z.object({
+  id: idSchema,
+  repositoriesUnlinked: z.number().int().nonnegative(),
+  branchesDeleted: z.number().int().nonnegative(),
+  changeRequestsDeleted: z.number().int().nonnegative(),
+  /** Kept, with their link to this Integration cleared. Never deleted. */
+  issuesDetached: z.number().int().nonnegative(),
+});
+export type DeleteIntegrationResultDto = z.infer<typeof deleteIntegrationResultDto>;

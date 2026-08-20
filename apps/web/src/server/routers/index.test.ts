@@ -145,7 +145,7 @@ describe("tRPC router integration", () => {
     const wsId = await seedWs(db, "acme");
     const c = caller(db, wsId);
     const ref = await c.secret.set({ name: "api", kind: "api_key", value: "sk-ant-secret" });
-    expect(ref).toEqual({ id: ref.id, name: "api", kind: "api_key" });
+    expect(ref).toEqual({ id: ref.id, name: "api", kind: "api_key", usedBy: [] });
     expect(JSON.stringify(ref)).not.toContain("sk-ant-secret");
   });
 

@@ -609,6 +609,120 @@
         }
       }
     },
+    "/integration.delete": {
+      "post": {
+        "operationId": "integration-delete",
+        "summary": "Disconnect an Integration. Its Repositories are unlinked and the branches and change requests synced from it are removed, since nothing can refresh them once the credential is gone. Imported Issues are kept and detached — Tasks point at them.",
+        "tags": [
+          "integration"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "repositoriesUnlinked": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "branchesDeleted": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "changeRequestsDeleted": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "issuesDetached": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "repositoriesUnlinked",
+                    "branchesDeleted",
+                    "changeRequestsDeleted",
+                    "issuesDetached"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/integration.listExternalRepositories": {
       "get": {
         "operationId": "integration-listExternalRepositories",
@@ -662,7 +776,10 @@
                       "url": {
                         "type": "string"
                       },
-                      "alreadyLinked": {
+                      "cloneUrl": {
+                        "type": "string"
+                      },
+                      "alreadyImported": {
                         "type": "boolean"
                       }
                     },
@@ -673,7 +790,8 @@
                       "defaultBranch",
                       "isPrivate",
                       "url",
-                      "alreadyLinked"
+                      "cloneUrl",
+                      "alreadyImported"
                     ]
                   }
                 }
@@ -733,10 +851,10 @@
         }
       }
     },
-    "/integration.linkRepository": {
+    "/integration.importRepository": {
       "post": {
-        "operationId": "integration-linkRepository",
-        "summary": "Bind a connected Repository to a specific owner/repo (GitHub) or namespace/project (GitLab) on an Integration.",
+        "operationId": "integration-importRepository",
+        "summary": "Import a repository from an Integration, creating the Repository already bound to it. Records the provider's clone URL; the orchestrator clones it the first time a Task needs it. Importing the same repository twice returns the existing Repository.",
         "tags": [
           "integration"
         ],
@@ -752,10 +870,6 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "repositoryId": {
-                    "type": "string",
-                    "minLength": 1
-                  },
                   "integrationId": {
                     "type": "string",
                     "minLength": 1
@@ -764,10 +878,14 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 300
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
                   }
                 },
                 "required": [
-                  "repositoryId",
                   "integrationId",
                   "externalFullName"
                 ]
@@ -5022,12 +5140,35 @@
                         "ssh_key",
                         "cloud_credential"
                       ]
+                    },
+                    "usedBy": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "holder": {
+                            "type": "string",
+                            "enum": [
+                              "integration",
+                              "agent_profile"
+                            ]
+                          },
+                          "name": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "holder",
+                          "name"
+                        ]
+                      }
                     }
                   },
                   "required": [
                     "id",
                     "name",
-                    "kind"
+                    "kind",
+                    "usedBy"
                   ]
                 }
               }
@@ -5113,12 +5254,35 @@
                           "ssh_key",
                           "cloud_credential"
                         ]
+                      },
+                      "usedBy": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "holder": {
+                              "type": "string",
+                              "enum": [
+                                "integration",
+                                "agent_profile"
+                              ]
+                            },
+                            "name": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "holder",
+                            "name"
+                          ]
+                        }
                       }
                     },
                     "required": [
                       "id",
                       "name",
-                      "kind"
+                      "kind",
+                      "usedBy"
                     ]
                   }
                 }
@@ -5161,6 +5325,138 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/error.NOT_FOUND"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/secret.delete": {
+      "post": {
+        "operationId": "secret-delete",
+        "summary": "Delete a Secret. Refused while an Integration or Agent Profile still references it.",
+        "tags": [
+          "secret"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "subscription_token",
+                        "api_key",
+                        "scm_pat",
+                        "ssh_key",
+                        "cloud_credential"
+                      ]
+                    },
+                    "usedBy": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "holder": {
+                            "type": "string",
+                            "enum": [
+                              "integration",
+                              "agent_profile"
+                            ]
+                          },
+                          "name": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "holder",
+                          "name"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "kind",
+                    "usedBy"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
                 }
               }
             }

@@ -134,6 +134,24 @@ describe("exec — one-shot commands never throw on failure", () => {
     const result = await executor.exec(["pwd"], { cwd: dir });
     expect(result.stdout.trim()).toBe(dir);
   });
+
+  it("merges the given env over the host's, rather than replacing it", async () => {
+    const executor = createLocalExecutor(await freshRoot());
+    const result = await executor.exec(["sh", "-c", 'echo "$GC_TEST_VAR"; echo "$PATH"'], {
+      env: { GC_TEST_VAR: "supplied" },
+    });
+    const [supplied, inherited] = result.stdout.trim().split("\n");
+    // Merged, unlike `spawn` (see the AC-3 suite above): this channel exists so `git` can be
+    // handed a credential, and a git that lost PATH and HOME would not run at all.
+    expect(supplied).toBe("supplied");
+    expect(inherited?.length ?? 0).toBeGreaterThan(0);
+  });
+
+  it("leaves the environment untouched when none is given", async () => {
+    const executor = createLocalExecutor(await freshRoot());
+    const result = await executor.exec(["sh", "-c", 'echo "[$GC_TEST_VAR]"']);
+    expect(result.stdout.trim()).toBe("[]");
+  });
 });
 
 describe("forward and metrics and dispose", () => {

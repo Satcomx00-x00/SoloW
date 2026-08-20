@@ -3,14 +3,16 @@ import {
   type ChangeRequestDto,
   CommonErrorCode,
   type ConnectIntegrationInput,
+  type DeleteIntegrationInput,
+  type DeleteIntegrationResultDto,
   type ExternalIssuePreviewDto,
   type ExternalRepositoryDto,
   err,
   type ImportIssuesInput,
+  type ImportRepositoryInput,
   type IntegrationDto,
   IntegrationErrorCode,
   type IssueDto,
-  type LinkRepositoryInput,
   type ListExternalIssuesInput,
   type ListExternalRepositoriesInput,
   ok,
@@ -136,6 +138,88 @@ export async function connectIntegration(
   return row ? ok(integrationToDto(row)) : err(CommonErrorCode.ValidationFailed);
 }
 
+/**
+ * Disconnect an Integration and drop what only existed because of it (spec F12).
+ *
+ * Three different answers for three different kinds of row, and the differences are the design:
+ *
+ * - Branches and change requests are a *cache* of the provider's state. With the credential gone
+ *   they can never be refreshed, so leaving them would leave the UI showing data nothing can
+ *   correct. They go.
+ * - Issues are *work*: `task.issue_id` is NOT NULL, so deleting an imported Issue would take its
+ *   Tasks with it. They stay, with the link to this Integration cleared.
+ * - Repositories are configuration the user created before any of this. They are unlinked, never
+ *   deleted.
+ *
+ * The statement order is the order the foreign keys allow — `change_request.integration_id` is
+ * NOT NULL, so those rows cannot outlive the integration row — and it is also the order that is
+ * safe to retry: every step before the final delete is idempotent, so a failure part-way through
+ * leaves a state a second call completes rather than a half-deleted integration.
+ */
+export async function deleteIntegration(
+  ctx: RequestContext,
+  input: DeleteIntegrationInput,
+): Promise<Result<DeleteIntegrationResultDto, typeof CommonErrorCode.NotFound>> {
+  const [row] = await ctx.db
+    .select({ id: integration.id })
+    .from(integration)
+    .where(and(eq(integration.workspaceId, ctx.workspaceId), eq(integration.id, input.id)))
+    .limit(1);
+  if (!row) return err(CommonErrorCode.NotFound);
+
+  const linkedRepos = await ctx.db
+    .select({ id: repository.id })
+    .from(repository)
+    .where(and(eq(repository.workspaceId, ctx.workspaceId), eq(repository.integrationId, row.id)));
+  const repoIds = linkedRepos.map((r) => r.id);
+
+  const changeRequestsDeleted = await ctx.db
+    .delete(changeRequest)
+    .where(
+      and(eq(changeRequest.workspaceId, ctx.workspaceId), eq(changeRequest.integrationId, row.id)),
+    )
+    .returning({ id: changeRequest.id });
+
+  // Branches carry no integration id of their own — they are reachable only through the
+  // Repositories this Integration linked, which is why they are cleared by repository id here.
+  const branchesDeleted =
+    repoIds.length === 0
+      ? []
+      : await ctx.db
+          .delete(repositoryBranch)
+          .where(
+            and(
+              eq(repositoryBranch.workspaceId, ctx.workspaceId),
+              inArray(repositoryBranch.repositoryId, repoIds),
+            ),
+          )
+          .returning({ id: repositoryBranch.id });
+
+  const issuesDetached = await ctx.db
+    .update(issue)
+    .set({ integrationId: null, updatedAt: new Date().toISOString() })
+    .where(and(eq(issue.workspaceId, ctx.workspaceId), eq(issue.integrationId, row.id)))
+    .returning({ id: issue.id });
+
+  const repositoriesUnlinked = await ctx.db
+    .update(repository)
+    .set({ integrationId: null, externalFullName: null, updatedAt: new Date().toISOString() })
+    .where(and(eq(repository.workspaceId, ctx.workspaceId), eq(repository.integrationId, row.id)))
+    .returning({ id: repository.id });
+
+  await ctx.db
+    .delete(integration)
+    .where(and(eq(integration.workspaceId, ctx.workspaceId), eq(integration.id, row.id)));
+
+  return ok({
+    id: row.id,
+    repositoriesUnlinked: repositoriesUnlinked.length,
+    branchesDeleted: branchesDeleted.length,
+    changeRequestsDeleted: changeRequestsDeleted.length,
+    issuesDetached: issuesDetached.length,
+  });
+}
+
 export async function listIntegrations(ctx: RequestContext): Promise<Result<IntegrationDto[]>> {
   const rows = await ctx.db
     .select()
@@ -163,8 +247,8 @@ export async function listExternalRepositories(
 
   // Scoped to this Integration: two Integrations can legitimately expose the same full name
   // (a github.com account and a GitHub Enterprise host both having "acme/gate"), and marking
-  // one as linked because of the other would be wrong.
-  const linked = await ctx.db
+  // one as imported because of the other would be wrong.
+  const imported = await ctx.db
     .select({ externalFullName: repository.externalFullName })
     .from(repository)
     .where(
@@ -173,40 +257,61 @@ export async function listExternalRepositories(
         eq(repository.integrationId, input.integrationId),
       ),
     );
-  const linkedNames = new Set(linked.map((r) => r.externalFullName));
+  const importedNames = new Set(imported.map((r) => r.externalFullName));
 
-  return ok(external.map((r) => ({ ...r, alreadyLinked: linkedNames.has(r.fullName) })));
+  return ok(external.map((r) => ({ ...r, alreadyImported: importedNames.has(r.fullName) })));
 }
 
-/** Bind a connected Repository to a specific `owner/repo` on an Integration (issue #15). */
-export async function linkRepository(
+/**
+ * Import a repository from an Integration, creating the Repository (issue #15).
+ *
+ * The clone URL is read from the provider rather than taken from the caller, which is what makes
+ * this safe to expose: the only repositories importable are the ones the stored token can
+ * actually see, so an `externalFullName` naming someone else's repository is a NotFound, not an
+ * attempt GateControl will go and make on the user's behalf.
+ *
+ * Nothing is cloned here. The web app is not allowed to touch the execution host
+ * (`scripts/audit-executor-boundary.ts`), and it does not need to be: recording the clone URL as
+ * a `remote_url` location hands the work to the orchestrator, which already clones exactly this
+ * kind of location into its cache the first time a Task needs it.
+ *
+ * Idempotent per `(integration, externalFullName)` — importing the same repository twice returns
+ * the Repository already there rather than a second row pointing at the same clone URL.
+ */
+export async function importRepository(
   ctx: RequestContext,
-  input: LinkRepositoryInput,
+  input: ImportRepositoryInput,
 ): Promise<Result<RepositoryDto, typeof CommonErrorCode.NotFound>> {
-  const [repo] = await ctx.db
-    .select({ id: repository.id })
-    .from(repository)
-    .where(and(eq(repository.workspaceId, ctx.workspaceId), eq(repository.id, input.repositoryId)))
-    .limit(1);
-  if (!repo) return err(CommonErrorCode.NotFound);
+  const cred = await loadCredential(ctx, input.integrationId);
+  if (!cred.ok) return err(CommonErrorCode.NotFound);
 
-  const [integrationRow] = await ctx.db
-    .select({ id: integration.id })
-    .from(integration)
+  const [existing] = await ctx.db
+    .select()
+    .from(repository)
     .where(
-      and(eq(integration.workspaceId, ctx.workspaceId), eq(integration.id, input.integrationId)),
+      and(
+        eq(repository.workspaceId, ctx.workspaceId),
+        eq(repository.integrationId, input.integrationId),
+        eq(repository.externalFullName, input.externalFullName),
+      ),
     )
     .limit(1);
-  if (!integrationRow) return err(CommonErrorCode.NotFound);
+  if (existing) return ok(repositoryToDto(existing));
+
+  const external = await providerFor(cred.data.row.provider).listRepositories(cred.data.credential);
+  const picked = external.find((r) => r.fullName === input.externalFullName);
+  if (!picked) return err(CommonErrorCode.NotFound);
 
   const [row] = await ctx.db
-    .update(repository)
-    .set({
+    .insert(repository)
+    .values({
+      workspaceId: ctx.workspaceId,
+      name: input.name ?? picked.name,
+      source: "remote_url",
+      location: picked.cloneUrl,
       integrationId: input.integrationId,
-      externalFullName: input.externalFullName,
-      updatedAt: new Date().toISOString(),
+      externalFullName: picked.fullName,
     })
-    .where(and(eq(repository.workspaceId, ctx.workspaceId), eq(repository.id, input.repositoryId)))
     .returning();
   return row ? ok(repositoryToDto(row)) : err(CommonErrorCode.NotFound);
 }

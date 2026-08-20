@@ -1,6 +1,6 @@
 import { reviewDecisionSchema, type TaskState } from "@gatecontrol/contracts";
 import { classifyRunFailure } from "@gatecontrol/core";
-import { createDb, type Db } from "@gatecontrol/db";
+import { createDb, type Db, decryptForScmSync } from "@gatecontrol/db";
 import {
   captureException,
   createLogger,
@@ -30,6 +30,7 @@ import { hasDriver, missingDriverReason } from "../../executor/drivers.js";
 import { createLocalExecutor } from "../../executor/local.js";
 import {
   adoptWorktree,
+  type CloneCredential,
   cleanupWorktree,
   commitWorktree,
   diffWorktree,
@@ -42,6 +43,21 @@ import {
 } from "../../worktree/manager.js";
 import { hub } from "../../ws/hub.js";
 import { inngest } from "../client.js";
+
+/**
+ * The username each provider expects on an https clone. Both authenticate on the token and
+ * ignore this, but sending what they document costs nothing and stops the pair looking arbitrary.
+ */
+const CLONE_USERNAME = { github: "x-access-token", gitlab: "oauth2" } as const;
+
+/** The credential for cloning this Task's Repository, or undefined when it needs none. */
+function cloneCredentialFor(ctx: TaskRunContext): CloneCredential | undefined {
+  if (!ctx.scmClone) return undefined;
+  return {
+    username: CLONE_USERNAME[ctx.scmClone.provider],
+    token: decryptForScmSync(ctx.scmClone.secretCiphertext),
+  };
+}
 
 /**
  * Durable Task lifecycle (plan §9 / task TASK-019). Steps are resumable: an orchestrator
@@ -218,6 +234,10 @@ export async function runTaskLifecycle(
       baseRef: ctx.task.baseRef ?? undefined,
       worktreeRoot: deps.worktreeRoot,
       repoCacheRoot: deps.repoCacheRoot,
+      // Decrypted here, at the point of use, and handed straight to the clone — an imported
+      // repository is private more often than not, and its Integration already holds the only
+      // token that can read it (issue #15).
+      cloneCredential: cloneCredentialFor(ctx),
     }),
   );
 

@@ -50,8 +50,10 @@ documents, so there is no second definition of any operation to drift. It sits b
   stored Personal Access Token Secret (never a pasted-in-place value — Principle IV), and
   an optional base URL for a self-managed instance. The token is verified against the
   provider before the Integration is stored as connected.
-- **FR-3** A user links a Repository to an Integration by its provider identifier
-  ("owner/repo" for GitHub, "namespace/path" for GitLab).
+- **FR-3** A user imports a Repository by picking one the Integration's token can see. The
+  Repository is created already bound to the provider, recording its clone URL; no local
+  clone has to exist first, and nothing is cloned at import time — the orchestrator clones
+  it, authenticating with the Integration's token, the first time a Task runs against it.
 - **FR-4** A user previews a linked Repository's open provider Issues and selects which to
   import; import is idempotent on `(Integration, external id)` — importing an id already
   imported is a no-op, not a duplicate.
@@ -99,8 +101,11 @@ documents, so there is no second definition of any operation to drift. It sits b
 
 - Each Integration is Workspace-scoped and reusable across every Repository it is linked
   to.
-- A Repository is linked to at most one Integration; `externalFullName` and
-  `integrationId` are set together.
+- A Repository belongs to at most one Integration; `externalFullName` and `integrationId`
+  are set together, at import, and cleared together when the Integration is disconnected.
+- Disconnecting an Integration removes what only it could produce — the synced branches and
+  change requests — unlinks its Repositories, and keeps imported Issues, which are work
+  items Tasks point at.
 - Canonical data owned by an external system (an imported Issue's title and description)
   is not edited in GateControl — see [F01](./F01-issue-management.md).
 

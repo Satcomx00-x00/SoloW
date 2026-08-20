@@ -53,6 +53,7 @@ interface GithubRepoSummary {
   default_branch: string | null;
   private: boolean;
   html_url: string;
+  clone_url: string;
 }
 
 function apiRoot(baseUrl: string | null): string {
@@ -98,6 +99,7 @@ export class GithubProvider implements ChangeProvider {
       defaultBranch: r.default_branch,
       isPrivate: r.private,
       url: r.html_url,
+      cloneUrl: r.clone_url,
     }));
   }
 

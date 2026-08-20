@@ -42,3 +42,14 @@ export const IntegrationErrorCode = {
   NotLinked: "INTEGRATION_NOT_LINKED",
 } as const;
 export type IntegrationErrorCode = (typeof IntegrationErrorCode)[keyof typeof IntegrationErrorCode];
+
+export const SecretErrorCode = {
+  /**
+   * The Secret is still referenced by an Integration or an Agent Profile. Neither reference is a
+   * database foreign key — `secret_id` is a plain column on both — so deleting the row would not
+   * fail here, it would fail much later, as an authentication error at the next sync or agent
+   * run. Refusing up front is what makes that impossible (spec F17 FR-6).
+   */
+  InUse: "SECRET_IN_USE",
+} as const;
+export type SecretErrorCode = (typeof SecretErrorCode)[keyof typeof SecretErrorCode];

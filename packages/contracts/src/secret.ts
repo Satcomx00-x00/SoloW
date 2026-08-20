@@ -28,10 +28,31 @@ export const setSecretInput = z.object({
 });
 export type SetSecretInput = z.infer<typeof setSecretInput>;
 
+/**
+ * What still holds a Secret. Carried on every read so the UI can say *which* Integration or
+ * Agent Profile depends on a credential before the user tries to delete it, rather than only
+ * after the server refuses.
+ */
+export const secretUsageDto = z.object({
+  holder: z.enum(["integration", "agent_profile"]),
+  /** How the holder is identified to the user — an Integration's provider, a Profile's name. */
+  name: z.string(),
+});
+export type SecretUsageDto = z.infer<typeof secretUsageDto>;
+
 /** Metadata only — never the value. */
 export const secretRefDto = z.object({
   id: idSchema,
   name: z.string(),
   kind: secretKindSchema,
+  usedBy: z.array(secretUsageDto),
 });
 export type SecretRefDto = z.infer<typeof secretRefDto>;
+
+/**
+ * Delete a Secret. Refused with `SECRET_IN_USE` while anything still references it — a stored
+ * credential is the only copy GateControl has, and dropping one an Integration or Agent Profile
+ * points at breaks that holder with no way to put the value back (spec F17 FR-6).
+ */
+export const deleteSecretInput = z.object({ id: idSchema });
+export type DeleteSecretInput = z.infer<typeof deleteSecretInput>;

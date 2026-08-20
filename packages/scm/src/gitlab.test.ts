@@ -89,6 +89,7 @@ beforeAll(() => {
             default_branch: "main",
             visibility: "private",
             web_url: "u/acme/gate",
+            http_url_to_repo: "https://gitlab.com/acme/gate.git",
             _query: url.search,
           },
           {
@@ -98,6 +99,7 @@ beforeAll(() => {
             default_branch: null,
             visibility: "internal",
             web_url: "u/acme/internal-tools",
+            http_url_to_repo: "https://gitlab.com/acme/internal-tools.git",
           },
           {
             name: "docs",
@@ -106,6 +108,7 @@ beforeAll(() => {
             default_branch: "main",
             visibility: "public",
             web_url: "u/acme/docs",
+            http_url_to_repo: "https://gitlab.com/acme/docs.git",
           },
         ]);
       }
@@ -197,6 +200,7 @@ describe("GitlabProvider", () => {
       defaultBranch: "main",
       isPrivate: true,
       url: "u/acme/gate",
+      cloneUrl: "https://gitlab.com/acme/gate.git",
     });
     // fullName is the RepoRef every other method takes, so a picked value needs no reformatting.
     expect(repos.map((r) => r.fullName)).toEqual(["acme/gate", "acme/internal-tools", "acme/docs"]);
@@ -206,6 +210,14 @@ describe("GitlabProvider", () => {
     receivedPaths = [];
     await new GitlabProvider().listRepositories(credential());
     expect(receivedPaths.at(-1)).toContain("membership=true");
+  });
+
+  it("reports the clone URL the provider gives, with no credential in it", async () => {
+    const repos = await new GitlabProvider().listRepositories(credential());
+    // http_url_to_repo, not ssh_url_to_repo: the import path authenticates over https with the
+    // Integration's token, which needs no key material on the host.
+    expect(repos[0]?.cloneUrl).toBe("https://gitlab.com/acme/gate.git");
+    expect(repos.every((r) => !r.cloneUrl.includes("@"))).toBe(true);
   });
 
   it('treats GitLab "internal" visibility as private, not as publicly readable', async () => {

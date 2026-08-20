@@ -2,7 +2,7 @@
 
 import type { McpScope } from "@gatecontrol/contracts";
 import { Check, Copy } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -27,10 +27,15 @@ import { trpc } from "@/trpc/react";
  * consequence of storing it hashed (AC-4).
  */
 
-/** The endpoint as a client must address it. Read at render time so it is right in any deployment. */
-function endpointUrl(): string {
-  if (typeof window === "undefined") return "/api/mcp";
-  return `${window.location.origin}/api/mcp`;
+/**
+ * The endpoint as a client must address it. The origin is only known in the browser, so it is
+ * filled in after mount rather than during render — the server and the first client render must
+ * agree on the relative path or React discards the tree as a hydration mismatch.
+ */
+function useEndpointUrl(): string {
+  const [url, setUrl] = useState("/api/mcp");
+  useEffect(() => setUrl(`${window.location.origin}/api/mcp`), []);
+  return url;
 }
 
 function CopyButton({ text, label }: { text: string; label: string }) {
@@ -96,7 +101,8 @@ export function McpSection() {
     onSuccess: () => utils.mcpToken.list.invalidate(),
   });
 
-  const url = endpointUrl();
+  const url = useEndpointUrl();
+  const snippets = snippetsFor(url);
   const live = (tokens.data ?? []).filter((t) => !t.revokedAt);
 
   return (
@@ -178,13 +184,13 @@ export function McpSection() {
           <p className="font-medium text-sm">Client configuration</p>
           <Tabs defaultValue="claude-code">
             <TabsList>
-              {snippetsFor(url).map((s) => (
+              {snippets.map((s) => (
                 <TabsTrigger key={s.id} value={s.id}>
                   {s.label}
                 </TabsTrigger>
               ))}
             </TabsList>
-            {snippetsFor(url).map((s) => (
+            {snippets.map((s) => (
               <TabsContent key={s.id} value={s.id} className="space-y-2">
                 <pre className="overflow-x-auto rounded-md border bg-muted/40 p-3 text-xs">
                   <code>{s.body}</code>

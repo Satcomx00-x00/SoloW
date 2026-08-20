@@ -161,8 +161,8 @@ describe("mappers", () => {
       expect(row.ciphertext.length).toBeGreaterThan(0);
 
       const ref = secretToRef(row);
-      expect(ref).toEqual({ id: row.id, name: "anthropic-key", kind: "api_key" });
-      expect(Object.keys(ref).sort()).toEqual(["id", "kind", "name"]);
+      expect(ref).toEqual({ id: row.id, name: "anthropic-key", kind: "api_key", usedBy: [] });
+      expect(Object.keys(ref).sort()).toEqual(["id", "kind", "name", "usedBy"]);
       expect(ref).not.toHaveProperty("ciphertext");
       // The plaintext must not appear anywhere in the serialized ref either.
       expect(JSON.stringify(ref)).not.toContain("super-secret-token");

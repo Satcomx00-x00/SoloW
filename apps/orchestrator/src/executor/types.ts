@@ -33,6 +33,16 @@ export interface SpawnOpts {
 
 export interface ExecOpts {
   cwd?: string;
+  /**
+   * Extra variables for this one command, merged *over* the executor's own environment.
+   *
+   * The opposite of `SpawnOpts.env`, and deliberately so. A spawned agent must see exactly what
+   * the caller shaped and nothing of the host (Principle IV) — but `exec` runs the product's own
+   * short-lived tools, and a `git` that inherited no `PATH`, `HOME` or proxy settings would not
+   * run at all. This is the channel for handing git a credential without putting it in argv,
+   * where `ps` would show it.
+   */
+  env?: Record<string, string>;
 }
 
 export interface ExecResult {

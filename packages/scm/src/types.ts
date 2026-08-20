@@ -62,8 +62,15 @@ export interface ExternalRepository {
   description: string | null;
   defaultBranch: string | null;
   isPrivate: boolean;
-  /** The provider's web page for the repository — not a clone URL, which would embed a token. */
+  /** The provider's web page for the repository — for a human to open, not for git. */
   url: string;
+  /**
+   * The https URL git clones from, exactly as the provider reports it and with no credential in
+   * it. Importing a repository stores this as its location, so a private repository is cloned by
+   * authenticating the request — never by embedding a token in a URL that would then live in the
+   * database and in every `git remote -v` (Principle IV).
+   */
+  cloneUrl: string;
 }
 
 /**

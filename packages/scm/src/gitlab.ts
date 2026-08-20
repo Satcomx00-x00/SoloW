@@ -47,6 +47,7 @@ interface GitlabProject {
   default_branch: string | null;
   visibility: "private" | "internal" | "public";
   web_url: string;
+  http_url_to_repo: string;
 }
 
 function apiRoot(baseUrl: string | null): string {
@@ -105,6 +106,7 @@ export class GitlabProvider implements ChangeProvider {
       // private here rather than being reported to the user as if anyone could read it.
       isPrivate: r.visibility !== "public",
       url: r.web_url,
+      cloneUrl: r.http_url_to_repo,
     }));
   }
 

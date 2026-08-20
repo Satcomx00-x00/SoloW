@@ -1,8 +1,9 @@
 "use client";
 
 import type { ScmProvider } from "@gatecontrol/contracts";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, Trash2 } from "lucide-react";
 import { useState } from "react";
+import { ConfirmAction } from "@/components/features/confirm-action";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -41,10 +42,7 @@ export function IntegrationsSection() {
     },
   });
 
-  const [linkTarget, setLinkTarget] = useState<{ repoId: string; integrationId: string }>({
-    repoId: "",
-    integrationId: "",
-  });
+  const [importFrom, setImportFrom] = useState("");
   const [externalFullName, setExternalFullName] = useState("");
 
   /**
@@ -53,8 +51,8 @@ export function IntegrationsSection() {
    * token — there is nothing meaningful to list before then.
    */
   const externalRepos = trpc.integration.listExternalRepositories.useQuery(
-    { integrationId: linkTarget.integrationId },
-    { enabled: linkTarget.integrationId.length > 0 },
+    { integrationId: importFrom },
+    { enabled: importFrom.length > 0 },
   );
 
   /**
@@ -63,11 +61,11 @@ export function IntegrationsSection() {
    * account B — the exact mistake the picker exists to prevent.
    */
   const changeIntegration = (integrationId: string) => {
-    setLinkTarget((t) => ({ ...t, integrationId }));
+    setImportFrom(integrationId);
     setExternalFullName("");
   };
 
-  const link = trpc.integration.linkRepository.useMutation({
+  const importRepository = trpc.integration.importRepository.useMutation({
     onSuccess: () => {
       utils.repository.list.invalidate();
       utils.integration.listExternalRepositories.invalidate();
@@ -76,6 +74,24 @@ export function IntegrationsSection() {
   });
 
   const sync = trpc.integration.syncRepositorySignals.useMutation();
+
+  /**
+   * Disconnecting invalidates the repository list too: the server unlinks every Repository that
+   * pointed at this Integration, so a list still showing them linked would be stale in the one
+   * place the user is looking.
+   */
+  const disconnect = trpc.integration.delete.useMutation({
+    onSuccess: () => {
+      utils.integration.list.invalidate();
+      utils.repository.list.invalidate();
+      setImportFrom("");
+      setExternalFullName("");
+    },
+  });
+
+  /** What disconnecting *this* Integration would take with it, in the user's own data. */
+  const linkedTo = (integrationId: string) =>
+    (repos.data ?? []).filter((r) => r.integrationId === integrationId);
 
   return (
     <Card id="integrations" className="scroll-mt-16">
@@ -154,52 +170,80 @@ export function IntegrationsSection() {
         )}
 
         {(integrations.data?.length ?? 0) > 0 && (
-          <div className="flex flex-wrap gap-2 border-t pt-4">
-            {(integrations.data ?? []).map((i) => (
-              <Badge key={i.id} variant="secondary">
-                {i.provider} · {i.baseUrl ?? "cloud"}
-              </Badge>
-            ))}
-          </div>
+          <ul className="divide-y border-t">
+            {(integrations.data ?? []).map((i) => {
+              const linked = linkedTo(i.id);
+              return (
+                <li key={i.id} className="flex items-center gap-3 py-2">
+                  <Badge variant="secondary">
+                    {i.provider} · {i.baseUrl ?? "cloud"}
+                  </Badge>
+                  <span className="min-w-0 flex-1 truncate text-muted-foreground text-xs">
+                    {linked.length === 0
+                      ? "no linked repositories"
+                      : `linked to ${linked.map((r) => r.name).join(", ")}`}
+                  </span>
+                  {/*
+                    The description names the consequences in the order they matter: what is lost
+                    for good, and what survives. "Disconnect" without that reads as reversible,
+                    and for the synced branches and change requests it is not.
+                  */}
+                  <ConfirmAction
+                    title={`Disconnect ${i.provider}?`}
+                    description={`${
+                      linked.length === 0
+                        ? "No repositories are linked to it. "
+                        : `${String(linked.length)} linked ${linked.length === 1 ? "repository" : "repositories"} (${linked
+                            .map((r) => r.name)
+                            .join(", ")}) will be unlinked. `
+                    }The branches and change requests synced from it are removed — nothing can refresh them once the token is gone. Issues already imported are kept, along with their Tasks.`}
+                    confirmLabel="Disconnect"
+                    onConfirm={() => disconnect.mutate({ id: i.id })}
+                    trigger={
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        aria-label={`Disconnect the ${i.provider} integration`}
+                        loading={disconnect.isPending && disconnect.variables?.id === i.id}
+                      >
+                        <Trash2 /> Disconnect
+                      </Button>
+                    }
+                  />
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        {disconnect.error && (
+          <p className="text-destructive text-sm" role="alert">
+            {disconnect.error.message}
+          </p>
         )}
 
-        {(integrations.data?.length ?? 0) > 0 && (repos.data?.length ?? 0) > 0 && (
+        {/*
+          No local Repository to pick any more. Importing used to mean binding a Repository the
+          user had already connected by path to a provider repo, which put "have a clone on disk"
+          in front of the thing they actually wanted — working on a repository they can see on
+          GitHub. Now the pick *is* the Repository: GateControl records the provider's clone URL,
+          and the orchestrator clones it the first time a Task runs against it.
+        */}
+        {(integrations.data?.length ?? 0) > 0 && (
           <div className="space-y-3 border-t pt-4">
-            <p className="font-medium text-sm">Link a repository</p>
+            <p className="font-medium text-sm">Import a repository</p>
             <form
               className="flex flex-wrap items-end gap-3"
               onSubmit={(e) => {
                 e.preventDefault();
-                if (!linkTarget.repoId || !linkTarget.integrationId) return;
-                link.mutate({
-                  repositoryId: linkTarget.repoId,
-                  integrationId: linkTarget.integrationId,
-                  externalFullName,
-                });
+                if (!importFrom || !externalFullName) return;
+                importRepository.mutate({ integrationId: importFrom, externalFullName });
               }}
             >
               <div className="grid gap-2">
-                <Label htmlFor="link-repo">Repository</Label>
-                <Select
-                  value={linkTarget.repoId}
-                  onValueChange={(v) => setLinkTarget((t) => ({ ...t, repoId: v }))}
-                >
-                  <SelectTrigger className="w-40" id="link-repo">
-                    <SelectValue placeholder="Repository" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(repos.data ?? []).map((r) => (
-                      <SelectItem key={r.id} value={r.id}>
-                        {r.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="link-integration">Integration</Label>
-                <Select value={linkTarget.integrationId} onValueChange={changeIntegration}>
-                  <SelectTrigger className="w-40" id="link-integration">
+                <Label htmlFor="import-integration">Integration</Label>
+                <Select value={importFrom} onValueChange={changeIntegration}>
+                  <SelectTrigger className="w-40" id="import-integration">
                     <SelectValue placeholder="Integration" />
                   </SelectTrigger>
                   <SelectContent>
@@ -212,16 +256,16 @@ export function IntegrationsSection() {
                 </Select>
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="link-full-name">Provider repository</Label>
+                <Label htmlFor="import-full-name">Repository</Label>
                 <Select
                   value={externalFullName}
                   onValueChange={setExternalFullName}
-                  disabled={!linkTarget.integrationId || externalRepos.isPending}
+                  disabled={!importFrom || externalRepos.isPending}
                 >
-                  <SelectTrigger className="w-64" id="link-full-name">
+                  <SelectTrigger className="w-64" id="import-full-name">
                     <SelectValue
                       placeholder={
-                        !linkTarget.integrationId
+                        !importFrom
                           ? "Select an integration first"
                           : externalRepos.isPending
                             ? "Loading repositories…"
@@ -231,10 +275,10 @@ export function IntegrationsSection() {
                   </SelectTrigger>
                   <SelectContent>
                     {(externalRepos.data ?? []).map((r) => (
-                      <SelectItem key={r.fullName} value={r.fullName} disabled={r.alreadyLinked}>
+                      <SelectItem key={r.fullName} value={r.fullName} disabled={r.alreadyImported}>
                         {r.fullName}
                         {r.isPrivate ? " · private" : ""}
-                        {r.alreadyLinked ? " · already linked" : ""}
+                        {r.alreadyImported ? " · already imported" : ""}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -243,12 +287,16 @@ export function IntegrationsSection() {
               <Button
                 type="submit"
                 size="sm"
-                loading={link.isPending}
-                disabled={!externalFullName || !linkTarget.repoId}
+                loading={importRepository.isPending}
+                disabled={!externalFullName}
               >
-                Link
+                Import
               </Button>
             </form>
+            <p className="text-muted-foreground text-xs">
+              The repository is cloned when a Task first runs against it, using this
+              integration&apos;s token — private repositories need nothing set up on the host.
+            </p>
             {externalRepos.error && (
               <p className="text-destructive text-sm" role="alert">
                 Could not list repositories: {externalRepos.error.message}
@@ -259,9 +307,9 @@ export function IntegrationsSection() {
                 This token cannot see any repositories. Check its scopes on the provider.
               </p>
             )}
-            {link.error && (
+            {importRepository.error && (
               <p className="text-destructive text-sm" role="alert">
-                {link.error.message}
+                {importRepository.error.message}
               </p>
             )}
           </div>
@@ -269,7 +317,7 @@ export function IntegrationsSection() {
 
         {(repos.data ?? []).filter((r) => r.integrationId).length > 0 && (
           <div className="space-y-2 border-t pt-4">
-            <p className="font-medium text-sm">Linked repositories</p>
+            <p className="font-medium text-sm">Imported repositories</p>
             <ul className="space-y-2">
               {(repos.data ?? [])
                 .filter((r) => r.integrationId)

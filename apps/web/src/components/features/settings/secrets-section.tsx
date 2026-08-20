@@ -1,7 +1,9 @@
 "use client";
 
-import type { SecretKind } from "@gatecontrol/contracts";
+import type { SecretKind, SecretRefDto } from "@gatecontrol/contracts";
+import { Trash2 } from "lucide-react";
 import { useState } from "react";
+import { ConfirmAction } from "@/components/features/confirm-action";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,6 +17,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { trpc } from "@/trpc/react";
+
+/**
+ * How a Secret's holders read in the list and in the confirmation. Named rather than counted:
+ * "used by github, claude" tells the user what to detach; "used by 2 things" does not.
+ */
+function describeUsage(usedBy: SecretRefDto["usedBy"]): string {
+  return usedBy.map((u) => u.name).join(", ");
+}
 
 /** Set (write-only) Secrets and list their metadata — the value is never shown after entry. */
 export function SecretsSection() {
@@ -30,6 +40,10 @@ export function SecretsSection() {
       setName("");
       setValue("");
     },
+  });
+
+  const deleteSecret = trpc.secret.delete.useMutation({
+    onSuccess: () => utils.secret.list.invalidate(),
   });
 
   return (
@@ -92,13 +106,50 @@ export function SecretsSection() {
           </p>
         )}
         {(secrets.data?.length ?? 0) > 0 && (
-          <div className="flex flex-wrap gap-2 border-t pt-4">
+          <ul className="divide-y border-t">
             {(secrets.data ?? []).map((s) => (
-              <Badge key={s.id} variant="secondary">
-                {s.name} · {s.kind}
-              </Badge>
+              <li key={s.id} className="flex items-center gap-3 py-2">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm">{s.name}</p>
+                  {s.usedBy.length > 0 && (
+                    <p className="truncate text-muted-foreground text-xs">
+                      Used by {describeUsage(s.usedBy)}
+                    </p>
+                  )}
+                </div>
+                <Badge variant="secondary">{s.kind}</Badge>
+                {/*
+                  A Secret in use is not deletable at all — the server refuses it, and a button
+                  that only ever produces an error is worse than one that explains itself. The
+                  reason sits beside it in the row above, so the disabled state is never a mystery.
+                */}
+                <ConfirmAction
+                  title={`Delete "${s.name}"?`}
+                  description="The stored value is encrypted and cannot be read back, so deleting it is permanent — you would have to obtain the credential again from wherever it came from."
+                  confirmLabel="Delete secret"
+                  disabled={s.usedBy.length > 0}
+                  onConfirm={() => deleteSecret.mutate({ id: s.id })}
+                  trigger={
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      disabled={s.usedBy.length > 0}
+                      aria-label={`Delete the secret ${s.name}`}
+                      loading={deleteSecret.isPending && deleteSecret.variables?.id === s.id}
+                    >
+                      <Trash2 />
+                    </Button>
+                  }
+                />
+              </li>
             ))}
-          </div>
+          </ul>
+        )}
+        {deleteSecret.error && (
+          <p className="text-destructive text-sm" role="alert">
+            {deleteSecret.error.message}
+          </p>
         )}
       </CardContent>
     </Card>

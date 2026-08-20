@@ -33,6 +33,7 @@ beforeAll(() => {
             default_branch: "main",
             private: true,
             html_url: "u/acme/gate",
+            clone_url: "https://github.com/acme/gate.git",
           },
           {
             name: "docs",
@@ -41,6 +42,7 @@ beforeAll(() => {
             default_branch: null,
             private: false,
             html_url: "u/acme/docs",
+            clone_url: "https://github.com/acme/docs.git",
           },
         ]);
       }
@@ -180,6 +182,7 @@ describe("GithubProvider", () => {
       defaultBranch: "main",
       isPrivate: true,
       url: "u/acme/gate",
+      cloneUrl: "https://github.com/acme/gate.git",
     });
     // fullName is the RepoRef every other method takes, so a picked value needs no reformatting.
     expect(repos.map((r) => r.fullName)).toEqual(["acme/gate", "acme/docs"]);
@@ -193,6 +196,15 @@ describe("GithubProvider", () => {
     expect(decodeURIComponent(path)).toContain(
       "affiliation=owner,collaborator,organization_member",
     );
+  });
+
+  it("reports the clone URL the provider gives, with no credential in it", async () => {
+    const repos = await new GithubProvider().listRepositories(credential());
+    // Importing stores this verbatim as the Repository's location, so a token here would be a
+    // token in the database and in every `git remote -v` afterwards (Principle IV).
+    expect(repos[0]?.cloneUrl).toBe("https://github.com/acme/gate.git");
+    expect(repos.every((r) => !r.cloneUrl.includes("gh-pat-secret"))).toBe(true);
+    expect(repos.every((r) => !r.cloneUrl.includes("@"))).toBe(true);
   });
 
   it("reports visibility so the picker can mark a private repository", async () => {

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import {
   changeRequestStateSchema,
+  importRepositoryInput,
   issueSourceSchema,
-  linkRepositoryInput,
   listExternalIssuesInput,
   scmProviderSchema,
   syncRepositorySignalsInput,
@@ -32,19 +32,26 @@ describe("changeRequestStateSchema", () => {
   });
 });
 
-describe("linkRepositoryInput", () => {
-  it("accepts a repository/integration pair with an external full name", () => {
-    const res = linkRepositoryInput.safeParse({
-      repositoryId: "repo_1",
+describe("importRepositoryInput", () => {
+  it("takes an Integration and a repository on it — no local Repository to name first", () => {
+    const res = importRepositoryInput.safeParse({
       integrationId: "int_1",
       externalFullName: "acme/gate",
     });
     expect(res.success).toBe(true);
   });
 
+  it("accepts an optional name override for a repository imported twice under one Workspace", () => {
+    const res = importRepositoryInput.safeParse({
+      integrationId: "int_1",
+      externalFullName: "acme/gate",
+      name: "gate-enterprise",
+    });
+    expect(res.success).toBe(true);
+  });
+
   it("rejects an empty externalFullName", () => {
-    const res = linkRepositoryInput.safeParse({
-      repositoryId: "repo_1",
+    const res = importRepositoryInput.safeParse({
       integrationId: "int_1",
       externalFullName: "",
     });

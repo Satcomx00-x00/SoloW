@@ -39,6 +39,9 @@ export function createLocalExecutor(root: string): Executor {
     if (!command) throw new Error("exec: empty command");
     const proc = Bun.spawn([command, ...args], {
       ...(opts.cwd ? { cwd: opts.cwd } : {}),
+      // Merged, not replaced: these are the product's own tools, and git needs the host's PATH
+      // and HOME to work at all (see `ExecOpts.env`).
+      ...(opts.env ? { env: { ...process.env, ...opts.env } } : {}),
       stdout: "pipe",
       stderr: "pipe",
     });

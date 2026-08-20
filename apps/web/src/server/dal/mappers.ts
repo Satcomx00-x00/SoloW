@@ -6,6 +6,8 @@ import type {
   McpTokenDto,
   RepositoryBranchDto,
   RepositoryDto,
+  SecretRefDto,
+  SecretUsageDto,
   TaskDto,
 } from "@gatecontrol/contracts";
 import type {
@@ -82,9 +84,15 @@ export function repositoryToDto(row: RepositoryRow): RepositoryDto {
   };
 }
 
-/** Secret metadata only — the ciphertext is deliberately excluded. */
-export function secretToRef(row: Pick<SecretRow, "id" | "name" | "kind">) {
-  return { id: row.id, name: row.name, kind: row.kind };
+/**
+ * Secret metadata only — the ciphertext is deliberately excluded. `usedBy` is supplied by the
+ * caller rather than read here: it comes from other tables, and this module maps rows, not joins.
+ */
+export function secretToRef(
+  row: Pick<SecretRow, "id" | "name" | "kind">,
+  usedBy: SecretUsageDto[] = [],
+): SecretRefDto {
+  return { id: row.id, name: row.name, kind: row.kind, usedBy };
 }
 
 export function integrationToDto(row: IntegrationRow): IntegrationDto {

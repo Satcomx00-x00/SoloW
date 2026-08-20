@@ -13,8 +13,12 @@ import type { Executor } from "../executor/types.js";
  */
 
 /** Run a command through the executor; throws with stderr on a non-zero exit. */
-async function run(executor: Executor, cmd: string[]): Promise<string> {
-  const result = await executor.exec(cmd);
+async function run(
+  executor: Executor,
+  cmd: string[],
+  env?: Record<string, string>,
+): Promise<string> {
+  const result = await executor.exec(cmd, env ? { env } : {});
   if (result.exitCode !== 0) {
     throw new Error(`command failed (${result.exitCode}): ${cmd.join(" ")}\n${result.stderr}`);
   }
@@ -37,6 +41,49 @@ export interface ProvisionParams {
   baseRef?: string | undefined;
   worktreeRoot: string;
   repoCacheRoot: string;
+  /**
+   * The credential for cloning an imported repository (issue #15). Present only for a Repository
+   * that came from an Integration; a public URL or a local path needs none. The token is read
+   * from the Integration's Secret at run time and lives only for the length of the clone.
+   */
+  cloneCredential?: CloneCredential | undefined;
+}
+
+/**
+ * A username/token pair for an https clone. The username is the provider's convention
+ * (`x-access-token` for GitHub, `oauth2` for GitLab) — both providers authenticate on the token
+ * and ignore the username, but sending the expected one avoids relying on that.
+ */
+export interface CloneCredential {
+  username: string;
+  token: string;
+}
+
+/** Environment variable the credential helper below reads the token from. */
+const TOKEN_VAR = "GATECONTROL_SCM_TOKEN";
+
+/**
+ * `git clone` arguments that authenticate without ever writing the token somewhere it persists.
+ *
+ * The token goes in the environment and is read back by an inline credential helper. The three
+ * obvious alternatives all leak it: putting it in the URL stores it in `.git/config` and prints
+ * it from `git remote -v` forever; `http.extraHeader` puts it in argv, where any user on the box
+ * can read it out of `ps`; a `.git-credentials` file leaves it on disk after the clone.
+ *
+ * The empty `credential.helper=` first clears any helper the host has configured, so a stale
+ * cached credential cannot take precedence over the one for this Integration. `GIT_TERMINAL_PROMPT=0`
+ * turns an auth failure into a failure — without it git blocks on a username prompt that no one
+ * is there to answer, and the Task hangs instead of reporting the problem.
+ */
+function credentialArgs(credential: CloneCredential): {
+  args: string[];
+  env: Record<string, string>;
+} {
+  const helper = `!f() { echo username=${credential.username}; echo "password=$${TOKEN_VAR}"; }; f`;
+  return {
+    args: ["-c", "credential.helper=", "-c", `credential.helper=${helper}`],
+    env: { [TOKEN_VAR]: credential.token, GIT_TERMINAL_PROMPT: "0" },
+  };
 }
 
 export interface Worktree {
@@ -53,7 +100,12 @@ async function resolveRepoPath(executor: Executor, params: ProvisionParams): Pro
   const cachePath = join(params.repoCacheRoot, encodeURIComponent(params.repository.location));
   const marker = await executor.exec(["test", "-f", join(cachePath, ".git", "HEAD")]);
   if (marker.exitCode !== 0) {
-    await run(executor, ["git", "clone", params.repository.location, cachePath]);
+    const auth = params.cloneCredential ? credentialArgs(params.cloneCredential) : null;
+    await run(
+      executor,
+      ["git", ...(auth?.args ?? []), "clone", params.repository.location, cachePath],
+      auth?.env,
+    );
   }
   return cachePath;
 }
