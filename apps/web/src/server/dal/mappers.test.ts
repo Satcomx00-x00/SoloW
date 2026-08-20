@@ -4,12 +4,13 @@ import { beforeEach, describe, expect, it } from "bun:test";
 // so setting it before the first encryptSecret call is sufficient. 32 bytes, base64.
 process.env.GATECONTROL_SECRET_KEY = Buffer.alloc(32, 7).toString("base64");
 
-import { encryptSecret, type issue, secret, workspace } from "@gatecontrol/db";
+import { encryptSecret, type issue, secret, type taskRepository, workspace } from "@gatecontrol/db";
 import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
 import { and, eq } from "drizzle-orm";
 import { issueToDto, repositoryToDto, secretToRef, taskToDto } from "./mappers.js";
 
 type IssueRow = typeof issue.$inferSelect;
+type TaskRepositoryRow = typeof taskRepository.$inferSelect;
 
 describe("mappers", () => {
   describe("issueToDto", () => {
@@ -80,25 +81,71 @@ describe("mappers", () => {
   });
 
   describe("taskToDto", () => {
+    const taskRow = {
+      id: "task-1",
+      workspaceId: "ws-1",
+      issueId: "issue-1",
+      title: "Do the thing",
+      state: "running" as const,
+      agentProfileId: "agent-1",
+      executorProfileId: "exec-1",
+      failureReason: null,
+      // A Task on no Workflow, which is every Task that exists today (issue #5).
+      workflowId: null,
+      workflowStepId: null,
+      workflowVersion: null,
+      workflowHandoff: null,
+      workflowPendingHandoff: null,
+      workflowDecisionId: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+    const attachment = (overrides: Partial<TaskRepositoryRow> = {}): TaskRepositoryRow => ({
+      id: "att-1",
+      workspaceId: "ws-1",
+      taskId: "task-1",
+      repositoryId: "repo-1",
+      baseRef: "main",
+      checkoutBranch: "gatecontrol/task-task-1",
+      resultBranch: null,
+      position: 0,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      ...overrides,
+    });
+
     it("projects the task fields without workspaceId", () => {
-      const dto = taskToDto({
-        id: "task-1",
-        workspaceId: "ws-1",
-        issueId: "issue-1",
-        title: "Do the thing",
-        state: "running",
-        agentProfileId: "agent-1",
-        executorProfileId: "exec-1",
-        repositoryId: "repo-1",
-        baseRef: "main",
-        resultBranch: null,
-        failureReason: null,
-        createdAt: "2026-01-01T00:00:00.000Z",
-        updatedAt: "2026-01-01T00:00:00.000Z",
-      });
+      const dto = taskToDto(taskRow, [attachment()]);
       expect(dto.id).toBe("task-1");
       expect(dto.state).toBe("running");
       expect(Object.keys(dto)).not.toContain("workspaceId");
+    });
+
+    it("carries every attachment, and the attachment's tenant key never reaches the DTO", () => {
+      // The join row is workspace-scoped like everything else; the DTO is what a browser sees,
+      // and a tenant key on it would be a leak nobody would notice (Principle V).
+      const dto = taskToDto(taskRow, [
+        attachment(),
+        attachment({ id: "att-2", repositoryId: "repo-2", position: 1, baseRef: null }),
+      ]);
+      expect(dto.repositories.map((r) => r.repositoryId)).toEqual(["repo-1", "repo-2"]);
+      expect(dto.repositories[1]?.baseRef).toBeNull();
+      for (const entry of dto.repositories) {
+        expect(Object.keys(entry)).not.toContain("workspaceId");
+        expect(Object.keys(entry)).not.toContain("taskId");
+      }
+    });
+
+    it("puts the attachments in position order whatever order the rows arrive in", () => {
+      // `repositories[0]` is the primary attachment — the worktree the agent is started in — so
+      // position order is a promise the DTO makes to every consumer. The read path sorts in SQL,
+      // but `task.create` and `task.setRepositories` map the rows `INSERT … RETURNING` handed
+      // back, whose order SQLite documents as undefined.
+      const dto = taskToDto(taskRow, [
+        attachment({ id: "att-2", repositoryId: "repo-2", position: 1 }),
+        attachment({ id: "att-1", repositoryId: "repo-1", position: 0 }),
+      ]);
+      expect(dto.repositories.map((r) => r.repositoryId)).toEqual(["repo-1", "repo-2"]);
     });
   });
 

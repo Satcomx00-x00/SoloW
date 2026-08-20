@@ -21,13 +21,18 @@ import {
   secret,
   session,
   task,
+  taskRepository,
   workspace,
 } from "@gatecontrol/db";
 import { createTestDb } from "@gatecontrol/db/testing";
 import { $ } from "bun";
 import { FakeAgentRunner } from "../apps/orchestrator/src/agent/runner.js";
 import { prepareAgentEnv } from "../apps/orchestrator/src/billing/guard.js";
-import { loadTaskRunContext, setTaskState } from "../apps/orchestrator/src/data.js";
+import {
+  loadTaskRunContext,
+  setTaskRepositoryResultBranch,
+  setTaskState,
+} from "../apps/orchestrator/src/data.js";
 import { createLocalExecutor } from "../apps/orchestrator/src/executor/local.js";
 import {
   cleanupWorktree,
@@ -137,11 +142,22 @@ async function main(): Promise<void> {
         state: "ready",
         agentProfileId: ap.id,
         executorProfileId: ep.id,
-        repositoryId: repo.id,
       })
       .returning();
     assert(tk, "task insert returned a row");
     const taskId = tk.id;
+
+    const [attachment] = await db
+      .insert(taskRepository)
+      .values({
+        workspaceId,
+        taskId,
+        repositoryId: repo.id,
+        checkoutBranch: `gatecontrol/task-${taskId}`,
+        position: 0,
+      })
+      .returning();
+    assert(attachment, "task_repository insert returned a row");
 
     const [ses] = await db
       .insert(session)
@@ -153,7 +169,11 @@ async function main(): Promise<void> {
     const ctx = await loadTaskRunContext(db, workspaceId, taskId);
     assert(ctx.task.id === taskId, "run context resolved the task");
     assert(ctx.agentProfile.id === ap.id, "run context resolved the agent profile");
-    assert(ctx.repository.location === repoDir, "run context resolved the repository");
+    assert(ctx.repositories.length === 1, "run context resolved one attached repository");
+    assert(
+      ctx.repositories[0]?.repository.location === repoDir,
+      "run context resolved the repository",
+    );
     assert(ctx.secretCiphertext, "run context carried the secret ciphertext");
 
     // 5. Billing/credential guard: api_key mode must inject ANTHROPIC_API_KEY and
@@ -194,7 +214,10 @@ async function main(): Promise<void> {
     const executor = createLocalExecutor(worktreeRoot);
     const wt = await provisionWorktree(executor, {
       taskId,
-      repository: { source: ctx.repository.source, location: ctx.repository.location },
+      repository: {
+        source: ctx.repositories[0].repository.source,
+        location: ctx.repositories[0].repository.location,
+      },
       worktreeRoot,
       repoCacheRoot,
     });
@@ -210,7 +233,7 @@ async function main(): Promise<void> {
     const events: string[] = [];
     const runner = new FakeAgentRunner([
       { kind: "tool_use", name: "edit_file" },
-      { kind: "stdout", text: "applied change" },
+      { kind: "stdout", channel: "assistant", text: "applied change" },
     ]);
     const handle = runner.start({
       command: "claude",
@@ -231,15 +254,19 @@ async function main(): Promise<void> {
     await commitWorktree(executor, wt.path, "GateControl smoke");
     assert(!(await hasChanges(executor, wt.path)), "changes committed; worktree clean again");
 
-    // 9. Advance the task to done, recording the result branch.
-    await setTaskState(db, workspaceId, taskId, "done", { resultBranch: wt.branch });
+    // 9. Advance the task to done, recording the result branch on the attachment (issue #7).
+    await setTaskState(db, workspaceId, taskId, "done");
+    await setTaskRepositoryResultBranch(db, workspaceId, attachment.id, wt.branch);
 
     // 10. Re-read the persisted task row (via the orchestrator data layer) to confirm
     //     the transition stuck.
     const afterCtx = await loadTaskRunContext(db, workspaceId, taskId);
     const after = afterCtx.task;
     assert(after.state === "done", `task state is done (got ${after.state})`);
-    assert(after.resultBranch === wt.branch, "task resultBranch recorded");
+    assert(
+      afterCtx.repositories[0]?.attachment.resultBranch === wt.branch,
+      "attachment resultBranch recorded",
+    );
 
     // 11. Tear down the worktree (as the orchestrator does after review).
     await cleanupWorktree(executor, wt.repoPath, wt.path);

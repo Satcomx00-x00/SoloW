@@ -1,6 +1,7 @@
 /// <reference types="bun-types" />
 
 import { beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { taskCheckoutBranch } from "@gatecontrol/core";
 import { verifyStreamTicket } from "@gatecontrol/core/stream";
 import { ensureDefaultAgentCatalog, issue as issueTable, workspace } from "@gatecontrol/db";
 import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
@@ -170,7 +171,7 @@ describe("tRPC router integration", () => {
       title: "Investigate latch",
       agentProfileId: agentId,
       executorProfileId: executorId,
-      repositoryId: repoId,
+      repositories: [{ repositoryId: repoId }],
     });
     expect(task.state).toBe("backlog");
 
@@ -204,7 +205,7 @@ describe("tRPC router integration", () => {
       title: "A's task",
       agentProfileId: fx.agentId,
       executorProfileId: fx.executorId,
-      repositoryId: fx.repoId,
+      repositories: [{ repositoryId: fx.repoId }],
     });
 
     expect(await errCode(() => caller(db, wsB).stream.ticket({ taskId: taskA.id }))).toBe(
@@ -226,10 +227,166 @@ describe("tRPC router integration", () => {
           title: "cross-tenant",
           agentProfileId: b.agentId,
           executorProfileId: b.executorId,
-          repositoryId: b.repoId,
+          repositories: [{ repositoryId: b.repoId }],
         }),
       ),
     ).not.toBe("OK");
+  });
+
+  /**
+   * Multi-repository Tasks at the API boundary (issue #7 AC-1). The DAL is where the rows are
+   * written; what these ask is whether the boundary lets a Task reach it pointing at a tenant
+   * it cannot see, and whether the set can be replaced afterwards.
+   */
+  describe("attaching Repositories to a Task (issue #7)", () => {
+    it("creates a Task attached to two Repositories, in the order given", async () => {
+      const wsId = await seedWs(db, "acme");
+      const fx = await taskFixtures(db, wsId);
+      const second = await fx.c.repository.connect({
+        name: "shared-lib",
+        source: "local_path",
+        location: "/srv/shared-lib",
+      });
+
+      const task = await fx.c.task.create({
+        issueId: fx.issueId,
+        title: "Cross-repository change",
+        agentProfileId: fx.agentId,
+        executorProfileId: fx.executorId,
+        repositories: [
+          { repositoryId: fx.repoId, baseRef: "main" },
+          { repositoryId: second.id, checkoutBranch: "feature/lib" },
+        ],
+      });
+
+      expect(task.repositories.map((r) => r.repositoryId)).toEqual([fx.repoId, second.id]);
+      expect(task.repositories.map((r) => r.position)).toEqual([0, 1]);
+      expect(task.repositories[1]?.checkoutBranch).toBe("feature/lib");
+    });
+
+    it("refuses an array containing another Workspace's Repository, and writes nothing", async () => {
+      // One cross-tenant id must fail the whole create — attaching the rest would leave a Task
+      // half pointed at a tenant it cannot see (Principle V).
+      const wsA = await seedWs(db, "workspace-a");
+      const wsB = await seedWs(db, "workspace-b");
+      const fx = await taskFixtures(db, wsA);
+      const b = await taskFixtures(db, wsB);
+
+      expect(
+        await errCode(() =>
+          b.c.task.create({
+            issueId: b.issueId,
+            title: "cross-tenant repository",
+            agentProfileId: b.agentId,
+            executorProfileId: b.executorId,
+            repositories: [{ repositoryId: b.repoId }, { repositoryId: fx.repoId }],
+          }),
+        ),
+      ).toBe("NOT_FOUND");
+      expect(await b.c.task.list({})).toEqual([]);
+    });
+
+    it("replaces the whole set on a Task that has not started", async () => {
+      const wsId = await seedWs(db, "acme");
+      const fx = await taskFixtures(db, wsId);
+      const second = await fx.c.repository.connect({
+        name: "shared-lib",
+        source: "local_path",
+        location: "/srv/shared-lib",
+      });
+      const task = await fx.c.task.create({
+        issueId: fx.issueId,
+        title: "Repointed",
+        agentProfileId: fx.agentId,
+        executorProfileId: fx.executorId,
+        repositories: [{ repositoryId: fx.repoId }],
+      });
+
+      const updated = await fx.c.task.setRepositories({
+        taskId: task.id,
+        repositories: [{ repositoryId: fx.repoId }, { repositoryId: second.id }],
+      });
+
+      expect(updated.repositories.map((r) => r.repositoryId)).toEqual([fx.repoId, second.id]);
+      const reread = await fx.c.task.get({ id: task.id });
+      expect(reread.repositories).toHaveLength(2);
+    });
+
+    it("refuses to re-point a Task that is already running", async () => {
+      const wsId = await seedWs(db, "acme");
+      const fx = await taskFixtures(db, wsId);
+      const task = await fx.c.task.create({
+        issueId: fx.issueId,
+        title: "Running",
+        agentProfileId: fx.agentId,
+        executorProfileId: fx.executorId,
+        repositories: [{ repositoryId: fx.repoId }],
+      });
+      await fx.c.task.move({ id: task.id, to: "ready" });
+      await fx.c.task.move({ id: task.id, to: "running" });
+
+      expect(
+        await errCode(() =>
+          fx.c.task.setRepositories({
+            taskId: task.id,
+            repositories: [{ repositoryId: fx.repoId, checkoutBranch: "somewhere-else" }],
+          }),
+        ),
+      ).not.toBe("OK");
+    });
+
+    it("refuses a repeated attachment with a 400, not the unique index with a 500", async () => {
+      // The Task id is an input to setRepositories, so a caller can spell out the branch the
+      // omitted entry derives. Both rows then collide on `(task, repository, branch)` — and the
+      // refusal used to arrive as SQLite's constraint text inside an INTERNAL_SERVER_ERROR,
+      // which is exactly the outcome validating the list up front exists to prevent.
+      const wsId = await seedWs(db, "acme");
+      const fx = await taskFixtures(db, wsId);
+      const task = await fx.c.task.create({
+        issueId: fx.issueId,
+        title: "Repointed",
+        agentProfileId: fx.agentId,
+        executorProfileId: fx.executorId,
+        repositories: [{ repositoryId: fx.repoId }],
+      });
+
+      expect(
+        await errCode(() =>
+          fx.c.task.setRepositories({
+            taskId: task.id,
+            repositories: [
+              { repositoryId: fx.repoId },
+              { repositoryId: fx.repoId, checkoutBranch: taskCheckoutBranch(task.id) },
+            ],
+          }),
+        ),
+      ).toBe("BAD_REQUEST");
+      // And the Task still has the attachment it had, which the rolled-back write never touched.
+      expect((await fx.c.task.get({ id: task.id })).repositories).toHaveLength(1);
+    });
+
+    it("refuses another Workspace's Repository on setRepositories too", async () => {
+      const wsA = await seedWs(db, "workspace-a");
+      const wsB = await seedWs(db, "workspace-b");
+      const fx = await taskFixtures(db, wsA);
+      const b = await taskFixtures(db, wsB);
+      const task = await b.c.task.create({
+        issueId: b.issueId,
+        title: "B's task",
+        agentProfileId: b.agentId,
+        executorProfileId: b.executorId,
+        repositories: [{ repositoryId: b.repoId }],
+      });
+
+      expect(
+        await errCode(() =>
+          b.c.task.setRepositories({
+            taskId: task.id,
+            repositories: [{ repositoryId: fx.repoId }],
+          }),
+        ),
+      ).toBe("NOT_FOUND");
+    });
   });
 
   describe("executor profile configuration (issue #73)", () => {

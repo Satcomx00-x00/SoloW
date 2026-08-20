@@ -1,5 +1,5 @@
 /// <reference types="bun-types" />
-import { type TaskEvent, taskInputSchema } from "@gatecontrol/contracts";
+import { taskInputSchema } from "@gatecontrol/contracts";
 import {
   type StreamTicketClaims,
   streamChannel,
@@ -11,11 +11,10 @@ import {
   agentRegistry,
   type PermissionAnswerResult,
 } from "./agent/registry.js";
-import { listTaskEventsSince } from "./data.js";
 import { orchestratorEnv } from "./env.js";
 import { inngest } from "./inngest/client.js";
 import { taskRun } from "./inngest/functions/task-run.js";
-import { hub } from "./ws/hub.js";
+import { attachSubscriber } from "./ws/replay.js";
 
 export { inngest };
 export const functions = [taskRun];
@@ -72,44 +71,12 @@ export function authorizeUpgrade(
 }
 
 /**
- * Replay what the client missed, then hand back the live subscription. Live events that arrive
- * mid-replay are buffered and flushed afterwards (dropping any the replay already covered), so
- * a reconnect never loses or reorders terminal history.
+ * Reconnect replay and the stored-event → wire-frame projection now live in `ws/replay.ts`, so
+ * the live publish path in `task-run.ts` and this one share a single projection instead of two
+ * hand-kept-in-sync copies (issue #2, AC-5). Re-exported here because this is the module the
+ * WebSocket server and its tests already reach for.
  */
-export async function attachSubscriber(
-  deps: Pick<WsServerDeps, "db">,
-  data: Omit<WsData, "unsubscribe">,
-  send: (msg: TaskEvent) => void,
-): Promise<() => void> {
-  let replaying = true;
-  let highestReplayed = data.since;
-  const buffered: TaskEvent[] = [];
-
-  const unsubscribe = hub.subscribe(data.channel, (msg: TaskEvent) => {
-    if (replaying) buffered.push(msg);
-    else send(msg);
-  });
-
-  if (data.claims.taskId) {
-    const missed = await listTaskEventsSince(
-      deps.db,
-      data.claims.workspaceId,
-      data.claims.taskId,
-      data.since,
-    );
-    for (const e of missed) {
-      send(toTaskEvent(e.kind, e.payload, data.claims.taskId, e.sessionId, e.seq));
-      highestReplayed = Math.max(highestReplayed, e.seq);
-    }
-  }
-
-  replaying = false;
-  for (const msg of buffered) {
-    if ("seq" in msg && msg.seq <= highestReplayed) continue;
-    send(msg);
-  }
-  return unsubscribe;
-}
+export { attachSubscriber };
 
 /**
  * Route a client frame to the agent running that Task (tasks TASK-014 / TASK-022).
@@ -188,55 +155,6 @@ function safeJson(raw: unknown): unknown {
 }
 
 const decodeUtf8 = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
-
-/** Rebuild a wire event from a stored log row. Unknown kinds degrade to a stdout line. */
-function toTaskEvent(
-  kind: string,
-  payload: unknown,
-  taskId: string,
-  sessionId: string,
-  seq: number,
-): TaskEvent {
-  const p = (payload ?? {}) as Record<string, unknown>;
-  if (kind === "tool_use") {
-    return { kind: "tool_use", taskId, sessionId, seq, name: String(p["name"] ?? "") };
-  }
-  if (kind === "diff") {
-    return { kind: "diff", taskId, sessionId, diffRef: String(p["diffRef"] ?? "") };
-  }
-  if (kind === "permission_request") {
-    // Replayed as itself rather than degraded to a stdout line: a reconnecting operator has to
-    // still be able to answer the question, not merely read that it was asked.
-    return {
-      kind: "permission_request",
-      taskId,
-      sessionId,
-      seq,
-      requestId: String(p["requestId"] ?? ""),
-      title: String(p["title"] ?? ""),
-      toolKind: typeof p["toolKind"] === "string" ? p["toolKind"] : null,
-      options: Array.isArray(p["options"])
-        ? (p["options"] as Array<Record<string, unknown>>).map((o) => ({
-            optionId: String(o["optionId"] ?? ""),
-            name: String(o["name"] ?? ""),
-            kind: String(o["kind"] ?? ""),
-          }))
-        : [],
-    };
-  }
-  if (kind === "permission_resolved") {
-    return {
-      kind: "permission_resolved",
-      taskId,
-      sessionId,
-      seq,
-      requestId: String(p["requestId"] ?? ""),
-      optionId: typeof p["optionId"] === "string" ? p["optionId"] : null,
-      decidedBy: p["decidedBy"] === "operator" ? "operator" : "policy",
-    };
-  }
-  return { kind: "stdout", taskId, sessionId, seq, text: String(p["text"] ?? "") };
-}
 
 /**
  * Long-lived orchestrator process (Decision 0002): hosts the WebSocket hub and the Inngest

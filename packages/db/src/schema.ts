@@ -330,11 +330,6 @@ export const task = sqliteTable(
     executorProfileId: text("executor_profile_id")
       .notNull()
       .references(() => executorProfile.id),
-    repositoryId: text("repository_id")
-      .notNull()
-      .references(() => repository.id),
-    baseRef: text("base_ref"),
-    resultBranch: text("result_branch"),
     failureReason: text("failure_reason"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -342,6 +337,63 @@ export const task = sqliteTable(
   (t) => ({
     byState: index("task_ws_state").on(t.workspaceId, t.state),
     byIssue: index("task_issue").on(t.issueId),
+  }),
+);
+
+/**
+ * Which Repositories a Task works in, and on which branch (issue #7). One row per attachment;
+ * this replaced `task.repository_id` / `task.base_ref` / `task.result_branch`.
+ *
+ * Keyed on `(task, repository, branch)` rather than on `(task, repository)`. That is the whole
+ * point of the change: one Task producing two branches of one Repository — several change
+ * requests out of one unit of work — is then a second row rather than a second migration, and it
+ * costs nothing to state now while every Task still attaches exactly one Repository.
+ *
+ * `checkout_branch` is NOT NULL for that key to mean anything. SQLite treats every NULL as
+ * distinct, so a nullable branch column would make the unique index enforce nothing at all: two
+ * rows for the same `(task, repository)` would both be accepted and "which worktree is this
+ * Task's" would be decided by insertion order. The value is either the Owner's or the
+ * deterministic name `taskCheckoutBranch` derives, so it is always known at insert time.
+ *
+ * `result_branch` is a separate column from `checkout_branch` even though the two are equal
+ * today — the branch the work was committed onto is the branch it was checked out on. They stop
+ * being equal the moment the work is pushed somewhere else (#57/#100), and `base_ref` living
+ * here rather than on the Task is what lets a diff base become per-repository, mutable state
+ * (#84). Both are the cheap-now half of work that is expensive later.
+ */
+export const taskRepository = sqliteTable(
+  "task_repository",
+  {
+    id: id(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspace.id),
+    taskId: text("task_id")
+      .notNull()
+      .references(() => task.id),
+    repositoryId: text("repository_id")
+      .notNull()
+      .references(() => repository.id),
+    /** Where the worktree starts from. Null means HEAD, exactly as `task.base_ref` did. */
+    baseRef: text("base_ref"),
+    checkoutBranch: text("checkout_branch").notNull(),
+    /** Set on approval, once the change has actually been committed onto a branch. */
+    resultBranch: text("result_branch"),
+    position: integer("position").notNull().default(0),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => ({
+    byTask: index("task_repository_task").on(t.taskId),
+    /** The tenant-scoped read the board does once for every card (Principle V). */
+    byWs: index("task_repository_ws").on(t.workspaceId),
+    byBranch: uniqueIndex("task_repository_task_repo_branch").on(
+      t.taskId,
+      t.repositoryId,
+      t.checkoutBranch,
+    ),
+    /** So "which attachment is primary" has exactly one answer, forever — see `primaryTaskRepository`. */
+    byPosition: uniqueIndex("task_repository_task_position").on(t.taskId, t.position),
   }),
 );
 
@@ -437,6 +489,48 @@ export const sessionEvent = sqliteTable(
     at: createdAt(),
   },
   (t) => ({ bySeq: uniqueIndex("session_event_seq").on(t.sessionId, t.seq) }),
+);
+
+/**
+ * A summary standing in for a closed range of a Session's event log (issue #2, AC-2/AC-3).
+ *
+ * A separate table rather than a summary *event*, for a concrete reason: `seq` inside a live run
+ * is an in-memory counter held for the life of the durable step, so a compactor inserting into
+ * the same sequence would collide with the agent still writing to it. Keeping summaries out of
+ * `session_event` also keeps that table exactly what it claims to be — what the agent produced,
+ * with nothing derived mixed in.
+ *
+ * Compaction can only ever insert here. There is no code path that deletes or updates a
+ * `session_event` row, which is what makes "replay stays lossless" a structural property rather
+ * than a discipline: a summary is an index into history, never a replacement for it, and the
+ * review gate keeps its evidence (Principle I).
+ *
+ * `(session_id, from_seq)` is the idempotency key, the same way `session_event_seq` and
+ * `session_usage_turn` are theirs: a durable step that re-runs after an orchestrator restart
+ * re-inserts the same range as a no-op rather than a duplicate (Principle III).
+ */
+export const sessionSummary = sqliteTable(
+  "session_summary",
+  {
+    id: id(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspace.id),
+    sessionId: text("session_id")
+      .notNull()
+      .references(() => session.id),
+    /** Inclusive on both ends. */
+    fromSeq: integer("from_seq").notNull(),
+    toSeq: integer("to_seq").notNull(),
+    /** How many events the range actually held — not `toSeq - fromSeq`, which counts gaps. */
+    eventCount: integer("event_count").notNull(),
+    text: text("text").notNull(),
+    at: createdAt(),
+  },
+  (t) => ({
+    byRange: uniqueIndex("session_summary_range").on(t.sessionId, t.fromSeq),
+    bySession: index("session_summary_session").on(t.workspaceId, t.sessionId, t.fromSeq),
+  }),
 );
 
 /**
@@ -635,10 +729,12 @@ export const schema = {
   repositoryBranch,
   changeRequest,
   task,
+  taskRepository,
   taskDependency,
   worktree,
   session,
   sessionEvent,
+  sessionSummary,
   sessionUsage,
   review,
   secret,

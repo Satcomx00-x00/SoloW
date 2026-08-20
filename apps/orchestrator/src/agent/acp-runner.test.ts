@@ -65,7 +65,7 @@ describe("AcpRunner", () => {
     expect(await h.outcome).toEqual({ kind: "completed" });
     expect(events.filter((e) => e.kind !== "usage")).toEqual([
       { kind: "tool_use", name: "Edit src/latch.ts" },
-      { kind: "stdout", text: "patched latch.ts" },
+      { kind: "stdout", channel: "assistant", text: "patched latch.ts" },
     ]);
   });
 
@@ -171,6 +171,39 @@ describe("AcpRunner permissions (AC-4)", () => {
     expect(stdout(events)).toContain("wrote it");
   });
 
+  it("does not offer an option the agent gave no id, because nobody could choose it", async () => {
+    // The ACP wire schema asks only for a string, so an agent may offer an option with an empty
+    // id. Answering names the option by id, and an empty one resolves to a cancellation whatever
+    // was clicked — and the session log's contract will not admit it either, which used to mean
+    // the whole request reached the operator live and never reached the log at all.
+    const { handle: h, events } = await run({
+      turns: [
+        {
+          permission: {
+            title: "Write .env",
+            options: [
+              { optionId: "", name: "Allow", kind: "allow_once" },
+              { optionId: "allow", name: "Allow once", kind: "allow_once" },
+            ],
+          },
+          text: ["wrote it"],
+        },
+      ],
+    });
+
+    let request: Extract<AgentStreamEvent, { kind: "permission_request" }> | undefined;
+    for (let i = 0; i < 500 && !request; i++) {
+      request = events.find((e) => e.kind === "permission_request");
+      if (!request) await new Promise((r) => setTimeout(r, 2));
+    }
+    expect(request?.options).toEqual([
+      { optionId: "allow", name: "Allow once", kind: "allow_once" },
+    ]);
+
+    expect(await h.respondPermission?.(request?.requestId ?? "", "allow")).toBe("answered");
+    expect(await h.outcome).toEqual({ kind: "completed" });
+  });
+
   it("refuses when nobody answers, rather than granting what nobody was asked about", async () => {
     // A run nobody is watching must not hang a durable step for days — and must not help itself
     // to the permission either (AC-4). The refusal is what the agent gets from an operator who
@@ -249,10 +282,19 @@ describe("AcpRunner credential isolation (AC-5 / Principle IV)", () => {
 });
 
 describe("toStreamEvent", () => {
-  it("marks the agent's thinking so the terminal matches the recorded transcript", () => {
+  it("carries the channel a line came in on rather than baking it into the text", () => {
+    // The "· " thinking marker is presentation and is re-applied by the wire projection
+    // (`toTaskEvent`); what the runner reports is *whose* line this was, which is the thing the
+    // session log could not previously record (issue #2).
     expect(toStreamEvent({ kind: "text", channel: "thinking", text: "considering" })).toEqual({
       kind: "stdout",
-      text: "· considering",
+      channel: "thinking",
+      text: "considering",
+    });
+    expect(toStreamEvent({ kind: "text", channel: "user", text: "also add a test" })).toEqual({
+      kind: "stdout",
+      channel: "user",
+      text: "also add a test",
     });
   });
 
@@ -266,6 +308,6 @@ describe("toStreamEvent", () => {
     ).toBeNull();
     expect(
       toStreamEvent({ kind: "result", ok: false, stopReason: "refusal", error: null }),
-    ).toEqual({ kind: "stdout", text: "\n[refusal]\n" });
+    ).toEqual({ kind: "stdout", channel: "system", text: "\n[refusal]\n" });
   });
 });

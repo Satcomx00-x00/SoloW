@@ -9,6 +9,7 @@ import type {
   SecretRefDto,
   SecretUsageDto,
   TaskDto,
+  TaskRepositoryDto,
 } from "@gatecontrol/contracts";
 import type {
   changeRequest,
@@ -19,10 +20,12 @@ import type {
   repositoryBranch,
   secret,
   task,
+  taskRepository,
 } from "@gatecontrol/db";
 
 type IssueRow = typeof issue.$inferSelect;
 type TaskRow = typeof task.$inferSelect;
+type TaskRepositoryRow = typeof taskRepository.$inferSelect;
 type RepositoryRow = typeof repository.$inferSelect;
 type SecretRow = typeof secret.$inferSelect;
 type IntegrationRow = typeof integration.$inferSelect;
@@ -54,7 +57,29 @@ export function issueToDto(row: IssueRow, taskCount: number, status = row.status
   };
 }
 
-export function taskToDto(row: TaskRow): TaskDto {
+export function taskRepositoryToDto(row: TaskRepositoryRow): TaskRepositoryDto {
+  return {
+    id: row.id,
+    repositoryId: row.repositoryId,
+    baseRef: row.baseRef,
+    checkoutBranch: row.checkoutBranch,
+    resultBranch: row.resultBranch,
+    position: row.position,
+  };
+}
+
+/**
+ * The attachments are passed in rather than read here (issue #7): this module maps rows, not
+ * joins, and the board hydrates a whole page of Tasks with one workspace-scoped query instead of
+ * one query per card.
+ *
+ * Sorted here rather than trusted from the caller. `repositories[0]` is the primary attachment —
+ * the worktree the agent is started in — so position order is a promise the DTO makes, and the
+ * write paths get their rows from `INSERT … RETURNING`, whose order SQLite documents as
+ * undefined. One sort at the single point every Task DTO is built beats a sort at each caller,
+ * one of which would eventually be forgotten.
+ */
+export function taskToDto(row: TaskRow, attachments: readonly TaskRepositoryRow[]): TaskDto {
   return {
     id: row.id,
     issueId: row.issueId,
@@ -62,9 +87,7 @@ export function taskToDto(row: TaskRow): TaskDto {
     state: row.state,
     agentProfileId: row.agentProfileId,
     executorProfileId: row.executorProfileId,
-    repositoryId: row.repositoryId,
-    baseRef: row.baseRef,
-    resultBranch: row.resultBranch,
+    repositories: [...attachments].sort((a, b) => a.position - b.position).map(taskRepositoryToDto),
     failureReason: row.failureReason,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,

@@ -59,8 +59,8 @@ describe("ClaudeCodeRunner", () => {
     // Usage rides alongside each block and is asserted separately, below.
     expect(events.filter((e) => e.kind !== "usage")).toEqual([
       { kind: "tool_use", name: "Edit" },
-      { kind: "stdout", text: "patched latch.ts" },
-      { kind: "stdout", text: "\ndone\n" },
+      { kind: "stdout", channel: "assistant", text: "patched latch.ts" },
+      { kind: "stdout", channel: "system", text: "\ndone\n" },
     ]);
   });
 
@@ -140,10 +140,13 @@ describe("ClaudeCodeRunner", () => {
 });
 
 describe("toStreamEvent", () => {
-  it("marks the agent's thinking so the terminal matches the recorded transcript", () => {
+  it("carries the channel a line came in on rather than baking it into the text", () => {
+    // The "· " thinking marker is presentation and is re-applied by the wire projection
+    // (`toTaskEvent`); what the runner reports is *whose* line this was (issue #2).
     expect(toStreamEvent({ kind: "text", channel: "thinking", text: "considering" })).toEqual({
       kind: "stdout",
-      text: "· considering",
+      channel: "thinking",
+      text: "considering",
     });
   });
 

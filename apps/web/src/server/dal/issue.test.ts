@@ -145,7 +145,7 @@ describe("issue status is derived from its Tasks (FR-006)", () => {
         title: `task-${index}`,
         agentProfileId: g.agentProfileId,
         executorProfileId: g.executorProfileId,
-        repositoryId: g.repositoryId,
+        repositories: [{ repositoryId: g.repositoryId }],
         state,
       });
       if (!created.ok) throw new Error("task seed failed");
@@ -180,7 +180,7 @@ describe("issue status is derived from its Tasks (FR-006)", () => {
       title: "t",
       agentProfileId: g.agentProfileId,
       executorProfileId: g.executorProfileId,
-      repositoryId: g.repositoryId,
+      repositories: [{ repositoryId: g.repositoryId }],
       state: "running",
     });
 

@@ -1,6 +1,12 @@
 "use client";
 
-import type { SessionEventDto, TaskEvent, TaskInputAck } from "@gatecontrol/contracts";
+import type {
+  SessionEventDto,
+  SessionSummaryDto,
+  TaskEvent,
+  TaskInputAck,
+} from "@gatecontrol/contracts";
+import { primaryTaskRepository } from "@gatecontrol/core";
 import {
   ArrowLeft,
   Check,
@@ -26,12 +32,33 @@ import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
 import { DiffView } from "./diff-view";
 import { PermissionRequestDialog, pendingPermission } from "./permission-request-dialog";
+import { SessionLog } from "./session-log";
 
-function eventText(e: SessionEventDto): string {
+/**
+ * Text a persisted event contributes to the terminal.
+ *
+ * A total switch over the payload union (issue #2) — it used to be `eventText()`, which probed
+ * for `text`, then for `name`, then stringified whatever was left, and so could not tell an
+ * operator's own steering from the model's answer. Records with no terminal form (usage, state,
+ * a captured diff) contribute nothing, exactly as the wire projection drops them.
+ */
+function loggedText(e: SessionEventDto): string {
   const p = e.payload;
-  if (p && typeof p === "object" && "text" in p) return String((p as { text: unknown }).text);
-  if (p && typeof p === "object" && "name" in p) return `tool: ${(p as { name: unknown }).name}`;
-  return typeof p === "string" ? p : JSON.stringify(p);
+  switch (p.kind) {
+    case "user_turn":
+    case "notice":
+      return p.text;
+    case "assistant_turn":
+      return p.thinking ? `· ${p.text}` : p.text;
+    case "tool_call":
+      return `tool: ${p.name}\n`;
+    case "permission_request":
+      return `permission requested: ${p.title}\n`;
+    case "permission_resolved":
+      return `permission ${p.optionId ?? "declined"} (${p.decidedBy})\n`;
+    default:
+      return "";
+  }
 }
 
 /** Text a live wire event contributes to the terminal (status/diff events contribute none). */
@@ -121,6 +148,19 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   const onAck = useCallback((next: TaskInputAck) => setAck(next), []);
   const live = useTaskStream(taskId, { onEvent: onLive, onAck });
 
+  // Read one summarised range back when an operator opens it (issue #2, AC-3). `session.get`
+  // leaves those events out — that is what compaction buys — and this is how they come back,
+  // one range at a time instead of on every load of the workspace.
+  const loadRange = useCallback(
+    (summary: SessionSummaryDto) =>
+      utils.session.eventRange.fetch({
+        sessionId: summary.sessionId,
+        fromSeq: summary.fromSeq,
+        toSeq: summary.toSeq,
+      }),
+    [utils],
+  );
+
   const [input, setInput] = useState("");
   const [feedback, setFeedback] = useState("");
   const decide = trpc.review.decide.useMutation({
@@ -150,19 +190,27 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
 
   const t = task.data;
   const events = detail.data?.events ?? [];
-  // Persisted history first, then anything that arrived live since this view mounted.
-  const stdout =
-    events
-      .filter((e) => e.kind === "stdout")
-      .map(eventText)
-      .join("") + live.events.map(liveText).join("");
+  const summaries = detail.data?.summaries ?? [];
+  // Persisted history first, then anything that arrived live since this view mounted. A
+  // compacted Session no longer ships the events its summaries stand in for, so the terminal
+  // says what it is missing rather than quietly starting mid-run; the Conversation tab is where
+  // a collapsed range can be opened back up.
+  const elided = summaries.reduce((n, s) => n + s.eventCount, 0);
+  const preamble =
+    elided > 0 ? `… ${elided} earlier events summarised — see the Conversation tab\n` : "";
+  const stdout = preamble + events.map(loggedText).join("") + live.events.map(liveText).join("");
   const inReview = t.state === "review";
   const canDecide = inReview && !decide.isPending;
   // Steering only makes sense while an agent is actually working; once the Task is in review
   // the way to ask for more is "request changes", which is recorded (Principle I).
   const isRunning = t.state === "running";
   const canSteer = isRunning && live.status === "open";
-  const branch = t.resultBranch ?? latest?.diffRef ?? null;
+  // The primary attachment's branch (issue #7). The header has room for one line, so it names
+  // the repository the agent actually ran in; the Changes tab is where every repository's own
+  // branch and change is shown.
+  const primary = t.repositories.length > 0 ? primaryTaskRepository(t.repositories) : null;
+  const branch = primary?.resultBranch ?? latest?.diffRef ?? null;
+  const diffs = detail.data?.diffs ?? [];
   // Derived from the stream rather than held in state, so a reconnect replay reopens a question
   // that is still outstanding and never reopens one already settled (issue #58, AC-4).
   const permission = pendingPermission(live.events);
@@ -208,7 +256,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
           </div>
           <p className="mt-0.5 flex items-center gap-1.5 truncate font-mono text-2xs text-muted-foreground">
             <GitBranch className="size-3 shrink-0" aria-hidden />
-            {branch ?? `base ${t.baseRef ?? "HEAD"}`}
+            {branch ?? `base ${primary?.baseRef ?? "HEAD"}`}
           </p>
         </div>
         <div className="ml-auto shrink-0">
@@ -293,28 +341,47 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
         </TabsContent>
 
         <TabsContent value="changes" className="min-h-0 flex-1 p-4">
-          <DiffView diff={detail.data?.diff ?? null} branch={branch} />
+          {/*
+            One group per Repository (issue #7 AC-4). A Task can span several, and a reviewer
+            shown one flat file list could not tell which repository a path came from —
+            `DiffView` is reused unchanged inside each group rather than learning to group.
+            With one repository there is no header at all, so a single-Repository Task looks
+            exactly as it did.
+          */}
+          {diffs.length > 1 ? (
+            <ScrollArea className="h-full">
+              <div className="space-y-4">
+                {diffs.map((entry, index) => (
+                  <section
+                    key={entry.repositoryId ?? entry.diffRef ?? index}
+                    aria-label={`Changes in ${entry.repositoryName ?? entry.diffRef}`}
+                  >
+                    <h2 className="mb-2 flex items-center gap-2 font-medium text-sm">
+                      <GitBranch className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                      <span className="truncate">
+                        {entry.repositoryName ?? "Unnamed repository"}
+                      </span>
+                      <span className="truncate font-mono text-2xs text-muted-foreground">
+                        {entry.diffRef}
+                      </span>
+                      <span className="shrink-0 font-mono text-2xs text-muted-foreground/70">
+                        {entry.files.length} file{entry.files.length === 1 ? "" : "s"}
+                      </span>
+                    </h2>
+                    <DiffView diff={entry} branch={entry.diffRef} />
+                  </section>
+                ))}
+              </div>
+            </ScrollArea>
+          ) : (
+            <DiffView diff={diffs[0] ?? null} branch={branch} />
+          )}
         </TabsContent>
 
         <TabsContent value="conversation" className="min-h-0 flex-1 p-4">
           <div className="surface-edge h-full overflow-hidden rounded-xl border bg-card">
             <ScrollArea className="h-full">
-              {events.length > 0 ? (
-                <ul className="divide-y">
-                  {events.map((e) => (
-                    <li key={e.id} className="flex gap-3 px-4 py-2.5 text-sm">
-                      <span className="w-16 shrink-0 pt-px font-mono text-2xs text-muted-foreground/70 uppercase tracking-wider">
-                        {e.kind}
-                      </span>
-                      <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">
-                        {eventText(e)}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <EmptyPanel label="No conversation yet." />
-              )}
+              <SessionLog events={events} summaries={summaries} loadRange={loadRange} />
             </ScrollArea>
           </div>
         </TabsContent>

@@ -8,17 +8,52 @@ import {
   type ListTasksInput,
   ok,
   type Result,
+  type SetTaskRepositoriesInput,
   type TaskDependencyCycleError,
   type TaskDependencyListDto,
   type TaskDto,
+  TaskErrorCode,
   type TaskListDto,
   type TaskState,
 } from "@gatecontrol/contracts";
-import { buildDependencyGraph, checkDependencyEdge } from "@gatecontrol/core";
-import { task, taskDependency } from "@gatecontrol/db";
-import { and, asc, desc, eq, like } from "drizzle-orm";
+import { buildDependencyGraph, checkDependencyEdge, taskCheckoutBranch } from "@gatecontrol/core";
+import { task, taskDependency, taskRepository } from "@gatecontrol/db";
+import { and, asc, desc, eq, inArray, like } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
 import { taskToDto } from "./mappers.js";
+
+/**
+ * The Repository attachments of a set of Tasks, keyed by Task id (issue #7).
+ *
+ * One workspace-scoped query for the whole set rather than one per Task: the board reads a page
+ * of cards, and a per-card query would turn one list into as many round trips as there are
+ * Tasks. Ordered by position so every DTO's `repositories[0]` is the primary attachment, which
+ * is what `primaryTaskRepository` decides from.
+ */
+async function attachmentsForTasks(
+  ctx: RequestContext,
+  taskIds: readonly string[],
+): Promise<Map<string, (typeof taskRepository.$inferSelect)[]>> {
+  const byTask = new Map<string, (typeof taskRepository.$inferSelect)[]>();
+  if (taskIds.length === 0) return byTask;
+
+  const rows = await ctx.db
+    .select()
+    .from(taskRepository)
+    .where(
+      and(
+        eq(taskRepository.workspaceId, ctx.workspaceId),
+        inArray(taskRepository.taskId, [...taskIds]),
+      ),
+    )
+    .orderBy(asc(taskRepository.position));
+  for (const row of rows) {
+    const existing = byTask.get(row.taskId);
+    if (existing) existing.push(row);
+    else byTask.set(row.taskId, [row]);
+  }
+  return byTask;
+}
 
 export async function getTaskById(
   ctx: RequestContext,
@@ -30,7 +65,8 @@ export async function getTaskById(
     .where(and(eq(task.workspaceId, ctx.workspaceId), eq(task.id, id)))
     .limit(1);
   if (!row) return err(CommonErrorCode.NotFound);
-  return ok(taskToDto(row));
+  const attachments = await attachmentsForTasks(ctx, [row.id]);
+  return ok(taskToDto(row, attachments.get(row.id) ?? []));
 }
 
 export async function listTasks(
@@ -49,28 +85,122 @@ export async function listTasks(
     .from(task)
     .where(and(...conditions))
     .orderBy(desc(task.createdAt));
-  return ok(rows.map(taskToDto));
+  const attachments = await attachmentsForTasks(
+    ctx,
+    rows.map((row) => row.id),
+  );
+  return ok(rows.map((row) => taskToDto(row, attachments.get(row.id) ?? [])));
 }
 
+/**
+ * The attachment rows for one Task, from the input the Owner supplied (issue #7).
+ *
+ * `position` comes from array order — the Owner said which Repository matters most by listing it
+ * first, and position 0 is what "the worktree the agent is started in" means. `checkoutBranch`
+ * falls back to the deterministic name `taskCheckoutBranch` derives, which is the same string
+ * the orchestrator would have asked git for anyway; it is never left null, because a nullable
+ * branch would make the `(task, repository, branch)` unique index enforce nothing.
+ */
+function attachmentValues(
+  ctx: RequestContext,
+  taskId: string,
+  repositories: CreateTaskInput["repositories"],
+): (typeof taskRepository.$inferInsert)[] {
+  return repositories.map((entry, position) => ({
+    workspaceId: ctx.workspaceId,
+    taskId,
+    repositoryId: entry.repositoryId,
+    baseRef: entry.baseRef ?? null,
+    checkoutBranch: entry.checkoutBranch ?? taskCheckoutBranch(taskId),
+    position,
+  }));
+}
+
+/**
+ * Create a Task and its Repository attachments as one unit.
+ *
+ * One synchronous transaction (`behavior: "immediate"`, the shape `addTaskDependencyEdge`
+ * already uses) rather than an insert followed by another: a Task with no attachment cannot be
+ * launched at all, so a half-created one is not a degraded Task, it is an unrunnable row that
+ * nothing would ever clean up. `BEGIN IMMEDIATE` takes the write lock on the first statement, so
+ * the pair is atomic against a second connection as well as against the event loop.
+ */
 export async function createTaskRecord(
   ctx: RequestContext,
   input: CreateTaskInput & { state: TaskState },
 ): Promise<Result<TaskDto>> {
-  const [row] = await ctx.db
-    .insert(task)
-    .values({
-      workspaceId: ctx.workspaceId,
-      issueId: input.issueId,
-      title: input.title,
-      state: input.state,
-      agentProfileId: input.agentProfileId,
-      executorProfileId: input.executorProfileId,
-      repositoryId: input.repositoryId,
-      baseRef: input.baseRef ?? null,
-    })
-    .returning();
-  if (!row) return err(CommonErrorCode.ValidationFailed);
-  return ok(taskToDto(row));
+  return ctx.db.transaction(
+    (tx) => {
+      const [row] = tx
+        .insert(task)
+        .values({
+          workspaceId: ctx.workspaceId,
+          issueId: input.issueId,
+          title: input.title,
+          state: input.state,
+          agentProfileId: input.agentProfileId,
+          executorProfileId: input.executorProfileId,
+        })
+        .returning()
+        .all();
+      if (!row) return err(CommonErrorCode.ValidationFailed);
+
+      const attachments = tx
+        .insert(taskRepository)
+        .values(attachmentValues(ctx, row.id, input.repositories))
+        .returning()
+        .all();
+      return ok(taskToDto(row, attachments));
+    },
+    { behavior: "immediate" },
+  );
+}
+
+/**
+ * Replace a Task's whole attachment set (issue #7 AC-1).
+ *
+ * Refused once the Task has left `backlog`/`ready`: re-pointing a Task whose worktrees are
+ * already live would orphan directories that nothing else knows how to find, and the running
+ * agent would carry on working in a repository the Task no longer claims (Principle II).
+ *
+ * Delete-then-insert inside one transaction rather than a diff of the two sets. The Owner sent a
+ * state of the world, and reconciling it row by row would have to decide what happens to a
+ * `resultBranch` on an attachment that is being re-pointed — a question with no good answer,
+ * which is exactly why the mutation is refused after `ready` instead.
+ */
+export async function setTaskRepositories(
+  ctx: RequestContext,
+  input: SetTaskRepositoriesInput,
+): Promise<
+  Result<TaskDto, typeof CommonErrorCode.NotFound | typeof TaskErrorCode.IllegalTransition>
+> {
+  return ctx.db.transaction(
+    (tx) => {
+      const [row] = tx
+        .select()
+        .from(task)
+        .where(and(eq(task.workspaceId, ctx.workspaceId), eq(task.id, input.taskId)))
+        .limit(1)
+        .all();
+      if (!row) return err(CommonErrorCode.NotFound);
+      if (row.state !== "backlog" && row.state !== "ready") {
+        return err(TaskErrorCode.IllegalTransition);
+      }
+
+      tx.delete(taskRepository)
+        .where(
+          and(eq(taskRepository.workspaceId, ctx.workspaceId), eq(taskRepository.taskId, row.id)),
+        )
+        .run();
+      const attachments = tx
+        .insert(taskRepository)
+        .values(attachmentValues(ctx, row.id, input.repositories))
+        .returning()
+        .all();
+      return ok(taskToDto(row, attachments));
+    },
+    { behavior: "immediate" },
+  );
 }
 
 /** Update a Task's state (callers gate the transition via services.canTransitionTask). */
@@ -78,20 +208,20 @@ export async function updateTaskState(
   ctx: RequestContext,
   id: string,
   state: TaskState,
-  extra?: { resultBranch?: string; failureReason?: string | null },
+  extra?: { failureReason?: string | null },
 ): Promise<Result<TaskDto, typeof CommonErrorCode.NotFound>> {
   const [row] = await ctx.db
     .update(task)
     .set({
       state,
-      ...(extra?.resultBranch !== undefined ? { resultBranch: extra.resultBranch } : {}),
       ...(extra?.failureReason !== undefined ? { failureReason: extra.failureReason } : {}),
       updatedAt: new Date().toISOString(),
     })
     .where(and(eq(task.workspaceId, ctx.workspaceId), eq(task.id, id)))
     .returning();
   if (!row) return err(CommonErrorCode.NotFound);
-  return ok(taskToDto(row));
+  const attachments = await attachmentsForTasks(ctx, [row.id]);
+  return ok(taskToDto(row, attachments.get(row.id) ?? []));
 }
 
 /** Count a profile's Tasks currently in `running` (for the concurrency cap). */

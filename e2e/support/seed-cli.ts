@@ -29,6 +29,7 @@ import {
   repository,
   secret,
   task,
+  taskRepository,
 } from "@gatecontrol/db";
 
 async function seedIssue(workspaceId: string, title: string): Promise<void> {
@@ -88,10 +89,18 @@ async function seedTask(workspaceId: string, title: string): Promise<void> {
       title,
       agentProfileId: agent.id,
       executorProfileId: executor.id,
-      repositoryId: repo.id,
     })
     .returning();
   if (!row) throw new Error("failed to seed task");
+  // The Task's Repository attachment (issue #7). A Task with none cannot be launched at all, so
+  // seeding one without it would produce a fixture the orchestrator refuses to load.
+  await db.insert(taskRepository).values({
+    workspaceId,
+    taskId: row.id,
+    repositoryId: repo.id,
+    checkoutBranch: `gatecontrol/task-${row.id}`,
+    position: 0,
+  });
   console.log(JSON.stringify({ id: row.id, title: row.title }));
 }
 

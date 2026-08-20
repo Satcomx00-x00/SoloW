@@ -9,6 +9,7 @@ import {
   moveTaskInput,
   removeTaskDependencyInput,
   retryTaskInput,
+  setTaskRepositoriesInput,
   TaskDependencyErrorCode,
   TaskErrorCode,
   taskDependencyListDto,
@@ -37,6 +38,7 @@ import {
   listTaskDependencies,
   listTasks,
   removeTaskDependencyEdge,
+  setTaskRepositories,
   updateTaskState,
 } from "../dal/task.js";
 import { orchestrator } from "../orchestrator-client.js";
@@ -73,7 +75,7 @@ export const taskRouter = router({
         tags: ["task"],
         protect: true,
         summary:
-          "Create a Task under an Issue, binding an Agent Profile, an Executor Profile, and a Repository. Creates it in the backlog; it does not start an agent — use task.launch for that.",
+          "Create a Task under an Issue, binding an Agent Profile, an Executor Profile, and one or more Repositories — each with its own base ref and checkout branch. Creates it in the backlog; it does not start an agent — use task.launch for that.",
       },
     })
     .input(createTaskInput)
@@ -84,10 +86,36 @@ export const taskRouter = router({
       unwrap(await getIssueById(ctx.rctx, input.issueId));
       unwrap(await getAgentProfile(ctx.rctx, input.agentProfileId));
       unwrap(await getExecutorProfile(ctx.rctx, input.executorProfileId));
-      unwrap(await getRepository(ctx.rctx, input.repositoryId));
+      // Every attached Repository, resolved before anything is written: one id from another
+      // Workspace has to fail the whole create, not attach the rest and leave a Task half
+      // pointed at a tenant it cannot see (issue #7 AC-1).
+      for (const attachment of input.repositories) {
+        unwrap(await getRepository(ctx.rctx, attachment.repositoryId));
+      }
 
       const payload = unwrap(buildCreateTaskPayload(input, { workspaceId: ctx.rctx.workspaceId }));
       return unwrap(await createTaskRecord(ctx.rctx, payload));
+    }),
+
+  setRepositories: ownerProcedure
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/task.setRepositories",
+        tags: ["task"],
+        protect: true,
+        summary:
+          "Replace the whole set of Repositories a Task works in, each with its own base ref and checkout branch. Refused once the Task has left the backlog or ready states, because its worktrees are already live.",
+      },
+    })
+    .input(setTaskRepositoriesInput)
+    .output(taskDto)
+    .mutation(async ({ ctx, input }) => {
+      unwrap(await getTaskById(ctx.rctx, input.taskId));
+      for (const attachment of input.repositories) {
+        unwrap(await getRepository(ctx.rctx, attachment.repositoryId));
+      }
+      return unwrap(await setTaskRepositories(ctx.rctx, input));
     }),
 
   list: ownerProcedure

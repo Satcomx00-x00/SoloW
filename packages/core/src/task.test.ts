@@ -9,7 +9,9 @@ import {
   isBlocked,
   isLaunchable,
   parseDependencyCycleMessage,
+  primaryTaskRepository,
   type TaskDependencyEdge,
+  taskCheckoutBranch,
   unsatisfiedDependencies,
 } from "./task.js";
 
@@ -50,7 +52,7 @@ describe("buildCreateTaskPayload", () => {
         title: "T",
         agentProfileId: "a1",
         executorProfileId: "e1",
-        repositoryId: "r1",
+        repositories: [{ repositoryId: "r1" }],
       },
       { workspaceId: "w1" },
     );
@@ -58,7 +60,48 @@ describe("buildCreateTaskPayload", () => {
     if (r.ok) {
       expect(r.data.workspaceId).toBe("w1");
       expect(r.data.state).toBe("backlog");
+      expect(r.data.repositories).toEqual([{ repositoryId: "r1" }]);
     }
+  });
+});
+
+/**
+ * The Task ↔ Repository join, from the pure side (issue #7). Both functions exist so that
+ * "which branch" and "which worktree does the agent run in" have exactly one answer each, and
+ * that answer is testable without a database.
+ */
+describe("taskCheckoutBranch", () => {
+  it("derives the branch a Task's worktree sits on from the Task id alone", () => {
+    expect(taskCheckoutBranch("abc")).toBe("gatecontrol/task-abc");
+  });
+
+  it("is deterministic, which is what makes provisioning idempotent across relaunches", () => {
+    expect(taskCheckoutBranch("abc")).toBe(taskCheckoutBranch("abc"));
+    expect(taskCheckoutBranch("abc")).not.toBe(taskCheckoutBranch("abd"));
+  });
+});
+
+describe("primaryTaskRepository", () => {
+  it("returns the position-0 attachment whatever order the list arrives in", () => {
+    // The agent runs in exactly one working directory, so this decides which. Deciding it by
+    // array order would make a re-sorted list start the agent somewhere else.
+    const attachments = [
+      { id: "b", position: 2 },
+      { id: "a", position: 0 },
+      { id: "c", position: 1 },
+    ];
+    expect(primaryTaskRepository(attachments).id).toBe("a");
+    expect(primaryTaskRepository([...attachments].reverse()).id).toBe("a");
+  });
+
+  it("returns the sole attachment of a single-Repository Task", () => {
+    expect(primaryTaskRepository([{ id: "only", position: 0 }]).id).toBe("only");
+  });
+
+  it("throws rather than returning undefined when nothing is attached", () => {
+    // A Task with no attachment cannot be run at all. Returning undefined would move the failure
+    // to whichever caller forgot to check, three steps later, with nothing left to point at.
+    expect(() => primaryTaskRepository([])).toThrow(/no repository attached/);
   });
 });
 

@@ -92,7 +92,7 @@ class FixtureAgentRunner implements AgentRunner {
         .sort()
         .join(",");
       writeFileSync(join(worktree, "visible.txt"), `${visible}\n`);
-      opts.onEvent({ kind: "stdout", text: `agent edited ${label}\n` });
+      opts.onEvent({ kind: "stdout", channel: "assistant", text: `agent edited ${label}\n` });
 
       if (!opts.prompt.includes(STEERABLE)) finish({ kind: "completed" });
     })();
@@ -104,12 +104,16 @@ class FixtureAgentRunner implements AgentRunner {
         const path = await workspacePath;
         if (!path) return false;
         writeFileSync(join(path, "steered.txt"), `${text}\n`);
-        opts.onEvent({ kind: "stdout", text: `agent received: ${text}\n` });
+        opts.onEvent({ kind: "stdout", channel: "user", text: `agent received: ${text}\n` });
         finish({ kind: "completed" });
         return true;
       },
       stop: async () => {
-        opts.onEvent({ kind: "stdout", text: "agent stopped by the operator\n" });
+        opts.onEvent({
+          kind: "stdout",
+          channel: "system",
+          text: "agent stopped by the operator\n",
+        });
         finish({ kind: "completed" });
       },
     };

@@ -9,16 +9,24 @@ import {
   repository,
   secret,
   session,
+  sessionEvent,
   task,
+  taskRepository,
   workspace,
 } from "@gatecontrol/db";
 import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import {
+  appendSessionEvent,
+  compactSession,
+  latestStateTransition,
+  listSessionLog,
+  listSessionSummaries,
   listSessionUsage,
   loadTaskRunContext,
   nextSessionUsageSeq,
   recordSessionUsage,
+  setTaskRepositoryResultBranch,
   setTaskState,
 } from "./data.js";
 
@@ -96,8 +104,15 @@ async function seed(db: TestDb) {
     state: "ready",
     agentProfileId: "ap-1",
     executorProfileId: "ex-1",
+  });
+  await db.insert(taskRepository).values({
+    id: "attach-1",
+    workspaceId: WS,
+    taskId: "task-1",
     repositoryId: "repo-1",
     baseRef: "main",
+    checkoutBranch: "gatecontrol/task-task-1",
+    position: 0,
   });
 
   return { ciphertext };
@@ -130,7 +145,10 @@ async function seedImportedRepository(db: TestDb, scmCiphertext: string) {
     integrationId: "int-1",
     externalFullName: "acme/gate",
   });
-  await db.update(task).set({ repositoryId: "repo-imported" }).where(eq(task.id, "task-1"));
+  await db
+    .update(taskRepository)
+    .set({ repositoryId: "repo-imported" })
+    .where(eq(taskRepository.taskId, "task-1"));
 }
 
 describe("loadTaskRunContext — clone credential for an imported Repository", () => {
@@ -142,9 +160,12 @@ describe("loadTaskRunContext — clone credential for an imported Repository", (
 
     const ctx = await loadTaskRunContext(db, WS, "task-1");
 
-    expect(ctx.scmClone).toEqual({ provider: "github", secretCiphertext: scmCiphertext });
+    expect(ctx.repositories[0]?.scmClone).toEqual({
+      provider: "github",
+      secretCiphertext: scmCiphertext,
+    });
     // Encrypted here, decrypted only at the point the clone runs (Principle IV).
-    expect(JSON.stringify(ctx.scmClone)).not.toContain("ghp-clone-me");
+    expect(JSON.stringify(ctx.repositories)).not.toContain("ghp-clone-me");
   });
 
   it("is null for a local path — nothing to authenticate against", async () => {
@@ -152,7 +173,7 @@ describe("loadTaskRunContext — clone credential for an imported Repository", (
     await seed(db);
 
     const ctx = await loadTaskRunContext(db, WS, "task-1");
-    expect(ctx.scmClone).toBeNull();
+    expect(ctx.repositories[0]?.scmClone).toBeNull();
   });
 
   it("is null once the Integration has been disconnected", async () => {
@@ -167,7 +188,156 @@ describe("loadTaskRunContext — clone credential for an imported Repository", (
       .where(eq(repository.id, "repo-imported"));
 
     const ctx = await loadTaskRunContext(db, WS, "task-1");
-    expect(ctx.scmClone).toBeNull();
+    expect(ctx.repositories[0]?.scmClone).toBeNull();
+  });
+});
+
+/**
+ * The Task ↔ Repository join, from the orchestrator's side (issue #7). The lifecycle iterates
+ * over `ctx.repositories`, so what this asks is whether that list is ordered, complete, and
+ * refuses to be empty.
+ */
+describe("loadTaskRunContext — several attached Repositories", () => {
+  /** A second Repository on the same Task, at the position the caller names. */
+  async function attachSecond(db: TestDb, position: number) {
+    await db.insert(repository).values({
+      id: "repo-2",
+      workspaceId: WS,
+      name: "shared-lib",
+      source: "local_path",
+      location: "/srv/repos/shared-lib",
+    });
+    await db.insert(taskRepository).values({
+      id: "attach-2",
+      workspaceId: WS,
+      taskId: "task-1",
+      repositoryId: "repo-2",
+      baseRef: "develop",
+      checkoutBranch: "gatecontrol/task-task-1",
+      position,
+    });
+  }
+
+  it("returns every attachment with its own Repository row", async () => {
+    const db = createTestDb();
+    await seed(db);
+    await attachSecond(db, 1);
+
+    const ctx = await loadTaskRunContext(db, WS, "task-1");
+
+    expect(ctx.repositories.map((b) => b.repository.name)).toEqual(["gatecontrol", "shared-lib"]);
+    expect(ctx.repositories.map((b) => b.attachment.baseRef)).toEqual(["main", "develop"]);
+  });
+
+  it("orders them by position, not by insertion, so the primary is never insertion-order luck", async () => {
+    const db = createTestDb();
+    await seed(db);
+    // Inserted second but positioned first: the agent must be started in this one.
+    await db.update(taskRepository).set({ position: 1 }).where(eq(taskRepository.id, "attach-1"));
+    await attachSecond(db, 0);
+
+    const ctx = await loadTaskRunContext(db, WS, "task-1");
+
+    expect(ctx.repositories.map((b) => b.repository.name)).toEqual(["shared-lib", "gatecontrol"]);
+  });
+
+  it("resolves each attachment's own clone credential", async () => {
+    // Two attachments imported from two different Integrations each need their own token; one
+    // credential per Task could only ever have been right for one of them.
+    const db = createTestDb();
+    await seed(db);
+    const ciphertext = encryptSecret("ghp-clone-me");
+    await seedImportedRepository(db, ciphertext);
+    await db.insert(repository).values({
+      id: "repo-local",
+      workspaceId: WS,
+      name: "local-only",
+      source: "local_path",
+      location: "/srv/repos/local-only",
+    });
+    await db.insert(taskRepository).values({
+      id: "attach-2",
+      workspaceId: WS,
+      taskId: "task-1",
+      repositoryId: "repo-local",
+      checkoutBranch: "gatecontrol/task-task-1",
+      position: 1,
+    });
+
+    const ctx = await loadTaskRunContext(db, WS, "task-1");
+
+    expect(ctx.repositories[0]?.scmClone).toEqual({
+      provider: "github",
+      secretCiphertext: ciphertext,
+    });
+    expect(ctx.repositories[1]?.scmClone).toBeNull();
+  });
+
+  it("refuses a Task with nothing attached, by name, rather than returning an empty list", async () => {
+    // A Task with no attachment cannot be run at all. Failing at load is the difference between
+    // a legible error and "cannot read property location of undefined" three steps later.
+    const db = createTestDb();
+    await seed(db);
+    await db.delete(taskRepository).where(eq(taskRepository.taskId, "task-1"));
+
+    await expect(loadTaskRunContext(db, WS, "task-1")).rejects.toThrow(
+      /task task-1 has no repository attached/,
+    );
+  });
+
+  it("does not see an attachment belonging to another Workspace (Principle V)", async () => {
+    const db = createTestDb();
+    await seed(db);
+    await db
+      .update(taskRepository)
+      .set({ workspaceId: OTHER_WS })
+      .where(eq(taskRepository.id, "attach-1"));
+
+    await expect(loadTaskRunContext(db, WS, "task-1")).rejects.toThrow(
+      /has no repository attached/,
+    );
+  });
+});
+
+describe("setTaskRepositoryResultBranch", () => {
+  it("records the branch on the attachment, leaving the others alone", async () => {
+    const db = createTestDb();
+    await seed(db);
+    await db.insert(repository).values({
+      id: "repo-2",
+      workspaceId: WS,
+      name: "shared-lib",
+      source: "local_path",
+      location: "/srv/repos/shared-lib",
+    });
+    await db.insert(taskRepository).values({
+      id: "attach-2",
+      workspaceId: WS,
+      taskId: "task-1",
+      repositoryId: "repo-2",
+      checkoutBranch: "gatecontrol/task-task-1",
+      position: 1,
+    });
+
+    await setTaskRepositoryResultBranch(db, WS, "attach-1", "gatecontrol/task-task-1");
+
+    const rows = await db
+      .select()
+      .from(taskRepository)
+      .where(eq(taskRepository.taskId, "task-1"))
+      .orderBy(taskRepository.position);
+    expect(rows[0]?.resultBranch).toBe("gatecontrol/task-task-1");
+    expect(rows[1]?.resultBranch).toBeNull();
+  });
+
+  it("will not write into another Workspace's attachment (Principle V)", async () => {
+    const db = createTestDb();
+    await seed(db);
+
+    await setTaskRepositoryResultBranch(db, OTHER_WS, "attach-1", "hijacked");
+
+    const [row] = await db.select().from(taskRepository).where(eq(taskRepository.id, "attach-1"));
+    expect(row?.resultBranch).toBeNull();
   });
 });
 
@@ -190,9 +360,11 @@ describe("loadTaskRunContext", () => {
     expect(ctx.agentCatalog.command).toBe("claude");
     expect(ctx.agentCatalog.subscriptionEnvVar).toBe("CLAUDE_CODE_OAUTH_TOKEN");
 
-    expect(ctx.repository.id).toBe("repo-1");
-    expect(ctx.repository.source).toBe("local_path");
-    expect(ctx.repository.location).toBe("/srv/repos/gatecontrol");
+    expect(ctx.repositories).toHaveLength(1);
+    expect(ctx.repositories[0]?.repository.id).toBe("repo-1");
+    expect(ctx.repositories[0]?.repository.source).toBe("local_path");
+    expect(ctx.repositories[0]?.repository.location).toBe("/srv/repos/gatecontrol");
+    expect(ctx.repositories[0]?.attachment.baseRef).toBe("main");
 
     // The stored value is ciphertext, never plaintext (Principle IV).
     expect(ctx.secretCiphertext).toBe(ciphertext);
@@ -230,7 +402,7 @@ describe("loadTaskRunContext", () => {
 });
 
 describe("setTaskState", () => {
-  it("updates state and optional result branch on the scoped row", async () => {
+  it("updates state on the scoped row", async () => {
     const db = createTestDb();
     await seed(db);
 
@@ -238,10 +410,9 @@ describe("setTaskState", () => {
     let [row] = await db.select().from(task).where(eq(task.id, "task-1"));
     expect(row?.state).toBe("running");
 
-    await setTaskState(db, WS, "task-1", "done", { resultBranch: "gatecontrol/task-task-1" });
+    await setTaskState(db, WS, "task-1", "done");
     [row] = await db.select().from(task).where(eq(task.id, "task-1"));
     expect(row?.state).toBe("done");
-    expect(row?.resultBranch).toBe("gatecontrol/task-task-1");
   });
 
   it("records a failure reason and can clear it back to null", async () => {
@@ -417,5 +588,168 @@ describe("nextSessionUsageSeq — turn numbering survives a review round (issue 
 
     await recordSessionUsage(db, WS, turn(0, 10));
     expect(await nextSessionUsageSeq(db, WS, "sess-2")).toBe(0);
+  });
+});
+
+/**
+ * The session log's three new properties (issue #2): payloads validated at write time, a
+ * compaction pass that can only ever insert, and a cursor that refuses a rewritten history.
+ */
+describe("session log (issue #2)", () => {
+  async function seedSession(db: TestDb) {
+    await seed(db);
+    await db.insert(session).values({ id: "sess-1", workspaceId: WS, taskId: "task-1" });
+  }
+
+  const append = (db: TestDb, seq: number, text: string) =>
+    appendSessionEvent(db, WS, {
+      sessionId: "sess-1",
+      seq,
+      payload: { kind: "assistant_turn", text, thinking: false },
+    });
+
+  /** Every row of the log, exactly as stored — the comparison AC-2 turns on. */
+  const rawRows = (db: TestDb) =>
+    db
+      .select()
+      .from(sessionEvent)
+      .where(eq(sessionEvent.sessionId, "sess-1"))
+      .orderBy(asc(sessionEvent.seq));
+
+  it("derives the kind column from the payload, so the two can never disagree", async () => {
+    const db = createTestDb();
+    await seedSession(db);
+
+    await appendSessionEvent(db, WS, {
+      sessionId: "sess-1",
+      seq: 0,
+      payload: { kind: "tool_call", name: "Edit", callId: null },
+    });
+
+    const [row] = await rawRows(db);
+    expect(row?.kind).toBe("tool_call");
+    expect(row?.payload).toEqual({ kind: "tool_call", name: "Edit", callId: null });
+  });
+
+  it("refuses to write a payload the union does not admit", async () => {
+    const db = createTestDb();
+    await seedSession(db);
+
+    await expect(
+      appendSessionEvent(db, WS, {
+        sessionId: "sess-1",
+        seq: 0,
+        // The shape the log used to accept without complaint, and which every reader then had
+        // to guess at (issue #2, AC-1).
+        payload: { kind: "stdout", text: "working" } as never,
+      }),
+    ).rejects.toThrow();
+    expect(await rawRows(db)).toHaveLength(0);
+  });
+
+  it("reads a row written before the union existed back as a typed event", async () => {
+    const db = createTestDb();
+    await seedSession(db);
+    // Exactly what an earlier run left behind: an opaque payload under a transport-word kind.
+    await db.insert(sessionEvent).values({
+      id: "legacy-0",
+      workspaceId: WS,
+      sessionId: "sess-1",
+      seq: 0,
+      kind: "stdout",
+      payload: { text: "patched latch.ts\n" },
+    });
+
+    expect(await listSessionLog(db, WS, "sess-1")).toEqual([
+      { seq: 0, payload: { kind: "assistant_turn", text: "patched latch.ts\n", thinking: false } },
+    ]);
+  });
+
+  it("records a summary for a long session and leaves every event exactly where it was", async () => {
+    const db = createTestDb();
+    await seedSession(db);
+    for (let seq = 0; seq < 60; seq++) await append(db, seq, `line ${seq}`);
+    const before = await rawRows(db);
+
+    const planned = await compactSession(db, WS, "sess-1", { threshold: 20, tail: 10 });
+
+    expect(planned).toHaveLength(1);
+    const summaries = await listSessionSummaries(db, WS, "sess-1");
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]?.fromSeq).toBe(0);
+    expect(summaries[0]?.toSeq).toBe(49);
+    expect(summaries[0]?.eventCount).toBe(50);
+    // AC-2, stated as the only thing that would actually catch a regression: the log is
+    // byte-identical afterwards. Nothing was deleted, nothing was rewritten.
+    expect(await rawRows(db)).toEqual(before);
+  });
+
+  it("records the same range twice as a no-op, so a replayed step does not duplicate it", async () => {
+    const db = createTestDb();
+    await seedSession(db);
+    for (let seq = 0; seq < 60; seq++) await append(db, seq, `line ${seq}`);
+
+    await compactSession(db, WS, "sess-1", { threshold: 20, tail: 10 });
+    const first = await listSessionSummaries(db, WS, "sess-1");
+    await compactSession(db, WS, "sess-1", { threshold: 20, tail: 10 });
+
+    expect(await listSessionSummaries(db, WS, "sess-1")).toEqual(first);
+  });
+
+  it("does not compact a session that has not got long yet", async () => {
+    const db = createTestDb();
+    await seedSession(db);
+    for (let seq = 0; seq < 5; seq++) await append(db, seq, `line ${seq}`);
+
+    expect(await compactSession(db, WS, "sess-1")).toEqual([]);
+    expect(await listSessionSummaries(db, WS, "sess-1")).toHaveLength(0);
+  });
+
+  it("records a state transition once when a retried step body records it again", async () => {
+    // `recordTransition` reads its seq back as max+1, so the unique index cannot dedupe it and a
+    // retried Inngest step body would otherwise leave a reviewer looking at the same move twice.
+    const db = createTestDb();
+    await seedSession(db);
+    await db.insert(sessionEvent).values({
+      id: "state-0",
+      workspaceId: WS,
+      sessionId: "sess-1",
+      seq: 0,
+      kind: "state",
+      payload: { kind: "state", from: "running", to: "review" },
+    });
+
+    const latest = await latestStateTransition(db, WS, "sess-1");
+    expect(latest).toEqual({ kind: "state", from: "running", to: "review" });
+  });
+
+  it("reports no state transition for a Session that has only ever recorded turns", async () => {
+    const db = createTestDb();
+    await seedSession(db);
+    await append(db, 0, "line 0");
+    expect(await latestStateTransition(db, WS, "sess-1")).toBeNull();
+  });
+
+  it("does not read another Workspace's state transitions (Principle V)", async () => {
+    const db = createTestDb();
+    await seedSession(db);
+    await db.insert(sessionEvent).values({
+      id: "state-0",
+      workspaceId: WS,
+      sessionId: "sess-1",
+      seq: 0,
+      kind: "state",
+      payload: { kind: "state", from: "running", to: "review" },
+    });
+    expect(await latestStateTransition(db, OTHER_WS, "sess-1")).toBeNull();
+  });
+
+  it("does not return another Workspace's summaries (Principle V)", async () => {
+    const db = createTestDb();
+    await seedSession(db);
+    for (let seq = 0; seq < 60; seq++) await append(db, seq, `line ${seq}`);
+    await compactSession(db, WS, "sess-1", { threshold: 20, tail: 10 });
+
+    expect(await listSessionSummaries(db, OTHER_WS, "sess-1")).toHaveLength(0);
   });
 });

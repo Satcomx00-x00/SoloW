@@ -87,3 +87,28 @@ export const updateRepositorySetupInput = z.object({
   setupFilePatterns: setupFilePatternsSchema,
 });
 export type UpdateRepositorySetupInput = z.infer<typeof updateRepositorySetupInput>;
+
+/**
+ * A git ref name that is safe to hand to `git` as an argument (issue #7).
+ *
+ * Both a Task attachment's base ref and its checkout branch reach `git worktree add … -B
+ * <branch> <base>` as argv, so the same jail `setupFilePatternSchema` documents applies for the
+ * same reason: a value beginning with `-` would be read as an option rather than as a ref, and
+ * `baseRef` has been unvalidated beyond a length bound since it was introduced. A `..` segment
+ * is refused because git spells revision ranges that way, whitespace and control characters
+ * because git refuses them itself and a legible error here beats a command failure three steps
+ * later.
+ */
+export const gitRefNameSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(200)
+  .refine((r) => !r.startsWith("-") && !r.startsWith(":"), {
+    message: "ref must not start with - or :",
+  })
+  .refine((r) => !r.split("/").includes(".."), { message: "ref must not contain a .. segment" })
+  .refine((r) => !/[\s~^:?*[\\]/.test(r), { message: "ref must not contain git wildcard syntax" })
+  .refine((r) => ![...r].some((c) => c.charCodeAt(0) < 0x20), {
+    message: "ref must not contain a control character",
+  });

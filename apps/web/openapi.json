@@ -2227,7 +2227,7 @@
     "/task.create": {
       "post": {
         "operationId": "task-create",
-        "summary": "Create a Task under an Issue, binding an Agent Profile, an Executor Profile, and a Repository. Creates it in the backlog; it does not start an agent — use task.launch for that.",
+        "summary": "Create a Task under an Issue, binding an Agent Profile, an Executor Profile, and one or more Repositories — each with its own base ref and checkout branch. Creates it in the backlog; it does not start an agent — use task.launch for that.",
         "tags": [
           "task"
         ],
@@ -2260,14 +2260,32 @@
                     "type": "string",
                     "minLength": 1
                   },
-                  "repositoryId": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "baseRef": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 200
+                  "repositories": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "repositoryId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "baseRef": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "checkoutBranch": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        }
+                      },
+                      "required": [
+                        "repositoryId"
+                      ]
+                    },
+                    "minItems": 1,
+                    "maxItems": 10
                   }
                 },
                 "required": [
@@ -2275,7 +2293,7 @@
                   "title",
                   "agentProfileId",
                   "executorProfileId",
-                  "repositoryId"
+                  "repositories"
                 ]
               }
             }
@@ -2320,17 +2338,44 @@
                       "type": "string",
                       "minLength": 1
                     },
-                    "repositoryId": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "baseRef": {
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "resultBranch": {
-                      "type": "string",
-                      "nullable": true
+                    "repositories": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "repositoryId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "baseRef": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "checkoutBranch": {
+                            "type": "string"
+                          },
+                          "resultBranch": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "position": {
+                            "type": "integer",
+                            "minimum": 0
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "repositoryId",
+                          "baseRef",
+                          "checkoutBranch",
+                          "resultBranch",
+                          "position"
+                        ]
+                      }
                     },
                     "failureReason": {
                       "type": "string",
@@ -2352,9 +2397,216 @@
                     "state",
                     "agentProfileId",
                     "executorProfileId",
-                    "repositoryId",
-                    "baseRef",
-                    "resultBranch",
+                    "repositories",
+                    "failureReason",
+                    "createdAt",
+                    "updatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/task.setRepositories": {
+      "post": {
+        "operationId": "task-setRepositories",
+        "summary": "Replace the whole set of Repositories a Task works in, each with its own base ref and checkout branch. Refused once the Task has left the backlog or ready states, because its worktrees are already live.",
+        "tags": [
+          "task"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "taskId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "repositories": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "repositoryId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "baseRef": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "checkoutBranch": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        }
+                      },
+                      "required": [
+                        "repositoryId"
+                      ]
+                    },
+                    "minItems": 1,
+                    "maxItems": 10
+                  }
+                },
+                "required": [
+                  "taskId",
+                  "repositories"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "issueId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "backlog",
+                        "ready",
+                        "running",
+                        "review",
+                        "parked",
+                        "failed",
+                        "done"
+                      ]
+                    },
+                    "agentProfileId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "executorProfileId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "repositories": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "repositoryId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "baseRef": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "checkoutBranch": {
+                            "type": "string"
+                          },
+                          "resultBranch": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "position": {
+                            "type": "integer",
+                            "minimum": 0
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "repositoryId",
+                          "baseRef",
+                          "checkoutBranch",
+                          "resultBranch",
+                          "position"
+                        ]
+                      }
+                    },
+                    "failureReason": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "issueId",
+                    "title",
+                    "state",
+                    "agentProfileId",
+                    "executorProfileId",
+                    "repositories",
                     "failureReason",
                     "createdAt",
                     "updatedAt"
@@ -2493,17 +2745,44 @@
                         "type": "string",
                         "minLength": 1
                       },
-                      "repositoryId": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "baseRef": {
-                        "type": "string",
-                        "nullable": true
-                      },
-                      "resultBranch": {
-                        "type": "string",
-                        "nullable": true
+                      "repositories": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "repositoryId": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "baseRef": {
+                              "type": "string",
+                              "nullable": true
+                            },
+                            "checkoutBranch": {
+                              "type": "string"
+                            },
+                            "resultBranch": {
+                              "type": "string",
+                              "nullable": true
+                            },
+                            "position": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "repositoryId",
+                            "baseRef",
+                            "checkoutBranch",
+                            "resultBranch",
+                            "position"
+                          ]
+                        }
                       },
                       "failureReason": {
                         "type": "string",
@@ -2525,9 +2804,7 @@
                       "state",
                       "agentProfileId",
                       "executorProfileId",
-                      "repositoryId",
-                      "baseRef",
-                      "resultBranch",
+                      "repositories",
                       "failureReason",
                       "createdAt",
                       "updatedAt"
@@ -2652,17 +2929,44 @@
                       "type": "string",
                       "minLength": 1
                     },
-                    "repositoryId": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "baseRef": {
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "resultBranch": {
-                      "type": "string",
-                      "nullable": true
+                    "repositories": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "repositoryId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "baseRef": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "checkoutBranch": {
+                            "type": "string"
+                          },
+                          "resultBranch": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "position": {
+                            "type": "integer",
+                            "minimum": 0
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "repositoryId",
+                          "baseRef",
+                          "checkoutBranch",
+                          "resultBranch",
+                          "position"
+                        ]
+                      }
                     },
                     "failureReason": {
                       "type": "string",
@@ -2684,9 +2988,7 @@
                     "state",
                     "agentProfileId",
                     "executorProfileId",
-                    "repositoryId",
-                    "baseRef",
-                    "resultBranch",
+                    "repositories",
                     "failureReason",
                     "createdAt",
                     "updatedAt"
@@ -2818,17 +3120,44 @@
                       "type": "string",
                       "minLength": 1
                     },
-                    "repositoryId": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "baseRef": {
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "resultBranch": {
-                      "type": "string",
-                      "nullable": true
+                    "repositories": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "repositoryId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "baseRef": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "checkoutBranch": {
+                            "type": "string"
+                          },
+                          "resultBranch": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "position": {
+                            "type": "integer",
+                            "minimum": 0
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "repositoryId",
+                          "baseRef",
+                          "checkoutBranch",
+                          "resultBranch",
+                          "position"
+                        ]
+                      }
                     },
                     "failureReason": {
                       "type": "string",
@@ -2850,9 +3179,7 @@
                     "state",
                     "agentProfileId",
                     "executorProfileId",
-                    "repositoryId",
-                    "baseRef",
-                    "resultBranch",
+                    "repositories",
                     "failureReason",
                     "createdAt",
                     "updatedAt"
@@ -2987,17 +3314,44 @@
                       "type": "string",
                       "minLength": 1
                     },
-                    "repositoryId": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "baseRef": {
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "resultBranch": {
-                      "type": "string",
-                      "nullable": true
+                    "repositories": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "repositoryId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "baseRef": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "checkoutBranch": {
+                            "type": "string"
+                          },
+                          "resultBranch": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "position": {
+                            "type": "integer",
+                            "minimum": 0
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "repositoryId",
+                          "baseRef",
+                          "checkoutBranch",
+                          "resultBranch",
+                          "position"
+                        ]
+                      }
                     },
                     "failureReason": {
                       "type": "string",
@@ -3019,9 +3373,7 @@
                     "state",
                     "agentProfileId",
                     "executorProfileId",
-                    "repositoryId",
-                    "baseRef",
-                    "resultBranch",
+                    "repositories",
                     "failureReason",
                     "createdAt",
                     "updatedAt"
@@ -3143,17 +3495,44 @@
                       "type": "string",
                       "minLength": 1
                     },
-                    "repositoryId": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "baseRef": {
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "resultBranch": {
-                      "type": "string",
-                      "nullable": true
+                    "repositories": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "repositoryId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "baseRef": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "checkoutBranch": {
+                            "type": "string"
+                          },
+                          "resultBranch": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "position": {
+                            "type": "integer",
+                            "minimum": 0
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "repositoryId",
+                          "baseRef",
+                          "checkoutBranch",
+                          "resultBranch",
+                          "position"
+                        ]
+                      }
                     },
                     "failureReason": {
                       "type": "string",
@@ -3175,9 +3554,7 @@
                     "state",
                     "agentProfileId",
                     "executorProfileId",
-                    "repositoryId",
-                    "baseRef",
-                    "resultBranch",
+                    "repositories",
                     "failureReason",
                     "createdAt",
                     "updatedAt"
@@ -6475,7 +6852,7 @@
     "/session.get": {
       "get": {
         "operationId": "session-get",
-        "summary": "Fetch one Session with its full replayable event log, the diff captured at the review gate, and any recorded decision.",
+        "summary": "Fetch one Session with its event log — minus any range a compaction summary stands in for, which session.eventRange reads back — the diff captured at the review gate for each Repository the Task works in, and any recorded decision.",
         "tags": [
           "session"
         ],
@@ -6563,9 +6940,366 @@
                             "type": "integer"
                           },
                           "kind": {
-                            "type": "string"
+                            "type": "string",
+                            "enum": [
+                              "user_turn",
+                              "assistant_turn",
+                              "notice",
+                              "tool_call",
+                              "tool_result",
+                              "usage",
+                              "state",
+                              "permission_request",
+                              "permission_resolved",
+                              "diff"
+                            ]
                           },
-                          "payload": {},
+                          "payload": {
+                            "oneOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "user_turn"
+                                    ]
+                                  },
+                                  "text": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "text"
+                                ]
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "assistant_turn"
+                                    ]
+                                  },
+                                  "text": {
+                                    "type": "string"
+                                  },
+                                  "thinking": {
+                                    "type": "boolean"
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "text",
+                                  "thinking"
+                                ]
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "notice"
+                                    ]
+                                  },
+                                  "text": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "text"
+                                ]
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "tool_call"
+                                    ]
+                                  },
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "callId": {
+                                    "type": "string",
+                                    "nullable": true
+                                  },
+                                  "input": {}
+                                },
+                                "required": [
+                                  "kind",
+                                  "name",
+                                  "callId"
+                                ]
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "tool_result"
+                                    ]
+                                  },
+                                  "callId": {
+                                    "type": "string",
+                                    "nullable": true
+                                  },
+                                  "ok": {
+                                    "type": "boolean"
+                                  },
+                                  "output": {}
+                                },
+                                "required": [
+                                  "kind",
+                                  "callId",
+                                  "ok"
+                                ]
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "usage"
+                                    ]
+                                  },
+                                  "model": {
+                                    "type": "string",
+                                    "nullable": true
+                                  },
+                                  "inputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "outputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "cacheReadTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "cacheWriteTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "costUsd": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "model",
+                                  "inputTokens",
+                                  "outputTokens",
+                                  "cacheReadTokens",
+                                  "cacheWriteTokens"
+                                ]
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "state"
+                                    ]
+                                  },
+                                  "from": {
+                                    "type": "string",
+                                    "enum": [
+                                      "backlog",
+                                      "ready",
+                                      "running",
+                                      "review",
+                                      "parked",
+                                      "failed",
+                                      "done"
+                                    ]
+                                  },
+                                  "to": {
+                                    "type": "string",
+                                    "enum": [
+                                      "backlog",
+                                      "ready",
+                                      "running",
+                                      "review",
+                                      "parked",
+                                      "failed",
+                                      "done"
+                                    ]
+                                  },
+                                  "reason": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "from",
+                                  "to"
+                                ]
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "permission_request"
+                                    ]
+                                  },
+                                  "requestId": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "title": {
+                                    "type": "string"
+                                  },
+                                  "toolKind": {
+                                    "type": "string",
+                                    "nullable": true
+                                  },
+                                  "options": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "optionId": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        },
+                                        "name": {
+                                          "type": "string"
+                                        },
+                                        "kind": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "optionId",
+                                        "name",
+                                        "kind"
+                                      ]
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "requestId",
+                                  "title",
+                                  "toolKind",
+                                  "options"
+                                ]
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "permission_resolved"
+                                    ]
+                                  },
+                                  "requestId": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "optionId": {
+                                    "type": "string",
+                                    "nullable": true
+                                  },
+                                  "decidedBy": {
+                                    "type": "string",
+                                    "enum": [
+                                      "operator",
+                                      "policy"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "requestId",
+                                  "optionId",
+                                  "decidedBy"
+                                ]
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "diff"
+                                    ]
+                                  },
+                                  "diffRef": {
+                                    "type": "string"
+                                  },
+                                  "files": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "path": {
+                                          "type": "string"
+                                        },
+                                        "status": {
+                                          "type": "string",
+                                          "enum": [
+                                            "added",
+                                            "modified",
+                                            "deleted",
+                                            "renamed"
+                                          ]
+                                        },
+                                        "additions": {
+                                          "type": "integer",
+                                          "minimum": 0
+                                        },
+                                        "deletions": {
+                                          "type": "integer",
+                                          "minimum": 0
+                                        }
+                                      },
+                                      "required": [
+                                        "path",
+                                        "status",
+                                        "additions",
+                                        "deletions"
+                                      ]
+                                    }
+                                  },
+                                  "patch": {
+                                    "type": "string"
+                                  },
+                                  "truncated": {
+                                    "type": "boolean"
+                                  },
+                                  "repositoryId": {
+                                    "type": "string"
+                                  },
+                                  "repositoryName": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "diffRef",
+                                  "files",
+                                  "patch",
+                                  "truncated"
+                                ]
+                              }
+                            ]
+                          },
                           "at": {
                             "type": "string",
                             "format": "date-time"
@@ -6576,6 +7310,7 @@
                           "sessionId",
                           "seq",
                           "kind",
+                          "payload",
                           "at"
                         ]
                       }
@@ -6673,6 +7408,12 @@
                         },
                         "truncated": {
                           "type": "boolean"
+                        },
+                        "repositoryId": {
+                          "type": "string"
+                        },
+                        "repositoryName": {
+                          "type": "string"
                         }
                       },
                       "required": [
@@ -6681,14 +7422,1249 @@
                         "patch",
                         "truncated"
                       ]
+                    },
+                    "diffs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "diffRef": {
+                            "type": "string"
+                          },
+                          "files": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "path": {
+                                  "type": "string"
+                                },
+                                "status": {
+                                  "type": "string",
+                                  "enum": [
+                                    "added",
+                                    "modified",
+                                    "deleted",
+                                    "renamed"
+                                  ]
+                                },
+                                "additions": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "deletions": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "path",
+                                "status",
+                                "additions",
+                                "deletions"
+                              ]
+                            }
+                          },
+                          "patch": {
+                            "type": "string"
+                          },
+                          "truncated": {
+                            "type": "boolean"
+                          },
+                          "repositoryId": {
+                            "type": "string"
+                          },
+                          "repositoryName": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "diffRef",
+                          "files",
+                          "patch",
+                          "truncated"
+                        ]
+                      }
+                    },
+                    "summaries": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "sessionId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "fromSeq": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "toSeq": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "eventCount": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "text": {
+                            "type": "string"
+                          },
+                          "at": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "sessionId",
+                          "fromSeq",
+                          "toSeq",
+                          "eventCount",
+                          "text",
+                          "at"
+                        ]
+                      }
+                    },
+                    "cursor": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "sessionId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "seq": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "hash": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "sessionId",
+                        "seq",
+                        "hash"
+                      ]
                     }
                   },
                   "required": [
                     "session",
                     "events",
                     "review",
-                    "diff"
+                    "diff",
+                    "diffs",
+                    "summaries",
+                    "cursor"
                   ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.NOT_FOUND"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/session.eventRange": {
+      "get": {
+        "operationId": "session-eventRange",
+        "summary": "Read the events inside one closed seq range of a Session's log — what a compaction summary stands in for.",
+        "tags": [
+          "session"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "sessionId",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "fromSeq",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "toSeq",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "sessionId": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "seq": {
+                        "type": "integer"
+                      },
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "user_turn",
+                          "assistant_turn",
+                          "notice",
+                          "tool_call",
+                          "tool_result",
+                          "usage",
+                          "state",
+                          "permission_request",
+                          "permission_resolved",
+                          "diff"
+                        ]
+                      },
+                      "payload": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "user_turn"
+                                ]
+                              },
+                              "text": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "text"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "assistant_turn"
+                                ]
+                              },
+                              "text": {
+                                "type": "string"
+                              },
+                              "thinking": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "text",
+                              "thinking"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "notice"
+                                ]
+                              },
+                              "text": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "text"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "tool_call"
+                                ]
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "callId": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "input": {}
+                            },
+                            "required": [
+                              "kind",
+                              "name",
+                              "callId"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "tool_result"
+                                ]
+                              },
+                              "callId": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "ok": {
+                                "type": "boolean"
+                              },
+                              "output": {}
+                            },
+                            "required": [
+                              "kind",
+                              "callId",
+                              "ok"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "usage"
+                                ]
+                              },
+                              "model": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "inputTokens": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "outputTokens": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "cacheReadTokens": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "cacheWriteTokens": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "costUsd": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "model",
+                              "inputTokens",
+                              "outputTokens",
+                              "cacheReadTokens",
+                              "cacheWriteTokens"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "state"
+                                ]
+                              },
+                              "from": {
+                                "type": "string",
+                                "enum": [
+                                  "backlog",
+                                  "ready",
+                                  "running",
+                                  "review",
+                                  "parked",
+                                  "failed",
+                                  "done"
+                                ]
+                              },
+                              "to": {
+                                "type": "string",
+                                "enum": [
+                                  "backlog",
+                                  "ready",
+                                  "running",
+                                  "review",
+                                  "parked",
+                                  "failed",
+                                  "done"
+                                ]
+                              },
+                              "reason": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "from",
+                              "to"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "permission_request"
+                                ]
+                              },
+                              "requestId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "title": {
+                                "type": "string"
+                              },
+                              "toolKind": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "options": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "optionId": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "name": {
+                                      "type": "string"
+                                    },
+                                    "kind": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "optionId",
+                                    "name",
+                                    "kind"
+                                  ]
+                                }
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "requestId",
+                              "title",
+                              "toolKind",
+                              "options"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "permission_resolved"
+                                ]
+                              },
+                              "requestId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "optionId": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "decidedBy": {
+                                "type": "string",
+                                "enum": [
+                                  "operator",
+                                  "policy"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "requestId",
+                              "optionId",
+                              "decidedBy"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "diff"
+                                ]
+                              },
+                              "diffRef": {
+                                "type": "string"
+                              },
+                              "files": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "path": {
+                                      "type": "string"
+                                    },
+                                    "status": {
+                                      "type": "string",
+                                      "enum": [
+                                        "added",
+                                        "modified",
+                                        "deleted",
+                                        "renamed"
+                                      ]
+                                    },
+                                    "additions": {
+                                      "type": "integer",
+                                      "minimum": 0
+                                    },
+                                    "deletions": {
+                                      "type": "integer",
+                                      "minimum": 0
+                                    }
+                                  },
+                                  "required": [
+                                    "path",
+                                    "status",
+                                    "additions",
+                                    "deletions"
+                                  ]
+                                }
+                              },
+                              "patch": {
+                                "type": "string"
+                              },
+                              "truncated": {
+                                "type": "boolean"
+                              },
+                              "repositoryId": {
+                                "type": "string"
+                              },
+                              "repositoryName": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "diffRef",
+                              "files",
+                              "patch",
+                              "truncated"
+                            ]
+                          }
+                        ]
+                      },
+                      "at": {
+                        "type": "string",
+                        "format": "date-time"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "sessionId",
+                      "seq",
+                      "kind",
+                      "payload",
+                      "at"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.NOT_FOUND"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/session.forkCursor": {
+      "get": {
+        "operationId": "session-forkCursor",
+        "summary": "Mint a content-addressed fork cursor for a Session, at a given seq or at the head of its log.",
+        "tags": [
+          "session"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "sessionId",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "seq",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sessionId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "seq": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "hash": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "sessionId",
+                    "seq",
+                    "hash"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.NOT_FOUND"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/session.eventsFrom": {
+      "get": {
+        "operationId": "session-eventsFrom",
+        "summary": "Read the events recorded after a fork cursor, refusing a cursor whose hash no longer matches the log.",
+        "tags": [
+          "session"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "sessionId",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "seq",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "hash",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "sessionId": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "seq": {
+                        "type": "integer"
+                      },
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "user_turn",
+                          "assistant_turn",
+                          "notice",
+                          "tool_call",
+                          "tool_result",
+                          "usage",
+                          "state",
+                          "permission_request",
+                          "permission_resolved",
+                          "diff"
+                        ]
+                      },
+                      "payload": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "user_turn"
+                                ]
+                              },
+                              "text": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "text"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "assistant_turn"
+                                ]
+                              },
+                              "text": {
+                                "type": "string"
+                              },
+                              "thinking": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "text",
+                              "thinking"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "notice"
+                                ]
+                              },
+                              "text": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "text"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "tool_call"
+                                ]
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "callId": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "input": {}
+                            },
+                            "required": [
+                              "kind",
+                              "name",
+                              "callId"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "tool_result"
+                                ]
+                              },
+                              "callId": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "ok": {
+                                "type": "boolean"
+                              },
+                              "output": {}
+                            },
+                            "required": [
+                              "kind",
+                              "callId",
+                              "ok"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "usage"
+                                ]
+                              },
+                              "model": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "inputTokens": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "outputTokens": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "cacheReadTokens": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "cacheWriteTokens": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "costUsd": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "model",
+                              "inputTokens",
+                              "outputTokens",
+                              "cacheReadTokens",
+                              "cacheWriteTokens"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "state"
+                                ]
+                              },
+                              "from": {
+                                "type": "string",
+                                "enum": [
+                                  "backlog",
+                                  "ready",
+                                  "running",
+                                  "review",
+                                  "parked",
+                                  "failed",
+                                  "done"
+                                ]
+                              },
+                              "to": {
+                                "type": "string",
+                                "enum": [
+                                  "backlog",
+                                  "ready",
+                                  "running",
+                                  "review",
+                                  "parked",
+                                  "failed",
+                                  "done"
+                                ]
+                              },
+                              "reason": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "from",
+                              "to"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "permission_request"
+                                ]
+                              },
+                              "requestId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "title": {
+                                "type": "string"
+                              },
+                              "toolKind": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "options": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "optionId": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "name": {
+                                      "type": "string"
+                                    },
+                                    "kind": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "optionId",
+                                    "name",
+                                    "kind"
+                                  ]
+                                }
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "requestId",
+                              "title",
+                              "toolKind",
+                              "options"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "permission_resolved"
+                                ]
+                              },
+                              "requestId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "optionId": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "decidedBy": {
+                                "type": "string",
+                                "enum": [
+                                  "operator",
+                                  "policy"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "requestId",
+                              "optionId",
+                              "decidedBy"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "diff"
+                                ]
+                              },
+                              "diffRef": {
+                                "type": "string"
+                              },
+                              "files": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "path": {
+                                      "type": "string"
+                                    },
+                                    "status": {
+                                      "type": "string",
+                                      "enum": [
+                                        "added",
+                                        "modified",
+                                        "deleted",
+                                        "renamed"
+                                      ]
+                                    },
+                                    "additions": {
+                                      "type": "integer",
+                                      "minimum": 0
+                                    },
+                                    "deletions": {
+                                      "type": "integer",
+                                      "minimum": 0
+                                    }
+                                  },
+                                  "required": [
+                                    "path",
+                                    "status",
+                                    "additions",
+                                    "deletions"
+                                  ]
+                                }
+                              },
+                              "patch": {
+                                "type": "string"
+                              },
+                              "truncated": {
+                                "type": "boolean"
+                              },
+                              "repositoryId": {
+                                "type": "string"
+                              },
+                              "repositoryName": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "diffRef",
+                              "files",
+                              "patch",
+                              "truncated"
+                            ]
+                          }
+                        ]
+                      },
+                      "at": {
+                        "type": "string",
+                        "format": "date-time"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "sessionId",
+                      "seq",
+                      "kind",
+                      "payload",
+                      "at"
+                    ]
+                  }
                 }
               }
             }

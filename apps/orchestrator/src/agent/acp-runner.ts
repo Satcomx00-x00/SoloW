@@ -80,7 +80,13 @@ export class AcpRunner implements AgentRunner {
               requestId: request.requestId,
               title: request.title,
               toolKind: request.kind,
-              options: request.options,
+              // An option with no id is dropped rather than offered. The protocol admits one —
+              // its schema asks only for a string — but selecting it is impossible: the answer
+              // GateControl sends back names the option by id, and an empty name resolves to a
+              // cancellation whatever the operator clicked. Showing a choice that cannot be
+              // made is worse than showing one fewer, and the record of the request is what the
+              // session log has to keep either way (issue #58, AC-4).
+              options: request.options.filter((option) => option.optionId.length > 0),
             });
             const resolution = await inbox.ask(request);
             opts.onEvent({
@@ -96,6 +102,7 @@ export class AcpRunner implements AgentRunner {
             if (resolution.decidedBy === "policy" && resolution.outcome === "cancelled") {
               opts.onEvent({
                 kind: "stdout",
+                channel: "system",
                 text: `\n[permission refused by policy — nobody answered "${request.title}" in time]\n`,
               });
             }
@@ -182,22 +189,23 @@ export function toStreamEvent(update: AcpUpdate): AgentStreamEvent | null {
         cacheReadTokens: update.cacheReadTokens,
         cacheWriteTokens: update.cacheWriteTokens,
       };
-    case "text": {
-      // Thinking is shown, marked, rather than dropped: a reviewer judging the work wants the
+    case "text":
+      // Thinking is carried, marked, rather than dropped: a reviewer judging the work wants the
       // agent's reasoning, and hiding it would make the terminal disagree with the transcript.
       // A `user` chunk is the agent echoing back what it was told, which is worth seeing too.
-      const prefix = update.channel === "thinking" ? "· " : "";
-      return { kind: "stdout", text: `${prefix}${update.text}` };
-    }
+      // The channel travels with the text now instead of being baked into it as a prefix — the
+      // session log needs to know whose line this was, and the "· " marker is presentation the
+      // wire projection re-applies (issue #2).
+      return { kind: "stdout", channel: update.channel, text: update.text };
     case "mode":
-      return { kind: "stdout", text: `\nmode: ${update.modeId}\n` };
+      return { kind: "stdout", channel: "system", text: `\nmode: ${update.modeId}\n` };
     // The session preamble is plumbing, and the result's text lives in the stop reason rather
     // than in prose — neither is terminal output.
     case "session":
       return null;
     case "result":
       return update.stopReason && update.stopReason !== "end_turn"
-        ? { kind: "stdout", text: `\n[${update.stopReason}]\n` }
+        ? { kind: "stdout", channel: "system", text: `\n[${update.stopReason}]\n` }
         : null;
   }
 }

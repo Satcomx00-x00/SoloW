@@ -45,6 +45,53 @@ export function buildCreateTaskPayload(
   return ok({ ...input, workspaceId: ctx.workspaceId, state: "backlog" });
 }
 
+/**
+ * A Task's Repository attachments (issue #7) — the pure half of "which repositories, on which
+ * branches", so the orchestrator, the DAL and the board all answer it the same way.
+ */
+
+/**
+ * The deterministic branch a Task's worktree sits on when the Owner named none.
+ *
+ * Four places now need the same string and none of them may disagree: the DAL derives it when an
+ * attachment omits a branch, the manager asks git for it, the migration that backfilled existing
+ * Tasks wrote it — and `setTaskRepositoriesInput` derives it to tell an Owner that two entries
+ * are the same attachment written two ways. That last one is a contract, which cannot import
+ * this package, so the template lives there and is re-exported here; every consumer keeps
+ * importing it from `@gatecontrol/core` and there is still exactly one copy of it.
+ */
+export { taskCheckoutBranch } from "@gatecontrol/contracts";
+
+/** The shape "which attachment is primary" is decided from — nothing else about it matters. */
+export interface TaskRepositoryPosition {
+  position: number;
+}
+
+/**
+ * The attachment the agent is actually started in (issue #7).
+ *
+ * This is the *one* place the product picks a single repository out of a Task's several, and it
+ * is named rather than being a `[0]` somewhere in the lifecycle. The lifecycle runs the agent in
+ * exactly one working directory — that is the stated limitation of multi-repository Tasks, not
+ * an accident — so something has to answer "which one", and the answer must be the same on every
+ * read. It is decided by `position`, which a unique `(task_id, position)` index makes
+ * single-valued, rather than by the order rows happened to come back in.
+ *
+ * Throws on an empty list. A Task with no attachment cannot be run at all, and returning
+ * `undefined` here would move the failure to whichever caller forgot to check — three steps
+ * later, with nothing left to point at.
+ */
+export function primaryTaskRepository<T extends TaskRepositoryPosition>(
+  attachments: readonly T[],
+): T {
+  let primary: T | undefined;
+  for (const attachment of attachments) {
+    if (!primary || attachment.position < primary.position) primary = attachment;
+  }
+  if (!primary) throw new Error("task has no repository attached");
+  return primary;
+}
+
 /** A Task is launchable only from `ready`. */
 export function isLaunchable(state: TaskState): boolean {
   return state === "ready";

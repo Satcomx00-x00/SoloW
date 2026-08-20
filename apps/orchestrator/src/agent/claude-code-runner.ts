@@ -150,14 +150,14 @@ export function toStreamEvent(update: ClaudeUpdate): AgentStreamEvent | null {
         cacheReadTokens: update.cacheReadTokens,
         cacheWriteTokens: update.cacheWriteTokens,
       };
-    case "text": {
-      // Thinking is shown, marked, rather than dropped: a reviewer judging the work wants the
+    case "text":
+      // Thinking is carried, marked, rather than dropped: a reviewer judging the work wants the
       // agent's reasoning, and hiding it would make the terminal disagree with the transcript.
-      const prefix = update.channel === "thinking" ? "· " : "";
-      return { kind: "stdout", text: `${prefix}${update.text}` };
-    }
+      // The channel travels with the text now instead of being baked into it as a prefix, so the
+      // session log can say whose line this was (issue #2).
+      return { kind: "stdout", channel: update.channel, text: update.text };
     case "result":
-      return update.text ? { kind: "stdout", text: `\n${update.text}\n` } : null;
+      return update.text ? { kind: "stdout", channel: "system", text: `\n${update.text}\n` } : null;
     // The session preamble is plumbing, not output; the worktree it carries is read elsewhere.
     case "session":
       return null;

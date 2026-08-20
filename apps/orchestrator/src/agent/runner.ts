@@ -12,7 +12,16 @@ import type { FailureSignal } from "@gatecontrol/core";
  * the billing guard; the orchestrator's secret store is never exposed to the agent process.
  */
 export type AgentStreamEvent =
-  | { kind: "stdout"; text: string }
+  /**
+   * A line of the agent's output, and *whose* line it is (issue #2).
+   *
+   * The channel used to be collapsed into the text — thinking was marked with a "· " prefix and
+   * everything else was indistinguishable — which meant the session log could not tell a user
+   * turn from an assistant turn from a mode line. Both protocol layers already carry it, so this
+   * is the seam that was throwing it away. Presentation moved to the wire projection, so the
+   * durable record stays clean for readers that are not a terminal (#16, #84).
+   */
+  | { kind: "stdout"; channel: AgentTextChannel; text: string }
   | { kind: "tool_use"; name: string }
   /** One completed turn's token usage (issue #14). Counts and model only — never content. */
   | {
@@ -49,6 +58,9 @@ export type AgentStreamEvent =
       optionId: string | null;
       decidedBy: "operator" | "policy";
     };
+
+/** Who produced a line: the model, its reasoning, the operator, or the machinery. */
+export type AgentTextChannel = "assistant" | "thinking" | "user" | "system";
 
 export type AgentOutcome = { kind: "completed" } | { kind: "failed"; signal: FailureSignal };
 
@@ -132,7 +144,9 @@ export class FakeAgentRunner implements AgentRunner {
   stopped = false;
 
   constructor(
-    private readonly script: AgentStreamEvent[] = [{ kind: "stdout", text: "ok" }],
+    private readonly script: AgentStreamEvent[] = [
+      { kind: "stdout", channel: "assistant", text: "ok" },
+    ],
     /** The workspace the fake claims to be working in; defaults to the repository it was given. */
     private readonly workspace?: (opts: AgentStartOpts) => string | null,
   ) {}
@@ -148,7 +162,7 @@ export class FakeAgentRunner implements AgentRunner {
       ),
       send: async (text: string) => {
         this.inputs.push(text);
-        opts.onEvent({ kind: "stdout", text });
+        opts.onEvent({ kind: "stdout", channel: "user", text });
         return true;
       },
       respondPermission: async (requestId: string, optionId: string) => {

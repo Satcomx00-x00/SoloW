@@ -336,3 +336,106 @@ describe("provisionWorktree is idempotent for the same Task", () => {
     await cleanupWorktree(executor, second.repoPath, second.path);
   });
 });
+
+/**
+ * A Task spanning two Repositories (issue #7 AC-2/AC-5), against real git.
+ *
+ * The claim being checked is the one Principle II makes: each attachment gets a worktree of its
+ * own, on its own branch, and neither can see the other's working files.
+ */
+describe("one Task, two Repository attachments", () => {
+  let secondRepoDir: string;
+
+  beforeAll(async () => {
+    secondRepoDir = mkdtempSync(join(tmpdir(), "gc-repo-2-"));
+    await $`git -C ${secondRepoDir} init -q`.quiet();
+    await $`git -C ${secondRepoDir} config user.email t@e.com`.quiet();
+    await $`git -C ${secondRepoDir} config user.name Test`.quiet();
+    writeFileSync(join(secondRepoDir, "LIB.md"), "library\n");
+    await $`git -C ${secondRepoDir} add -A`.quiet();
+    await $`git -C ${secondRepoDir} commit -q -m init`.quiet();
+  });
+
+  afterAll(() => {
+    if (secondRepoDir) rmSync(secondRepoDir, { recursive: true, force: true });
+  });
+
+  it("gives each attachment its own directory, and neither sees the other's files", async () => {
+    const primary = await provisionWorktree(executor, {
+      taskId: "task-multi",
+      repository: { source: "local_path", location: repoDir },
+      checkoutBranch: "gatecontrol/task-task-multi",
+      worktreeRoot,
+      repoCacheRoot,
+    });
+    const secondary = await provisionWorktree(executor, {
+      taskId: "task-multi",
+      repository: { source: "local_path", location: secondRepoDir },
+      checkoutBranch: "gatecontrol/task-task-multi",
+      attachmentId: "attach-2",
+      worktreeRoot,
+      repoCacheRoot,
+    });
+
+    // The primary keeps the path a single-Repository Task has always had.
+    expect(primary.path).toBe(join(worktreeRoot, "task-multi"));
+    expect(secondary.path).toBe(join(worktreeRoot, "task-multi--attach-2"));
+    expect(primary.repoPath).toBe(repoDir);
+    expect(secondary.repoPath).toBe(secondRepoDir);
+
+    // Two repositories can hold the same branch name without colliding — the branch lives in
+    // its own repository, which is exactly why the key is (repository, branch).
+    expect(primary.branch).toBe("gatecontrol/task-task-multi");
+    expect(secondary.branch).toBe("gatecontrol/task-task-multi");
+
+    writeFileSync(join(primary.path, "PRIMARY_ONLY.txt"), "primary\n");
+    writeFileSync(join(secondary.path, "SECONDARY_ONLY.txt"), "secondary\n");
+
+    expect(existsSync(join(primary.path, "SECONDARY_ONLY.txt"))).toBe(false);
+    expect(existsSync(join(secondary.path, "PRIMARY_ONLY.txt"))).toBe(false);
+    // Each carries only its own repository's content.
+    expect(existsSync(join(primary.path, "README.md"))).toBe(true);
+    expect(existsSync(join(secondary.path, "LIB.md"))).toBe(true);
+    expect(existsSync(join(secondary.path, "README.md"))).toBe(false);
+
+    // And each diff is its own repository's change, not a merged one.
+    const primaryDiff = await diffWorktree(executor, primary.path);
+    const secondaryDiff = await diffWorktree(executor, secondary.path);
+    expect(primaryDiff.files.map((f) => f.path)).toEqual(["PRIMARY_ONLY.txt"]);
+    expect(secondaryDiff.files.map((f) => f.path)).toEqual(["SECONDARY_ONLY.txt"]);
+
+    await cleanupWorktree(executor, primary.repoPath, primary.path);
+    await cleanupWorktree(executor, secondary.repoPath, secondary.path);
+    expect(existsSync(primary.path)).toBe(false);
+    expect(existsSync(secondary.path)).toBe(false);
+  });
+
+  it("checks a second branch of the same repository out into its own directory (parity row 13)", async () => {
+    // The composite key permits it, so the path function has to as well — otherwise the two
+    // attachments would fight over one directory the moment anyone asks for it.
+    const first = await provisionWorktree(executor, {
+      taskId: "task-two-branches",
+      repository: { source: "local_path", location: repoDir },
+      checkoutBranch: "gatecontrol/task-two-branches-a",
+      worktreeRoot,
+      repoCacheRoot,
+    });
+    const second = await provisionWorktree(executor, {
+      taskId: "task-two-branches",
+      repository: { source: "local_path", location: repoDir },
+      checkoutBranch: "gatecontrol/task-two-branches-b",
+      attachmentId: "attach-b",
+      worktreeRoot,
+      repoCacheRoot,
+    });
+
+    expect(first.path).not.toBe(second.path);
+    expect(first.branch).toBe("gatecontrol/task-two-branches-a");
+    expect(second.branch).toBe("gatecontrol/task-two-branches-b");
+    const known = await listWorktrees(executor, repoDir);
+    expect(known.filter((w) => w.path === first.path || w.path === second.path)).toHaveLength(2);
+
+    await cleanupWorktree(executor, first.repoPath, first.path);
+    await cleanupWorktree(executor, second.repoPath, second.path);
+  });
+});

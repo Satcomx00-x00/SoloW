@@ -145,7 +145,6 @@ concurrency cap,
 ## Non-Goals *(mandatory)*
 
 - Visual Workflows and agent chaining (F03) — deferred.
-- Multi-repository Tasks — v1 is single-Repository per Task.
 - Docker, SSH, and cloud Executors — v1 is the local Executor only.
 - External integrations: issue-tracker sync and pull/merge request creation to a remote host
   (F12) — v1 integrates accepted changes onto a local branch only.

@@ -5,10 +5,13 @@ import {
   createTaskInput,
   importIssuesInput,
   MAX_SETUP_FILE_PATTERNS,
+  MAX_TASK_REPOSITORIES,
   reviewDecisionInput,
   setSecretInput,
+  setTaskRepositoriesInput,
   setupFilePatternSchema,
   setupFilePatternsSchema,
+  taskCheckoutBranch,
   taskEventSchema,
 } from "./index.js";
 
@@ -76,19 +79,22 @@ describe("createTaskInput", () => {
     title: "Fix the sensor driver",
     agentProfileId: "agent_1",
     executorProfileId: "exec_1",
-    repositoryId: "repo_1",
+    repositories: [{ repositoryId: "repo_1" }],
   };
 
   it("accepts a valid task (baseRef optional)", () => {
     const res = createTaskInput.safeParse(validTask);
     expect(res.success).toBe(true);
-    if (res.success) expect(res.data.baseRef).toBeUndefined();
+    if (res.success) expect(res.data.repositories[0]?.baseRef).toBeUndefined();
   });
 
   it("accepts a task with an explicit baseRef", () => {
-    const res = createTaskInput.safeParse({ ...validTask, baseRef: "main" });
+    const res = createTaskInput.safeParse({
+      ...validTask,
+      repositories: [{ repositoryId: "repo_1", baseRef: "main" }],
+    });
     expect(res.success).toBe(true);
-    if (res.success) expect(res.data.baseRef).toBe("main");
+    if (res.success) expect(res.data.repositories[0]?.baseRef).toBe("main");
   });
 
   it("rejects a task missing the required id field (issueId)", () => {
@@ -101,11 +107,137 @@ describe("createTaskInput", () => {
   });
 
   it("rejects an empty required id (idSchema min 1)", () => {
-    const res = createTaskInput.safeParse({ ...validTask, repositoryId: "" });
+    const res = createTaskInput.safeParse({ ...validTask, repositories: [{ repositoryId: "" }] });
     expect(res.success).toBe(false);
     if (!res.success) {
-      expect(res.error.issues.some((i) => i.path.join(".") === "repositoryId")).toBe(true);
+      expect(res.error.issues.some((i) => i.path.join(".") === "repositories.0.repositoryId")).toBe(
+        true,
+      );
     }
+  });
+
+  /**
+   * Multi-repository Tasks (issue #7 AC-1). The bounds and the duplicate refusal live in the
+   * contract so a bad attachment list is refused at the boundary rather than by a unique index
+   * three layers down, where nothing can say which entry was the duplicate.
+   */
+  it("accepts several repositories, each with its own base ref and branch", () => {
+    const res = createTaskInput.safeParse({
+      ...validTask,
+      repositories: [
+        { repositoryId: "repo_1", baseRef: "main", checkoutBranch: "feature/api" },
+        { repositoryId: "repo_2", baseRef: "develop" },
+      ],
+    });
+    expect(res.success).toBe(true);
+    if (res.success) expect(res.data.repositories).toHaveLength(2);
+  });
+
+  it("refuses a Task attached to no repository at all", () => {
+    // A Task with no attachment can never be launched: there is nowhere to make a worktree.
+    const res = createTaskInput.safeParse({ ...validTask, repositories: [] });
+    expect(res.success).toBe(false);
+  });
+
+  it("refuses more repositories than one unit of review can be", () => {
+    const many = Array.from({ length: MAX_TASK_REPOSITORIES + 1 }, (_, i) => ({
+      repositoryId: `repo_${i}`,
+    }));
+    expect(createTaskInput.safeParse({ ...validTask, repositories: many }).success).toBe(false);
+  });
+
+  it("refuses the same repository and branch attached twice", () => {
+    // Both entries would derive the same branch, so this is one worktree asked for twice — the
+    // unique index would refuse it, but only after the Task row had already been written.
+    const res = createTaskInput.safeParse({
+      ...validTask,
+      repositories: [{ repositoryId: "repo_1" }, { repositoryId: "repo_1" }],
+    });
+    expect(res.success).toBe(false);
+    if (!res.success) {
+      expect(res.error.issues.some((i) => i.message.includes("attached twice"))).toBe(true);
+    }
+  });
+
+  it("accepts the same repository twice on two different branches (parity row 13)", () => {
+    const res = createTaskInput.safeParse({
+      ...validTask,
+      repositories: [
+        { repositoryId: "repo_1", checkoutBranch: "feature/a" },
+        { repositoryId: "repo_1", checkoutBranch: "feature/b" },
+      ],
+    });
+    expect(res.success).toBe(true);
+  });
+
+  it.each([
+    ["an option-looking ref", "--upload-pack=touch/pwned"],
+    ["a revision range", "main/../HEAD"],
+    ["whitespace", "my branch"],
+    ["a control character", "main\u0000"],
+  ])("refuses %s as a base ref, before git ever sees it", (_label, baseRef) => {
+    const res = createTaskInput.safeParse({
+      ...validTask,
+      repositories: [{ repositoryId: "repo_1", baseRef }],
+    });
+    expect(res.success).toBe(false);
+  });
+
+  it("refuses a checkout branch that could be read as a git option", () => {
+    const res = createTaskInput.safeParse({
+      ...validTask,
+      repositories: [{ repositoryId: "repo_1", checkoutBranch: "-B" }],
+    });
+    expect(res.success).toBe(false);
+  });
+});
+
+describe("setTaskRepositoriesInput", () => {
+  it("carries the whole replacement set, not a delta", () => {
+    const res = setTaskRepositoriesInput.safeParse({
+      taskId: "task_1",
+      repositories: [{ repositoryId: "repo_1" }, { repositoryId: "repo_2" }],
+    });
+    expect(res.success).toBe(true);
+    if (res.success)
+      expect(res.data.repositories.map((r) => r.repositoryId)).toEqual(["repo_1", "repo_2"]);
+  });
+
+  it("applies the same bounds as create, so neither path can write an unrunnable Task", () => {
+    expect(setTaskRepositoriesInput.safeParse({ taskId: "task_1", repositories: [] }).success).toBe(
+      false,
+    );
+  });
+
+  it("refuses an entry that spells out the branch another entry would derive", () => {
+    // The Task id is an input here, so the derived name is fully predictable to the caller:
+    // `[{ repo }, { repo, checkoutBranch: <derived> }]` is one attachment written two ways.
+    // Comparing the omitted branch as a key of its own let the pair through to the unique index,
+    // where the refusal arrived as SQLite's constraint text inside a 500.
+    const res = setTaskRepositoriesInput.safeParse({
+      taskId: "task_1",
+      repositories: [
+        { repositoryId: "repo_1" },
+        { repositoryId: "repo_1", checkoutBranch: taskCheckoutBranch("task_1") },
+      ],
+    });
+    expect(res.success).toBe(false);
+    if (!res.success) {
+      const issue = res.error.issues.find((i) => i.message.includes("attached twice"));
+      // The path names the entry at fault, which is the whole reason to refuse it here.
+      expect(issue?.path).toEqual(["repositories", 1, "repositoryId"]);
+    }
+  });
+
+  it("still accepts the derived branch named on a repository attached only once", () => {
+    const res = setTaskRepositoriesInput.safeParse({
+      taskId: "task_1",
+      repositories: [
+        { repositoryId: "repo_1", checkoutBranch: taskCheckoutBranch("task_1") },
+        { repositoryId: "repo_2" },
+      ],
+    });
+    expect(res.success).toBe(true);
   });
 });
 

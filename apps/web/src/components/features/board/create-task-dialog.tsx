@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -34,12 +35,23 @@ import {
 import { trpc } from "@/trpc/react";
 import { onOpenCreateDialog } from "./create-dialog-bus";
 
+/**
+ * The repository the agent is started in stays a single Select, and any others are ticked
+ * beside it (issue #7).
+ *
+ * A flat multi-select would be the obvious shape and the wrong one: the agent process gets
+ * exactly one working directory, so one attachment is materially different from the rest, and a
+ * form that treated them as interchangeable would hide the one thing the Owner needs to decide.
+ */
 const taskFormSchema = z.object({
   title: z.string().min(1, "Enter a task title"),
   issueId: z.string().min(1, "Select an issue"),
   agentProfileId: z.string().min(1, "Select an agent profile"),
   executorProfileId: z.string().min(1, "Select an executor"),
   repositoryId: z.string().min(1, "Select a repository"),
+  baseRef: z.string(),
+  /** Repositories the Task also works in; each gets its own worktree and its own branch. */
+  additionalRepositoryIds: z.array(z.string()),
 });
 type TaskFormValues = z.infer<typeof taskFormSchema>;
 
@@ -62,6 +74,8 @@ export function CreateTaskDialog() {
       agentProfileId: "",
       executorProfileId: "",
       repositoryId: "",
+      baseRef: "",
+      additionalRepositoryIds: [],
     },
   });
 
@@ -144,7 +158,20 @@ export function CreateTaskDialog() {
         ) : (
           <Form {...form}>
             <form
-              onSubmit={form.handleSubmit((values) => create.mutate(values))}
+              onSubmit={form.handleSubmit(
+                ({ repositoryId, baseRef, additionalRepositoryIds, ...values }) =>
+                  create.mutate({
+                    ...values,
+                    // The chosen repository first: array order is what becomes `position`, and
+                    // position 0 is the worktree the agent is started in.
+                    repositories: [
+                      { repositoryId, ...(baseRef.trim() ? { baseRef: baseRef.trim() } : {}) },
+                      ...additionalRepositoryIds
+                        .filter((id) => id !== repositoryId)
+                        .map((id) => ({ repositoryId: id })),
+                    ],
+                  }),
+              )}
               className="space-y-4"
               noValidate
             >
@@ -187,6 +214,61 @@ export function CreateTaskDialog() {
                 "Select a repository",
                 (repos.data ?? []).map((r) => ({ id: r.id, label: r.name })),
               )}
+              <FormField
+                control={form.control}
+                name="baseRef"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Base ref</FormLabel>
+                    <FormControl>
+                      <Input placeholder="Defaults to HEAD" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="additionalRepositoryIds"
+                render={({ field }) => {
+                  const others = (repos.data ?? []).filter(
+                    (r) => r.id !== form.watch("repositoryId"),
+                  );
+                  if (others.length === 0) return <FormItem />;
+                  return (
+                    <FormItem>
+                      <FormLabel>Also works in</FormLabel>
+                      <p className="text-muted-foreground text-xs">
+                        Each gets its own worktree and its own branch. The agent runs in the
+                        repository above and is told where the others are.
+                      </p>
+                      <div className="space-y-1.5">
+                        {others.map((r) => (
+                          <label
+                            key={r.id}
+                            className="flex items-center gap-2 text-sm"
+                            htmlFor={`additional-repo-${r.id}`}
+                          >
+                            <Checkbox
+                              id={`additional-repo-${r.id}`}
+                              checked={field.value.includes(r.id)}
+                              onCheckedChange={(checked) =>
+                                field.onChange(
+                                  checked === true
+                                    ? [...field.value, r.id]
+                                    : field.value.filter((id: string) => id !== r.id),
+                                )
+                              }
+                            />
+                            {r.name}
+                          </label>
+                        ))}
+                      </div>
+                      <FormMessage />
+                    </FormItem>
+                  );
+                }}
+              />
               {create.error && (
                 <p className="text-destructive text-sm" role="alert">
                   {create.error.message}

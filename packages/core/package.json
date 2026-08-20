@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./session-log": "./src/session-log.ts",
     "./stream": "./src/stream.ts"
   },
   "scripts": {

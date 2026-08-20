@@ -1,6 +1,6 @@
 import type { TaskDependencyDto, TaskDto } from "@gatecontrol/contracts";
-import { unsatisfiedDependencies } from "@gatecontrol/core";
-import { GitBranch, Lock } from "lucide-react";
+import { primaryTaskRepository, unsatisfiedDependencies } from "@gatecontrol/core";
+import { GitBranch, Library, Lock } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -43,7 +43,12 @@ export function TaskCard({
   ghost?: boolean;
 }) {
   const attention = needsAttention(task.state);
-  const reference = task.resultBranch ?? task.id.slice(0, 8);
+  // The branch the primary attachment's work landed on (issue #7). A Task spanning several
+  // Repositories has several result branches, and the card has room for one line — so it shows
+  // the one the agent actually ran in, and says how many others there are beside it.
+  const primary = task.repositories.length > 0 ? primaryTaskRepository(task.repositories) : null;
+  const reference = primary?.resultBranch ?? task.id.slice(0, 8);
+  const extraRepositories = Math.max(task.repositories.length - 1, 0);
   const outstanding = unsatisfiedDependencies(blockers ?? []);
   const first = outstanding[0];
 
@@ -114,6 +119,19 @@ export function TaskCard({
               <span className="truncate">{reference}</span>
             </span>
           )}
+          {extraRepositories > 0 ? (
+            <span
+              // `img` with a label rather than a bare span: the count is meaningless read as
+              // loose text, and a screen reader should hear "3 repositories", not "3".
+              role="img"
+              aria-label={`${task.repositories.length} repositories`}
+              title={`${task.repositories.length} repositories`}
+              className="inline-flex shrink-0 items-center gap-1 rounded border border-border bg-muted/40 px-1.5 py-px font-mono text-2xs text-muted-foreground"
+            >
+              <Library className="size-3 shrink-0" aria-hidden />
+              {task.repositories.length}
+            </span>
+          ) : null}
         </div>
 
         {actions ? <div className="mt-2.5 flex gap-1.5">{actions}</div> : null}

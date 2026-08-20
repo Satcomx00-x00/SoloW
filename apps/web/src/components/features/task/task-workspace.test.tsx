@@ -1,8 +1,8 @@
 /// <reference types="bun-types" />
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import type { TaskDto } from "@gatecontrol/contracts";
-import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import type { SessionEventPayload, TaskDto } from "@gatecontrol/contracts";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { type FakeSocket, installFakeWebSocket, renderWithTrpc } from "@/test/trpc-harness";
 import { TaskWorkspace } from "./task-workspace";
 
@@ -24,9 +24,16 @@ function task(over: Partial<TaskDto> = {}): TaskDto {
     state: "review",
     agentProfileId: "agent-1",
     executorProfileId: "exec-1",
-    repositoryId: "repo-1",
-    baseRef: "main",
-    resultBranch: null,
+    repositories: [
+      {
+        id: "attach-1",
+        repositoryId: "repo-1",
+        baseRef: "main",
+        checkoutBranch: "gatecontrol/task-1",
+        resultBranch: null,
+        position: 0,
+      },
+    ],
     failureReason: null,
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
@@ -43,17 +50,20 @@ const session = {
   endedAt: null,
 };
 
-function detail(events: Array<{ kind: string; payload: unknown }> = []) {
+/** Session detail, with the log's payloads typed the way the router now returns them (#2). */
+function detail(payloads: SessionEventPayload[] = []) {
   return {
     session,
-    events: events.map((e, i) => ({
+    events: payloads.map((payload, i) => ({
       id: `ev-${i}`,
       sessionId: SESSION_ID,
       seq: i,
-      kind: e.kind,
-      payload: e.payload,
+      kind: payload.kind,
+      payload,
       at: "2026-01-01T00:00:00.000Z",
     })),
+    summaries: [],
+    cursor: null,
     review: null,
   };
 }
@@ -145,7 +155,8 @@ describe("TaskWorkspace review gate", () => {
     renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
       "task.get": () => task(),
       "session.listForTask": () => [session],
-      "session.get": () => detail([{ kind: "stdout", payload: { text: "patched latch.ts\n" } }]),
+      "session.get": () =>
+        detail([{ kind: "assistant_turn", text: "patched latch.ts\n", thinking: false }]),
       "stream.ticket": () => ({
         url: "ws://hub.test/?ticket=t",
         expiresAt: "2026-01-01T00:01:00.000Z",
@@ -359,5 +370,118 @@ describe("TaskWorkspace permission prompt (issue #58)", () => {
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
     // ...and the transcript records what happened, so a reviewer sees it afterwards.
     expect(await screen.findByText(/permission once \(policy\)/)).toBeDefined();
+  });
+});
+
+/**
+ * The Changes tab across several Repositories (issue #7 AC-4).
+ *
+ * A Task can now span several, and a reviewer shown one flat file list could not tell which
+ * repository a path came from. `DiffView` is reused unchanged inside each group.
+ */
+describe("the Changes tab of a multi-Repository Task", () => {
+  const change = (path: string) => ({
+    files: [{ path, status: "modified" as const, additions: 2, deletions: 1 }],
+    patch: `--- a/${path}\n+++ b/${path}\n`,
+    truncated: false,
+  });
+
+  function detailWithDiffs(diffs: unknown[]) {
+    return { ...detail(), diffs, diff: diffs[0] ?? null };
+  }
+
+  /** Radix activates a tab on mousedown/focus, not on click. */
+  async function openChangesTab(): Promise<void> {
+    const tab = await screen.findByRole("tab", { name: /Changes/ });
+    fireEvent.mouseDown(tab);
+    fireEvent.focus(tab);
+    fireEvent.click(tab);
+  }
+
+  const baseHandlers = {
+    "task.get": () => task(),
+    "session.listForTask": () => [session],
+    "stream.ticket": () => ({
+      url: "ws://hub.test/?ticket=t",
+      expiresAt: "2026-01-01T00:01:00.000Z",
+    }),
+  };
+
+  it("renders one labelled group per Repository, with each repository's own branch", async () => {
+    renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
+      ...baseHandlers,
+      "session.get": () =>
+        detailWithDiffs([
+          {
+            diffRef: "gatecontrol/task-1",
+            repositoryId: "repo-1",
+            repositoryName: "api",
+            ...change("src/api.ts"),
+          },
+          {
+            diffRef: "feature/lib",
+            repositoryId: "repo-2",
+            repositoryName: "shared-lib",
+            ...change("src/lib.ts"),
+          },
+        ]),
+    });
+
+    await openChangesTab();
+
+    expect(await screen.findByLabelText("Changes in api")).toBeDefined();
+    expect(await screen.findByLabelText("Changes in shared-lib")).toBeDefined();
+    // Each group carries its own branch — one branch for the whole Task would be a lie.
+    const libGroup = await screen.findByLabelText("Changes in shared-lib");
+    expect(within(libGroup).getAllByText("feature/lib").length).toBeGreaterThan(0);
+    expect(within(libGroup).getByText("src/lib.ts")).toBeDefined();
+    const apiGroup = await screen.findByLabelText("Changes in api");
+    expect(within(apiGroup).getByText("src/api.ts")).toBeDefined();
+    expect(within(apiGroup).queryByText("src/lib.ts")).toBeNull();
+  });
+
+  it("shows a single Repository's change with no group header at all", async () => {
+    // A single-Repository Task's Changes tab is unchanged by this refactor.
+    renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
+      ...baseHandlers,
+      "session.get": () =>
+        detailWithDiffs([
+          {
+            diffRef: "gatecontrol/task-1",
+            repositoryId: "repo-1",
+            repositoryName: "api",
+            ...change("src/api.ts"),
+          },
+        ]),
+    });
+
+    await openChangesTab();
+
+    expect(await screen.findByText("src/api.ts")).toBeDefined();
+    expect(screen.queryByLabelText("Changes in api")).toBeNull();
+  });
+
+  it("renders a diff captured before Repositories were named as an unlabelled group", async () => {
+    // An event written by an older build carries no repository; dropping it would blank the
+    // Changes tab of every Task that finished before this change.
+    renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
+      ...baseHandlers,
+      "session.get": () =>
+        detailWithDiffs([
+          { diffRef: "gatecontrol/task-1", ...change("src/legacy.ts") },
+          {
+            diffRef: "feature/lib",
+            repositoryId: "repo-2",
+            repositoryName: "shared-lib",
+            ...change("src/lib.ts"),
+          },
+        ]),
+    });
+
+    await openChangesTab();
+
+    expect(await screen.findByLabelText("Changes in gatecontrol/task-1")).toBeDefined();
+    expect(await screen.findByText("Unnamed repository")).toBeDefined();
+    expect(await screen.findByText("src/legacy.ts")).toBeDefined();
   });
 });

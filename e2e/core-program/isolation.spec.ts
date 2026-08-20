@@ -15,6 +15,11 @@ import { seedIssue, seedTask } from "../support/seed.js";
  */
 
 const REPO_NAME = "e2e-fixture-repo";
+/** The second Repository a multi-repository Task attaches (issue #7). */
+// Deliberately not a name with `e2e-fixture-repo` as a prefix: Playwright matches an accessible
+// name by substring, so a second repository called `…-repo-2` would make every existing
+// `Repository` selection in this suite — and in happy.spec.ts — ambiguous.
+const REPO2_NAME = "e2e-shared-lib";
 const OTHER_WORKSPACE = SEED_WORKSPACE_B;
 const OTHER_WORKSPACE_TASK_TITLE = "Add debounce to the keypad backlight driver";
 // Seeded once, at module load — the session under test belongs to Workspace A, this Task
@@ -24,17 +29,28 @@ const OTHER_WORKSPACE_TASK = seedTask(OTHER_WORKSPACE, OTHER_WORKSPACE_TASK_TITL
 
 type Page = import("@playwright/test").Page;
 
-async function ensureRepository(page: Page): Promise<void> {
-  await page.goto("/settings");
+async function connectRepository(page: Page, name: string, location: string): Promise<void> {
   // See the note in happy.spec.ts: decide only once the list has resolved, or a second copy of
   // the repository gets connected and the Repository selector becomes ambiguous.
   await expect(page.getByLabel("Connected repositories")).toBeVisible();
-  const badge = page.getByText(`${REPO_NAME} · local_path`);
+  const badge = page.getByText(`${name} · local_path`);
   if (await badge.isVisible()) return;
-  await page.getByLabel("Name").last().fill(REPO_NAME);
-  await page.getByLabel("Location").fill(PATHS.repo);
+  await page.getByLabel("Name").last().fill(name);
+  await page.getByLabel("Location").fill(location);
   await page.getByRole("button", { name: "Connect repository" }).click();
   await expect(badge).toBeVisible();
+}
+
+async function ensureRepository(page: Page): Promise<void> {
+  await page.goto("/settings");
+  await connectRepository(page, REPO_NAME, PATHS.repo);
+}
+
+/** Both fixture repositories connected, for the multi-repository Task (issue #7). */
+async function ensureBothRepositories(page: Page): Promise<void> {
+  await page.goto("/settings");
+  await connectRepository(page, REPO_NAME, PATHS.repo);
+  await connectRepository(page, REPO2_NAME, PATHS.repo2);
 }
 
 async function pickOption(page: Page, label: string, option: string): Promise<void> {
@@ -42,7 +58,13 @@ async function pickOption(page: Page, label: string, option: string): Promise<vo
   await page.getByRole("option", { name: option }).click();
 }
 
-async function createTask(page: Page, title: string, issue: string): Promise<void> {
+async function createTask(
+  page: Page,
+  title: string,
+  issue: string,
+  /** Repositories to tick under "Also works in" — each becomes its own worktree and branch. */
+  alsoWorksIn: readonly string[] = [],
+): Promise<void> {
   await page.getByRole("button", { name: "New task" }).click();
   const dialog = page.getByRole("dialog", { name: "New task" });
   await dialog.getByLabel("Title").fill(title);
@@ -50,6 +72,9 @@ async function createTask(page: Page, title: string, issue: string): Promise<voi
   await pickOption(page, "Agent profile", "Claude Code (subscription)");
   await pickOption(page, "Executor", "Local executor");
   await pickOption(page, "Repository", REPO_NAME);
+  for (const name of alsoWorksIn) {
+    await dialog.getByRole("checkbox", { name, exact: true }).click();
+  }
   await dialog.getByRole("button", { name: "Create task" }).click();
   await expect(dialog).toBeHidden();
 }
@@ -121,6 +146,45 @@ test.describe("@critical isolation", () => {
     expect(readFileSync(join(pathB, "visible.txt"), "utf8").trim()).toBe(
       `marker-gatecontrol-task-${idB}.txt`,
     );
+  });
+
+  test("a multi-Repository Task gets one isolated worktree per Repository (issue #7)", async ({
+    page,
+  }) => {
+    const stamp = Date.now();
+    const issueTitle = `Cross-repository work ${stamp}`;
+    const title = `Task spanning two repos ${stamp}`;
+
+    await ensureBothRepositories(page);
+    await page.goto("/board");
+    seedIssue(SEED_WORKSPACE_A, issueTitle);
+
+    await createTask(page, title, issueTitle, [REPO2_NAME]);
+    const id = await launchToReview(page, title);
+
+    // The primary worktree is the one the agent made, at exactly the path a single-Repository
+    // Task has always used. The secondary is a sibling GateControl provisioned, named for the
+    // attachment — no Owner-authored text ever reaches the path.
+    const primary = join(PATHS.worktrees, `gatecontrol-task-${id}`);
+    const siblings = readdirSync(PATHS.worktrees).filter((entry) => entry.startsWith(`${id}--`));
+    expect(siblings).toHaveLength(1);
+    const secondary = join(PATHS.worktrees, siblings[0] as string);
+
+    // Each worktree holds only its own Repository's content: the marker the agent wrote is in
+    // the primary and nowhere else, and the second Repository's file is only in the secondary.
+    expect(readdirSync(primary)).toContain(`marker-gatecontrol-task-${id}.txt`);
+    expect(readdirSync(primary)).toContain("README.md");
+    expect(readdirSync(primary)).not.toContain("LIB.md");
+    expect(readdirSync(secondary)).toContain("LIB.md");
+    expect(readdirSync(secondary)).not.toContain("README.md");
+    expect(readdirSync(secondary)).not.toContain(`marker-gatecontrol-task-${id}.txt`);
+
+    // ...and the review page presents the change grouped per Repository, not as one flat list.
+    await page.goto(`/task/${id}`);
+    await page.getByRole("tab", { name: "Changes" }).click();
+    // Exact, so a substring match can never make one group stand in for the other.
+    await expect(page.getByLabel(`Changes in ${REPO_NAME}`, { exact: true })).toBeVisible();
+    await expect(page.getByLabel(`Changes in ${REPO2_NAME}`, { exact: true })).toBeVisible();
   });
 
   test("another Workspace's Task is unreachable by URL (Principle V)", async ({ page }) => {

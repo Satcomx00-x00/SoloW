@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it } from "bun:test";
+import { TaskErrorCode } from "@gatecontrol/contracts";
+import { repository } from "@gatecontrol/db";
 import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
 import type { RequestContext } from "./context.js";
 import { getIssueById } from "./issue.js";
-import { createTaskRecord, getTaskById, listTasks } from "./task.js";
+import { createTaskRecord, getTaskById, listTasks, setTaskRepositories } from "./task.js";
 import { ctxFor, seedIssue, seedWorkspaceGraph } from "./test-fixtures.js";
 
 /**
@@ -34,14 +36,21 @@ describe("task DAL", () => {
       title: "Implement latch fix",
       agentProfileId: g.agentProfileId,
       executorProfileId: g.executorProfileId,
-      repositoryId: g.repositoryId,
+      repositories: [{ repositoryId: g.repositoryId }],
       state: "backlog",
     });
     expect(created.ok).toBe(true);
     if (!created.ok) return;
     expect(created.data.issueId).toBe(issue.data.id);
     expect(created.data.state).toBe("backlog");
-    expect(created.data.baseRef).toBeNull();
+    expect(created.data.repositories).toHaveLength(1);
+    expect(created.data.repositories[0]?.repositoryId).toBe(g.repositoryId);
+    expect(created.data.repositories[0]?.baseRef).toBeNull();
+    // Derived server-side rather than left null: the unique key is (task, repository, branch),
+    // and SQLite treats every NULL as distinct.
+    expect(created.data.repositories[0]?.checkoutBranch).toBe(
+      `gatecontrol/task-${created.data.id}`,
+    );
 
     const fetched = await getTaskById(ctx, created.data.id);
     expect(fetched.ok).toBe(true);
@@ -61,7 +70,7 @@ describe("task DAL", () => {
         title,
         agentProfileId: g.agentProfileId,
         executorProfileId: g.executorProfileId,
-        repositoryId: g.repositoryId,
+        repositories: [{ repositoryId: g.repositoryId }],
         state: "backlog",
       });
     }
@@ -85,7 +94,7 @@ describe("task DAL", () => {
         title,
         agentProfileId: g.agentProfileId,
         executorProfileId: g.executorProfileId,
-        repositoryId: g.repositoryId,
+        repositories: [{ repositoryId: g.repositoryId }],
         state: "backlog",
       });
     await mk(issueA.data.id, "a-task");
@@ -113,7 +122,7 @@ describe("task DAL", () => {
         title,
         agentProfileId: g.agentProfileId,
         executorProfileId: g.executorProfileId,
-        repositoryId: g.repositoryId,
+        repositories: [{ repositoryId: g.repositoryId }],
         state: "backlog",
       });
     await mk("Debounce the keypad backlight");
@@ -142,7 +151,7 @@ describe("task DAL", () => {
       title: "B's task",
       agentProfileId: gB.agentProfileId,
       executorProfileId: gB.executorProfileId,
-      repositoryId: gB.repositoryId,
+      repositories: [{ repositoryId: gB.repositoryId }],
       state: "backlog",
     });
     expect(taskB.ok).toBe(true);
@@ -157,5 +166,232 @@ describe("task DAL", () => {
     expect(listA.ok).toBe(true);
     if (!listA.ok) return;
     expect(listA.data.length).toBe(0);
+  });
+});
+
+/**
+ * The Task ↔ Repository join from the DAL's side (issue #7). A Task now names several
+ * Repositories, and the questions that matter are: does every attachment survive the write,
+ * does position 0 stay the one the agent will run in, and can the set be replaced safely.
+ */
+describe("a Task's Repository attachments", () => {
+  let db: TestDb;
+
+  beforeEach(() => {
+    db = createTestDb();
+  });
+
+  /** A second Repository in the same Workspace, so a Task has something else to attach. */
+  async function secondRepository(workspaceId: string, name: string): Promise<string> {
+    const [row] = await db
+      .insert(repository)
+      .values({ workspaceId, name, source: "local_path", location: `/srv/${name}` })
+      .returning();
+    if (!row) throw new Error("failed to seed repository");
+    return row.id;
+  }
+
+  it("writes one attachment per entry, in the order the Owner listed them", async () => {
+    const g = await seedWorkspaceGraph(db, "acme");
+    const ctx = ctxFor(db, g.workspaceId);
+    const issue = await seedIssueOk(db, ctx, { title: "Spans two repos" });
+    if (!issue.ok) return;
+    const second = await secondRepository(g.workspaceId, "shared-lib");
+
+    const created = await createTaskRecord(ctx, {
+      issueId: issue.data.id,
+      title: "Cross-repository change",
+      agentProfileId: g.agentProfileId,
+      executorProfileId: g.executorProfileId,
+      repositories: [
+        { repositoryId: g.repositoryId, baseRef: "main" },
+        { repositoryId: second, baseRef: "develop", checkoutBranch: "feature/lib" },
+      ],
+      state: "backlog",
+    });
+
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    // Array order becomes `position`, and position 0 is the worktree the agent is started in —
+    // so "which repository did the Owner mean first" is answered by the row, not by a re-sort.
+    expect(created.data.repositories.map((r) => r.position)).toEqual([0, 1]);
+    expect(created.data.repositories.map((r) => r.repositoryId)).toEqual([g.repositoryId, second]);
+    expect(created.data.repositories.map((r) => r.baseRef)).toEqual(["main", "develop"]);
+    expect(created.data.repositories[1]?.checkoutBranch).toBe("feature/lib");
+
+    const reread = await getTaskById(ctx, created.data.id);
+    expect(reread.ok && reread.data.repositories).toEqual(created.data.repositories);
+  });
+
+  it("hydrates every listed Task's attachments, not just the first", async () => {
+    // The board reads a page of cards at once; a per-card query would be one round trip per
+    // Task, and a query that forgot to key by Task would give every card the same repositories.
+    const g = await seedWorkspaceGraph(db, "acme");
+    const ctx = ctxFor(db, g.workspaceId);
+    const issue = await seedIssueOk(db, ctx, { title: "Two tasks" });
+    if (!issue.ok) return;
+    const second = await secondRepository(g.workspaceId, "shared-lib");
+
+    const mk = (title: string, repositoryIds: string[]) =>
+      createTaskRecord(ctx, {
+        issueId: issue.data.id,
+        title,
+        agentProfileId: g.agentProfileId,
+        executorProfileId: g.executorProfileId,
+        repositories: repositoryIds.map((repositoryId) => ({ repositoryId })),
+        state: "backlog",
+      });
+    await mk("one repo", [g.repositoryId]);
+    await mk("two repos", [g.repositoryId, second]);
+
+    const listed = await listTasks(ctx, {});
+    expect(listed.ok).toBe(true);
+    if (!listed.ok) return;
+    const byTitle = Object.fromEntries(listed.data.map((t) => [t.title, t.repositories.length]));
+    expect(byTitle).toEqual({ "one repo": 1, "two repos": 2 });
+  });
+
+  it("never shows another Workspace's attachments (Principle V)", async () => {
+    const gA = await seedWorkspaceGraph(db, "workspace-a");
+    const gB = await seedWorkspaceGraph(db, "workspace-b");
+    const ctxA = ctxFor(db, gA.workspaceId);
+    const ctxB = ctxFor(db, gB.workspaceId);
+    const issueA = await seedIssueOk(db, ctxA, { title: "A's issue" });
+    const issueB = await seedIssueOk(db, ctxB, { title: "B's issue" });
+    if (!issueA.ok || !issueB.ok) return;
+
+    await createTaskRecord(ctxB, {
+      issueId: issueB.data.id,
+      title: "B's task",
+      agentProfileId: gB.agentProfileId,
+      executorProfileId: gB.executorProfileId,
+      repositories: [{ repositoryId: gB.repositoryId }],
+      state: "backlog",
+    });
+    const taskA = await createTaskRecord(ctxA, {
+      issueId: issueA.data.id,
+      title: "A's task",
+      agentProfileId: gA.agentProfileId,
+      executorProfileId: gA.executorProfileId,
+      repositories: [{ repositoryId: gA.repositoryId }],
+      state: "backlog",
+    });
+
+    expect(taskA.ok).toBe(true);
+    if (!taskA.ok) return;
+    expect(taskA.data.repositories.map((r) => r.repositoryId)).toEqual([gA.repositoryId]);
+  });
+
+  it("setTaskRepositories replaces the whole set rather than merging into it", async () => {
+    const g = await seedWorkspaceGraph(db, "acme");
+    const ctx = ctxFor(db, g.workspaceId);
+    const issue = await seedIssueOk(db, ctx, { title: "Repointed" });
+    if (!issue.ok) return;
+    const second = await secondRepository(g.workspaceId, "shared-lib");
+    const created = await createTaskRecord(ctx, {
+      issueId: issue.data.id,
+      title: "Repointed",
+      agentProfileId: g.agentProfileId,
+      executorProfileId: g.executorProfileId,
+      repositories: [{ repositoryId: g.repositoryId }],
+      state: "backlog",
+    });
+    if (!created.ok) return;
+
+    const replaced = await setTaskRepositories(ctx, {
+      taskId: created.data.id,
+      repositories: [{ repositoryId: second, baseRef: "develop" }],
+    });
+
+    expect(replaced.ok).toBe(true);
+    if (!replaced.ok) return;
+    // The Owner sent a state of the world, so the repository they dropped is gone, not demoted.
+    expect(replaced.data.repositories.map((r) => r.repositoryId)).toEqual([second]);
+    const reread = await getTaskById(ctx, created.data.id);
+    expect(reread.ok && reread.data.repositories.map((r) => r.repositoryId)).toEqual([second]);
+  });
+
+  it("refuses to re-point a Task whose worktrees are already live", async () => {
+    // Re-pointing a running Task would orphan directories nothing else knows how to find, and
+    // leave the agent working in a repository the Task no longer claims (Principle II).
+    const g = await seedWorkspaceGraph(db, "acme");
+    const ctx = ctxFor(db, g.workspaceId);
+    const issue = await seedIssueOk(db, ctx, { title: "Running" });
+    if (!issue.ok) return;
+    const second = await secondRepository(g.workspaceId, "shared-lib");
+    const created = await createTaskRecord(ctx, {
+      issueId: issue.data.id,
+      title: "Running",
+      agentProfileId: g.agentProfileId,
+      executorProfileId: g.executorProfileId,
+      repositories: [{ repositoryId: g.repositoryId }],
+      state: "running",
+    });
+    if (!created.ok) return;
+
+    const refused = await setTaskRepositories(ctx, {
+      taskId: created.data.id,
+      repositories: [{ repositoryId: second }],
+    });
+
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect(refused.error).toBe(TaskErrorCode.IllegalTransition);
+    // And nothing was written: the refusal and the delete are one transaction.
+    const reread = await getTaskById(ctx, created.data.id);
+    expect(reread.ok && reread.data.repositories.map((r) => r.repositoryId)).toEqual([
+      g.repositoryId,
+    ]);
+  });
+
+  it("will not re-point another Workspace's Task (Principle V)", async () => {
+    const gA = await seedWorkspaceGraph(db, "workspace-a");
+    const gB = await seedWorkspaceGraph(db, "workspace-b");
+    const ctxA = ctxFor(db, gA.workspaceId);
+    const ctxB = ctxFor(db, gB.workspaceId);
+    const issueB = await seedIssueOk(db, ctxB, { title: "B's issue" });
+    if (!issueB.ok) return;
+    const taskB = await createTaskRecord(ctxB, {
+      issueId: issueB.data.id,
+      title: "B's task",
+      agentProfileId: gB.agentProfileId,
+      executorProfileId: gB.executorProfileId,
+      repositories: [{ repositoryId: gB.repositoryId }],
+      state: "backlog",
+    });
+    if (!taskB.ok) return;
+
+    const refused = await setTaskRepositories(ctxA, {
+      taskId: taskB.data.id,
+      repositories: [{ repositoryId: gA.repositoryId }],
+    });
+
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect(refused.error).toBe("NOT_FOUND");
+  });
+
+  it("leaves no half-created Task behind when an attachment cannot be written", async () => {
+    // The insert pair is one transaction: a Task with no attachment cannot be launched at all,
+    // so a half-created one is an unrunnable row nothing would ever clean up.
+    const g = await seedWorkspaceGraph(db, "acme");
+    const ctx = ctxFor(db, g.workspaceId);
+    const issue = await seedIssueOk(db, ctx, { title: "Bad attachment" });
+    if (!issue.ok) return;
+
+    await expect(
+      createTaskRecord(ctx, {
+        issueId: issue.data.id,
+        title: "Bad attachment",
+        agentProfileId: g.agentProfileId,
+        executorProfileId: g.executorProfileId,
+        // A repository id that does not exist — the foreign key refuses the attachment insert.
+        repositories: [{ repositoryId: "repo-that-does-not-exist" }],
+        state: "backlog",
+      }),
+    ).rejects.toThrow();
+
+    const listed = await listTasks(ctx, {});
+    expect(listed.ok && listed.data).toEqual([]);
   });
 });

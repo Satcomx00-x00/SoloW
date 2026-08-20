@@ -1,4 +1,15 @@
-import type { ScmProvider, SessionState, TaskState } from "@gatecontrol/contracts";
+import type {
+  ScmProvider,
+  SessionEventPayload,
+  SessionState,
+  TaskState,
+} from "@gatecontrol/contracts";
+import { parseSessionEventPayload, sessionEventPayloadSchema } from "@gatecontrol/contracts";
+import {
+  type CompactionRange,
+  planCompaction,
+  type SessionLogEvent,
+} from "@gatecontrol/core/session-log";
 import {
   agentCatalog,
   agentProfile,
@@ -10,9 +21,11 @@ import {
   secret,
   session,
   sessionEvent,
+  sessionSummary,
   sessionUsage,
   task,
   taskDependency,
+  taskRepository,
 } from "@gatecontrol/db";
 import { and, asc, desc, eq, gt, inArray } from "drizzle-orm";
 
@@ -21,6 +34,27 @@ import { and, asc, desc, eq, gt, inArray } from "drizzle-orm";
  * launch event, originating from the authenticated session that created it — Principle V).
  * Kept separate from the web DAL, which is `server-only` and request-context bound.
  */
+
+/**
+ * One Repository a Task works in, resolved (issue #7): the attachment row that names the branch,
+ * the Repository it points at, and the credential for cloning *that* Repository.
+ *
+ * The credential is per binding rather than per Task because two attachments can come from two
+ * different Integrations — a Task spanning a GitHub service and a GitLab library needs each
+ * clone authenticated with its own token, and a single `scmClone` on the context could only ever
+ * be right for one of them.
+ */
+export interface TaskRepositoryBinding {
+  attachment: typeof taskRepository.$inferSelect;
+  repository: typeof repository.$inferSelect;
+  /**
+   * The Integration the Repository was imported from, with its still-encrypted token (issue #15).
+   * Null for a local path or a public URL, which need no credential to clone. Kept encrypted here
+   * — this module reads rows, and a plaintext token on a context object would be one more place
+   * it could be logged from (Principle IV).
+   */
+  scmClone: { provider: ScmProvider; secretCiphertext: string } | null;
+}
 
 export interface TaskRunContext {
   task: typeof task.$inferSelect;
@@ -31,15 +65,9 @@ export interface TaskRunContext {
   agentCatalog: typeof agentCatalog.$inferSelect;
   /** Where the agent runs, and the per-kind configuration it runs under (issue #73). */
   executorProfile: typeof executorProfile.$inferSelect;
-  repository: typeof repository.$inferSelect;
+  /** Every Repository the Task works in, in position order. Never empty (issue #7). */
+  repositories: TaskRepositoryBinding[];
   secretCiphertext: string | null;
-  /**
-   * The Integration the Repository was imported from, with its still-encrypted token (issue #15).
-   * Null for a local path or a public URL, which need no credential to clone. Kept encrypted here
-   * — this module reads rows, and a plaintext token on a context object would be one more place
-   * it could be logged from (Principle IV).
-   */
-  scmClone: { provider: ScmProvider; secretCiphertext: string } | null;
 }
 
 export async function loadTaskRunContext(
@@ -87,12 +115,35 @@ export async function loadTaskRunContext(
     .limit(1);
   if (!ep) throw new Error(`executor profile ${t.executorProfileId} not found`);
 
-  const [repo] = await db
-    .select()
-    .from(repository)
-    .where(and(eq(repository.workspaceId, workspaceId), eq(repository.id, t.repositoryId)))
-    .limit(1);
-  if (!repo) throw new Error(`repository ${t.repositoryId} not found`);
+  // Ordered by position, so index 0 is the primary attachment and `primaryTaskRepository` and
+  // this list agree about which worktree the agent is started in (issue #7).
+  const attachments = await db
+    .select({ attachment: taskRepository, repository })
+    .from(taskRepository)
+    .innerJoin(repository, eq(repository.id, taskRepository.repositoryId))
+    .where(
+      and(
+        eq(taskRepository.workspaceId, workspaceId),
+        eq(taskRepository.taskId, taskId),
+        eq(repository.workspaceId, workspaceId),
+      ),
+    )
+    .orderBy(asc(taskRepository.position));
+  // A Task with no attachment cannot be run at all, and every write path creates one with the
+  // Task itself. Refused here, by name, rather than letting an index return undefined and the
+  // failure surface three steps later as "cannot read property location of undefined".
+  if (attachments.length === 0) {
+    throw new Error(`task ${taskId} has no repository attached`);
+  }
+
+  const repositories: TaskRepositoryBinding[] = [];
+  for (const row of attachments) {
+    repositories.push({
+      attachment: row.attachment,
+      repository: row.repository,
+      scmClone: await loadScmClone(db, workspaceId, row.repository),
+    });
+  }
 
   const [sec] = await db
     .select({ ciphertext: secret.ciphertext })
@@ -106,9 +157,8 @@ export async function loadTaskRunContext(
     agentProfile: ap,
     agentCatalog: cat,
     executorProfile: ep,
-    repository: repo,
+    repositories,
     secretCiphertext: sec?.ciphertext ?? null,
-    scmClone: await loadScmClone(db, workspaceId, repo),
   };
 }
 
@@ -148,17 +198,35 @@ export async function setTaskState(
   workspaceId: string,
   taskId: string,
   state: TaskState,
-  extra?: { resultBranch?: string; failureReason?: string | null },
+  extra?: { failureReason?: string | null },
 ): Promise<void> {
   await db
     .update(task)
     .set({
       state,
-      ...(extra?.resultBranch !== undefined ? { resultBranch: extra.resultBranch } : {}),
       ...(extra?.failureReason !== undefined ? { failureReason: extra.failureReason } : {}),
       updatedAt: new Date().toISOString(),
     })
     .where(and(eq(task.workspaceId, workspaceId), eq(task.id, taskId)));
+}
+
+/**
+ * Record which branch one attachment's work was committed onto (issue #7).
+ *
+ * Per attachment rather than per Task: approving a multi-Repository Task commits once in each
+ * worktree, and a single column on `task` could only ever name one of the branches a reviewer
+ * would need to fetch. Scoped by Workspace like every other write here (Principle V).
+ */
+export async function setTaskRepositoryResultBranch(
+  db: Db,
+  workspaceId: string,
+  attachmentId: string,
+  resultBranch: string,
+): Promise<void> {
+  await db
+    .update(taskRepository)
+    .set({ resultBranch, updatedAt: new Date().toISOString() })
+    .where(and(eq(taskRepository.workspaceId, workspaceId), eq(taskRepository.id, attachmentId)));
 }
 
 /**
@@ -205,22 +273,131 @@ export async function setSessionState(
  * client can ask for it again, so a reconnecting SPA replays exactly what it missed instead of
  * losing terminal history. `seq` is unique per Session, so a retried durable step that re-emits
  * the same event is a no-op rather than a duplicate.
+ *
+ * The payload is validated against the contract union before the insert (issue #2, AC-1) and the
+ * `kind` column is *derived* from it rather than passed alongside, so the column and the payload
+ * cannot drift apart — a row that says `tool_call` in one place and `stdout` in the other is not
+ * representable. A payload the union does not admit throws here rather than becoming another
+ * opaque blob a reader has to guess at.
  */
 export async function appendSessionEvent(
   db: Db,
   workspaceId: string,
-  input: { sessionId: string; seq: number; kind: string; payload: unknown },
+  input: { sessionId: string; seq: number; payload: SessionEventPayload },
 ): Promise<void> {
+  const payload = sessionEventPayloadSchema.parse(input.payload);
   await db
     .insert(sessionEvent)
     .values({
       workspaceId,
       sessionId: input.sessionId,
       seq: input.seq,
-      kind: input.kind,
-      payload: input.payload,
+      kind: payload.kind,
+      payload,
     })
     .onConflictDoNothing();
+}
+
+/**
+ * The newest state transition recorded for a Session, or null when it has recorded none.
+ *
+ * One caller, and one reason: the lifecycle's `recordTransition` takes its `seq` from max+1, so
+ * the `(session_id, seq)` unique index cannot turn a retried write into a no-op — a second
+ * attempt just lands at a new seq. A retried Inngest step body would therefore append the same
+ * transition twice, which a reviewer reads as the Task having moved twice (Principle III is
+ * about the run surviving a restart, not about the record growing a duplicate each time one
+ * happens). Only the newest one is needed: an identical transition further back is a real
+ * revisit, and the departure between them is itself a recorded transition.
+ */
+export async function latestStateTransition(
+  db: Db,
+  workspaceId: string,
+  sessionId: string,
+): Promise<Extract<SessionEventPayload, { kind: "state" }> | null> {
+  const [row] = await db
+    .select({ kind: sessionEvent.kind, payload: sessionEvent.payload })
+    .from(sessionEvent)
+    .where(
+      and(
+        eq(sessionEvent.workspaceId, workspaceId),
+        eq(sessionEvent.sessionId, sessionId),
+        eq(sessionEvent.kind, "state"),
+      ),
+    )
+    .orderBy(desc(sessionEvent.seq))
+    .limit(1);
+  if (!row) return null;
+  const payload = parseSessionEventPayload(row.kind, row.payload);
+  return payload.kind === "state" ? payload : null;
+}
+
+/**
+ * A Session's whole log, typed, oldest first — what compaction reads.
+ *
+ * Rows written before the payload union existed are mapped on the way out by
+ * `parseSessionEventPayload`, so a Session recorded by an earlier run hashes and compacts like
+ * any other instead of being unreadable (see that function for the mapping and its one
+ * judgement call).
+ */
+export async function listSessionLog(
+  db: Db,
+  workspaceId: string,
+  sessionId: string,
+): Promise<SessionLogEvent[]> {
+  const rows = await db
+    .select({ seq: sessionEvent.seq, kind: sessionEvent.kind, payload: sessionEvent.payload })
+    .from(sessionEvent)
+    .where(and(eq(sessionEvent.workspaceId, workspaceId), eq(sessionEvent.sessionId, sessionId)))
+    .orderBy(asc(sessionEvent.seq));
+  return rows.map((r) => ({ seq: r.seq, payload: parseSessionEventPayload(r.kind, r.payload) }));
+}
+
+/** Every summary recorded for a Session, oldest range first. */
+export async function listSessionSummaries(
+  db: Db,
+  workspaceId: string,
+  sessionId: string,
+): Promise<(typeof sessionSummary.$inferSelect)[]> {
+  return db
+    .select()
+    .from(sessionSummary)
+    .where(
+      and(eq(sessionSummary.workspaceId, workspaceId), eq(sessionSummary.sessionId, sessionId)),
+    )
+    .orderBy(asc(sessionSummary.fromSeq));
+}
+
+/**
+ * Compact a Session at a turn boundary (issue #2, AC-3).
+ *
+ * Inserts summaries and nothing else. `onConflictDoNothing` on `(session_id, from_seq)` makes a
+ * durable step that replays after an orchestrator restart a no-op rather than a duplicate
+ * (Principle III), and there is deliberately no delete or update of `session_event` anywhere on
+ * this path — replay reproduces the full history whether or not this ever ran (AC-2).
+ */
+export async function compactSession(
+  db: Db,
+  workspaceId: string,
+  sessionId: string,
+  opts: { threshold?: number; tail?: number } = {},
+): Promise<CompactionRange[]> {
+  const events = await listSessionLog(db, workspaceId, sessionId);
+  const existing = await listSessionSummaries(db, workspaceId, sessionId);
+  const planned = planCompaction(events, existing, opts);
+  for (const range of planned) {
+    await db
+      .insert(sessionSummary)
+      .values({
+        workspaceId,
+        sessionId,
+        fromSeq: range.fromSeq,
+        toSeq: range.toSeq,
+        eventCount: range.eventCount,
+        text: range.text,
+      })
+      .onConflictDoNothing();
+  }
+  return planned;
 }
 
 /**
@@ -321,13 +498,15 @@ export async function nextSessionEventSeq(
 export interface ReplayEvent {
   sessionId: string;
   seq: number;
-  kind: string;
-  payload: unknown;
+  payload: SessionEventPayload;
 }
 
 /**
  * Events for a Task's Sessions with `seq` above `sinceSeq`, oldest first. Workspace-scoped:
  * the caller's ticket names the Workspace, and a Task from another one yields nothing.
+ *
+ * Payloads come back typed, rows written before the union existed included — which is what lets
+ * the replay projection be a total `switch` instead of the field-probing it used to be.
  */
 export async function listTaskEventsSince(
   db: Db,
@@ -341,7 +520,7 @@ export async function listTaskEventsSince(
     .where(and(eq(session.workspaceId, workspaceId), eq(session.taskId, taskId)));
   if (sessions.length === 0) return [];
 
-  return db
+  const rows = await db
     .select({
       sessionId: sessionEvent.sessionId,
       seq: sessionEvent.seq,
@@ -360,4 +539,10 @@ export async function listTaskEventsSince(
       ),
     )
     .orderBy(asc(sessionEvent.seq));
+
+  return rows.map((r) => ({
+    sessionId: r.sessionId,
+    seq: r.seq,
+    payload: parseSessionEventPayload(r.kind, r.payload),
+  }));
 }

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { taskCheckoutBranch } from "@gatecontrol/core";
 import type { ExecOpts, ExecResult, Executor } from "../executor/types.js";
 import { prepareRepository, worktreeBranch, worktreePath } from "./manager.js";
 
@@ -7,6 +8,22 @@ describe("worktree naming", () => {
     expect(worktreeBranch("t1")).toBe("gatecontrol/task-t1");
     expect(worktreePath("/wt", "t1")).toBe("/wt/t1");
     expect(worktreeBranch("a")).not.toBe(worktreeBranch("b"));
+  });
+
+  it("delegates the branch name to core, so three call sites cannot disagree", () => {
+    // The DAL derives this when an attachment names no branch and the 0010 migration wrote it;
+    // a second copy of the template here would be a silent divergence waiting to happen.
+    expect(worktreeBranch("t1")).toBe(taskCheckoutBranch("t1"));
+  });
+
+  it("gives a secondary attachment its own sibling directory (issue #7)", () => {
+    // Keyed on the attachment, not the repository: a future second branch of the *same*
+    // repository already has a directory of its own, and no Owner-authored text — a repository
+    // called `../../etc` — ever reaches the path.
+    expect(worktreePath("/wt", "t1", "att-2")).toBe("/wt/t1--att-2");
+    expect(worktreePath("/wt", "t1", "att-2")).not.toBe(worktreePath("/wt", "t1", "att-3"));
+    // And the primary keeps exactly the path a single-Repository Task has always had.
+    expect(worktreePath("/wt", "t1", undefined)).toBe(worktreePath("/wt", "t1"));
   });
 });
 

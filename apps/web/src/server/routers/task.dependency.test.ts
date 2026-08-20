@@ -111,7 +111,7 @@ async function fixture(db: TestDb, name: string) {
       title,
       agentProfileId: agent.id,
       executorProfileId: executor.id,
-      repositoryId: repo.id,
+      repositories: [{ repositoryId: repo.id }],
     });
 
   return { wsId, c, newTask };

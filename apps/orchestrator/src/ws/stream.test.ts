@@ -12,6 +12,7 @@ import {
   session,
   sessionEvent,
   task,
+  taskRepository,
   workspace,
 } from "@gatecontrol/db";
 import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
@@ -127,7 +128,13 @@ describe("attachSubscriber (reconnect replay)", () => {
       state: "running",
       agentProfileId: `agent-${suffix}`,
       executorProfileId: `exec-${suffix}`,
+    });
+    await db.insert(taskRepository).values({
+      id: `attach-${taskId}`,
+      workspaceId,
+      taskId,
       repositoryId: `repo-${suffix}`,
+      checkoutBranch: `gatecontrol/task-${taskId}`,
     });
     await db.insert(session).values({ id: `sess-${taskId}`, workspaceId, taskId, state: "active" });
     for (let seq = 0; seq < count; seq++) {

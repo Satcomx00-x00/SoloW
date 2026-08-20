@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import type { RepositorySource } from "@gatecontrol/contracts";
+import { taskCheckoutBranch } from "@gatecontrol/core";
 import type { Executor } from "../executor/types.js";
 import { setupFileExclusions } from "./setup-files.js";
 
@@ -26,20 +27,45 @@ async function run(
   return result.stdout;
 }
 
-/** Deterministic, collision-free branch name for a Task's worktree. */
+/**
+ * Deterministic, collision-free branch name for a Task's worktree.
+ *
+ * Delegated to `@gatecontrol/core` rather than spelled out here: the DAL derives the same name
+ * when an attachment omits a branch, and the migration that backfilled existing Tasks wrote it.
+ * Three places, one template — a second copy is a silent divergence waiting to happen.
+ */
 export function worktreeBranch(taskId: string): string {
-  return `gatecontrol/task-${taskId}`;
+  return taskCheckoutBranch(taskId);
 }
 
-/** Deterministic worktree directory for a Task. */
-export function worktreePath(root: string, taskId: string): string {
-  return join(root, taskId);
+/**
+ * Deterministic worktree directory for one of a Task's Repository attachments (issue #7).
+ *
+ * The primary attachment keeps the Task's own directory, so nothing about a single-Repository
+ * Task moves; every other attachment gets a sibling named for the attachment, not for the
+ * repository. Keyed on the attachment id for two reasons: a future second branch of the *same*
+ * repository (parity row 13) already has its own directory, and the path never contains
+ * Owner-authored text — a Repository called `../../etc` cannot climb out of the worktree root,
+ * and two repositories both called "api" cannot collide.
+ */
+export function worktreePath(root: string, taskId: string, attachmentId?: string): string {
+  return attachmentId ? join(root, `${taskId}--${attachmentId}`) : join(root, taskId);
 }
 
 export interface ProvisionParams {
   taskId: string;
   repository: { source: RepositorySource; location: string };
   baseRef?: string | undefined;
+  /**
+   * The branch this worktree is checked out on. Defaults to `worktreeBranch(taskId)`, which is
+   * what an attachment that named no branch was given at write time anyway.
+   */
+  checkoutBranch?: string | undefined;
+  /**
+   * The secondary attachment this worktree belongs to; omitted for the primary, which keeps the
+   * Task's own directory. See `worktreePath`.
+   */
+  attachmentId?: string | undefined;
   worktreeRoot: string;
   repoCacheRoot: string;
   /**
@@ -133,8 +159,8 @@ export async function provisionWorktree(
   params: ProvisionParams,
 ): Promise<Worktree> {
   const repoPath = await resolveRepoPath(executor, params);
-  const branch = worktreeBranch(params.taskId);
-  const path = worktreePath(params.worktreeRoot, params.taskId);
+  const branch = params.checkoutBranch ?? worktreeBranch(params.taskId);
+  const path = worktreePath(params.worktreeRoot, params.taskId, params.attachmentId);
   const base = params.baseRef ?? "HEAD";
 
   // Best-effort: clears git's record of a worktree whose directory was deleted from underneath
@@ -166,6 +192,23 @@ export async function provisionWorktree(
 }
 
 /**
+ * A Repository that will still be unusable on the next attempt.
+ *
+ * The distinction is what lets the lifecycle keep both halves of issue #7 AC-3 and Principle III:
+ * a location that is not a git repository is answered now, by failing the Task with the
+ * Repository's name, while a clone that timed out or a path that was momentarily unavailable
+ * throws a plain `Error` and is retried — failing a Task on the first flake is a durability
+ * regression, and failing it silently after the retries is the unreadable state AC-3 exists to
+ * remove. Only conditions a retry cannot change are raised as this type.
+ */
+export class RepositoryUnusableError extends Error {}
+
+/** True when the cause is one no retry will fix (see `RepositoryUnusableError`). */
+export function isRepositoryUnusable(cause: unknown): boolean {
+  return cause instanceof RepositoryUnusableError;
+}
+
+/**
  * Make the repository ready for an agent to run in, without creating the Task's worktree.
  *
  * Claude Code creates that itself (`--worktree`), which is what lets several Tasks share one
@@ -181,7 +224,7 @@ export async function prepareRepository(
   const repoPath = await resolveRepoPath(executor, params);
   const isRepo = await executor.exec(["git", "-C", repoPath, "rev-parse", "--git-dir"]);
   if (isRepo.exitCode !== 0) {
-    throw new Error(`not a git repository: ${params.repository.location}`);
+    throw new RepositoryUnusableError(`not a git repository: ${params.repository.location}`);
   }
   return repoPath;
 }

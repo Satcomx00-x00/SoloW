@@ -8,6 +8,7 @@ import {
   repository,
   repositoryBranch,
   task,
+  taskRepository,
 } from "@gatecontrol/db";
 import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
 import { eq } from "drizzle-orm";
@@ -119,10 +120,15 @@ describe("deleteIntegration", () => {
         title: "Work on the imported issue",
         agentProfileId: profileIds.agentProfileId,
         executorProfileId: profileIds.executorProfileId,
-        repositoryId,
       })
       .returning();
     if (!attached) throw new Error("failed to seed task");
+    await db.insert(taskRepository).values({
+      workspaceId,
+      taskId: attached.id,
+      repositoryId,
+      checkoutBranch: `gatecontrol/task-${attached.id}`,
+    });
     return { issueId: importedIssue.id, taskId: attached.id };
   }
 
