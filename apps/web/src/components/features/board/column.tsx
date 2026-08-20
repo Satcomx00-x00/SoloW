@@ -1,4 +1,4 @@
-import type { TaskDto, TaskState } from "@gatecontrol/contracts";
+import type { TaskDependencyDto, TaskDto, TaskState } from "@gatecontrol/contracts";
 import type { ReactNode } from "react";
 import { STATE_STYLE } from "@/lib/task-states";
 import { cn } from "@/lib/utils";
@@ -69,17 +69,24 @@ export function ColumnEmpty({ label }: { label: string }) {
   );
 }
 
-/** One lifecycle-state column holding its Tasks. */
+/**
+ * One lifecycle-state column holding its Tasks.
+ *
+ * `blockersFor` is threaded down rather than each card fetching its own: the board loads the
+ * Workspace's dependency edges once, so a column of thirty cards costs one query, not thirty.
+ */
 export function Column({
   state,
   label,
   tasks,
   renderActions,
+  blockersFor,
 }: {
   state: TaskState;
   label: string;
   tasks: TaskDto[];
   renderActions?: ((task: TaskDto) => ReactNode) | undefined;
+  blockersFor?: ((taskId: string) => readonly TaskDependencyDto[] | undefined) | undefined;
 }) {
   return (
     <section
@@ -94,7 +101,11 @@ export function Column({
         <ul className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-2 pb-2">
           {tasks.map((task) => (
             <li key={task.id}>
-              <TaskCard task={task} actions={renderActions?.(task)} />
+              <TaskCard
+                task={task}
+                actions={renderActions?.(task)}
+                blockers={blockersFor?.(task.id)}
+              />
             </li>
           ))}
         </ul>

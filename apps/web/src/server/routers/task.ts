@@ -1,35 +1,68 @@
 import "server-only";
 import {
+  addTaskDependencyInput,
   createTaskInput,
   getTaskInput,
   launchTaskInput,
+  listTaskDependenciesInput,
   listTasksInput,
   moveTaskInput,
+  removeTaskDependencyInput,
   retryTaskInput,
+  TaskDependencyErrorCode,
   TaskErrorCode,
+  taskDependencyListDto,
   taskDto,
   taskListDto,
 } from "@gatecontrol/contracts";
 import {
   buildCreateTaskPayload,
   canTransitionTask,
+  formatDependencyCycle,
   isLaunchable,
+  unsatisfiedDependencies,
   withinConcurrencyCap,
 } from "@gatecontrol/core";
 import { TRPCError } from "@trpc/server";
+import type { RequestContext } from "../dal/context.js";
 import { getIssueById } from "../dal/issue.js";
 import { getAgentProfile, getExecutorProfile } from "../dal/profile.js";
 import { getRepository } from "../dal/repository.js";
 import { createSession } from "../dal/session.js";
 import {
+  addTaskDependencyEdge,
   countRunningForAgentProfile,
   createTaskRecord,
   getTaskById,
+  listTaskDependencies,
   listTasks,
+  removeTaskDependencyEdge,
   updateTaskState,
 } from "../dal/task.js";
 import { orchestrator } from "../orchestrator-client.js";
 import { ownerProcedure, rateLimit, router, unwrap } from "../trpc.js";
+
+/**
+ * The start gate (issue #6 AC-3, rule 2): a Task with a predecessor that is not yet `done` is
+ * not started by anything.
+ *
+ * Deliberately one function called by every start path rather than a check repeated in each.
+ * The invariant the issue states is "never auto-started by *any* path", and the way that
+ * invariant dies is the next start path added — workflow advance, a coordinator — being written
+ * by someone who did not know a check existed to repeat. There is nothing to remember here: a
+ * new start path either calls this or it does not start Tasks. Exported for the same reason:
+ * `review.decide` resumes an agent, so it is a start path and calls this one, rather than
+ * growing a second opinion about what "blocked" means.
+ *
+ * The MCP surface needs no gate of its own; `mcp/tools.ts` derives every tool from these same
+ * procedures and dispatches back through them, so `task_launch` over MCP arrives here too.
+ */
+export async function requireUnblocked(rctx: RequestContext, taskId: string): Promise<void> {
+  const deps = unwrap(await listTaskDependencies(rctx, { taskId }));
+  if (unsatisfiedDependencies(deps).length > 0) {
+    throw new TRPCError({ code: "BAD_REQUEST", message: TaskDependencyErrorCode.Blocked });
+  }
+}
 
 export const taskRouter = router({
   create: ownerProcedure
@@ -104,6 +137,7 @@ export const taskRouter = router({
       if (!isLaunchable(task.state)) {
         throw new TRPCError({ code: "BAD_REQUEST", message: TaskErrorCode.NotReady });
       }
+      await requireUnblocked(ctx.rctx, task.id);
       // Enforce the Agent Profile concurrency cap (spec FR-017).
       const profile = unwrap(await getAgentProfile(ctx.rctx, task.agentProfileId));
       const running = await countRunningForAgentProfile(ctx.rctx, task.agentProfileId);
@@ -140,6 +174,9 @@ export const taskRouter = router({
     .mutation(async ({ ctx, input }) => {
       const task = unwrap(await getTaskById(ctx.rctx, input.id));
       unwrap(canTransitionTask(task.state, input.to));
+      // Moving is not starting — a blocked Task may still be dragged around the board. Only the
+      // move *into* `running` is a start, and it goes through the same gate as launch.
+      if (input.to === "running") await requireUnblocked(ctx.rctx, task.id);
       return unwrap(await updateTaskState(ctx.rctx, task.id, input.to));
     }),
 
@@ -159,6 +196,7 @@ export const taskRouter = router({
     .mutation(async ({ ctx, input }) => {
       const task = unwrap(await getTaskById(ctx.rctx, input.id));
       unwrap(canTransitionTask(task.state, "running"));
+      await requireUnblocked(ctx.rctx, task.id);
       const session = unwrap(await createSession(ctx.rctx, task.id));
       const updated = unwrap(
         await updateTaskState(ctx.rctx, task.id, "running", { failureReason: null }),
@@ -169,5 +207,78 @@ export const taskRouter = router({
         sessionId: session.id,
       });
       return updated;
+    }),
+
+  dependencies: ownerProcedure
+    .meta({
+      openapi: {
+        method: "GET",
+        path: "/task.dependencies",
+        tags: ["task"],
+        protect: true,
+        summary:
+          "List blocked_by dependencies — for one Task, or for every Task in the Workspace when no id is given. Each edge carries the blocking Task's title and current state, so a caller can see what is still outstanding.",
+      },
+    })
+    .input(listTaskDependenciesInput)
+    .output(taskDependencyListDto)
+    .query(async ({ ctx, input }) => unwrap(await listTaskDependencies(ctx.rctx, input))),
+
+  addDependency: ownerProcedure
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/task.addDependency",
+        tags: ["task"],
+        protect: true,
+        summary:
+          "Declare that a Task is blocked by another Task in the same Workspace. Refused if the edge would create a cycle, naming the offending path. Re-declaring an existing dependency is a no-op.",
+      },
+    })
+    .input(addTaskDependencyInput)
+    .output(taskDependencyListDto)
+    .mutation(async ({ ctx, input }) => {
+      // Both ends resolved through the workspace-scoped lookup before anything is written, so an
+      // edge aimed at another Workspace's Task is a NOT_FOUND and never becomes a row (AC-5).
+      const task = unwrap(await getTaskById(ctx.rctx, input.taskId));
+      unwrap(await getTaskById(ctx.rctx, input.blockedByTaskId));
+
+      // The cycle check and the insert are one transaction inside the DAL, not two statements
+      // here: two concurrent adds asking for the two halves of a cycle would otherwise both read
+      // the pre-insert graph and both be allowed through.
+      const written = await addTaskDependencyEdge(ctx.rctx, {
+        taskId: task.id,
+        blockedByTaskId: input.blockedByTaskId,
+      });
+      if (!written.ok) {
+        // Ids, not titles, in the message: the path travels as text through `TRPCError.message`
+        // (there is no error formatter carrying structure yet), and a Task title containing the
+        // separator would otherwise break the path the dialog reads back.
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `${written.error.code}: ${formatDependencyCycle(written.error.path)}`,
+        });
+      }
+
+      return unwrap(await listTaskDependencies(ctx.rctx, { taskId: task.id }));
+    }),
+
+  removeDependency: ownerProcedure
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/task.removeDependency",
+        tags: ["task"],
+        protect: true,
+        summary:
+          "Withdraw a blocked_by dependency between two Tasks, returning the Task's remaining dependencies.",
+      },
+    })
+    .input(removeTaskDependencyInput)
+    .output(taskDependencyListDto)
+    .mutation(async ({ ctx, input }) => {
+      const task = unwrap(await getTaskById(ctx.rctx, input.taskId));
+      unwrap(await removeTaskDependencyEdge(ctx.rctx, input));
+      return unwrap(await listTaskDependencies(ctx.rctx, { taskId: task.id }));
     }),
 });

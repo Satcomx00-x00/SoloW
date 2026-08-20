@@ -13,7 +13,7 @@ import {
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
-import type { TaskDto, TaskState } from "@gatecontrol/contracts";
+import type { TaskDependencyDto, TaskDto, TaskState } from "@gatecontrol/contracts";
 import { GripVertical } from "lucide-react";
 import type { ReactNode } from "react";
 import { useState } from "react";
@@ -27,7 +27,15 @@ import { TaskCard } from "./task-card";
  * the body holds a link and action buttons, and nesting those inside a `role="button"` wrapper
  * would be invalid ARIA and unreachable by keyboard.
  */
-function DraggableCard({ task, actions }: { task: TaskDto; actions?: ReactNode }) {
+function DraggableCard({
+  task,
+  actions,
+  blockers,
+}: {
+  task: TaskDto;
+  actions?: ReactNode;
+  blockers?: readonly TaskDependencyDto[] | undefined;
+}) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: task.id,
     data: { state: task.state },
@@ -50,7 +58,7 @@ function DraggableCard({ task, actions }: { task: TaskDto; actions?: ReactNode }
   );
   return (
     <div ref={setNodeRef} className={cn(isDragging && "opacity-30")}>
-      <TaskCard task={task} actions={actions} dragHandle={handle} />
+      <TaskCard task={task} actions={actions} dragHandle={handle} blockers={blockers} />
     </div>
   );
 }
@@ -60,11 +68,13 @@ function DroppableColumn({
   label,
   tasks,
   renderActions,
+  blockersFor,
 }: {
   state: TaskState;
   label: string;
   tasks: TaskDto[];
   renderActions?: ((task: TaskDto) => ReactNode) | undefined;
+  blockersFor?: ((taskId: string) => readonly TaskDependencyDto[] | undefined) | undefined;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: state });
   return (
@@ -84,7 +94,11 @@ function DroppableColumn({
         <ul className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-2 pb-2">
           {tasks.map((task) => (
             <li key={task.id}>
-              <DraggableCard task={task} actions={renderActions?.(task)} />
+              <DraggableCard
+                task={task}
+                actions={renderActions?.(task)}
+                blockers={blockersFor?.(task.id)}
+              />
             </li>
           ))}
         </ul>
@@ -97,10 +111,13 @@ function DroppableColumn({
 export function DndBoard({
   tasks,
   renderActions,
+  blockersFor,
   onMove,
 }: {
   tasks: TaskDto[];
   renderActions?: ((task: TaskDto) => ReactNode) | undefined;
+  // Same lookup the plain board takes, so the two cannot drift on whether a card looks blocked.
+  blockersFor?: ((taskId: string) => readonly TaskDependencyDto[] | undefined) | undefined;
   onMove: (taskId: string, from: TaskState, to: TaskState) => void;
 }) {
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -141,6 +158,7 @@ export function DndBoard({
             label={STATE_LABELS[state]}
             tasks={tasks.filter((task) => task.state === state)}
             renderActions={renderActions}
+            blockersFor={blockersFor}
           />
         ))}
       </section>
@@ -148,7 +166,10 @@ export function DndBoard({
       <DragOverlay dropAnimation={{ duration: 180, easing: "cubic-bezier(0.16,1,0.3,1)" }}>
         {activeTask ? (
           <div className="w-[268px] rotate-2 shadow-float">
-            <TaskCard task={activeTask} />
+            {/* The same blockers the column copy has, so a blocked card does not un-dim and lose
+                its lock for the length of the drag — and `ghost`, so the two copies do not both
+                claim the same DOM id. */}
+            <TaskCard task={activeTask} blockers={blockersFor?.(activeTask.id)} ghost />
           </div>
         ) : null}
       </DragOverlay>

@@ -41,8 +41,10 @@ agent work.
   to Running.
 - **FR-7** A user can open any Task into the [Integrated Review Workspace](./F09-integrated-workspace.md)
   from the board.
-- **FR-8** A user can define Task dependencies, so a Task becomes Ready only after its
-  prerequisites are Done.
+- **FR-8** A user can define Task dependencies, so a Task with a prerequisite that is not yet
+  Done is never started — not by launch, not by retry, not by a move into Running, and not by
+  any automated path. Ready stays a planning state the user controls: a blocked Task can still be
+  moved into Ready, it simply cannot enter Running until every prerequisite is Done.
 - **FR-9** A user can filter and search Tasks on a Board by Issue, Agent, Executor, state,
   and text.
 - **FR-10** A user can archive or delete a Task, with confirmation for the destructive
@@ -59,8 +61,11 @@ agent work.
 
 - The lifecycle states and their transitions are defined once in
   [Domain Model](../product/04-domain-model.md); the Board is their primary presentation.
-- A Task cannot enter Running unless it is Ready (fully configured) and within concurrency
-  limits; otherwise it queues.
+- A Task cannot enter Running unless it is Ready (fully configured), within concurrency
+  limits, and has no prerequisite that is not yet Done; otherwise it queues.
+- Dependencies are `blocked_by` edges scoped to one Workspace. An edge that would close a cycle
+  is refused when it is declared, naming the offending path, rather than discovered later by a
+  Task that silently never starts.
 - Moving a Running Task backward interrupts its Session (with confirmation).
 - A Task in Review cannot reach Done until a human Review outcome is recorded.
 
@@ -84,3 +89,4 @@ agent work.
 - [F03 — Visual Workflow Designer & Monitor](./F03-workflow-designer.md)
 - [F09 — Integrated Review Workspace](./F09-integrated-workspace.md)
 - [Decision 0006 — Kanban scoped to Issues](../decisions/0006-kanban-scoped-to-issues.md)
+- Issue #6 — FR-8 as built: dependencies are Workspace-scoped `blocked_by` edges, a cycle is refused at write time naming the offending path, and a Task with an unsatisfied predecessor is never started by any automated path. Not built: chained creation that fires a dependent Task automatically once every predecessor succeeds — unblocking lifts a refusal, it does not launch anything.

@@ -57,6 +57,9 @@ describe("Board (wired)", () => {
     renderWithTrpc(<Board />, {
       ...ticket,
       "task.list": () => [makeTask({ id: "task-1", state, title: "Fix the gate latch" })],
+      // The board waits for the edges before it draws: an undelivered dependency query would
+      // otherwise let a blocked card render as launchable (issue #6).
+      "task.dependencies": () => [],
     });
 
     await waitFor(() => {
@@ -88,6 +91,7 @@ describe("Board (wired)", () => {
     const { log } = renderWithTrpc(<Board />, {
       ...ticket,
       "task.list": () => [makeTask({ id: "task-1", state, title: "Investigate servo" })],
+      "task.dependencies": () => [],
       "task.move": (input) => {
         state = (input as { to: TaskState }).to;
         return makeTask({ id: "task-1", state });
@@ -110,6 +114,7 @@ describe("Board (wired)", () => {
     renderWithTrpc(<Board />, {
       ...ticket,
       "task.list": () => [makeTask({ id: "task-1", state: "ready", title: "Launchable" })],
+      "task.dependencies": () => [],
       "task.launch": () => {
         throw new Error("concurrency_cap_reached");
       },
@@ -128,6 +133,7 @@ describe("Board (wired)", () => {
       "task.list": () => {
         throw new Error("UNAUTHORIZED");
       },
+      "task.dependencies": () => [],
     });
 
     await waitFor(() => {

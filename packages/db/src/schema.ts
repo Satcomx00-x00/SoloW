@@ -345,6 +345,42 @@ export const task = sqliteTable(
   }),
 );
 
+/**
+ * Task dependency edges (issue #6). One row per `blocked_by` relationship: `taskId` cannot start
+ * until `blockedByTaskId` is done.
+ *
+ * There is no constraint here that keeps the graph acyclic, and there cannot be — reachability
+ * is not something SQLite can express. The invariant is enforced at write time by
+ * `checkDependencyEdge` in `@gatecontrol/core`, before the insert, so a cycle is refused with
+ * the offending path instead of being discovered later as a Task that silently never starts.
+ *
+ * `createdAt` only, no `updatedAt`: an edge is declared or withdrawn, never amended — the same
+ * shape choice `sessionUsage` makes with its bare `at`.
+ */
+export const taskDependency = sqliteTable(
+  "task_dependency",
+  {
+    id: id(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspace.id),
+    taskId: text("task_id")
+      .notNull()
+      .references(() => task.id),
+    blockedByTaskId: text("blocked_by_task_id")
+      .notNull()
+      .references(() => task.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    /** Re-declaring an existing dependency is a no-op, not a second row that must be removed twice. */
+    byEdge: uniqueIndex("task_dependency_edge").on(t.taskId, t.blockedByTaskId),
+    byBlockedBy: index("task_dependency_blocked_by").on(t.blockedByTaskId),
+    /** The DFS loads the tenant subgraph and nothing else (Principle V). */
+    byWs: index("task_dependency_ws").on(t.workspaceId),
+  }),
+);
+
 export const worktree = sqliteTable(
   "worktree",
   {
@@ -548,6 +584,43 @@ export const mcpToken = sqliteTable(
 );
 
 /**
+ * Per-user interface preferences (issue #3, AC-3) — today the arrangement of a contributed
+ * surface, tomorrow whatever else belongs to a person rather than to a browser.
+ *
+ * One table with a namespaced `key` rather than a column (or a table) per preference: these are
+ * opaque to the server, which stores and returns them and never branches on their contents, so a
+ * schema change per preference would buy nothing. The value is parsed against its contract on
+ * read, and a value that no longer parses degrades to the default — a preference written by an
+ * older build must never be able to stop the shell rendering.
+ *
+ * Keyed by Workspace *and* user: an arrangement belongs to one person inside one tenant
+ * (Principle V), and the same account in two Workspaces is entitled to two arrangements.
+ */
+export const uiPreference = sqliteTable(
+  "ui_preference",
+  {
+    id: id(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspace.id),
+    /** `auth_user.id`, or the local stand-in owner when running on the dev-owner path. */
+    userId: text("user_id").notNull(),
+    key: text("key").notNull(),
+    value: text("value", { mode: "json" }).$type<unknown>().notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => ({
+    /**
+     * Unique because the triple *is* the identity: a second row for the same key would make
+     * "the user's arrangement" a question with two answers, decided by insertion order. It is
+     * also what lets a write be an upsert rather than a read-then-branch.
+     */
+    byOwnerKey: uniqueIndex("ui_preference_owner_key").on(t.workspaceId, t.userId, t.key),
+  }),
+);
+
+/**
  * The domain tables. BetterAuth's tables live in `auth-schema.ts` and are joined onto this in
  * `tables.ts` — kept in separate files because drizzle-kit reads each schema file standalone.
  */
@@ -562,6 +635,7 @@ export const schema = {
   repositoryBranch,
   changeRequest,
   task,
+  taskDependency,
   worktree,
   session,
   sessionEvent,
@@ -569,4 +643,5 @@ export const schema = {
   review,
   secret,
   mcpToken,
+  uiPreference,
 };

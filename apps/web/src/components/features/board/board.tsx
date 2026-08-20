@@ -1,27 +1,39 @@
 "use client";
 
-import { CommonErrorCode, type TaskDto, type TaskState } from "@gatecontrol/contracts";
-import { canTransitionTask } from "@gatecontrol/core";
-import { ArrowRight, Play, TriangleAlert } from "lucide-react";
+import {
+  CommonErrorCode,
+  type TaskDependencyDto,
+  TaskDependencyErrorCode,
+  type TaskDto,
+  type TaskState,
+} from "@gatecontrol/contracts";
+import { unsatisfiedDependencies } from "@gatecontrol/core";
+import { ArrowRight, Link2, Play, TriangleAlert } from "lucide-react";
 import type { ReactNode } from "react";
 import { useCallback, useState } from "react";
 import { ConfirmDialog } from "@/components/features/confirm-action";
 import { useEventStream } from "@/components/hooks/use-task-stream";
 import { HeaderActions } from "@/components/shell/header-actions";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { BOARD_COLUMNS, STATE_LABELS } from "@/lib/task-states";
 import { trpc } from "@/trpc/react";
+import { BlockedByDialog } from "./blocked-by-dialog";
+import { moveRefusal, waitingOn } from "./blockers";
 import { Column } from "./column";
 import { CreateTaskDialog } from "./create-task-dialog";
+import { DependencyCycleDialog } from "./dependency-cycle-dialog";
 import { DndBoard } from "./dnd-board";
 
 /** Pure presentational board — groups Tasks into lifecycle columns (used by tests). */
 export function BoardView({
   tasks,
   renderActions,
+  blockersFor,
 }: {
   tasks: TaskDto[];
   renderActions?: ((task: TaskDto) => ReactNode) | undefined;
+  blockersFor?: ((taskId: string) => readonly TaskDependencyDto[] | undefined) | undefined;
 }) {
   return (
     <section
@@ -35,6 +47,7 @@ export function BoardView({
           label={STATE_LABELS[state]}
           tasks={tasks.filter((task) => task.state === state)}
           renderActions={renderActions}
+          blockersFor={blockersFor}
         />
       ))}
     </section>
@@ -101,24 +114,45 @@ function BoardEmpty() {
 export function Board() {
   const utils = trpc.useUtils();
   const tasksQuery = trpc.task.list.useQuery({});
-  const move = trpc.task.move.useMutation({ onSuccess: () => utils.task.list.invalidate() });
-  const launch = trpc.task.launch.useMutation({ onSuccess: () => utils.task.list.invalidate() });
+  // The whole Workspace's edges in one query (issue #6): readiness is derived from the blockers'
+  // states, so this is also what makes a card un-dim the moment its last predecessor is Done —
+  // there is no per-Task "blocked" flag anywhere that could be left stale.
+  const dependenciesQuery = trpc.task.dependencies.useQuery({});
+  const refresh = () => {
+    void utils.task.list.invalidate();
+    void utils.task.dependencies.invalidate();
+  };
+  const move = trpc.task.move.useMutation({ onSuccess: refresh });
+  const launch = trpc.task.launch.useMutation({ onSuccess: refresh });
   const [dragError, setDragError] = useState<string | null>(null);
   const [pendingMove, setPendingMove] = useState<{ taskId: string; to: TaskState } | null>(null);
+  const [editingBlockersFor, setEditingBlockersFor] = useState<TaskDto | null>(null);
+  const [cyclePath, setCyclePath] = useState<readonly string[] | null>(null);
 
   // Live board (TASK-018/021): the orchestrator announces every Task state change on the
   // Workspace channel, so a run that advances in the background lands here without a poll.
+  // Dependencies ride the same event — the announcement that moves a predecessor into Done is
+  // exactly the announcement that unblocks whatever was waiting on it (AC-4).
   const onStatus = useCallback(() => {
     utils.task.list.invalidate();
+    utils.task.dependencies.invalidate();
   }, [utils]);
   useEventStream({ onEvent: onStatus });
 
-  if (tasksQuery.isLoading) return <BoardSkeleton />;
+  // Both queries, not just the Tasks: readiness is derived from the edges, so a board drawn
+  // before they land would render every blocked card undimmed, lockless and launchable. The
+  // absence of edge data is not evidence that nothing is blocked — wait for it, and if it never
+  // arrives say so rather than showing a Workspace that looks unblocked forever (AC-4).
+  // Error before loading, not after: with two queries in flight one can fail while the other is
+  // still running, and a skeleton that hides a failure until its sibling settles tells the
+  // reader "still working" about something that has already stopped.
+  const loadError = tasksQuery.error ?? dependenciesQuery.error;
+  if (!loadError && (tasksQuery.isLoading || dependenciesQuery.isLoading)) return <BoardSkeleton />;
 
-  if (tasksQuery.error) {
+  if (loadError) {
     // A disabled flag is an operator state, not a fault — say what it is and how to change it,
     // rather than showing the raw error code to someone who cannot act on it.
-    if (tasksQuery.error.message === CommonErrorCode.FlagDisabled) {
+    if (loadError.message === CommonErrorCode.FlagDisabled) {
       return (
         <div className="flex flex-col items-start gap-3 px-6 py-16" role="alert">
           <h2 className="font-medium text-sm">The core program is not enabled here</h2>
@@ -136,15 +170,23 @@ export function Board() {
         <TriangleAlert className="mt-px size-4 shrink-0 text-state-failed" aria-hidden />
         <div>
           <p className="font-medium">Failed to load the board</p>
-          <p className="mt-0.5 font-mono text-xs text-muted-foreground">
-            {tasksQuery.error.message}
-          </p>
+          <p className="mt-0.5 font-mono text-xs text-muted-foreground">{loadError.message}</p>
         </div>
       </div>
     );
   }
 
   const tasks = tasksQuery.data ?? [];
+  const edges = dependenciesQuery.data ?? [];
+  const blockersByTask = new Map<string, TaskDependencyDto[]>();
+  for (const edge of edges) {
+    const existing = blockersByTask.get(edge.taskId);
+    if (existing) existing.push(edge);
+    else blockersByTask.set(edge.taskId, [edge]);
+  }
+  const blockersFor = (taskId: string) => blockersByTask.get(taskId);
+  const outstandingFor = (taskId: string) => unsatisfiedDependencies(blockersFor(taskId) ?? []);
+
   const busy = move.isPending || launch.isPending;
   const actionError = move.error ?? launch.error;
   // Spin only the card that was clicked. `busy` still blocks the rest, but a global spinner
@@ -154,9 +196,9 @@ export function Board() {
     (launch.isPending && launch.variables?.id === id);
 
   const onMove = (taskId: string, from: TaskState, to: TaskState) => {
-    const res = canTransitionTask(from, to);
-    if (!res.ok) {
-      setDragError(`Can't move ${STATE_LABELS[from]} → ${STATE_LABELS[to]}`);
+    const refusal = moveRefusal(from, to, outstandingFor(taskId));
+    if (refusal) {
+      setDragError(refusal);
       return;
     }
     setDragError(null);
@@ -169,36 +211,79 @@ export function Board() {
     move.mutate({ id: taskId, to });
   };
 
+  /** Opens the "Blocked by" picker for a card — the only way to declare an edge from the board. */
+  const blockedByAction = (task: TaskDto): ReactNode => (
+    <Button size="xs" variant="ghost" onClick={() => setEditingBlockersFor(task)}>
+      <Link2 /> Blocked by
+    </Button>
+  );
+
   const renderActions = (task: TaskDto): ReactNode => {
     if (task.state === "backlog") {
       return (
-        <Button
-          size="xs"
-          variant="outline"
-          disabled={busy}
-          loading={pendingOn(task.id)}
-          onClick={() => move.mutate({ id: task.id, to: "ready" })}
-        >
-          Ready <ArrowRight />
-        </Button>
+        <>
+          <Button
+            size="xs"
+            variant="outline"
+            disabled={busy}
+            loading={pendingOn(task.id)}
+            onClick={() => move.mutate({ id: task.id, to: "ready" })}
+          >
+            Ready <ArrowRight />
+          </Button>
+          {blockedByAction(task)}
+        </>
       );
     }
     if (task.state === "ready") {
+      const outstanding = outstandingFor(task.id);
+      // The server refuses a blocked launch either way (`requireUnblocked`); disabling the button
+      // is so the Owner learns what is outstanding instead of learning that a click failed.
+      if (outstanding.length > 0) {
+        return (
+          <>
+            <TooltipProvider delayDuration={200}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  {/* A disabled button fires no pointer events, so the tooltip hangs off a wrapper. */}
+                  <span className="inline-flex">
+                    <Button size="xs" disabled>
+                      <Play /> Launch
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>{waitingOn(outstanding)}</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+            {blockedByAction(task)}
+          </>
+        );
+      }
       return (
-        <Button
-          size="xs"
-          disabled={busy}
-          loading={pendingOn(task.id)}
-          onClick={() => launch.mutate({ id: task.id })}
-        >
-          <Play /> Launch
-        </Button>
+        <>
+          <Button
+            size="xs"
+            disabled={busy}
+            loading={pendingOn(task.id)}
+            onClick={() => launch.mutate({ id: task.id })}
+          >
+            <Play /> Launch
+          </Button>
+          {blockedByAction(task)}
+        </>
       );
     }
-    return null;
+    // Nothing to declare on a finished Task: an edge into it would only ever be satisfied.
+    return task.state === "done" ? null : blockedByAction(task);
   };
 
-  const errorMessage = dragError ?? actionError?.message ?? null;
+  // The server's refusal is a wire code; `TASK_BLOCKED` reaching this banner would be the only
+  // place on the board a machine-readable code is shown to a person.
+  const actionMessage =
+    actionError?.message === TaskDependencyErrorCode.Blocked
+      ? "Can't start this task yet — it is waiting on a task that isn't done."
+      : (actionError?.message ?? null);
+  const errorMessage = dragError ?? actionMessage;
 
   return (
     <>
@@ -217,7 +302,12 @@ export function Board() {
       {tasks.length === 0 ? (
         <BoardEmpty />
       ) : (
-        <DndBoard tasks={tasks} renderActions={renderActions} onMove={onMove} />
+        <DndBoard
+          tasks={tasks}
+          renderActions={renderActions}
+          blockersFor={blockersFor}
+          onMove={onMove}
+        />
       )}
       <ConfirmDialog
         open={pendingMove !== null}
@@ -230,6 +320,22 @@ export function Board() {
         onConfirm={() => {
           if (pendingMove) move.mutate({ id: pendingMove.taskId, to: pendingMove.to });
           setPendingMove(null);
+        }}
+      />
+      <BlockedByDialog
+        task={editingBlockersFor}
+        tasks={tasks}
+        blockers={editingBlockersFor ? (blockersFor(editingBlockersFor.id) ?? []) : []}
+        onOpenChange={(open) => {
+          if (!open) setEditingBlockersFor(null);
+        }}
+        onCycle={setCyclePath}
+      />
+      <DependencyCycleDialog
+        path={cyclePath}
+        tasks={tasks}
+        onOpenChange={(open) => {
+          if (!open) setCyclePath(null);
         }}
       />
     </>
