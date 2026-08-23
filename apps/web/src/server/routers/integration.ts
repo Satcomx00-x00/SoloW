@@ -13,10 +13,13 @@ import {
   issueDto,
   listExternalIssuesInput,
   listExternalRepositoriesInput,
+  listProvidersInput,
+  providerManifestListDto,
   repositoryBranchDto,
   repositoryDto,
   syncRepositorySignalsInput,
 } from "@gatecontrol/contracts";
+import { listProviderManifests } from "@gatecontrol/scm";
 import { z } from "zod";
 import {
   connectIntegration,
@@ -30,8 +33,30 @@ import {
 } from "../dal/integration.js";
 import { integrationsProcedure, router, unwrap } from "../trpc.js";
 
-/** SCM integrations (issue #15) — connect GitHub/GitLab, link Repositories, import and sync. */
+/** SCM integrations (issue #15) — connect a provider, link Repositories, import and sync. */
 export const integrationRouter = router({
+  /**
+   * Which providers this build actually has (F21).
+   *
+   * An endpoint rather than a constant compiled into the web app, because that is the whole
+   * point of the registry: the answer belongs to the running server and can differ between
+   * builds. It is also why `openapi.json` no longer enumerates the valid providers for
+   * `connect` — the document describes the id grammar, and this describes what is installed.
+   */
+  providers: integrationsProcedure
+    .meta({
+      openapi: {
+        method: "GET",
+        path: "/integration.providers",
+        tags: ["integration"],
+        protect: true,
+        summary:
+          "Every integration provider this build has a driver for, with the capabilities it offers and the fields its connect form needs. Optionally narrowed to providers offering one capability.",
+      },
+    })
+    .input(listProvidersInput)
+    .output(providerManifestListDto)
+    .query(({ input }) => listProviderManifests(input.capability)),
   connect: integrationsProcedure
     .meta({
       openapi: {

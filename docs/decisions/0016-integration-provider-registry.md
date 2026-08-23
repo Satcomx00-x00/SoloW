@@ -1,6 +1,6 @@
 # 0016 — Register integration providers by capability, rather than enumerating them
 
-**Status:** Proposed · **Date:** 2026-08-23 · **Deciders:** Product, Architecture
+**Status:** Accepted · **Date:** 2026-08-23 · **Deciders:** Product, Architecture
 **Extends:** [0014](./0014-direct-api-source-integrations.md) · **Builds on:** [F19](../features/F19-extension-contributions.md)
 
 ## Context

@@ -9,20 +9,38 @@ import {
 } from "./scm.js";
 
 describe("scmProviderSchema", () => {
-  it("accepts exactly github and gitlab — the DoD's stated scope", () => {
-    expect(scmProviderSchema.options).toEqual(["github", "gitlab"]);
+  it("takes any well-formed provider id, not a fixed pair", () => {
+    // The point of the registry (F21): a build that ships a third driver stores its id here, and
+    // nothing in contracts had to be edited for it to be storable.
+    for (const id of ["github", "gitlab", "gitea", "acme.internal-forge"]) {
+      expect(scmProviderSchema.safeParse(id).success).toBe(true);
+    }
+  });
+
+  it("still enforces the grammar, because the id is a stored compatibility surface", () => {
+    // A column is not a free-text field. These are the shapes that would make an id unusable as
+    // a key: empty, spaced, capitalised, or punctuated outside the alphabet.
+    for (const bad of ["", "GitHub", "git hub", "git_hub", "-gitea", "gitea-"]) {
+      expect(scmProviderSchema.safeParse(bad).success).toBe(false);
+    }
   });
 });
 
 describe("issueSourceSchema", () => {
-  it("includes local, for rows that predate this feature", () => {
+  it("includes local, for Issues that belong to no provider", () => {
     expect(issueSourceSchema.safeParse("local").success).toBe(true);
-    expect(issueSourceSchema.safeParse("github").success).toBe(true);
-    expect(issueSourceSchema.safeParse("gitlab").success).toBe(true);
   });
 
-  it("rejects anything outside the closed set", () => {
-    expect(issueSourceSchema.safeParse("jira").success).toBe(false);
+  it("accepts a provider id this build may not have a driver for", () => {
+    // This is the restored-database case, and the reason the enum went. An Issue imported by a
+    // build that shipped a Jira driver must still read back in one that does not — inert, but
+    // readable (F21 FR-7). Refusing to parse it would take the whole Issues page down.
+    expect(issueSourceSchema.safeParse("jira").success).toBe(true);
+    expect(issueSourceSchema.safeParse("gitea").success).toBe(true);
+  });
+
+  it("rejects a source that is not a legal id", () => {
+    expect(issueSourceSchema.safeParse("Not An Id").success).toBe(false);
   });
 });
 

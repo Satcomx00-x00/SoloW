@@ -68,7 +68,14 @@ function show(over: Partial<TaskDto> = {}, refs: BoardReferences = references) {
     <BoardReferencesProvider value={refs}>
       <TaskCard task={{ ...task, ...over }} />
     </BoardReferencesProvider>,
-    { "issue.setStatus": () => ({ ...issue, status: "resolved" }) },
+    {
+      "issue.setStatus": () => ({ ...issue, status: "resolved" }),
+      // How the provider spells its own name comes from the registry now (F21) — there is no
+      // table of names left in the web app to read it from.
+      "integration.providers": () => [
+        { id: "github", name: "GitHub", capabilities: ["issues"], fields: [] },
+      ],
+    },
   );
 }
 
@@ -153,5 +160,27 @@ describe("TaskCard issue menu", () => {
     // The status items are still there — a local Issue is just as editable.
     expect(await screen.findByRole("menuitem", { name: /Resolved/ })).toBeDefined();
     expect(screen.queryByRole("menuitem", { name: /View on/ })).toBeNull();
+  });
+});
+
+describe("TaskCard issue menu, provider not installed", () => {
+  it("names the provider by its own id rather than showing nothing", async () => {
+    // F21 FR-7, at the surface an Owner actually looks at. An Issue imported by a build that
+    // shipped a driver this one does not have still reads: `jira`, not `undefined`, and not a
+    // card that fails to render. The link still works — it is the provider's own URL, stored
+    // with the Issue, and needs no driver to open.
+    const foreign: IssueDto = { ...issue, source: "jira", externalNumber: 7 };
+    renderWithTrpc(
+      <BoardReferencesProvider value={{ ...references, issue: () => foreign }}>
+        <TaskCard task={task} />
+      </BoardReferencesProvider>,
+      { "integration.providers": () => [] },
+    );
+
+    fireEvent.keyDown(
+      screen.getByRole("button", { name: `#7: ${foreign.title}. Edit this issue` }),
+      { key: "Enter" },
+    );
+    expect(await screen.findByRole("menuitem", { name: /View on jira/ })).toBeDefined();
   });
 });

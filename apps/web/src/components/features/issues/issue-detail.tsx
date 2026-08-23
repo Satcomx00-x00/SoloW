@@ -6,9 +6,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { TaskCard } from "@/components/features/board/task-card";
 import { TaskStateBadge } from "@/components/features/board/task-state-badge";
+import { useProviderNames } from "@/components/hooks/use-provider-names";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ISSUE_SOURCE_LABELS } from "@/lib/issue-status";
+import { issueSourceLabel } from "@/lib/issue-status";
 import { trpc } from "@/trpc/react";
 import { DeleteIssueAction } from "./delete-issue-action";
 import { IssueFormDialog } from "./issue-form-dialog";
@@ -22,6 +23,7 @@ import { IssueStatusControl } from "./issue-status-control";
  * same `task.list`, filtered by `issueId` here.
  */
 export function IssueDetail({ issueId }: { issueId: string }) {
+  const providerName = useProviderNames();
   const router = useRouter();
   const issue = trpc.issue.get.useQuery({ id: issueId });
   const tasks = trpc.task.list.useQuery({ issueId }, { enabled: issue.isSuccess });
@@ -89,7 +91,7 @@ export function IssueDetail({ issueId }: { issueId: string }) {
               rel="noreferrer"
               className="mt-1.5 inline-flex items-center gap-1.5 text-muted-foreground text-xs transition-colors hover:text-foreground"
             >
-              <span>{ISSUE_SOURCE_LABELS[data.source]}</span>
+              <span>{issueSourceLabel(data.source, providerName(data.source))}</span>
               {data.externalNumber !== null && (
                 <span className="font-mono">#{data.externalNumber}</span>
               )}

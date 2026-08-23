@@ -13,6 +13,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { ConfirmDialog } from "@/components/features/confirm-action";
 import { IssueFormDialog } from "@/components/features/issues/issue-form-dialog";
+import { useProviderNames } from "@/components/hooks/use-provider-names";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -22,10 +23,10 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  ISSUE_SOURCE_LABELS,
   ISSUE_STATUS_LABELS,
   ISSUE_STATUS_STYLE,
   ISSUE_STATUSES,
+  issueSourceLabel,
 } from "@/lib/issue-status";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
@@ -48,6 +49,7 @@ import { trpc } from "@/trpc/react";
  * the Task, and opening this menu must not navigate away from the board underneath it.
  */
 export function IssueMenu({ issue }: { issue: IssueDto }) {
+  const providerName = useProviderNames();
   const utils = trpc.useUtils();
   const [editing, setEditing] = useState(false);
   /** Set when a close is refused over active Tasks — the second ask, which is the point of FR-9. */
@@ -128,7 +130,7 @@ export function IssueMenu({ issue }: { issue: IssueDto }) {
             <DropdownMenuItem asChild>
               <a href={issue.externalUrl} target="_blank" rel="noreferrer">
                 <ExternalLink aria-hidden />
-                View on {ISSUE_SOURCE_LABELS[issue.source]}
+                View on {issueSourceLabel(issue.source, providerName(issue.source))}
               </a>
             </DropdownMenuItem>
           )}

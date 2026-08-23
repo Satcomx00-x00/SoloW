@@ -4,15 +4,19 @@
 
 ## Summary
 
-Integrations connect GateControl to the tools teams already use. **Scope is GitHub and
-GitLab only** — Jira, Linear, Sentry and Slack are `wont-do` (issue #15). A connected
+Integrations connect GateControl to the tools teams already use. **GitHub, GitLab and Gitea
+ship today.** Which providers exist is no longer a property of this feature: a provider is a
+driver and a manifest registered behind [F21](./F21-integration-providers.md), so adding a
+fourth is proportional to the provider rather than to the codebase, and a tracker with issues
+and no repositories — Jira, Linear — is now expressible rather than structurally excluded. What
+GateControl *carries* is still a product decision, and today it carries three. A connected
 Integration is what gives GateControl real Issues to work from (see
 [F01](./F01-issue-management.md), which has no native "create Issue" path any more), and
 keeps a linked Repository's branches and change requests (pull requests / merge requests)
 visible alongside the Tasks that touch it.
 
-GitHub and GitLab are driven through a single, terminology-neutral `ChangeProvider`
-interface (`packages/scm`) — a direct REST API client authenticated by a stored Personal
+Every provider is driven through the same terminology-neutral driver boundary
+(`packages/scm`), split by capability so a provider supplies only what it actually has — a direct REST API client authenticated by a stored Personal
 Access Token, not the `gh`/`glab` CLIs (see [Decision 0014](../decisions/0014-direct-api-source-integrations.md),
 which supersedes [Decision 0009](../decisions/0009-cli-based-source-integrations.md) for this
 pair). GitLab's merge requests and GitHub's pull requests both surface as a **change

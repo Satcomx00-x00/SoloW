@@ -270,11 +270,19 @@
             "in": "query",
             "name": "source",
             "schema": {
-              "type": "string",
-              "enum": [
-                "local",
-                "github",
-                "gitlab"
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "local"
+                  ]
+                },
+                {
+                  "type": "string",
+                  "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$",
+                  "minLength": 1,
+                  "maxLength": 64
+                }
               ]
             }
           },
@@ -350,11 +358,19 @@
                         "minimum": 0
                       },
                       "source": {
-                        "type": "string",
-                        "enum": [
-                          "local",
-                          "github",
-                          "gitlab"
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              "local"
+                            ]
+                          },
+                          {
+                            "type": "string",
+                            "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$",
+                            "minLength": 1,
+                            "maxLength": 64
+                          }
                         ]
                       },
                       "repositoryId": {
@@ -550,11 +566,19 @@
                       "minimum": 0
                     },
                     "source": {
-                      "type": "string",
-                      "enum": [
-                        "local",
-                        "github",
-                        "gitlab"
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "local"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$",
+                          "minLength": 1,
+                          "maxLength": 64
+                        }
                       ]
                     },
                     "repositoryId": {
@@ -852,11 +876,19 @@
                       "minimum": 0
                     },
                     "source": {
-                      "type": "string",
-                      "enum": [
-                        "local",
-                        "github",
-                        "gitlab"
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "local"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$",
+                          "minLength": 1,
+                          "maxLength": 64
+                        }
                       ]
                     },
                     "repositoryId": {
@@ -1069,11 +1101,19 @@
                       "minimum": 0
                     },
                     "source": {
-                      "type": "string",
-                      "enum": [
-                        "local",
-                        "github",
-                        "gitlab"
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "local"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$",
+                          "minLength": 1,
+                          "maxLength": 64
+                        }
                       ]
                     },
                     "repositoryId": {
@@ -1284,11 +1324,19 @@
                       "minimum": 0
                     },
                     "source": {
-                      "type": "string",
-                      "enum": [
-                        "local",
-                        "github",
-                        "gitlab"
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "local"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$",
+                          "minLength": 1,
+                          "maxLength": 64
+                        }
                       ]
                     },
                     "repositoryId": {
@@ -1602,6 +1650,176 @@
         }
       }
     },
+    "/integration.providers": {
+      "get": {
+        "operationId": "integration-providers",
+        "summary": "Every integration provider this build has a driver for, with the capabilities it offers and the fields its connect form needs. Optionally narrowed to providers offering one capability.",
+        "tags": [
+          "integration"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "capability",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "issues",
+                "repositories",
+                "changeRequests"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$",
+                        "minLength": 1,
+                        "maxLength": 64
+                      },
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 80
+                      },
+                      "capabilities": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "issues",
+                            "repositories",
+                            "changeRequests"
+                          ]
+                        },
+                        "minItems": 1
+                      },
+                      "fields": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "key": {
+                              "type": "string",
+                              "pattern": "^[a-z][a-zA-Z0-9]*$",
+                              "minLength": 1,
+                              "maxLength": 64
+                            },
+                            "label": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 80
+                            },
+                            "help": {
+                              "type": "string",
+                              "maxLength": 200
+                            },
+                            "placeholder": {
+                              "type": "string",
+                              "maxLength": 200
+                            },
+                            "required": {
+                              "type": "boolean",
+                              "default": false
+                            },
+                            "secret": {
+                              "type": "boolean",
+                              "default": false
+                            }
+                          },
+                          "required": [
+                            "key",
+                            "label",
+                            "required",
+                            "secret"
+                          ]
+                        },
+                        "maxItems": 12
+                      },
+                      "changeRequestNoun": {
+                        "type": "string",
+                        "maxLength": 40
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "name",
+                      "capabilities",
+                      "fields"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.NOT_FOUND"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/integration.connect": {
       "post": {
         "operationId": "integration-connect",
@@ -1623,10 +1841,9 @@
                 "properties": {
                   "provider": {
                     "type": "string",
-                    "enum": [
-                      "github",
-                      "gitlab"
-                    ]
+                    "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$",
+                    "minLength": 1,
+                    "maxLength": 64
                   },
                   "secretId": {
                     "type": "string",
@@ -1667,10 +1884,9 @@
                         },
                         "provider": {
                           "type": "string",
-                          "enum": [
-                            "github",
-                            "gitlab"
-                          ]
+                          "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$",
+                          "minLength": 1,
+                          "maxLength": 64
                         },
                         "secretId": {
                           "type": "string",
@@ -1816,10 +2032,9 @@
                       },
                       "provider": {
                         "type": "string",
-                        "enum": [
-                          "github",
-                          "gitlab"
-                        ]
+                        "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$",
+                        "minLength": 1,
+                        "maxLength": 64
                       },
                       "secretId": {
                         "type": "string",
@@ -2529,11 +2744,19 @@
                         "minimum": 0
                       },
                       "source": {
-                        "type": "string",
-                        "enum": [
-                          "local",
-                          "github",
-                          "gitlab"
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              "local"
+                            ]
+                          },
+                          {
+                            "type": "string",
+                            "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$",
+                            "minLength": 1,
+                            "maxLength": 64
+                          }
                         ]
                       },
                       "repositoryId": {

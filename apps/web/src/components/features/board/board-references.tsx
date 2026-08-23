@@ -3,8 +3,6 @@
 import type { IssueDto } from "@gatecontrol/contracts";
 import { createContext, type ReactNode, useContext } from "react";
 
-export { ISSUE_SOURCE_LABELS } from "@/lib/issue-status";
-
 /**
  * The names behind the ids a Task carries.
  *

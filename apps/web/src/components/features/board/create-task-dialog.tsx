@@ -6,6 +6,7 @@ import { ChevronRight, ExternalLink, Plus } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
+import { useProviderNames } from "@/components/hooks/use-provider-names";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -35,7 +36,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ISSUE_SOURCE_LABELS, ISSUE_STATUS_LABELS, ISSUE_STATUS_STYLE } from "@/lib/issue-status";
+import { ISSUE_STATUS_LABELS, ISSUE_STATUS_STYLE, issueSourceLabel } from "@/lib/issue-status";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
 import { onOpenCreateDialog } from "./create-dialog-bus";
@@ -77,6 +78,7 @@ type TaskFormValues = z.infer<typeof taskFormSchema>;
  * would be worse than both drawing it plainly.
  */
 function IssuePreview({ issue }: { issue: IssueDto }) {
+  const providerName = useProviderNames();
   const status = ISSUE_STATUS_STYLE[issue.status];
   return (
     <section
@@ -100,7 +102,7 @@ function IssuePreview({ issue }: { issue: IssueDto }) {
           rel="noreferrer"
           className="inline-flex items-center gap-1.5 text-muted-foreground text-xs transition-colors hover:text-foreground"
         >
-          <span>{ISSUE_SOURCE_LABELS[issue.source]}</span>
+          <span>{issueSourceLabel(issue.source, providerName(issue.source))}</span>
           {issue.externalNumber !== null && (
             <span className="font-mono">#{issue.externalNumber}</span>
           )}

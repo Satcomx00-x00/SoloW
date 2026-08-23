@@ -1,23 +1,43 @@
 import { z } from "zod";
 import { idSchema, timestampsSchema } from "./common.js";
+import { providerIdSchema } from "./integration-provider.js";
 
 /**
  * SCM integrations (issue #15, spec F12). One `integration` per connected GitHub or GitLab
  * account, and everything imported from it — Issues, change requests, branches — carries a
  * reference back to the integration that produced it (AC-3, AC-6).
  *
- * Scope is deliberately narrow: GitHub and GitLab only (Jira/Linear/Sentry/Slack are
- * `wont-do`), and the domain speaks of a **change request**, never a "pull request" or "merge
- * request" — GitHub and GitLab each translate their own noun onto this shape at the driver
- * boundary in `@gatecontrol/scm`, so the domain never has to know which provider it is talking
- * to.
+ * The domain speaks of a **change request**, never a "pull request" or "merge request" — each
+ * driver translates its provider's own noun onto this shape at the boundary in
+ * `@gatecontrol/scm`, so the domain never has to know which provider it is talking to.
+ *
+ * Which providers exist is no longer stated here. It was, as a closed `z.enum`, and that enum
+ * was one of eight places a third provider had to be added to (F21, Decision 0016). It is now a
+ * registry, and these two schemas take the id grammar instead.
  */
 
-export const scmProviderSchema = z.enum(["github", "gitlab"]);
+/**
+ * The provider an Integration connects to.
+ *
+ * A pattern rather than an enum, which is a real trade and worth naming. The enum guaranteed
+ * every stored value was one this build understands — by refusing to parse anything else, which
+ * in practice meant a Workspace restored into an older build failed to render its Issues page
+ * rather than showing one unfamiliar badge. The pattern gives that guarantee up on purpose: an
+ * id with no registered provider behind it is readable, inert, and cannot be synced through
+ * (F21 FR-7). An unfamiliar badge is a better failure than a page that will not load.
+ */
+export const scmProviderSchema = providerIdSchema;
 export type ScmProvider = z.infer<typeof scmProviderSchema>;
 
-/** Where an Issue came from. Existing rows predating this feature read as "local". */
-export const issueSourceSchema = z.enum(["local", "github", "gitlab"]);
+/**
+ * Where an Issue came from. `local` is the one reserved value — an Issue typed into GateControl,
+ * belonging to no provider — and everything else is a provider id. Rows predating integrations
+ * read as `local`.
+ *
+ * Reserved rather than registered: no driver may claim `local`, because it is the absence of one.
+ */
+export const LOCAL_ISSUE_SOURCE = "local";
+export const issueSourceSchema = z.union([z.literal(LOCAL_ISSUE_SOURCE), providerIdSchema]);
 export type IssueSource = z.infer<typeof issueSourceSchema>;
 
 export const changeRequestStateSchema = z.enum(["open", "closed", "merged"]);

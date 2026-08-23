@@ -30,15 +30,33 @@ export function IntegrationsSection() {
   const repos = trpc.repository.list.useQuery({});
   const patSecrets = (secrets.data ?? []).filter((s) => s.kind === "scm_pat");
 
-  const [provider, setProvider] = useState<ScmProvider>("github");
+  /**
+   * The providers this build has (F21). Asked of the server rather than compiled in, because a
+   * build that ships a fourth driver must offer it here without the settings page being edited —
+   * which is the whole claim the registry makes.
+   */
+  const providers = trpc.integration.providers.useQuery({});
+  const manifests = providers.data ?? [];
+  const [provider, setProvider] = useState<ScmProvider>("");
+  // Whatever the server listed first, until someone chooses. Deriving rather than defaulting to
+  // "github" in `useState`: a build without a GitHub driver would otherwise open on a provider it
+  // does not have, and the form would submit an id nothing can connect.
+  const selected = manifests.find((m) => m.id === provider) ?? manifests[0] ?? null;
   const [secretId, setSecretId] = useState("");
-  const [baseUrl, setBaseUrl] = useState("");
+  /** Keyed by field, because a provider's connect form is whatever its manifest declares. */
+  const [values, setValues] = useState<Record<string, string>>({});
+  const setField = (key: string, value: string) =>
+    setValues((current) => ({ ...current, [key]: value }));
+
+  /** The non-secret fields the chosen provider asks for. The token is picked from Secrets. */
+  const configFields = (selected?.fields ?? []).filter((f) => !f.secret);
+  const missingRequired = configFields.some((f) => f.required && !values[f.key]?.trim());
 
   const connect = trpc.integration.connect.useMutation({
     onSuccess: () => {
       utils.integration.list.invalidate();
       setSecretId("");
-      setBaseUrl("");
+      setValues({});
     },
   });
 
@@ -98,8 +116,8 @@ export function IntegrationsSection() {
       <CardHeader>
         <CardTitle>Integrations</CardTitle>
         <CardDescription>
-          Connect GitHub or GitLab with a personal access token, then link a repository to import
-          its Issues and sync its branches and change requests.
+          Connect a provider with a personal access token, then link a repository to import its
+          Issues and sync its branches and change requests.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -107,23 +125,27 @@ export function IntegrationsSection() {
           className="space-y-4"
           onSubmit={(e) => {
             e.preventDefault();
+            if (!selected) return;
             connect.mutate({
-              provider,
+              provider: selected.id,
               secretId,
-              ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}),
+              ...(values.baseUrl?.trim() ? { baseUrl: values.baseUrl.trim() } : {}),
             });
           }}
         >
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="grid gap-2">
               <Label htmlFor="integration-provider">Provider</Label>
-              <Select value={provider} onValueChange={(v) => setProvider(v as ScmProvider)}>
+              <Select value={selected?.id ?? ""} onValueChange={setProvider}>
                 <SelectTrigger className="w-full" id="integration-provider">
-                  <SelectValue />
+                  <SelectValue placeholder="Select a provider" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="github">GitHub</SelectItem>
-                  <SelectItem value="gitlab">GitLab</SelectItem>
+                  {manifests.map((m) => (
+                    <SelectItem key={m.id} value={m.id}>
+                      {m.name}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -148,18 +170,34 @@ export function IntegrationsSection() {
               )}
             </div>
           </div>
-          <div className="grid gap-2">
-            <Label htmlFor="integration-base-url">
-              Base URL <span className="text-muted-foreground">(self-hosted only)</span>
-            </Label>
-            <Input
-              id="integration-base-url"
-              placeholder="e.g. https://github.example.com or https://gitlab.example.com"
-              value={baseUrl}
-              onChange={(e) => setBaseUrl(e.target.value)}
-            />
-          </div>
-          <Button type="submit" loading={connect.isPending} disabled={!secretId}>
+          {/*
+            The rest of the form is whatever this provider declares. It used to be one Base URL
+            field with both hosts named in its placeholder, offered to every provider — including
+            any that has no such concept, and useless to one that needs an account email beside
+            its token. Now the field, its help and whether it is required all come from the
+            manifest: Gitea's base URL is required because Gitea has no hosted instance to fall
+            back to, and GitHub's is not.
+          */}
+          {configFields.map((field) => (
+            <div className="grid gap-2" key={field.key}>
+              <Label htmlFor={`integration-${field.key}`}>
+                {field.label}
+                {!field.required && <span className="ml-1 text-muted-foreground">(optional)</span>}
+              </Label>
+              <Input
+                id={`integration-${field.key}`}
+                placeholder={field.placeholder ?? ""}
+                value={values[field.key] ?? ""}
+                onChange={(e) => setField(field.key, e.target.value)}
+              />
+              {field.help && <p className="text-muted-foreground text-xs">{field.help}</p>}
+            </div>
+          ))}
+          <Button
+            type="submit"
+            loading={connect.isPending}
+            disabled={!secretId || !selected || missingRequired}
+          >
             Connect
           </Button>
         </form>

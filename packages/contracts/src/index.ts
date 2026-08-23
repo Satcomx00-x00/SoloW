@@ -5,6 +5,7 @@ export * from "./errors.js";
 export * from "./events.js";
 export * from "./executor-config.js";
 export * from "./flag.js";
+export * from "./integration-provider.js";
 export * from "./issue.js";
 export * from "./mcp.js";
 export * from "./profile.js";

@@ -1,4 +1,5 @@
 import "server-only";
+import type { IntegrationCapability } from "@gatecontrol/contracts";
 import {
   type AutoSyncedRepositoryDto,
   type ChangeRequestDto,
@@ -33,8 +34,11 @@ import {
   secret,
 } from "@gatecontrol/db";
 import {
+  type DriverWith,
   type ExternalRepository,
+  isProviderInstalled,
   providerFor,
+  providerWith,
   type ScmCredential,
   type ScmProvider,
 } from "@gatecontrol/scm";
@@ -90,7 +94,7 @@ async function loadLinkedRepository(
 ): Promise<
   Result<
     typeof repository.$inferSelect & { integrationId: string; externalFullName: string },
-    typeof CommonErrorCode.NotFound | typeof IntegrationErrorCode.NotLinked
+    typeof CommonErrorCode.NotFound | IntegrationErrorCode
   >
 > {
   const [repo] = await ctx.db
@@ -162,13 +166,43 @@ async function insertRepositoryRow(
  * throws on a provider or DB failure so each caller decides for itself whether that failure
  * should abort its own unit of work or just be recorded and swallowed.
  */
+/**
+ * The driver for a stored provider, narrowed to the capability the caller is about to use.
+ *
+ * Every call below used to be `providerFor(id).listWhatever(...)`, on two assumptions the
+ * registry no longer lets stand: that an id always resolves, and that whatever it resolves to
+ * answers every question. Both are now ordinary states — an Integration can name a provider this
+ * build has no driver for (a Workspace written by a build that shipped one more), and a provider
+ * can be a tracker that has issues and no repositories at all (F21).
+ *
+ * They are told apart deliberately. "Your connection cannot list repositories" and "nothing here
+ * knows what that provider is" have different fixes, and one error code for both would send an
+ * Owner to reinstall something that is working exactly as declared.
+ */
+function driverWith<C extends IntegrationCapability>(
+  provider: string,
+  capability: C,
+): Result<DriverWith<C>, IntegrationErrorCode> {
+  const driver = providerWith(provider, capability);
+  if (driver) return ok(driver);
+  return err(
+    isProviderInstalled(provider)
+      ? IntegrationErrorCode.CapabilityUnavailable
+      : IntegrationErrorCode.ProviderUnavailable,
+  );
+}
+
 async function autoImportIssuesForRepository(
   ctx: RequestContext,
   provider: ScmProvider,
   credential: ScmCredential,
   repo: { id: string; externalFullName: string },
 ): Promise<number> {
-  const external = await providerFor(provider).listIssues(credential, repo.externalFullName);
+  const driver = driverWith(provider, "issues");
+  // This helper's contract is to throw and let each caller decide whether that aborts its unit
+  // of work; an Integration whose provider cannot list issues is the same kind of failure.
+  if (!driver.ok) throw new Error(`cannot import issues from ${provider}: ${driver.error}`);
+  const external = await driver.data.listIssues(credential, repo.externalFullName);
   if (external.length === 0) return 0;
 
   const imported = await importIssues(ctx, {
@@ -200,9 +234,14 @@ async function autoSyncNewIntegration(
   row: typeof integration.$inferSelect,
   credential: ScmCredential,
 ): Promise<AutoSyncedRepositoryDto[]> {
+  const driver = driverWith(row.provider, "repositories");
+  // A provider with no repositories to offer — a tracker — syncs nothing and is not an error:
+  // the Integration is connected and its issues are exactly what it was connected for.
+  if (!driver.ok) return [];
+
   let external: ExternalRepository[];
   try {
-    external = await providerFor(row.provider).listRepositories(credential);
+    external = await driver.data.listRepositories(credential);
   } catch {
     return [];
   }
@@ -263,6 +302,7 @@ export async function connectIntegration(
   Result<
     ConnectIntegrationResultDto,
     | typeof CommonErrorCode.NotFound
+    | typeof IntegrationErrorCode.ProviderUnavailable
     | typeof CommonErrorCode.ValidationFailed
     | typeof IntegrationErrorCode.AuthenticationFailed
   >
@@ -278,7 +318,12 @@ export async function connectIntegration(
     token: decryptForScmSync(secretRow.ciphertext),
     baseUrl: input.baseUrl ?? null,
   };
-  const auth = await providerFor(input.provider).authenticate(credential);
+  // `authenticate` is the one method every driver has, so this needs the provider and no
+  // particular capability — a connection refused for want of a driver is a different answer from
+  // one refused by the provider itself.
+  const driver = providerFor(input.provider);
+  if (!driver) return err(IntegrationErrorCode.ProviderUnavailable);
+  const auth = await driver.authenticate(credential);
   if (!auth.ok) return err(IntegrationErrorCode.AuthenticationFailed);
 
   const [row] = await ctx.db
@@ -398,11 +443,15 @@ export async function listIntegrations(ctx: RequestContext): Promise<Result<Inte
 export async function listExternalRepositories(
   ctx: RequestContext,
   input: ListExternalRepositoriesInput,
-): Promise<Result<ExternalRepositoryDto[], typeof CommonErrorCode.NotFound>> {
+): Promise<
+  Result<ExternalRepositoryDto[], typeof CommonErrorCode.NotFound | IntegrationErrorCode>
+> {
   const cred = await loadCredential(ctx, input.integrationId);
   if (!cred.ok) return err(CommonErrorCode.NotFound);
 
-  const external = await providerFor(cred.data.row.provider).listRepositories(cred.data.credential);
+  const driver = driverWith(cred.data.row.provider, "repositories");
+  if (!driver.ok) return err(driver.error);
+  const external = await driver.data.listRepositories(cred.data.credential);
 
   // Scoped to this Integration: two Integrations can legitimately expose the same full name
   // (a github.com account and a GitHub Enterprise host both having "acme/gate"), and marking
@@ -440,7 +489,7 @@ export async function listExternalRepositories(
 export async function importRepository(
   ctx: RequestContext,
   input: ImportRepositoryInput,
-): Promise<Result<RepositoryDto, typeof CommonErrorCode.NotFound>> {
+): Promise<Result<RepositoryDto, typeof CommonErrorCode.NotFound | IntegrationErrorCode>> {
   const cred = await loadCredential(ctx, input.integrationId);
   if (!cred.ok) return err(CommonErrorCode.NotFound);
 
@@ -457,7 +506,9 @@ export async function importRepository(
     .limit(1);
   if (existing) return ok(repositoryToDto(existing));
 
-  const external = await providerFor(cred.data.row.provider).listRepositories(cred.data.credential);
+  const driver = driverWith(cred.data.row.provider, "repositories");
+  if (!driver.ok) return err(driver.error);
+  const external = await driver.data.listRepositories(cred.data.credential);
   const picked = external.find((r) => r.fullName === input.externalFullName);
   if (!picked) return err(CommonErrorCode.NotFound);
 
@@ -487,10 +538,7 @@ export async function listExternalIssues(
   ctx: RequestContext,
   input: ListExternalIssuesInput,
 ): Promise<
-  Result<
-    ExternalIssuePreviewDto[],
-    typeof CommonErrorCode.NotFound | typeof IntegrationErrorCode.NotLinked
-  >
+  Result<ExternalIssuePreviewDto[], typeof CommonErrorCode.NotFound | IntegrationErrorCode>
 > {
   const repo = await loadLinkedRepository(ctx, input.repositoryId);
   if (!repo.ok) return repo;
@@ -498,10 +546,9 @@ export async function listExternalIssues(
   const cred = await loadCredential(ctx, repo.data.integrationId);
   if (!cred.ok) return err(CommonErrorCode.NotFound);
 
-  const external = await providerFor(cred.data.row.provider).listIssues(
-    cred.data.credential,
-    repo.data.externalFullName,
-  );
+  const driver = driverWith(cred.data.row.provider, "issues");
+  if (!driver.ok) return err(driver.error);
+  const external = await driver.data.listIssues(cred.data.credential, repo.data.externalFullName);
 
   // Scoped to this Repository, not the whole Integration: GitLab's issue `iid` restarts per
   // project, so two Repositories on one Integration can share an externalId that means two
@@ -527,19 +574,16 @@ export async function listExternalIssues(
 export async function importIssues(
   ctx: RequestContext,
   input: ImportIssuesInput,
-): Promise<
-  Result<IssueDto[], typeof CommonErrorCode.NotFound | typeof IntegrationErrorCode.NotLinked>
-> {
+): Promise<Result<IssueDto[], typeof CommonErrorCode.NotFound | IntegrationErrorCode>> {
   const repo = await loadLinkedRepository(ctx, input.repositoryId);
   if (!repo.ok) return repo;
 
   const cred = await loadCredential(ctx, repo.data.integrationId);
   if (!cred.ok) return err(CommonErrorCode.NotFound);
 
-  const external = await providerFor(cred.data.row.provider).listIssues(
-    cred.data.credential,
-    repo.data.externalFullName,
-  );
+  const driver = driverWith(cred.data.row.provider, "issues");
+  if (!driver.ok) return err(driver.error);
+  const external = await driver.data.listIssues(cred.data.credential, repo.data.externalFullName);
   const selected = new Set(input.externalIds);
   const toImport = external.filter((i) => selected.has(i.externalId));
   const syncedAt = new Date().toISOString();
@@ -585,7 +629,7 @@ export async function syncRepositorySignals(
 ): Promise<
   Result<
     { changeRequests: ChangeRequestDto[]; branches: RepositoryBranchDto[] },
-    typeof CommonErrorCode.NotFound | typeof IntegrationErrorCode.NotLinked
+    typeof CommonErrorCode.NotFound | IntegrationErrorCode
   >
 > {
   const repo = await loadLinkedRepository(ctx, input.repositoryId);
@@ -594,10 +638,15 @@ export async function syncRepositorySignals(
   const cred = await loadCredential(ctx, repo.data.integrationId);
   if (!cred.ok) return err(CommonErrorCode.NotFound);
 
-  const driver = providerFor(cred.data.row.provider);
+  // Two capabilities, asked for separately: a provider could plausibly offer branches and no
+  // change requests, and this is the call that would find out.
+  const changes = driverWith(cred.data.row.provider, "changeRequests");
+  if (!changes.ok) return err(changes.error);
+  const repos = driverWith(cred.data.row.provider, "repositories");
+  if (!repos.ok) return err(repos.error);
   const [externalCrs, externalBranches] = await Promise.all([
-    driver.listChangeRequests(cred.data.credential, repo.data.externalFullName),
-    driver.listBranches(cred.data.credential, repo.data.externalFullName),
+    changes.data.listChangeRequests(cred.data.credential, repo.data.externalFullName),
+    repos.data.listBranches(cred.data.credential, repo.data.externalFullName),
   ]);
   const syncedAt = new Date().toISOString();
 

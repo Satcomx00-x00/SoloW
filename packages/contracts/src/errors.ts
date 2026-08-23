@@ -55,6 +55,21 @@ export const IntegrationErrorCode = {
   AuthenticationFailed: "INTEGRATION_AUTHENTICATION_FAILED",
   /** A Repository has no linked Integration to sync from. */
   NotLinked: "INTEGRATION_NOT_LINKED",
+  /**
+   * The Integration names a provider this build has no driver for — an orphan (F21 FR-7).
+   *
+   * Reachable because `integration.provider` stores an id rather than a member of a closed enum,
+   * which is what lets a Workspace written by a build shipping a fourth provider still open in
+   * one that does not. The row is readable; nothing can be done through it.
+   */
+  ProviderUnavailable: "INTEGRATION_PROVIDER_UNAVAILABLE",
+  /**
+   * The provider is installed and does not do this. Distinct from `ProviderUnavailable` on
+   * purpose: "your Jira connection cannot list repositories" and "nothing here knows what Jira
+   * is" are different problems with different fixes, and collapsing them would tell an Owner to
+   * reinstall something that is working correctly.
+   */
+  CapabilityUnavailable: "INTEGRATION_CAPABILITY_UNAVAILABLE",
 } as const;
 export type IntegrationErrorCode = (typeof IntegrationErrorCode)[keyof typeof IntegrationErrorCode];
 

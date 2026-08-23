@@ -6,6 +6,7 @@ import { ChevronRight, ListFilter, Search, TriangleAlert, X } from "lucide-react
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
+import { useProviderNames } from "@/components/hooks/use-provider-names";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,10 +24,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  ISSUE_SOURCE_LABELS,
   ISSUE_STATUS_LABELS,
   ISSUE_STATUS_STYLE,
   ISSUE_STATUSES,
+  issueSourceLabel,
 } from "@/lib/issue-status";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
@@ -273,6 +274,7 @@ function IssueRow({ issue }: { issue: IssueDto }) {
 }
 
 export function IssuesView() {
+  const providerName = useProviderNames();
   const router = useRouter();
   const params = useSearchParams();
   const filters = readFilters(new URLSearchParams(params.toString()));
@@ -354,7 +356,9 @@ export function IssuesView() {
             {narrowed && (
               <p className="text-muted-foreground text-xs">
                 {issues.data.length === 1 ? "1 issue" : `${issues.data.length} issues`}
-                {filters.source ? ` · ${ISSUE_SOURCE_LABELS[filters.source]}` : ""}
+                {filters.source
+                  ? ` · ${issueSourceLabel(filters.source, providerName(filters.source))}`
+                  : ""}
               </p>
             )}
             <ul className="space-y-2">

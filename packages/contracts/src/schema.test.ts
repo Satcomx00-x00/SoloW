@@ -36,9 +36,16 @@ describe("connectIntegrationInput (issue #15)", () => {
     expect(res.success).toBe(true);
   });
 
-  it("rejects an unknown provider", () => {
-    const res = connectIntegrationInput.safeParse({ provider: "bitbucket", secretId: "sec_1" });
-    expect(res.success).toBe(false);
+  it("accepts a provider id it has never heard of, and refuses one that is not an id", () => {
+    // Whether a provider is *installed* is the registry's question, answered where the driver is
+    // resolved — this schema's job is only that the id could name one. Deciding it here would
+    // put the list of installed providers back into contracts, which is what F21 removed.
+    expect(
+      connectIntegrationInput.safeParse({ provider: "gitea", secretId: "sec_1" }).success,
+    ).toBe(true);
+    expect(
+      connectIntegrationInput.safeParse({ provider: "Bit Bucket", secretId: "sec_1" }).success,
+    ).toBe(false);
   });
 
   it("rejects a baseUrl that is not a URL", () => {

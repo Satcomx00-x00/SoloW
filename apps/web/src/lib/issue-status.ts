@@ -1,4 +1,4 @@
-import type { IssueSource, IssueStatus } from "@gatecontrol/contracts";
+import { type IssueSource, type IssueStatus, LOCAL_ISSUE_SOURCE } from "@gatecontrol/contracts";
 import {
   CircleCheck,
   CircleDashed,
@@ -57,11 +57,20 @@ export const ISSUE_STATUS_STYLE: Record<IssueStatus, IssueStatusStyle> = {
 export const ISSUE_STATUSES: readonly IssueStatus[] = ["open", "in_progress", "resolved", "closed"];
 
 /**
- * How each source is spelled where a person reads it. A CSS `capitalize` on the raw enum gets
- * "Github" and "Gitlab" wrong, and those are the two names on screen most often.
+ * How a source is spelled where a person reads it.
+ *
+ * This was a total `Record` over a closed enum, which is exactly what a registry cannot have: the
+ * set of providers is no longer known here, and a `Record` missing a key renders `undefined` on
+ * screen. So the name comes from the provider's own manifest — `useProviderNames` fetches them —
+ * and this falls back to the id itself when there is none.
+ *
+ * The fallback is the whole of F21 FR-7 in one line. An Issue imported by a build that shipped a
+ * Jira driver, opened in one that does not, reads `jira`: not the prettiest label, and a great
+ * deal better than `undefined` or a page that will not render. A CSS `capitalize` is deliberately
+ * not applied — it would turn `github` into "Github", which is wrong, and the manifest is what
+ * knows the right spelling.
  */
-export const ISSUE_SOURCE_LABELS: Record<IssueSource, string> = {
-  local: "Local",
-  github: "GitHub",
-  gitlab: "GitLab",
-};
+export function issueSourceLabel(source: IssueSource, providerName?: string | null): string {
+  if (source === LOCAL_ISSUE_SOURCE) return "Local";
+  return providerName ?? source;
+}

@@ -11,7 +11,7 @@ import {
   type UpdateRepositorySetupInput,
 } from "@gatecontrol/contracts";
 import { decryptForScmSync, integration, repository, secret } from "@gatecontrol/db";
-import { providerFor, type ScmCredential } from "@gatecontrol/scm";
+import { isProviderInstalled, providerWith, type ScmCredential } from "@gatecontrol/scm";
 import { and, desc, eq } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
 import { repositoryToDto } from "./mappers.js";
@@ -85,7 +85,9 @@ async function loadRepositoryCredential(
   repositoryId: string,
 ): Promise<
   Result<
-    { provider: "github" | "gitlab"; credential: ScmCredential; externalFullName: string },
+    // The provider is whatever the row holds, not a member of a pair. Whether this build has a
+    // driver for it is the caller's question, asked of the registry (F21).
+    { provider: string; credential: ScmCredential; externalFullName: string },
     typeof CommonErrorCode.NotFound | typeof IntegrationErrorCode.NotLinked
   >
 > {
@@ -121,25 +123,29 @@ async function loadRepositoryCredential(
 }
 
 /**
- * A linked Repository's real labels, for the Issue label picker (issue #15 reversal). Only
- * meaningful for a Repository linked to a GitHub/GitLab Integration — a local-path Repository
- * has nothing to fetch, which is exactly what `IntegrationErrorCode.NotLinked` communicates.
+ * A linked Repository's real labels, for the Issue label picker (issue #15 reversal).
+ *
+ * Only meaningful for a Repository linked to an Integration whose provider carries labels — a
+ * local-path Repository has nothing to fetch, which is what `NotLinked` communicates, and a
+ * provider that does not declare the issues capability has no label vocabulary to offer, which
+ * is what `CapabilityUnavailable` communicates. Two different reasons for an empty picker, and
+ * an Owner can act on exactly one of them.
  */
 export async function listRepositoryLabels(
   ctx: RequestContext,
   repositoryId: string,
-): Promise<
-  Result<
-    RepositoryLabelDto[],
-    typeof CommonErrorCode.NotFound | typeof IntegrationErrorCode.NotLinked
-  >
-> {
+): Promise<Result<RepositoryLabelDto[], typeof CommonErrorCode.NotFound | IntegrationErrorCode>> {
   const resolved = await loadRepositoryCredential(ctx, repositoryId);
   if (!resolved.ok) return resolved;
 
-  const labels = await providerFor(resolved.data.provider).listLabels(
-    resolved.data.credential,
-    resolved.data.externalFullName,
-  );
+  const driver = providerWith(resolved.data.provider, "issues");
+  if (!driver) {
+    return err(
+      isProviderInstalled(resolved.data.provider)
+        ? IntegrationErrorCode.CapabilityUnavailable
+        : IntegrationErrorCode.ProviderUnavailable,
+    );
+  }
+  const labels = await driver.listLabels(resolved.data.credential, resolved.data.externalFullName);
   return ok(labels);
 }

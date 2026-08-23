@@ -31,6 +31,7 @@ import {
   logWorktreeBinding,
   withRunContext,
 } from "@gatecontrol/observability";
+import { cloneUsernameFor } from "@gatecontrol/scm";
 import { z } from "zod";
 import { worktreeNameForTask } from "../../agent/claude-code-runner.js";
 import {
@@ -83,12 +84,6 @@ import { toTaskEvent } from "../../ws/replay.js";
 import { inngest } from "../client.js";
 
 /**
- * The username each provider expects on an https clone. Both authenticate on the token and
- * ignore this, but sending what they document costs nothing and stops the pair looking arbitrary.
- */
-const CLONE_USERNAME = { github: "x-access-token", gitlab: "oauth2" } as const;
-
-/**
  * The credential for cloning one of the Task's Repositories, or undefined when it needs none.
  *
  * Per binding, not per Task: two attachments can come from two different Integrations, and a
@@ -97,7 +92,11 @@ const CLONE_USERNAME = { github: "x-access-token", gitlab: "oauth2" } as const;
 function cloneCredentialFor(binding: TaskRepositoryBinding): CloneCredential | undefined {
   if (!binding.scmClone) return undefined;
   return {
-    username: CLONE_USERNAME[binding.scmClone.provider],
+    // Read off the provider's registration rather than a table maintained here: this was one of
+    // the eight places a third provider had to be added to, and it is now the registry's answer
+    // (F21 FR-9). An unregistered provider still clones — `git` is the conventional username and
+    // every host here ignores it anyway, authenticating on the token.
+    username: cloneUsernameFor(binding.scmClone.provider),
     token: decryptForScmSync(binding.scmClone.secretCiphertext),
   };
 }
