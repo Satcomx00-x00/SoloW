@@ -598,6 +598,23 @@ describe("runTaskLifecycle (integration)", () => {
     expect(board.every((p) => p.event["kind"] === "status")).toBe(true);
   });
 
+  it("announces a state change to the Task's own channel as well as the board", async () => {
+    // The bug: it went to the board alone, so the Task page — the one place dedicated to this
+    // very Task — kept saying the agent was writing until somebody reloaded. Every `diff` already
+    // went to both; the status was the one that did not.
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const { deps, spies } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    const task = spies.published.filter(
+      (p) =>
+        p.channel === `ws:${ids.workspaceId}:task:${ids.taskId}` && p.event["kind"] === "status",
+    );
+    expect(task.map((p) => p.event["state"])).toEqual(["review", "done"]);
+  });
+
   it("a Task's events are invisible to another Workspace's replay (Principle V)", async () => {
     const a = freshIds();
     const b = freshIds();

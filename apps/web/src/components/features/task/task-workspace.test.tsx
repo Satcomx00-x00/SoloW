@@ -772,3 +772,51 @@ describe("TaskWorkspace todo checklist", () => {
     expect(screen.queryByText("Writing the fix")).toBeNull();
   });
 });
+
+/**
+ * The page following its own Task's state, without a reload.
+ *
+ * The report: "the Writing animation is still happening when I stay on the page, but disappears
+ * when reloading." True, and the cause was one line in the orchestrator — a state change was
+ * announced on the Workspace board channel alone, so the board updated instantly and the page
+ * dedicated to that very Task never heard it. Everything this page derives from the Task's state
+ * was therefore correct only on a fresh load: the activity line, the review gate, and whether the
+ * composer would still offer to steer an agent that had already stopped.
+ *
+ * One test, because they are one fact: the Task's own channel now carries the status, and this
+ * page acts on it. The review gate is the assertion because it is the consequence an operator is
+ * actually waiting for.
+ */
+describe("TaskWorkspace live state", () => {
+  it("opens the review gate on a status event, with no reload", async () => {
+    // `task.get` answers differently after the run ends, exactly as the server's does.
+    let state = "running";
+    renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
+      "task.get": () => task({ state: state as "running" }),
+      "session.listForTask": () => [session],
+      "session.get": () =>
+        detail([{ kind: "assistant_turn", text: "still going", thinking: false }]),
+      "stream.ticket": () => ({
+        url: "ws://hub.test/?ticket=t",
+        expiresAt: "2026-01-01T00:01:00.000Z",
+      }),
+    });
+
+    await screen.findByText("still going");
+    await waitFor(() => expect(sockets[0]).toBeDefined());
+    // Nothing to decide while it runs.
+    expect(screen.queryByRole("button", { name: /Approve/ })).toBeNull();
+
+    state = "review";
+    act(() =>
+      sockets[0]?.emit({
+        kind: "status",
+        taskId: TASK_ID,
+        state: "review",
+        at: "2026-01-01T00:00:05.000Z",
+      }),
+    );
+
+    expect(await screen.findByRole("button", { name: /Approve/ })).toBeDefined();
+  });
+});

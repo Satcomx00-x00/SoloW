@@ -114,6 +114,7 @@ function fakeHub() {
       published.push({ channel, msg });
     },
     boardChannel: (workspaceId: string) => `board:${workspaceId}`,
+    taskChannel: (workspaceId: string, taskId: string) => `task:${workspaceId}:${taskId}`,
   };
 }
 
@@ -151,14 +152,17 @@ describe("reclaimOrphanedRuns", () => {
     });
   });
 
-  it("announces the change on the Workspace's board channel", async () => {
+  it("announces the change to the board and to the Task's own page", async () => {
+    // Both, because the person most likely to be waiting on this reclaim is looking at the Task
+    // itself — and that page subscribes to the task channel, which this used to skip.
     const db = createTestDb();
     await seedTask(db, { taskId: "task-1" });
     const hub = fakeHub();
 
     await reclaimOrphanedRuns(db, fakeRegistry(), hub, LONG_AFTER);
 
-    expect(hub.published).toHaveLength(1);
+    expect(hub.published.map((p) => p.channel)).toEqual([`board:${WS}`, `task:${WS}:task-1`]);
+    expect(hub.published[1]?.msg).toMatchObject({ kind: "status", state: "failed" });
     expect(hub.published[0]?.channel).toBe(`board:${WS}`);
     expect(hub.published[0]?.msg).toMatchObject({
       kind: "status",

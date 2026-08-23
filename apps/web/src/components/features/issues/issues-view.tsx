@@ -5,8 +5,9 @@ import { CommonErrorCode } from "@gatecontrol/contracts";
 import { ChevronRight, ListFilter, Search, TriangleAlert, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useProviderNames } from "@/components/hooks/use-provider-names";
+import { useEventStream } from "@/components/hooks/use-task-stream";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -291,6 +292,17 @@ export function IssuesView() {
   // The whole vocabulary, not the labels of what survived the current filter — otherwise
   // choosing one label would delete every other option from the menu that offered it.
   const labels = trpc.issue.labels.useQuery({});
+  const utils = trpc.useUtils();
+
+  /**
+   * The same reasoning as the Issue page: a status here is derived from Tasks, and a Task that
+   * finishes elsewhere changes what this list says about the Issue above it — its status, and
+   * how many of its Tasks are still active.
+   */
+  const onStatus = useCallback(() => {
+    utils.issue.list.invalidate();
+  }, [utils]);
+  useEventStream({ onEvent: onStatus });
 
   const narrowed = Boolean(
     filters.status || filters.query || filters.labels.length || filters.source,

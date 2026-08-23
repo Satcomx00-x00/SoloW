@@ -485,14 +485,25 @@ export async function runTaskLifecycle(
   const channel = deps.hub.taskChannel(workspaceId, taskId);
   const boardChannel = deps.hub.boardChannel(workspaceId);
 
-  /** Announce a Task state change on the Workspace board channel (the SPA board listens here). */
-  const announce = (state: TaskState) =>
-    deps.hub.publish(boardChannel, {
-      kind: "status",
-      taskId,
-      state,
-      at: new Date().toISOString(),
-    });
+  /**
+   * Announce a Task state change to everyone watching it.
+   *
+   * Both channels, and the second one is the bug this replaces. It published to the board channel
+   * alone, on the reasoning that the board is what shows Task states — but the Task page shows
+   * one too, and it subscribes to the *task* channel. So a run that finished, failed or parked
+   * updated the board instantly and left the page dedicated to that very Task claiming the agent
+   * was still writing, until somebody reloaded. Every `diff` on the line below already went to
+   * both; the status was the one that did not.
+   *
+   * Published twice rather than having the page subscribe to the board channel as well: a Task
+   * page would then receive every state change in the Workspace and filter for its own, which is
+   * a subscription to other people's work in order to learn about your own.
+   */
+  const announce = (state: TaskState) => {
+    const message = { kind: "status" as const, taskId, state, at: new Date().toISOString() };
+    deps.hub.publish(boardChannel, message);
+    deps.hub.publish(channel, message);
+  };
 
   /**
    * Record a transition in the session log as well as announcing it (issue #2).

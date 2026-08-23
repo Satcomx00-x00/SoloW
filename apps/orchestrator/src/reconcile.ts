@@ -58,7 +58,7 @@ export const RECLAIM_STALE_MS = 10 * 60 * 1000;
 export async function reclaimOrphanedRuns(
   db: Db,
   registry: Pick<AgentRegistry, "get">,
-  hub: Pick<EventHub, "publish" | "boardChannel">,
+  hub: Pick<EventHub, "publish" | "boardChannel" | "taskChannel">,
   now: () => Date = () => new Date(),
 ): Promise<number> {
   const running = await db
@@ -106,12 +106,17 @@ export async function reclaimOrphanedRuns(
         payload: { kind: "state", from: "running", to: "failed", reason: INTERRUPTED_REASON },
       });
     }
-    hub.publish(hub.boardChannel(row.workspaceId), {
-      kind: "status",
+    // Both channels, as `announce` in task-run.ts does: whoever is looking at this Task's own
+    // page is the person most likely to be waiting on this reclaim, and they were the ones it
+    // never reached.
+    const message = {
+      kind: "status" as const,
       taskId: row.id,
-      state: "failed",
+      state: "failed" as const,
       at: endedAt,
-    });
+    };
+    hub.publish(hub.boardChannel(row.workspaceId), message);
+    hub.publish(hub.taskChannel(row.workspaceId, row.id), message);
     reclaimed += 1;
   }
   return reclaimed;

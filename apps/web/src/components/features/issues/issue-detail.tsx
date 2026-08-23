@@ -4,9 +4,11 @@ import type { TaskDependencyDto } from "@gatecontrol/contracts";
 import { ArrowLeft, ExternalLink, Pencil, Trash2, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useCallback } from "react";
 import { TaskCard } from "@/components/features/board/task-card";
 import { TaskStateBadge } from "@/components/features/board/task-state-badge";
 import { useProviderNames } from "@/components/hooks/use-provider-names";
+import { useEventStream } from "@/components/hooks/use-task-stream";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { issueSourceLabel } from "@/lib/issue-status";
@@ -25,12 +27,30 @@ import { IssueStatusControl } from "./issue-status-control";
 export function IssueDetail({ issueId }: { issueId: string }) {
   const providerName = useProviderNames();
   const router = useRouter();
+  const utils = trpc.useUtils();
   const issue = trpc.issue.get.useQuery({ id: issueId });
   const tasks = trpc.task.list.useQuery({ issueId }, { enabled: issue.isSuccess });
   // The Workspace's `blocked_by` edges (issue #6), so a blocked Task reads as blocked here too
   // rather than only on the board. Waited on rather than defaulted to empty: a card drawn before
   // the edges land would say "ready to run" about work that cannot run (AC-4).
   const dependencies = trpc.task.dependencies.useQuery({}, { enabled: issue.isSuccess });
+
+  /**
+   * An Issue's status is derived from the Tasks under it, so this page is stale the moment one of
+   * them advances — and it had no live subscription at all. A run finishing on another tab left
+   * the status pill, the Task rows and the blocked/unblocked dimming all showing the world as it
+   * was when the page was opened.
+   *
+   * Subscribed to the Workspace channel rather than to each Task's: this page shows every Task
+   * under the Issue, so it wants "something in this Workspace moved", which is exactly what the
+   * board channel carries.
+   */
+  const onStatus = useCallback(() => {
+    utils.issue.get.invalidate({ id: issueId });
+    utils.task.list.invalidate();
+    utils.task.dependencies.invalidate();
+  }, [utils, issueId]);
+  useEventStream({ onEvent: onStatus });
 
   if (issue.isLoading) {
     return (

@@ -105,14 +105,34 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
     { enabled: Boolean(latest?.id) },
   );
 
-  // Live agent stream (TASK-018): output arrives as the agent produces it, and a state change
-  // refetches the Task so the review gate opens without a reload. Replay on reconnect means the
-  // terminal keeps its history across a dropped connection.
+  /**
+   * Live agent stream (TASK-018). Output arrives as the agent produces it; this is about
+   * everything *around* the output, which the transcript does not carry.
+   *
+   * The rule the page needs is that nothing here is ever true only after a reload. Two things
+   * broke it. The orchestrator announced state changes on the board channel alone, so a run that
+   * finished left this page — the one dedicated to that Task — saying the agent was still
+   * writing; that is fixed on the publishing side. And this handler never invalidated
+   * `session.get`, which is where the diffs, the summaries and the persisted events live: a
+   * `diff` event arrived, the Task refetched, and the Changes panel beside it kept showing the
+   * previous round's files.
+   *
+   * `session.get` is keyed by session id and the Session that matters can *change* — a
+   * `request_changes` opens a new one — so the invalidation is unkeyed on purpose. Naming
+   * `latest.id` would refresh the Session this render happens to know about, which is precisely
+   * the one that has just been superseded.
+   */
   const onLive = useCallback(
     (event: TaskEvent) => {
       if (event.kind === "status" || event.kind === "diff") {
         utils.task.get.invalidate({ id: taskId });
         utils.session.listForTask.invalidate({ taskId });
+        utils.session.get.invalidate();
+        // The Issue above this Task derives its status from the Tasks under it, so a run that
+        // finishes changes what the Issues list and the board card would say. Both are a
+        // navigation away and would otherwise be stale on arrival.
+        utils.issue.list.invalidate();
+        utils.task.list.invalidate();
       }
     },
     [utils, taskId],
