@@ -33,6 +33,7 @@ differentiator) · **Later** (planned after first release).
 | [F18](./F18-onboarding-setup-workflow.md) | First-Run Onboarding & Setup Workflow | Core | J6, J10 |
 | [F19](./F19-extension-contributions.md) | Extension Contributions | Core | J4, J10 |
 | [F20](./F20-agent-widgets.md) | Agent Widgets | Core | J4, J10 |
+| [F21](./F21-integration-providers.md) | Integration Providers | Core | J2, J10 |
 
 ## Specification template
 
