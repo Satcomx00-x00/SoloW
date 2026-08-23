@@ -574,15 +574,15 @@ describe("runTaskLifecycle (integration)", () => {
         .where(eq(sessionEvent.sessionId, ids.sessionId))
         .orderBy(asc(sessionEvent.seq))
     ).filter((e) => e.kind === "assistant_turn");
-    // Round 0 writes seq 0; the review gate then records the transition and the diff, and the
-    // resume records another transition, so round 1's turn lands at seq 4 (issue #2 added the
-    // `state` records — the sequence itself is unchanged, there is simply more in it).
-    expect(logged.map((e) => e.seq)).toEqual([0, 4]);
+    // Round 0 writes seq 0; the agent-finished marker, the review gate's transition and its diff
+    // follow, and the resume records another transition — so round 1's turn lands at seq 5. The
+    // sequence itself is unchanged; there is simply more in it than there was.
+    expect(logged.map((e) => e.seq)).toEqual([0, 5]);
 
     // Every event shares one `seq` sequence, diffs and transitions included, so a client
     // resuming from a cursor gets each of them exactly once and in order.
     const missed = await listTaskEventsSince(db, ids.workspaceId, ids.taskId, 0);
-    expect(missed.map((e) => e.seq)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(missed.map((e) => e.seq)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
   });
 
   it("announces Task state changes on the Workspace board channel", async () => {
@@ -624,8 +624,9 @@ describe("runTaskLifecycle (integration)", () => {
 
     await runTaskLifecycle(deps, { event: { data: a }, step: scriptedStep(["approve"]) });
 
-    // One agent turn, the two transitions the run recorded, and the diff captured at the gate.
-    expect(await listTaskEventsSince(db, a.workspaceId, a.taskId, -1)).toHaveLength(4);
+    // One agent turn, the marker saying it finished, the two transitions the run recorded, and
+    // the diff captured at the gate.
+    expect(await listTaskEventsSince(db, a.workspaceId, a.taskId, -1)).toHaveLength(5);
     expect(await listTaskEventsSince(db, b.workspaceId, a.taskId, -1)).toHaveLength(0);
   });
 
@@ -753,6 +754,38 @@ describe("runTaskLifecycle (integration)", () => {
     expect(payloads.filter((p) => p.kind === "tool_result").map((p) => p.callId)).toEqual([
       "call-1",
     ]);
+  });
+
+  it("writes the agent-finished marker before the step that moves the Task to review", async () => {
+    /*
+     * The ordering that decides whether a clean run can end up in the Failed column.
+     *
+     * Completion used to exist only as the run function's return value — real, in memory, and
+     * recorded nowhere until `to-review` acted on it two steps later. Anything that lost the run
+     * in between left no evidence the agent had ever finished, and the reclaim sweep, unable to
+     * tell that from dying mid-work, filed it as a failure. The marker has to be in the log
+     * *before* the transition, or it is not worth having.
+     */
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const { deps } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    const rows = await db
+      .select()
+      .from(sessionEvent)
+      .where(eq(sessionEvent.sessionId, ids.sessionId))
+      .orderBy(asc(sessionEvent.seq));
+    const payloads = rows.map((e) => e.payload as { kind: string; to?: string; branch?: string });
+
+    const doneAt = payloads.findIndex((p) => p.kind === "agent_done");
+    const reviewAt = payloads.findIndex((p) => p.kind === "state" && p.to === "review");
+    expect(doneAt).toBeGreaterThanOrEqual(0);
+    // Strictly before, which is the whole property.
+    expect(doneAt).toBeLessThan(reviewAt);
+    // And it carries the branch, because that is what a sweep would need to finish the job.
+    expect(payloads[doneAt]?.branch).toBeTruthy();
   });
 
   it("records a state transition once when a retried step body records it again", async () => {
@@ -2302,6 +2335,40 @@ describe("task-run widgets", () => {
       .set({ enabledFlags: { "ff-agent-widgets": true } })
       .where(eq(workspace.id, ids.workspaceId));
   }
+
+  it("records what the agent said about stopping, when it said anything", async () => {
+    // Without a `task_complete` the marker still gets written — the fix must not depend on an
+    // agent knowing GateControl exists — so this is about the enrichment, not the mechanism.
+    const ids = freshIds();
+    await seedRun(db, ids);
+    await enableWidgets(ids);
+    const report = '{"kind":"task_complete","outcome":"nothing_to_do","summary":"Already pinned."}';
+    const runner = new ScriptedRunner(
+      [{ kind: "completed" }],
+      [
+        {
+          kind: "stdout",
+          channel: "assistant",
+          text: `Nothing needed.\n\`\`\`gatecontrol:widget\n${report}\n\`\`\``,
+        },
+      ],
+    );
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    const payloads = (
+      await db
+        .select()
+        .from(sessionEvent)
+        .where(eq(sessionEvent.sessionId, ids.sessionId))
+        .orderBy(asc(sessionEvent.seq))
+    ).map((e) => e.payload as { kind: string; outcome?: string; summary?: string });
+
+    const marker = payloads.find((p) => p.kind === "agent_done");
+    expect(marker?.outcome).toBe("nothing_to_do");
+    expect(marker?.summary).toBe("Already pinned.");
+  });
 
   it("records a fenced emission as a widget event and keeps it out of the prose", async () => {
     const ids = freshIds();

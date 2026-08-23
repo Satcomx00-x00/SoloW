@@ -42,8 +42,29 @@ import { appRouter } from "../routers/index.js";
  *   loop that produces one Session per Step, so a completion report can be attributed to the Step
  *   it came from and checked against it. Until then the namespace is withheld by decision rather
  *   than admitted by omission, which is what the rest of this list records.
+ * - `review` — its only procedure is `decide`, which is the review gate itself. The paragraph
+ *   above rejected `workflow.advanceTask` for letting a token sign off its own Step; this is the
+ *   same act, one level down and more directly: approving the change an agent just wrote. The
+ *   gate exists because the party that did the work is not the party that rules on it
+ *   (Principle I), and a gate the subject can open is not a gate.
+ *
+ *   Withheld now, while it is still only latent — the orchestrator hands its agents no MCP
+ *   configuration at all today (`packages/acp/src/session.ts` sends `mcpServers: []`), so nothing
+ *   has ever been able to reach this. Issue #75's task-scoped surface is the change that would
+ *   make it reachable, and a rule added *with* that surface is a rule written after the fact. An
+ *   agent may now report how its run ended — `task_complete` in `widget.ts` — which is the half
+ *   of this it should have. `task` stays exposed: `task.create`, `task.list` and `task.launch`
+ *   are the work management this surface exists for, and withholding the namespace to reach
+ *   `task.move` would take all of it.
  */
-const WITHHELD_NAMESPACES = new Set(["secret", "stream", "mcpToken", "preference", "workflow"]);
+const WITHHELD_NAMESPACES = new Set([
+  "secret",
+  "stream",
+  "mcpToken",
+  "preference",
+  "workflow",
+  "review",
+]);
 
 export interface McpToolDefinition {
   /** MCP tool name — the tRPC path with `.` swapped for `_` (`issue.get` → `issue_get`). */

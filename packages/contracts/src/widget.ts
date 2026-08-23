@@ -131,6 +131,7 @@ export const WIDGET_CATALOG = {
   image_search: { family: "domain", status: "planned" },
   // Meta / install.
   present_files: { family: "meta", status: "implemented" },
+  task_complete: { family: "meta", status: "implemented" },
   suggest_connectors: { family: "meta", status: "planned" },
   suggest_plugin_install: { family: "meta", status: "planned" },
   suggest_skills: { family: "meta", status: "planned" },
@@ -232,6 +233,46 @@ export const presentFilesWidget = z.object({
 });
 
 /**
+ * How a run ended, in the agent's own words (`task_complete`).
+ *
+ * The one thing an agent could never say. Its whole vocabulary for finishing was *stopping*, so
+ * an agent that had done the work, one that ran out of context, and one that decided there was
+ * nothing to do all exited the same way and were all read as "completed" — the orchestrator's
+ * only other source was the agent's stderr, matched against regexes for the word "quota".
+ *
+ * Deliberately a *report*, never a decision. It does not move the Task to `done`, and it must
+ * not: the review gate exists because the party that did the work is not the party that signs it
+ * off (Principle I). It carries the run to the gate with a reason attached, and a person opens
+ * it. This is the same line the MCP surface draws by withholding `review.decide` — an agent may
+ * say what happened and may not rule on it.
+ */
+export const taskCompletionOutcomeSchema = z.enum([
+  /** Work was done and is ready to look at. The ordinary ending. */
+  "changes_ready",
+  /**
+   * The agent finished and produced nothing — the brief was already satisfied, or was a question
+   * rather than a change. Distinct from failure, and distinct from work: opening a review gate on
+   * an empty diff asks somebody to approve nothing.
+   */
+  "nothing_to_do",
+  /**
+   * The agent stopped because it could not continue — a missing credential, a decision it is not
+   * allowed to make, a dependency that is not there. It is not claiming its own work is good; it
+   * is saying why there is none.
+   */
+  "blocked",
+]);
+export type TaskCompletionOutcome = z.infer<typeof taskCompletionOutcomeSchema>;
+
+/** The agent reporting how its run ended (`task_complete`). Presentational — nothing to answer. */
+export const taskCompleteWidget = z.object({
+  kind: z.literal("task_complete"),
+  outcome: taskCompletionOutcomeSchema,
+  /** What the agent wants the reviewer to know before opening the diff. */
+  summary: z.string().max(2000).optional(),
+});
+
+/**
  * An emission this build cannot draw: a catalogued widget that is still `planned`, or a payload
  * that failed its own schema. Produced only by `parseWidget` — an agent never sends this kind.
  *
@@ -253,6 +294,7 @@ export const widgetSchema = z.discriminatedUnion("kind", [
   optionsCardWidget,
   stepCardWidget,
   presentFilesWidget,
+  taskCompleteWidget,
   unsupportedWidget,
 ]);
 export type Widget = z.infer<typeof widgetSchema>;

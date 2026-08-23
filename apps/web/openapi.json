@@ -9737,7 +9737,8 @@
                               "diff",
                               "widget",
                               "widget_response",
-                              "todos"
+                              "todos",
+                              "agent_done"
                             ]
                           },
                           "payload": {
@@ -10400,6 +10401,33 @@
                                           "kind": {
                                             "type": "string",
                                             "enum": [
+                                              "task_complete"
+                                            ]
+                                          },
+                                          "outcome": {
+                                            "type": "string",
+                                            "enum": [
+                                              "changes_ready",
+                                              "nothing_to_do",
+                                              "blocked"
+                                            ]
+                                          },
+                                          "summary": {
+                                            "type": "string",
+                                            "maxLength": 2000
+                                          }
+                                        },
+                                        "required": [
+                                          "kind",
+                                          "outcome"
+                                        ]
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": [
                                               "unsupported"
                                             ]
                                           },
@@ -10470,6 +10498,42 @@
                                 "required": [
                                   "kind",
                                   "items"
+                                ]
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "agent_done"
+                                    ]
+                                  },
+                                  "changed": {
+                                    "type": "boolean"
+                                  },
+                                  "branch": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 400
+                                  },
+                                  "outcome": {
+                                    "type": "string",
+                                    "enum": [
+                                      "changes_ready",
+                                      "nothing_to_do",
+                                      "blocked"
+                                    ]
+                                  },
+                                  "summary": {
+                                    "type": "string",
+                                    "maxLength": 2000
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "changed",
+                                  "branch"
                                 ]
                               },
                               {
@@ -10901,7 +10965,8 @@
                           "diff",
                           "widget",
                           "widget_response",
-                          "todos"
+                          "todos",
+                          "agent_done"
                         ]
                       },
                       "payload": {
@@ -11564,6 +11629,33 @@
                                       "kind": {
                                         "type": "string",
                                         "enum": [
+                                          "task_complete"
+                                        ]
+                                      },
+                                      "outcome": {
+                                        "type": "string",
+                                        "enum": [
+                                          "changes_ready",
+                                          "nothing_to_do",
+                                          "blocked"
+                                        ]
+                                      },
+                                      "summary": {
+                                        "type": "string",
+                                        "maxLength": 2000
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "outcome"
+                                    ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
                                           "unsupported"
                                         ]
                                       },
@@ -11634,6 +11726,42 @@
                             "required": [
                               "kind",
                               "items"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "agent_done"
+                                ]
+                              },
+                              "changed": {
+                                "type": "boolean"
+                              },
+                              "branch": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 400
+                              },
+                              "outcome": {
+                                "type": "string",
+                                "enum": [
+                                  "changes_ready",
+                                  "nothing_to_do",
+                                  "blocked"
+                                ]
+                              },
+                              "summary": {
+                                "type": "string",
+                                "maxLength": 2000
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "changed",
+                              "branch"
                             ]
                           },
                           {
@@ -11930,7 +12058,8 @@
                           "diff",
                           "widget",
                           "widget_response",
-                          "todos"
+                          "todos",
+                          "agent_done"
                         ]
                       },
                       "payload": {
@@ -12593,6 +12722,33 @@
                                       "kind": {
                                         "type": "string",
                                         "enum": [
+                                          "task_complete"
+                                        ]
+                                      },
+                                      "outcome": {
+                                        "type": "string",
+                                        "enum": [
+                                          "changes_ready",
+                                          "nothing_to_do",
+                                          "blocked"
+                                        ]
+                                      },
+                                      "summary": {
+                                        "type": "string",
+                                        "maxLength": 2000
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "outcome"
+                                    ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
                                           "unsupported"
                                         ]
                                       },
@@ -12663,6 +12819,42 @@
                             "required": [
                               "kind",
                               "items"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "agent_done"
+                                ]
+                              },
+                              "changed": {
+                                "type": "boolean"
+                              },
+                              "branch": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 400
+                              },
+                              "outcome": {
+                                "type": "string",
+                                "enum": [
+                                  "changes_ready",
+                                  "nothing_to_do",
+                                  "blocked"
+                                ]
+                              },
+                              "summary": {
+                                "type": "string",
+                                "maxLength": 2000
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "changed",
+                              "branch"
                             ]
                           },
                           {

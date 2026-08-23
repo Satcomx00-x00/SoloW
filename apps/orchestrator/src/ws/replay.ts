@@ -121,6 +121,11 @@ export function toTaskEvent(
       };
     case "usage":
     case "state":
+    // `agent_done` has no wire form on purpose. It is a durable marker for the reclaim sweep —
+    // "the agent finished, here is its branch" — and every consequence a client cares about
+    // reaches it as the `status` change that follows. Replaying it would put a row in the
+    // transcript saying the run ended, immediately above the state change saying the same thing.
+    case "agent_done":
       return null;
   }
 }

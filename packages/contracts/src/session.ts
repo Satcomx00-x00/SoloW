@@ -2,7 +2,7 @@ import { z } from "zod";
 import { idSchema, sessionStateSchema, taskStateSchema } from "./common.js";
 import { todoItemSchema } from "./events.js";
 import { reviewDto } from "./review.js";
-import { widgetSchema } from "./widget.js";
+import { taskCompletionOutcomeSchema, widgetSchema } from "./widget.js";
 
 /** Read contracts for agent Sessions and their streamed event log (spec F09/F10). */
 
@@ -189,6 +189,40 @@ export const sessionEventPayloadSchema = z.discriminatedUnion("kind", [
    */
   z.object({ kind: z.literal("todos"), items: z.array(todoItemSchema).max(100) }),
   /**
+   * The agent stopped, and it stopped having finished — recorded the instant it happens.
+   *
+   * This exists because of an ordering bug with real consequences. The orchestrator learns that a
+   * run completed *in memory*, and used to record that fact only by acting on it: moving the Task
+   * to `review`, two durable steps later. Anything that lost the run in between — a restart, a
+   * dev-server hot reload, an engine that dropped an in-flight run — left nothing anywhere saying
+   * the agent had ever finished. The reclaim sweep then found a Task sitting in `running` with no
+   * agent, could not tell "died mid-work" from "died having finished", and did the safe thing:
+   * `failed`, with `interrupted`. A Task whose agent had done the work perfectly, and committed
+   * it, ended up in the Failed column.
+   *
+   * Writing the fact *before* the fragile part is the whole of the fix. `branch` is what the
+   * review gate needs and the only thing it strictly needs — `to-review`'s own comment says the
+   * branch name alone is enough to decide on — so a sweep that finds this can finish the job the
+   * run did not, and send the Task to review with its work attached.
+   *
+   * `changed` travels because "finished and produced nothing" is a real outcome and was, until
+   * now, computed and then dropped on the floor.
+   */
+  z.object({
+    kind: z.literal("agent_done"),
+    changed: z.boolean(),
+    /** The primary worktree's branch — what a reviewer opens. */
+    branch: z.string().min(1).max(400),
+    /**
+     * What the agent itself said about stopping, when it said anything (see `task_complete` in
+     * `widget.ts`). Absent for every agent that just exits, which is all of them today and most
+     * of them always — the marker has to work without the agent's cooperation.
+     */
+    outcome: taskCompletionOutcomeSchema.optional(),
+    /** The agent's own words, when it left any. */
+    summary: z.string().max(2000).optional(),
+  }),
+  /**
    * What a person answered. Logged as its own record rather than folded into the widget's row,
    * for the reason the permission channel keeps `permission_resolved` separate: the question and
    * the answer happened at different times, and a log that collapses them cannot say how long
@@ -217,6 +251,7 @@ export const sessionEventKindSchema = z.enum([
   "widget",
   "widget_response",
   "todos",
+  "agent_done",
 ]);
 export type SessionEventKind = z.infer<typeof sessionEventKindSchema>;
 

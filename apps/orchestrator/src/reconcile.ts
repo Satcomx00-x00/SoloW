@@ -1,3 +1,4 @@
+import { parseSessionEventPayload } from "@gatecontrol/contracts";
 import { INTERRUPTED_REASON } from "@gatecontrol/core";
 import { type Db, session, sessionEvent, task } from "@gatecontrol/db";
 import { and, desc, eq, ne } from "drizzle-orm";
@@ -91,7 +92,41 @@ export async function reclaimOrphanedRuns(
     const lastSpoke = live ? await latestActivity(db, live.id, live.startedAt) : row.updatedAt;
     if (now().getTime() - Date.parse(lastSpoke) < RECLAIM_STALE_MS) continue;
 
+    /*
+     * Orphaned mid-work, or orphaned having finished?
+     *
+     * Until `agent_done` existed this sweep could not tell, and had to assume the worse of the
+     * two: a Task whose agent had done the work and committed it was filed as a failure, because
+     * the run was lost between the agent's last word and the step that would have moved it to
+     * review. That is the single most common way a clean run ended up in the Failed column.
+     *
+     * The marker settles it, and it carries the branch — which `to-review`'s own comment calls
+     * the only thing a reviewer strictly needs. So the sweep finishes the job the run did not:
+     * the Task goes to review, on its branch, and a person decides. What it cannot do is capture
+     * the diff, because the worktree deps belong to the run; the gate degrades to "no diff shown"
+     * rather than to a wrong verdict, exactly as `to-review` already degrades when a capture
+     * fails.
+     */
+    const finished = live ? await completionMarker(db, live.id) : null;
     const endedAt = now().toISOString();
+
+    if (finished) {
+      await setTaskState(db, row.workspaceId, row.id, "review");
+      if (live) {
+        await setSessionState(db, row.workspaceId, live.id, "awaiting_review", {
+          diffRef: finished.branch,
+        });
+        await appendSessionEvent(db, row.workspaceId, {
+          sessionId: live.id,
+          seq: await nextSessionEventSeq(db, row.workspaceId, live.id),
+          payload: { kind: "state", from: "running", to: "review", reason: RECOVERED_REASON },
+        });
+      }
+      announce(hub, row, "review", endedAt);
+      reclaimed += 1;
+      continue;
+    }
+
     await setTaskState(db, row.workspaceId, row.id, "failed", {
       failureReason: INTERRUPTED_REASON,
     });
@@ -106,17 +141,7 @@ export async function reclaimOrphanedRuns(
         payload: { kind: "state", from: "running", to: "failed", reason: INTERRUPTED_REASON },
       });
     }
-    // Both channels, as `announce` in task-run.ts does: whoever is looking at this Task's own
-    // page is the person most likely to be waiting on this reclaim, and they were the ones it
-    // never reached.
-    const message = {
-      kind: "status" as const,
-      taskId: row.id,
-      state: "failed" as const,
-      at: endedAt,
-    };
-    hub.publish(hub.boardChannel(row.workspaceId), message);
-    hub.publish(hub.taskChannel(row.workspaceId, row.id), message);
+    announce(hub, row, "failed", endedAt);
     reclaimed += 1;
   }
   return reclaimed;
@@ -131,4 +156,49 @@ async function latestActivity(db: Db, sessionId: string, startedAt: string): Pro
     .orderBy(desc(sessionEvent.at))
     .limit(1);
   return newest?.at ?? startedAt;
+}
+
+/**
+ * The reason a Task recovered by this sweep carries into review.
+ *
+ * Distinct from `interrupted`, and the distinction is the point: both say the run was lost, and
+ * only one says the work survived it. A reviewer opening this Task is looking at real changes
+ * that nothing else would have shown them.
+ */
+export const RECOVERED_REASON = "recovered_after_restart";
+
+/**
+ * The `agent_done` this Session ended on, if it ended on one.
+ *
+ * Read as "the newest marker in the log", not "the last event is a marker": an agent's final turn
+ * and the compaction step both land after it, and neither of them means the agent did not finish.
+ * There is no ambiguity to resolve — a marker is only ever written once the agent has stopped
+ * having completed, so its presence is the fact, whatever came afterwards.
+ */
+async function completionMarker(db: Db, sessionId: string): Promise<{ branch: string } | null> {
+  const [newest] = await db
+    .select({ payload: sessionEvent.payload })
+    .from(sessionEvent)
+    .where(and(eq(sessionEvent.sessionId, sessionId), eq(sessionEvent.kind, "agent_done")))
+    .orderBy(desc(sessionEvent.seq))
+    .limit(1);
+  if (!newest) return null;
+  const parsed = parseSessionEventPayload("agent_done", newest.payload);
+  return parsed.kind === "agent_done" ? { branch: parsed.branch } : null;
+}
+
+/**
+ * Tell everyone watching. Both channels, as `announce` in task-run.ts does: whoever is looking at
+ * this Task's own page is the person most likely to be waiting on this reclaim, and they were the
+ * ones it never reached.
+ */
+function announce(
+  hub: Pick<EventHub, "publish" | "boardChannel" | "taskChannel">,
+  row: { id: string; workspaceId: string },
+  state: "failed" | "review",
+  at: string,
+): void {
+  const message = { kind: "status" as const, taskId: row.id, state, at };
+  hub.publish(hub.boardChannel(row.workspaceId), message);
+  hub.publish(hub.taskChannel(row.workspaceId, row.id), message);
 }

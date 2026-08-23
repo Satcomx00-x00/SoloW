@@ -13,7 +13,7 @@ import {
 } from "@gatecontrol/db";
 import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
 import { and, eq } from "drizzle-orm";
-import { RECLAIM_STALE_MS, reclaimOrphanedRuns } from "./reconcile.js";
+import { RECLAIM_STALE_MS, RECOVERED_REASON, reclaimOrphanedRuns } from "./reconcile.js";
 
 /**
  * Reclaim a Task left `running` by a process that is provably gone (see `reconcile.ts`'s own
@@ -273,5 +273,93 @@ describe("reclaimOrphanedRuns staleness", () => {
     );
 
     expect(count).toBe(0);
+  });
+});
+
+/**
+ * A run that finished and was then lost, which is the case that filled the Failed column.
+ *
+ * The agent did the work, wrote its last turn and committed. The step that would have moved the
+ * Task to review never ran — a restart, a `bun --hot` reload, an engine that dropped the run —
+ * and nothing anywhere recorded that the agent had ever finished. This sweep found a `running`
+ * Task with no agent and did the only safe thing available to it: `failed`, `interrupted`. Work
+ * that was done, and committed, filed as a failure.
+ *
+ * `agent_done` is what makes the two distinguishable, so these are the two halves of one rule.
+ */
+describe("reclaimOrphanedRuns after the agent finished", () => {
+  async function seedWithMarker(db: TestDb, taskId: string, branch: string) {
+    const { sessionId } = await seedTask(db, { taskId });
+    await db.insert(sessionEvent).values({
+      id: `ev-done-${taskId}`,
+      workspaceId: WS,
+      sessionId,
+      seq: 0,
+      kind: "agent_done",
+      payload: { kind: "agent_done", changed: true, branch },
+      at: new Date().toISOString(),
+    });
+    return sessionId;
+  }
+
+  it("sends the Task to review on its branch, not to failed", async () => {
+    const db = createTestDb();
+    const sessionId = await seedWithMarker(db, "task-finished", "gatecontrol/task-finished");
+
+    const count = await reclaimOrphanedRuns(db, fakeRegistry(), fakeHub(), LONG_AFTER);
+
+    expect(count).toBe(1);
+    const [row] = await db.select().from(task).where(eq(task.id, "task-finished"));
+    expect(row?.state).toBe("review");
+    // No failure reason: nothing failed.
+    expect(row?.failureReason).toBeNull();
+
+    const [live] = await db.select().from(session).where(eq(session.id, sessionId));
+    expect(live?.state).toBe("awaiting_review");
+    // The branch the marker carried — what the reviewer opens, and the only thing the gate
+    // strictly needs.
+    expect(live?.diffRef).toBe("gatecontrol/task-finished");
+  });
+
+  it("records why the state changed, in a reason distinct from interrupted", async () => {
+    // Both mean the run was lost; only one means the work survived it. An Owner reading the log
+    // should be able to tell which happened to them.
+    const db = createTestDb();
+    const sessionId = await seedWithMarker(db, "task-recorded", "b");
+
+    await reclaimOrphanedRuns(db, fakeRegistry(), fakeHub(), LONG_AFTER);
+
+    const events = await db
+      .select()
+      .from(sessionEvent)
+      .where(and(eq(sessionEvent.sessionId, sessionId), eq(sessionEvent.kind, "state")));
+    expect(events).toHaveLength(1);
+    expect(events[0]?.payload).toMatchObject({ to: "review", reason: RECOVERED_REASON });
+  });
+
+  it("announces review, so a board and a Task page both stop showing it as running", async () => {
+    const db = createTestDb();
+    await seedWithMarker(db, "task-announced", "b");
+    const hub = fakeHub();
+
+    await reclaimOrphanedRuns(db, fakeRegistry(), hub, LONG_AFTER);
+
+    expect(hub.published.map((p) => p.channel)).toEqual([
+      `board:${WS}`,
+      `task:${WS}:task-announced`,
+    ]);
+    expect(hub.published[0]?.msg).toMatchObject({ kind: "status", state: "review" });
+  });
+
+  it("still fails a run that was lost with no marker behind it", async () => {
+    // The other half. Without evidence that the agent finished, the safe answer is still the
+    // right one — this rule buys review for work that provably exists, not for every orphan.
+    const db = createTestDb();
+    await seedTask(db, { taskId: "task-midwork" });
+
+    await reclaimOrphanedRuns(db, fakeRegistry(), fakeHub(), LONG_AFTER);
+
+    const [row] = await db.select().from(task).where(eq(task.id, "task-midwork"));
+    expect(row?.state).toBe("failed");
   });
 });

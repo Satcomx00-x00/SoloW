@@ -1008,6 +1008,16 @@ export async function runTaskLifecycle(
        * they were.
        */
       const pendingWidgets = new Map<string, Widget>();
+      /**
+       * The last `task_complete` the agent emitted this round, if it emitted one at all.
+       *
+       * A holder rather than a bare `let`: the only assignment is inside the output callback, and
+       * the compiler cannot see that callback run — it would narrow a `let` to `null` at every
+       * read below and refuse the field accesses.
+       */
+      const completion: { widget: Extract<Widget, { kind: "task_complete" }> | null } = {
+        widget: null,
+      };
       const scanner = new WidgetFenceScanner();
 
       /**
@@ -1036,6 +1046,11 @@ export async function runTaskLifecycle(
         for (const widget of out.widgets) {
           const widgetId = randomUUID();
           if (widgetExpectsResponse(widget)) pendingWidgets.set(widgetId, widget);
+          // The agent saying how its run ended. Held rather than acted on: an agent can emit this
+          // and then keep working — it is prose, not a tool call, and nothing stops it — so what
+          // counts is the last one standing when the run actually ends. It is still recorded as a
+          // widget so the transcript shows what was said and when.
+          if (widget.kind === "task_complete") completion.widget = widget;
           emit({ kind: "widget", widgetId, widget });
         }
       };
@@ -1203,7 +1218,37 @@ export async function runTaskLifecycle(
           break;
         }
       }
-      return { kind: "completed" as const, changed, worktree: adopted };
+
+      /*
+       * The agent finished — written down here, inside the step that learned it, and not two
+       * steps later when the Task is moved to review.
+       *
+       * That gap is a bug with a Failed column full of evidence for it. Completion used to exist
+       * only as this function's return value: real, in memory, and recorded nowhere. Anything
+       * that lost the run before `to-review` committed — a restart, a `bun --hot` reload, an
+       * engine that dropped an in-flight run — left no trace that the agent had ever finished, so
+       * the reclaim sweep found a `running` Task with no agent, could not tell "died mid-work"
+       * from "died having finished", and marked it `failed`. Work that was done and committed
+       * ended up filed as a failure.
+       *
+       * A durable row before the fragile part is the whole fix. It carries the branch because
+       * that is what the review gate opens, and whatever the agent said about stopping, because
+       * that is the only thing here it could have told us itself.
+       */
+      emit({
+        kind: "agent_done",
+        changed,
+        branch: adopted.branch,
+        ...(completion.widget ? { outcome: completion.widget.outcome } : {}),
+        ...(completion.widget?.summary ? { summary: completion.widget.summary } : {}),
+      });
+
+      return {
+        kind: "completed" as const,
+        changed,
+        worktree: adopted,
+        outcome: completion.widget?.outcome ?? null,
+      };
     });
 
     // Compaction at a turn boundary (issue #2, AC-3). A long run gets a summary standing in for

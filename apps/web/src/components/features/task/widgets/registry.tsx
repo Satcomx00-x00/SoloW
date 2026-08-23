@@ -7,6 +7,7 @@ import { OptionsCard } from "./options-card";
 import { PresentFiles } from "./present-files";
 import { ShowWidget } from "./show-widget";
 import { StepCard } from "./step-card";
+import { TaskComplete } from "./task-complete";
 import { UnsupportedWidget } from "./unsupported";
 
 /**
@@ -46,6 +47,7 @@ const RENDERERS: Record<WidgetKind, AnyRenderer> = {
   options_card: OptionsCard as AnyRenderer,
   step_card: StepCard as AnyRenderer,
   present_files: PresentFiles as AnyRenderer,
+  task_complete: TaskComplete as AnyRenderer,
   unsupported: UnsupportedWidget as AnyRenderer,
 };
 

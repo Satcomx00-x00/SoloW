@@ -53,6 +53,8 @@ function widgetText(widget: WidgetLike): string {
       return [widget.title ?? "", ...widget.steps.map((s) => s.label)].join(" ");
     case "present_files":
       return [widget.title ?? "", ...widget.files.map((f) => f.path)].join(" ");
+    case "task_complete":
+      return [widget.outcome, widget.summary ?? ""].join(" ");
     case "show_widget":
       // Never the content: that is markup the agent wrote, and matching inside it would send a
       // search for "div" to every diagram in the run.

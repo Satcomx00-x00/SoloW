@@ -79,6 +79,7 @@ describe("parseWidget", () => {
       "options_card",
       "step_card",
       "present_files",
+      "task_complete",
     ]);
   });
 });
