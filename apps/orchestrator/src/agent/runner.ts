@@ -22,7 +22,15 @@ export type AgentStreamEvent =
    * durable record stays clean for readers that are not a terminal (#16, #84).
    */
   | { kind: "stdout"; channel: AgentTextChannel; text: string }
-  | { kind: "tool_use"; name: string }
+  /**
+   * A tool invocation. `callId` is what lets the transcript fold a call together with its
+   * result; `input` is the raw arguments as the protocol reported them, narrowed to the
+   * allowlist further down in `task-run.ts` rather than here — this seam is protocol-shaped,
+   * the allowlist is policy, and the policy must apply to every adapter that reaches it.
+   */
+  | { kind: "tool_use"; name: string; callId: string | null; input: unknown; status: string | null }
+  /** How a tool call finished. Truncation of `output` belongs to the same policy layer. */
+  | { kind: "tool_result"; callId: string | null; ok: boolean; output: string | null }
   /** One completed turn's token usage (issue #14). Counts and model only — never content. */
   | {
       kind: "usage";

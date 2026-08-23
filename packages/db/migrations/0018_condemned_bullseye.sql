@@ -1,0 +1,1 @@
+ALTER TABLE `agent_profile` ADD `permission_mode` text DEFAULT 'acceptEdits' NOT NULL;

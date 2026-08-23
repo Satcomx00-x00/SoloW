@@ -10,12 +10,15 @@ import {
   type AgentRegistry,
   agentRegistry,
   type PermissionAnswerResult,
+  type WidgetAnswerResult,
 } from "./agent/registry.js";
 import { orchestratorEnv } from "./env.js";
 import { inngest } from "./inngest/client.js";
 import { handleEventPost } from "./inngest/events.js";
 import { taskRun } from "./inngest/functions/task-run.js";
 import { inngestServeHandler } from "./inngest/serve.js";
+import { reclaimOrphanedRuns } from "./reconcile.js";
+import { hub } from "./ws/hub.js";
 import { attachSubscriber } from "./ws/replay.js";
 
 export { inngest };
@@ -93,7 +96,8 @@ export async function handleClientFrame(
   claims: StreamTicketClaims,
   raw: unknown,
 ): Promise<
-  { ok: true; action: "input" | "stop" | "permission" } | { ok: false; error: ClientFrameError }
+  | { ok: true; action: "input" | "stop" | "permission" | "widget_response" }
+  | { ok: false; error: ClientFrameError }
 > {
   const parsed = taskInputSchema.safeParse(safeJson(raw));
   if (!parsed.success) return { ok: false, error: "frame_malformed" };
@@ -123,6 +127,17 @@ export async function handleClientFrame(
     // agent is mid-turn, streaming into the terminal the operator is looking at.
     return { ok: false, error: PERMISSION_FRAME_ERROR[answered] };
   }
+  if (frame.kind === "widget_response") {
+    // The operator's answer to something the agent drew. Same route, same tenant key, same ack
+    // shape as a permission — the two are the same act with different vocabulary.
+    const answered = await deps.registry.respondWidget(claims.workspaceId, frame.taskId, {
+      widgetId: frame.widgetId,
+      values: frame.values,
+      text: frame.text ?? null,
+    });
+    if (answered === "answered") return { ok: true, action: "widget_response" };
+    return { ok: false, error: WIDGET_FRAME_ERROR[answered] };
+  }
   const accepted = await deps.registry.send(claims.workspaceId, frame.taskId, frame.data);
   return accepted ? { ok: true, action: "input" } : { ok: false, error: "agent_not_running" };
 }
@@ -133,7 +148,9 @@ export type ClientFrameError =
   | "agent_not_running"
   | "permission_not_pending"
   | "permission_option_unknown"
-  | "permission_unsupported";
+  | "permission_unsupported"
+  | "widget_not_pending"
+  | "widget_option_unknown";
 
 /** Why a permission answer did not land, in the vocabulary the ack carries. */
 const PERMISSION_FRAME_ERROR: Record<
@@ -144,6 +161,19 @@ const PERMISSION_FRAME_ERROR: Record<
   no_permission_channel: "permission_unsupported",
   not_pending: "permission_not_pending",
   option_not_offered: "permission_option_unknown",
+};
+
+/**
+ * Why a widget answer did not land. `no_widget_channel` reports as `agent_not_running` on
+ * purpose: a run old enough to have no widget channel has no widget on screen either, so the
+ * honest thing to tell the operator is that nothing is listening — not that their answer was
+ * about the wrong option.
+ */
+const WIDGET_FRAME_ERROR: Record<Exclude<WidgetAnswerResult, "answered">, ClientFrameError> = {
+  no_agent: "agent_not_running",
+  no_widget_channel: "agent_not_running",
+  not_pending: "widget_not_pending",
+  option_unknown: "widget_option_unknown",
 };
 
 function safeJson(raw: unknown): unknown {
@@ -159,6 +189,27 @@ function safeJson(raw: unknown): unknown {
 const decodeUtf8 = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
 
 /**
+ * How long to wait after boot before the first reclaim sweep (see `reconcile.ts`). Long enough
+ * that a legitimate Inngest redrive — which re-registers with `agentRegistry` the moment it
+ * resumes — has a real chance to land first.
+ */
+const RECONCILE_GRACE_MS = 20_000;
+
+/**
+ * How often to sweep after that.
+ *
+ * The sweep used to happen once, at boot, and that was the bug: it answers only "was something
+ * orphaned by the process before me", never "has something been orphaned since". A run that died
+ * two hours into a process left its Task showing `running`, with an input box answering "No agent
+ * is running", until somebody restarted the orchestrator. Sweeping on a timer is what closes it.
+ *
+ * A minute is cheap — one indexed select over `running` Tasks, which is a handful of rows — and
+ * the delay an Owner actually feels is dominated by `RECLAIM_STALE_MS`, the quiet period a Task
+ * has to serve before this will touch it at all.
+ */
+const RECONCILE_INTERVAL_MS = 60_000;
+
+/**
  * Long-lived orchestrator process (Decision 0002): hosts the WebSocket hub and the Inngest
  * functions. Serverless-style Next.js cannot hold these, so they run here.
  */
@@ -166,6 +217,25 @@ export function startWebSocketServer(
   port = orchestratorEnv().GATECONTROL_WS_PORT,
   deps: WsServerDeps = defaultWsDeps(),
 ) {
+  // A failed sweep must never stop the next one: the reasons this throws (a locked database, a
+  // transient driver error) are exactly the transient kind, and a net that retires on its first
+  // stumble is the shape of the bug this schedule replaced.
+  const sweep = () =>
+    reclaimOrphanedRuns(deps.db, deps.registry, hub)
+      .then((count) => {
+        if (count > 0) {
+          console.log(`[gatecontrol/orchestrator] reclaimed ${count} orphaned running task(s)`);
+        }
+      })
+      .catch((cause) => {
+        console.error("[gatecontrol/orchestrator] reconciliation sweep failed:", cause);
+      });
+
+  setTimeout(() => {
+    void sweep();
+    setInterval(() => void sweep(), RECONCILE_INTERVAL_MS);
+  }, RECONCILE_GRACE_MS);
+
   return Bun.serve<WsData>({
     port,
     fetch(req, server) {

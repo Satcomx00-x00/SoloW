@@ -100,8 +100,12 @@ concurrency cap,
 - [ ] AC-012: IF a Subscription-mode agent exhausts its quota window during a run, THEN THE
       SYSTEM SHALL move the Task to Parked, preserve its work, and resume it when the quota
       window resets.
-- [ ] AC-013: IF a subscription credential is expired or revoked, THEN THE SYSTEM SHALL pause
+- [x] AC-013: IF a subscription credential is expired or revoked, THEN THE SYSTEM SHALL pause
       dependent Tasks in a distinct credential-expired state with instructions to renew it.
+      Satisfied: the board card renders the state distinctly (`task-card.tsx`) with a one-click
+      Renew action into the pre-filled Secret form (`board.tsx`, `secrets-section.tsx`), and
+      replacing the credential resumes every Task paused on it automatically
+      (`routers/secret.ts`, issue #63).
 - [ ] AC-014: THE SYSTEM SHALL enforce the Agent Profile's concurrency cap so that no more than
       the configured number of that profile's agents run at once.
 - [ ] AC-015: IF the Owner queues more parallel Subscription-mode Tasks than the cap allows,

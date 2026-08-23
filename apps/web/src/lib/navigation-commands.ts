@@ -1,6 +1,6 @@
 "use client";
 
-import { Plus } from "lucide-react";
+import { Download, FolderPlus, SquarePen, Zap } from "lucide-react";
 import { commandRegistry, contribute } from "./contributions";
 import { SECTIONS } from "./navigation";
 
@@ -31,13 +31,33 @@ for (const [index, section] of SECTIONS.entries()) {
   });
 }
 
-contribute(commandRegistry, {
-  id: "task.create",
-  priority: 10,
-  render: {
-    title: "New task",
-    group: "Create",
-    icon: Plus,
-    run: (actions) => actions.createTask(),
+/**
+ * The same four things the header's Create menu offers, reachable by name from ⌘K.
+ *
+ * They resolve to `actions.create(kind)`, which the shell answers by opening the dialog wherever
+ * you are — none of these navigates any more, because the dialogs no longer belong to a page.
+ */
+const CREATE_COMMANDS = [
+  { id: "task.create", title: "New task", icon: Zap, kind: "task" },
+  { id: "issue.create", title: "New issue", icon: SquarePen, kind: "issue" },
+  { id: "issue.import", title: "Import issues", icon: Download, kind: "import-issues" },
+  {
+    id: "repository.connect.create",
+    title: "Connect a repository",
+    icon: FolderPlus,
+    kind: "connect-repository",
   },
-});
+] as const;
+
+for (const [index, command] of CREATE_COMMANDS.entries()) {
+  contribute(commandRegistry, {
+    id: command.id,
+    priority: 10 + index,
+    render: {
+      title: command.title,
+      group: "Create",
+      icon: command.icon,
+      run: (actions) => actions.create(command.kind),
+    },
+  });
+}

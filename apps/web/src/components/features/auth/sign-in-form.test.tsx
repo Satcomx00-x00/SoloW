@@ -31,11 +31,19 @@ mock.module("@/lib/auth-client", () => ({
   },
 }));
 
+// Every hook another test file's component might read from `next/navigation` has to be here,
+// not just the one this file uses — `mock.module` replaces the module for the rest of the
+// bun:test process, and a stub missing a hook breaks whichever *other* file's component reads it
+// next (see issue-detail.test.tsx's fuller account of this exact leak, and secrets-section.test.tsx
+// for a component this omission broke).
 mock.module("next/navigation", () => ({
   useRouter: () => ({
     replace: (href: string) => calls.replaced.push(href),
     refresh: () => {},
   }),
+  usePathname: () => "/sign-in",
+  useSearchParams: () => new URLSearchParams(),
+  useParams: () => ({}),
 }));
 
 const { SignInForm } = await import("./sign-in-form");

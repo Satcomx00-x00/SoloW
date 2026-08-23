@@ -82,6 +82,13 @@ export const IssueErrorCode = {
    * stop them or clean up their worktrees.
    */
   StopFailed: "ISSUE_STOP_FAILED",
+  /**
+   * Closing an Issue while Tasks under it are still active (spec F01 FR-9). A warning rather
+   * than a wall: unlike `HasRunningTasks`, nothing is destroyed by closing, so `force` is a
+   * legitimate answer — the point is that the user is told what they are leaving behind rather
+   * than discovering it later on the board.
+   */
+  HasActiveTasks: "ISSUE_HAS_ACTIVE_TASKS",
 } as const;
 export type IssueErrorCode = (typeof IssueErrorCode)[keyof typeof IssueErrorCode];
 
@@ -95,3 +102,28 @@ export const SecretErrorCode = {
   InUse: "SECRET_IN_USE",
 } as const;
 export type SecretErrorCode = (typeof SecretErrorCode)[keyof typeof SecretErrorCode];
+
+export const AgentProfileErrorCode = {
+  /**
+   * The Agent Profile is still referenced by a Task, a Workflow Step, or a Session's usage
+   * record. All three are real foreign keys (unlike `secret_id`, a plain column) — so a naive
+   * delete would not fail here, it would fail as a raw constraint violation deep in a query that
+   * has nothing to do with deleting a profile. Refusing up front, and saying what still holds
+   * it, is what turns that into an ordinary product refusal instead.
+   */
+  InUse: "AGENT_PROFILE_IN_USE",
+} as const;
+export type AgentProfileErrorCode =
+  (typeof AgentProfileErrorCode)[keyof typeof AgentProfileErrorCode];
+
+export const AgentCatalogErrorCode = {
+  /**
+   * `(workspace_id, key)` is unique (spec F05 issue #10) — two rows with the same key would
+   * make "which agent does this Profile mean" ambiguous, since `key` (not the id) is how a
+   * Workspace names an agent to itself. Refused here rather than left to the database's raw
+   * constraint error, which names a column, not the row the Owner was trying to add.
+   */
+  KeyTaken: "AGENT_CATALOG_KEY_TAKEN",
+} as const;
+export type AgentCatalogErrorCode =
+  (typeof AgentCatalogErrorCode)[keyof typeof AgentCatalogErrorCode];

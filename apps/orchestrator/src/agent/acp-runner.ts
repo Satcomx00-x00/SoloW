@@ -143,7 +143,12 @@ export class AcpRunner implements AgentRunner {
       // that has to discover it, and two shapes would buy nothing.
       workspacePath: Promise.resolve<string | null>(opts.cwd),
       async send(text: string) {
-        return live.send(text);
+        const accepted = await live.send(text);
+        // Same reasoning as `ClaudeCodeRunner.send` (see its comment): nothing on the agent's own
+        // stream echoes what the operator typed, so without this the transcript never showed it
+        // was sent at all — even though ACP genuinely queues it as the next `session/prompt`.
+        if (accepted) opts.onEvent({ kind: "stdout", channel: "user", text });
+        return accepted;
       },
       async respondPermission(requestId: string, optionId: string) {
         return inbox.answer(requestId, optionId);
@@ -177,7 +182,17 @@ function signalFor(
 export function toStreamEvent(update: AcpUpdate): AgentStreamEvent | null {
   switch (update.kind) {
     case "tool_call":
-      return { kind: "tool_use", name: update.name };
+      // `toolCallId` and `status` were dropped here, so a `tool_call_update` arrived looking
+      // like a second, unrelated call and nothing could show a tool's progress. ACP has carried
+      // both all along (protocol.ts) — this seam was the only thing losing them.
+      return {
+        kind: "tool_use",
+        name: update.name,
+        callId: update.toolCallId,
+        status: update.status,
+        // ACP does not expose a tool's raw input at all, by design; there is nothing to narrow.
+        input: undefined,
+      };
     case "usage":
       return {
         kind: "usage",

@@ -62,7 +62,7 @@ async function createTask(
   page: Page,
   title: string,
   issue: string,
-  /** Repositories to tick under "Also works in" — each becomes its own worktree and branch. */
+  /** Repositories to tick under Advanced → "Also works in": each gets its own worktree and branch. */
   alsoWorksIn: readonly string[] = [],
 ): Promise<void> {
   await page.getByRole("button", { name: "New task" }).click();
@@ -74,8 +74,13 @@ async function createTask(
   await pickOption(page, "Issue", issue);
   await pickOption(page, "Agent profile", "Claude Code (subscription)");
   await pickOption(page, "Executor", "Local executor");
-  for (const name of alsoWorksIn) {
-    await dialog.getByRole("checkbox", { name, exact: true }).click();
+  if (alsoWorksIn.length > 0) {
+    // A second repository is the exception, so the form folds it away — the disclosure has to be
+    // opened before the checkboxes exist on screen.
+    await dialog.getByText("Advanced", { exact: true }).click();
+    for (const name of alsoWorksIn) {
+      await dialog.getByRole("checkbox", { name, exact: true }).click();
+    }
   }
   await dialog.getByRole("button", { name: "Create task" }).click();
   await expect(dialog).toBeHidden();

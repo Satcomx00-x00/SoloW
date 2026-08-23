@@ -26,6 +26,7 @@ import {
   task,
   taskDependency,
   taskRepository,
+  workspace,
 } from "@gatecontrol/db";
 import { and, asc, desc, eq, gt, inArray } from "drizzle-orm";
 
@@ -68,6 +69,15 @@ export interface TaskRunContext {
   /** Every Repository the Task works in, in position order. Never empty (issue #7). */
   repositories: TaskRepositoryBinding[];
   secretCiphertext: string | null;
+  /**
+   * Whether this Workspace has agent widgets on (`ff-agent-widgets`).
+   *
+   * Read here rather than at the point of use so the run makes one decision about it: the flag
+   * governs both halves of the feature — whether the brief teaches the agent to emit a widget,
+   * and whether the output stream is scanned for one — and a run where those two disagreed
+   * would either teach a language nothing listens to or listen for one nothing was taught.
+   */
+  widgetsEnabled: boolean;
 }
 
 export async function loadTaskRunContext(
@@ -145,6 +155,12 @@ export async function loadTaskRunContext(
     });
   }
 
+  const [ws] = await db
+    .select({ flags: workspace.enabledFlags })
+    .from(workspace)
+    .where(eq(workspace.id, workspaceId))
+    .limit(1);
+
   const [sec] = await db
     .select({ ciphertext: secret.ciphertext })
     .from(secret)
@@ -158,6 +174,7 @@ export async function loadTaskRunContext(
     agentCatalog: cat,
     executorProfile: ep,
     repositories,
+    widgetsEnabled: ws?.flags?.["ff-agent-widgets"] === true,
     secretCiphertext: sec?.ciphertext ?? null,
   };
 }
@@ -280,6 +297,23 @@ export async function setSessionState(
  * representable. A payload the union does not admit throws here rather than becoming another
  * opaque blob a reader has to guess at.
  */
+/**
+ * Whether a write failed because the row it points at is gone.
+ *
+ * The case this exists for: a Task is deleted (or its Issue force-deleted) while its agent is
+ * still streaming. `cascadeDeleteTasks` takes the `session` row with the Task, and every event
+ * the live run appends afterwards hits `session_event.session_id`'s foreign key — one stack
+ * trace per chunk of agent output, for a run whose transcript no longer has anywhere to live.
+ *
+ * Both dialects are named because the same condition means the same thing in each and this is
+ * the only place that has to know their codes: SQLite reports `SQLITE_CONSTRAINT_FOREIGNKEY`,
+ * Postgres `23503`.
+ */
+export function isMissingParentRow(cause: unknown): boolean {
+  const code = (cause as { code?: unknown } | null)?.code;
+  return code === "SQLITE_CONSTRAINT_FOREIGNKEY" || code === "23503";
+}
+
 export async function appendSessionEvent(
   db: Db,
   workspaceId: string,

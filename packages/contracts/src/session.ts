@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { idSchema, sessionStateSchema, taskStateSchema } from "./common.js";
+import { todoItemSchema } from "./events.js";
 import { reviewDto } from "./review.js";
+import { widgetSchema } from "./widget.js";
 
 /** Read contracts for agent Sessions and their streamed event log (spec F09/F10). */
 
@@ -90,23 +92,41 @@ export const sessionEventPayloadSchema = z.discriminatedUnion("kind", [
   /**
    * A tool the agent invoked.
    *
-   * `input` is declared and deliberately unpopulated: a tool call's raw input can hold the
-   * contents of a file being written, which is exactly the class of value that must never reach
-   * a durable payload (Principle IV). A future producer that wires it up owns proving that.
+   * `input` was declared and deliberately unpopulated for a long time, because a tool call's raw
+   * input can hold the contents of a file being written — exactly the class of value that must
+   * never reach a durable payload (Principle IV). It is populated now, but only through a
+   * **per-tool allowlist of argument keys**, applied once in `task-run.ts` so both the ACP and
+   * the Claude Code producers inherit it, and applied *before* the existing secret redaction
+   * rather than instead of it.
+   *
+   * What that admits: a path, a command, a search pattern. What it refuses, permanently:
+   * `Write.content` and `Edit.new_string`. The rule lives with the producer, not here, because
+   * this schema cannot know which key of which tool is safe — but the guarantee it encodes is
+   * that `input` is a flat map of short strings, never an arbitrary blob.
    */
   z.object({
     kind: z.literal("tool_call"),
     name: z.string(),
     /** The protocol's id for the call, or null for an adapter that reports none. */
     callId: z.string().nullable(),
-    input: z.unknown().optional(),
+    input: z.record(z.string()).nullish(),
+    /**
+     * Nullish, never required: every `tool_call` row written before this field existed must keep
+     * parsing here, or it falls through to the legacy coercion below and loses its shape.
+     */
+    status: z.enum(["pending", "in_progress", "completed", "failed"]).nullish(),
   }),
-  /** How a tool call finished. Same standing warning on `output` as on `tool_call.input`. */
+  /**
+   * How a tool call finished. `output` is truncated by the producer with an explicit marker —
+   * a `Read` result is a whole file, and compaction will not save the log from it
+   * (`SESSION_COMPACTION_THRESHOLD` counts events, not bytes).
+   */
   z.object({
     kind: z.literal("tool_result"),
     callId: z.string().nullable(),
     ok: z.boolean(),
-    output: z.unknown().optional(),
+    output: z.string().nullish(),
+    truncated: z.boolean().nullish(),
   }),
   /**
    * One turn's token usage. Defined here so #64 has a place to land at zero extra cost, and
@@ -134,6 +154,8 @@ export const sessionEventPayloadSchema = z.discriminatedUnion("kind", [
     requestId: z.string().min(1),
     title: z.string(),
     toolKind: z.string().nullable(),
+    /** Nullish for the same reason as `tool_call.status`: rows predate the field. */
+    toolCallId: z.string().nullish(),
     options: z.array(permissionOption),
   }),
   z.object({
@@ -144,6 +166,40 @@ export const sessionEventPayloadSchema = z.discriminatedUnion("kind", [
   }),
   /** The change captured at the review gate — the same shape `taskDiffDto` already described. */
   z.object({ kind: z.literal("diff"), ...taskDiffDto.shape }),
+  /**
+   * Something the agent asked the frontend to draw rather than say (see `widget.ts`).
+   *
+   * `widgetId` is this build's id for the emission, not the agent's: an agent may emit the same
+   * widget twice, and the answer has to name one of them. It is what a `widget_response` refers
+   * back to, exactly as `requestId` ties a permission to its resolution.
+   */
+  z.object({ kind: z.literal("widget"), widgetId: z.string().min(1), widget: widgetSchema }),
+  /**
+   * The agent's own todo list, recorded instead of the `TodoWrite` call that carried it.
+   *
+   * The call itself was a contentless row: the argument allowlist admits none of `TodoWrite`'s
+   * input, because the list is an array of objects and `tool_call.input` is bounded to a flat
+   * map of short strings — so the transcript could say only "tool: TodoWrite", and the plan
+   * every reader actually wanted was thrown away. Storing the list is what makes it survive.
+   *
+   * The list is stored whole on every rewrite rather than as a diff against the last one. That
+   * is redundant on purpose: the log is append-only evidence (Principle I), and a row that only
+   * means something in the light of the rows before it cannot be read out of a summarised range
+   * or a snapshot.
+   */
+  z.object({ kind: z.literal("todos"), items: z.array(todoItemSchema).max(100) }),
+  /**
+   * What a person answered. Logged as its own record rather than folded into the widget's row,
+   * for the reason the permission channel keeps `permission_resolved` separate: the question and
+   * the answer happened at different times, and a log that collapses them cannot say how long
+   * the run waited or whether anyone was there at all.
+   */
+  z.object({
+    kind: z.literal("widget_response"),
+    widgetId: z.string().min(1),
+    values: z.array(z.string()),
+    text: z.string().nullish(),
+  }),
 ]);
 export type SessionEventPayload = z.infer<typeof sessionEventPayloadSchema>;
 
@@ -158,6 +214,9 @@ export const sessionEventKindSchema = z.enum([
   "permission_request",
   "permission_resolved",
   "diff",
+  "widget",
+  "widget_response",
+  "todos",
 ]);
 export type SessionEventKind = z.infer<typeof sessionEventKindSchema>;
 

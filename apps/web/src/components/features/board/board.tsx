@@ -3,27 +3,26 @@
 import {
   CommonErrorCode,
   type TaskDependencyDto,
-  TaskDependencyErrorCode,
   type TaskDto,
   type TaskState,
 } from "@gatecontrol/contracts";
 import { unsatisfiedDependencies } from "@gatecontrol/core";
-import { ArrowRight, Link2, Play, Trash2, TriangleAlert } from "lucide-react";
+import { ArrowRight, KeyRound, Link2, Play, RotateCcw, Trash2, TriangleAlert } from "lucide-react";
+import Link from "next/link";
 import type { ReactNode } from "react";
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { ConfirmDialog } from "@/components/features/confirm-action";
 import { DeleteTaskAction } from "@/components/features/task/delete-task-action";
 import { useEventStream } from "@/components/hooks/use-task-stream";
-import { HeaderActions } from "@/components/shell/header-actions";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { BOARD_COLUMNS, STATE_LABELS } from "@/lib/task-states";
+import { taskActionMessage } from "@/lib/task-errors";
+import { BOARD_COLUMNS, CREDENTIAL_EXPIRED_REASON, STATE_LABELS } from "@/lib/task-states";
 import { trpc } from "@/trpc/react";
-import { BacklogActions } from "./backlog-actions";
 import { BlockedByDialog } from "./blocked-by-dialog";
 import { moveRefusal, waitingOn } from "./blockers";
+import { type BoardReferences, BoardReferencesProvider } from "./board-references";
 import { Column } from "./column";
-import { CreateTaskDialog } from "./create-task-dialog";
 import { DependencyCycleDialog } from "./dependency-cycle-dialog";
 import { DndBoard } from "./dnd-board";
 
@@ -32,13 +31,10 @@ export function BoardView({
   tasks,
   renderActions,
   blockersFor,
-  headerActionFor,
 }: {
   tasks: TaskDto[];
   renderActions?: ((task: TaskDto) => ReactNode) | undefined;
   blockersFor?: ((taskId: string) => readonly TaskDependencyDto[] | undefined) | undefined;
-  /** e.g. the Backlog column's "new issue" / "connect repository" buttons. */
-  headerActionFor?: ((state: TaskState) => ReactNode) | undefined;
 }) {
   return (
     <section
@@ -53,7 +49,6 @@ export function BoardView({
           tasks={tasks.filter((task) => task.state === state)}
           renderActions={renderActions}
           blockersFor={blockersFor}
-          headerAction={headerActionFor?.(state)}
         />
       ))}
     </section>
@@ -124,12 +119,38 @@ export function Board() {
   // states, so this is also what makes a card un-dim the moment its last predecessor is Done —
   // there is no per-Task "blocked" flag anywhere that could be left stale.
   const dependenciesQuery = trpc.task.dependencies.useQuery({});
+  // Which Secret a credential-expired card's "Renew" action should point at (spec AC-013,
+  // issue #63). Both queries are already fetched elsewhere in the app with this same empty
+  // input (`create-task-dialog.tsx`, `secrets-section.tsx`), so React Query serves this from
+  // its existing cache far more often than it issues a new request.
+  const agentProfilesQuery = trpc.profile.agent.list.useQuery({});
+  const secretsQuery = trpc.secret.list.useQuery({});
+  /**
+   * The names behind the ids a card carries: which Repository its branch is in, and which Issue
+   * it came from (see `board-references.tsx`).
+   *
+   * Deliberately *not* joined into the readiness gate below. A card whose repository name has
+   * not landed yet is still a perfectly readable card — it just says one thing less for a
+   * moment — whereas holding the whole board behind two more requests would make every load
+   * wait on data no decision depends on.
+   */
+  const repositoriesQuery = trpc.repository.list.useQuery({});
+  const issuesQuery = trpc.issue.list.useQuery({});
+  const references = useMemo<BoardReferences>(() => {
+    const byRepository = new Map((repositoriesQuery.data ?? []).map((r) => [r.id, r.name]));
+    const byIssue = new Map((issuesQuery.data ?? []).map((i) => [i.id, i]));
+    return {
+      repositoryName: (id) => byRepository.get(id) ?? null,
+      issue: (id) => byIssue.get(id) ?? null,
+    };
+  }, [repositoriesQuery.data, issuesQuery.data]);
   const refresh = () => {
     void utils.task.list.invalidate();
     void utils.task.dependencies.invalidate();
   };
   const move = trpc.task.move.useMutation({ onSuccess: refresh });
   const launch = trpc.task.launch.useMutation({ onSuccess: refresh });
+  const retry = trpc.task.retry.useMutation({ onSuccess: refresh });
   const [dragError, setDragError] = useState<string | null>(null);
   const [pendingMove, setPendingMove] = useState<{ taskId: string; to: TaskState } | null>(null);
   const [editingBlockersFor, setEditingBlockersFor] = useState<TaskDto | null>(null);
@@ -193,13 +214,21 @@ export function Board() {
   const blockersFor = (taskId: string) => blockersByTask.get(taskId);
   const outstandingFor = (taskId: string) => unsatisfiedDependencies(blockersFor(taskId) ?? []);
 
-  const busy = move.isPending || launch.isPending;
-  const actionError = move.error ?? launch.error;
+  // Agent Profile → the name of the Secret it spends, so the Renew link can say which
+  // credential it is about to open rather than sending the Owner to a bare form.
+  const secretNameById = new Map((secretsQuery.data ?? []).map((s) => [s.id, s.name]));
+  const credentialNameByProfile = new Map(
+    (agentProfilesQuery.data ?? []).map((p) => [p.id, secretNameById.get(p.secretId) ?? null]),
+  );
+
+  const busy = move.isPending || launch.isPending || retry.isPending;
+  const actionError = move.error ?? launch.error ?? retry.error;
   // Spin only the card that was clicked. `busy` still blocks the rest, but a global spinner
   // would claim every task on the board is doing something when one of them is.
   const pendingOn = (id: string) =>
     (move.isPending && move.variables?.id === id) ||
-    (launch.isPending && launch.variables?.id === id);
+    (launch.isPending && launch.variables?.id === id) ||
+    (retry.isPending && retry.variables?.id === id);
 
   const onMove = (taskId: string, from: TaskState, to: TaskState) => {
     const refusal = moveRefusal(from, to, outstandingFor(taskId));
@@ -248,6 +277,49 @@ export function Board() {
       )}
     />
   );
+
+  /**
+   * The one-click path from a credential-expired card into the pre-filled Secret form (spec
+   * AC-013, issue #63). A plain navigation, not a mutation — renewing the credential itself
+   * happens on `secret.set`, on the Settings page this only takes the Owner to.
+   */
+  const renewAction = (task: TaskDto): ReactNode => {
+    if (task.failureReason !== CREDENTIAL_EXPIRED_REASON) return null;
+    const credentialName = credentialNameByProfile.get(task.agentProfileId);
+    return (
+      <Button key={`renew-${task.id}`} asChild size="xs" variant="outline">
+        <Link href={`/settings?renewSecret=${encodeURIComponent(credentialName ?? "")}#secrets`}>
+          <KeyRound /> Renew
+        </Link>
+      </Button>
+    );
+  };
+
+  /**
+   * The one-click path back to `running` for a Task that failed for a reason a fresh attempt can
+   * actually fix — everything except a credential, which `renewAction` covers instead: retrying
+   * before the credential itself changes would only fail the same way again immediately.
+   *
+   * This is also how an Owner recovers a Task `INTERRUPTED_REASON`'d by the orchestrator's own
+   * boot-time reconciliation (an orchestrator restart mid-run with nothing left to redrive it —
+   * see `apps/orchestrator/src/reconcile.ts`): the worktree and its commits are untouched, so a
+   * retry here is a fresh agent process picking the same work back up, not a restart from zero.
+   */
+  const retryAction = (task: TaskDto): ReactNode => {
+    if (task.state !== "failed" || task.failureReason === CREDENTIAL_EXPIRED_REASON) return null;
+    return (
+      <Button
+        key={`retry-${task.id}`}
+        size="xs"
+        variant="outline"
+        disabled={busy}
+        loading={pendingOn(task.id)}
+        onClick={() => retry.mutate({ id: task.id })}
+      >
+        <RotateCcw /> Retry
+      </Button>
+    );
+  };
 
   const renderActions = (task: TaskDto): ReactNode => {
     if (task.state === "backlog") {
@@ -311,24 +383,21 @@ export function Board() {
     return (
       <>
         {task.state === "done" ? null : blockedByAction(task)}
+        {renewAction(task)}
+        {retryAction(task)}
         {deleteAction(task)}
       </>
     );
   };
 
-  // The server's refusal is a wire code; `TASK_BLOCKED` reaching this banner would be the only
-  // place on the board a machine-readable code is shown to a person.
-  const actionMessage =
-    actionError?.message === TaskDependencyErrorCode.Blocked
-      ? "Can't start this task yet — it is waiting on a task that isn't done."
-      : (actionError?.message ?? null);
+  // Every server refusal is a wire code, so none of them may reach the banner as-is — see
+  // `taskActionMessage`, which owns the whole mapping rather than special-casing one code and
+  // letting the rest through (which is how `TASK_CONCURRENCY_CAP_REACHED` ended up on screen).
+  const actionMessage = taskActionMessage(actionError?.message);
   const errorMessage = dragError ?? actionMessage;
 
   return (
-    <>
-      <HeaderActions>
-        <CreateTaskDialog />
-      </HeaderActions>
+    <BoardReferencesProvider value={references}>
       {errorMessage ? (
         <p
           className="mx-4 mt-3 flex items-center gap-2 rounded-lg border border-state-failed/30 bg-state-failed/10 px-3 py-2 text-state-failed text-sm"
@@ -346,7 +415,6 @@ export function Board() {
           renderActions={renderActions}
           blockersFor={blockersFor}
           onMove={onMove}
-          headerActionFor={(state) => (state === "backlog" ? <BacklogActions /> : undefined)}
         />
       )}
       <ConfirmDialog
@@ -378,6 +446,6 @@ export function Board() {
           if (!open) setCyclePath(null);
         }}
       />
-    </>
+    </BoardReferencesProvider>
   );
 }

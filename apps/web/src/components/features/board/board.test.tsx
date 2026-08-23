@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import type { TaskDto, TaskState } from "@gatecontrol/contracts";
+import { type TaskDto, TaskErrorCode, type TaskState } from "@gatecontrol/contracts";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { type FakeSocket, installFakeWebSocket, renderWithTrpc } from "@/test/trpc-harness";
 import { Board } from "./board";
@@ -117,20 +117,43 @@ describe("Board (wired)", () => {
     });
   });
 
-  it("surfaces a rejected launch instead of failing silently", async () => {
+  it("surfaces a rejected launch as a sentence, not as the wire code", async () => {
     renderWithTrpc(<Board />, {
       ...ticket,
       "task.list": () => [makeTask({ id: "task-1", state: "ready", title: "Launchable" })],
       "task.dependencies": () => [],
       "task.launch": () => {
-        throw new Error("concurrency_cap_reached");
+        throw new Error(TaskErrorCode.ConcurrencyCapReached);
       },
     });
 
     fireEvent.click(await screen.findByRole("button", { name: "Launch" }));
 
     await waitFor(() => {
-      expect(screen.getByRole("alert").textContent).toContain("concurrency_cap_reached");
+      const alert = screen.getByRole("alert").textContent ?? "";
+      expect(alert).toContain("already running as many tasks as it allows");
+      // The banner used to render `error.message` straight through, so an Owner who hit the cap
+      // was shown TASK_CONCURRENCY_CAP_REACHED and left to guess.
+      expect(alert).not.toContain(TaskErrorCode.ConcurrencyCapReached);
+    });
+  });
+
+  it("falls back to a sentence for a code it does not know, rather than leaking it", async () => {
+    renderWithTrpc(<Board />, {
+      ...ticket,
+      "task.list": () => [makeTask({ id: "task-1", state: "ready", title: "Launchable" })],
+      "task.dependencies": () => [],
+      "task.launch": () => {
+        throw new Error("SOME_FUTURE_CODE");
+      },
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Launch" }));
+
+    await waitFor(() => {
+      const alert = screen.getByRole("alert").textContent ?? "";
+      expect(alert).not.toContain("SOME_FUTURE_CODE");
+      expect(alert.length).toBeGreaterThan(0);
     });
   });
 
@@ -145,6 +168,103 @@ describe("Board (wired)", () => {
 
     await waitFor(() => {
       expect(screen.getByRole("alert").textContent).toContain("UNAUTHORIZED");
+    });
+  });
+
+  describe("credential-expired Tasks (spec AC-013, issue #63)", () => {
+    const handlers = {
+      ...ticket,
+      "task.list": () => [
+        makeTask({
+          id: "cred-1",
+          state: "failed",
+          title: "Stuck",
+          failureReason: "credential_expired",
+        }),
+      ],
+      "task.dependencies": () => [],
+      "profile.agent.list": () => [
+        { id: "agent-1", secretId: "secret-1", name: "Claude", agentCatalogId: "cat-1" },
+      ],
+      "secret.list": () => [
+        { id: "secret-1", name: "anthropic-api-key", kind: "api_key", usedBy: [] },
+      ],
+    };
+
+    it("offers a Renew link naming the Secret that expired, to the pre-filled Settings form", async () => {
+      renderWithTrpc(<Board />, handlers);
+
+      const renew = await screen.findByRole("link", { name: /Renew/ });
+      expect(renew.getAttribute("href")).toBe("/settings?renewSecret=anthropic-api-key#secrets");
+    });
+
+    it("offers no Renew link for a Task that failed for any other reason", async () => {
+      renderWithTrpc(<Board />, {
+        ...handlers,
+        "task.list": () => [
+          makeTask({ id: "ord-1", state: "failed", title: "Crashed", failureReason: "fail" }),
+        ],
+      });
+
+      await screen.findByText("Crashed");
+      expect(screen.queryByRole("link", { name: /Renew/ })).toBeNull();
+    });
+  });
+
+  describe("Retry for a failed Task", () => {
+    const handlers = {
+      ...ticket,
+      "task.dependencies": () => [],
+      "profile.agent.list": () => [],
+      "secret.list": () => [],
+    };
+
+    it("re-runs a Task that failed for a reason a fresh attempt can fix", async () => {
+      const retried: unknown[] = [];
+      renderWithTrpc(<Board />, {
+        ...handlers,
+        "task.list": () => [
+          // The exact reason an orchestrator restart leaves behind (issue: an Owner reported a
+          // Task's input box answering "No agent is running" forever after a restart) — Retry is
+          // how it comes back, since the worktree and its commits were never touched.
+          makeTask({ id: "int-1", state: "failed", title: "Stuck", failureReason: "interrupted" }),
+        ],
+        "task.retry": (input) => {
+          retried.push(input);
+          return makeTask({ id: "int-1", state: "running", title: "Stuck", failureReason: null });
+        },
+      });
+
+      fireEvent.click(await screen.findByRole("button", { name: /Retry/ }));
+
+      await waitFor(() => expect(retried).toEqual([{ id: "int-1" }]));
+    });
+
+    it("offers no Retry button for a credential-expired Task — Renew covers that path instead", async () => {
+      renderWithTrpc(<Board />, {
+        ...handlers,
+        "task.list": () => [
+          makeTask({
+            id: "cred-1",
+            state: "failed",
+            title: "Needs a credential",
+            failureReason: "credential_expired",
+          }),
+        ],
+      });
+
+      await screen.findByText("Needs a credential");
+      expect(screen.queryByRole("button", { name: /Retry/ })).toBeNull();
+    });
+
+    it("offers no Retry button for a Task that has not failed", async () => {
+      renderWithTrpc(<Board />, {
+        ...handlers,
+        "task.list": () => [makeTask({ id: "run-1", state: "running", title: "Working" })],
+      });
+
+      await screen.findByText("Working");
+      expect(screen.queryByRole("button", { name: /Retry/ })).toBeNull();
     });
   });
 });

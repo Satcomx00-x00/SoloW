@@ -17,14 +17,16 @@ import { hub } from "./hub.js";
 /**
  * Project a log payload onto the wire, or `null` for a record that has no wire form.
  *
- * `usage`, `state` and `tool_result` are durable records nothing streams: usage belongs to
- * `session_usage`, the board's `status` frame already carries a transition, and no runner
- * reports tool results yet. `attachSubscriber` still advances its cursor past them, so a skipped
- * row cannot make a following live event look like a duplicate.
+ * `usage` and `state` are durable records nothing streams: usage belongs to `session_usage`, and
+ * the board's `status` frame already carries a transition.
  *
- * The wire union is deliberately not extended here. It is the contract the SPA already speaks,
- * and issue #2 is about what the *log* records; widening both at once would have made AC-5 —
- * "reconnect replay delivers exactly the missed events, unchanged" — untestable.
+ * This used to say the wire union was "deliberately not extended here", and to collapse
+ * `assistant_turn` / `user_turn` / `notice` into one `stdout` frame with thinking encoded as a
+ * literal "· " prefix. That made the four kinds indistinguishable to any client and left
+ * `tool_result` with no wire form at all, so a live terminal could not tell the operator's own
+ * steering from the model's answer, could not correlate a tool call with its result, and could
+ * not render markdown for prose without also mangling machine output. The wire now carries what
+ * the log stores; the terminal decides how it looks.
  */
 export function toTaskEvent(
   payload: SessionEventPayload,
@@ -34,20 +36,40 @@ export function toTaskEvent(
 ): TaskEvent | null {
   switch (payload.kind) {
     case "assistant_turn":
-      // Thinking is a property of the record; the "· " marker is presentation, applied on the
-      // way out so the stored text stays clean for the readers that are not a terminal (#16, #84).
       return {
         kind: "stdout",
         taskId,
         sessionId,
         seq,
-        text: payload.thinking ? `· ${payload.text}` : payload.text,
+        text: payload.text,
+        channel: payload.thinking ? "thinking" : "assistant",
       };
     case "user_turn":
+      return { kind: "stdout", taskId, sessionId, seq, text: payload.text, channel: "user" };
     case "notice":
-      return { kind: "stdout", taskId, sessionId, seq, text: payload.text };
+      return { kind: "stdout", taskId, sessionId, seq, text: payload.text, channel: "system" };
     case "tool_call":
-      return { kind: "tool_use", taskId, sessionId, seq, name: payload.name };
+      return {
+        kind: "tool_use",
+        taskId,
+        sessionId,
+        seq,
+        name: payload.name,
+        callId: payload.callId,
+        input: payload.input ?? null,
+        status: payload.status ?? null,
+      };
+    case "tool_result":
+      return {
+        kind: "tool_result",
+        taskId,
+        sessionId,
+        seq,
+        callId: payload.callId,
+        ok: payload.ok,
+        output: payload.output ?? null,
+        truncated: payload.truncated ?? false,
+      };
     case "diff":
       return { kind: "diff", taskId, sessionId, diffRef: payload.diffRef };
     case "permission_request":
@@ -61,6 +83,7 @@ export function toTaskEvent(
         requestId: payload.requestId,
         title: payload.title,
         toolKind: payload.toolKind,
+        toolCallId: payload.toolCallId ?? null,
         options: payload.options,
       };
     case "permission_resolved":
@@ -73,9 +96,31 @@ export function toTaskEvent(
         optionId: payload.optionId,
         decidedBy: payload.decidedBy,
       };
+    case "widget":
+      return {
+        kind: "widget",
+        taskId,
+        sessionId,
+        seq,
+        widgetId: payload.widgetId,
+        widget: payload.widget,
+      };
+    case "todos":
+      // Replayed like any other row: the list is stored whole on every rewrite, so a client
+      // that reconnects mid-run rebuilds the plan by keeping the last of these it sees.
+      return { kind: "todos", taskId, sessionId, seq, items: payload.items };
+    case "widget_response":
+      return {
+        kind: "widget_response",
+        taskId,
+        sessionId,
+        seq,
+        widgetId: payload.widgetId,
+        values: payload.values,
+        text: payload.text ?? null,
+      };
     case "usage":
     case "state":
-    case "tool_result":
       return null;
   }
 }

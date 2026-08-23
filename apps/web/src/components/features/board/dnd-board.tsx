@@ -69,14 +69,12 @@ function DroppableColumn({
   tasks,
   renderActions,
   blockersFor,
-  headerAction,
 }: {
   state: TaskState;
   label: string;
   tasks: TaskDto[];
   renderActions?: ((task: TaskDto) => ReactNode) | undefined;
   blockersFor?: ((taskId: string) => readonly TaskDependencyDto[] | undefined) | undefined;
-  headerAction?: ReactNode;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: state });
   return (
@@ -89,7 +87,7 @@ function DroppableColumn({
         isOver && "border-ring/60 bg-accent/30",
       )}
     >
-      <ColumnHeader state={state} label={label} count={tasks.length} headerAction={headerAction} />
+      <ColumnHeader state={state} label={label} count={tasks.length} />
       {tasks.length === 0 ? (
         <ColumnEmpty label={label} />
       ) : (
@@ -115,7 +113,6 @@ export function DndBoard({
   renderActions,
   blockersFor,
   onMove,
-  headerActionFor,
 }: {
   tasks: TaskDto[];
   renderActions?: ((task: TaskDto) => ReactNode) | undefined;
@@ -123,7 +120,6 @@ export function DndBoard({
   blockersFor?: ((taskId: string) => readonly TaskDependencyDto[] | undefined) | undefined;
   onMove: (taskId: string, from: TaskState, to: TaskState) => void;
   /** e.g. the Backlog column's "new issue" / "connect repository" buttons. */
-  headerActionFor?: ((state: TaskState) => ReactNode) | undefined;
 }) {
   const [activeId, setActiveId] = useState<string | null>(null);
   // A small activation distance keeps a click on the handle from starting a drag.
@@ -164,7 +160,6 @@ export function DndBoard({
             tasks={tasks.filter((task) => task.state === state)}
             renderActions={renderActions}
             blockersFor={blockersFor}
-            headerAction={headerActionFor?.(state)}
           />
         ))}
       </section>

@@ -39,6 +39,8 @@ export function DeleteIssueAction({
       // A force delete takes Tasks and sessions with the Issue, so the board and the session
       // lists are stale too — not just the Issue list the plain delete affects.
       utils.issue.list.invalidate();
+      // Deleting the last Issue carrying a label retires that label with it.
+      utils.issue.labels.invalidate();
       utils.task.invalidate();
       utils.session.invalidate();
       onSuccess?.();

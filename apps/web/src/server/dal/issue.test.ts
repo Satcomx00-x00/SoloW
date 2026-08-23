@@ -1,6 +1,13 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import { CommonErrorCode, IssueErrorCode, type TaskState } from "@gatecontrol/contracts";
-import { session, taskDependency, task as taskTable, workspace, worktree } from "@gatecontrol/db";
+import {
+  issue as issueTable,
+  session,
+  taskDependency,
+  task as taskTable,
+  workspace,
+  worktree,
+} from "@gatecontrol/db";
 import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
 import { eq } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
@@ -9,8 +16,10 @@ import {
   deleteIssue,
   getIssueById,
   issueDeletionImpact,
+  listIssueLabels,
   listIssues,
   runningTasksForIssue,
+  setIssueStatus,
   updateIssue,
 } from "./issue.js";
 import { createTaskRecord } from "./task.js";
@@ -608,5 +617,211 @@ describe("deleteIssue (issue #15 reversal)", () => {
     expect(await runningTasksForIssue(ctx, created.data.id)).toEqual([
       { taskId: made.data.id, sessionId: live.id },
     ]);
+  });
+});
+
+describe("listIssues filters (spec F01 FR-2)", () => {
+  let db: TestDb;
+  beforeEach(() => {
+    db = createTestDb();
+  });
+
+  /** Three Issues that differ in every axis the filters read. */
+  async function seedThree(name: string) {
+    const wsId = await seedWorkspace(db, name);
+    const ctx = ctxFor(db, wsId);
+    await seedIssue(db, wsId, {
+      title: "Keypad backlight flickers",
+      description: "only at dusk",
+      labels: ["hardware", "ui"],
+    });
+    await seedIssue(db, wsId, {
+      title: "Latch sticks",
+      description: "in the rain",
+      labels: ["hardware"],
+      source: "github",
+      externalNumber: 42,
+      externalUrl: "https://github.com/acme/gate/issues/42",
+    });
+    await seedIssue(db, wsId, { title: "Docs are stale", labels: [] });
+    return ctx;
+  }
+
+  const titles = (r: Awaited<ReturnType<typeof listIssues>>) =>
+    r.ok ? r.data.map((i) => i.title).sort() : ["<error>"];
+
+  it("matches the query against the title", async () => {
+    const ctx = await seedThree("q-title");
+    expect(titles(await listIssues(ctx, { query: "latch" }))).toEqual(["Latch sticks"]);
+  });
+
+  it("matches the query against the description too, not the title alone", async () => {
+    const ctx = await seedThree("q-desc");
+    // "dusk" appears nowhere in any title — before FR-2 this returned nothing.
+    expect(titles(await listIssues(ctx, { query: "dusk" }))).toEqual(["Keypad backlight flickers"]);
+  });
+
+  it("finds an imported Issue by the provider's number, with or without the #", async () => {
+    const ctx = await seedThree("q-number");
+    expect(titles(await listIssues(ctx, { query: "#42" }))).toEqual(["Latch sticks"]);
+    expect(titles(await listIssues(ctx, { query: "42" }))).toEqual(["Latch sticks"]);
+  });
+
+  it("filters by source", async () => {
+    const ctx = await seedThree("src");
+    expect(titles(await listIssues(ctx, { source: "github" }))).toEqual(["Latch sticks"]);
+    expect(titles(await listIssues(ctx, { source: "local" }))).toEqual([
+      "Docs are stale",
+      "Keypad backlight flickers",
+    ]);
+    expect(titles(await listIssues(ctx, { source: "gitlab" }))).toEqual([]);
+  });
+
+  it("filters by label, and a second label narrows rather than widens", async () => {
+    const ctx = await seedThree("labels");
+    expect(titles(await listIssues(ctx, { labels: ["hardware"] }))).toEqual([
+      "Keypad backlight flickers",
+      "Latch sticks",
+    ]);
+    expect(titles(await listIssues(ctx, { labels: ["hardware", "ui"] }))).toEqual([
+      "Keypad backlight flickers",
+    ]);
+  });
+
+  it("matches a label exactly, not as a substring of a longer one", async () => {
+    const wsId = await seedWorkspace(db, "label-exact");
+    const ctx = ctxFor(db, wsId);
+    await seedIssue(db, wsId, { title: "Gateway", labels: ["api-gateway"] });
+    // The reason labels are filtered in memory rather than with a LIKE over the JSON column.
+    expect(titles(await listIssues(ctx, { labels: ["api"] }))).toEqual([]);
+  });
+
+  it("composes every filter at once", async () => {
+    const ctx = await seedThree("compose");
+    const both = await listIssues(ctx, { query: "latch", labels: ["hardware"], source: "github" });
+    expect(titles(both)).toEqual(["Latch sticks"]);
+    // One mismatching clause is enough to empty the list.
+    expect(titles(await listIssues(ctx, { query: "latch", source: "local" }))).toEqual([]);
+  });
+
+  it("listIssueLabels returns the Workspace's label vocabulary, sorted and deduplicated", async () => {
+    const ctx = await seedThree("vocab");
+    const labels = await listIssueLabels(ctx);
+    expect(labels.ok && labels.data).toEqual(["hardware", "ui"]);
+  });
+
+  it("neither the list nor its label vocabulary crosses a Workspace boundary", async () => {
+    const ctx = await seedThree("tenant-a");
+    const otherWs = await seedWorkspace(db, "tenant-b");
+    await seedIssue(db, otherWs, { title: "Latch sticks", labels: ["hardware"] });
+
+    expect(titles(await listIssues(ctx, { query: "latch" }))).toEqual(["Latch sticks"]);
+    const labels = await listIssueLabels(ctxFor(db, otherWs));
+    expect(labels.ok && labels.data).toEqual(["hardware"]);
+  });
+});
+
+describe("setIssueStatus (spec F01 FR-7 / FR-9)", () => {
+  let db: TestDb;
+  beforeEach(() => {
+    db = createTestDb();
+  });
+
+  /** An Issue with one Task in the given state, and the context to act on it. */
+  async function issueWithTask(name: string, state: TaskState) {
+    const g = await seedWorkspaceGraph(db, name);
+    const ctx = ctxFor(db, g.workspaceId);
+    const seeded = await seedIssue(db, g.workspaceId, { title: "Keypad backlight" });
+    const created = await createTaskRecord(ctx, {
+      issueId: seeded.id,
+      title: "t",
+      agentProfileId: g.agentProfileId,
+      executorProfileId: g.executorProfileId,
+      repositories: [{ repositoryId: g.repositoryId }],
+      state,
+    });
+    if (!created.ok) throw new Error("task seed failed");
+    return { ctx, issueId: seeded.id };
+  }
+
+  it("an override wins over the derived status, and records when it was set", async () => {
+    const { ctx, issueId } = await issueWithTask("override", "running");
+    const before = await getIssueById(ctx, issueId);
+    expect(before.ok && before.data.status).toBe("in_progress");
+
+    const set = await setIssueStatus(ctx, { id: issueId, status: "resolved", force: false });
+    expect(set.ok).toBe(true);
+    if (!set.ok) return;
+    expect(set.data.status).toBe("resolved");
+    // The Tasks still say what they said — that is the point of carrying both.
+    expect(set.data.derivedStatus).toBe("in_progress");
+    expect(set.data.statusOverride).toBe("resolved");
+    expect(set.data.statusOverrideAt).not.toBeNull();
+
+    const reread = await getIssueById(ctx, issueId);
+    expect(reread.ok && reread.data.status).toBe("resolved");
+  });
+
+  it("records who set the override, without putting them in the DTO", async () => {
+    const { ctx, issueId } = await issueWithTask("actor", "done");
+    await setIssueStatus(ctx, { id: issueId, status: "closed", force: false });
+    const [row] = await db.select().from(issueTable).where(eq(issueTable.id, issueId));
+    expect(row?.statusOverrideBy).toBe("user-1");
+  });
+
+  it("clearing the override hands the Issue back to its Tasks", async () => {
+    const { ctx, issueId } = await issueWithTask("clear", "running");
+    await setIssueStatus(ctx, { id: issueId, status: "closed", force: true });
+
+    const cleared = await setIssueStatus(ctx, { id: issueId, status: null, force: false });
+    expect(cleared.ok).toBe(true);
+    if (!cleared.ok) return;
+    expect(cleared.data.status).toBe("in_progress");
+    expect(cleared.data.statusOverride).toBeNull();
+    // The timestamp goes with it, so nothing is left claiming an override that is gone.
+    expect(cleared.data.statusOverrideAt).toBeNull();
+  });
+
+  it("refuses to close over active Tasks, and says how many", async () => {
+    const { ctx, issueId } = await issueWithTask("guard", "running");
+    const refused = await setIssueStatus(ctx, { id: issueId, status: "closed", force: false });
+    expect(refused.ok).toBe(false);
+    expect(!refused.ok && refused.error).toBe(IssueErrorCode.HasActiveTasks);
+
+    const read = await getIssueById(ctx, issueId);
+    expect(read.ok && read.data.activeTaskCount).toBe(1);
+    // And the refusal changed nothing.
+    expect(read.ok && read.data.statusOverride).toBeNull();
+  });
+
+  it("closes over active Tasks when forced", async () => {
+    const { ctx, issueId } = await issueWithTask("forced", "review");
+    const closed = await setIssueStatus(ctx, { id: issueId, status: "closed", force: true });
+    expect(closed.ok && closed.data.status).toBe("closed");
+  });
+
+  it("does not guard any status but closed", async () => {
+    const { ctx, issueId } = await issueWithTask("only-closed", "running");
+    // Resolved over running work is a claim about the work, not an abandonment of it — FR-9 is
+    // only about closing.
+    const resolved = await setIssueStatus(ctx, { id: issueId, status: "resolved", force: false });
+    expect(resolved.ok).toBe(true);
+  });
+
+  it("lets a finished Issue close with no force at all", async () => {
+    const { ctx, issueId } = await issueWithTask("done", "done");
+    const closed = await setIssueStatus(ctx, { id: issueId, status: "closed", force: false });
+    expect(closed.ok && closed.data.status).toBe("closed");
+  });
+
+  it("refuses an Issue in another Workspace", async () => {
+    const { issueId } = await issueWithTask("tenant", "done");
+    const otherWs = await seedWorkspace(db, "outsider");
+    const stranger = await setIssueStatus(ctxFor(db, otherWs), {
+      id: issueId,
+      status: "closed",
+      force: true,
+    });
+    expect(!stranger.ok && stranger.error).toBe(CommonErrorCode.NotFound);
   });
 });

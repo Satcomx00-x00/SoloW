@@ -45,7 +45,8 @@ export function TaskStateBadge({
         className={cn(
           "shrink-0",
           size === "sm" ? "size-2.5" : "size-3",
-          isLiveState(state) && "animate-spin [animation-duration:2s]",
+          // The ambient cadence: a board can have a dozen of these turning at once.
+          isLiveState(state) && "spinner-ambient",
         )}
       />
       {count === undefined ? (

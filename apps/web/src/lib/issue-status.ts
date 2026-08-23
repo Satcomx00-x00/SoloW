@@ -1,4 +1,4 @@
-import type { IssueStatus } from "@gatecontrol/contracts";
+import type { IssueSource, IssueStatus } from "@gatecontrol/contracts";
 import {
   CircleCheck,
   CircleDashed,
@@ -55,3 +55,13 @@ export const ISSUE_STATUS_STYLE: Record<IssueStatus, IssueStatusStyle> = {
 
 /** Rail/filter order: the states you act on first. */
 export const ISSUE_STATUSES: readonly IssueStatus[] = ["open", "in_progress", "resolved", "closed"];
+
+/**
+ * How each source is spelled where a person reads it. A CSS `capitalize` on the raw enum gets
+ * "Github" and "Gitlab" wrong, and those are the two names on screen most often.
+ */
+export const ISSUE_SOURCE_LABELS: Record<IssueSource, string> = {
+  local: "Local",
+  github: "GitHub",
+  gitlab: "GitLab",
+};

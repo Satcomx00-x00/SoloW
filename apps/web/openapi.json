@@ -255,6 +255,31 @@
           },
           {
             "in": "query",
+            "name": "labels",
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 50
+              },
+              "maxItems": 20
+            }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "local",
+                "github",
+                "gitlab"
+              ]
+            }
+          },
+          {
+            "in": "query",
             "name": "repositoryId",
             "schema": {
               "type": "string",
@@ -292,7 +317,35 @@
                           "closed"
                         ]
                       },
+                      "derivedStatus": {
+                        "type": "string",
+                        "enum": [
+                          "open",
+                          "in_progress",
+                          "resolved",
+                          "closed"
+                        ]
+                      },
+                      "statusOverride": {
+                        "type": "string",
+                        "nullable": true,
+                        "enum": [
+                          "open",
+                          "in_progress",
+                          "resolved",
+                          "closed",
+                          null
+                        ]
+                      },
+                      "statusOverrideAt": {
+                        "type": "string",
+                        "nullable": true
+                      },
                       "taskCount": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "activeTaskCount": {
                         "type": "integer",
                         "minimum": 0
                       },
@@ -341,7 +394,11 @@
                       "title",
                       "description",
                       "status",
+                      "derivedStatus",
+                      "statusOverride",
+                      "statusOverrideAt",
                       "taskCount",
+                      "activeTaskCount",
                       "source",
                       "repositoryId",
                       "externalNumber",
@@ -460,7 +517,35 @@
                         "closed"
                       ]
                     },
+                    "derivedStatus": {
+                      "type": "string",
+                      "enum": [
+                        "open",
+                        "in_progress",
+                        "resolved",
+                        "closed"
+                      ]
+                    },
+                    "statusOverride": {
+                      "type": "string",
+                      "nullable": true,
+                      "enum": [
+                        "open",
+                        "in_progress",
+                        "resolved",
+                        "closed",
+                        null
+                      ]
+                    },
+                    "statusOverrideAt": {
+                      "type": "string",
+                      "nullable": true
+                    },
                     "taskCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "activeTaskCount": {
                       "type": "integer",
                       "minimum": 0
                     },
@@ -509,7 +594,11 @@
                     "title",
                     "description",
                     "status",
+                    "derivedStatus",
+                    "statusOverride",
+                    "statusOverrideAt",
                     "taskCount",
+                    "activeTaskCount",
                     "source",
                     "repositoryId",
                     "externalNumber",
@@ -559,6 +648,298 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/error.NOT_FOUND"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/issue.labels": {
+      "get": {
+        "operationId": "issue-labels",
+        "summary": "Every distinct label in use on the Workspace's Issues, sorted — the vocabulary the list filter offers.",
+        "tags": [
+          "issue"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.NOT_FOUND"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/issue.setStatus": {
+      "post": {
+        "operationId": "issue-setStatus",
+        "summary": "Set an Issue's status by hand, overriding the one derived from its Tasks, or pass `status: null` to follow the Tasks again. Closing is refused while Tasks are still active unless `force` is set.",
+        "tags": [
+          "issue"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "status": {
+                    "type": "string",
+                    "nullable": true,
+                    "enum": [
+                      "open",
+                      "in_progress",
+                      "resolved",
+                      "closed",
+                      null
+                    ]
+                  },
+                  "force": {
+                    "type": "boolean",
+                    "default": false
+                  }
+                },
+                "required": [
+                  "id",
+                  "status"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "open",
+                        "in_progress",
+                        "resolved",
+                        "closed"
+                      ]
+                    },
+                    "derivedStatus": {
+                      "type": "string",
+                      "enum": [
+                        "open",
+                        "in_progress",
+                        "resolved",
+                        "closed"
+                      ]
+                    },
+                    "statusOverride": {
+                      "type": "string",
+                      "nullable": true,
+                      "enum": [
+                        "open",
+                        "in_progress",
+                        "resolved",
+                        "closed",
+                        null
+                      ]
+                    },
+                    "statusOverrideAt": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "taskCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "activeTaskCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "source": {
+                      "type": "string",
+                      "enum": [
+                        "local",
+                        "github",
+                        "gitlab"
+                      ]
+                    },
+                    "repositoryId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
+                    "externalNumber": {
+                      "type": "integer",
+                      "nullable": true
+                    },
+                    "externalUrl": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "syncedAt": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "labels": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "title",
+                    "description",
+                    "status",
+                    "derivedStatus",
+                    "statusOverride",
+                    "statusOverrideAt",
+                    "taskCount",
+                    "activeTaskCount",
+                    "source",
+                    "repositoryId",
+                    "externalNumber",
+                    "externalUrl",
+                    "syncedAt",
+                    "labels",
+                    "createdAt",
+                    "updatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
                 }
               }
             }
@@ -655,7 +1036,35 @@
                         "closed"
                       ]
                     },
+                    "derivedStatus": {
+                      "type": "string",
+                      "enum": [
+                        "open",
+                        "in_progress",
+                        "resolved",
+                        "closed"
+                      ]
+                    },
+                    "statusOverride": {
+                      "type": "string",
+                      "nullable": true,
+                      "enum": [
+                        "open",
+                        "in_progress",
+                        "resolved",
+                        "closed",
+                        null
+                      ]
+                    },
+                    "statusOverrideAt": {
+                      "type": "string",
+                      "nullable": true
+                    },
                     "taskCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "activeTaskCount": {
                       "type": "integer",
                       "minimum": 0
                     },
@@ -704,7 +1113,11 @@
                     "title",
                     "description",
                     "status",
+                    "derivedStatus",
+                    "statusOverride",
+                    "statusOverrideAt",
                     "taskCount",
+                    "activeTaskCount",
                     "source",
                     "repositoryId",
                     "externalNumber",
@@ -838,7 +1251,35 @@
                         "closed"
                       ]
                     },
+                    "derivedStatus": {
+                      "type": "string",
+                      "enum": [
+                        "open",
+                        "in_progress",
+                        "resolved",
+                        "closed"
+                      ]
+                    },
+                    "statusOverride": {
+                      "type": "string",
+                      "nullable": true,
+                      "enum": [
+                        "open",
+                        "in_progress",
+                        "resolved",
+                        "closed",
+                        null
+                      ]
+                    },
+                    "statusOverrideAt": {
+                      "type": "string",
+                      "nullable": true
+                    },
                     "taskCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "activeTaskCount": {
                       "type": "integer",
                       "minimum": 0
                     },
@@ -887,7 +1328,11 @@
                     "title",
                     "description",
                     "status",
+                    "derivedStatus",
+                    "statusOverride",
+                    "statusOverrideAt",
                     "taskCount",
+                    "activeTaskCount",
                     "source",
                     "repositoryId",
                     "externalNumber",
@@ -2051,7 +2496,35 @@
                           "closed"
                         ]
                       },
+                      "derivedStatus": {
+                        "type": "string",
+                        "enum": [
+                          "open",
+                          "in_progress",
+                          "resolved",
+                          "closed"
+                        ]
+                      },
+                      "statusOverride": {
+                        "type": "string",
+                        "nullable": true,
+                        "enum": [
+                          "open",
+                          "in_progress",
+                          "resolved",
+                          "closed",
+                          null
+                        ]
+                      },
+                      "statusOverrideAt": {
+                        "type": "string",
+                        "nullable": true
+                      },
                       "taskCount": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "activeTaskCount": {
                         "type": "integer",
                         "minimum": 0
                       },
@@ -2100,7 +2573,11 @@
                       "title",
                       "description",
                       "status",
+                      "derivedStatus",
+                      "statusOverride",
+                      "statusOverrideAt",
                       "taskCount",
+                      "activeTaskCount",
                       "source",
                       "repositoryId",
                       "externalNumber",
@@ -3034,6 +3511,236 @@
                   },
                   "required": [
                     "surface",
+                    "workspaceId",
+                    "userId",
+                    "layout"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/preference.getTaskPaneLayout": {
+      "get": {
+        "operationId": "preference-getTaskPaneLayout",
+        "summary": "Read the signed-in user's Task page split — the width of the changes column and whether it is folded. Returns the default when nothing is saved.",
+        "tags": [
+          "preference"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "workspaceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "userId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "layout": {
+                      "type": "object",
+                      "properties": {
+                        "changesWidth": {
+                          "type": "integer",
+                          "minimum": 240,
+                          "maximum": 900
+                        },
+                        "changesCollapsed": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "changesWidth",
+                        "changesCollapsed"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "workspaceId",
+                    "userId",
+                    "layout"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.NOT_FOUND"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/preference.setTaskPaneLayout": {
+      "post": {
+        "operationId": "preference-setTaskPaneLayout",
+        "summary": "Save the signed-in user's Task page split.",
+        "tags": [
+          "preference"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "changesWidth": {
+                    "type": "integer",
+                    "minimum": 240,
+                    "maximum": 900
+                  },
+                  "changesCollapsed": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "changesWidth",
+                  "changesCollapsed"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "workspaceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "userId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "layout": {
+                      "type": "object",
+                      "properties": {
+                        "changesWidth": {
+                          "type": "integer",
+                          "minimum": 240,
+                          "maximum": 900
+                        },
+                        "changesCollapsed": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "changesWidth",
+                        "changesCollapsed"
+                      ]
+                    }
+                  },
+                  "required": [
                     "workspaceId",
                     "userId",
                     "layout"
@@ -5101,6 +5808,15 @@
                     "minimum": 1,
                     "maximum": 20,
                     "default": 3
+                  },
+                  "permissionMode": {
+                    "type": "string",
+                    "enum": [
+                      "acceptEdits",
+                      "plan",
+                      "bypassPermissions"
+                    ],
+                    "default": "bypassPermissions"
                   }
                 },
                 "required": [
@@ -5146,6 +5862,36 @@
                     "concurrencyCap": {
                       "type": "integer"
                     },
+                    "permissionMode": {
+                      "type": "string",
+                      "enum": [
+                        "acceptEdits",
+                        "plan",
+                        "bypassPermissions"
+                      ]
+                    },
+                    "usage": {
+                      "type": "object",
+                      "properties": {
+                        "taskCount": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "workflowStepCount": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "sessionUsageCount": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "taskCount",
+                        "workflowStepCount",
+                        "sessionUsageCount"
+                      ]
+                    },
                     "createdAt": {
                       "type": "string",
                       "format": "date-time"
@@ -5162,6 +5908,8 @@
                     "authMode",
                     "secretId",
                     "concurrencyCap",
+                    "permissionMode",
+                    "usage",
                     "createdAt",
                     "updatedAt"
                   ]
@@ -5215,7 +5963,7 @@
     "/profile.agent.list": {
       "get": {
         "operationId": "profile-agent-list",
-        "summary": "List Agent Profiles available to bind to a Task.",
+        "summary": "List Agent Profiles available to bind to a Task, with how many Tasks, Workflow Steps and Sessions each is used by.",
         "tags": [
           "profile"
         ],
@@ -5259,6 +6007,36 @@
                       "concurrencyCap": {
                         "type": "integer"
                       },
+                      "permissionMode": {
+                        "type": "string",
+                        "enum": [
+                          "acceptEdits",
+                          "plan",
+                          "bypassPermissions"
+                        ]
+                      },
+                      "usage": {
+                        "type": "object",
+                        "properties": {
+                          "taskCount": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "workflowStepCount": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "sessionUsageCount": {
+                            "type": "integer",
+                            "minimum": 0
+                          }
+                        },
+                        "required": [
+                          "taskCount",
+                          "workflowStepCount",
+                          "sessionUsageCount"
+                        ]
+                      },
                       "createdAt": {
                         "type": "string",
                         "format": "date-time"
@@ -5275,6 +6053,8 @@
                       "authMode",
                       "secretId",
                       "concurrencyCap",
+                      "permissionMode",
+                      "usage",
                       "createdAt",
                       "updatedAt"
                     ]
@@ -5336,10 +6116,352 @@
         }
       }
     },
+    "/profile.agent.update": {
+      "post": {
+        "operationId": "profile-agent-update",
+        "summary": "Edit an Agent Profile's name, concurrency cap or permission mode. The agent it runs and the credential it runs on are fixed at creation — changing those would rewrite what its finished runs meant.",
+        "tags": [
+          "profile"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "concurrencyCap": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 20
+                  },
+                  "permissionMode": {
+                    "type": "string",
+                    "enum": [
+                      "acceptEdits",
+                      "plan",
+                      "bypassPermissions"
+                    ]
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "agentCatalogId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "authMode": {
+                      "type": "string",
+                      "enum": [
+                        "subscription",
+                        "api_key"
+                      ]
+                    },
+                    "secretId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "concurrencyCap": {
+                      "type": "integer"
+                    },
+                    "permissionMode": {
+                      "type": "string",
+                      "enum": [
+                        "acceptEdits",
+                        "plan",
+                        "bypassPermissions"
+                      ]
+                    },
+                    "usage": {
+                      "type": "object",
+                      "properties": {
+                        "taskCount": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "workflowStepCount": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "sessionUsageCount": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "taskCount",
+                        "workflowStepCount",
+                        "sessionUsageCount"
+                      ]
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "agentCatalogId",
+                    "authMode",
+                    "secretId",
+                    "concurrencyCap",
+                    "permissionMode",
+                    "usage",
+                    "createdAt",
+                    "updatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/profile.agent.delete": {
+      "post": {
+        "operationId": "profile-agent-delete",
+        "summary": "Delete an Agent Profile. Refused while a Task, a Workflow Step, or a Session's usage record still references it.",
+        "tags": [
+          "profile"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "agentCatalogId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "authMode": {
+                      "type": "string",
+                      "enum": [
+                        "subscription",
+                        "api_key"
+                      ]
+                    },
+                    "secretId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "concurrencyCap": {
+                      "type": "integer"
+                    },
+                    "permissionMode": {
+                      "type": "string",
+                      "enum": [
+                        "acceptEdits",
+                        "plan",
+                        "bypassPermissions"
+                      ]
+                    },
+                    "usage": {
+                      "type": "object",
+                      "properties": {
+                        "taskCount": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "workflowStepCount": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "sessionUsageCount": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "taskCount",
+                        "workflowStepCount",
+                        "sessionUsageCount"
+                      ]
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "agentCatalogId",
+                    "authMode",
+                    "secretId",
+                    "concurrencyCap",
+                    "permissionMode",
+                    "usage",
+                    "createdAt",
+                    "updatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/profile.agentCatalog.list": {
       "get": {
         "operationId": "profile-agentCatalog-list",
-        "summary": "List the agents this Workspace can run — the catalog an Agent Profile points at. Read-only; rows are seeded per Workspace.",
+        "summary": "List the agents this Workspace can run — the catalog an Agent Profile points at.",
         "tags": [
           "profile"
         ],
@@ -5488,6 +6610,255 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/error.NOT_FOUND"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/profile.agentCatalog.create": {
+      "post": {
+        "operationId": "profile-agentCatalog-create",
+        "summary": "Declare a new agent this Workspace can run: which protocol it speaks, the command that starts it, and the two environment variables billing integrity depends on.",
+        "tags": [
+          "profile"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9_]*$",
+                    "minLength": 1,
+                    "maxLength": 60
+                  },
+                  "displayName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "protocol": {
+                    "type": "string",
+                    "enum": [
+                      "claude_code_stream_json",
+                      "acp",
+                      "cli_passthrough"
+                    ]
+                  },
+                  "command": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "argsTemplate": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "maxItems": 64,
+                    "default": []
+                  },
+                  "installHint": {
+                    "type": "string",
+                    "nullable": true,
+                    "maxLength": 500,
+                    "default": null
+                  },
+                  "subscriptionEnvVar": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                    "minLength": 1
+                  },
+                  "meteredEnvVar": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                    "minLength": 1
+                  },
+                  "capabilities": {
+                    "type": "object",
+                    "properties": {
+                      "models": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "default": []
+                      },
+                      "modes": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "default": []
+                      }
+                    },
+                    "additionalProperties": false,
+                    "default": {
+                      "models": [],
+                      "modes": []
+                    }
+                  }
+                },
+                "required": [
+                  "key",
+                  "displayName",
+                  "protocol",
+                  "command",
+                  "subscriptionEnvVar",
+                  "meteredEnvVar"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "key": {
+                      "type": "string",
+                      "pattern": "^[a-z][a-z0-9_]*$",
+                      "minLength": 1,
+                      "maxLength": 60
+                    },
+                    "displayName": {
+                      "type": "string"
+                    },
+                    "protocol": {
+                      "type": "string",
+                      "enum": [
+                        "claude_code_stream_json",
+                        "acp",
+                        "cli_passthrough"
+                      ]
+                    },
+                    "command": {
+                      "type": "string"
+                    },
+                    "argsTemplate": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "installHint": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "subscriptionEnvVar": {
+                      "type": "string"
+                    },
+                    "meteredEnvVar": {
+                      "type": "string"
+                    },
+                    "capabilities": {
+                      "type": "object",
+                      "properties": {
+                        "models": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "default": []
+                        },
+                        "modes": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "default": []
+                        }
+                      },
+                      "required": [
+                        "models",
+                        "modes"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "key",
+                    "displayName",
+                    "protocol",
+                    "command",
+                    "argsTemplate",
+                    "installHint",
+                    "subscriptionEnvVar",
+                    "meteredEnvVar",
+                    "capabilities",
+                    "createdAt",
+                    "updatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
                 }
               }
             }
@@ -7545,51 +8916,64 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "id": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "name": {
-                      "type": "string"
-                    },
-                    "kind": {
-                      "type": "string",
-                      "enum": [
-                        "subscription_token",
-                        "api_key",
-                        "scm_pat",
-                        "ssh_key",
-                        "cloud_credential"
+                    "secret": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "subscription_token",
+                            "api_key",
+                            "scm_pat",
+                            "ssh_key",
+                            "cloud_credential"
+                          ]
+                        },
+                        "usedBy": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "holder": {
+                                "type": "string",
+                                "enum": [
+                                  "integration",
+                                  "agent_profile"
+                                ]
+                              },
+                              "name": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "holder",
+                              "name"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name",
+                        "kind",
+                        "usedBy"
                       ]
                     },
-                    "usedBy": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "holder": {
-                            "type": "string",
-                            "enum": [
-                              "integration",
-                              "agent_profile"
-                            ]
-                          },
-                          "name": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "holder",
-                          "name"
-                        ]
-                      }
+                    "resumedTaskCount": {
+                      "type": "integer",
+                      "minimum": 0
                     }
                   },
                   "required": [
-                    "id",
-                    "name",
-                    "kind",
-                    "usedBy"
+                    "secret",
+                    "resumedTaskCount"
                   ]
                 }
               }
@@ -8127,7 +9511,10 @@
                               "state",
                               "permission_request",
                               "permission_resolved",
-                              "diff"
+                              "diff",
+                              "widget",
+                              "widget_response",
+                              "todos"
                             ]
                           },
                           "payload": {
@@ -8206,7 +9593,24 @@
                                     "type": "string",
                                     "nullable": true
                                   },
-                                  "input": {}
+                                  "input": {
+                                    "type": "object",
+                                    "nullable": true,
+                                    "additionalProperties": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "status": {
+                                    "type": "string",
+                                    "nullable": true,
+                                    "enum": [
+                                      "pending",
+                                      "in_progress",
+                                      "completed",
+                                      "failed",
+                                      null
+                                    ]
+                                  }
                                 },
                                 "required": [
                                   "kind",
@@ -8230,7 +9634,14 @@
                                   "ok": {
                                     "type": "boolean"
                                   },
-                                  "output": {}
+                                  "output": {
+                                    "type": "string",
+                                    "nullable": true
+                                  },
+                                  "truncated": {
+                                    "type": "boolean",
+                                    "nullable": true
+                                  }
                                 },
                                 "required": [
                                   "kind",
@@ -8340,6 +9751,10 @@
                                     "type": "string"
                                   },
                                   "toolKind": {
+                                    "type": "string",
+                                    "nullable": true
+                                  },
+                                  "toolCallId": {
                                     "type": "string",
                                     "nullable": true
                                   },
@@ -8472,6 +9887,396 @@
                                   "files",
                                   "patch",
                                   "truncated"
+                                ]
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "widget"
+                                    ]
+                                  },
+                                  "widgetId": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "widget": {
+                                    "oneOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": [
+                                              "ask_user_input"
+                                            ]
+                                          },
+                                          "prompt": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 1000
+                                          },
+                                          "mode": {
+                                            "type": "string",
+                                            "enum": [
+                                              "single",
+                                              "multi",
+                                              "rank"
+                                            ],
+                                            "default": "single"
+                                          },
+                                          "options": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "id": {
+                                                  "type": "string",
+                                                  "minLength": 1,
+                                                  "maxLength": 120
+                                                },
+                                                "label": {
+                                                  "type": "string",
+                                                  "minLength": 1,
+                                                  "maxLength": 500
+                                                },
+                                                "description": {
+                                                  "type": "string",
+                                                  "maxLength": 1000
+                                                }
+                                              },
+                                              "required": [
+                                                "id",
+                                                "label"
+                                              ]
+                                            },
+                                            "minItems": 1,
+                                            "maxItems": 12
+                                          },
+                                          "allowOther": {
+                                            "type": "boolean",
+                                            "default": false
+                                          }
+                                        },
+                                        "required": [
+                                          "kind",
+                                          "prompt",
+                                          "mode",
+                                          "options",
+                                          "allowOther"
+                                        ]
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": [
+                                              "show_widget"
+                                            ]
+                                          },
+                                          "module": {
+                                            "type": "string",
+                                            "enum": [
+                                              "diagram",
+                                              "chart",
+                                              "data_viz",
+                                              "mockup",
+                                              "interactive",
+                                              "art",
+                                              "elicitation"
+                                            ]
+                                          },
+                                          "title": {
+                                            "type": "string",
+                                            "maxLength": 200
+                                          },
+                                          "format": {
+                                            "type": "string",
+                                            "enum": [
+                                              "svg",
+                                              "html"
+                                            ]
+                                          },
+                                          "content": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 65536
+                                          }
+                                        },
+                                        "required": [
+                                          "kind",
+                                          "module",
+                                          "format",
+                                          "content"
+                                        ]
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": [
+                                              "options_card"
+                                            ]
+                                          },
+                                          "title": {
+                                            "type": "string",
+                                            "maxLength": 200
+                                          },
+                                          "options": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "id": {
+                                                  "type": "string",
+                                                  "minLength": 1,
+                                                  "maxLength": 120
+                                                },
+                                                "label": {
+                                                  "type": "string",
+                                                  "minLength": 1,
+                                                  "maxLength": 500
+                                                },
+                                                "description": {
+                                                  "type": "string",
+                                                  "maxLength": 1000
+                                                },
+                                                "badge": {
+                                                  "type": "string",
+                                                  "maxLength": 40
+                                                }
+                                              },
+                                              "required": [
+                                                "id",
+                                                "label"
+                                              ]
+                                            },
+                                            "minItems": 1,
+                                            "maxItems": 12
+                                          }
+                                        },
+                                        "required": [
+                                          "kind",
+                                          "options"
+                                        ]
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": [
+                                              "step_card"
+                                            ]
+                                          },
+                                          "title": {
+                                            "type": "string",
+                                            "maxLength": 200
+                                          },
+                                          "steps": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "id": {
+                                                  "type": "string",
+                                                  "minLength": 1,
+                                                  "maxLength": 120
+                                                },
+                                                "label": {
+                                                  "type": "string",
+                                                  "minLength": 1,
+                                                  "maxLength": 500
+                                                },
+                                                "state": {
+                                                  "type": "string",
+                                                  "enum": [
+                                                    "todo",
+                                                    "active",
+                                                    "done",
+                                                    "blocked"
+                                                  ]
+                                                },
+                                                "note": {
+                                                  "type": "string",
+                                                  "maxLength": 300
+                                                }
+                                              },
+                                              "required": [
+                                                "id",
+                                                "label",
+                                                "state"
+                                              ]
+                                            },
+                                            "minItems": 1,
+                                            "maxItems": 40
+                                          }
+                                        },
+                                        "required": [
+                                          "kind",
+                                          "steps"
+                                        ]
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": [
+                                              "present_files"
+                                            ]
+                                          },
+                                          "title": {
+                                            "type": "string",
+                                            "maxLength": 200
+                                          },
+                                          "files": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "path": {
+                                                  "type": "string",
+                                                  "minLength": 1,
+                                                  "maxLength": 400
+                                                },
+                                                "status": {
+                                                  "type": "string",
+                                                  "enum": [
+                                                    "added",
+                                                    "modified",
+                                                    "deleted",
+                                                    "renamed"
+                                                  ]
+                                                },
+                                                "note": {
+                                                  "type": "string",
+                                                  "maxLength": 300
+                                                }
+                                              },
+                                              "required": [
+                                                "path"
+                                              ]
+                                            },
+                                            "minItems": 1,
+                                            "maxItems": 100
+                                          }
+                                        },
+                                        "required": [
+                                          "kind",
+                                          "files"
+                                        ]
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": [
+                                              "unsupported"
+                                            ]
+                                          },
+                                          "requested": {
+                                            "type": "string",
+                                            "maxLength": 120
+                                          },
+                                          "reason": {
+                                            "type": "string",
+                                            "maxLength": 500
+                                          }
+                                        },
+                                        "required": [
+                                          "kind",
+                                          "requested",
+                                          "reason"
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "widgetId",
+                                  "widget"
+                                ]
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "todos"
+                                    ]
+                                  },
+                                  "items": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "content": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 500
+                                        },
+                                        "status": {
+                                          "type": "string",
+                                          "enum": [
+                                            "pending",
+                                            "in_progress",
+                                            "completed"
+                                          ]
+                                        },
+                                        "activeForm": {
+                                          "type": "string",
+                                          "maxLength": 500
+                                        }
+                                      },
+                                      "required": [
+                                        "content",
+                                        "status"
+                                      ]
+                                    },
+                                    "maxItems": 100
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "items"
+                                ]
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "widget_response"
+                                    ]
+                                  },
+                                  "widgetId": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "values": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "text": {
+                                    "type": "string",
+                                    "nullable": true
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "widgetId",
+                                  "values"
                                 ]
                               }
                             ]
@@ -8870,7 +10675,10 @@
                           "state",
                           "permission_request",
                           "permission_resolved",
-                          "diff"
+                          "diff",
+                          "widget",
+                          "widget_response",
+                          "todos"
                         ]
                       },
                       "payload": {
@@ -8949,7 +10757,24 @@
                                 "type": "string",
                                 "nullable": true
                               },
-                              "input": {}
+                              "input": {
+                                "type": "object",
+                                "nullable": true,
+                                "additionalProperties": {
+                                  "type": "string"
+                                }
+                              },
+                              "status": {
+                                "type": "string",
+                                "nullable": true,
+                                "enum": [
+                                  "pending",
+                                  "in_progress",
+                                  "completed",
+                                  "failed",
+                                  null
+                                ]
+                              }
                             },
                             "required": [
                               "kind",
@@ -8973,7 +10798,14 @@
                               "ok": {
                                 "type": "boolean"
                               },
-                              "output": {}
+                              "output": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "truncated": {
+                                "type": "boolean",
+                                "nullable": true
+                              }
                             },
                             "required": [
                               "kind",
@@ -9083,6 +10915,10 @@
                                 "type": "string"
                               },
                               "toolKind": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "toolCallId": {
                                 "type": "string",
                                 "nullable": true
                               },
@@ -9215,6 +11051,396 @@
                               "files",
                               "patch",
                               "truncated"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "widget"
+                                ]
+                              },
+                              "widgetId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "widget": {
+                                "oneOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "ask_user_input"
+                                        ]
+                                      },
+                                      "prompt": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 1000
+                                      },
+                                      "mode": {
+                                        "type": "string",
+                                        "enum": [
+                                          "single",
+                                          "multi",
+                                          "rank"
+                                        ],
+                                        "default": "single"
+                                      },
+                                      "options": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "id": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 120
+                                            },
+                                            "label": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 500
+                                            },
+                                            "description": {
+                                              "type": "string",
+                                              "maxLength": 1000
+                                            }
+                                          },
+                                          "required": [
+                                            "id",
+                                            "label"
+                                          ]
+                                        },
+                                        "minItems": 1,
+                                        "maxItems": 12
+                                      },
+                                      "allowOther": {
+                                        "type": "boolean",
+                                        "default": false
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "prompt",
+                                      "mode",
+                                      "options",
+                                      "allowOther"
+                                    ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "show_widget"
+                                        ]
+                                      },
+                                      "module": {
+                                        "type": "string",
+                                        "enum": [
+                                          "diagram",
+                                          "chart",
+                                          "data_viz",
+                                          "mockup",
+                                          "interactive",
+                                          "art",
+                                          "elicitation"
+                                        ]
+                                      },
+                                      "title": {
+                                        "type": "string",
+                                        "maxLength": 200
+                                      },
+                                      "format": {
+                                        "type": "string",
+                                        "enum": [
+                                          "svg",
+                                          "html"
+                                        ]
+                                      },
+                                      "content": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 65536
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "module",
+                                      "format",
+                                      "content"
+                                    ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "options_card"
+                                        ]
+                                      },
+                                      "title": {
+                                        "type": "string",
+                                        "maxLength": 200
+                                      },
+                                      "options": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "id": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 120
+                                            },
+                                            "label": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 500
+                                            },
+                                            "description": {
+                                              "type": "string",
+                                              "maxLength": 1000
+                                            },
+                                            "badge": {
+                                              "type": "string",
+                                              "maxLength": 40
+                                            }
+                                          },
+                                          "required": [
+                                            "id",
+                                            "label"
+                                          ]
+                                        },
+                                        "minItems": 1,
+                                        "maxItems": 12
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "options"
+                                    ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "step_card"
+                                        ]
+                                      },
+                                      "title": {
+                                        "type": "string",
+                                        "maxLength": 200
+                                      },
+                                      "steps": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "id": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 120
+                                            },
+                                            "label": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 500
+                                            },
+                                            "state": {
+                                              "type": "string",
+                                              "enum": [
+                                                "todo",
+                                                "active",
+                                                "done",
+                                                "blocked"
+                                              ]
+                                            },
+                                            "note": {
+                                              "type": "string",
+                                              "maxLength": 300
+                                            }
+                                          },
+                                          "required": [
+                                            "id",
+                                            "label",
+                                            "state"
+                                          ]
+                                        },
+                                        "minItems": 1,
+                                        "maxItems": 40
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "steps"
+                                    ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "present_files"
+                                        ]
+                                      },
+                                      "title": {
+                                        "type": "string",
+                                        "maxLength": 200
+                                      },
+                                      "files": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "path": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 400
+                                            },
+                                            "status": {
+                                              "type": "string",
+                                              "enum": [
+                                                "added",
+                                                "modified",
+                                                "deleted",
+                                                "renamed"
+                                              ]
+                                            },
+                                            "note": {
+                                              "type": "string",
+                                              "maxLength": 300
+                                            }
+                                          },
+                                          "required": [
+                                            "path"
+                                          ]
+                                        },
+                                        "minItems": 1,
+                                        "maxItems": 100
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "files"
+                                    ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "unsupported"
+                                        ]
+                                      },
+                                      "requested": {
+                                        "type": "string",
+                                        "maxLength": 120
+                                      },
+                                      "reason": {
+                                        "type": "string",
+                                        "maxLength": 500
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "requested",
+                                      "reason"
+                                    ]
+                                  }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "widgetId",
+                              "widget"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "todos"
+                                ]
+                              },
+                              "items": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "content": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 500
+                                    },
+                                    "status": {
+                                      "type": "string",
+                                      "enum": [
+                                        "pending",
+                                        "in_progress",
+                                        "completed"
+                                      ]
+                                    },
+                                    "activeForm": {
+                                      "type": "string",
+                                      "maxLength": 500
+                                    }
+                                  },
+                                  "required": [
+                                    "content",
+                                    "status"
+                                  ]
+                                },
+                                "maxItems": 100
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "items"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "widget_response"
+                                ]
+                              },
+                              "widgetId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "values": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "text": {
+                                "type": "string",
+                                "nullable": true
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "widgetId",
+                              "values"
                             ]
                           }
                         ]
@@ -9478,7 +11704,10 @@
                           "state",
                           "permission_request",
                           "permission_resolved",
-                          "diff"
+                          "diff",
+                          "widget",
+                          "widget_response",
+                          "todos"
                         ]
                       },
                       "payload": {
@@ -9557,7 +11786,24 @@
                                 "type": "string",
                                 "nullable": true
                               },
-                              "input": {}
+                              "input": {
+                                "type": "object",
+                                "nullable": true,
+                                "additionalProperties": {
+                                  "type": "string"
+                                }
+                              },
+                              "status": {
+                                "type": "string",
+                                "nullable": true,
+                                "enum": [
+                                  "pending",
+                                  "in_progress",
+                                  "completed",
+                                  "failed",
+                                  null
+                                ]
+                              }
                             },
                             "required": [
                               "kind",
@@ -9581,7 +11827,14 @@
                               "ok": {
                                 "type": "boolean"
                               },
-                              "output": {}
+                              "output": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "truncated": {
+                                "type": "boolean",
+                                "nullable": true
+                              }
                             },
                             "required": [
                               "kind",
@@ -9691,6 +11944,10 @@
                                 "type": "string"
                               },
                               "toolKind": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "toolCallId": {
                                 "type": "string",
                                 "nullable": true
                               },
@@ -9823,6 +12080,396 @@
                               "files",
                               "patch",
                               "truncated"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "widget"
+                                ]
+                              },
+                              "widgetId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "widget": {
+                                "oneOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "ask_user_input"
+                                        ]
+                                      },
+                                      "prompt": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 1000
+                                      },
+                                      "mode": {
+                                        "type": "string",
+                                        "enum": [
+                                          "single",
+                                          "multi",
+                                          "rank"
+                                        ],
+                                        "default": "single"
+                                      },
+                                      "options": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "id": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 120
+                                            },
+                                            "label": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 500
+                                            },
+                                            "description": {
+                                              "type": "string",
+                                              "maxLength": 1000
+                                            }
+                                          },
+                                          "required": [
+                                            "id",
+                                            "label"
+                                          ]
+                                        },
+                                        "minItems": 1,
+                                        "maxItems": 12
+                                      },
+                                      "allowOther": {
+                                        "type": "boolean",
+                                        "default": false
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "prompt",
+                                      "mode",
+                                      "options",
+                                      "allowOther"
+                                    ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "show_widget"
+                                        ]
+                                      },
+                                      "module": {
+                                        "type": "string",
+                                        "enum": [
+                                          "diagram",
+                                          "chart",
+                                          "data_viz",
+                                          "mockup",
+                                          "interactive",
+                                          "art",
+                                          "elicitation"
+                                        ]
+                                      },
+                                      "title": {
+                                        "type": "string",
+                                        "maxLength": 200
+                                      },
+                                      "format": {
+                                        "type": "string",
+                                        "enum": [
+                                          "svg",
+                                          "html"
+                                        ]
+                                      },
+                                      "content": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 65536
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "module",
+                                      "format",
+                                      "content"
+                                    ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "options_card"
+                                        ]
+                                      },
+                                      "title": {
+                                        "type": "string",
+                                        "maxLength": 200
+                                      },
+                                      "options": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "id": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 120
+                                            },
+                                            "label": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 500
+                                            },
+                                            "description": {
+                                              "type": "string",
+                                              "maxLength": 1000
+                                            },
+                                            "badge": {
+                                              "type": "string",
+                                              "maxLength": 40
+                                            }
+                                          },
+                                          "required": [
+                                            "id",
+                                            "label"
+                                          ]
+                                        },
+                                        "minItems": 1,
+                                        "maxItems": 12
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "options"
+                                    ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "step_card"
+                                        ]
+                                      },
+                                      "title": {
+                                        "type": "string",
+                                        "maxLength": 200
+                                      },
+                                      "steps": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "id": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 120
+                                            },
+                                            "label": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 500
+                                            },
+                                            "state": {
+                                              "type": "string",
+                                              "enum": [
+                                                "todo",
+                                                "active",
+                                                "done",
+                                                "blocked"
+                                              ]
+                                            },
+                                            "note": {
+                                              "type": "string",
+                                              "maxLength": 300
+                                            }
+                                          },
+                                          "required": [
+                                            "id",
+                                            "label",
+                                            "state"
+                                          ]
+                                        },
+                                        "minItems": 1,
+                                        "maxItems": 40
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "steps"
+                                    ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "present_files"
+                                        ]
+                                      },
+                                      "title": {
+                                        "type": "string",
+                                        "maxLength": 200
+                                      },
+                                      "files": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "path": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 400
+                                            },
+                                            "status": {
+                                              "type": "string",
+                                              "enum": [
+                                                "added",
+                                                "modified",
+                                                "deleted",
+                                                "renamed"
+                                              ]
+                                            },
+                                            "note": {
+                                              "type": "string",
+                                              "maxLength": 300
+                                            }
+                                          },
+                                          "required": [
+                                            "path"
+                                          ]
+                                        },
+                                        "minItems": 1,
+                                        "maxItems": 100
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "files"
+                                    ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "unsupported"
+                                        ]
+                                      },
+                                      "requested": {
+                                        "type": "string",
+                                        "maxLength": 120
+                                      },
+                                      "reason": {
+                                        "type": "string",
+                                        "maxLength": 500
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "requested",
+                                      "reason"
+                                    ]
+                                  }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "widgetId",
+                              "widget"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "todos"
+                                ]
+                              },
+                              "items": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "content": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 500
+                                    },
+                                    "status": {
+                                      "type": "string",
+                                      "enum": [
+                                        "pending",
+                                        "in_progress",
+                                        "completed"
+                                      ]
+                                    },
+                                    "activeForm": {
+                                      "type": "string",
+                                      "maxLength": 500
+                                    }
+                                  },
+                                  "required": [
+                                    "content",
+                                    "status"
+                                  ]
+                                },
+                                "maxItems": 100
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "items"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "widget_response"
+                                ]
+                              },
+                              "widgetId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "values": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "text": {
+                                "type": "string",
+                                "nullable": true
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "widgetId",
+                              "values"
                             ]
                           }
                         ]

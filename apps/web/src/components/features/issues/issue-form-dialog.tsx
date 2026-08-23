@@ -44,13 +44,20 @@ export function IssueFormDialog({
   issue,
   trigger,
   onSuccess,
+  open: controlledOpen,
+  onOpenChange,
 }: {
   issue?: IssueDto;
-  trigger: ReactNode;
+  /** Omitted when the caller opens the dialog itself — the header's Create menu does. */
+  trigger?: ReactNode;
   onSuccess?: () => void;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const isEdit = issue !== undefined;
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = controlledOpen ?? internalOpen;
+  const setOpen = onOpenChange ?? setInternalOpen;
   const utils = trpc.useUtils();
   const repos = trpc.repository.list.useQuery({}, { enabled: open });
 
@@ -86,6 +93,10 @@ export function IssueFormDialog({
   const create = trpc.issue.create.useMutation({
     onSuccess: () => {
       utils.issue.list.invalidate();
+      // The label vocabulary the list's filter offers is read from the Issues themselves, so a
+      // label first used here does not exist for that menu until this refetches (caught in the
+      // browser: a new label showed on the row but never in the filter).
+      utils.issue.labels.invalidate();
       setOpen(false);
       onSuccess?.();
     },
@@ -93,6 +104,7 @@ export function IssueFormDialog({
   const update = trpc.issue.update.useMutation({
     onSuccess: () => {
       utils.issue.list.invalidate();
+      utils.issue.labels.invalidate();
       utils.issue.get.invalidate();
       setOpen(false);
       onSuccess?.();
@@ -130,8 +142,8 @@ export function IssueFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>{trigger}</DialogTrigger>
-      <DialogContent className="sm:max-w-lg">
+      {trigger ? <DialogTrigger asChild>{trigger}</DialogTrigger> : null}
+      <DialogContent size="sm">
         <DialogHeader>
           <DialogTitle>{isEdit ? "Edit issue" : "New issue"}</DialogTitle>
           <DialogDescription>

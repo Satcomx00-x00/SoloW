@@ -1,4 +1,7 @@
 import type { TaskState } from "@gatecontrol/contracts";
+
+export { CREDENTIAL_EXPIRED_REASON, INTERRUPTED_REASON } from "@gatecontrol/core";
+
 import {
   Circle,
   CircleAlert,

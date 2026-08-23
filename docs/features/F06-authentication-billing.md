@@ -42,9 +42,17 @@ billing. This is a primary differentiator from kandev.
 - **FR-7** When a Subscription-mode Agent exhausts its quota window, its Task (or Workflow
   Step) moves to **Parked**, preserving all work, and resumes automatically when the quota
   window resets or when the user acts.
-- **FR-8** When a subscription credential is expired or revoked, affected Tasks surface a
-  distinct **credential-expired** state with clear instructions to renew it, separate from
-  the quota Parked state.
+- **FR-8** When a subscription or API-key credential is expired or revoked, affected Tasks
+  surface a distinct **credential-expired** state — a lock icon and the words "Credential
+  expired" on the card, never the raw failure-class string — separate from the quota Parked
+  state and from a generic run failure (spec AC-013).
+- **FR-8a** A credential-expired Task offers a **Renew** action that opens the Secret form
+  pre-filled with the affected credential's name, scrolled and focused so the Owner can act
+  in one click rather than hunting for the row by hand.
+- **FR-8b** Replacing a credential (there is no separate "renew" endpoint — renewing *is*
+  writing the same Secret again) automatically resumes every Task paused on it, in a fresh
+  Session, without the Owner retrying each one individually. A Task that cannot resume right
+  now (a dependency, the concurrency cap) is left exactly as it was rather than lost.
 - **FR-9** GateControl warns a user before they queue more parallel Subscription-mode Tasks
   than the configured cap allows.
 - **FR-10** All credentials are stored encrypted and are never displayed after entry
@@ -74,7 +82,12 @@ billing. This is a primary differentiator from kandev.
 - If a quota window resets while many Tasks are Parked, they resume in order and within the
   concurrency cap, not all at once.
 - If a subscription credential renewal is required, dependent Tasks stay safely paused until
-  it is provided.
+  it is provided, and resume automatically — not manually, one at a time — the moment it is
+  (FR-8b).
+- Credential-expiry classification comes only from the Agent's own authentication error
+  (401/403, "unauthorized", "invalid api key", "token expired", …), never inferred from a
+  generic run failure — misclassifying a network error as an expired credential would send
+  the Owner to the wrong fix with confidence.
 
 ## Out of scope
 

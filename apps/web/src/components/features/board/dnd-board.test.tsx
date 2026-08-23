@@ -48,20 +48,4 @@ describe("DndBoard card entrance transition", () => {
       expect(item?.className).toContain(cls);
     }
   });
-
-  it("renders a column's headerAction inside that column, not the others", () => {
-    render(
-      <DndBoard
-        tasks={[]}
-        onMove={() => {}}
-        headerActionFor={(state) =>
-          state === "backlog" ? <button type="button">New issue</button> : null
-        }
-      />,
-    );
-
-    const button = screen.getByRole("button", { name: "New issue" });
-    expect(button.closest("[data-state='backlog']")).not.toBeNull();
-    expect(button.closest("[data-state='ready']")).toBeNull();
-  });
 });

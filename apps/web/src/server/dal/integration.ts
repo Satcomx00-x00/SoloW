@@ -44,6 +44,7 @@ import {
   changeRequestToDto,
   integrationToDto,
   issueToDto,
+  NO_TASKS,
   repositoryBranchToDto,
   repositoryToDto,
 } from "./mappers.js";
@@ -574,7 +575,7 @@ export async function importIssues(
       ),
     );
   // A freshly imported Issue has no Tasks yet.
-  return ok(rows.map((r) => issueToDto(r, 0)));
+  return ok(rows.map((r) => issueToDto(r, NO_TASKS)));
 }
 
 /** Refresh a Repository's change requests and branches from its Integration (v1: manual trigger, polling — see issue #15). */

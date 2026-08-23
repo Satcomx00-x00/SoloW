@@ -64,7 +64,15 @@ describe("AcpRunner", () => {
 
     expect(await h.outcome).toEqual({ kind: "completed" });
     expect(events.filter((e) => e.kind !== "usage")).toEqual([
-      { kind: "tool_use", name: "Edit src/latch.ts" },
+      // ACP carried the id and the status all along; this seam used to drop both, so a
+      // `tool_call_update` arrived looking like a second, unrelated call.
+      {
+        kind: "tool_use",
+        name: "Edit src/latch.ts",
+        callId: "call-Edit src/latch.ts",
+        input: undefined,
+        status: "in_progress",
+      },
       { kind: "stdout", channel: "assistant", text: "patched latch.ts" },
     ]);
   });
@@ -84,10 +92,37 @@ describe("AcpRunner", () => {
     expect(stdout(events)).toContain("added the test");
   });
 
+  it("echoes accepted operator input onto the stream, since the agent's own output never does", async () => {
+    // Same reasoning as `ClaudeCodeRunner`'s equivalent test: with no echo, `task-run.ts` has no
+    // `channel: "user"` update to turn into the `user_turn` session_event the transcript needs
+    // both to show the message was sent and to stop it merging into the surrounding agent text.
+    const { handle: h, events } = await run({
+      turns: [{ text: ["first pass"] }, { text: ["added the test"] }],
+    });
+
+    await h.send("also add a regression test");
+    await h.outcome;
+
+    expect(events).toContainEqual({
+      kind: "stdout",
+      channel: "user",
+      text: "also add a regression test",
+    });
+  });
+
   it("refuses input once the run has finished rather than swallowing it", async () => {
     const { handle: h } = await run({ turns: [{ text: ["done"] }] });
     await h.outcome;
     expect(await h.send("too late")).toBe(false);
+  });
+
+  it("does not echo input the run refused to accept", async () => {
+    const { handle: h, events } = await run({ turns: [{ text: ["done"] }] });
+    await h.outcome;
+
+    await h.send("too late");
+
+    expect(events).not.toContainEqual(expect.objectContaining({ kind: "stdout", channel: "user" }));
   });
 
   it("stopping ends the run without failing it, so partial work still reaches review", async () => {

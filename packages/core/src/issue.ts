@@ -15,3 +15,14 @@ export function deriveIssueStatus(taskStates: readonly TaskState[]): IssueStatus
   if (taskStates.every((s) => s === "done")) return "resolved";
   return "open";
 }
+
+/**
+ * How many of these Tasks are still going (spec F01 FR-9's "active Tasks remain"). Pure.
+ *
+ * Shares `ACTIVE` with `deriveIssueStatus` on purpose: "the Issue is in progress" and "closing
+ * it would strand work" are the same claim about the same Tasks, and letting the two drift
+ * apart would let an Issue read In progress while closing it raised no warning at all.
+ */
+export function activeTaskCount(taskStates: readonly TaskState[]): number {
+  return taskStates.filter((s) => ACTIVE.includes(s)).length;
+}

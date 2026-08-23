@@ -70,6 +70,8 @@ export class ClaudeCodeRunner implements AgentRunner {
   start(opts: AgentStartOpts): AgentHandle {
     let session: (ClaudeSession & { stderrTail: () => string }) | undefined;
     let stopRequested = false;
+    // Stateful: it drops the closing `result` when that text is the turn just streamed.
+    const mapUpdate = createStreamMapper();
 
     try {
       session = startClaudeSession(
@@ -82,7 +84,7 @@ export class ClaudeCodeRunner implements AgentRunner {
           worktreeName: opts.worktreeName,
           permissionMode: this.options.permissionMode ?? DEFAULT_PERMISSION_MODE,
           onUpdate: (update) => {
-            const event = toStreamEvent(update);
+            const event = mapUpdate(update);
             if (event) opts.onEvent(event);
           },
           ...(this.options.onStderr ? { onStderr: this.options.onStderr } : {}),
@@ -113,7 +115,16 @@ export class ClaudeCodeRunner implements AgentRunner {
       outcome,
       workspacePath: live.workspacePath,
       async send(text: string) {
-        return live.send(text);
+        const accepted = live.send(text);
+        // The operator's own message has no producer on the CLI's own stream — `stream-json`
+        // output never echoes what was fed into it, only the model's turns — so without this the
+        // transcript recorded only the agent's side of a conversation that visibly has two
+        // parties (reported directly: an Owner sends a message and sees nothing acknowledge it,
+        // then the agent's next reply appears to run straight into the previous paragraph with no
+        // way to tell a new turn started). Echoed only once truly accepted, matching what
+        // `FakeAgentRunner` already simulates for every test that asserts this row exists.
+        if (accepted) opts.onEvent({ kind: "stdout", channel: "user", text });
+        return accepted;
       },
       async stop() {
         stopRequested = true;
@@ -138,7 +149,22 @@ function signalFor(subtype: string | null, stderrTail: string): FailureSignal {
 export function toStreamEvent(update: ClaudeUpdate): AgentStreamEvent | null {
   switch (update.kind) {
     case "tool_use":
-      return { kind: "tool_use", name: update.name };
+      return {
+        kind: "tool_use",
+        name: update.name,
+        callId: update.callId,
+        input: update.input,
+        // stream-JSON announces a call and later its result; it has no in-between status the
+        // way ACP's `tool_call_update` does. Null rather than invented.
+        status: null,
+      };
+    case "tool_result":
+      return {
+        kind: "tool_result",
+        callId: update.callId,
+        ok: update.ok,
+        output: update.output,
+      };
     case "usage":
       return {
         kind: "usage",
@@ -157,9 +183,42 @@ export function toStreamEvent(update: ClaudeUpdate): AgentStreamEvent | null {
       // session log can say whose line this was (issue #2).
       return { kind: "stdout", channel: update.channel, text: update.text };
     case "result":
+      // Emitted unconditionally here; `createStreamMapper` is what decides whether this text is
+      // new or the closing repeat of a turn already streamed. Kept in the pure mapper so the
+      // shape stays in one place, and so a caller that wants every update still gets it.
       return update.text ? { kind: "stdout", channel: "system", text: `\n${update.text}\n` } : null;
     // The session preamble is plumbing, not output; the worktree it carries is read elsewhere.
     case "session":
       return null;
   }
+}
+
+/**
+ * A `toStreamEvent` that remembers the turn it is in the middle of.
+ *
+ * Claude Code closes a run with a `result` event whose `result` field is the **final assistant
+ * turn's own text, repeated**. Mapping it straight through published every answer twice — once
+ * as `assistant_turn`, then again as a `notice` — so the terminal and the session log both
+ * showed the agent saying everything a second time. That is not a rendering artefact to paper
+ * over in the SPA: the duplicate was written into `session_event`, so it also reached the
+ * transcript, a review, and anything replaying the log.
+ *
+ * The check is containment rather than equality because one turn arrives as several content
+ * blocks, and `result` carries them concatenated. A `result` that says something genuinely new —
+ * an error subtype whose message never appeared as an assistant turn — is still emitted, which
+ * is why this suppresses rather than dropping `result` text altogether.
+ */
+export function createStreamMapper(): (update: ClaudeUpdate) => AgentStreamEvent | null {
+  let streamedThisTurn = "";
+  return (update) => {
+    if (update.kind === "text" && update.channel === "assistant") {
+      streamedThisTurn += update.text;
+    }
+    if (update.kind === "result") {
+      const repeat = update.text !== null && streamedThisTurn.includes(update.text.trim());
+      streamedThisTurn = "";
+      if (repeat) return null;
+    }
+    return toStreamEvent(update);
+  };
 }

@@ -46,6 +46,13 @@ function recordingConnect() {
   return { connect, opened, sockets };
 }
 
+/** Counts how many times it rendered, so a burst of frames can be shown to cost one render. */
+function CountingProbe({ connect, renders }: { connect: ConnectFn; renders: { n: number } }) {
+  const { events } = useTaskStream("task-1", { connect });
+  renders.n += 1;
+  return <span data-testid="count">{events.length}</span>;
+}
+
 function Probe({ connect }: { connect: ConnectFn }) {
   const [ack, setAck] = useState<TaskInputAck | null>(null);
   const { events, status, sendInput, stopAgent } = useTaskStream("task-1", {
@@ -88,6 +95,7 @@ describe("useTaskStream", () => {
         sessionId: "sess-1",
         seq: 0,
         text: "hello ",
+        channel: "assistant",
       });
       sockets[0]?.onEvent({
         kind: "stdout",
@@ -95,6 +103,7 @@ describe("useTaskStream", () => {
         sessionId: "sess-1",
         seq: 1,
         text: "world",
+        channel: "assistant",
       });
     });
 
@@ -114,6 +123,7 @@ describe("useTaskStream", () => {
         sessionId: "sess-1",
         seq: 4,
         text: "before the drop\n",
+        channel: "assistant",
       });
       sockets[0]?.onClose();
     });
@@ -134,6 +144,36 @@ describe("useTaskStream", () => {
 
     await waitFor(() => expect(screen.getByTestId("status").textContent).toBe("error"));
     expect(opened).toHaveLength(0);
+  });
+});
+
+describe("useTaskStream — batching", () => {
+  it("commits a burst of frames in one render instead of one render per frame", async () => {
+    // Each socket message is its own macrotask, so React cannot batch them itself. One render
+    // per chunk meant re-deriving the whole transcript per chunk — the slowness the terminal
+    // was reported for. The frames themselves must all survive; only the renders collapse.
+    const { connect, sockets } = recordingConnect();
+    const renders = { n: 0 };
+    renderWithTrpc(<CountingProbe connect={connect} renders={renders} />, ticketHandler);
+    await waitFor(() => expect(sockets).toHaveLength(1));
+
+    const before = renders.n;
+    act(() => {
+      for (let seq = 0; seq < 40; seq += 1) {
+        sockets[0]?.onEvent({
+          kind: "stdout",
+          taskId: "task-1",
+          sessionId: "sess-1",
+          seq,
+          text: `chunk ${seq}`,
+          channel: "assistant",
+        });
+      }
+    });
+
+    await waitFor(() => expect(screen.getByTestId("count").textContent).toBe("40"));
+    // Forty frames, a handful of renders — not forty.
+    expect(renders.n - before).toBeLessThan(10);
   });
 });
 

@@ -12,6 +12,7 @@ import {
   retryTaskInput,
   setTaskRepositoriesInput,
   TaskDependencyErrorCode,
+  type TaskDto,
   TaskErrorCode,
   taskDeletionImpactDto,
   taskDeletionImpactInput,
@@ -71,6 +72,32 @@ export async function requireUnblocked(rctx: RequestContext, taskId: string): Pr
   if (unsatisfiedDependencies(deps).length > 0) {
     throw new TRPCError({ code: "BAD_REQUEST", message: TaskDependencyErrorCode.Blocked });
   }
+}
+
+/**
+ * Re-run one Task in a fresh Session — the shared body of `task.retry` and the automatic
+ * resumption an Owner triggers by replacing an expired credential (issue #63, spec AC-013).
+ *
+ * A start refused here (an unmet dependency, an illegal transition) is the caller's problem to
+ * handle: `task.retry` lets it surface as the request's own error, while the credential-renewal
+ * path calls this once per blocked Task and catches the refusal there — one Task that still
+ * cannot start (its dependency graph changed since it failed) must not stop the rest of the
+ * batch from resuming.
+ */
+export async function resumeTask(rctx: RequestContext, taskId: string): Promise<TaskDto> {
+  const existing = unwrap(await getTaskById(rctx, taskId));
+  unwrap(canTransitionTask(existing.state, "running"));
+  await requireUnblocked(rctx, existing.id);
+  const session = unwrap(await createSession(rctx, existing.id));
+  const updated = unwrap(
+    await updateTaskState(rctx, existing.id, "running", { failureReason: null }),
+  );
+  await orchestrator.enqueueTaskRun({
+    workspaceId: rctx.workspaceId,
+    taskId: existing.id,
+    sessionId: session.id,
+  });
+  return updated;
 }
 
 export const taskRouter = router({
@@ -228,21 +255,7 @@ export const taskRouter = router({
     })
     .input(retryTaskInput)
     .output(taskDto)
-    .mutation(async ({ ctx, input }) => {
-      const task = unwrap(await getTaskById(ctx.rctx, input.id));
-      unwrap(canTransitionTask(task.state, "running"));
-      await requireUnblocked(ctx.rctx, task.id);
-      const session = unwrap(await createSession(ctx.rctx, task.id));
-      const updated = unwrap(
-        await updateTaskState(ctx.rctx, task.id, "running", { failureReason: null }),
-      );
-      await orchestrator.enqueueTaskRun({
-        workspaceId: ctx.rctx.workspaceId,
-        taskId: task.id,
-        sessionId: session.id,
-      });
-      return updated;
-    }),
+    .mutation(async ({ ctx, input }) => resumeTask(ctx.rctx, input.id)),
 
   dependencies: ownerProcedure
     .meta({
@@ -349,6 +362,7 @@ export const taskRouter = router({
       // hand-off, and the DAL stays pure database. It re-checks the same condition inside its
       // transaction, which is what makes this safe rather than merely polite.
       const sessionId = await activeSessionForTask(ctx.rctx, input.id);
+      let stopIssued = false;
       if (sessionId) {
         try {
           await orchestrator.stopTaskRun({
@@ -356,6 +370,10 @@ export const taskRouter = router({
             taskId: input.id,
             sessionId,
           });
+          // The orchestrator accepted the cancellation. It unwinds between steps, so the Task
+          // row will still read `running` for a moment — `stopIssued` is what tells the DAL that
+          // the stale flag is expected rather than a live agent it must protect.
+          stopIssued = true;
         } catch (cause) {
           // Nothing has been deleted yet, so refusing leaves the Task exactly as it was — the
           // one outcome that cannot orphan a running agent.
@@ -366,6 +384,6 @@ export const taskRouter = router({
           });
         }
       }
-      return unwrap(await deleteTask(ctx.rctx, input));
+      return unwrap(await deleteTask(ctx.rctx, input, { stopIssued }));
     }),
 });

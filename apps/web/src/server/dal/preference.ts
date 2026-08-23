@@ -1,6 +1,7 @@
 import "server-only";
 import {
   DEFAULT_SURFACE_LAYOUT,
+  DEFAULT_TASK_PANE_LAYOUT,
   ok,
   type Result,
   type SetSurfaceLayoutInput,
@@ -9,6 +10,10 @@ import {
   type SurfaceLayoutDto,
   surfaceLayoutPreferenceKey,
   surfaceLayoutSchema,
+  TASK_PANE_PREFERENCE_KEY,
+  type TaskPaneLayout,
+  type TaskPaneLayoutDto,
+  taskPaneLayoutSchema,
 } from "@gatecontrol/contracts";
 import { uiPreference } from "@gatecontrol/db";
 import { and, eq } from "drizzle-orm";
@@ -77,4 +82,53 @@ export async function setSurfaceLayout(
     });
 
   return ok(dtoFor(ctx, input.surface, input.layout));
+}
+
+/**
+ * The Task page's split — the same read-parse-or-default and upsert shape as the surface layout
+ * above, for the same reasons. Kept as its own pair rather than generalised into a key/value
+ * helper: two callers is not yet a pattern, and a generic setter would be a place for any future
+ * client to write any shape under any key.
+ */
+export async function getTaskPaneLayout(ctx: RequestContext): Promise<Result<TaskPaneLayoutDto>> {
+  const [row] = await ctx.db
+    .select({ value: uiPreference.value })
+    .from(uiPreference)
+    .where(
+      and(
+        eq(uiPreference.workspaceId, ctx.workspaceId),
+        eq(uiPreference.userId, ctx.userId),
+        eq(uiPreference.key, TASK_PANE_PREFERENCE_KEY),
+      ),
+    )
+    .limit(1);
+
+  // A row written by an older build, or by hand, must not be able to stop the page rendering.
+  const parsed = taskPaneLayoutSchema.safeParse(row?.value);
+  return ok({
+    workspaceId: ctx.workspaceId,
+    userId: ctx.userId,
+    layout: parsed.success ? parsed.data : DEFAULT_TASK_PANE_LAYOUT,
+  });
+}
+
+export async function setTaskPaneLayout(
+  ctx: RequestContext,
+  layout: TaskPaneLayout,
+): Promise<Result<TaskPaneLayoutDto>> {
+  const now = new Date().toISOString();
+  await ctx.db
+    .insert(uiPreference)
+    .values({
+      workspaceId: ctx.workspaceId,
+      userId: ctx.userId,
+      key: TASK_PANE_PREFERENCE_KEY,
+      value: layout,
+    })
+    .onConflictDoUpdate({
+      target: [uiPreference.workspaceId, uiPreference.userId, uiPreference.key],
+      set: { value: layout, updatedAt: now },
+    });
+
+  return ok({ workspaceId: ctx.workspaceId, userId: ctx.userId, layout });
 }

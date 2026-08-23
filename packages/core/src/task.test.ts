@@ -8,7 +8,9 @@ import {
   formatDependencyCycle,
   isBlocked,
   isLaunchable,
+  nextTaskState,
   parseDependencyCycleMessage,
+  previousTaskState,
   primaryTaskRepository,
   type TaskDependencyEdge,
   taskCheckoutBranch,
@@ -41,6 +43,69 @@ describe("canTransitionTask", () => {
       expect(r.ok).toBe(false);
       if (!r.ok) expect(r.error).toBe(TaskErrorCode.IllegalTransition);
     }
+  });
+});
+
+/**
+ * Stepping a Task along the lifecycle from the Task page (the header's back/forward arrows).
+ *
+ * The property under test is that stepping is *derived from* `TRANSITIONS` and the column order,
+ * not listed separately. That is the whole point: an arrow that offers a move the server then
+ * refuses is worse than no arrow, and the only way the two can stay in agreement as the
+ * lifecycle grows is for there to be one statement of it. So these cases assert the seven states
+ * in both directions against the transition table's own answer, and pin the four that carry
+ * real product meaning — a Task under review moves on to `done`, back to `running`; a `running`
+ * Task has nowhere to retreat to; `done` is terminal in both directions.
+ */
+describe("nextTaskState / previousTaskState", () => {
+  const states: TaskState[] = ["backlog", "ready", "running", "review", "parked", "failed", "done"];
+
+  it("steps forward to the nearest legal state ahead", () => {
+    const forward: Record<TaskState, TaskState | null> = {
+      backlog: "ready",
+      ready: "running",
+      // Not `done`: `running` may also go to `parked` or `failed`, and the arrow offers the
+      // nearest of them, never a fast-forward past the states in between.
+      running: "review",
+      review: "done",
+      // `failed` is where a Task leaves the line, not the state after `parked`. A Task parked on
+      // a quota window resumes by itself, so a forward arrow offering "give up on this" as its
+      // only meaning is worse than no arrow at all.
+      parked: null,
+      failed: null,
+      done: null,
+    };
+    for (const state of states) expect(nextTaskState(state)).toBe(forward[state]);
+  });
+
+  it("steps back to the nearest legal state behind", () => {
+    const back: Record<TaskState, TaskState | null> = {
+      backlog: null,
+      ready: "backlog",
+      // `running` has three exits and every one of them is further along, so there is no way back.
+      running: null,
+      review: "running",
+      parked: "running",
+      failed: "running",
+      done: null,
+    };
+    for (const state of states) expect(previousTaskState(state)).toBe(back[state]);
+  });
+
+  it("never offers a step the transition table would refuse", () => {
+    // The invariant the derivation exists to guarantee: whatever an arrow proposes, the same
+    // rule that governs a drag on the board has to accept it.
+    for (const state of states) {
+      for (const to of [nextTaskState(state), previousTaskState(state)]) {
+        if (to === null) continue;
+        expect(canTransitionTask(state, to).ok).toBe(true);
+      }
+    }
+  });
+
+  it("leaves the terminal state with nowhere to go", () => {
+    expect(nextTaskState("done")).toBeNull();
+    expect(previousTaskState("done")).toBeNull();
   });
 });
 

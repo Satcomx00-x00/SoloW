@@ -1,10 +1,19 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import { TaskErrorCode } from "@gatecontrol/contracts";
-import { repository } from "@gatecontrol/db";
+import { CREDENTIAL_EXPIRED_REASON } from "@gatecontrol/core";
+import { agentProfile, repository } from "@gatecontrol/db";
 import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
+import { eq } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
 import { getIssueById } from "./issue.js";
-import { createTaskRecord, getTaskById, listTasks, setTaskRepositories } from "./task.js";
+import {
+  createTaskRecord,
+  getTaskById,
+  listTasks,
+  setTaskRepositories,
+  taskIdsBlockedByCredential,
+  updateTaskState,
+} from "./task.js";
 import { ctxFor, seedIssue, seedWorkspaceGraph } from "./test-fixtures.js";
 
 /**
@@ -393,5 +402,144 @@ describe("a Task's Repository attachments", () => {
 
     const listed = await listTasks(ctx, {});
     expect(listed.ok && listed.data).toEqual([]);
+  });
+});
+
+/**
+ * Tasks blocked on a credential (spec AC-013, issue #63) — the query that lets a Secret write
+ * find every Task it should resume, so an Owner replacing an expired credential does not have
+ * to find and retry each one by hand.
+ */
+describe("taskIdsBlockedByCredential", () => {
+  let db: TestDb;
+  beforeEach(() => {
+    db = createTestDb();
+  });
+
+  it("finds a failed Task whose Agent Profile spends the given Secret", async () => {
+    const g = await seedWorkspaceGraph(db, "acme");
+    const ctx = ctxFor(db, g.workspaceId);
+    const issue = await seedIssueOk(db, ctx, { title: "Stuck on a credential" });
+    if (!issue.ok) return;
+    const created = await createTaskRecord(ctx, {
+      issueId: issue.data.id,
+      title: "Stuck",
+      agentProfileId: g.agentProfileId,
+      executorProfileId: g.executorProfileId,
+      repositories: [{ repositoryId: g.repositoryId }],
+      state: "backlog",
+    });
+    if (!created.ok) throw new Error("seed failed");
+    await updateTaskState(ctx, created.data.id, "failed", {
+      failureReason: CREDENTIAL_EXPIRED_REASON,
+    });
+
+    // `seedWorkspaceGraph`'s Agent Profile spends the literal Secret id "secret-1" (test-fixtures.ts).
+    expect(await taskIdsBlockedByCredential(ctx, "secret-1")).toEqual([created.data.id]);
+    expect(await taskIdsBlockedByCredential(ctx, "some-other-secret")).toEqual([]);
+  });
+
+  it("ignores a Task failed for any other reason", async () => {
+    const g = await seedWorkspaceGraph(db, "acme");
+    const ctx = ctxFor(db, g.workspaceId);
+    const issue = await seedIssueOk(db, ctx, { title: "Failed, but not on a credential" });
+    if (!issue.ok) return;
+    const created = await createTaskRecord(ctx, {
+      issueId: issue.data.id,
+      title: "Ordinary failure",
+      agentProfileId: g.agentProfileId,
+      executorProfileId: g.executorProfileId,
+      repositories: [{ repositoryId: g.repositoryId }],
+      state: "backlog",
+    });
+    if (!created.ok) throw new Error("seed failed");
+    await updateTaskState(ctx, created.data.id, "failed", { failureReason: "fail" });
+
+    expect(await taskIdsBlockedByCredential(ctx, "secret-1")).toEqual([]);
+  });
+
+  it("ignores a Task that is not (or no longer) failed", async () => {
+    const g = await seedWorkspaceGraph(db, "acme");
+    const ctx = ctxFor(db, g.workspaceId);
+    const issue = await seedIssueOk(db, ctx, { title: "Already resumed" });
+    if (!issue.ok) return;
+    const created = await createTaskRecord(ctx, {
+      issueId: issue.data.id,
+      title: "Back to running",
+      agentProfileId: g.agentProfileId,
+      executorProfileId: g.executorProfileId,
+      repositories: [{ repositoryId: g.repositoryId }],
+      state: "backlog",
+    });
+    if (!created.ok) throw new Error("seed failed");
+    // A Task that has already been resumed (state moved on, failureReason cleared) must not be
+    // found again — a second `secret.set` for an unrelated reason must not resume it twice.
+    await updateTaskState(ctx, created.data.id, "running", { failureReason: null });
+
+    expect(await taskIdsBlockedByCredential(ctx, "secret-1")).toEqual([]);
+  });
+
+  it("does not cross Agent Profiles that happen to share a workspace but not a Secret", async () => {
+    const g = await seedWorkspaceGraph(db, "acme");
+    const ctx = ctxFor(db, g.workspaceId);
+    const [existing] = await db
+      .select({ agentCatalogId: agentProfile.agentCatalogId })
+      .from(agentProfile)
+      .where(eq(agentProfile.id, g.agentProfileId));
+    if (!existing) throw new Error("seed failed");
+    const [other] = await db
+      .insert(agentProfile)
+      .values({
+        workspaceId: g.workspaceId,
+        name: "a second profile",
+        agentCatalogId: existing.agentCatalogId,
+        authMode: "api_key",
+        secretId: "secret-2",
+      })
+      .returning();
+    if (!other) throw new Error("seed failed");
+
+    const issue = await seedIssueOk(db, ctx, { title: "On the other profile" });
+    if (!issue.ok) return;
+    const created = await createTaskRecord(ctx, {
+      issueId: issue.data.id,
+      title: "Different credential",
+      agentProfileId: other.id,
+      executorProfileId: g.executorProfileId,
+      repositories: [{ repositoryId: g.repositoryId }],
+      state: "backlog",
+    });
+    if (!created.ok) throw new Error("seed failed");
+    await updateTaskState(ctx, created.data.id, "failed", {
+      failureReason: CREDENTIAL_EXPIRED_REASON,
+    });
+
+    expect(await taskIdsBlockedByCredential(ctx, "secret-1")).toEqual([]);
+    expect(await taskIdsBlockedByCredential(ctx, "secret-2")).toEqual([created.data.id]);
+  });
+
+  it("cannot see another Workspace's Task, even one blocked on the identically-named Secret", async () => {
+    const a = await seedWorkspaceGraph(db, "workspace-a");
+    const b = await seedWorkspaceGraph(db, "workspace-b");
+    const ctxA = ctxFor(db, a.workspaceId);
+    const ctxB = ctxFor(db, b.workspaceId);
+    const issueA = await seedIssueOk(db, ctxA, { title: "A's stuck task" });
+    if (!issueA.ok) return;
+    const created = await createTaskRecord(ctxA, {
+      issueId: issueA.data.id,
+      title: "A's task",
+      agentProfileId: a.agentProfileId,
+      executorProfileId: a.executorProfileId,
+      repositories: [{ repositoryId: a.repositoryId }],
+      state: "backlog",
+    });
+    if (!created.ok) throw new Error("seed failed");
+    await updateTaskState(ctxA, created.data.id, "failed", {
+      failureReason: CREDENTIAL_EXPIRED_REASON,
+    });
+
+    // Both fixtures' default Agent Profile spends the same literal Secret id ("secret-1"), so
+    // this is the case that actually exercises the workspace scope rather than a Secret mismatch.
+    expect(await taskIdsBlockedByCredential(ctxB, "secret-1")).toEqual([]);
   });
 });

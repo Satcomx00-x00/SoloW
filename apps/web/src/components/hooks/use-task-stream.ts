@@ -193,13 +193,64 @@ export function useTaskStream(
    * tenancy check for no benefit. `false` if the stream is not connected.
    */
   respondPermission: (requestId: string, optionId: string) => boolean;
+  /** Answer an interactive widget the agent drew. `false` when the socket is not open. */
+  respondWidget: (widgetId: string, values: string[], text?: string) => boolean;
 } {
   const [events, setEvents] = useState<TaskEvent[]>([]);
   const callerRef = useRef(options.onEvent);
   callerRef.current = options.onEvent;
-  const onEvent = useCallback((event: TaskEvent) => {
-    setEvents((prev) => [...prev, event]);
-    callerRef.current?.(event);
+
+  /**
+   * Frames that have arrived but not yet been committed to state.
+   *
+   * Each socket message is its own macrotask, so React cannot batch them: one `setEvents` per
+   * frame meant one render of the whole Task page per chunk of agent output, and the previous
+   * `[...prev, event]` copied the entire array each time — O(n²) over a run, on top of a
+   * terminal that re-derived the whole transcript on every one of those renders.
+   *
+   * Buffering in a ref and flushing on the next animation frame collapses a burst into a single
+   * render, and appends the burst with one `concat` instead of one copy per event. The frames
+   * themselves are never dropped or reordered; only the number of renders changes.
+   */
+  const pendingRef = useRef<TaskEvent[]>([]);
+  const flushRef = useRef<number | null>(null);
+
+  const flush = useCallback(() => {
+    flushRef.current = null;
+    const batch = pendingRef.current;
+    if (batch.length === 0) return;
+    pendingRef.current = [];
+    setEvents((prev) => prev.concat(batch));
+  }, []);
+
+  const onEvent = useCallback(
+    (event: TaskEvent) => {
+      pendingRef.current.push(event);
+      if (flushRef.current === null) {
+        // `requestAnimationFrame` rather than a timer: the only reason to commit is to paint, so
+        // pacing to the frame is exactly right, and a background tab stops re-rendering for
+        // output nobody is looking at. Falls back to a macrotask where rAF is absent (happy-dom
+        // in tests, and any non-browser renderer).
+        flushRef.current =
+          typeof requestAnimationFrame === "function"
+            ? requestAnimationFrame(flush)
+            : (setTimeout(flush, 0) as unknown as number);
+      }
+      // The caller's own hook runs per event, not per batch: it drives things like refetching on
+      // a state change, where coalescing would lose an event that matters.
+      callerRef.current?.(event);
+    },
+    [flush],
+  );
+
+  // A burst still in the buffer when the view goes away has nowhere to land; dropping it is
+  // correct (the component is gone), but the scheduled callback must not outlive the component.
+  useEffect(() => {
+    return () => {
+      if (flushRef.current === null) return;
+      if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(flushRef.current);
+      else clearTimeout(flushRef.current);
+    };
   }, []);
   const { status, send } = useEventStream({
     taskId,
@@ -219,5 +270,11 @@ export function useTaskStream(
     [send, taskId],
   );
 
-  return { events, status, sendInput, stopAgent, respondPermission };
+  const respondWidget = useCallback(
+    (widgetId: string, values: string[], text?: string) =>
+      send({ kind: "widget_response", taskId, widgetId, values, text: text ?? null }),
+    [send, taskId],
+  );
+
+  return { events, status, sendInput, stopAgent, respondPermission, respondWidget };
 }

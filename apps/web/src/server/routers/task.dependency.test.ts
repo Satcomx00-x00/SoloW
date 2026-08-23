@@ -85,7 +85,7 @@ async function fixture(db: TestDb, name: string) {
   const wsId = await seedWs(db, name);
   const c = caller(db, wsId);
   const agentCatalogId = await ensureDefaultAgentCatalog(db, wsId);
-  const secret = await c.secret.set({ name: "sub", kind: "subscription_token", value: "tok" });
+  const { secret } = await c.secret.set({ name: "sub", kind: "subscription_token", value: "tok" });
   const agent = await c.profile.agent.create({
     name: "Claude",
     agentCatalogId,

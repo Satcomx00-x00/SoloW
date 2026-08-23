@@ -65,6 +65,31 @@ describe("SessionLog", () => {
     expect(screen.getByText("No input recorded.")).toBeDefined();
   });
 
+  it("says where the plan stood, rather than rendering a blank row for it", () => {
+    // A kind with no case in the body switch renders as nothing at all, and the type checker
+    // cannot see it: the row keeps its gutter label and loses its content. `todos` reached this
+    // view that way — the log holding the agent's whole plan while the tab whose job is to show
+    // the log said nothing about it, which is the contentless row the capture existed to remove.
+    render(
+      <SessionLog
+        events={[
+          event(0, {
+            kind: "todos",
+            items: [
+              { content: "Read the failing test", status: "completed" },
+              { content: "Write the patch", status: "in_progress", activeForm: "Writing the fix" },
+              { content: "Run the suite", status: "pending" },
+            ],
+          }),
+        ]}
+        summaries={[]}
+      />,
+    );
+
+    expect(screen.getByText(/1 of 3 done/)).toBeDefined();
+    expect(screen.getByText(/Writing the fix/)).toBeDefined();
+  });
+
   it("renders a permission and its answer as themselves", () => {
     render(
       <SessionLog

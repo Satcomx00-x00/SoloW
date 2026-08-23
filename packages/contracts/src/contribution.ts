@@ -89,3 +89,46 @@ export type SurfaceLayoutDto = z.infer<typeof surfaceLayoutDto>;
 export function surfaceLayoutPreferenceKey(surface: SurfaceKey): string {
   return `surface-layout:${surface}`;
 }
+
+/**
+ * The Task page's split: the terminal on the left, the change under review in a column on the
+ * right, the way a source-control panel sits beside an editor.
+ *
+ * It lives beside the surface-layout schemas because both are rows of `ui_preference` and share
+ * its one JSON column — but it is deliberately its own schema rather than another `SurfaceKey`.
+ * A contributed surface's arrangement is an order and a hidden list; a pane is a width and a
+ * fold. Forcing one shape to mean both would make `surfaceLayoutSchema` stop describing anything.
+ *
+ * Bounded on both sides: a stored width of zero would render an invisible column that cannot be
+ * grabbed to reopen, and an unbounded one would push the terminal off the page. Values outside
+ * the range fall back to the default rather than being clamped, since a value that far out is a
+ * corrupt row, not a preference.
+ */
+export const TASK_PANE_MIN_WIDTH = 240;
+export const TASK_PANE_MAX_WIDTH = 900;
+
+export const taskPaneLayoutSchema = z.object({
+  changesWidth: z.number().int().min(TASK_PANE_MIN_WIDTH).max(TASK_PANE_MAX_WIDTH),
+  changesCollapsed: z.boolean(),
+});
+export type TaskPaneLayout = z.infer<typeof taskPaneLayoutSchema>;
+
+/** Wide enough for a file list and a patch's leading columns without crowding the terminal. */
+export const DEFAULT_TASK_PANE_LAYOUT: TaskPaneLayout = {
+  changesWidth: 420,
+  changesCollapsed: false,
+};
+
+export const setTaskPaneLayoutInput = taskPaneLayoutSchema;
+export type SetTaskPaneLayoutInput = z.infer<typeof setTaskPaneLayoutInput>;
+
+/** Echoes the identity back for the same reason `surfaceLayoutDto` does (Principle V). */
+export const taskPaneLayoutDto = z.object({
+  workspaceId: idSchema,
+  userId: idSchema,
+  layout: taskPaneLayoutSchema,
+});
+export type TaskPaneLayoutDto = z.infer<typeof taskPaneLayoutDto>;
+
+/** The single `ui_preference.key` the split is stored under. */
+export const TASK_PANE_PREFERENCE_KEY = "task-pane-layout";

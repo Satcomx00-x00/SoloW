@@ -29,25 +29,63 @@ import { attachSubscriber, toTaskEvent } from "./replay.js";
 const CLAIMS = { workspaceId: "ws-a", taskId: "task-1", exp: 2_000_000_000_000 };
 
 describe("toTaskEvent", () => {
-  it("puts the thinking marker back on the wire without ever storing it in the record", () => {
-    // Presentation belongs to the terminal; the durable record stays clean for the readers that
-    // are not one (#16 redaction, #84 MCP).
+  it("carries thinking as a channel, not as a marker baked into the text", () => {
+    // The "· " prefix used to be glued on here. That made thinking indistinguishable from an
+    // answer that happens to start with a bullet, and forced every client to parse presentation
+    // back out of the text. The channel is data; the marker, if any, is the terminal's choice.
     expect(
       toTaskEvent({ kind: "assistant_turn", text: "considering", thinking: true }, "t", "s", 4),
-    ).toEqual({ kind: "stdout", taskId: "t", sessionId: "s", seq: 4, text: "· considering" });
+    ).toEqual({
+      kind: "stdout",
+      taskId: "t",
+      sessionId: "s",
+      seq: 4,
+      text: "considering",
+      channel: "thinking",
+    });
     expect(
       toTaskEvent({ kind: "assistant_turn", text: "considering", thinking: false }, "t", "s", 4),
-    ).toEqual({ kind: "stdout", taskId: "t", sessionId: "s", seq: 4, text: "considering" });
+    ).toEqual({
+      kind: "stdout",
+      taskId: "t",
+      sessionId: "s",
+      seq: 4,
+      text: "considering",
+      channel: "assistant",
+    });
   });
 
-  it("keeps the wire vocabulary the SPA already speaks, whatever the log now calls things", () => {
+  it("keeps an operator's own steering, machine output and the model's answer apart", () => {
+    // All three used to arrive as an untagged `stdout` frame, so the terminal rendered them
+    // identically and could not, for instance, render markdown for prose but not for a mode
+    // switch. Telling them apart on the wire is what makes that possible at all.
     expect(toTaskEvent({ kind: "user_turn", text: "steer left" }, "t", "s", 1)).toMatchObject({
       kind: "stdout",
       text: "steer left",
+      channel: "user",
     });
+    expect(toTaskEvent({ kind: "notice", text: "mode: acceptEdits" }, "t", "s", 2)).toMatchObject({
+      kind: "stdout",
+      text: "mode: acceptEdits",
+      channel: "system",
+    });
+  });
+
+  it("carries a tool call's id, so a client can fold it together with its result", () => {
     expect(
-      toTaskEvent({ kind: "tool_call", name: "Edit", callId: "c1" }, "t", "s", 2),
-    ).toMatchObject({ kind: "tool_use", name: "Edit" });
+      toTaskEvent(
+        { kind: "tool_call", name: "Edit", callId: "c1", input: { file_path: "a.ts" } },
+        "t",
+        "s",
+        2,
+      ),
+    ).toMatchObject({ kind: "tool_use", name: "Edit", callId: "c1", input: { file_path: "a.ts" } });
+  });
+
+  it("gives a tool result a wire form at all — it previously had none", () => {
+    expect(
+      toTaskEvent({ kind: "tool_result", callId: "c1", ok: false, output: "boom" }, "t", "s", 3),
+    ).toMatchObject({ kind: "tool_result", callId: "c1", ok: false, output: "boom" });
   });
 
   it("replays a permission as itself, so a reconnecting operator can still answer it", () => {
@@ -69,10 +107,33 @@ describe("toTaskEvent", () => {
       taskId: "t",
       sessionId: "s",
       seq: 3,
+      toolCallId: null,
       requestId: "req-1",
       title: "Write .env",
       toolKind: "edit",
       options: [{ optionId: "allow", name: "Allow", kind: "allow_once" }],
+    });
+  });
+
+  it("replays the agent's todo list whole, so a client that joined late still has the plan", () => {
+    // The list is stored entire on every rewrite rather than as a delta, which is what makes a
+    // reconnect work at all: there is nothing for a late client to apply a delta to.
+    expect(
+      toTaskEvent(
+        {
+          kind: "todos",
+          items: [{ content: "Record the list", status: "in_progress", activeForm: "Recording" }],
+        },
+        "t",
+        "s",
+        7,
+      ),
+    ).toEqual({
+      kind: "todos",
+      taskId: "t",
+      sessionId: "s",
+      seq: 7,
+      items: [{ content: "Record the list", status: "in_progress", activeForm: "Recording" }],
     });
   });
 
@@ -102,7 +163,7 @@ describe("attachSubscriber (typed log, unchanged wire)", () => {
   beforeEach(async () => {
     db = createTestDb();
     await db.insert(workspace).values({ id: "ws-a", name: "Alpha", ownerUserId: "owner" });
-    await db.insert(issue).values({ id: "iss-1", workspaceId: "ws-a", title: "I", status: "open" });
+    await db.insert(issue).values({ id: "iss-1", workspaceId: "ws-a", title: "I" });
     await db.insert(agentCatalog).values({
       id: "cat-1",
       workspaceId: "ws-a",
@@ -179,8 +240,24 @@ describe("attachSubscriber (typed log, unchanged wire)", () => {
     ]);
 
     expect(await replay()).toEqual([
-      { kind: "stdout", taskId: "task-1", sessionId: "sess-1", seq: 0, text: "line 0\n" },
-      { kind: "tool_use", taskId: "task-1", sessionId: "sess-1", seq: 1, name: "Edit" },
+      {
+        kind: "stdout",
+        taskId: "task-1",
+        sessionId: "sess-1",
+        seq: 0,
+        text: "line 0\n",
+        channel: "assistant",
+      },
+      {
+        kind: "tool_use",
+        taskId: "task-1",
+        sessionId: "sess-1",
+        seq: 1,
+        name: "Edit",
+        callId: null,
+        input: null,
+        status: null,
+      },
     ]);
   });
 
@@ -189,7 +266,14 @@ describe("attachSubscriber (typed log, unchanged wire)", () => {
     // rounds straddle the change would see its own history change shape mid-transcript.
     await seed([typed(0, { kind: "assistant_turn", text: "line 0\n", thinking: false })]);
     expect(await replay()).toEqual([
-      { kind: "stdout", taskId: "task-1", sessionId: "sess-1", seq: 0, text: "line 0\n" },
+      {
+        kind: "stdout",
+        taskId: "task-1",
+        sessionId: "sess-1",
+        seq: 0,
+        text: "line 0\n",
+        channel: "assistant",
+      },
     ]);
   });
 

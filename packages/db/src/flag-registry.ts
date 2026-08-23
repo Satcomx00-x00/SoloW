@@ -12,7 +12,12 @@
  * flag column can now reach the registry, so there is nothing to keep in sync.
  */
 
-export type FlagKey = "ff-core-program" | "ff-integrations" | "ff-mcp" | "ff-workflows";
+export type FlagKey =
+  | "ff-core-program"
+  | "ff-integrations"
+  | "ff-mcp"
+  | "ff-workflows"
+  | "ff-agent-widgets";
 
 export interface FlagDefinition {
   key: FlagKey;
@@ -46,6 +51,13 @@ export const FLAGS: Record<FlagKey, FlagDefinition> = {
     key: "ff-workflows",
     description:
       "Agentic workflows — multi-step pipelines with a different agent per Step (issue #5).",
+    default: false,
+    granularity: "workspace",
+  },
+  "ff-agent-widgets": {
+    key: "ff-agent-widgets",
+    description:
+      "Agent widgets — teach the agent to emit tappable questions, diagrams and checklists, and draw them in the transcript.",
     default: false,
     granularity: "workspace",
   },

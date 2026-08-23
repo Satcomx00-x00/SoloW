@@ -17,6 +17,7 @@
     "dev": "sh scripts/dev.sh",
     "dev:web": "cd apps/web && bun --bun run dev",
     "dev:orchestrator": "bun --hot run apps/orchestrator/src/main.ts",
+    "start": "sh scripts/start.sh",
     "typecheck": "bun run --filter '*' typecheck",
     "test": "bun run --filter '*' test",
     "lint": "biome check .",

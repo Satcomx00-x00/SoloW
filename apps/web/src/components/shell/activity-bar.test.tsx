@@ -10,13 +10,23 @@ import { TooltipProvider } from "@/components/ui/tooltip";
  * own dependencies — nothing here exercises navigation or sign-out, only what the rail renders.
  */
 
+// Complete, not just what this file needs: `mock.module` replaces the module for the rest of
+// the bun:test process, and a stub missing a hook breaks whichever other file's component reads
+// it next (see issue-detail.test.tsx's fuller account of this leak).
 mock.module("next/navigation", () => ({
   usePathname: () => "/board",
   useRouter: () => ({ replace: () => {}, refresh: () => {} }),
+  useSearchParams: () => new URLSearchParams(),
+  useParams: () => ({}),
 }));
 
+// Same completeness reasoning as the next/navigation mock above: sign-in-form.test.tsx's own
+// stub of this module has both signIn and signUp, and an incomplete stub registered after it
+// leaks a "signUp not found" SyntaxError into whichever file next imports the real specifier.
 mock.module("@/lib/auth-client", () => ({
   signOut: async () => {},
+  signIn: { email: async () => ({}) },
+  signUp: { email: async () => ({}) },
 }));
 
 const { ActivityBar } = await import("./activity-bar");

@@ -18,8 +18,20 @@ import {
   type TaskListDto,
   type TaskState,
 } from "@gatecontrol/contracts";
-import { buildDependencyGraph, checkDependencyEdge, taskCheckoutBranch } from "@gatecontrol/core";
-import { session, task, taskDependency, taskRepository, worktree } from "@gatecontrol/db";
+import {
+  buildDependencyGraph,
+  CREDENTIAL_EXPIRED_REASON,
+  checkDependencyEdge,
+  taskCheckoutBranch,
+} from "@gatecontrol/core";
+import {
+  agentProfile,
+  session,
+  task,
+  taskDependency,
+  taskRepository,
+  worktree,
+} from "@gatecontrol/db";
 import { and, asc, desc, eq, inArray, like } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
 import { taskToDto } from "./mappers.js";
@@ -359,10 +371,21 @@ export async function removeTaskDependencyEdge(
  *
  * Two guards, and they are not the same kind of thing:
  *
- * - **Running** is refused outright (`StillRunning`). The router stops the agent first; this
- *   re-check inside the transaction is what makes that safe rather than merely likely, since a
- *   Task can re-enter `running` between the stop and the delete. No flag overrides it — an
- *   orphaned agent process is never what the Owner meant.
+ * - **An active Session** is refused (`StillRunning`) unless the caller has already told the
+ *   orchestrator to stop this Task — `opts.stopIssued`. That flag is deliberately NOT part of
+ *   `DeleteTaskInput`: it is something the server learns by doing (the stop returned), never
+ *   something a client asserts, so no request can talk its way past the guard.
+ *
+ *   The guard keys on the Session, not on `task.state`. A Task reading `running` with no active
+ *   Session is a row nothing will ever update again — its run died without reconciling — and
+ *   that is precisely the wreckage an operator is trying to clear. Keying on the state instead
+ *   made every such Task permanently undeletable from the UI, with no way out but SQL, and left
+ *   it holding its Agent Profile's concurrency slot forever.
+ *
+ *   Why an accepted stop is enough even when the row still says `running`: cancellation is
+ *   asynchronous (Inngest cancels between steps), so the state read here is stale by
+ *   construction, and waiting for it to clear would wait forever whenever the run is already
+ *   dead.
  * - **Dependents** are refused unless `force` (`HasDependents`). Other Tasks declaring a
  *   `blocked_by` edge on this one are gated on it deliberately; deleting it silently starts
  *   them. With `force` those edges go, and the dependents become runnable — which is a decision,
@@ -374,6 +397,7 @@ export async function removeTaskDependencyEdge(
 export async function deleteTask(
   ctx: RequestContext,
   input: DeleteTaskInput,
+  opts: { stopIssued?: boolean } = {},
 ): Promise<
   Result<
     { id: string },
@@ -403,9 +427,7 @@ export async function deleteTask(
       )
       .limit(1)
       .all();
-    if (existing.state === "running" || activeSession.length > 0) {
-      return err(TaskErrorCode.StillRunning);
-    }
+    if (activeSession.length > 0 && !opts.stopIssued) return err(TaskErrorCode.StillRunning);
 
     if (!input.force) {
       const dependents = tx
@@ -488,4 +510,34 @@ export async function activeSessionForTask(
     )
     .limit(1);
   return row?.id;
+}
+
+/**
+ * Failed Tasks blocked on this Secret — the credential their Agent Profile spends (spec AC-013,
+ * issue #63).
+ *
+ * Joined through `agent_profile` rather than trusted from `failureReason` alone: the reason
+ * names a *class* of failure, not which credential caused it, and two Agent Profiles can hold
+ * two different Secrets. A Task only belongs on this list when both are true — it failed on a
+ * credential, and the credential that failed is the one an Owner just replaced. Called after a
+ * Secret is (re)written, so its caller can resume every Task this unblocks without the Owner
+ * finding and retrying each one by hand.
+ */
+export async function taskIdsBlockedByCredential(
+  ctx: RequestContext,
+  secretId: string,
+): Promise<string[]> {
+  const rows = await ctx.db
+    .select({ id: task.id })
+    .from(task)
+    .innerJoin(agentProfile, eq(agentProfile.id, task.agentProfileId))
+    .where(
+      and(
+        eq(task.workspaceId, ctx.workspaceId),
+        eq(task.state, "failed"),
+        eq(task.failureReason, CREDENTIAL_EXPIRED_REASON),
+        eq(agentProfile.secretId, secretId),
+      ),
+    );
+  return rows.map((row) => row.id);
 }

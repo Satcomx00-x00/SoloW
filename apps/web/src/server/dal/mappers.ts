@@ -3,6 +3,7 @@ import type {
   ChangeRequestDto,
   IntegrationDto,
   IssueDto,
+  IssueStatus,
   McpTokenDto,
   RepositoryBranchDto,
   RepositoryDto,
@@ -39,14 +40,34 @@ type McpTokenRow = typeof mcpToken.$inferSelect;
  * DTO mapper that includes `ciphertext` (Principle IV).
  */
 
-export function issueToDto(row: IssueRow, taskCount: number, status = row.status): IssueDto {
+/**
+ * What an Issue's Tasks add up to. Computed by the DAL (`@gatecontrol/core`'s
+ * `deriveIssueStatus`/`activeTaskCount`) and handed here, so this file stays pure row → DTO
+ * mapping with no rules of its own.
+ */
+export interface IssueRollup {
+  taskCount: number;
+  activeTaskCount: number;
+  derivedStatus: IssueStatus;
+}
+
+/** An Issue with no Tasks yet — what a create or an import returns before anything is cut from it. */
+export const NO_TASKS: IssueRollup = { taskCount: 0, activeTaskCount: 0, derivedStatus: "open" };
+
+export function issueToDto(row: IssueRow, rollup: IssueRollup): IssueDto {
   return {
     id: row.id,
     title: row.title,
     description: row.description,
-    // Derived from the Issue's Tasks by the DAL (spec FR-006); the column is only a fallback.
-    status,
-    taskCount,
+    // The override is the answer whenever someone set one (spec F01 FR-7); otherwise the Issue
+    // says whatever its Tasks say. Both halves travel, so the UI can show one as the other's
+    // override rather than silently replacing it.
+    status: row.statusOverride ?? rollup.derivedStatus,
+    derivedStatus: rollup.derivedStatus,
+    statusOverride: row.statusOverride,
+    statusOverrideAt: row.statusOverrideAt,
+    taskCount: rollup.taskCount,
+    activeTaskCount: rollup.activeTaskCount,
     source: row.source,
     repositoryId: row.repositoryId,
     externalNumber: row.externalNumber,

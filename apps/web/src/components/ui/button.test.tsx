@@ -43,9 +43,9 @@ describe("Button loading state", () => {
 
   it("shows a spinner while loading and none when idle", () => {
     const { rerender } = render(<Button loading>Approve</Button>)
-    expect(screen.getByRole("button").querySelector(".animate-spin")).not.toBeNull()
+    expect(screen.getByRole("button").querySelector(".spinner")).not.toBeNull()
     rerender(<Button>Approve</Button>)
-    expect(screen.getByRole("button").querySelector(".animate-spin")).toBeNull()
+    expect(screen.getByRole("button").querySelector(".spinner")).toBeNull()
   })
 
   it("clicks normally when idle", () => {
@@ -73,7 +73,7 @@ describe("Button loading state", () => {
       </Button>,
     )
     const link = screen.getByRole("link", { name: "Back to board" })
-    expect(link.querySelector(".animate-spin")).toBeNull()
+    expect(link.querySelector(".spinner")).toBeNull()
     expect(link.textContent).toBe("Back to board")
   })
 })

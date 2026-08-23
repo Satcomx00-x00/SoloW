@@ -50,6 +50,26 @@ export const secretRefDto = z.object({
 export type SecretRefDto = z.infer<typeof secretRefDto>;
 
 /**
+ * The result of `secret.set` — the Secret's metadata, plus how many Tasks the write just
+ * unblocked (spec AC-013, issue #63).
+ *
+ * A wider DTO than `secretRefDto` rather than an extra field bolted onto it, because
+ * `resumedTaskCount` means something only for a write: `secret.list` and `secret.delete` return
+ * `secretRefDto` on its own, and a count that is always zero on those responses would be a field
+ * nobody could tell "genuinely zero" from "not applicable here".
+ */
+export const setSecretResultDto = z.object({
+  secret: secretRefDto,
+  /**
+   * Every Task that was paused with a failed run against *this* Secret, and has now been
+   * restarted. Zero on the far more common case — creating a new Secret, or replacing one that
+   * nothing was waiting on.
+   */
+  resumedTaskCount: z.number().int().nonnegative(),
+});
+export type SetSecretResultDto = z.infer<typeof setSecretResultDto>;
+
+/**
  * Delete a Secret. Refused with `SECRET_IN_USE` while anything still references it — a stored
  * credential is the only copy GateControl has, and dropping one an Integration or Agent Profile
  * points at breaks that holder with no way to put the value back (spec F17 FR-6).

@@ -23,6 +23,7 @@ function request(over: Partial<PermissionRequest> = {}): PermissionRequest {
     taskId: "task-1",
     sessionId: "sess-1",
     seq: 3,
+    toolCallId: null,
     requestId: "req-1",
     title: "Write .env in the worktree",
     toolKind: "edit",
@@ -136,7 +137,14 @@ describe("pendingPermission", () => {
   it("finds nothing in a stream that never carried a permission", () => {
     expect(
       pendingPermission([
-        { kind: "stdout", taskId: "task-1", sessionId: "sess-1", seq: 0, text: "working" },
+        {
+          kind: "stdout",
+          taskId: "task-1",
+          sessionId: "sess-1",
+          seq: 0,
+          text: "working",
+          channel: "assistant",
+        },
       ]),
     ).toBeNull();
   });

@@ -18,7 +18,22 @@ const toolUseBlockSchema = z.object({
   name: z.string(),
   input: z.unknown().optional(),
 });
-/** Tool results and anything else: recognised as a block, carried no further. */
+/**
+ * A tool's result, as it comes back on a `user` event.
+ *
+ * `content` is whatever the tool produced: a string for most, an array of blocks for the ones
+ * that return structured output. Both shapes are accepted and flattened to text by the mapper,
+ * because a transcript renders text — and because refusing an unanticipated shape would drop
+ * the result entirely rather than showing a truncated version of it.
+ */
+const toolResultBlockSchema = z.object({
+  type: z.literal("tool_result"),
+  tool_use_id: z.string().optional(),
+  is_error: z.boolean().optional(),
+  content: z.unknown().optional(),
+});
+
+/** Anything else: recognised as a block, carried no further. */
 const contentBlockSchema = z.object({ type: z.string() }).passthrough();
 
 /**
@@ -73,7 +88,13 @@ export const assistantEventSchema = z
   .passthrough();
 
 export const userEventSchema = z
-  .object({ type: z.literal("user"), message: z.unknown().optional() })
+  .object({
+    type: z.literal("user"),
+    message: z
+      .object({ content: z.array(contentBlockSchema).optional() })
+      .passthrough()
+      .optional(),
+  })
   .passthrough();
 
 /**
@@ -109,7 +130,18 @@ export type ResultEvent = z.infer<typeof resultEventSchema>;
 export type ClaudeUpdate =
   | { kind: "session"; cwd: string | null; sessionId: string | null }
   | { kind: "text"; channel: "assistant" | "thinking"; text: string }
-  | { kind: "tool_use"; name: string }
+  /**
+   * A tool invocation. `callId` is the CLI's own id for it — without it a result cannot be
+   * matched back to its call, which is why the transcript could only ever say "tool: Read".
+   *
+   * `input` is the tool's raw arguments, passed on as the CLI reported them. Narrowing them to
+   * what is safe to store is deliberately NOT done here: this package models the protocol, and
+   * the allowlist is a policy that must apply to every adapter, so it lives once in the
+   * orchestrator (`task-run.ts`) where both this and ACP pass through it.
+   */
+  | { kind: "tool_use"; name: string; callId: string | null; input: unknown }
+  /** How a tool call finished. `output` is flattened to text; truncation is the orchestrator's. */
+  | { kind: "tool_result"; callId: string | null; ok: boolean; output: string | null }
   /**
    * One completed assistant turn's token usage (issue #14).
    *
@@ -185,7 +217,14 @@ export function toUpdates(event: StreamEvent): ClaudeUpdate[] {
         continue;
       }
       const tool = toolUseBlockSchema.safeParse(block);
-      if (tool.success) updates.push({ kind: "tool_use", name: tool.data.name });
+      if (tool.success) {
+        updates.push({
+          kind: "tool_use",
+          name: tool.data.name,
+          callId: tool.data.id ?? null,
+          input: tool.data.input,
+        });
+      }
     }
     // Usage last: it belongs to the turn these blocks just completed, and ordering it after
     // them keeps the event log readable as a narrative.
@@ -221,8 +260,52 @@ export function toUpdates(event: StreamEvent): ClaudeUpdate[] {
     ];
   }
 
-  // `user` events carry tool results already summarised by the tool_use above them.
+  if (event.type === "user") {
+    // This used to `return []` on the premise that a `user` event's tool results were "already
+    // summarised by the tool_use above them". They were not: that `tool_use` carried only a
+    // name, so nothing in the system ever recorded whether a tool succeeded, failed, or what it
+    // produced — and `session_event`'s `tool_result` member had zero producers as a result.
+    const parsed = userEventSchema.safeParse(event);
+    if (!parsed.success) return [];
+    const updates: ClaudeUpdate[] = [];
+    for (const block of parsed.data.message?.content ?? []) {
+      const result = toolResultBlockSchema.safeParse(block);
+      if (!result.success) continue;
+      updates.push({
+        kind: "tool_result",
+        callId: result.data.tool_use_id ?? null,
+        // `is_error` absent means the tool did not report a failure, which is the success case.
+        ok: result.data.is_error !== true,
+        output: flattenToolOutput(result.data.content),
+      });
+    }
+    return updates;
+  }
+
   return [];
+}
+
+/**
+ * A tool result's `content` as text.
+ *
+ * The CLI sends a bare string for most tools and an array of `{type:"text",text}` blocks for the
+ * ones with structured output. Anything else is JSON-stringified rather than dropped: a reader
+ * seeing an odd-looking result is better served than one seeing nothing, and this is the only
+ * record that a tool produced anything at all.
+ */
+function flattenToolOutput(content: unknown): string | null {
+  if (content === undefined || content === null) return null;
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    const parts = content
+      .map((block) => {
+        const text = textBlockSchema.safeParse(block);
+        return text.success ? text.data.text : null;
+      })
+      .filter((t): t is string => t !== null);
+    if (parts.length > 0) return parts.join("");
+  }
+  return JSON.stringify(content);
 }
 
 /** One line of stream-JSON input: a user turn, as the CLI expects it. */

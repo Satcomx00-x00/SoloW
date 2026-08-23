@@ -1,18 +1,18 @@
 "use client";
 
 import type { TaskDependencyDto } from "@gatecontrol/contracts";
-import { ArrowLeft, Pencil, Trash2, TriangleAlert } from "lucide-react";
+import { ArrowLeft, ExternalLink, Pencil, Trash2, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { TaskCard } from "@/components/features/board/task-card";
 import { TaskStateBadge } from "@/components/features/board/task-state-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ISSUE_STATUS_LABELS, ISSUE_STATUS_STYLE } from "@/lib/issue-status";
-import { cn } from "@/lib/utils";
+import { ISSUE_SOURCE_LABELS } from "@/lib/issue-status";
 import { trpc } from "@/trpc/react";
 import { DeleteIssueAction } from "./delete-issue-action";
 import { IssueFormDialog } from "./issue-form-dialog";
+import { IssueStatusControl } from "./issue-status-control";
 
 /**
  * One Issue and the Tasks cut from it.
@@ -57,7 +57,6 @@ export function IssueDetail({ issueId }: { issueId: string }) {
   }
 
   const data = issue.data;
-  const { icon: Icon, text, badge } = ISSUE_STATUS_STYLE[data.status];
   const rows = tasks.data ?? [];
   const blockersByTask = new Map<string, TaskDependencyDto[]>();
   for (const edge of dependencies.data ?? []) {
@@ -76,18 +75,32 @@ export function IssueDetail({ issueId }: { issueId: string }) {
           </Link>
         </Button>
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-start gap-x-2 gap-y-1.5">
             <h1 className="font-semibold text-base leading-snug">{data.title}</h1>
-            <span
-              className={cn(
-                "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 font-medium text-2xs",
-                badge,
-              )}
-            >
-              <Icon aria-hidden strokeWidth={2.25} className={cn("size-3", text)} />
-              {ISSUE_STATUS_LABELS[data.status]}
-            </span>
+            <IssueStatusControl issue={data} />
           </div>
+          {/* Where an imported Issue actually lives (spec F01 FR-4). GateControl owns its Tasks
+              and its status; the title and description on this page are a copy of the
+              provider's, and this is the link back to the original. */}
+          {data.externalUrl && (
+            <a
+              href={data.externalUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-1.5 inline-flex items-center gap-1.5 text-muted-foreground text-xs transition-colors hover:text-foreground"
+            >
+              <span>{ISSUE_SOURCE_LABELS[data.source]}</span>
+              {data.externalNumber !== null && (
+                <span className="font-mono">#{data.externalNumber}</span>
+              )}
+              <ExternalLink aria-hidden className="size-3" />
+              {data.syncedAt && (
+                <span className="text-muted-foreground/70">
+                  · synced {new Date(data.syncedAt).toLocaleDateString()}
+                </span>
+              )}
+            </a>
+          )}
           {data.description && (
             <p className="mt-2 max-w-prose whitespace-pre-wrap text-muted-foreground text-sm leading-relaxed">
               {data.description}

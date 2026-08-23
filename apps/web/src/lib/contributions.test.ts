@@ -70,7 +70,7 @@ describe("a feature module contributing commands", () => {
     const navigated: string[] = [];
     const actions: CommandActions = {
       navigate: (href) => navigated.push(href),
-      createTask: () => {},
+      create: () => {},
     };
 
     command?.render.run(actions);

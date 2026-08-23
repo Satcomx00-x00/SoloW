@@ -96,7 +96,7 @@ function Button({
         children
       ) : (
         <>
-          {loading && <LoaderCircle className="animate-spin" aria-hidden />}
+          {loading && <LoaderCircle className="spinner" aria-hidden />}
           {children}
         </>
       )}

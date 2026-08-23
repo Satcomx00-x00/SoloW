@@ -1,6 +1,7 @@
 /// <reference types="bun-types" />
 
 import { describe, expect, it } from "bun:test";
+import type { WidgetResponse } from "@gatecontrol/contracts";
 import { AgentRegistry } from "./registry.js";
 import type { AgentHandle } from "./runner.js";
 
@@ -152,5 +153,68 @@ describe("AgentRegistry", () => {
     deregisterFirst();
     expect(await registry.send("ws-a", "task-1", "still steering")).toBe(true);
     expect(second.inputs).toEqual(["still steering"]);
+  });
+});
+
+describe("AgentRegistry.respondWidget", () => {
+  it("routes an answer to the run that drew the widget", async () => {
+    const registry = new AgentRegistry();
+    const answered: WidgetResponse[] = [];
+    registry.register("ws-1", {
+      taskId: "task-1",
+      sessionId: "s-1",
+      handle: fakeHandle(),
+      respondWidget: async (response) => {
+        answered.push(response);
+        return "answered";
+      },
+    });
+
+    const result = await registry.respondWidget("ws-1", "task-1", {
+      widgetId: "w-1",
+      values: ["pg"],
+      text: null,
+    });
+    expect(result).toBe("answered");
+    expect(answered).toEqual([{ widgetId: "w-1", values: ["pg"], text: null }]);
+  });
+
+  it("refuses an answer for another tenant's Task", async () => {
+    const registry = new AgentRegistry();
+    registry.register("ws-1", {
+      taskId: "task-1",
+      sessionId: "s-1",
+      handle: fakeHandle(),
+      respondWidget: async () => "answered",
+    });
+    // Principle V: the Workspace comes from the signed ticket, and a mismatch finds nothing.
+    expect(
+      await registry.respondWidget("ws-2", "task-1", { widgetId: "w-1", values: [], text: null }),
+    ).toBe("no_agent");
+  });
+
+  it("reports a run with no widget channel apart from a missing one", async () => {
+    const registry = new AgentRegistry();
+    registry.register("ws-1", { taskId: "task-1", sessionId: "s-1", handle: fakeHandle() });
+    expect(
+      await registry.respondWidget("ws-1", "task-1", { widgetId: "w-1", values: [], text: null }),
+    ).toBe("no_widget_channel");
+    expect(
+      await registry.respondWidget("ws-1", "task-2", { widgetId: "w-1", values: [], text: null }),
+    ).toBe("no_agent");
+  });
+
+  it("passes the run's own verdict straight through", async () => {
+    const registry = new AgentRegistry();
+    registry.register("ws-1", {
+      taskId: "task-1",
+      sessionId: "s-1",
+      handle: fakeHandle(),
+      respondWidget: async () => "not_pending",
+    });
+    // Only the lifecycle knows which widgets are outstanding; the registry never second-guesses it.
+    expect(
+      await registry.respondWidget("ws-1", "task-1", { widgetId: "gone", values: [], text: null }),
+    ).toBe("not_pending");
   });
 });

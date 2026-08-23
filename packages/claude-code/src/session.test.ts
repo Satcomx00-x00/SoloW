@@ -92,6 +92,18 @@ describe("buildArgs", () => {
     expect(args).toContain("--verbose");
   });
 
+  it("passes the permission mode it was given, whichever it is", () => {
+    // The mode comes from the Agent Profile: `acceptEdits` leaves an agent unable to run a
+    // command in a headless run, `bypassPermissions` is what an Owner picks when the work needs
+    // the shell. Neither is decided here — this only proves the choice reaches the CLI.
+    for (const mode of ["acceptEdits", "plan", "bypassPermissions"] as const) {
+      const args = buildArgs({ worktreeName: "w", permissionMode: mode });
+      const at = args.indexOf("--permission-mode");
+      expect(at).toBeGreaterThanOrEqual(0);
+      expect(args[at + 1]).toBe(mode);
+    }
+  });
+
   it("puts configured extras after the arguments GateControl requires", () => {
     const args = buildArgs({
       worktreeName: "w",
@@ -112,7 +124,7 @@ describe("startClaudeSession", () => {
     expect(await s.outcome).toEqual({ ok: true, subtype: "success", text: "done" });
     // Usage accompanies every block of a turn (see events.test.ts) and is asserted there.
     expect(updates.filter((u) => u.kind !== "session" && u.kind !== "usage")).toEqual([
-      { kind: "tool_use", name: "Edit" },
+      { kind: "tool_use", name: "Edit", callId: "t-Edit", input: {} },
       { kind: "text", channel: "assistant", text: "patched " },
       { kind: "text", channel: "assistant", text: "latch.ts" },
       { kind: "result", ok: true, subtype: "success", text: "done" },

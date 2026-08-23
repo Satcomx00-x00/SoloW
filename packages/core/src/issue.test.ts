@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { TaskState } from "@gatecontrol/contracts";
-import { deriveIssueStatus } from "./issue.js";
+import { activeTaskCount, deriveIssueStatus } from "./issue.js";
 
 describe("deriveIssueStatus", () => {
   it("returns 'open' when there are no tasks", () => {
@@ -35,5 +35,27 @@ describe("deriveIssueStatus", () => {
     expect(deriveIssueStatus(["backlog"])).toBe("open");
     expect(deriveIssueStatus(["failed"])).toBe("open");
     expect(deriveIssueStatus(["backlog", "failed"])).toBe("open");
+  });
+});
+
+describe("activeTaskCount", () => {
+  it("counts the Tasks that are still going", () => {
+    // The same four states `deriveIssueStatus` calls active — shared on purpose, so an Issue
+    // cannot read "In progress" while closing it raises no warning (spec F01 FR-9).
+    expect(activeTaskCount(["ready", "running", "review", "parked"])).toBe(4);
+  });
+
+  it("does not count a Task that has finished, failed or never started", () => {
+    expect(activeTaskCount(["done", "failed", "backlog"])).toBe(0);
+  });
+
+  it("is zero for an Issue with no Tasks", () => {
+    expect(activeTaskCount([])).toBe(0);
+  });
+
+  it("agrees with the derived status about what active means", () => {
+    for (const state of ["ready", "running", "review", "parked"] as const) {
+      expect(activeTaskCount([state]) > 0).toBe(deriveIssueStatus([state]) === "in_progress");
+    }
   });
 });

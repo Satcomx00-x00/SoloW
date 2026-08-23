@@ -29,13 +29,10 @@ export function ColumnHeader({
   state,
   label,
   count,
-  headerAction,
 }: {
   state: TaskState;
   label: string;
   count: number;
-  /** e.g. the Backlog column's "new issue" / "connect repository" buttons. Additive — most columns pass none. */
-  headerAction?: ReactNode;
 }) {
   const { icon: Icon, textClassName, barClassName, hint } = STATE_STYLE[state];
   return (
@@ -57,7 +54,6 @@ export function ColumnHeader({
       >
         {label}
       </span>
-      {headerAction}
       <span
         className={cn(
           "ml-auto font-mono text-2xs tabular-nums",
@@ -100,14 +96,12 @@ export function Column({
   tasks,
   renderActions,
   blockersFor,
-  headerAction,
 }: {
   state: TaskState;
   label: string;
   tasks: TaskDto[];
   renderActions?: ((task: TaskDto) => ReactNode) | undefined;
   blockersFor?: ((taskId: string) => readonly TaskDependencyDto[] | undefined) | undefined;
-  headerAction?: ReactNode;
 }) {
   return (
     <section
@@ -115,7 +109,7 @@ export function Column({
       data-state={state}
       className="relative flex w-72 shrink-0 flex-col overflow-hidden rounded-xl border bg-sidebar/60"
     >
-      <ColumnHeader state={state} label={label} count={tasks.length} headerAction={headerAction} />
+      <ColumnHeader state={state} label={label} count={tasks.length} />
       {tasks.length === 0 ? (
         <ColumnEmpty label={label} />
       ) : (

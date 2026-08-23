@@ -7,6 +7,7 @@ import {
   TaskDependencyErrorCode,
   TaskErrorCode,
   type TaskState,
+  taskStateSchema,
 } from "@gatecontrol/contracts";
 
 /**
@@ -30,6 +31,69 @@ export function canTransitionTask(
   to: TaskState,
 ): Result<void, typeof TaskErrorCode.IllegalTransition> {
   return TRANSITIONS[from].includes(to) ? ok(undefined) : err(TaskErrorCode.IllegalTransition);
+}
+
+/**
+ * The lifecycle read as an ordered line, so a Task can be nudged one step along it.
+ *
+ * The order is the contract's own enum, `taskStateSchema.options`, and not a seven-name list
+ * written out again here. The board lays its columns out in exactly that order (`BOARD_COLUMNS`
+ * in the web app, which core cannot import), so the sequence already has an owner; a third copy
+ * of it would be the one nobody looks at, and therefore the one that drifts.
+ *
+ * Both directions are *derived* from `TRANSITIONS` rather than listed. A hand-written "what
+ * comes after review" table would be a second statement of the lifecycle, and the first time
+ * someone adds or removes an edge the two would disagree — with the stepping table being the
+ * half that offers a move the server then refuses.
+ */
+const STATE_ORDER: readonly TaskState[] = taskStateSchema.options;
+
+/**
+ * Where a Task leaves the line rather than moving along it.
+ *
+ * Both sit *after* `review` in column order, which is an artefact of where the board draws them
+ * and not a statement that they come later in the work. Left in, stepping forward reads them as
+ * destinations: a `parked` Task — one waiting on a quota window it will come out of by itself —
+ * would be handed a forward arrow whose only meaning is "give up on this", because `failed` is
+ * the only legal target to the right of it. Reaching either of them is something that happens to
+ * a run, so it is announced by the orchestrator or chosen deliberately on the board, never a
+ * nudge one column along.
+ */
+const EXIT_STATES: readonly TaskState[] = ["parked", "failed"];
+
+/**
+ * The legal target nearest to `from` in column order, searching forward (`+1`) or back (`-1`).
+ *
+ * "Nearest" matters because several states have more than one legal exit in the same direction:
+ * `running` may go to `review`, `parked` or `failed`, and only the first of those is the move an
+ * arrow should offer. Skipping over `parked` and `failed` to reach `done` would be a fast-forward
+ * the Owner did not ask for.
+ */
+function stepTaskState(from: TaskState, direction: 1 | -1): TaskState | null {
+  const origin = STATE_ORDER.indexOf(from);
+  let best: TaskState | null = null;
+  let bestIndex = -1;
+
+  for (const to of TRANSITIONS[from]) {
+    if (direction === 1 && EXIT_STATES.includes(to)) continue;
+    const index = STATE_ORDER.indexOf(to);
+    if (direction === 1 ? index <= origin : index >= origin) continue;
+    if (best === null || (direction === 1 ? index < bestIndex : index > bestIndex)) {
+      best = to;
+      bestIndex = index;
+    }
+  }
+  return best;
+}
+
+/** The state one step forward along the board, or null when the Task cannot advance. */
+export function nextTaskState(from: TaskState): TaskState | null {
+  return stepTaskState(from, 1);
+}
+
+/** The state one step back along the board, or null when the Task cannot retreat. */
+export function previousTaskState(from: TaskState): TaskState | null {
+  return stepTaskState(from, -1);
 }
 
 export interface TaskCreatePayload extends CreateTaskInput {

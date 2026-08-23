@@ -1,3 +1,4 @@
+import type { WidgetResponse } from "@gatecontrol/contracts";
 import type { AgentHandle, PermissionAnswer } from "./runner.js";
 
 /**
@@ -18,10 +19,27 @@ import type { AgentHandle, PermissionAnswer } from "./runner.js";
  */
 export type PermissionAnswerResult = PermissionAnswer | "no_agent" | "no_permission_channel";
 
+/**
+ * What became of a widget answer. `not_pending` and `option_unknown` are the run's judgement —
+ * only the lifecycle knows which widgets are outstanding and what each offered — and `no_agent`
+ * is the registry's.
+ */
+export type WidgetAnswer = "answered" | "not_pending" | "option_unknown";
+export type WidgetAnswerResult = WidgetAnswer | "no_agent" | "no_widget_channel";
+
 export interface LiveAgent {
   taskId: string;
   sessionId: string;
   handle: AgentHandle;
+  /**
+   * How to answer an interactive widget this run emitted.
+   *
+   * Supplied by the lifecycle rather than implemented here, because answering one means three
+   * things the registry has no business knowing: validating the answer against the widget that
+   * asked, appending a `widget_response` to the session log, and telling the agent in words it
+   * will understand. The registry's job is finding the right agent under the right tenant key.
+   */
+  respondWidget?: (response: WidgetResponse) => Promise<WidgetAnswer>;
 }
 
 export class AgentRegistry {
@@ -50,6 +68,22 @@ export class AgentRegistry {
     const agent = this.get(workspaceId, taskId);
     if (!agent) return false;
     return agent.handle.send(text);
+  }
+
+  /**
+   * Answer an interactive widget. Keyed by Workspace exactly like `send`, `stop` and
+   * `respondPermission`, so a client can only ever answer for the one agent its ticket granted
+   * (Principle V).
+   */
+  async respondWidget(
+    workspaceId: string,
+    taskId: string,
+    response: WidgetResponse,
+  ): Promise<WidgetAnswerResult> {
+    const agent = this.get(workspaceId, taskId);
+    if (!agent) return "no_agent";
+    if (!agent.respondWidget) return "no_widget_channel";
+    return agent.respondWidget(response);
   }
 
   /**

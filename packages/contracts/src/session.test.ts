@@ -49,6 +49,16 @@ const VARIANTS: Array<[string, SessionEventPayload]> = [
     { kind: "permission_resolved", requestId: "req-1", optionId: "allow", decidedBy: "operator" },
   ],
   [
+    "the agent's todo list",
+    {
+      kind: "todos",
+      items: [
+        { content: "Record the todo list", status: "completed", activeForm: "Recording it" },
+        { content: "Show it on the Task page", status: "in_progress" },
+      ],
+    },
+  ],
+  [
     "a captured diff",
     {
       kind: "diff",
@@ -77,6 +87,18 @@ describe("sessionEventPayloadSchema", () => {
     // reasoning line indistinguishable from an answer for every reader downstream.
     expect(
       sessionEventPayloadSchema.safeParse({ kind: "assistant_turn", text: "hi" }).success,
+    ).toBe(false);
+  });
+
+  it("refuses a todo list longer than a plan, so the log cannot grow one row at a time", () => {
+    // The producer cuts an over-long list down before it gets here (`readTodoWrite` in the
+    // orchestrator). This bound is the guarantee that it has to: the log is append-only, and a
+    // payload nothing caps would sit in it whole for the life of the Session.
+    expect(
+      sessionEventPayloadSchema.safeParse({
+        kind: "todos",
+        items: Array.from({ length: 101 }, () => ({ content: "x", status: "pending" })),
+      }).success,
     ).toBe(false);
   });
 

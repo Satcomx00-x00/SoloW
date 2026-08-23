@@ -118,3 +118,78 @@ describe("one turn, many events (the over-counting trap)", () => {
     expect(usageOf(updates)?.messageId).toBeNull();
   });
 });
+
+describe("tool calls and their results", () => {
+  it("keeps the id and the arguments the CLI reported", () => {
+    // Only the name used to survive, which is why a transcript could say "tool: Read" and
+    // nothing more — and why a result could never be matched back to the call it belonged to.
+    const updates = toUpdates({
+      type: "assistant",
+      message: {
+        id: "m1",
+        content: [
+          { type: "tool_use", id: "toolu_01", name: "Read", input: { file_path: "src/a.ts" } },
+        ],
+      },
+    });
+    expect(updates.filter((u) => u.kind === "tool_use")).toEqual([
+      { kind: "tool_use", name: "Read", callId: "toolu_01", input: { file_path: "src/a.ts" } },
+    ]);
+  });
+
+  it("no longer drops the user event that carries a tool result", () => {
+    // This path used to `return []` on the premise that results were "already summarised by the
+    // tool_use above them". They were not, so `tool_result` had zero producers anywhere.
+    expect(
+      toUpdates({
+        type: "user",
+        message: {
+          content: [{ type: "tool_result", tool_use_id: "toolu_01", content: "file contents" }],
+        },
+      }),
+    ).toEqual([{ kind: "tool_result", callId: "toolu_01", ok: true, output: "file contents" }]);
+  });
+
+  it("reads a failed result as failed", () => {
+    expect(
+      toUpdates({
+        type: "user",
+        message: {
+          content: [
+            { type: "tool_result", tool_use_id: "toolu_02", is_error: true, content: "ENOENT" },
+          ],
+        },
+      }),
+    ).toEqual([{ kind: "tool_result", callId: "toolu_02", ok: false, output: "ENOENT" }]);
+  });
+
+  it("flattens a structured result to the text a transcript can show", () => {
+    expect(
+      toUpdates({
+        type: "user",
+        message: {
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "toolu_03",
+              content: [
+                { type: "text", text: "line one\n" },
+                { type: "text", text: "line two" },
+              ],
+            },
+          ],
+        },
+      }),
+    ).toEqual([
+      { kind: "tool_result", callId: "toolu_03", ok: true, output: "line one\nline two" },
+    ]);
+  });
+
+  it("keeps an unanticipated result shape rather than losing the fact a tool ran", () => {
+    const [update] = toUpdates({
+      type: "user",
+      message: { content: [{ type: "tool_result", tool_use_id: "t4", content: { rows: 3 } }] },
+    });
+    expect(update).toMatchObject({ kind: "tool_result", callId: "t4", ok: true });
+  });
+});

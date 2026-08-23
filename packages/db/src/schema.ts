@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type {
   AgentCapabilities,
+  AgentPermissionMode,
   AgentProtocol,
   AuthMode,
   ChangeRequestState,
@@ -89,7 +90,21 @@ export const issue = sqliteTable(
       .references(() => workspace.id),
     title: text("title").notNull(),
     description: text("description"),
-    status: text("status").$type<IssueStatus>().notNull().default("open"),
+    /**
+     * A person's deliberate status, overriding the one derived from this Issue's Tasks (spec
+     * F01 FR-7). Null — the normal case — means "follow the Tasks", which is what
+     * `deriveIssueStatus` answers.
+     *
+     * This replaces a `status` column that was written once at creation and then never updated:
+     * with the status derived on read, a stored copy of it was a second source of truth that
+     * spent its life wrong. What is stored now is only the part nothing else can know, namely
+     * that a person disagreed with the Tasks — recorded with who and when, because an override
+     * outliving the reason for it is how a board starts lying.
+     */
+    statusOverride: text("status_override").$type<IssueStatus>(),
+    statusOverrideAt: text("status_override_at"),
+    /** `auth_user.id` of whoever set the override, or the dev-owner stand-in. */
+    statusOverrideBy: text("status_override_by"),
     /**
      * Every Issue is imported now (issue #15) — `source`/`integrationId`/`externalId` are set
      * together by the import DAL. `"local"` is the value existing pre-#15 rows carry; nothing
@@ -115,7 +130,7 @@ export const issue = sqliteTable(
     updatedAt: updatedAt(),
   },
   (t) => ({
-    byStatus: index("issue_ws_status").on(t.workspaceId, t.status),
+    byStatus: index("issue_ws_status").on(t.workspaceId, t.statusOverride),
     byCreated: index("issue_ws_created").on(t.workspaceId, t.createdAt),
     /**
      * Idempotent import (issue #15 AC-2 / DoD), scoped per **Repository**, not per Integration.
@@ -193,6 +208,15 @@ export const agentProfile = sqliteTable(
     authMode: text("auth_mode").$type<AuthMode>().notNull(),
     secretId: text("secret_id").notNull(),
     concurrencyCap: integer("concurrency_cap").notNull().default(3),
+    /**
+     * How much the agent may do without asking (spec F05). Defaults to the value every Profile
+     * effectively ran as before the column existed, so an existing row's behaviour is unchanged
+     * by the migration that added it.
+     */
+    permissionMode: text("permission_mode")
+      .$type<AgentPermissionMode>()
+      .notNull()
+      .default("acceptEdits"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

@@ -69,12 +69,10 @@ describe("TaskStateBadge", () => {
   it("spins only while an agent is actually working", () => {
     // A permanent spinner on a finished Task would report work that is not happening.
     expect(badgeFor("running").querySelector("svg")?.getAttribute("class")).toContain(
-      "animate-spin",
+      "spinner-ambient",
     );
     for (const idle of ["review", "parked", "failed", "done"] as TaskState[]) {
-      expect(badgeFor(idle).querySelector("svg")?.getAttribute("class")).not.toContain(
-        "animate-spin",
-      );
+      expect(badgeFor(idle).querySelector("svg")?.getAttribute("class")).not.toContain("spinner");
     }
   });
 

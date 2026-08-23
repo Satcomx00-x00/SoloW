@@ -82,7 +82,31 @@ export function withinConcurrencyCap(cap: number, runningCount: number): boolean
   return runningCount < cap;
 }
 
-export type FailureClass = "fail" | "park" | "credential_expired";
+export type FailureClass = "fail" | "park" | "credential_expired" | "interrupted";
+
+/**
+ * The `FailureClass` value a Task's `failureReason` holds when its Agent Profile's credential
+ * was rejected or is missing (spec AC-013, issue #63).
+ *
+ * Exported as one constant rather than left as a string literal repeated at each of the three
+ * places that write or read it (the orchestrator's failure classification, the DAL query that
+ * finds Tasks to resume after a credential is replaced, the board card that renders them
+ * distinctly) — a typo in any one of those would silently stop the credential-expiry path from
+ * ever matching again, and nothing would fail loudly when it did.
+ */
+export const CREDENTIAL_EXPIRED_REASON: FailureClass = "credential_expired";
+
+/**
+ * The `failureReason` a Task carries when it was `running` with no agent process anywhere to
+ * show for it — the orchestrator restarted (or crashed) mid-run and, unlike a review round's own
+ * retry, nothing durable was left to redrive it (issue: reported directly by an Owner watching a
+ * Task's input box answer "No agent is running" forever after a restart).
+ *
+ * `classifyRunFailure` never produces this value — it comes only from the orchestrator's own
+ * boot-time reconciliation (`apps/orchestrator/src/reconcile.ts`), which is the one place with
+ * standing to say "the process that was supposed to be running this is provably gone."
+ */
+export const INTERRUPTED_REASON: FailureClass = "interrupted";
 
 export interface FailureSignal {
   quotaExhausted?: boolean;

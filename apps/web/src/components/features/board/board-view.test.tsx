@@ -65,10 +65,30 @@ describe("BoardView", () => {
   it("shows a failure reason on a failed Task card", () => {
     render(
       <BoardView
-        tasks={[makeTask({ id: "3", state: "failed", failureReason: "credential_expired" })]}
+        tasks={[makeTask({ id: "3", state: "failed", failureReason: "some_generic_failure" })]}
       />,
     );
-    expect(screen.getByText("credential_expired")).toBeDefined();
+    expect(screen.getByText("some_generic_failure")).toBeDefined();
+  });
+
+  it("shows an expired credential distinctly, not as the raw failure class (spec AC-013)", () => {
+    // A reviewer scanning the board should not have to know what "credential_expired" means —
+    // this is the one failure reason with a one-click fix, so it reads as a sentence.
+    render(
+      <BoardView
+        tasks={[makeTask({ id: "3b", state: "failed", failureReason: "credential_expired" })]}
+      />,
+    );
+    expect(screen.getByText("Credential expired")).toBeDefined();
+    expect(screen.queryByText("credential_expired")).toBeNull();
+  });
+
+  it("shows a Task the orchestrator reclaimed after a restart distinctly (issue: input answered 'no agent running' forever)", () => {
+    render(
+      <BoardView tasks={[makeTask({ id: "3c", state: "failed", failureReason: "interrupted" })]} />,
+    );
+    expect(screen.getByText("Interrupted by restart")).toBeDefined();
+    expect(screen.queryByText("interrupted")).toBeNull();
   });
 
   it("renders per-Task actions supplied by renderActions", () => {
@@ -88,19 +108,5 @@ describe("BoardView", () => {
     for (const cls of CARD_ENTRANCE_CLASS.split(" ")) {
       expect(item?.className).toContain(cls);
     }
-  });
-
-  it("renders a column's headerAction inside that column only", () => {
-    render(
-      <BoardView
-        tasks={[]}
-        headerActionFor={(state) =>
-          state === "backlog" ? <button type="button">New issue</button> : null
-        }
-      />,
-    );
-    const button = screen.getByRole("button", { name: "New issue" });
-    expect(button.closest("[data-state='backlog']")).not.toBeNull();
-    expect(button.closest("[data-state='ready']")).toBeNull();
   });
 });

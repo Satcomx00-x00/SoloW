@@ -84,7 +84,17 @@ describe("TaskCard with several Repositories", () => {
 describe("creating a Task across several Repositories", () => {
   const handlers = {
     "issue.list": () => [
-      { id: "issue-1", title: "Ship it", description: null, status: "open", taskCount: 0 },
+      {
+        id: "issue-1",
+        title: "Ship it",
+        description: "The upload endpoint rejects files over 2 MB.",
+        status: "open",
+        taskCount: 0,
+        labels: ["bug"],
+        source: "github",
+        externalNumber: 42,
+        externalUrl: "https://github.com/acme/api/issues/42",
+      },
     ],
     "profile.agent.list": () => [{ id: "agent-1", name: "Claude" }],
     "profile.executor.list": () => [{ id: "exec-1", name: "Local" }],
@@ -116,6 +126,10 @@ describe("creating a Task across several Repositories", () => {
     await pick("Issue", "Ship it");
     await pick("Agent profile", "Claude");
     await pick("Executor", "Local");
+    // Both fields now live behind the "Advanced" disclosure. Opened here rather than reached
+    // into: happy-dom keeps a closed `details`' contents queryable, so a test that skipped this
+    // would pass while a real Owner could not see the field at all.
+    fireEvent.click(screen.getByText("Advanced"));
     fireEvent.change(screen.getByLabelText("Base ref"), { target: { value: "main" } });
     fireEvent.click(await screen.findByRole("checkbox", { name: "shared-lib" }));
     fireEvent.click(screen.getByRole("button", { name: "Create task" }));

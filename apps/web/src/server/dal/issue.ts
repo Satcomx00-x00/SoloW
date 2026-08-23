@@ -7,19 +7,20 @@ import {
   type IssueDeletionImpactDto,
   type IssueDto,
   IssueErrorCode,
+  type IssueLabelListDto,
   type IssueListDto,
-  type IssueStatus,
   type ListIssuesInput,
   ok,
   type Result,
+  type SetIssueStatusInput,
   type TaskState,
   type UpdateIssueInput,
 } from "@gatecontrol/contracts";
-import { deriveIssueStatus } from "@gatecontrol/core";
+import { activeTaskCount, deriveIssueStatus } from "@gatecontrol/core";
 import { issue, repository, session, task, worktree } from "@gatecontrol/db";
-import { and, desc, eq, inArray, like } from "drizzle-orm";
+import { and, desc, eq, inArray, like, or } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
-import { issueToDto } from "./mappers.js";
+import { type IssueRollup, issueToDto, NO_TASKS } from "./mappers.js";
 import { cascadeDeleteTasks } from "./task-cascade.js";
 
 /**
@@ -45,15 +46,16 @@ async function taskStatesByIssue(
 }
 
 /**
- * An Issue's status is derived from its Tasks (spec FR-006), not read from the column.
- *
- * `deriveIssueStatus` existed in `@gatecontrol/core`, tested, and was never called: the column
- * is written once at creation and never updated, so every Issue read "Open" forever no matter
- * what its Tasks were doing. A stored `closed` still wins, since that is the one status a person
- * sets deliberately to mean "stop tracking this".
+ * What an Issue's Tasks add up to (spec FR-006). The stored `status_override` column, when set,
+ * beats all of this — `issueToDto` applies it — but the derived answer travels either way, so a
+ * manual status can be shown *as* an override of what the Tasks actually say.
  */
-function statusFor(stored: IssueStatus, states: TaskState[]): IssueStatus {
-  return stored === "closed" ? "closed" : deriveIssueStatus(states);
+function rollupOf(states: TaskState[]): IssueRollup {
+  return {
+    taskCount: states.length,
+    activeTaskCount: activeTaskCount(states),
+    derivedStatus: deriveIssueStatus(states),
+  };
 }
 
 export async function getIssueById(
@@ -67,7 +69,7 @@ export async function getIssueById(
     .limit(1);
   if (!row) return err(CommonErrorCode.NotFound);
   const states = (await taskStatesByIssue(ctx, [row.id])).get(row.id) ?? [];
-  return ok(issueToDto(row, states.length, statusFor(row.status, states)));
+  return ok(issueToDto(row, rollupOf(states)));
 }
 
 export async function listIssues(
@@ -75,7 +77,17 @@ export async function listIssues(
   input: ListIssuesInput,
 ): Promise<Result<IssueListDto>> {
   const conditions = [eq(issue.workspaceId, ctx.workspaceId)];
-  if (input.query) conditions.push(like(issue.title, `%${input.query}%`));
+  if (input.query) {
+    const needle = `%${input.query}%`;
+    // "#42" and "42" both mean the provider's issue 42 — the number people actually say out
+    // loud for an imported Issue, and one nothing else on the row would match.
+    const asNumber = Number.parseInt(input.query.trim().replace(/^#/, ""), 10);
+    const matches = [like(issue.title, needle), like(issue.description, needle)];
+    if (Number.isSafeInteger(asNumber)) matches.push(eq(issue.externalNumber, asNumber));
+    const match = or(...matches);
+    if (match) conditions.push(match);
+  }
+  if (input.source) conditions.push(eq(issue.source, input.source));
   // Narrows the Task-creation picker to the Issues that belong to the Repository the Owner just
   // picked — no new query shape, one more `and()` clause on the same workspace-scoped read.
   if (input.repositoryId) conditions.push(eq(issue.repositoryId, input.repositoryId));
@@ -90,14 +102,85 @@ export async function listIssues(
     ctx,
     rows.map((r) => r.id),
   );
-  const dtos = rows.map((r) => {
-    const own = states.get(r.id) ?? [];
-    return issueToDto(r, own.length, statusFor(r.status, own));
-  });
+  const dtos = rows.map((r) => issueToDto(r, rollupOf(states.get(r.id) ?? [])));
 
-  // Filtered after derivation, not in SQL: the column no longer decides the status, so a
-  // `where status = …` would match on a value the caller never sees.
-  return ok(input.status ? dtos.filter((d) => d.status === input.status) : dtos);
+  // Both remaining filters run after mapping rather than in SQL, for the same reason in two
+  // shapes: `status` is derived (a `where status = …` would match a value the caller never
+  // sees), and `labels` is a JSON array column, where SQL matching means substring-matching the
+  // serialized text — "api" would match the label "api-gateway". Neither is a scan worth
+  // avoiding at a Workspace's number of Issues (NFR-2 is about the list staying responsive, and
+  // the rows are already in memory for the roll-up).
+  const wanted = input.labels;
+  return ok(
+    dtos.filter(
+      (d) =>
+        (!input.status || d.status === input.status) &&
+        (!wanted?.length || wanted.every((label) => d.labels.includes(label))),
+    ),
+  );
+}
+
+/**
+ * Every label in use in the Workspace, sorted, for the list filter to offer.
+ *
+ * Read from the Issues rather than kept as its own table: a label exists exactly as long as an
+ * Issue carries it (schema.ts explains why labels are a JSON column and not a join table), so a
+ * label vocabulary stored separately would immediately start including tags nothing wears.
+ */
+export async function listIssueLabels(ctx: RequestContext): Promise<Result<IssueLabelListDto>> {
+  const rows = await ctx.db
+    .select({ labels: issue.labels })
+    .from(issue)
+    .where(eq(issue.workspaceId, ctx.workspaceId));
+
+  const seen = new Set<string>();
+  for (const row of rows) for (const label of row.labels) seen.add(label);
+  return ok([...seen].sort((a, b) => a.localeCompare(b)));
+}
+
+/**
+ * Set or clear an Issue's manual status (spec F01 FR-7), recording who did it and when.
+ *
+ * Closing is the one status that can strand work, so it is refused while Tasks under the Issue
+ * are still active (FR-9) unless the caller passes `force`. The check is deliberately a warning
+ * the user can overrule rather than a wall like `deleteIssue`'s: nothing is destroyed by
+ * closing, and an Issue whose remaining Tasks are abandoned is a real thing to want to close.
+ *
+ * `null` clears the override and hands the Issue back to `deriveIssueStatus`. The recording
+ * columns are cleared with it — a timestamp for an override that no longer exists would be
+ * read, eventually, as one that does.
+ */
+export async function setIssueStatus(
+  ctx: RequestContext,
+  input: SetIssueStatusInput,
+): Promise<
+  Result<IssueDto, typeof CommonErrorCode.NotFound | typeof IssueErrorCode.HasActiveTasks>
+> {
+  const [existing] = await ctx.db
+    .select({ id: issue.id })
+    .from(issue)
+    .where(and(eq(issue.workspaceId, ctx.workspaceId), eq(issue.id, input.id)))
+    .limit(1);
+  if (!existing) return err(CommonErrorCode.NotFound);
+
+  const states = (await taskStatesByIssue(ctx, [input.id])).get(input.id) ?? [];
+  if (input.status === "closed" && !input.force && activeTaskCount(states) > 0) {
+    return err(IssueErrorCode.HasActiveTasks);
+  }
+
+  const now = new Date().toISOString();
+  const [row] = await ctx.db
+    .update(issue)
+    .set({
+      statusOverride: input.status,
+      statusOverrideAt: input.status === null ? null : now,
+      statusOverrideBy: input.status === null ? null : ctx.userId,
+      updatedAt: now,
+    })
+    .where(and(eq(issue.workspaceId, ctx.workspaceId), eq(issue.id, input.id)))
+    .returning();
+  if (!row) return err(CommonErrorCode.NotFound);
+  return ok(issueToDto(row, rollupOf(states)));
 }
 
 /**
@@ -128,7 +211,7 @@ export async function createIssue(
       // source defaults to "local" at the column — this is exactly the case that value means.
     })
     .returning();
-  return row ? ok(issueToDto(row, 0)) : err(CommonErrorCode.NotFound);
+  return row ? ok(issueToDto(row, NO_TASKS)) : err(CommonErrorCode.NotFound);
 }
 
 /**
@@ -166,7 +249,7 @@ export async function updateIssue(
   if (!row) return err(CommonErrorCode.NotFound);
 
   const states = (await taskStatesByIssue(ctx, [row.id])).get(row.id) ?? [];
-  return ok(issueToDto(row, states.length, statusFor(row.status, states)));
+  return ok(issueToDto(row, rollupOf(states)));
 }
 
 /**

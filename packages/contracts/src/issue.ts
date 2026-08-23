@@ -19,17 +19,6 @@ import { issueSourceSchema } from "./scm.js";
  * rather than a new enum member, since "local" already means exactly "not imported".
  */
 
-export const listIssuesInput = z.object({
-  status: issueStatusSchema.optional(),
-  query: z.string().max(200).optional(),
-  /** Narrows the Task-creation picker to the Issues that belong to one chosen Repository. */
-  repositoryId: idSchema.optional(),
-});
-export type ListIssuesInput = z.infer<typeof listIssuesInput>;
-
-export const getIssueInput = z.object({ id: idSchema });
-export type GetIssueInput = z.infer<typeof getIssueInput>;
-
 /** One label, trimmed. Mirrors `setupFilePatternSchema`'s bound style (packages/contracts/src/repository.ts). */
 export const issueLabelSchema = z.string().trim().min(1).max(50);
 
@@ -40,6 +29,53 @@ export const issueLabelSchema = z.string().trim().min(1).max(50);
 export const MAX_ISSUE_LABELS = 20;
 
 export const issueLabelsSchema = z.array(issueLabelSchema).max(MAX_ISSUE_LABELS);
+
+/**
+ * The filters an Issue list can be narrowed by (spec F01 FR-2). Every one of them is optional
+ * and they compose: the list is what survives all of them at once.
+ *
+ * `query` matches title, description or the provider's own issue number — "#42" and "42" both
+ * find the imported Issue numbered 42, since that number is how a person refers to it out loud.
+ * `labels` is an AND: an Issue must carry every label named, which is the only reading under
+ * which adding a second label narrows rather than widens.
+ *
+ * There is no `priority` filter, though FR-2 lists one: an Issue has no priority in the domain
+ * model, and F01's own "Out of scope" rules out custom fields. Adding it is a product decision,
+ * not a gap in this list.
+ */
+export const listIssuesInput = z.object({
+  status: issueStatusSchema.optional(),
+  query: z.string().max(200).optional(),
+  labels: issueLabelsSchema.optional(),
+  source: issueSourceSchema.optional(),
+  /** Narrows the Task-creation picker to the Issues that belong to one chosen Repository. */
+  repositoryId: idSchema.optional(),
+});
+export type ListIssuesInput = z.infer<typeof listIssuesInput>;
+
+export const getIssueInput = z.object({ id: idSchema });
+export type GetIssueInput = z.infer<typeof getIssueInput>;
+
+/** Every distinct label in use in the Workspace, so the list filter can offer a real vocabulary. */
+export const issueLabelListDto = z.array(z.string());
+export type IssueLabelListDto = z.infer<typeof issueLabelListDto>;
+
+/**
+ * Set an Issue's status by hand (spec F01 FR-7), or hand it back to its Tasks with
+ * `status: null` — an override is a claim about the work that the Tasks cannot make for
+ * themselves ("this is resolved, whatever the board says"), and clearing it has to be as easy
+ * as setting it or the derived status becomes unreachable.
+ *
+ * `force` is FR-9's deliberate close: closing an Issue with active Tasks under it is refused
+ * with `IssueErrorCode.HasActiveTasks` unless the caller asks for it by name. It applies only
+ * to `closed` — no other status leaves work stranded.
+ */
+export const setIssueStatusInput = z.object({
+  id: idSchema,
+  status: issueStatusSchema.nullable(),
+  force: z.boolean().default(false),
+});
+export type SetIssueStatusInput = z.infer<typeof setIssueStatusInput>;
 
 /**
  * Create a local Issue. `repositoryId` is required — not optional the way it is nullable on the
@@ -103,8 +139,20 @@ export const issueDto = z
     id: idSchema,
     title: z.string(),
     description: z.string().nullable(),
+    /** What the reader should believe: the override when one is set, the derived status otherwise. */
     status: issueStatusSchema,
+    /**
+     * What this Issue's Tasks say on their own. Sent alongside `status` rather than instead of
+     * it so an override can be shown *as* an override — "Closed, though its tasks read In
+     * progress" is the useful sentence, and it needs both halves.
+     */
+    derivedStatus: issueStatusSchema,
+    statusOverride: issueStatusSchema.nullable(),
+    /** When the override was set — null whenever `statusOverride` is (FR-7: recorded, not silent). */
+    statusOverrideAt: z.string().nullable(),
     taskCount: z.number().int().nonnegative(),
+    /** Tasks not yet finished (ready, running, review or parked) — what FR-9 refuses to close over. */
+    activeTaskCount: z.number().int().nonnegative(),
     source: issueSourceSchema,
     /** Set together: the Repository it was imported into, and the provider's own issue number/URL. */
     repositoryId: idSchema.nullable(),

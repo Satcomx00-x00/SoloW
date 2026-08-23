@@ -235,5 +235,20 @@ function EventBody({ event }: { event: SessionEventDto }) {
           <span className="font-mono text-xs">{p.diffRef}</span>
         </span>
       );
+    case "todos": {
+      // A line, not the checklist. The Plan panel beside the diff draws the list itself and
+      // draws only the latest one; what this tab is for is *when* the plan changed and what it
+      // said at that point in the run, which a dozen stacked copies of the same twelve items
+      // would bury. Without a case at all the row rendered blank — the log holding the whole
+      // plan and the one view whose job is to show the log saying nothing about it.
+      const done = p.items.filter((i) => i.status === "completed").length;
+      const current = p.items.find((i) => i.status === "in_progress");
+      return (
+        <span>
+          {done} of {p.items.length} done
+          {current ? ` — ${current.activeForm ?? current.content}` : ""}
+        </span>
+      );
+    }
   }
 }

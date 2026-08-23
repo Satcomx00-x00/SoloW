@@ -89,9 +89,7 @@ describe("attachSubscriber (reconnect replay)", () => {
   /** Minimal rows for a Task with a Session carrying `count` stdout events. */
   async function seedEvents(workspaceId: string, taskId: string, count: number): Promise<void> {
     const suffix = `${workspaceId}-${taskId}`;
-    await db
-      .insert(issue)
-      .values({ id: `issue-${suffix}`, workspaceId, title: "Issue", status: "open" });
+    await db.insert(issue).values({ id: `issue-${suffix}`, workspaceId, title: "Issue" });
     await db.insert(agentCatalog).values({
       id: `catalog-${suffix}`,
       workspaceId,
@@ -196,6 +194,7 @@ describe("attachSubscriber (reconnect replay)", () => {
       sessionId: "sess-task-2",
       seq: 2,
       text: "live\n",
+      channel: "assistant",
     });
     unsubscribe();
 
@@ -207,6 +206,7 @@ describe("attachSubscriber (reconnect replay)", () => {
       sessionId: "sess-task-2",
       seq: 3,
       text: "after\n",
+      channel: "assistant",
     });
     expect(sent).toHaveLength(3);
   });

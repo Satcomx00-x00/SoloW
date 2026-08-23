@@ -5,15 +5,19 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { sectionFor } from "@/lib/navigation";
 import { CommandPaletteTrigger } from "./command-palette";
+import { CreateMenu } from "./create-menu";
 import { HeaderActionsOutlet } from "./header-actions";
 
 /**
  * The shell's header: where you are on the left, what you can do on the right.
  *
  * The breadcrumb is a real trail, not a label — the section segment is a link, so a Task page
- * has a one-click way back that is not the browser's Back button. Page-level controls arrive
- * through `HeaderActionsOutlet`, which is why the board no longer carries its own action band
- * directly beneath this one.
+ * has a one-click way back that is not the browser's Back button.
+ *
+ * `CreateMenu` is rendered here rather than contributed by a page, and that is the point: making
+ * a Task or an Issue is not a property of the route you are on, so it is available on every one
+ * of them (see that component for the five surfaces this replaced). `HeaderActionsOutlet` stays
+ * for controls that genuinely do belong to one page.
  */
 export function HeaderBar({ workspaceName }: { workspaceName: string }) {
   const pathname = usePathname();
@@ -54,6 +58,7 @@ export function HeaderBar({ workspaceName }: { workspaceName: string }) {
 
       <div className="ml-auto flex items-center gap-2">
         <HeaderActionsOutlet />
+        <CreateMenu />
         <span className="h-4 w-px bg-border" aria-hidden />
         <CommandPaletteTrigger />
       </div>

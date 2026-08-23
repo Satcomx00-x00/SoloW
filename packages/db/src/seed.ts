@@ -1,3 +1,4 @@
+import { DEFAULT_AGENT_PERMISSION_MODE } from "@gatecontrol/contracts";
 import { ensureDefaultAgentCatalog } from "./agent-catalog-defaults.js";
 import type { Db } from "./index.js";
 import { agentProfile, executorProfile, repository, secret, workspace } from "./schema.js";
@@ -70,6 +71,9 @@ export async function seed(db: Db): Promise<SeedResult> {
       authMode: "subscription",
       secretId: A.secret,
       concurrencyCap: 3,
+      // Seeded Profiles run as the product's default rather than the column's, so a fresh dev
+      // Workspace behaves like one an Owner would create (spec F05 FR-1).
+      permissionMode: DEFAULT_AGENT_PERMISSION_MODE,
     })
     .onConflictDoNothing();
   await db
@@ -118,6 +122,7 @@ export async function seed(db: Db): Promise<SeedResult> {
       authMode: "api_key",
       secretId: B.secret,
       concurrencyCap: 5,
+      permissionMode: DEFAULT_AGENT_PERMISSION_MODE,
     })
     .onConflictDoNothing();
   await db

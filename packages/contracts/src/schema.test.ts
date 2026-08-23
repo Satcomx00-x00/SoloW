@@ -13,6 +13,7 @@ import {
   setupFilePatternsSchema,
   taskCheckoutBranch,
   taskEventSchema,
+  todoItemSchema,
 } from "./index.js";
 
 describe("connectIntegrationInput (issue #15)", () => {
@@ -283,38 +284,44 @@ describe("connectRepositoryInput superRefine", () => {
   });
 });
 
-describe("reviewDecisionInput superRefine", () => {
-  it("rejects request_changes without feedback", () => {
+/**
+ * `request_changes` is no longer gated on feedback. The Task page dropped its feedback panel, so a
+ * schema that refused the decision without text would have made "Request changes" un-submittable
+ * from the only UI that sends it. The field survives — it is what reaches the agent as
+ * `pendingFeedback` on the next round — but as an option for callers who have something to say,
+ * not a precondition for the ones who do not.
+ */
+describe("reviewDecisionInput", () => {
+  it("accepts request_changes with no feedback at all", () => {
     const res = reviewDecisionInput.safeParse({
       sessionId: "sess_1",
       decision: "request_changes",
     });
-    expect(res.success).toBe(false);
-    if (!res.success) {
-      const issue = res.error.issues.find((i) => i.path.join(".") === "feedback");
-      expect(issue?.message).toBe("feedback is required when requesting changes");
+    expect(res.success).toBe(true);
+    if (res.success) {
+      expect(res.data.feedback).toBeUndefined();
     }
   });
 
-  it("rejects request_changes with whitespace-only feedback", () => {
+  it("accepts request_changes with whitespace-only feedback", () => {
     const res = reviewDecisionInput.safeParse({
       sessionId: "sess_1",
       decision: "request_changes",
       feedback: "   ",
     });
-    expect(res.success).toBe(false);
-    if (!res.success) {
-      expect(res.error.issues.some((i) => i.path.join(".") === "feedback")).toBe(true);
-    }
+    expect(res.success).toBe(true);
   });
 
-  it("accepts request_changes with real feedback", () => {
+  it("round-trips feedback when a caller supplies it", () => {
     const res = reviewDecisionInput.safeParse({
       sessionId: "sess_1",
       decision: "request_changes",
       feedback: "Please add error handling around the network call.",
     });
     expect(res.success).toBe(true);
+    if (res.success) {
+      expect(res.data.feedback).toBe("Please add error handling around the network call.");
+    }
   });
 
   it("accepts approve without feedback", () => {
@@ -386,11 +393,15 @@ describe("taskEventSchema discriminated union", () => {
       sessionId: "sess_1",
       seq: 0,
       text: "compiling...",
+      channel: "system",
     });
     expect(res.success).toBe(true);
     if (res.success && res.data.kind === "stdout") {
       expect(res.data.text).toBe("compiling...");
       expect(res.data.seq).toBe(0);
+      // The channel is required: a frame that does not say what it is would leave the terminal
+      // guessing again, which is the thing widening the union was meant to end.
+      expect(res.data.channel).toBe("system");
     }
   });
 
@@ -451,6 +462,40 @@ describe("taskEventSchema discriminated union", () => {
     });
     expect(res.success).toBe(false);
   });
+
+  it("carries the agent's todo list, addressed like every other row of the log", () => {
+    // The frame needs `sessionId` and `seq` as much as a tool call does: it is projected from a
+    // stored event, and a reconnecting client drops what it has already seen by `seq`.
+    const res = taskEventSchema.safeParse({
+      kind: "todos",
+      taskId: "task_1",
+      sessionId: "sess_1",
+      seq: 12,
+      items: [
+        { content: "Record the todo list", status: "in_progress", activeForm: "Recording it" },
+        { content: "Show it on the Task page", status: "pending" },
+      ],
+    });
+    expect(res.success).toBe(true);
+    if (res.success && res.data.kind === "todos") {
+      expect(res.data.items).toHaveLength(2);
+      expect(res.data.items[0]?.activeForm).toBe("Recording it");
+      // Optional, and absent rather than defaulted: an agent that offers no present-tense form
+      // is not the same as one that offers an empty string.
+      expect(res.data.items[1]?.activeForm).toBeUndefined();
+    }
+  });
+
+  it("rejects a todo item whose status is not one a renderer can draw", () => {
+    const res = taskEventSchema.safeParse({
+      kind: "todos",
+      taskId: "task_1",
+      sessionId: "sess_1",
+      seq: 1,
+      items: [{ content: "Ship it", status: "blocked" }],
+    });
+    expect(res.success).toBe(false);
+  });
 });
 
 /**
@@ -503,5 +548,30 @@ describe("setupFilePatternSchema (issue #52 AC-6)", () => {
     expect(setupFilePatternsSchema.safeParse(tooMany).success).toBe(false);
     expect(setupFilePatternsSchema.safeParse(tooMany.slice(0, -1)).success).toBe(true);
     expect(setupFilePatternsSchema.safeParse([]).success).toBe(true);
+  });
+});
+
+/**
+ * The todo item both the wire frame and the durable log carry (`todoItemSchema`).
+ *
+ * Its bounds are what stop an agent's plan from becoming an unbounded blob in a record that
+ * outlives the run, so they are pinned here rather than left to the producer that applies them.
+ */
+describe("todoItemSchema", () => {
+  it("refuses an item with nothing written on it", () => {
+    expect(todoItemSchema.safeParse({ content: "", status: "pending" }).success).toBe(false);
+  });
+
+  it("refuses an item longer than a line of a plan", () => {
+    expect(todoItemSchema.safeParse({ content: "x".repeat(501), status: "pending" }).success).toBe(
+      false,
+    );
+    expect(
+      todoItemSchema.safeParse({
+        content: "ok",
+        status: "pending",
+        activeForm: "y".repeat(501),
+      }).success,
+    ).toBe(false);
   });
 });

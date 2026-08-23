@@ -2,9 +2,17 @@ import "server-only";
 import {
   getSurfaceLayoutInput,
   setSurfaceLayoutInput,
+  setTaskPaneLayoutInput,
   surfaceLayoutDto,
+  taskPaneLayoutDto,
 } from "@gatecontrol/contracts";
-import { getSurfaceLayout, setSurfaceLayout } from "../dal/preference.js";
+import { z } from "zod";
+import {
+  getSurfaceLayout,
+  getTaskPaneLayout,
+  setSurfaceLayout,
+  setTaskPaneLayout,
+} from "../dal/preference.js";
 import { ownerProcedure, router, unwrap } from "../trpc.js";
 
 /**
@@ -45,4 +53,33 @@ export const preferenceRouter = router({
     .input(setSurfaceLayoutInput)
     .output(surfaceLayoutDto)
     .mutation(async ({ ctx, input }) => unwrap(await setSurfaceLayout(ctx.rctx, input))),
+
+  getTaskPaneLayout: ownerProcedure
+    .meta({
+      openapi: {
+        method: "GET",
+        path: "/preference.getTaskPaneLayout",
+        tags: ["preference"],
+        protect: true,
+        summary:
+          "Read the signed-in user's Task page split — the width of the changes column and whether it is folded. Returns the default when nothing is saved.",
+      },
+    })
+    .input(z.object({}))
+    .output(taskPaneLayoutDto)
+    .query(async ({ ctx }) => unwrap(await getTaskPaneLayout(ctx.rctx))),
+
+  setTaskPaneLayout: ownerProcedure
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/preference.setTaskPaneLayout",
+        tags: ["preference"],
+        protect: true,
+        summary: "Save the signed-in user's Task page split.",
+      },
+    })
+    .input(setTaskPaneLayoutInput)
+    .output(taskPaneLayoutDto)
+    .mutation(async ({ ctx, input }) => unwrap(await setTaskPaneLayout(ctx.rctx, input))),
 });

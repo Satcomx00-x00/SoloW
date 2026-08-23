@@ -1,17 +1,19 @@
 "use client";
 
 /**
- * Lets something outside the board ask a create dialog to open — currently the command palette.
+ * Lets anything in the shell ask one of the create/import dialogs to open — the command palette,
+ * the header's Create menu, and the keyboard shortcuts that mirror it.
  *
  * An event rather than a `?new=task` URL parameter: the parameter had to be consumed on arrival
  * so that a refresh or a Back did not reopen the dialog, which meant a `router.replace` on every
  * mount. This carries the same intent without leaving a trace in history.
  *
- * `"issue"` is gone (issue #15): there is no create-Issue dialog any more — every Issue is
- * imported from a connected GitHub/GitLab repository (Settings → Integrations, or the Issues
- * page's Import dialog), never typed by hand.
+ * All four kinds live here now (user report: creating and importing issues was spread across the
+ * board's Backlog column, the Issues page and Settings, with no single place to reach any of
+ * them). `CreateMenu` in the shell header subscribes to every kind and owns the dialogs, so the
+ * sender never has to know — or navigate to — the page a dialog used to belong to.
  */
-export type CreateKind = "task";
+export type CreateKind = "task" | "issue" | "import-issues" | "connect-repository";
 
 const EVENT = "gatecontrol:open-create-dialog";
 

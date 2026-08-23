@@ -1,12 +1,27 @@
+import { randomUUID } from "node:crypto";
 import {
+  type AgentPermissionMode,
   type AgentProtocol,
   parseSessionEventPayload,
   reviewDecisionSchema,
   type SessionEventPayload,
   TaskErrorCode,
   type TaskState,
+  type TodoItem,
+  todoItemSchema,
+  validateWidgetResponse,
+  WIDGET_ANSWER_PREFIX,
+  type Widget,
+  type WidgetResponse,
+  widgetExpectsResponse,
+  widgetOptions,
 } from "@gatecontrol/contracts";
-import { classifyRunFailure, primaryTaskRepository, taskCheckoutBranch } from "@gatecontrol/core";
+import {
+  CREDENTIAL_EXPIRED_REASON,
+  classifyRunFailure,
+  primaryTaskRepository,
+  taskCheckoutBranch,
+} from "@gatecontrol/core";
 import { createDb, type Db, decryptForScmSync } from "@gatecontrol/db";
 import {
   captureException,
@@ -26,10 +41,12 @@ import {
 import { type AgentRegistry, agentRegistry } from "../../agent/registry.js";
 import type { AgentRunner, AgentTextChannel } from "../../agent/runner.js";
 import { createAgentRunner } from "../../agent/runners.js";
+import { WIDGET_BRIEF_INSTRUCTIONS, WidgetFenceScanner } from "../../agent/widget-fence.js";
 import { prepareAgentEnv } from "../../billing/guard.js";
 import {
   appendSessionEvent,
   compactSession,
+  isMissingParentRow,
   latestStateTransition,
   loadTaskRunContext,
   nextSessionEventSeq,
@@ -175,7 +192,12 @@ export interface TaskRunDeps {
    * function rather than a runner because the protocol comes from the Task's own Agent catalog
    * row: two Tasks in one Workspace can be driven over two different protocols.
    */
-  runner: (protocol: AgentProtocol) => AgentRunner | null;
+  /**
+   * Built per run, not once per process: an Agent Profile carries its own permission mode
+   * (spec F05), so two Tasks in the same Workspace can run the same agent under different
+   * postures — one that may reach the shell, one that may not.
+   */
+  runner: (protocol: AgentProtocol, permissionMode: AgentPermissionMode) => AgentRunner | null;
   worktreeRoot: string;
   repoCacheRoot: string;
   logger: Logger;
@@ -193,9 +215,10 @@ export function defaultDeps(): TaskRunDeps {
   const executor = createLocalExecutor(env.GATECONTROL_WORKTREE_ROOT);
   return {
     db: createDb(),
-    runner: (protocol) =>
+    runner: (protocol, permissionMode) =>
       createAgentRunner(protocol, {
         executor,
+        permissionMode,
         unattendedPermissionPosture: env.GATECONTROL_ACP_UNATTENDED_PERMISSION,
       }),
     worktreeRoot: env.GATECONTROL_WORKTREE_ROOT,
@@ -249,6 +272,147 @@ function textPayload(channel: AgentTextChannel, text: string): SessionEventPaylo
   if (channel === "user") return { kind: "user_turn", text };
   if (channel === "system") return { kind: "notice", text };
   return { kind: "assistant_turn", text, thinking: channel === "thinking" };
+}
+
+/**
+ * Which of a tool's arguments may be written to the durable log, by tool name.
+ *
+ * A tool call's raw input can hold the contents of a file being written, which is exactly the
+ * class of value that must never reach a durable payload (Principle IV) — so the schema declared
+ * `tool_call.input` and left it unpopulated for a long time. The cost was a transcript that
+ * could only ever say "tool: Read": a reviewer could not see which file, which command, or which
+ * pattern, which is most of what makes a tool call worth reading.
+ *
+ * The resolution is an allowlist of *keys*, not a size limit or a redaction pass over everything.
+ * A denylist would be wrong here: it fails open, so a tool added upstream with a new
+ * content-bearing argument would start leaking the day it shipped. This fails closed — an
+ * unknown tool contributes no arguments at all.
+ *
+ * `Write.content` and `Edit.new_string` are absent on purpose and must stay absent. They are the
+ * file contents.
+ */
+const TOOL_INPUT_ALLOWLIST: Record<string, readonly string[]> = {
+  Read: ["file_path", "offset", "limit"],
+  Write: ["file_path"],
+  Edit: ["file_path", "replace_all"],
+  NotebookEdit: ["notebook_path", "cell_id"],
+  Bash: ["command", "description", "timeout"],
+  BashOutput: ["bash_id"],
+  KillShell: ["shell_id"],
+  Glob: ["pattern", "path"],
+  Grep: ["pattern", "path", "glob", "type"],
+  WebFetch: ["url"],
+  WebSearch: ["query"],
+  Task: ["description", "subagent_type"],
+  // Nothing here, and nothing that could be: a todo list is an array of objects and this map
+  // holds short strings. A well-formed `TodoWrite` never reaches this function at all — it is
+  // recorded as a `todos` event instead (see `readTodoWrite`) — so what this entry now governs
+  // is only the fallback row a malformed one falls through to.
+  TodoWrite: [],
+};
+
+/**
+ * ACP reports a tool call's status as a free-form string; the log stores a closed set. An
+ * unrecognised value becomes null rather than being stored raw — a status nothing can render is
+ * worse than none, and a future ACP vocabulary must not be able to widen the persisted union by
+ * writing into it.
+ */
+const TOOL_STATUSES = ["pending", "in_progress", "completed", "failed"] as const;
+type ToolStatus = (typeof TOOL_STATUSES)[number];
+export function toolStatus(value: string | null): ToolStatus | null {
+  return TOOL_STATUSES.includes(value as ToolStatus) ? (value as ToolStatus) : null;
+}
+
+/** Longest an allowlisted argument may be before it is cut. A command is a line, not a file. */
+const TOOL_INPUT_MAX = 400;
+
+/** Longest a tool's output may be before it is cut, with `truncated` set to say so. */
+const TOOL_OUTPUT_MAX = 2_000;
+
+/**
+ * A tool call's arguments, narrowed to what may be stored.
+ *
+ * Values are stringified and cut to `TOOL_INPUT_MAX`, so the stored shape is always a flat map
+ * of short strings — the guarantee `sessionEventPayloadSchema` encodes with `z.record(z.string())`.
+ * Returns null rather than an empty object for a tool that contributes nothing, so a reader can
+ * tell "no arguments recorded" from "arguments recorded, and there were none".
+ */
+export function allowlistToolInput(name: string, input: unknown): Record<string, string> | null {
+  const keys = TOOL_INPUT_ALLOWLIST[name];
+  if (!keys || keys.length === 0) return null;
+  if (typeof input !== "object" || input === null) return null;
+
+  const source = input as Record<string, unknown>;
+  const out: Record<string, string> = {};
+  for (const key of keys) {
+    const value = source[key];
+    if (value === undefined || value === null) continue;
+    const text = typeof value === "string" ? value : JSON.stringify(value);
+    out[key] = text.length > TOOL_INPUT_MAX ? `${text.slice(0, TOOL_INPUT_MAX)}…` : text;
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+/**
+ * How many todo items and how much of each one the log will hold.
+ *
+ * The same numbers `todoItemSchema` enforces, restated here because this is the side that has to
+ * *make* the payload fit: a list that overshoots the bound is cut down to it rather than
+ * refused. Refusing would mean falling back to the `TodoWrite` tool call, which is precisely the
+ * contentless row recording the list exists to remove.
+ */
+const TODO_ITEMS_MAX = 100;
+const TODO_TEXT_MAX = 500;
+
+/** Cut a todo's text to the schema's bound, leaving the marker inside it rather than over it. */
+function boundTodoText(value: unknown): unknown {
+  if (typeof value !== "string" || value.length <= TODO_TEXT_MAX) return value;
+  return `${value.slice(0, TODO_TEXT_MAX - 1)}…`;
+}
+
+/**
+ * The todo list out of a `TodoWrite` call, or null when the input is not one.
+ *
+ * Pure and exported so it can be tested without a run: this is the only thing standing between
+ * an agent's plan and the durable log, and its two failure modes pull in opposite directions —
+ * too strict and the list is silently replaced by the contentless tool-call row it was meant to
+ * abolish, too loose and an unbounded blob reaches a record that outlives the run.
+ *
+ * So the bounds are applied first and the shape is checked second. An over-long list is cut and
+ * kept; a list whose items are not todos at all is refused, and the caller falls back to
+ * emitting the tool call — an emission this file cannot understand is degraded, never dropped.
+ */
+export function readTodoWrite(input: unknown): TodoItem[] | null {
+  if (typeof input !== "object" || input === null) return null;
+  const todos = (input as Record<string, unknown>)["todos"];
+  if (!Array.isArray(todos)) return null;
+
+  const bounded = todos.slice(0, TODO_ITEMS_MAX).map((item) => {
+    if (typeof item !== "object" || item === null) return item;
+    const fields = item as Record<string, unknown>;
+    const out: Record<string, unknown> = { ...fields, content: boundTodoText(fields["content"]) };
+    if (fields["activeForm"] !== undefined) out["activeForm"] = boundTodoText(fields["activeForm"]);
+    return out;
+  });
+
+  const parsed = z.array(todoItemSchema).safeParse(bounded);
+  return parsed.success ? parsed.data : null;
+}
+
+/**
+ * A tool's output, cut to a length a transcript can hold.
+ *
+ * Compaction will not save the log from an untruncated one: `SESSION_COMPACTION_THRESHOLD`
+ * counts events, not bytes, and only runs at a review-round boundary — so a single `Read` of a
+ * large file would sit in the log whole until then.
+ */
+export function truncateToolOutput(output: string | null): {
+  output: string | null;
+  truncated: boolean;
+} {
+  if (output === null) return { output: null, truncated: false };
+  if (output.length <= TOOL_OUTPUT_MAX) return { output, truncated: false };
+  return { output: `${output.slice(0, TOOL_OUTPUT_MAX)}…`, truncated: true };
 }
 
 /** What a redacted secret leaves behind, so a reader can see that something was removed. */
@@ -379,7 +543,7 @@ export async function runTaskLifecycle(
    * a runner that was never built for it.
    */
   const protocol = ctx.agentCatalog.protocol;
-  const runner = deps.runner(protocol);
+  const runner = deps.runner(protocol, ctx.agentProfile.permissionMode);
   if (!hasAgentRunner(protocol) || !runner) {
     const reason = missingAgentRunnerReason(protocol);
     await step.run("agent-runner-unavailable", async () => {
@@ -698,7 +862,7 @@ export async function runTaskLifecycle(
         // shaping, never over it, so a profile cannot become a route to metered billing.
         profileEnv: ctx.executorProfile.config.env ?? {},
       });
-      if (!shaped.ok) return { kind: "failed" as const, cls: "credential_expired" as const };
+      if (!shaped.ok) return { kind: "failed" as const, cls: CREDENTIAL_EXPIRED_REASON };
 
       // What must never reach a payload, computed from the env this run actually shaped rather
       // than from a list of variable names, so it holds for whichever Agent is running.
@@ -709,6 +873,37 @@ export async function runTaskLifecycle(
       // chained to keep log order identical to stream order.
       let seq = await nextSessionEventSeq(db, workspaceId, sessionId);
       let writes: Promise<unknown> = Promise.resolve();
+
+      /**
+       * The run outlived the rows it writes into.
+       *
+       * A Task can be deleted — or its Issue force-deleted — while its agent is mid-turn:
+       * cancellation happens *between* Inngest steps, and stopping an agent is a request, not an
+       * instant. `cascadeDeleteTasks` takes the `session` row with the Task, so every event this
+       * run appends afterwards fails on `session_event.session_id`'s foreign key.
+       *
+       * What that produced was one logged stack trace per chunk of agent output, for a run whose
+       * transcript has nowhere to live, whose work nobody will review, and which keeps spending
+       * tokens until it finishes on its own. So the first such failure latches here: the log
+       * says it once, the agent is stopped, and the rest of the round is skipped.
+       */
+      let abandoned = false;
+      /** Set once the agent exists, so `abandon` can stop something that started after it. */
+      let live: { stop: () => Promise<void> | void } | null = null;
+
+      const abandon = (stage: string) => {
+        if (abandoned) return;
+        abandoned = true;
+        log.warn(
+          { stage },
+          "the Session this run writes to no longer exists — it was deleted while the agent was live; stopping the agent and abandoning the round",
+        );
+        try {
+          void live?.stop();
+        } catch (cause) {
+          captureException(log, cause, { stage: "abandon-stop" });
+        }
+      };
       // Usage is recorded per turn as it is reported (issue #14) — the agent states it once,
       // in its own stream, and nothing else in the system can reconstruct it afterwards.
       //
@@ -727,6 +922,7 @@ export async function runTaskLifecycle(
         cacheReadTokens: number;
         cacheWriteTokens: number;
       }) => {
+        if (abandoned) return;
         const seq = usageSeq;
         // A CLI that reports no turn id gets one derived from position — still stable under
         // replay, because the sequence itself is read back from the database each round.
@@ -750,7 +946,11 @@ export async function runTaskLifecycle(
               cacheWriteTokens: u.cacheWriteTokens,
             }),
           )
-          .catch((cause) => captureException(log, cause, { stage: "session-usage-record" }));
+          .catch((cause) =>
+            isMissingParentRow(cause)
+              ? abandon("session-usage-record")
+              : captureException(log, cause, { stage: "session-usage-record" }),
+          );
       };
 
       // One typed record, published and persisted (issue #2, AC-1). The wire frame is *derived*
@@ -759,6 +959,8 @@ export async function runTaskLifecycle(
       // transport's ("stdout", "tool_use") and let the two paths drift apart. A record with no
       // wire form is still written; it simply publishes nothing.
       const emit = (rawPayload: SessionEventPayload) => {
+        // Nothing to append to and nothing worth publishing: the Session is gone.
+        if (abandoned) return;
         const at = seq++;
         // One record, read back through the union *before* either destination sees it.
         //
@@ -780,7 +982,52 @@ export async function runTaskLifecycle(
         if (frame) deps.hub.publish(channel, frame);
         writes = writes
           .then(() => appendSessionEvent(db, workspaceId, { sessionId, seq: at, payload }))
-          .catch((cause) => captureException(log, cause, { stage: "session-event-append" }));
+          .catch((cause) =>
+            isMissingParentRow(cause)
+              ? abandon("session-event-append")
+              : captureException(log, cause, { stage: "session-event-append" }),
+          );
+      };
+
+      /**
+       * Widgets the agent drew and is still waiting on, by the id this run gave them.
+       *
+       * The book is per-run and in memory for the same reason the agent registry is: an answer
+       * is only deliverable while the process that asked is alive. A run that ends with widgets
+       * outstanding leaves them in the log as questions nobody answered, which is exactly what
+       * they were.
+       */
+      const pendingWidgets = new Map<string, Widget>();
+      const scanner = new WidgetFenceScanner();
+
+      /**
+       * Calls that became a `todos` record instead of a `tool_call`, so their result can be
+       * dropped when it arrives.
+       *
+       * Every tool call the CLI reports comes back a moment later as a `tool_result` carrying the
+       * same id, and the transcript folds the two together by that id. Swallow only the call and
+       * the result has nothing to fold into: the builder treats it as an orphan and draws a row
+       * named literally "tool", with Claude Code's "Todos have been modified successfully" as its
+       * body — an anonymous version of the contentless row this interception exists to remove,
+       * one per plan rewrite. The list already says the call happened and succeeded.
+       */
+      const todoCalls = new Set<string>();
+
+      /** Emit whatever a chunk of assistant prose turned out to contain. */
+      const emitAssistant = (text: string, thinking: boolean) => {
+        // Only the model's answer is scanned. Reasoning is a thought about a widget, not a
+        // request to draw one, and the operator's own steering is not the agent's to render.
+        if (!ctx.widgetsEnabled || thinking) {
+          emit({ kind: "assistant_turn", text, thinking });
+          return;
+        }
+        const out = scanner.push(text);
+        if (out.text !== "") emit({ kind: "assistant_turn", text: out.text, thinking });
+        for (const widget of out.widgets) {
+          const widgetId = randomUUID();
+          if (widgetExpectsResponse(widget)) pendingWidgets.set(widgetId, widget);
+          emit({ kind: "widget", widgetId, widget });
+        }
       };
 
       // Launch command and arguments come from the Agent's catalog row (issue #10) — not a
@@ -806,9 +1053,44 @@ export async function runTaskLifecycle(
           // The agent's channel decides what kind of record this is. `user` is the operator's
           // own steering echoed back, `system` is the machinery talking about itself, and the
           // rest is the model — the distinction the log could not previously make at all.
-          if (e.kind === "stdout") emit(textPayload(e.channel, e.text));
-          else if (e.kind === "tool_use") emit({ kind: "tool_call", name: e.name, callId: null });
-          else if (e.kind === "permission_request") {
+          if (e.kind === "stdout") {
+            if (e.channel === "assistant" || e.channel === "thinking") {
+              emitAssistant(e.text, e.channel === "thinking");
+            } else emit(textPayload(e.channel, e.text));
+          } else if (e.kind === "tool_use") {
+            // `TodoWrite` is recorded as the list it carried, in place of the call itself.
+            //
+            // The allowlist admits none of its arguments — a todo list is an array of objects
+            // and `tool_call.input` is bounded to a flat map of short strings — so the row this
+            // would otherwise write says "tool: TodoWrite" and nothing else: a contentless line
+            // in the transcript, with the agent's plan discarded alongside it. Emitting the list
+            // instead removes that row and is the only path by which the plan survives at all.
+            //
+            // Only a payload that reads as a todo list takes this branch. Anything else falls
+            // through to the tool call it always was, because the rule in this file is that an
+            // emission which cannot be understood still reaches the transcript as *something*.
+            const todos = e.name === "TodoWrite" ? readTodoWrite(e.input) : null;
+            if (todos) {
+              if (e.callId) todoCalls.add(e.callId);
+              emit({ kind: "todos", items: todos });
+              return;
+            }
+            emit({
+              kind: "tool_call",
+              name: e.name,
+              callId: e.callId,
+              // Narrowed here, once, rather than in each adapter: the allowlist is policy and
+              // must hold for every protocol that reaches this point. It runs *before*
+              // `redactPayload`, never instead of it — an allowlisted argument can still have a
+              // credential echoed into it, and the redaction walk covers the new field for free.
+              input: allowlistToolInput(e.name, e.input),
+              status: toolStatus(e.status),
+            });
+          } else if (e.kind === "tool_result") {
+            if (e.callId !== null && todoCalls.has(e.callId)) return;
+            const { output, truncated } = truncateToolOutput(e.output);
+            emit({ kind: "tool_result", callId: e.callId, ok: e.ok, output, truncated });
+          } else if (e.kind === "permission_request") {
             emit({
               kind: "permission_request",
               requestId: e.requestId,
@@ -826,9 +1108,36 @@ export async function runTaskLifecycle(
           } else recordUsage(e);
         },
       });
+      live = handle;
       // Publish the handle for the lifetime of the run so the hub can deliver the operator's
       // input or stop to *this* agent (TASK-022), and withdraw it the moment the run ends.
-      const deregister = deps.registry.register(workspaceId, { taskId, sessionId, handle });
+      const deregister = deps.registry.register(workspaceId, {
+        taskId,
+        sessionId,
+        handle,
+        /**
+         * Answer one of this run's widgets: validate against the widget that asked, record the
+         * answer in the log, then tell the agent in a line it can read. The agent is not blocked
+         * on this — a fenced widget is prose, not a tool call — so the answer arrives as steering,
+         * which is the same channel an operator types into.
+         */
+        respondWidget: async (response) => {
+          const widget = pendingWidgets.get(response.widgetId);
+          if (!widget) return "not_pending";
+          const invalid = validateWidgetResponse(widget, response);
+          if (invalid) return "option_unknown";
+
+          pendingWidgets.delete(response.widgetId);
+          emit({
+            kind: "widget_response",
+            widgetId: response.widgetId,
+            values: response.values,
+            text: response.text ?? null,
+          });
+          await handle.send(widgetAnswerMessage(widget, response));
+          return "answered";
+        },
+      });
       let outcome: Awaited<typeof handle.outcome>;
       let reported: string | null = null;
       try {
@@ -849,6 +1158,11 @@ export async function runTaskLifecycle(
         // mid-turn failure would lose it permanently rather than merely delay it.
         await writes;
       }
+
+      // Reported before the worktree is adopted, on purpose: everything below this line writes
+      // to rows that no longer exist (compaction, the state transition, the captured diff), so
+      // continuing would turn one deleted Task into a failing step and a retried run.
+      if (abandoned) return { kind: "abandoned" as const };
 
       // Confirm with git that the reported path really is a worktree of this repository. An
       // agent working somewhere else has not been isolated, and committing from wherever it
@@ -894,6 +1208,14 @@ export async function runTaskLifecycle(
       // The audit line binding a worktree to its Task (Principle IV) is emitted on adoption,
       // because that is the first moment GateControl knows which directory the agent used.
       logWorktreeBinding(log, { workspaceId, taskId, worktreePath: run.worktree.path });
+    }
+
+    if (run.kind === "abandoned") {
+      // Nothing to record and nothing to review: the Task this run belonged to is gone. The
+      // worktree is deliberately left where it is — the delete path owns tearing that down, and
+      // guessing at it from a run that has already lost its context is how a directory someone
+      // else adopted gets removed.
+      return { taskId, result: "abandoned" };
     }
 
     if (run.kind === "failed") {
@@ -1045,7 +1367,10 @@ export async function runTaskLifecycle(
       });
       return { taskId, result: reason };
     }
-    pendingFeedback = feedback ?? undefined;
+    // `""` rather than `undefined` when the reviewer wrote nothing: the next round's brief still
+    // has to say the last one was rejected, and only the presence of the field distinguishes a
+    // redo from a first attempt.
+    pendingFeedback = feedback ?? "";
     await step.run(`resume-${round}`, async () => {
       await setTaskState(db, workspaceId, taskId, "running");
       await recordTransition("review", "running");
@@ -1127,6 +1452,39 @@ export interface BriefWorkspace {
 }
 
 /**
+ * What the agent is told when someone answers its widget.
+ *
+ * Labels first, ids after: the model wrote the labels and reasons in them, while the ids are how
+ * this build refers to the same options — so the sentence leads with what it recognises and
+ * keeps the machine-readable form for precision. `rank` answers keep the operator's ordering,
+ * which is the entire content of that answer.
+ */
+export function widgetAnswerMessage(widget: Widget, response: WidgetResponse): string {
+  const byId = new Map(widgetOptions(widget).map((o) => [o.id, o.label]));
+  const chosen = response.values.map((id) => byId.get(id) ?? id);
+  const asked = widget.kind === "ask_user_input" ? widget.prompt : (widgetTitle(widget) ?? "");
+
+  // Labels first, ids after: the model wrote the labels and its reasons live in them, while the
+  // ids are how it referred to the same options. The question is quoted back because an agent can
+  // have more than one widget outstanding, and it is the only reference *the agent itself*
+  // recognises — this build's own widget id was generated after the emission and the agent has
+  // never seen it, so naming it here told nobody anything.
+  const parts = [WIDGET_ANSWER_PREFIX];
+  parts.push(
+    asked ? `The operator answered "${asked}":` : "The operator answered your widget:",
+    chosen.length > 0 ? chosen.join(", ") : "(nothing chosen)",
+  );
+  if (response.values.length > 0) parts.push(`(ids: ${response.values.join(", ")})`);
+  if (response.text?.trim()) parts.push(`They also wrote: ${response.text.trim()}`);
+  return parts.join(" ");
+}
+
+/** The heading a widget carries, for the ones that have one. */
+function widgetTitle(widget: Widget): string | undefined {
+  return "title" in widget ? widget.title : undefined;
+}
+
+/**
  * The brief handed to the agent. Round one is the Issue and the Task; later rounds lead with the
  * reviewer's feedback, because that — not the original brief — is what still needs doing.
  *
@@ -1140,6 +1498,8 @@ export function agentBrief(
   feedback?: string | undefined,
   workspaces: readonly BriefWorkspace[] = [],
 ): string {
+  // Widgets are taught, not assumed: an agent emits one only because the brief told it how, so
+  // the flag that draws them is the same flag that explains them (`ctx.widgetsEnabled`).
   const parts = [`# Task\n${ctx.task.title}`, `# Issue\n${ctx.issue.title}`];
   if (ctx.issue.description) parts.push(ctx.issue.description);
   if (workspaces.length > 1) {
@@ -1154,11 +1514,21 @@ export function agentBrief(
       `# Repositories\nThis task spans ${workspaces.length} repositories. Each has its own worktree and its own branch; changes in each are reviewed separately.\n${lines.join("\n")}`,
     );
   }
-  if (feedback?.trim()) {
+  // A rejection is announced whether or not the reviewer wrote anything. `undefined` is round
+  // one and says nothing; an empty string is "rejected, no words", which the review gate now
+  // produces on every Request changes. Without this the redo brief was byte-identical to the
+  // first — and since each round is a fresh process with no memory of the last, the agent was
+  // handed the original instructions in a worktree already holding its own rejected work, with
+  // nothing anywhere telling it the work had been turned down.
+  if (feedback !== undefined) {
+    const detail = feedback.trim();
     parts.push(
-      `# Review feedback\nYour previous attempt was not accepted. Address this feedback:\n${feedback.trim()}`,
+      detail
+        ? `# Review feedback\nYour previous attempt was not accepted. Address this feedback:\n${detail}`
+        : "# Review feedback\nYour previous attempt was not accepted. The reviewer left no notes. The worktree still holds that attempt — reconsider it rather than repeating it.",
     );
   }
+  if (ctx.widgetsEnabled) parts.push(`# Widgets\n${WIDGET_BRIEF_INSTRUCTIONS}`);
   return parts.join("\n\n");
 }
 

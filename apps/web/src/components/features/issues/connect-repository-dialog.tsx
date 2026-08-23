@@ -31,8 +31,19 @@ import { trpc } from "@/trpc/react";
  * add one. The field shape mirrors Settings' form (name/source/location); Settings keeps its own
  * copy, per the instructions, rather than this importing from it.
  */
-export function ConnectRepositoryDialog({ trigger }: { trigger: ReactNode }) {
-  const [open, setOpen] = useState(false);
+export function ConnectRepositoryDialog({
+  trigger,
+  open: controlledOpen,
+  onOpenChange,
+}: {
+  /** Omitted when the caller opens the dialog itself — the header's Create menu does. */
+  trigger?: ReactNode;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}) {
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = controlledOpen ?? internalOpen;
+  const setOpen = onOpenChange ?? setInternalOpen;
   const utils = trpc.useUtils();
   const [name, setName] = useState("");
   const [source, setSource] = useState<RepositorySource>("local_path");
@@ -49,8 +60,8 @@ export function ConnectRepositoryDialog({ trigger }: { trigger: ReactNode }) {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>{trigger}</DialogTrigger>
-      <DialogContent className="sm:max-w-md">
+      {trigger ? <DialogTrigger asChild>{trigger}</DialogTrigger> : null}
+      <DialogContent size="sm">
         <DialogHeader>
           <DialogTitle>Connect a repository</DialogTitle>
           <DialogDescription>A local clone path or a remote git URL.</DialogDescription>

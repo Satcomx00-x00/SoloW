@@ -4,7 +4,7 @@ import type { SurfaceLayout } from "@gatecontrol/core";
 import { CornerDownLeft, Inbox, Search } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
-import { openCreateDialog } from "@/components/features/board/create-dialog-bus";
+import { type CreateKind, openCreateDialog } from "@/components/features/board/create-dialog-bus";
 import {
   CommandDialog,
   CommandEmpty,
@@ -104,28 +104,21 @@ export function CommandPalette() {
   );
 
   /**
-   * The create dialog lives on the board, so get there first and then ask. Already-on-board is
-   * the common case and `push` to the current route is a no-op, so the dialog opens at once.
-   * Issues have no create dialog any more (issue #15) — only Tasks do.
+   * Ask the shell to open a create/import dialog. No navigation any more: the dialogs live in
+   * the header's `CreateMenu`, which is mounted on every route, so a palette command no longer
+   * has to bounce through `/board` to reach one.
    */
-  const create = useCallback(
-    (kind: "task") => {
-      setOpen(false);
-      router.push("/board");
-      openCreateDialog(kind);
-    },
-    [router],
-  );
+  const create = useCallback((kind: CreateKind) => {
+    setOpen(false);
+    openCreateDialog(kind);
+  }, []);
 
   /**
    * What a command is allowed to do, handed in rather than imported: a contributed command that
    * reached for the router itself would be exactly the coupling the registry removes, and it is
    * this object that a plugin permission prompt (#93) eventually attaches to.
    */
-  const actions = useMemo<CommandActions>(
-    () => ({ navigate: go, createTask: () => create("task") }),
-    [go, create],
-  );
+  const actions = useMemo<CommandActions>(() => ({ navigate: go, create }), [go, create]);
 
   // Read here and passed down, so the resolved list is arranged the way the operator arranged it
   // while `ContributedCommands` itself stays free of a query client (issue #3 AC-3).

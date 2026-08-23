@@ -129,6 +129,22 @@
    * sprinkling `text-[13px]` means the vendored components inherit the scale for free, and
    * there is exactly one place to change it.
    */
+  /*
+   * Spinner cadence. Two speeds, because a spinner's job depends on how many are on screen:
+   * a single control the reader is waiting on wants to look busy, while a board where several
+   * Tasks run at once wants calm — a dozen icons at the same brisk speed reads as agitation.
+   */
+  --duration-spinner: 1.1s;
+  --duration-spinner-ambient: 2s;
+
+  /*
+   * The thinking cadence. Slower than either spinner on purpose: a spinner reports that a
+   * machine is turning, and these dots report that a model is composing — the unhurried rhythm
+   * is what separates "working" from "waiting on the network", and it is the one piece of motion
+   * an operator watches for minutes at a time.
+   */
+  --duration-thinking: 1.4s;
+
   --text-2xs: 0.6875rem;
   --text-2xs--line-height: 1rem;
   --text-xs: 0.75rem;
@@ -240,6 +256,173 @@
 }
 
 @layer components {
+  /*
+   * The spinner.
+   *
+   * `linear`, deliberately: a spinner is constant motion, and any easing makes it look like it
+   * is labouring — accelerating and stalling once per turn, which reads as a stutter rather than
+   * as work. This is the one place in the interface where a flat curve is the considered choice
+   * rather than the lazy one.
+   *
+   * A class rather than Tailwind's `animate-spin` so the duration is a named token and, more
+   * importantly, so there is a single selector to carve out of the reduced-motion block at the
+   * bottom of this file. See the comment there.
+   */
+  .spinner {
+    animation: spinner-turn var(--duration-spinner) linear infinite;
+  }
+
+  .spinner-ambient {
+    animation: spinner-turn var(--duration-spinner-ambient) linear infinite;
+  }
+
+  @keyframes spinner-turn {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  /* Reduced motion's stand-in: brightness, not movement. See the bottom of this file. */
+  @keyframes spinner-breathe {
+    50% {
+      opacity: 0.35;
+    }
+  }
+
+  /*
+   * The thinking dots: three, keeping time, under a label that says what is being waited for.
+   *
+   * A spinner would have done, and is wrong here. A spinner is what a *control* shows while a
+   * request is in flight — it belongs to a button and it ends. This sits at the foot of a
+   * transcript for as long as a model is composing, and the figure every reader already knows
+   * for that is the typing indicator: three dots, taking turns. Borrowing it means the line needs
+   * no explaining.
+   *
+   * Staggered in CSS rather than by an inline `animationDelay` per dot, so the rhythm is one
+   * thing in one place and the component stays three identical spans.
+   */
+  .thinking-dot {
+    animation: thinking-pulse var(--duration-thinking) ease-in-out infinite;
+  }
+
+  .thinking-dot:nth-child(2) {
+    animation-delay: 0.18s;
+  }
+
+  .thinking-dot:nth-child(3) {
+    animation-delay: 0.36s;
+  }
+
+  /*
+   * The travel is 2px. Enough to read as a wave across three dots at 4px each, small enough that
+   * it never pulls the eye away from the transcript it is sitting under — which, while an agent
+   * runs for ten minutes, is the whole design constraint.
+   */
+  @keyframes thinking-pulse {
+    0%,
+    70%,
+    100% {
+      opacity: 0.3;
+      transform: translateY(0);
+    }
+    35% {
+      opacity: 1;
+      transform: translateY(-2px);
+    }
+  }
+
+  /* Reduced motion's stand-in, as for the spinner: brightness, and nothing that travels. */
+  @keyframes thinking-breathe {
+    0%,
+    70%,
+    100% {
+      opacity: 0.3;
+    }
+    35% {
+      opacity: 1;
+    }
+  }
+
+  /*
+   * Syntax colours for the code an agent writes.
+   *
+   * `rehype-highlight` tokenises a fenced block into highlight.js's class names; these give them
+   * colour. Written here, in the app's own tokens, rather than importing one of highlight.js's
+   * stylesheets: an imported theme brings its own palette and its own idea of a background, and a
+   * transcript with a GitHub-blue keyword sitting next to this app's indigo would read as two
+   * products stapled together. Every colour below is one the interface already uses somewhere.
+   *
+   * Six roles, no more. A theme with twenty distinct hues is a theme nobody can read at 12px in a
+   * scrolling column: what a reviewer needs is to tell a string from a keyword from a comment at
+   * a glance, and the rest can share.
+   */
+  .hljs-comment,
+  .hljs-quote {
+    color: var(--muted-foreground);
+    font-style: italic;
+  }
+
+  /* Keywords and the grammar's own furniture. */
+  .hljs-keyword,
+  .hljs-selector-tag,
+  .hljs-literal,
+  .hljs-type,
+  .hljs-name,
+  .hljs-meta .hljs-keyword {
+    color: var(--primary);
+  }
+
+  /* Anything quoted, including a regex — the thing you scan a config or a payload for. */
+  .hljs-string,
+  .hljs-regexp,
+  .hljs-template-tag,
+  .hljs-selector-attr,
+  .hljs-selector-pseudo,
+  .hljs-addition {
+    color: var(--state-done);
+  }
+
+  /* Numbers, versions, and the constants that behave like them. */
+  .hljs-number,
+  .hljs-symbol,
+  .hljs-bullet,
+  .hljs-link,
+  .hljs-meta {
+    color: var(--state-review);
+  }
+
+  /* What is being defined or called — the shape of the code rather than its values. */
+  .hljs-title,
+  .hljs-title.class_,
+  .hljs-title.function_,
+  .hljs-section,
+  .hljs-built_in,
+  .hljs-class .hljs-title {
+    color: var(--state-running);
+  }
+
+  /* Named things: attributes, properties, variables. Deliberately near-foreground — these are
+     the majority of most blocks, and colouring the majority is how a theme becomes noise. */
+  .hljs-attr,
+  .hljs-attribute,
+  .hljs-variable,
+  .hljs-property,
+  .hljs-template-variable,
+  .hljs-selector-id,
+  .hljs-selector-class {
+    color: color-mix(in oklch, var(--foreground) 82%, var(--state-queued));
+  }
+
+  /* A diff's removed lines, and anything the grammar itself calls wrong. */
+  .hljs-deletion,
+  .hljs-strong {
+    color: var(--state-failed);
+  }
+
+  .hljs-emphasis {
+    font-style: italic;
+  }
+
   /* A hairline of light along the top edge — the cheapest way to make a dark panel feel raised. */
   .surface-edge {
     box-shadow: inset 0 1px 0 0 var(--edge-highlight);
@@ -274,5 +457,41 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+}
+
+/*
+ * The one exception to the block above, and the reason it needed one.
+ *
+ * That rule rests on "motion is decoration here, never information". True of a state badge,
+ * which also carries a label, an icon and a colour — and false of a spinner, whose rotation *is*
+ * the information. It is the only thing separating "still working" from "hung", so freezing it
+ * (which `animation-iteration-count: 1` does, instantly) leaves a reader with a stopped icon and
+ * no way to tell the difference. Reduced motion asks for less movement, not for less meaning.
+ *
+ * So the spinner keeps indicating, by brightness instead of rotation: no transform, no change of
+ * position, nothing that travels across the retina. Unlayered and after the block above so the
+ * comparison is plain specificity between two important declarations — `.spinner` beats `*` —
+ * rather than an argument about cascade-layer precedence.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .spinner,
+  .spinner-ambient {
+    animation: spinner-breathe 2s ease-in-out infinite !important;
+  }
+
+  /*
+   * The dots are the same case: their motion is the only thing distinguishing a model that is
+   * still composing from one that stopped mid-sentence, so they keep indicating — by brightness,
+   * with the travel dropped.
+   *
+   * Longhands rather than the `animation` shorthand, which would reset `animation-delay` to zero
+   * and land all three dots on the same beat — three lights blinking in unison, which reads as an
+   * alarm rather than as work. This way the stagger declared above survives.
+   */
+  .thinking-dot {
+    animation-name: thinking-breathe !important;
+    animation-duration: var(--duration-thinking) !important;
+    animation-iteration-count: infinite !important;
   }
 }

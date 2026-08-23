@@ -70,18 +70,7 @@ describe("deleteTask", () => {
     expect(await getIssueById(ctx, issue.id)).toMatchObject({ ok: true });
   });
 
-  it("refuses while the Task is running, so no agent is orphaned", async () => {
-    const { ctx, make } = await seed("delete-task-running");
-    const t = await make("Agent is alive", "running");
-
-    expect(await deleteTask(ctx, { id: t.id, force: true })).toEqual({
-      ok: false,
-      error: TaskErrorCode.StillRunning,
-    });
-    expect(await db.select().from(taskTable).where(eq(taskTable.id, t.id))).toHaveLength(1);
-  });
-
-  it("refuses while the Task has an active Session even if its own state says otherwise", async () => {
+  it("refuses while an active Session is on the Task, whatever its own state says", async () => {
     const { g, ctx, make } = await seed("delete-task-active-session");
     const t = await make("Says failed, session says otherwise", "failed");
     await db.insert(session).values({ workspaceId: g.workspaceId, taskId: t.id, state: "active" });
@@ -91,6 +80,33 @@ describe("deleteTask", () => {
       error: TaskErrorCode.StillRunning,
     });
     expect(await activeSessionForTask(ctx, t.id)).toBeDefined();
+  });
+
+  it("proceeds once the caller has issued a stop, because cancellation is asynchronous", async () => {
+    const { g, ctx, make } = await seed("delete-task-stop-issued");
+    const t = await make("Being cancelled", "running");
+    await db.insert(session).values({ workspaceId: g.workspaceId, taskId: t.id, state: "active" });
+
+    // The row still reads `running` — it always will at this point, since Inngest cancels
+    // between steps. Waiting for it to clear is what made a dead run undeletable.
+    expect(await deleteTask(ctx, { id: t.id, force: true }, { stopIssued: true })).toMatchObject({
+      ok: true,
+    });
+    expect(await db.select().from(taskTable).where(eq(taskTable.id, t.id))).toHaveLength(0);
+  });
+
+  it("deletes a Task stuck in `running` with no Session left to stop", async () => {
+    // The wreckage a run that died without reconciling leaves behind: the state says running,
+    // nothing will ever update it again, and it holds the Agent Profile's concurrency slot.
+    // Keying the guard on `task.state` made this permanently undeletable from the UI.
+    const { ctx, make } = await seed("delete-task-stale-running");
+    const t = await make("Its run died two days ago", "running");
+
+    expect(await deleteTask(ctx, { id: t.id, force: false })).toEqual({
+      ok: true,
+      data: { id: t.id },
+    });
+    expect(await db.select().from(taskTable).where(eq(taskTable.id, t.id))).toHaveLength(0);
   });
 
   it("refuses without force while another Task is blocked by this one", async () => {

@@ -85,7 +85,13 @@ class FixtureAgentRunner implements AgentRunner {
       resolveWorkspace(worktree);
 
       const label = basename(worktree);
-      opts.onEvent({ kind: "tool_use", name: "edit_file" });
+      opts.onEvent({
+        kind: "tool_use",
+        name: "edit_file",
+        callId: null,
+        input: undefined,
+        status: null,
+      });
       writeFileSync(join(worktree, `marker-${label}.txt`), `edited by the agent in ${label}\n`);
       const visible = readdirSync(worktree)
         .filter((f) => f.startsWith("marker-"))

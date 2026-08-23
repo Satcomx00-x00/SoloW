@@ -1,6 +1,6 @@
 # F05 — Agent & Executor Profiles
 
-**Status:** Draft · **Owner:** Product · **Maturity:** Core · **Last reviewed:** 2026-08-17
+**Status:** Draft · **Owner:** Product · **Maturity:** Core · **Last reviewed:** 2026-08-22
 
 ## Summary
 
@@ -35,9 +35,16 @@ agent_catalog (id, workspaceId, key, displayName, protocol, command, argsTemplat
 ```
 
 An Agent Profile's `agentCatalogId` points at one of these rather than switching on a closed
-`agentKind` string. **Adding a supported agent is a seed row plus a Profile pointing at it, not
-a change to application code** — the schema, the DAL, and the billing guard all read the
+`agentKind` string. **Adding a supported agent is a catalog row plus a Profile pointing at it,
+not a change to application code** — the schema, the DAL, and the billing guard all read the
 catalog row rather than a literal.
+
+Since issue #10/#58, that row no longer has to come from a seed: `profile.agentCatalog.create`
+(`apps/web/src/server/dal/profile.ts` → `createAgentCatalogEntry`) lets an Owner declare one
+from Settings → Agent profiles → "Add a custom agent", refused on a key already taken in the
+Workspace. This is what makes the `acp` protocol reachable at all — `acp-runner.ts` already
+implements the full `session/request_permission` round trip the inline elicitation card needs,
+but until an Owner could add an `acp`-protocol row, no Agent Profile could ever point at one.
 
 Two fields carry the weight:
 
@@ -52,17 +59,43 @@ Two fields carry the weight:
   an undriven protocol before an agent starts, rather than crashing inside a runner never built
   to speak it — the same pattern F07 uses for an Executor kind with no driver yet.
 
-Every Workspace is seeded with a `claude_code` catalog entry the moment it exists — at sign-up
-(`apps/web/src/server/auth/auth.ts`) and in the dev/test seed alike
-(`packages/db/src/agent-catalog-defaults.ts`) — so an Agent Profile is always creatable.
+Every Workspace is still seeded with a `claude_code` catalog entry the moment it exists — at
+sign-up (`apps/web/src/server/auth/auth.ts`) and in the dev/test seed alike
+(`packages/db/src/agent-catalog-defaults.ts`) — so an Agent Profile is always creatable without
+an Owner adding anything first; the seed guarantees a floor, the create mutation removes the
+ceiling.
 
 ## Functional requirements
 
 ### Agent Profiles
 - **FR-1** A user can create an Agent Profile specifying: the catalog agent it runs (see
   above), its Authentication Mode (see [F06](./F06-authentication-billing.md)), its tool-use
-  approval policy, and its concurrency limit.
+  approval policy, and its concurrency limit. The approval policy shipped 2026-08-22 as
+  **permission mode**, carried to the agent as the vendor CLI's own `--permission-mode`:
+  - `bypassPermissions` (**default**, decided 2026-08-22) — it never asks.
+  - `acceptEdits` — the agent edits inside its worktree and asks for everything else.
+  - `plan` — it may read and reason but not change anything.
+
+  The default is the permissive one, and that is the decision rather than an oversight. GateControl runs an agent **headless**, and the stream-json
+  protocol has no channel to ask an operator on (`claude-code-runner.ts` documents this: the
+  review gate, not a prompt nobody will see, is the safety boundary). So under `acceptEdits`
+  every shell command and every fetch is refused by a prompt with no answerer, and a Task needing
+  either stalls partway through — observed with an agent asking for `pip index versions` until it
+  gave up. `bypassPermissions` is the answer, and what bounds it is the worktree the agent runs
+  in plus the review gate that still holds every change before it reaches a branch (Principle I).
+  The setting means the same thing on ACP, by different mechanics: that protocol *has* a request
+  channel, so `bypassPermissions` there answers each request immediately with the narrowest allow
+  the agent offered, published and logged as decided by `policy` — a run where nobody looked must
+  never read afterwards as one where somebody did. Immediately, not on the deadline: a deadline is
+  how long a person gets, and waiting one out for a decision nobody is coming to make is the same
+  stall in slower clothing. Any other mode leaves ACP on the deployment's own unattended posture
+  (`GATECONTROL_ACP_UNATTENDED_PERMISSION`), which still refuses unless a deployment named
+  otherwise.
 - **FR-2** A user can create, edit, duplicate, and delete Agent Profiles within a Workspace.
+  Editing shipped 2026-08-22 (`profile.agent.update`) for the three fields that describe how a
+  Profile runs — name, concurrency cap, permission mode. The agent it points at, its auth mode
+  and its Secret are fixed at creation: those are what a Profile *is*, and changing them under
+  Tasks that already reference it would rewrite what finished runs meant.
 - **FR-3** An Agent Profile can be referenced by many Tasks and Workflow Steps.
 - **FR-4** Editing an Agent Profile affects future Sessions; Sessions already running are
   unaffected.
@@ -98,6 +131,12 @@ Every Workspace is seeded with a `claude_code` catalog entry the moment it exist
 
 - If a referenced Profile becomes invalid (for example, a removed credential), Tasks using
   it are prevented from launching with a clear reason until it is fixed.
+- Deleting an Agent Profile (FR-2, FR-9) is refused while a Task, a Workflow Step, or a
+  Session's usage record still references it — all three are foreign keys, so nothing is ever
+  silently orphaned. The refusal names what still holds it (e.g. "Used by 3 tasks, 1 past
+  session") and is shown disabled before the Owner tries, not only after the server refuses
+  (`profile.agent.delete`, `agent-profiles-section.tsx`). Deleting a Profile never touches the
+  Secret it spends — only the binding between them.
 
 ## Out of scope
 

@@ -3,6 +3,7 @@
 import { type Contribution, createRegistry, type Registry } from "@gatecontrol/core";
 import type { LucideIcon } from "lucide-react";
 import type { ComponentType } from "react";
+import type { CreateKind } from "@/components/features/board/create-dialog-bus";
 
 /**
  * The app's three contribution registries (issue #3), and the types they are generic over.
@@ -72,7 +73,12 @@ export type CommandGroup = (typeof COMMAND_GROUPS)[number];
  */
 export interface CommandActions {
   navigate(href: string): void;
-  createTask(): void;
+  /**
+   * Open one of the shell's create/import dialogs. One verb rather than four, because the
+   * dialogs themselves are now one component's business (`CreateMenu`) — a command contributes
+   * the intent and the shell decides what that opens.
+   */
+  create(kind: CreateKind): void;
 }
 
 export interface CommandItem {

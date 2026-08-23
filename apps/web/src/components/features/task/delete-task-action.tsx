@@ -1,9 +1,10 @@
 "use client";
 
-import { type TaskDeletionImpactDto, TaskErrorCode } from "@gatecontrol/contracts";
+import type { TaskDeletionImpactDto } from "@gatecontrol/contracts";
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { ConfirmDialog } from "@/components/features/confirm-action";
+import { taskActionMessage } from "@/lib/task-errors";
 import { trpc } from "@/trpc/react";
 
 /**
@@ -39,10 +40,14 @@ export function DeleteTaskAction({
 
   const del = trpc.task.delete.useMutation({
     onSuccess: () => {
+      // `onDeleted` first, invalidation second. On the Task page this callback navigates away;
+      // invalidating while that page is still mounted makes it refetch the Task it is showing,
+      // which has just been deleted — a 404 round trip on every delete, for a view about to
+      // unmount. Navigating first lets it go before the refetch is triggered.
+      onDeleted?.();
       utils.task.invalidate();
       utils.issue.list.invalidate();
       utils.session.invalidate();
-      onDeleted?.();
     },
   });
 
@@ -66,22 +71,11 @@ export function DeleteTaskAction({
 
       {del.error && (
         <p className="w-full text-right text-destructive text-xs" role="alert">
-          {messageFor(del.error.message)}
+          {taskActionMessage(del.error.message)}
         </p>
       )}
     </>
   );
-}
-
-function messageFor(code: string): string {
-  switch (code) {
-    case TaskErrorCode.StillRunning:
-      return "This task started running again before it could be deleted. Try again.";
-    case TaskErrorCode.StopFailed:
-      return "The agent could not be stopped, so nothing was deleted. Check the orchestrator is up, then try again.";
-    default:
-      return code;
-  }
 }
 
 function describe(impact: TaskDeletionImpactDto | undefined): string {
@@ -89,7 +83,8 @@ function describe(impact: TaskDeletionImpactDto | undefined): string {
 
   let text = "This cannot be undone.";
   if (impact.sessionCount > 0) {
-    text += ` It deletes ${plural(impact.sessionCount, "session")} with their logs and review history.`;
+    const its = impact.sessionCount === 1 ? "its" : "their";
+    text += ` It deletes ${plural(impact.sessionCount, "session")} with ${its} logs and review history.`;
   }
   if (impact.running) text += " The running agent will be stopped first.";
   if (impact.dependentCount > 0) {

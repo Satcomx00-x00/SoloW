@@ -36,7 +36,7 @@ beforeAll(() => {
       title: "Probe a contributed command",
       group: "Create",
       icon: NO_ICON,
-      run: (actions) => actions.createTask(),
+      run: (actions) => actions.create("task"),
     },
   });
   commandRegistry.register({
@@ -57,12 +57,10 @@ afterAll(() => {
   commandRegistry.unregister(HIDDEN_ID);
 });
 
-const calls: { navigated: string[]; created: number } = { navigated: [], created: 0 };
+const calls: { navigated: string[]; created: string[] } = { navigated: [], created: [] };
 const actions: CommandActions = {
   navigate: (href) => calls.navigated.push(href),
-  createTask: () => {
-    calls.created += 1;
-  },
+  create: (kind) => calls.created.push(kind),
 };
 
 function renderPalette(
@@ -70,7 +68,7 @@ function renderPalette(
   layout?: SurfaceLayout,
 ) {
   calls.navigated = [];
-  calls.created = 0;
+  calls.created = [];
   return render(
     <AppContextProvider value={{ identity }}>
       <Command shouldFilter={false}>
@@ -150,7 +148,7 @@ describe("the command palette's entries", () => {
     fireEvent.click(screen.getByText("New task"));
 
     expect(calls.navigated).toEqual(["/board"]);
-    expect(calls.created).toBe(1);
+    expect(calls.created).toEqual(["task"]);
   });
 
   it("groups the entries under the headings the command vocabulary defines", () => {

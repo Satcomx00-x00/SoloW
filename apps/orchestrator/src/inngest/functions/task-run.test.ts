@@ -2,7 +2,13 @@
 
 import { beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { Writable } from "node:stream";
-import { type AgentProtocol, type ExecutorConfig, TaskErrorCode } from "@gatecontrol/contracts";
+import {
+  type AgentPermissionMode,
+  type AgentProtocol,
+  type ExecutorConfig,
+  TaskErrorCode,
+  WIDGET_ANSWER_PREFIX,
+} from "@gatecontrol/contracts";
 import {
   agentCatalog,
   agentProfile,
@@ -33,7 +39,12 @@ import type {
 } from "../../agent/runner.js";
 import { listTaskEventsSince } from "../../data.js";
 import { RepositoryUnusableError } from "../../worktree/manager.js";
-import { runTaskLifecycle, type StepLike, type TaskRunDeps } from "./task-run.js";
+import {
+  runTaskLifecycle,
+  type StepLike,
+  type TaskRunDeps,
+  widgetAnswerMessage,
+} from "./task-run.js";
 
 /**
  * Orchestrator lifecycle integration test (task TASK-020). Drives `runTaskLifecycle` against a
@@ -141,9 +152,7 @@ async function seedRun(
     ...(opts.setupFilePatterns ? { setupFilePatterns: opts.setupFilePatterns } : {}),
   });
   const issueId = `issue-${ids.taskId}`;
-  await db
-    .insert(issue)
-    .values({ id: issueId, workspaceId: ids.workspaceId, title: "Issue", status: "open" });
+  await db.insert(issue).values({ id: issueId, workspaceId: ids.workspaceId, title: "Issue" });
   await db.insert(task).values({
     id: ids.taskId,
     workspaceId: ids.workspaceId,
@@ -241,6 +250,8 @@ function retryingStep(decisions: ScriptedDecision[], retryStepId: string): StepL
 /** Fake agent runner returning queued outcomes; records how many times it started. */
 class ScriptedRunner implements AgentRunner {
   starts = 0;
+  /** How many times the lifecycle asked this run to stop — asserted by the abandon path. */
+  stops = 0;
   /** The brief each run was given, in order. */
   readonly prompts: string[] = [];
   /** The command and environment each run was launched with — where the catalog row and the
@@ -274,7 +285,9 @@ class ScriptedRunner implements AgentRunner {
         opts.worktreeName ? `/wt/${opts.worktreeName}` : opts.cwd,
       ),
       send: async () => true,
-      stop: async () => {},
+      stop: async () => {
+        this.stops += 1;
+      },
     };
   }
 }
@@ -636,7 +649,15 @@ describe("runTaskLifecycle (integration)", () => {
         { kind: "stdout", channel: "thinking", text: "considering" },
         { kind: "stdout", channel: "user", text: "also add a test" },
         { kind: "stdout", channel: "system", text: "\nmode: plan\n" },
-        { kind: "tool_use", name: "Edit" },
+        {
+          kind: "tool_use",
+          name: "Edit",
+          callId: "call-1",
+          // Two arguments, one allowlisted for Edit and one that must never be stored.
+          input: { file_path: "src/latch.ts", new_string: "SECRET FILE CONTENTS" },
+          status: "in_progress",
+        },
+        { kind: "tool_result", callId: "call-1", ok: true, output: "applied" },
       ],
     );
     const { deps } = makeDeps(db, runner, nullStream());
@@ -654,11 +675,67 @@ describe("runTaskLifecycle (integration)", () => {
       { kind: "assistant_turn", text: "considering", thinking: true },
       { kind: "user_turn", text: "also add a test" },
       { kind: "notice", text: "\nmode: plan\n" },
-      { kind: "tool_call", name: "Edit", callId: null },
+      {
+        kind: "tool_call",
+        name: "Edit",
+        callId: "call-1",
+        // `new_string` is absent, and must stay absent: it is the file's contents.
+        input: { file_path: "src/latch.ts" },
+        status: "in_progress",
+      },
     ]);
+    expect(logged[5]?.payload).toEqual({
+      kind: "tool_result",
+      callId: "call-1",
+      ok: true,
+      output: "applied",
+      truncated: false,
+    });
     // The presentation marker is applied on the way to the wire and never stored, so what #16
     // and #84 read back is the agent's own text.
     expect(JSON.stringify(logged)).not.toContain("· considering");
+  });
+
+  it("records a TodoWrite as its list and drops the result that call would have folded into", async () => {
+    // The plan replaces the call, so the call's `tool_result` has nothing left to fold into.
+    // Logged anyway it reaches the transcript as an orphan and is drawn as a row named literally
+    // "tool" carrying the CLI's "Todos have been modified successfully" — one per plan rewrite,
+    // which is the contentless row this interception exists to remove, only anonymous.
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const runner = new ScriptedRunner(
+      [{ kind: "completed" }],
+      [
+        {
+          kind: "tool_use",
+          name: "TodoWrite",
+          callId: "toolu_todo",
+          input: { todos: [{ content: "Write the patch", status: "in_progress" }] },
+          status: "in_progress",
+        },
+        { kind: "tool_result", callId: "toolu_todo", ok: true, output: "Todos have been modified" },
+        // A tool that was *not* intercepted still gets both halves, so this is a suppression of
+        // one call's result and not of the branch.
+        { kind: "tool_use", name: "Edit", callId: "call-1", input: {}, status: "in_progress" },
+        { kind: "tool_result", callId: "call-1", ok: true, output: "applied" },
+      ],
+    );
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    const payloads = (
+      await db
+        .select()
+        .from(sessionEvent)
+        .where(eq(sessionEvent.sessionId, ids.sessionId))
+        .orderBy(asc(sessionEvent.seq))
+    ).map((e) => e.payload as { kind: string; callId?: string | null });
+
+    expect(payloads.filter((p) => p.kind === "todos")).toHaveLength(1);
+    expect(payloads.filter((p) => p.kind === "tool_result").map((p) => p.callId)).toEqual([
+      "call-1",
+    ]);
   });
 
   it("records a state transition once when a retried step body records it again", async () => {
@@ -731,7 +808,13 @@ describe("runTaskLifecycle (integration)", () => {
         { kind: "stdout", channel: "assistant", text: "$ echo $CLAUDE_CODE_OAUTH_TOKEN" },
         { kind: "stdout", channel: "assistant", text: "oauth-token\n" },
         { kind: "stdout", channel: "system", text: `secret at rest: ${ciphertext}` },
-        { kind: "tool_use", name: "Bash(echo oauth-token)" },
+        {
+          kind: "tool_use",
+          name: "Bash(echo oauth-token)",
+          callId: null,
+          input: undefined,
+          status: null,
+        },
       ],
     );
     const { deps, spies } = makeDeps(db, runner, nullStream());
@@ -856,6 +939,25 @@ describe("the brief the agent is given", () => {
     // reason to produce anything different — request-changes would be a no-op loop.
     expect(runner.prompts[0]).not.toContain("Add a regression test");
     expect(runner.prompts[1]).toContain("Add a regression test for the latch.");
+  });
+
+  it("tells the agent the round is a redo even when the reviewer wrote nothing", async () => {
+    // The review gate no longer collects feedback, so this is now the ordinary shape of a
+    // Request changes. Each round is a fresh process with no memory of the last, so a brief
+    // identical to round one's hands the agent the original instructions in a worktree that
+    // already holds its own rejected work, with nothing anywhere saying it was turned down.
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const runner = new ScriptedRunner([{ kind: "completed" }, { kind: "completed" }]);
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    await runTaskLifecycle(deps, {
+      event: { data: ids },
+      step: scriptedStep(["request_changes", "approve"]),
+    });
+
+    expect(runner.prompts[0]).not.toContain("not accepted");
+    expect(runner.prompts[1]).toContain("Your previous attempt was not accepted.");
   });
 
   it("describes the Task and its Issue so the agent knows what to do", async () => {
@@ -2099,5 +2201,315 @@ describe("approving a multi-Repository Task that changed only some of them", () 
       .where(eq(taskRepository.taskId, ids.taskId))
       .orderBy(asc(taskRepository.position));
     expect(attachments.every((a) => a.resultBranch !== null)).toBe(true);
+  });
+});
+
+/**
+ * Agent widgets (`ff-agent-widgets`): the run teaches the agent the fence, lifts what it emits
+ * out of the prose, and records it as its own event — so a client can draw the thing rather than
+ * printing the JSON that described it.
+ */
+describe("task-run permission mode", () => {
+  let db: TestDb;
+  beforeEach(() => {
+    db = createTestDb();
+  });
+
+  it("builds the runner with the Agent Profile's own permission mode", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    await db
+      .update(agentProfile)
+      .set({ permissionMode: "bypassPermissions" })
+      .where(eq(agentProfile.id, (await seededProfileId(db, ids)) ?? ""));
+
+    const runner = new ScriptedRunner([{ kind: "completed" }]);
+    const { deps } = makeDeps(db, runner, nullStream());
+    const asked: Array<string | undefined> = [];
+    const wrapped = {
+      ...deps,
+      runner: (protocol: AgentProtocol, mode: AgentPermissionMode) => {
+        asked.push(mode);
+        return deps.runner(protocol, mode);
+      },
+    };
+
+    await runTaskLifecycle(wrapped, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    // The posture is read off the Profile the Task names, not off a process-wide default: this
+    // is what lets one Workspace hold a "never asks" Profile beside a cautious one.
+    expect(asked).toEqual(["bypassPermissions"]);
+  });
+
+  it("leaves a Profile that never chose one on the cautious default", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const runner = new ScriptedRunner([{ kind: "completed" }]);
+    const { deps } = makeDeps(db, runner, nullStream());
+    const asked: Array<string | undefined> = [];
+    const wrapped = {
+      ...deps,
+      runner: (protocol: AgentProtocol, mode: AgentPermissionMode) => {
+        asked.push(mode);
+        return deps.runner(protocol, mode);
+      },
+    };
+
+    await runTaskLifecycle(wrapped, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    expect(asked).toEqual(["acceptEdits"]);
+  });
+});
+
+/** The Agent Profile `seedRun` created for this run. */
+async function seededProfileId(db: TestDb, ids: { taskId: string }): Promise<string | undefined> {
+  const [row] = await db
+    .select({ id: task.agentProfileId })
+    .from(task)
+    .where(eq(task.id, ids.taskId))
+    .limit(1);
+  return row?.id;
+}
+
+describe("task-run widgets", () => {
+  let db: TestDb;
+  beforeEach(() => {
+    db = createTestDb();
+  });
+
+  const ASK =
+    '{"kind":"ask_user_input","prompt":"Which database?","options":[{"id":"pg","label":"PostgreSQL"}]}';
+
+  async function enableWidgets(ids: ReturnType<typeof freshIds>): Promise<void> {
+    await db
+      .update(workspace)
+      .set({ enabledFlags: { "ff-agent-widgets": true } })
+      .where(eq(workspace.id, ids.workspaceId));
+  }
+
+  it("records a fenced emission as a widget event and keeps it out of the prose", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    await enableWidgets(ids);
+    const runner = new ScriptedRunner(
+      [{ kind: "completed" }],
+      [
+        {
+          kind: "stdout",
+          channel: "assistant",
+          text: `Picking a store.\n\`\`\`gatecontrol:widget\n${ASK}\n\`\`\`\nStanding by.`,
+        },
+      ],
+    );
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    const logged = await db
+      .select()
+      .from(sessionEvent)
+      .where(eq(sessionEvent.sessionId, ids.sessionId))
+      .orderBy(asc(sessionEvent.seq));
+
+    const widgets = logged.filter((e) => e.kind === "widget");
+    expect(widgets).toHaveLength(1);
+    expect(widgets[0]?.payload).toMatchObject({
+      kind: "widget",
+      widget: { kind: "ask_user_input", prompt: "Which database?" },
+    });
+
+    // The prose keeps its sentences and loses the block — an operator reading the transcript
+    // must never see the JSON that produced the widget beside the widget itself.
+    const prose = logged
+      .filter((e) => e.kind === "assistant_turn")
+      .map((e) => (e.payload as { text: string }).text)
+      .join("");
+    expect(prose).toBe("Picking a store.\nStanding by.");
+    expect(prose).not.toContain("ask_user_input");
+  });
+
+  it("teaches the fence in the brief, and only when the flag is on", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    await enableWidgets(ids);
+    const runner = new ScriptedRunner([{ kind: "completed" }]);
+    const { deps } = makeDeps(db, runner, nullStream());
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    expect(runner.prompts[0]).toContain("gatecontrol:widget");
+
+    const off = freshIds();
+    await seedRun(db, off);
+    const quiet = new ScriptedRunner([{ kind: "completed" }]);
+    const { deps: offDeps } = makeDeps(db, quiet, nullStream());
+    await runTaskLifecycle(offDeps, { event: { data: off }, step: scriptedStep(["approve"]) });
+    // A Workspace without the flag gets the brief it always got, byte for byte.
+    expect(quiet.prompts[0]).not.toContain("gatecontrol:widget");
+  });
+
+  it("leaves the output untouched for a Workspace with the flag off", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const runner = new ScriptedRunner(
+      [{ kind: "completed" }],
+      [
+        {
+          kind: "stdout",
+          channel: "assistant",
+          text: `\`\`\`gatecontrol:widget\n${ASK}\n\`\`\``,
+        },
+      ],
+    );
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    const logged = await db
+      .select()
+      .from(sessionEvent)
+      .where(eq(sessionEvent.sessionId, ids.sessionId));
+    expect(logged.filter((e) => e.kind === "widget")).toHaveLength(0);
+    // Not parsed, not stripped: with the feature off the block is exactly what it looks like.
+    const prose = logged
+      .filter((e) => e.kind === "assistant_turn")
+      .map((e) => (e.payload as { text: string }).text)
+      .join("");
+    expect(prose).toContain("gatecontrol:widget");
+  });
+
+  it("does not read a widget out of the model's reasoning", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    await enableWidgets(ids);
+    const runner = new ScriptedRunner(
+      [{ kind: "completed" }],
+      [
+        {
+          kind: "stdout",
+          channel: "thinking",
+          text: `maybe \`\`\`gatecontrol:widget\n${ASK}\n\`\`\``,
+        },
+      ],
+    );
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    const logged = await db
+      .select()
+      .from(sessionEvent)
+      .where(eq(sessionEvent.sessionId, ids.sessionId));
+    // Thinking about a widget is not asking for one.
+    expect(logged.filter((e) => e.kind === "widget")).toHaveLength(0);
+  });
+});
+
+/**
+ * A Task deleted while its agent is still streaming (observed in a dev run: one
+ * `FOREIGN KEY constraint failed` per chunk of output, at `session-event-append`).
+ *
+ * Cancellation happens between Inngest steps and stopping an agent is a request rather than an
+ * instant, so this window is real by design. What is not acceptable is what the window used to
+ * cost: a stack trace per event, an agent left running for a review nobody will ever hold, and a
+ * round that carries on writing to rows that are gone.
+ */
+describe("task-run when its Session is deleted mid-run", () => {
+  let db: TestDb;
+  beforeEach(() => {
+    db = createTestDb();
+  });
+
+  it("stops the agent and abandons the round instead of failing per event", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    // Exactly what `cascadeDeleteTasks` does when the Task is force-deleted underneath the run.
+    await db.delete(session).where(eq(session.id, ids.sessionId));
+
+    const runner = new ScriptedRunner(
+      [{ kind: "completed" }],
+      [
+        { kind: "stdout", channel: "assistant", text: "still working" },
+        { kind: "stdout", channel: "assistant", text: "and still going" },
+      ],
+    );
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    const result = await runTaskLifecycle(deps, {
+      event: { data: ids },
+      step: scriptedStep(["approve"]),
+    });
+
+    // The run ends by saying what happened, rather than throwing its way through the review gate.
+    expect(result).toEqual({ taskId: ids.taskId, result: "abandoned" });
+    // And the agent is not left burning tokens for a Task that no longer exists.
+    expect(runner.stops).toBe(1);
+
+    // Nothing was written, because there was nowhere to write it.
+    const events = await db
+      .select()
+      .from(sessionEvent)
+      .where(eq(sessionEvent.sessionId, ids.sessionId));
+    expect(events).toHaveLength(0);
+  });
+
+  it("leaves an ordinary run untouched", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const runner = new ScriptedRunner([{ kind: "completed" }]);
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    const result = await runTaskLifecycle(deps, {
+      event: { data: ids },
+      step: scriptedStep(["approve"]),
+    });
+
+    // The latch is only ever tripped by a missing parent row: a healthy run still reviews,
+    // still records, and never stops its own agent early.
+    expect(result.result).not.toBe("abandoned");
+    expect(runner.stops).toBe(0);
+  });
+});
+
+describe("widgetAnswerMessage", () => {
+  const ask = {
+    kind: "ask_user_input" as const,
+    prompt: "Which database?",
+    mode: "single" as const,
+    allowOther: false,
+    options: [
+      { id: "pg", label: "PostgreSQL" },
+      { id: "sqlite", label: "SQLite" },
+    ],
+  };
+
+  it("leads with the marker the transcript filters on", () => {
+    const message = widgetAnswerMessage(ask, { widgetId: "w-1", values: ["sqlite"], text: null });
+    expect(message.startsWith(WIDGET_ANSWER_PREFIX)).toBe(true);
+  });
+
+  it("says the labels the agent wrote, and the ids it defined", () => {
+    const message = widgetAnswerMessage(ask, { widgetId: "w-1", values: ["sqlite"], text: null });
+    expect(message).toContain("SQLite");
+    expect(message).toContain("ids: sqlite");
+    // Quoted back because an agent can have more than one widget outstanding.
+    expect(message).toContain('"Which database?"');
+  });
+
+  it("never names this build's own widget id", () => {
+    // The id is generated after the emission, so the agent has never seen it — naming it told
+    // nobody anything and was most of what made the echoed line unreadable.
+    const message = widgetAnswerMessage(ask, {
+      widgetId: "44ea64d3-ddf4-45ef-b3d8-c87d7d8987e4",
+      values: ["pg"],
+      text: null,
+    });
+    expect(message).not.toContain("44ea64d3");
+  });
+
+  it("carries free text when the operator wrote some", () => {
+    const message = widgetAnswerMessage(
+      { ...ask, allowOther: true },
+      { widgetId: "w-1", values: [], text: "neither, use libSQL" },
+    );
+    expect(message).toContain("neither, use libSQL");
+    expect(message).toContain("(nothing chosen)");
   });
 });

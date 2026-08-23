@@ -6,7 +6,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type FakeClaudeScript, writeFakeClaudeBin } from "@gatecontrol/claude-code/testing";
 import { createLocalExecutor } from "../executor/local.js";
-import { ClaudeCodeRunner, toStreamEvent, worktreeNameForTask } from "./claude-code-runner.js";
+import {
+  ClaudeCodeRunner,
+  createStreamMapper,
+  toStreamEvent,
+  worktreeNameForTask,
+} from "./claude-code-runner.js";
 import type { AgentHandle, AgentStreamEvent } from "./runner.js";
 
 /**
@@ -58,7 +63,9 @@ describe("ClaudeCodeRunner", () => {
     expect(await h.outcome).toEqual({ kind: "completed" });
     // Usage rides alongside each block and is asserted separately, below.
     expect(events.filter((e) => e.kind !== "usage")).toEqual([
-      { kind: "tool_use", name: "Edit" },
+      // The id and the arguments now survive the adapter — without them the transcript could
+      // only ever print the tool's name, and a result could not be matched back to its call.
+      { kind: "tool_use", name: "Edit", callId: "t-Edit", input: {}, status: null },
       { kind: "stdout", channel: "assistant", text: "patched latch.ts" },
       { kind: "stdout", channel: "system", text: "\ndone\n" },
     ]);
@@ -83,10 +90,40 @@ describe("ClaudeCodeRunner", () => {
     );
   });
 
+  it("echoes accepted operator input onto the stream, since the CLI's own output never does", async () => {
+    // Reported directly: an Owner sent a message and saw nothing acknowledge it — the agent
+    // genuinely received and answered it, but the transcript had no record it was ever sent,
+    // and the reply that followed ran straight into whatever paragraph preceded it. Without this
+    // event, `task-run.ts` never has a `channel: "user"` update to turn into a `user_turn`
+    // session_event, which is the one thing that both shows the message and (transcript.ts's own
+    // coalescing rule) stops it merging into the surrounding assistant text.
+    const { handle: h, events } = await run({
+      turns: [{ text: ["first pass"] }, { text: ["added the test"] }],
+    });
+
+    await h.send("also add a regression test");
+    await h.outcome;
+
+    expect(events).toContainEqual({
+      kind: "stdout",
+      channel: "user",
+      text: "also add a regression test",
+    });
+  });
+
   it("refuses input once the run has finished rather than swallowing it", async () => {
     const { handle: h } = await run({ turns: [{ text: ["done"] }] });
     await h.outcome;
     expect(await h.send("too late")).toBe(false);
+  });
+
+  it("does not echo input the run refused to accept", async () => {
+    const { handle: h, events } = await run({ turns: [{ text: ["done"] }] });
+    await h.outcome;
+
+    await h.send("too late");
+
+    expect(events).not.toContainEqual(expect.objectContaining({ kind: "stdout", channel: "user" }));
   });
 
   it("stopping ends the run without failing it, so partial work still reaches review", async () => {
@@ -189,5 +226,67 @@ describe("usage reaches the orchestrator once per turn (issue #14)", () => {
       events.flatMap((e) => (e.kind === "usage" && e.messageId ? [e.messageId] : [])),
     );
     expect(ids.size).toBe(2);
+  });
+});
+
+describe("createStreamMapper", () => {
+  it("drops the closing result when it merely repeats the turn just streamed", () => {
+    const map = createStreamMapper();
+    const streamed = map({
+      kind: "text",
+      channel: "assistant",
+      text: "All done, the latch is fixed.",
+    });
+    expect(streamed).toEqual({
+      kind: "stdout",
+      channel: "assistant",
+      text: "All done, the latch is fixed.",
+    });
+
+    // The CLI closes with its own final text repeated. Publishing it would put the agent's
+    // answer in the session log twice — which is what the terminal was showing.
+    expect(
+      map({ kind: "result", ok: true, subtype: null, text: "All done, the latch is fixed." }),
+    ).toBeNull();
+  });
+
+  it("keeps a result whose text never appeared as an assistant turn", () => {
+    const map = createStreamMapper();
+    map({ kind: "text", channel: "assistant", text: "Working on it." });
+    const event = map({
+      kind: "result",
+      ok: false,
+      subtype: "error_during_execution",
+      text: "Failed to authenticate. API Error: 401",
+    });
+    expect(event).toEqual({
+      kind: "stdout",
+      channel: "system",
+      text: "\nFailed to authenticate. API Error: 401\n",
+    });
+  });
+
+  it("matches across a turn that arrived as several content blocks", () => {
+    const map = createStreamMapper();
+    map({ kind: "text", channel: "assistant", text: "First part. " });
+    map({ kind: "text", channel: "assistant", text: "Second part." });
+    expect(
+      map({ kind: "result", ok: true, subtype: null, text: "First part. Second part." }),
+    ).toBeNull();
+  });
+
+  it("starts a fresh turn after each result, so a later repeat is still caught", () => {
+    const map = createStreamMapper();
+    map({ kind: "text", channel: "assistant", text: "Round one." });
+    map({ kind: "result", ok: true, subtype: null, text: "Round one." });
+
+    // Review round two: the accumulator must not still be holding round one's text, or an
+    // unrelated result could be mistaken for a repeat.
+    map({ kind: "text", channel: "assistant", text: "Round two." });
+    expect(map({ kind: "result", ok: true, subtype: null, text: "Round one." })).toEqual({
+      kind: "stdout",
+      channel: "system",
+      text: "\nRound one.\n",
+    });
   });
 });

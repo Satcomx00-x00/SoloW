@@ -7,7 +7,7 @@ process.env.GATECONTROL_SECRET_KEY = Buffer.alloc(32, 7).toString("base64");
 import { encryptSecret, type issue, secret, type taskRepository, workspace } from "@gatecontrol/db";
 import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
 import { and, eq } from "drizzle-orm";
-import { issueToDto, repositoryToDto, secretToRef, taskToDto } from "./mappers.js";
+import { issueToDto, NO_TASKS, repositoryToDto, secretToRef, taskToDto } from "./mappers.js";
 
 type IssueRow = typeof issue.$inferSelect;
 type TaskRepositoryRow = typeof taskRepository.$inferSelect;
@@ -20,7 +20,9 @@ describe("mappers", () => {
         workspaceId: "ws-1",
         title: "Latch fix",
         description: "sticks in rain",
-        status: "open",
+        statusOverride: null,
+        statusOverrideAt: null,
+        statusOverrideBy: null,
         source: "local",
         integrationId: null,
         repositoryId: null,
@@ -33,13 +35,22 @@ describe("mappers", () => {
         updatedAt: "2026-01-02T00:00:00.000Z",
       };
 
-      const dto = issueToDto(row, 3);
+      const dto = issueToDto(row, {
+        taskCount: 3,
+        activeTaskCount: 1,
+        derivedStatus: "in_progress",
+      });
       expect(dto).toEqual({
         id: "issue-1",
         title: "Latch fix",
         description: "sticks in rain",
-        status: "open",
+        // No override on the row, so the Issue reads whatever its Tasks derived to.
+        status: "in_progress",
+        derivedStatus: "in_progress",
+        statusOverride: null,
+        statusOverrideAt: null,
         taskCount: 3,
+        activeTaskCount: 1,
         source: "local",
         repositoryId: null,
         externalNumber: null,
@@ -61,7 +72,9 @@ describe("mappers", () => {
         workspaceId: "ws-1",
         title: "No details",
         description: null,
-        status: "closed",
+        statusOverride: "closed",
+        statusOverrideAt: "2026-01-04T00:00:00.000Z",
+        statusOverrideBy: "user-1",
         source: "github",
         integrationId: "int-1",
         repositoryId: "repo-1",
@@ -73,7 +86,7 @@ describe("mappers", () => {
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
       };
-      const dto = issueToDto(row, 0);
+      const dto = issueToDto(row, NO_TASKS);
       expect(dto.description).toBeNull();
       expect(dto.source).toBe("github");
       expect(dto.repositoryId).toBe("repo-1");
@@ -81,6 +94,43 @@ describe("mappers", () => {
       expect(dto.externalUrl).toBe("https://github.com/acme/gate/issues/42");
       expect(dto.syncedAt).toBe("2026-01-03T00:00:00.000Z");
       expect(dto.labels).toEqual([]);
+    });
+
+    it("lets a manual override win over the derived status, and reports both", () => {
+      const row: IssueRow = {
+        id: "issue-3",
+        workspaceId: "ws-1",
+        title: "Abandoned",
+        description: null,
+        statusOverride: "closed",
+        statusOverrideAt: "2026-01-04T00:00:00.000Z",
+        statusOverrideBy: "user-1",
+        source: "local",
+        integrationId: null,
+        repositoryId: null,
+        externalId: null,
+        externalNumber: null,
+        externalUrl: null,
+        syncedAt: null,
+        labels: [],
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      };
+
+      const dto = issueToDto(row, {
+        taskCount: 2,
+        activeTaskCount: 2,
+        derivedStatus: "in_progress",
+      });
+      // Both halves travel: the detail view says "Closed" but can still explain what the Tasks
+      // say underneath it (spec F01 FR-7).
+      expect(dto.status).toBe("closed");
+      expect(dto.derivedStatus).toBe("in_progress");
+      expect(dto.statusOverride).toBe("closed");
+      expect(dto.statusOverrideAt).toBe("2026-01-04T00:00:00.000Z");
+      expect(dto.activeTaskCount).toBe(2);
+      // Who set it is recorded on the row but is not client-facing.
+      expect(Object.keys(dto)).not.toContain("statusOverrideBy");
     });
   });
 

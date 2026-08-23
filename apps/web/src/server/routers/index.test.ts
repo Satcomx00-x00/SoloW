@@ -59,7 +59,7 @@ async function errCode(fn: () => Promise<unknown>): Promise<string> {
 async function taskFixtures(db: TestDb, wsId: string) {
   const c = caller(db, wsId);
   const agentCatalogId = await ensureDefaultAgentCatalog(db, wsId);
-  const secret = await c.secret.set({ name: "sub", kind: "subscription_token", value: "tok" });
+  const { secret } = await c.secret.set({ name: "sub", kind: "subscription_token", value: "tok" });
   const agent = await c.profile.agent.create({
     name: "Claude",
     agentCatalogId,
@@ -145,9 +145,12 @@ describe("tRPC router integration", () => {
   it("secret.set returns metadata only — never echoes the value", async () => {
     const wsId = await seedWs(db, "acme");
     const c = caller(db, wsId);
-    const ref = await c.secret.set({ name: "api", kind: "api_key", value: "sk-ant-secret" });
-    expect(ref).toEqual({ id: ref.id, name: "api", kind: "api_key", usedBy: [] });
-    expect(JSON.stringify(ref)).not.toContain("sk-ant-secret");
+    const result = await c.secret.set({ name: "api", kind: "api_key", value: "sk-ant-secret" });
+    expect(result).toEqual({
+      secret: { id: result.secret.id, name: "api", kind: "api_key", usedBy: [] },
+      resumedTaskCount: 0,
+    });
+    expect(JSON.stringify(result)).not.toContain("sk-ant-secret");
   });
 
   it("rate-limits secret.set per Owner past the window limit", async () => {
