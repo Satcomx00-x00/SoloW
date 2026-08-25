@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { idSchema, taskStateSchema, timestampsSchema } from "./common.js";
 import { gitRefNameSchema } from "./repository.js";
+import { taskCompletionOutcomeSchema } from "./widget.js";
 
 /**
  * How many Repositories one Task may span (issue #7). A ceiling rather than a limit anyone is
@@ -149,6 +150,16 @@ export const moveTaskInput = z.object({
 });
 export type MoveTaskInput = z.infer<typeof moveTaskInput>;
 
+/**
+ * Open the review gate on a Task whose agent has declared it finished (the completion gate).
+ *
+ * A separate procedure from `move` on purpose: moving is a board gesture that may be refused by
+ * the state machine, and this is an assertion that the work is ready to judge — refused when the
+ * agent has not said so. One is dragging a card; the other is opening the gate.
+ */
+export const submitTaskForReviewInput = z.object({ id: idSchema });
+export type SubmitTaskForReviewInput = z.infer<typeof submitTaskForReviewInput>;
+
 export const retryTaskInput = z.object({ id: idSchema });
 export type RetryTaskInput = z.infer<typeof retryTaskInput>;
 
@@ -222,6 +233,19 @@ export const taskDto = z
     /** Every Repository the Task works in, in position order (issue #7). Never empty. */
     repositories: z.array(taskRepositoryDto),
     failureReason: z.string().nullable(),
+    /**
+     * What the agent declared about how its run ended, if it declared anything.
+     *
+     * On the Task rather than derived from its Session, because the board asks it once per card:
+     * "is this finished and waiting for me?" is the question the green control answers, and it
+     * has to be answerable without reading a log per tile.
+     *
+     * A declaration is not a transition. The Task is still wherever it was; only a person moves
+     * it into review (Principle I).
+     */
+    completedAt: z.string().nullable(),
+    completedOutcome: taskCompletionOutcomeSchema.nullable(),
+    completedSummary: z.string().nullable(),
   })
   .merge(timestampsSchema);
 export type TaskDto = z.infer<typeof taskDto>;

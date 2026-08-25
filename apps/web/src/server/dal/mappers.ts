@@ -111,6 +111,9 @@ export function taskToDto(row: TaskRow, attachments: readonly TaskRepositoryRow[
     executorProfileId: row.executorProfileId,
     repositories: [...attachments].sort((a, b) => a.position - b.position).map(taskRepositoryToDto),
     failureReason: row.failureReason,
+    completedAt: row.completedAt,
+    completedOutcome: row.completedOutcome,
+    completedSummary: row.completedSummary,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };

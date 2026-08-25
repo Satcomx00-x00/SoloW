@@ -1,20 +1,27 @@
 <!--
 SYNC IMPACT REPORT
 ==================
-Version change: (uninitialized template) → 1.0.0 → 1.1.0 → 1.2.0 → 1.3.0
-Rationale: 1.0.0 was the first ratification of the GateControl constitution — all
-template placeholders replaced with concrete, testable governance derived from the
-product documentation in docs/ (arc42 architecture, feature specs F01–F18,
-decision records 0001–0010). 1.1.0 (same-day MINOR amendment) adds the front↔back
-communication-protocol constraint: tRPC over HTTP with a generated openapi.json plus a
-bidirectional WebSocket realtime channel (Decision 0011). 1.2.0 (same-day MINOR
-amendment) set the web-client build stack to a Vite + React SPA — SUPERSEDED. 1.3.0
-(same-day MINOR amendment) sets the web framework to Next.js (App Router) delivering a
-SPA-style client (core surfaces are client components; no reliance on SSR/RSC); tRPC +
-openapi.json via Next.js Route Handlers, with the WebSocket channel and orchestration in
-a separate always-on service (Decision 0013, superseding 0012).
+Version change: 1.3.0 → 1.4.0 (MINOR)
+Rationale: three decision records accepted after v1.3.0 (0014, 0015, 0016) changed
+committed architecture without being reflected here, and one of them made a standing
+constraint factually wrong. 0014 supersedes 0009 for GitHub and GitLab: integrations are
+direct REST API clients authenticated by an encrypted Secret, not `gh`/`glab` shell-outs.
+0016 extends that into a capability registry — providers register and declare what they
+can do, rather than being enumerated in a closed union. 0015 adds a default-deny rendering
+constraint for agent output, which is untrusted input in an authenticated session. The
+amendment also records the runtime and lint toolchain (Bun, Biome), names the external MCP
+server as a third API surface, and replaces the approximate quality-gate list with the
+`make verify` chain the repository actually enforces. MINOR: new guidance and constraints,
+no principle removed or redefined.
 
-Principles defined (7):
+Version history: (uninitialized template) → 1.0.0 first ratification, principles derived
+from docs/ (arc42, F01–F18, decisions 0001–0010) → 1.1.0 front↔back protocol: tRPC over
+HTTP + generated openapi.json + bidirectional WebSocket (0011) → 1.2.0 Vite + React SPA
+build stack (0012) — SUPERSEDED → 1.3.0 Next.js App Router delivering a SPA-style client,
+tRPC/openapi via Route Handlers, WebSocket and orchestration in a separate always-on
+service (0013, superseding 0012) → 1.4.0 (this amendment).
+
+Principles defined (7) — unchanged by this amendment:
   I.   Review-First & Human-in-the-Loop (NON-NEGOTIABLE)
   II.  Safe Parallel Isolation
   III. Durable, Resumable Orchestration
@@ -23,29 +30,55 @@ Principles defined (7):
   VI.  Test-First Quality Discipline (NON-NEGOTIABLE)
   VII. One Product, Two Deployments; Own Your Data
 
-Added sections:
-  - Technology & Architecture Constraints (stack + patterns, tenant key, roles)
+Modified sections (v1.4.0):
+  - Technology & Architecture Constraints
+      · Source integrations — REWRITTEN. `gh`/`glab` shell-out replaced by direct REST
+        clients authenticated by an encrypted Secret (0014, superseding 0009 for GitHub
+        and GitLab only; 0009's CLI pattern still governs agents).
+      · API surface — the external MCP server named as a third surface (F12).
+      · Runtime & tooling — ADDED (Bun, Biome).
+      · Extension contributions — ADDED (F19, 0016): capability registration, and the
+        forward-compatibility rule for persisted provider identifiers.
+      · Untrusted agent output — ADDED (0015): fail safe by default, not by configuration.
   - Development Workflow & Quality Gates
-  - Governance
+      · Quality gates — REWRITTEN to the enforced `make verify` chain, adding the
+        openapi.json staleness check and the Executor-boundary audit, and separating
+        `make e2e-critical` as the merge blocker.
 
-Removed sections: none (initial ratification).
+Added sections: none (no new principle or top-level section).
+Removed sections: none.
 
 Templates requiring updates:
-  ✅ .specify/templates/spec-template.md — aligned; roles/tenant key now defined
-     here (workspaceId; Owner/Member/Reviewer/Operator). No edit required — the
-     template already defers to the constitution for its real role/tenant set.
-  ✅ .specify/templates/tasks-template.md — aligned; tenant-isolation @critical
-     gate and feature-flag discipline match Principles V and VI. No edit required.
-  ⚠ .specify/templates/plan-template.md — RESOLVED BY DECISION (v1.2.0): the web
-     client is a Vite + React SPA with no SSR and no React Server Components
-     (Decision 0012), so the template's Server-Components-specific rows (page.tsx as
-     an RSC, loading.tsx, server-side initial data) do not apply. /speckit-plan draws
-     its Stack Reference from this constitution, so generated plans follow the SPA
-     stack. The preset file itself is left unedited to avoid destabilizing it; its
-     RSC rows are simply not used for this project.
+  ✅ .specify/templates/spec-template.md — aligned; defers to this constitution for the
+     role set and tenant key (workspaceId; Owner/Member/Reviewer/Operator).
+  ⚠ .specify/templates/plan-template.md — PENDING. Lines 58-59 and 185 assume React
+     Server Components (`page.tsx` as an RSC, `loading.tsx`, guards on RSC pages), which
+     Decisions 0010 and 0013 do not apply to this project: core surfaces are client
+     components and nothing relies on SSR/RSC. /speckit-plan draws its Stack Reference
+     from this constitution, so generated plans follow the SPA stack regardless; the
+     preset rows are simply unused. Left unedited, as at v1.2.0, to avoid destabilizing
+     the preset.
+  ⚠ .specify/templates/tasks-template.md — PENDING, same conflict, newly identified:
+     lines 45, 168, 170-171 and 244 categorize an RSC page task and a `loading.tsx`
+     skeleton. Otherwise aligned — its tenant-isolation @critical gate and feature-flag
+     discipline match Principles V and VI.
+  ⚠ .specify/templates/agent-context.md — PENDING, newly identified and the most
+     load-bearing of the three, because it is fed to agents as working context: lines 16,
+     28-29, 31 and 97 instruct "default to Server Components", co-located Server Component
+     fetches, `loading.tsx`/`error.tsx` per segment, and HTML streaming.
+  n/a .specify/templates/commands/ — no such directory in this project.
+
+Runtime guidance checked: README.md, docs/README.md, docs/architecture/*.md and CLAUDE.md
+carry no stale `gh`/`glab` integration references; docs/decisions/0009 is correctly marked
+superseded by 0014.
 
 Follow-up TODOs:
-  - none outstanding (plan-template-spa resolved by Decision 0012 at v1.2.0).
+  - TODO(RSC_TEMPLATE_ALIGNMENT): decide whether to edit the three preset templates above
+    or to record the divergence as an accepted deviation. Three amendments have now
+    deferred it.
+  - TODO(MCP_DECISION_RECORD): the external MCP server is built and constrained here, but
+    has no decision record of its own — only feature spec F12. Record one, or state in
+    F12 that no ADR is owed.
 -->
 
 # GateControl Constitution
@@ -177,6 +210,9 @@ an accepted decision record.
   delivering an authenticated **SPA-style** experience: the core interactive surfaces are
   **client components** and the product does not rely on server-side rendering or React Server
   Components for those screens (Decisions 0010, 0013).
+- **Runtime & tooling**: **Bun** is the runtime, package manager, and test runner, and
+  **Biome** is the single linter and formatter. A second toolchain for either role MUST NOT be
+  introduced without an accepted decision record.
 - **Backend shape**: tRPC queries/mutations and the `openapi.json` export are served through
   **Next.js Route Handlers**; the **WebSocket** realtime channel and the **long-lived
   orchestration component** run in a **separate always-on service**, preserving the
@@ -188,18 +224,38 @@ an accepted decision record.
   contracts.
 - **API surface**: **tRPC over HTTP** for queries and mutations (type-safe client, Zod
   contracts reused), with a generated **`openapi.json`** describing the HTTP API exported from
-  the tRPC routers and published as a committed build artifact (Decision 0011).
+  the tRPC routers and published as a committed build artifact (Decision 0011). An external
+  **MCP server** exposes the same procedures to agents and third-party clients as a third
+  surface, authenticated by hashed, revocable, Workspace-scoped tokens (F12); it MUST adapt the
+  existing procedures and Zod contracts rather than re-implement domain logic.
 - **Auth & tenancy**: BetterAuth for authentication; the tenant key is `workspaceId`; roles
   are **Owner**, **Member**, **Reviewer**, and (platform) **Operator**.
 - **Durable orchestration**: Inngest with AgentKit for durable, resumable Workflows and
   human-in-the-loop gates (Decision 0004).
 - **Agent connection**: The Agent Client Protocol (ACP) is the single boundary to agent CLIs;
   adding an agent is configuration, not engineering (Decision 0003).
-- **Source integrations**: GitHub via the `gh` CLI and GitLab via the `glab` CLI, for auth,
-  Issue sync, and pull/merge request creation (Decision 0009).
+- **Source integrations**: Source hosts and trackers are driven through their **REST APIs
+  directly**, authenticated by a Personal Access Token held as an encrypted `Secret` and
+  decrypted only inside the request that needs it — never by shelling out to a vendor CLI, and
+  never by inheriting a host-local CLI login that the product's own credential model cannot
+  express (Decision 0014, superseding 0009 for GitHub and GitLab). Decision 0009's
+  "drive the official CLI" pattern remains correct where its reasoning still holds — most
+  notably agents, whose CLI *is* the integrated product.
+- **Extension contributions**: Commands, status items, notification channels, and integration
+  providers are **registered contributions that declare their capabilities**, not entries in a
+  closed union (F19, Decision 0016). The domain MUST ask for a capability, never for a named
+  provider, and adding a provider MUST be registration rather than an edit spread across the
+  codebase. Because provider identifiers are persisted, a stored value the running build does
+  not recognise MUST degrade to an unfamiliar-but-rendered label, never to a surface that
+  refuses to parse.
 - **Realtime**: A **WebSocket** channel streams live agent activity and state changes to the
   SPA with low latency and carries client input back (terminal I/O, steering). The realtime
   channel is bidirectional and is not covered by `openapi.json` (Decision 0011).
+- **Untrusted agent output**: Agent output is untrusted input rendered inside an authenticated
+  operator session. Whatever renders it MUST fail safe **by default rather than by
+  configuration**: raw HTML escaped, link schemes other than `http(s)` rendered as plain text,
+  no remote images, and no `dangerouslySetInnerHTML` (Decision 0015). These guarantees are
+  load-bearing for the review gate and MUST be covered by tests, never assumed.
 - **Feature flags**: Every user-facing feature ships behind a flag named `ff-[feature-name]`,
   default OFF, with a kill switch.
 - **Secrets**: Accessed only through a validated environment module; never via bare
@@ -218,9 +274,13 @@ an accepted decision record.
 - **Review verifies compliance**: Code review MUST confirm adherence to every applicable
   principle — isolation, review gates, credential safety, Workspace scoping, and test-first
   discipline — not only code style.
-- **Quality gates (all MUST exit 0 before merge)**: lint, typecheck, generated-migration
-  review, unit and integration tests, E2E happy path, the `@critical` Workspace-isolation
-  test, secret scan, and dependency audit at the project's severity threshold.
+- **Quality gates (all MUST exit 0 before merge)**: `make verify` — lint, typecheck, unit
+  tests, the smoke test, the `openapi.json` staleness check, the dependency audit at the
+  project's severity threshold, the Executor-boundary audit (no direct host access outside the
+  local Executor, enforcing Principle II), the secret scan, and the E2E suite, in that order.
+  `make e2e-critical` — the `@critical` Workspace-isolation test — blocks merge with no
+  exception (Principle V). Migrations are generated and reviewed line-by-line as part of
+  `make build`; they are never hand-written.
 - **Documentation moves with the code**: A change to product behaviour and its documentation
   in `docs/` belong in the same change set.
 - **Complexity is justified or rejected**: A deviation from these constraints MUST be recorded
@@ -248,4 +308,4 @@ conflicts with it, the constitution governs and the conflicting artifact MUST be
   (see `docs/README.md`); architecture guidance follows the arc42 sections in
   `docs/architecture/`.
 
-**Version**: 1.3.0 | **Ratified**: 2026-08-17 | **Last Amended**: 2026-08-17
+**Version**: 1.4.0 | **Ratified**: 2026-08-17 | **Last Amended**: 2026-08-24

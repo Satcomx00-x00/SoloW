@@ -151,6 +151,10 @@ export function Board() {
   const move = trpc.task.move.useMutation({ onSuccess: refresh });
   const launch = trpc.task.launch.useMutation({ onSuccess: refresh });
   const retry = trpc.task.retry.useMutation({ onSuccess: refresh });
+  // The card's green control. A mutation of its own rather than `move`, because it asserts the
+  // work is ready to judge and is refused when the agent has not said so — dragging a card and
+  // opening the gate are two different acts.
+  const submitForReview = trpc.task.submitForReview.useMutation({ onSuccess: refresh });
   const [dragError, setDragError] = useState<string | null>(null);
   const [pendingMove, setPendingMove] = useState<{ taskId: string; to: TaskState } | null>(null);
   const [editingBlockersFor, setEditingBlockersFor] = useState<TaskDto | null>(null);
@@ -222,13 +226,14 @@ export function Board() {
   );
 
   const busy = move.isPending || launch.isPending || retry.isPending;
-  const actionError = move.error ?? launch.error ?? retry.error;
+  const actionError = move.error ?? launch.error ?? retry.error ?? submitForReview.error;
   // Spin only the card that was clicked. `busy` still blocks the rest, but a global spinner
   // would claim every task on the board is doing something when one of them is.
   const pendingOn = (id: string) =>
     (move.isPending && move.variables?.id === id) ||
     (launch.isPending && launch.variables?.id === id) ||
-    (retry.isPending && retry.variables?.id === id);
+    (retry.isPending && retry.variables?.id === id) ||
+    (submitForReview.isPending && submitForReview.variables?.id === id);
 
   const onMove = (taskId: string, from: TaskState, to: TaskState) => {
     const refusal = moveRefusal(from, to, outstandingFor(taskId));
@@ -415,6 +420,8 @@ export function Board() {
           renderActions={renderActions}
           blockersFor={blockersFor}
           onMove={onMove}
+          onSubmitForReview={(id) => submitForReview.mutate({ id })}
+          submittingOn={pendingOn}
         />
       )}
       <ConfirmDialog

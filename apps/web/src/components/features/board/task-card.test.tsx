@@ -1,6 +1,6 @@
 /// <reference types="bun-types" />
 
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, mock } from "bun:test";
 import type { IssueDto, TaskDto } from "@gatecontrol/contracts";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderWithTrpc } from "@/test/trpc-harness";
@@ -34,6 +34,9 @@ const task: TaskDto = {
     },
   ],
   failureReason: null,
+  completedAt: null,
+  completedOutcome: null,
+  completedSummary: null,
   createdAt: "2026-01-01T00:00:00.000Z",
   updatedAt: "2026-01-01T00:00:00.000Z",
 };
@@ -182,5 +185,80 @@ describe("TaskCard issue menu, provider not installed", () => {
       { key: "Enter" },
     );
     expect(await screen.findByRole("menuitem", { name: /View on jira/ })).toBeDefined();
+  });
+});
+
+/**
+ * The completion gate (the green control).
+ *
+ * A run finishing is not the same event as work being ready, and neither is the same as a person
+ * deciding to look at it. The card is where those three come apart: it reports what the agent
+ * declared, and offers exactly one action — and only when there is something to judge.
+ */
+describe("the completion gate", () => {
+  const FINISHED: Partial<TaskDto> = {
+    state: "running",
+    completedAt: "2026-08-24T18:00:00.000Z",
+    completedOutcome: "changes_ready",
+    completedSummary: "Pinned 5 dependencies",
+  };
+
+  function showGate(over: Partial<TaskDto> = {}, onSubmitForReview?: (id: string) => void) {
+    return renderWithTrpc(
+      <BoardReferencesProvider value={references}>
+        <TaskCard
+          task={{ ...task, ...over }}
+          {...(onSubmitForReview ? { onSubmitForReview } : {})}
+        />
+      </BoardReferencesProvider>,
+      { "issue.setStatus": () => ({ ...issue, status: "resolved" }) },
+    );
+  }
+
+  it("offers nothing while the agent has declared nothing", () => {
+    showGate({ state: "running" }, () => {});
+
+    expect(screen.queryByRole("button", { name: /open review/i })).toBeNull();
+    expect(screen.queryByText("Finished")).toBeNull();
+  });
+
+  it("shows the control once the agent says the work is ready", () => {
+    showGate(FINISHED, () => {});
+
+    expect(screen.getByRole("button", { name: /open review/i })).toBeDefined();
+  });
+
+  it("opens the gate on the operator's click, and only then", () => {
+    const onSubmitForReview = mock(() => {});
+    showGate(FINISHED, onSubmitForReview);
+
+    expect(onSubmitForReview).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /open review/i }));
+
+    expect(onSubmitForReview).toHaveBeenCalledWith(task.id);
+  });
+
+  it("reports a run that finished with nothing to do, and offers no gate", () => {
+    // Finishing having changed nothing is an answer, and the card should say it rather than
+    // looking like a Task that stalled. There is still nothing to approve.
+    showGate({ ...FINISHED, completedOutcome: "nothing_to_do" }, () => {});
+
+    expect(screen.getByText(/nothing to do/i)).toBeDefined();
+    expect(screen.queryByRole("button", { name: /open review/i })).toBeNull();
+  });
+
+  it("reports a run that gave up, and offers no gate", () => {
+    showGate({ ...FINISHED, completedOutcome: "blocked" }, () => {});
+
+    expect(screen.getByText(/blocked/i)).toBeDefined();
+    expect(screen.queryByRole("button", { name: /open review/i })).toBeNull();
+  });
+
+  it("offers no control on a board that cannot act", () => {
+    showGate(FINISHED);
+
+    expect(screen.queryByRole("button", { name: /open review/i })).toBeNull();
+    // ...but still says the agent finished, because that is a fact about the Task.
+    expect(screen.getByText("Finished")).toBeDefined();
   });
 });

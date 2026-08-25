@@ -46,13 +46,17 @@ import { WIDGET_BRIEF_INSTRUCTIONS, WidgetFenceScanner } from "../../agent/widge
 import { prepareAgentEnv } from "../../billing/guard.js";
 import {
   appendSessionEvent,
+  clearTaskCompletion,
   compactSession,
   isMissingParentRow,
   latestStateTransition,
   loadTaskRunContext,
+  markWorktreesRemoved,
   nextSessionEventSeq,
   nextSessionUsageSeq,
   recordSessionUsage,
+  recordTaskCompletion,
+  recordWorktree,
   setSessionState,
   setTaskRepositoryResultBranch,
   setTaskState,
@@ -745,6 +749,22 @@ export async function runTaskLifecycle(
           return { ok: false as const, repositoryName: binding.repository.name };
         }
       }
+      // The rows that say these directories exist (Principle II), written only once every
+      // attachment succeeded — the rollback above removes what a partial run made, and a row
+      // pointing at a directory that is no longer there is worse than no row at all.
+      const repositoryIdByAttachment = new Map(
+        toProvision.map((binding) => [binding.attachment.id, binding.repository.id]),
+      );
+      for (const entry of created) {
+        const repositoryId = repositoryIdByAttachment.get(entry.attachmentId);
+        if (!repositoryId) continue;
+        await recordWorktree(db, workspaceId, {
+          taskId,
+          repositoryId,
+          path: entry.worktree.path,
+          branch: entry.worktree.branch,
+        });
+      }
       return { ok: true as const, created };
     });
 
@@ -961,6 +981,9 @@ export async function runTaskLifecycle(
               ? abandon("session-usage-record")
               : captureException(log, cause, { stage: "session-usage-record" }),
           );
+        // A usage record *is* a completed turn, deduplicated on the turn id — the only
+        // protocol-independent turn boundary this loop can see. See `captureTurnDiffs`.
+        captureTurnDiffs();
       };
 
       // One typed record, published and persisted (issue #2, AC-1). The wire frame is *derived*
@@ -997,6 +1020,113 @@ export async function runTaskLifecycle(
               ? abandon("session-event-append")
               : captureException(log, cause, { stage: "session-event-append" }),
           );
+      };
+
+      /**
+       * Where the agent went, resolved as soon as it says so.
+       *
+       * A promise rather than the `reported` variable below, because the turn capture runs from
+       * inside the event stream — which starts before that variable is assigned — and a capture
+       * that fired one turn too early would silently record nothing.
+       */
+      let announcePath: (path: string | null) => void = () => {};
+      const announcedPath = new Promise<string | null>((resolve) => {
+        announcePath = resolve;
+      });
+
+      /**
+       * The primary worktree, as a fact rather than a claim.
+       *
+       * A resuming round already holds it. A first round with a `--worktree` agent does not: the
+       * directory is the agent's to create, and it announces the path before its first turn.
+       * Adoption is what turns that announcement into something safe to run git in — the same
+       * check the run's own adoption makes, for the same reason (Principle II). Memoized: it is
+       * a git call, and the answer cannot change within a round.
+       */
+      let primaryAdoption: Promise<Worktree | null> | null = null;
+      const livePrimary = (): Promise<Worktree | null> => {
+        if (wt) return Promise.resolve(wt);
+        primaryAdoption ??= announcedPath
+          .then((path) => (path ? deps.worktree.adopt(repoPath, path) : null))
+          .catch(() => null);
+        return primaryAdoption;
+      };
+
+      /**
+       * The change the agent has made so far, captured at the boundary of every turn that
+       * touched a file.
+       *
+       * The Changes panel renders `diff` records, and until now exactly one place wrote them:
+       * the step that moves a Task to review. An agent that stops mid-run to ask a question —
+       * "the change is in the working tree, shall I commit it?" — therefore left the operator
+       * answering blind, with real work sitting in a worktree the UI structurally could not
+       * show. This is the same capture the gate makes; only *when* moves. The gate still
+       * captures for itself, so a Task that reaches review is unaffected either way.
+       *
+       * Three properties keep it from being expensive or noisy:
+       *
+       *  - **A turn, not a chunk.** It fires from `recordUsage`, which is deduplicated on the
+       *    turn id, so a turn that streamed forty blocks captures once.
+       *  - **Only when something changed.** `hasChanges` is asked first, so the many turns that
+       *    only read cost two git commands rather than four and write nothing.
+       *  - **Only when it changed since last time.** A patch identical to the one already in the
+       *    log is dropped, so later turns that edit nothing add no records.
+       *
+       * Never awaited by the stream and never able to throw into it: a git hiccup mid-run costs
+       * this capture and nothing else.
+       *
+       * One capture at a time, and a turn that arrives while one is running sets `again` rather
+       * than starting a second. Two concurrent reads of a tree the agent is still writing buy
+       * nothing but contention — but *dropping* the later turn would leave the panel showing a
+       * state the agent has already moved on from, which is the failure this whole capture
+       * exists to remove. Trailing re-run, not trailing discard.
+       */
+      let capturing = false;
+      let again = false;
+      let pendingCapture: Promise<void> = Promise.resolve();
+      const lastPatch = new Map<string, string>();
+      const captureOnce = async (): Promise<void> => {
+        const primary = await livePrimary();
+        if (!primary || abandoned) return;
+        for (const entry of worktreeBindings(primary)) {
+          const patterns = patternsFor(entry);
+          if (!(await deps.worktree.hasChanges(entry.worktree.path, patterns))) continue;
+          const captured = await deps.worktree.diff(entry.worktree.path, patterns);
+          const repositoryId = entry.binding.repository.id;
+          if (lastPatch.get(repositoryId) === captured.patch) continue;
+          lastPatch.set(repositoryId, captured.patch);
+          // Through `emit`, not a bare append: the record is redacted, validated and published
+          // on the one path every other event takes, so a client watching live and a client that
+          // reconnects are shown the same thing (issue #2, AC-5).
+          emit({
+            kind: "diff",
+            diffRef: entry.worktree.branch,
+            repositoryId,
+            repositoryName: entry.binding.repository.name,
+            ...captured,
+          });
+        }
+      };
+      const captureTurnDiffs = () => {
+        if (abandoned) return;
+        if (capturing) {
+          again = true;
+          return;
+        }
+        capturing = true;
+        pendingCapture = (async () => {
+          try {
+            do {
+              again = false;
+              await captureOnce();
+            } while (again && !abandoned);
+          } catch (cause) {
+            captureException(log, cause, { stage: "diff-capture-turn" });
+          } finally {
+            again = false;
+            capturing = false;
+          }
+        })();
       };
 
       /**
@@ -1046,11 +1176,40 @@ export async function runTaskLifecycle(
         for (const widget of out.widgets) {
           const widgetId = randomUUID();
           if (widgetExpectsResponse(widget)) pendingWidgets.set(widgetId, widget);
-          // The agent saying how its run ended. Held rather than acted on: an agent can emit this
-          // and then keep working — it is prose, not a tool call, and nothing stops it — so what
-          // counts is the last one standing when the run actually ends. It is still recorded as a
-          // widget so the transcript shows what was said and when.
-          if (widget.kind === "task_complete") completion.widget = widget;
+          /*
+           * The agent saying how its run ended.
+           *
+           * Held for the end of the run, because an agent can emit this and then keep working —
+           * it is prose, not a tool call, and nothing stops it — so what counts is the last one
+           * standing when the run actually ends.
+           *
+           * *And* written down immediately, which is the part that was missing. The declaration
+           * used to reach the Task row only when the agent's process exited, and an agent that
+           * declares and then waits for the operator does not exit: a run could sit for eleven
+           * minutes having said "changes_ready" with the board still drawing it as working, and
+           * no amount of refreshing would have helped — there was nothing to fetch. A later
+           * declaration overwrites this one, which is the same "last one standing" rule.
+           */
+          if (widget.kind === "task_complete") {
+            completion.widget = widget;
+            const declared = widget;
+            writes = writes
+              .then(() =>
+                recordTaskCompletion(db, workspaceId, taskId, {
+                  outcome: declared.outcome,
+                  summary: declared.summary ?? null,
+                  at: new Date().toISOString(),
+                }),
+              )
+              // The Task's state has not changed, so nothing else will tell the board. This is
+              // the announcement that puts the control on the card, live.
+              .then(() => announce("running"))
+              .catch((cause) =>
+                isMissingParentRow(cause)
+                  ? abandon("task-completion-record")
+                  : captureException(log, cause, { stage: "task-completion-record" }),
+              );
+          }
           emit({ kind: "widget", widgetId, widget });
         }
       };
@@ -1134,6 +1293,9 @@ export async function runTaskLifecycle(
         },
       });
       live = handle;
+      // Hand the reported path to the turn capture the moment the agent states it — the capture
+      // is already running by now, waiting on exactly this.
+      void handle.workspacePath.then(announcePath, () => announcePath(null));
       // Publish the handle for the lifetime of the run so the hub can deliver the operator's
       // input or stop to *this* agent (TASK-022), and withdraw it the moment the run ends.
       const deregister = deps.registry.register(workspaceId, {
@@ -1178,6 +1340,9 @@ export async function runTaskLifecycle(
         outcome = await handle.outcome;
       } finally {
         deregister();
+        // Drain an in-flight turn capture first: it appends through `emit`, so a capture still
+        // running would otherwise chain its write on after the drain below had already passed.
+        await pendingCapture;
         // Drain queued log and usage writes even when the run threw. Usage in particular
         // cannot be re-obtained — the agent reports it once — so abandoning the chain on a
         // mid-turn failure would lose it permanently rather than merely delay it.
@@ -1248,6 +1413,7 @@ export async function runTaskLifecycle(
         changed,
         worktree: adopted,
         outcome: completion.widget?.outcome ?? null,
+        summary: completion.widget?.summary ?? null,
       };
     });
 
@@ -1263,6 +1429,19 @@ export async function runTaskLifecycle(
       // The audit line binding a worktree to its Task (Principle IV) is emitted on adoption,
       // because that is the first moment GateControl knows which directory the agent used.
       logWorktreeBinding(log, { workspaceId, taskId, worktreePath: run.worktree.path });
+      // And the row saying the same thing, for everything that has to answer "does this Task
+      // still hold a working copy" without a filesystem to look at — the delete preview and the
+      // Issue view both ask, and both read this table. Its own step, so it survives a restart
+      // between the run and the gate; idempotent, so a retried round does not double it.
+      const adoptedPrimary = run.worktree;
+      await step.run(`record-worktree-${round}`, () =>
+        recordWorktree(db, workspaceId, {
+          taskId,
+          repositoryId: primaryBinding.repository.id,
+          path: adoptedPrimary.path,
+          branch: adoptedPrimary.branch,
+        }),
+      );
     }
 
     if (run.kind === "abandoned") {
@@ -1296,12 +1475,30 @@ export async function runTaskLifecycle(
       return { taskId, result: run.cls };
     }
 
-    // Completed: move to review and wait for a human decision.
+    /*
+     * The agent has finished. It does not follow that the Task is in review.
+     *
+     * This step used to move it there itself, which made the review gate something that happened
+     * *to* an operator rather than something they opened — and made "the agent stopped" and "the
+     * work is ready" the same event, which they are not: an agent stops when it runs out of
+     * things to do, when it runs out of context, and when it decides the brief was already
+     * satisfied. Only one of those is worth a person's attention, and only the agent knows which.
+     *
+     * So the run records the declaration and the change, and stops. The Task stays where it is,
+     * the board shows it as finished, and the transition into `review` is the operator's click —
+     * one action, theirs (Principle I is a gate for a human to open, not a conveyor).
+     */
     const worktree = run.worktree;
     const gate = worktreeBindings(worktree);
     await step.run(`to-review-${round}`, async () => {
-      await setTaskState(db, workspaceId, taskId, "review");
-      await recordTransition("running", "review");
+      await recordTaskCompletion(db, workspaceId, taskId, {
+        // `changes_ready` when the agent said nothing: it stopped having produced a run, and the
+        // conservative reading is the one that puts the work in front of a person rather than
+        // the one that quietly files it as "nothing to see".
+        outcome: run.outcome ?? "changes_ready",
+        summary: run.summary ?? null,
+        at: new Date().toISOString(),
+      });
       await setSessionState(db, workspaceId, sessionId, "awaiting_review", {
         diffRef: worktree.branch,
       });
@@ -1336,8 +1533,9 @@ export async function runTaskLifecycle(
 
       deps.hub.publish(channel, { kind: "diff", taskId, sessionId, diffRef: worktree.branch });
     });
-    logStateTransition(log, { workspaceId, taskId, from: "running", to: "review" });
-    announce("review");
+    // The board still has to hear about it — the card's "finished" control appears on this, and
+    // the Task's state has not changed to carry the news for it.
+    announce("running");
 
     const decidedEvent = await step.waitForEvent(`await-review-${round}`, {
       event: "review.decided",
@@ -1428,6 +1626,9 @@ export async function runTaskLifecycle(
     pendingFeedback = feedback ?? "";
     await step.run(`resume-${round}`, async () => {
       await setTaskState(db, workspaceId, taskId, "running");
+      // The previous round's declaration does not describe the round about to start. Left in
+      // place, the board would keep offering to review work that is being rewritten as you look.
+      await clearTaskCompletion(db, workspaceId, taskId);
       await recordTransition("review", "running");
     });
     logStateTransition(log, { workspaceId, taskId, from: "review", to: "running" });
@@ -1451,6 +1652,15 @@ export async function runTaskLifecycle(
       for (const entry of remaining) {
         await deps.worktree.cleanup(entry.worktree.repoPath, entry.worktree.path);
       }
+      // After the directories are gone, not before: a row marked removed while the removal is
+      // still in flight would be a table that disagrees with the disk in the one direction that
+      // matters — telling the delete path there is nothing left to tear down.
+      await markWorktreesRemoved(
+        db,
+        workspaceId,
+        taskId,
+        remaining.map((entry) => entry.worktree.path),
+      );
     });
   }
   return { taskId, result: "done" };

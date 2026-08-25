@@ -35,3 +35,4 @@ Rules for this log ([per our conventions](../CONVENTIONS.md)):
 | [0014](./0014-direct-api-source-integrations.md) | Drive GitHub/GitLab integrations through their REST APIs directly, not gh/glab | Accepted |
 | [0015](./0015-markdown-rendering-of-agent-output.md) | Render agent output as Markdown with react-markdown (no raw HTML) | Accepted |
 | [0016](./0016-integration-provider-registry.md) | Register integration providers by capability, rather than enumerating them | Accepted |
+| [0017](./0017-worktree-git-rpc.md) | Reach a Task's worktree through a synchronous RPC on the orchestrator | Accepted |

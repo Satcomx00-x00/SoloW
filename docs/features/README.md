@@ -34,6 +34,7 @@ differentiator) · **Later** (planned after first release).
 | [F19](./F19-extension-contributions.md) | Extension Contributions | Core | J4, J10 |
 | [F20](./F20-agent-widgets.md) | Agent Widgets | Core | J4, J10 |
 | [F21](./F21-integration-providers.md) | Integration Providers | Core | J2, J10 |
+| [F22](./F22-source-control.md) | Source Control Panel | Core | J5, J10 |
 
 ## Specification template
 

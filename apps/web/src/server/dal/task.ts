@@ -229,7 +229,18 @@ export async function updateTaskState(
     .update(task)
     .set({
       state,
-      ...(extra?.failureReason !== undefined ? { failureReason: extra.failureReason } : {}),
+      // Leaving `failed` clears the reason, unless the caller states one of its own.
+      //
+      // It used to persist: the column was only written when a caller passed it, so a Task
+      // dragged out of Failed kept the old reason and carried it into `running` — a card that
+      // reads "interrupted" while its agent is working, and a stale explanation attached to
+      // whatever happens next. A reason describes the failure it belongs to, and that failure is
+      // over.
+      ...(extra?.failureReason !== undefined
+        ? { failureReason: extra.failureReason }
+        : state === "failed"
+          ? {}
+          : { failureReason: null }),
       updatedAt: new Date().toISOString(),
     })
     .where(and(eq(task.workspaceId, ctx.workspaceId), eq(task.id, id)))

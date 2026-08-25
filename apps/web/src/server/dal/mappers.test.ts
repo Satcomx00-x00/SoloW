@@ -144,6 +144,9 @@ describe("mappers", () => {
       agentProfileId: "agent-1",
       executorProfileId: "exec-1",
       failureReason: null,
+      completedAt: null,
+      completedOutcome: null,
+      completedSummary: null,
       // A Task on no Workflow, which is every Task that exists today (issue #5).
       workflowId: null,
       workflowStepId: null,

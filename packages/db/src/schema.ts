@@ -15,6 +15,7 @@ import type {
   ScmProvider,
   SecretKind,
   SessionState,
+  TaskCompletionOutcome,
   TaskState,
   WorkflowAdvanceOn,
   WorkflowStepAutomation,
@@ -367,6 +368,24 @@ export const task = sqliteTable(
       .notNull()
       .references(() => executorProfile.id),
     failureReason: text("failure_reason"),
+    /**
+     * What the agent said about how its run ended, and when it said it (spec F22 / the
+     * completion gate).
+     *
+     * Columns rather than a read of the session log, because the board asks this question once
+     * per card on every render: "has this Task finished?" is a property of the Task, and
+     * answering it by scanning each Task's events would put a subquery per tile on the one
+     * screen that has to stay fast.
+     *
+     * Null means the agent has not declared anything — which is *not* the same as failing.
+     * Nothing here moves the Task: the declaration is a report, and the person decides
+     * (Principle I). `completedOutcome` is the agent's own word from `task_complete`, so a run
+     * that finished having changed nothing is distinguishable from one that produced work.
+     */
+    completedAt: text("completed_at"),
+    completedOutcome: text("completed_outcome").$type<TaskCompletionOutcome>(),
+    /** What the agent wants read before the diff is opened. Shown on the card and in the header. */
+    completedSummary: text("completed_summary"),
     /**
      * The Workflow this Task follows, and where it has got to (issue #5). All four are nullable
      * and every Task that exists today has them null, which is exactly "this Task follows no

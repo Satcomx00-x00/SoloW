@@ -134,6 +134,13 @@
       "when": 1787411724660,
       "tag": "0018_condemned_bullseye",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1787599140717,
+      "tag": "0019_abnormal_the_stranger",
+      "breakpoints": true
     }
   ]
 }

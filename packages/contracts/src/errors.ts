@@ -34,6 +34,15 @@ export const TaskErrorCode = {
    * `IssueErrorCode.StopFailed`, which this is the single-Task counterpart of.
    */
   StopFailed: "TASK_STOP_FAILED",
+  /**
+   * Someone asked to open the review gate on a Task whose agent has not said it finished.
+   *
+   * The gate is for judging finished work. Opening it on a run that is still going — or on one
+   * that stopped without declaring anything — asks a person to approve something nobody has
+   * claimed is complete, which is how the review record ends up describing work that was still
+   * being written.
+   */
+  NotComplete: "TASK_NOT_COMPLETE",
 } as const;
 export type TaskErrorCode = (typeof TaskErrorCode)[keyof typeof TaskErrorCode];
 

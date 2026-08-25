@@ -3,6 +3,7 @@
 import type { DiffFileDto, TaskDiffDto } from "@gatecontrol/contracts";
 import { FileMinus2, FilePen, FilePlus2, GitBranch } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { PatchView } from "./patch-view";
 
 /**
  * The change an agent is proposing, file by file (task TASK-022).
@@ -22,16 +23,6 @@ const STATUS_STYLE: Record<DiffFileDto["status"], { icon: typeof FilePen; tone: 
   deleted: { icon: FileMinus2, tone: "text-state-failed" },
   renamed: { icon: FilePen, tone: "text-state-parked" },
 };
-
-/** A line's role in the patch, from its first character. */
-function lineTone(line: string): string {
-  if (line.startsWith("+++") || line.startsWith("---")) return "text-muted-foreground/60";
-  if (line.startsWith("@@")) return "text-state-parked";
-  if (line.startsWith("+")) return "text-state-done";
-  if (line.startsWith("-")) return "text-state-failed";
-  if (line.startsWith("diff --git")) return "text-muted-foreground font-medium";
-  return "text-foreground/70";
-}
 
 function FileRow({ file }: { file: DiffFileDto }) {
   const { icon: Icon, tone } = STATUS_STYLE[file.status];
@@ -111,24 +102,7 @@ export function DiffView({ diff, branch }: { diff: TaskDiffDto | null; branch: s
         )}
       </div>
 
-      {diff.patch && (
-        <div className="surface-edge flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-[oklch(0.13_0.008_265)]">
-          <pre className="min-h-0 flex-1 overflow-auto p-3 font-mono text-xs leading-[1.6]">
-            {diff.patch.split("\n").map((line, index) => (
-              // biome-ignore lint/suspicious/noArrayIndexKey: a patch is positional text whose lines carry no identity of their own, and this renders an immutable string that is never reordered or spliced.
-              <div key={index} className={cn("whitespace-pre", lineTone(line))}>
-                {line || " "}
-              </div>
-            ))}
-          </pre>
-          {diff.truncated && (
-            <p className="shrink-0 border-t bg-card px-3 py-1.5 text-2xs text-muted-foreground">
-              Patch truncated. The file list above is complete; check out the branch to read the
-              rest.
-            </p>
-          )}
-        </div>
-      )}
+      {diff.patch && <PatchView patch={diff.patch} truncated={diff.truncated} />}
     </div>
   );
 }

@@ -71,9 +71,22 @@ export const reviewRouter = router({
       });
 
       // Dev stand-in for the orchestrator's integrate step: apply the resulting Task state
-      // and close the session on a terminal decision. Skipped once a real engine is wired —
-      // there the workflow owns the transition, and writing it here too would race it.
-      if (devOwnerMode() && !orchestrator.isWired()) {
+      // and close the session on a terminal decision.
+      //
+      // Normally skipped once a real engine is wired — there the durable `task-run` sits parked
+      // at its `waitForEvent("review.decided")` and owns the transition, so writing it here too
+      // would race it. The tell for "a run is parked" is the Session state: `task-run` sets it to
+      // `awaiting_review` immediately before it parks. So a wired engine with the Session still
+      // `awaiting_review` means the run is there to apply this — leave it. Any OTHER Session state
+      // means no run is parked to receive the event we just published: the local Inngest Dev
+      // Server holds runs in memory and loses parked ones on restart (see `scripts/dev.sh
+      // --persist`), which strands the Task in `review` with an un-decidable gate. Applying the
+      // transition here then is a recovery, not a race — there is nothing to race.
+      //
+      // Dev-owner only, exactly as before: a hosted deployment runs a persistent engine and must
+      // not have the API second-guess whether a run is parked (Principle VII).
+      const engineOwnsTransition = orchestrator.isWired() && session.state === "awaiting_review";
+      if (devOwnerMode() && !engineOwnsTransition) {
         const nextState = DECISION_TASK_STATE[input.decision];
         unwrap(await updateTaskState(ctx.rctx, session.taskId, nextState));
         if (input.decision !== "request_changes") {

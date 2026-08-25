@@ -1,6 +1,7 @@
 import "server-only";
-import type { ReviewDecision } from "@gatecontrol/contracts";
-import { devOwnerMode, orchestratorUrl } from "./env.js";
+import type { ReviewDecision, TaskState } from "@gatecontrol/contracts";
+import { signStreamTicket } from "@gatecontrol/core/stream";
+import { devOwnerMode, orchestratorUrl, webEnv } from "./env.js";
 
 /**
  * Thin client the API uses to hand work to the orchestrator service (Decision 0002).
@@ -33,6 +34,15 @@ export interface OrchestratorClient {
     decision: ReviewDecision;
     feedback?: string | null;
   }): Promise<void>;
+  /**
+   * Tell every client watching that a Task changed, for a change this API made itself.
+   *
+   * The hub runs in the orchestrator process, so a state change made by a person reached only
+   * the browser that made it — every other open board sat stale until someone reloaded. Fire and
+   * forget, and deliberately never fatal: the write already succeeded, and a failed notification
+   * must not turn a completed action into an error. The worst case is the old behaviour.
+   */
+  announceTask(input: { workspaceId: string; taskId: string; state: TaskState }): Promise<void>;
 }
 
 const UNWIRED = "orchestrator not configured (GATECONTROL_ORCHESTRATOR_URL unset)";
@@ -79,5 +89,27 @@ export const orchestrator: OrchestratorClient = {
       return;
     }
     throw new Error(`${UNWIRED}: review resume unavailable`);
+  },
+
+  async announceTask(input) {
+    const base = orchestratorUrl();
+    // Silent where there is no hub to tell: a dev run without an orchestrator is not a broken
+    // deployment, and logging a line per state change would drown the console it shares.
+    if (!base) return;
+    try {
+      const ticket = signStreamTicket(
+        { workspaceId: input.workspaceId, taskId: input.taskId },
+        webEnv().GATECONTROL_STREAM_SECRET,
+        Date.now(),
+      );
+      await fetch(new URL("/announce", base), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ticket, state: input.state }),
+      });
+    } catch {
+      // Swallowed on purpose. The state change is already written and answered; this is the
+      // notification, and a hub that is down costs a stale board rather than a failed action.
+    }
   },
 };

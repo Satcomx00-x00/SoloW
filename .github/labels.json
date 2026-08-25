@@ -20,6 +20,36 @@
     "description": "Deferred; revisit when its prerequisites land"
   },
   {
+    "name": "order/1-core",
+    "color": "044F5C",
+    "description": "Stage 1 - remaining core; the rest of the backlog hangs off these"
+  },
+  {
+    "name": "order/2-enablers",
+    "color": "0B7285",
+    "description": "Stage 2 - one hop upstream of other work"
+  },
+  {
+    "name": "order/3-ready",
+    "color": "1098AD",
+    "description": "Stage 3 - high priority, unblocked, nothing waits on them"
+  },
+  {
+    "name": "order/4-breadth",
+    "color": "3BC9DB",
+    "description": "Stage 4 - capability breadth once the core is in"
+  },
+  {
+    "name": "order/5-unlocked",
+    "color": "99E9F2",
+    "description": "Stage 5 - opens once stages 1 and 2 land"
+  },
+  {
+    "name": "order/6-final",
+    "color": "C5F6FA",
+    "description": "Stage 6 - assembled last, from the rest of the backlog"
+  },
+  {
     "name": "kind/foundation",
     "color": "5319E7",
     "description": "Architectural work other issues depend on"

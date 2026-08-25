@@ -85,7 +85,16 @@ bun --hot run apps/orchestrator/src/main.ts &
 PIDS="$PIDS $!"
 
 echo "[dev] inngest      → http://localhost:$GATECONTROL_INNGEST_PORT  (Dev Server, Decision 0004)"
-bunx inngest-cli dev --no-discovery \
+# `--persist` keeps the durable engine's state (queued events AND in-flight runs)
+# across restarts. Without it the Dev Server holds everything in memory, so any run
+# parked at the review gate (`task-run`'s `waitForEvent("review.decided")`) is lost
+# the moment the server restarts — and `bun --hot` above restarts the orchestrator
+# on every edit, which the Dev Server follows. A lost parked run leaves its Task
+# stranded in `review`: `review.decide` then publishes `review.decided` to a wait
+# that no longer exists, the decision is recorded but never applied, and Approve /
+# Request changes appear dead. The app DB and the secret key are already persisted
+# a few lines up for the same reason — the engine's state was the missing third.
+bunx inngest-cli dev --no-discovery --persist \
     -u "http://localhost:$GATECONTROL_WS_PORT/api/inngest" \
     -p "$GATECONTROL_INNGEST_PORT" &
 PIDS="$PIDS $!"

@@ -11,6 +11,7 @@ import {
   removeTaskDependencyInput,
   retryTaskInput,
   setTaskRepositoriesInput,
+  submitTaskForReviewInput,
   TaskDependencyErrorCode,
   type TaskDto,
   TaskErrorCode,
@@ -239,7 +240,49 @@ export const taskRouter = router({
       // Moving is not starting — a blocked Task may still be dragged around the board. Only the
       // move *into* `running` is a start, and it goes through the same gate as launch.
       if (input.to === "running") await requireUnblocked(ctx.rctx, task.id);
-      return unwrap(await updateTaskState(ctx.rctx, task.id, input.to));
+      const moved = unwrap(await updateTaskState(ctx.rctx, task.id, input.to));
+      // Every client watching, not just the one that dragged the card.
+      await orchestrator.announceTask({
+        workspaceId: ctx.rctx.workspaceId,
+        taskId: moved.id,
+        state: moved.state,
+      });
+      return moved;
+    }),
+
+  submitForReview: ownerProcedure
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/task.submitForReview",
+        tags: ["task"],
+        protect: true,
+        summary:
+          "Open the review gate on a Task whose agent has declared it finished. Refused when no declaration has been made — the gate is for judging finished work, not work still in progress.",
+      },
+    })
+    .input(submitTaskForReviewInput)
+    .output(taskDto)
+    .mutation(async ({ ctx, input }) => {
+      const task = unwrap(await getTaskById(ctx.rctx, input.id));
+      // The agent's own word, and only `changes_ready` counts: a run that finished having changed
+      // nothing (`nothing_to_do`) has nothing to approve, and one that gave up (`blocked`) has not
+      // finished at all. Checked here rather than only in the UI, because the button is not the
+      // only caller — MCP and the OpenAPI surface reach this too.
+      if (task.completedAt === null || task.completedOutcome !== "changes_ready") {
+        throw new TRPCError({
+          code: "PRECONDITION_FAILED",
+          message: TaskErrorCode.NotComplete,
+        });
+      }
+      unwrap(canTransitionTask(task.state, "review"));
+      const opened = unwrap(await updateTaskState(ctx.rctx, task.id, "review"));
+      await orchestrator.announceTask({
+        workspaceId: ctx.rctx.workspaceId,
+        taskId: opened.id,
+        state: opened.state,
+      });
+      return opened;
     }),
 
   retry: ownerProcedure

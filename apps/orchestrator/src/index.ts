@@ -1,5 +1,5 @@
 /// <reference types="bun-types" />
-import { taskInputSchema } from "@gatecontrol/contracts";
+import { announceRequest, taskInputSchema } from "@gatecontrol/contracts";
 import {
   type StreamTicketClaims,
   streamChannel,
@@ -73,6 +73,51 @@ export function authorizeUpgrade(
     ok: true,
     data: { claims: verified.claims, channel: streamChannel(verified.claims), since },
   };
+}
+
+/**
+ * Tell every client watching that a Task changed, when the change was made by the API rather
+ * than by a run.
+ *
+ * The hub lives in this process and the web app does not, so a state change made by a person —
+ * moving a card, opening the review gate, retrying — reached only the browser that made it. Its
+ * own client refetched and every other one sat on a stale board until someone reloaded, which is
+ * exactly the "I have to refresh" this endpoint removes.
+ *
+ * Authorised by the same signed ticket the WebSocket upgrade takes, and the Workspace and Task
+ * are read from the ticket's *claims* — never from the body, so a caller cannot announce into
+ * another tenant's channel (Principle V). It publishes and nothing else: no state is written
+ * here, because the API already wrote it. This is the notification, not the change.
+ */
+export async function handleAnnouncePost(
+  req: Request,
+  deps: Pick<WsServerDeps, "now" | "streamSecret">,
+): Promise<Response> {
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return new Response("invalid_json", { status: 400 });
+  }
+  const parsed = announceRequest.safeParse(body);
+  if (!parsed.success) return new Response("invalid_request", { status: 400 });
+
+  const verified = verifyStreamTicket(parsed.data.ticket, deps.streamSecret, deps.now());
+  if (!verified.ok) return new Response(verified.error, { status: 401 });
+  const { workspaceId, taskId } = verified.claims;
+  // A board-scoped ticket names no Task, and there is no Task-shaped news to publish without
+  // one. Refused rather than broadcast, so the frame's `taskId` is always a real Task.
+  if (!taskId) return new Response("task_ticket_required", { status: 400 });
+
+  const message = {
+    kind: "status" as const,
+    taskId,
+    state: parsed.data.state,
+    at: new Date(deps.now()).toISOString(),
+  };
+  hub.publish(hub.boardChannel(workspaceId), message);
+  hub.publish(hub.taskChannel(workspaceId, taskId), message);
+  return new Response(null, { status: 202 });
 }
 
 /**
@@ -246,6 +291,7 @@ export function startWebSocketServer(
       // Inngest Dev Server (or, hosted, Inngest Cloud) polls to discover and invoke `taskRun`.
       if (pathname === "/events" && req.method === "POST") return handleEventPost(req);
       if (pathname === "/api/inngest") return inngestServeHandler(req);
+      if (pathname === "/announce" && req.method === "POST") return handleAnnouncePost(req, deps);
 
       const auth = authorizeUpgrade(req.url, deps);
       if (!auth.ok) return new Response(auth.error, { status: auth.status });

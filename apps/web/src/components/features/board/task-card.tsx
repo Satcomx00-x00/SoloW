@@ -1,6 +1,6 @@
 import type { TaskDependencyDto, TaskDto } from "@gatecontrol/contracts";
 import { primaryTaskRepository, unsatisfiedDependencies } from "@gatecontrol/core";
-import { GitBranch, KeyRound, Library, Lock, RotateCcw } from "lucide-react";
+import { CheckCircle2, GitBranch, KeyRound, Library, Lock, RotateCcw } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -42,12 +42,23 @@ export function TaskCard({
   dragHandle,
   blockers,
   ghost,
+  onSubmitForReview,
+  submitting = false,
 }: {
   task: TaskDto;
   actions?: ReactNode;
   dragHandle?: ReactNode;
   blockers?: readonly TaskDependencyDto[] | undefined;
   ghost?: boolean;
+  /**
+   * Open the review gate on a Task whose agent has declared it finished.
+   *
+   * Absent on a board that cannot act — the ghost a drag leaves behind, and any read-only view.
+   * The control is the *only* way a Task enters review: the run records the declaration and
+   * stops, and this click is the one action that opens the gate (Principle I).
+   */
+  onSubmitForReview?: (taskId: string) => void;
+  submitting?: boolean;
 }) {
   const attention = needsAttention(task.state);
   const references = useBoardReferences();
@@ -65,6 +76,17 @@ export function TaskCard({
   const extraRepositories = Math.max(task.repositories.length - 1, 0);
   const outstanding = unsatisfiedDependencies(blockers ?? []);
   const first = outstanding[0];
+  /*
+   * "The agent says it has finished, and there is something to look at."
+   *
+   * Both halves matter. `completedAt` alone would also be true of a run that finished having
+   * changed nothing (`nothing_to_do`) or one that gave up (`blocked`) — neither has anything to
+   * approve, and offering the gate on them asks a person to sign off on nothing. The badge below
+   * still reports those, because "finished, nothing to do" is an answer and the card should say
+   * it rather than looking like a Task that stalled.
+   */
+  const declared = task.completedAt !== null;
+  const readyForReview = declared && task.completedOutcome === "changes_ready";
 
   return (
     <article
@@ -95,8 +117,25 @@ export function TaskCard({
           {dragHandle}
         </div>
 
-        {(outstanding.length > 0 || task.failureReason || extraRepositories > 0) && (
+        {(outstanding.length > 0 || task.failureReason || declared || extraRepositories > 0) && (
           <div className="mt-2.5 flex items-center gap-1.5">
+            {declared ? (
+              <span
+                className={cn(
+                  "inline-flex items-center gap-1 rounded border px-1.5 py-px text-2xs",
+                  readyForReview
+                    ? "border-state-done/30 bg-state-done/10 text-state-done"
+                    : "border-border bg-muted/40 text-muted-foreground",
+                )}
+              >
+                <CheckCircle2 className="size-3 shrink-0" aria-hidden />
+                {task.completedOutcome === "nothing_to_do"
+                  ? "Finished — nothing to do"
+                  : task.completedOutcome === "blocked"
+                    ? "Stopped — blocked"
+                    : "Finished"}
+              </span>
+            ) : null}
             {outstanding.length > 0 && first ? (
               <TooltipProvider delayDuration={200}>
                 <Tooltip>
@@ -205,6 +244,27 @@ export function TaskCard({
             {issue && <IssueMenu issue={issue} />}
           </div>
         )}
+
+        {/*
+          The one action that opens the review gate.
+          
+          Green, and only present when the agent has declared `changes_ready` — a Task still
+          working, or one that finished with nothing to show, offers nothing to click. The label
+          says what will happen rather than naming a column, because "Review" beside a card
+          already sitting in a column is ambiguous about which way it goes.
+        */}
+        {readyForReview && onSubmitForReview ? (
+          <button
+            type="button"
+            disabled={submitting}
+            onClick={() => onSubmitForReview(task.id)}
+            title={task.completedSummary ?? undefined}
+            className="mt-2.5 inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-state-done/35 bg-state-done/12 px-2 py-1.5 font-medium text-2xs text-state-done transition-colors hover:bg-state-done/20 disabled:opacity-50"
+          >
+            <CheckCircle2 className="size-3.5 shrink-0" aria-hidden />
+            Open review
+          </button>
+        ) : null}
 
         {actions ? <div className="mt-2.5 flex gap-1.5">{actions}</div> : null}
       </div>

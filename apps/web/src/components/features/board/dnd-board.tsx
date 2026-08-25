@@ -31,10 +31,14 @@ function DraggableCard({
   task,
   actions,
   blockers,
+  onSubmitForReview,
+  submitting,
 }: {
   task: TaskDto;
   actions?: ReactNode;
   blockers?: readonly TaskDependencyDto[] | undefined;
+  onSubmitForReview?: ((taskId: string) => void) | undefined;
+  submitting?: boolean | undefined;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: task.id,
@@ -58,7 +62,14 @@ function DraggableCard({
   );
   return (
     <div ref={setNodeRef} className={cn(isDragging && "opacity-30")}>
-      <TaskCard task={task} actions={actions} dragHandle={handle} blockers={blockers} />
+      <TaskCard
+        task={task}
+        actions={actions}
+        dragHandle={handle}
+        blockers={blockers}
+        {...(onSubmitForReview ? { onSubmitForReview } : {})}
+        submitting={submitting ?? false}
+      />
     </div>
   );
 }
@@ -69,12 +80,16 @@ function DroppableColumn({
   tasks,
   renderActions,
   blockersFor,
+  onSubmitForReview,
+  submittingOn,
 }: {
   state: TaskState;
   label: string;
   tasks: TaskDto[];
   renderActions?: ((task: TaskDto) => ReactNode) | undefined;
   blockersFor?: ((taskId: string) => readonly TaskDependencyDto[] | undefined) | undefined;
+  onSubmitForReview?: ((taskId: string) => void) | undefined;
+  submittingOn?: ((taskId: string) => boolean) | undefined;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: state });
   return (
@@ -98,6 +113,8 @@ function DroppableColumn({
                 task={task}
                 actions={renderActions?.(task)}
                 blockers={blockersFor?.(task.id)}
+                onSubmitForReview={onSubmitForReview}
+                submitting={submittingOn?.(task.id) ?? false}
               />
             </li>
           ))}
@@ -113,12 +130,17 @@ export function DndBoard({
   renderActions,
   blockersFor,
   onMove,
+  onSubmitForReview,
+  submittingOn,
 }: {
   tasks: TaskDto[];
   renderActions?: ((task: TaskDto) => ReactNode) | undefined;
   // Same lookup the plain board takes, so the two cannot drift on whether a card looks blocked.
   blockersFor?: ((taskId: string) => readonly TaskDependencyDto[] | undefined) | undefined;
   onMove: (taskId: string, from: TaskState, to: TaskState) => void;
+  /** The card's green control — absent on a board that cannot act. */
+  onSubmitForReview?: ((taskId: string) => void) | undefined;
+  submittingOn?: ((taskId: string) => boolean) | undefined;
   /** e.g. the Backlog column's "new issue" / "connect repository" buttons. */
 }) {
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -160,6 +182,8 @@ export function DndBoard({
             tasks={tasks.filter((task) => task.state === state)}
             renderActions={renderActions}
             blockersFor={blockersFor}
+            onSubmitForReview={onSubmitForReview}
+            submittingOn={submittingOn}
           />
         ))}
       </section>

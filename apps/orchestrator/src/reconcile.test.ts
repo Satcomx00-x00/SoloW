@@ -302,7 +302,9 @@ describe("reclaimOrphanedRuns after the agent finished", () => {
     return sessionId;
   }
 
-  it("sends the Task to review on its branch, not to failed", async () => {
+  it("records the declaration and leaves the Task for a person, not in failed", async () => {
+    // The Task does not move: entering review is the operator's one action (Principle I), and
+    // the sweep has no more standing to open the gate than the run did.
     const db = createTestDb();
     const sessionId = await seedWithMarker(db, "task-finished", "gatecontrol/task-finished");
 
@@ -310,7 +312,8 @@ describe("reclaimOrphanedRuns after the agent finished", () => {
 
     expect(count).toBe(1);
     const [row] = await db.select().from(task).where(eq(task.id, "task-finished"));
-    expect(row?.state).toBe("review");
+    expect(row?.state).toBe("running");
+    expect(row?.completedAt).not.toBeNull();
     // No failure reason: nothing failed.
     expect(row?.failureReason).toBeNull();
 
@@ -334,10 +337,10 @@ describe("reclaimOrphanedRuns after the agent finished", () => {
       .from(sessionEvent)
       .where(and(eq(sessionEvent.sessionId, sessionId), eq(sessionEvent.kind, "state")));
     expect(events).toHaveLength(1);
-    expect(events[0]?.payload).toMatchObject({ to: "review", reason: RECOVERED_REASON });
+    expect(events[0]?.payload).toMatchObject({ to: "running", reason: RECOVERED_REASON });
   });
 
-  it("announces review, so a board and a Task page both stop showing it as running", async () => {
+  it("announces the recovery, so the card gains its control without a reload", async () => {
     const db = createTestDb();
     await seedWithMarker(db, "task-announced", "b");
     const hub = fakeHub();
@@ -348,12 +351,13 @@ describe("reclaimOrphanedRuns after the agent finished", () => {
       `board:${WS}`,
       `task:${WS}:task-announced`,
     ]);
-    expect(hub.published[0]?.msg).toMatchObject({ kind: "status", state: "review" });
+    expect(hub.published[0]?.msg).toMatchObject({ kind: "status", state: "running" });
   });
 
-  it("still fails a run that was lost with no marker behind it", async () => {
-    // The other half. Without evidence that the agent finished, the safe answer is still the
-    // right one — this rule buys review for work that provably exists, not for every orphan.
+  it("still fails a run that was lost with no evidence at all behind it", async () => {
+    // The other half. No marker and no captured change means nothing to point at — and this is
+    // the *only* case that is a failure, which is the whole change: an orphan used to be filed
+    // as a failure whatever it had achieved.
     const db = createTestDb();
     await seedTask(db, { taskId: "task-midwork" });
 
@@ -361,5 +365,67 @@ describe("reclaimOrphanedRuns after the agent finished", () => {
 
     const [row] = await db.select().from(task).where(eq(task.id, "task-midwork"));
     expect(row?.state).toBe("failed");
+  });
+
+  it("sends a run that produced a change back to ready, never to failed", async () => {
+    // The case that buried real work: an agent edits a file, the orchestrator captures the diff
+    // at a turn boundary, then the run is lost before the agent declares anything. The work is
+    // on disk and described in the log; filing it as a failure is what made it invisible.
+    const db = createTestDb();
+    const { sessionId } = await seedTask(db, { taskId: "task-produced" });
+    await db.insert(sessionEvent).values({
+      id: "ev-diff-task-produced",
+      workspaceId: WS,
+      sessionId,
+      seq: 0,
+      kind: "diff",
+      payload: {
+        kind: "diff",
+        diffRef: "gatecontrol/task-produced",
+        files: [{ path: "a.ts", status: "modified", additions: 1, deletions: 0 }],
+        patch: "",
+        truncated: false,
+      },
+      at: new Date().toISOString(),
+    });
+
+    await reclaimOrphanedRuns(db, fakeRegistry(), fakeHub(), LONG_AFTER);
+
+    const [row] = await db.select().from(task).where(eq(task.id, "task-produced"));
+    expect(row?.state).toBe("ready");
+    // And no failure reason left behind to make a recoverable Task look broken.
+    expect(row?.failureReason).toBeNull();
+  });
+});
+
+describe("reclaimOrphanedRuns when a previous sweep already closed the Session", () => {
+  it("still reads the evidence, instead of filing the work as a failure", async () => {
+    // The case that was sitting in a real database: a Task swept once into `failed`, moved back
+    // to `running` from the board, and swept again — by which time its Session was closed, so a
+    // lookup restricted to a live Session found nothing and failed it a second time.
+    const db = createTestDb();
+    const { sessionId } = await seedTask(db, { taskId: "task-reswept" });
+    await db.insert(sessionEvent).values({
+      id: "ev-diff-task-reswept",
+      workspaceId: WS,
+      sessionId,
+      seq: 0,
+      kind: "diff",
+      payload: {
+        kind: "diff",
+        diffRef: "gatecontrol/task-reswept",
+        files: [{ path: "a.ts", status: "modified", additions: 1, deletions: 0 }],
+        patch: "",
+        truncated: false,
+      },
+      at: new Date().toISOString(),
+    });
+    await db.update(session).set({ state: "closed" }).where(eq(session.id, sessionId));
+
+    await reclaimOrphanedRuns(db, fakeRegistry(), fakeHub(), LONG_AFTER);
+
+    const [row] = await db.select().from(task).where(eq(task.id, "task-reswept"));
+    expect(row?.state).toBe("ready");
+    expect(row?.failureReason).toBeNull();
   });
 });

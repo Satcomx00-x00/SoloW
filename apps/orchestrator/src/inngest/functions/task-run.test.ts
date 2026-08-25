@@ -24,6 +24,7 @@ import {
   taskDependency,
   taskRepository,
   workspace,
+  worktree,
 } from "@gatecontrol/db";
 import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
 import { createLogger } from "@gatecontrol/observability";
@@ -574,15 +575,15 @@ describe("runTaskLifecycle (integration)", () => {
         .where(eq(sessionEvent.sessionId, ids.sessionId))
         .orderBy(asc(sessionEvent.seq))
     ).filter((e) => e.kind === "assistant_turn");
-    // Round 0 writes seq 0; the agent-finished marker, the review gate's transition and its diff
-    // follow, and the resume records another transition — so round 1's turn lands at seq 5. The
-    // sequence itself is unchanged; there is simply more in it than there was.
-    expect(logged.map((e) => e.seq)).toEqual([0, 5]);
+    // Round 0 writes seq 0; the agent-finished marker and the gate's captured diff follow, and
+    // the resume records a transition — so round 1's turn lands at seq 4. One lower than it was:
+    // the run no longer writes a `running → review` transition, because it no longer makes one.
+    expect(logged.map((e) => e.seq)).toEqual([0, 4]);
 
     // Every event shares one `seq` sequence, diffs and transitions included, so a client
     // resuming from a cursor gets each of them exactly once and in order.
     const missed = await listTaskEventsSince(db, ids.workspaceId, ids.taskId, 0);
-    expect(missed.map((e) => e.seq)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    expect(missed.map((e) => e.seq)).toEqual([1, 2, 3, 4, 5, 6, 7]);
   });
 
   it("announces Task state changes on the Workspace board channel", async () => {
@@ -593,7 +594,7 @@ describe("runTaskLifecycle (integration)", () => {
     await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     const board = spies.published.filter((p) => p.channel === `ws:${ids.workspaceId}:board`);
-    expect(board.map((p) => p.event["state"])).toEqual(["review", "done"]);
+    expect(board.map((p) => p.event["state"])).toEqual(["running", "done"]);
     // Task-scoped output never leaks onto the Workspace-wide board channel.
     expect(board.every((p) => p.event["kind"] === "status")).toBe(true);
   });
@@ -612,7 +613,7 @@ describe("runTaskLifecycle (integration)", () => {
       (p) =>
         p.channel === `ws:${ids.workspaceId}:task:${ids.taskId}` && p.event["kind"] === "status",
     );
-    expect(task.map((p) => p.event["state"])).toEqual(["review", "done"]);
+    expect(task.map((p) => p.event["state"])).toEqual(["running", "done"]);
   });
 
   it("a Task's events are invisible to another Workspace's replay (Principle V)", async () => {
@@ -624,9 +625,10 @@ describe("runTaskLifecycle (integration)", () => {
 
     await runTaskLifecycle(deps, { event: { data: a }, step: scriptedStep(["approve"]) });
 
-    // One agent turn, the marker saying it finished, the two transitions the run recorded, and
-    // the diff captured at the gate.
-    expect(await listTaskEventsSince(db, a.workspaceId, a.taskId, -1)).toHaveLength(5);
+    // One agent turn, the marker saying it finished, the diff captured at the gate, and the one
+    // transition the run still records — `review → done` on approval. It no longer writes a
+    // `running → review`, because entering review is the operator's move now.
+    expect(await listTaskEventsSince(db, a.workspaceId, a.taskId, -1)).toHaveLength(4);
     expect(await listTaskEventsSince(db, b.workspaceId, a.taskId, -1)).toHaveLength(0);
   });
 
@@ -780,10 +782,12 @@ describe("runTaskLifecycle (integration)", () => {
     const payloads = rows.map((e) => e.payload as { kind: string; to?: string; branch?: string });
 
     const doneAt = payloads.findIndex((p) => p.kind === "agent_done");
-    const reviewAt = payloads.findIndex((p) => p.kind === "state" && p.to === "review");
+    const diffAt = payloads.findIndex((p) => p.kind === "diff");
     expect(doneAt).toBeGreaterThanOrEqual(0);
-    // Strictly before, which is the whole property.
-    expect(doneAt).toBeLessThan(reviewAt);
+    // Strictly before the gate step's own work, which is the whole property: the marker is
+    // written inside the step that learned the agent finished, not two steps later where a
+    // restart could lose it.
+    expect(doneAt).toBeLessThan(diffAt);
     // And it carries the branch, because that is what a sweep would need to finish the job.
     expect(payloads[doneAt]?.branch).toBeTruthy();
   });
@@ -811,10 +815,7 @@ describe("runTaskLifecycle (integration)", () => {
     )
       .filter((e) => e.kind === "state")
       .map((e) => e.payload);
-    expect(transitions).toEqual([
-      { kind: "state", from: "running", to: "review" },
-      { kind: "state", from: "review", to: "done" },
-    ]);
+    expect(transitions).toEqual([{ kind: "state", from: "review", to: "done" }]);
   });
 
   it("records a state event at each transition it announces", async () => {
@@ -833,10 +834,7 @@ describe("runTaskLifecycle (integration)", () => {
     )
       .filter((e) => e.kind === "state")
       .map((e) => e.payload);
-    expect(transitions).toEqual([
-      { kind: "state", from: "running", to: "review" },
-      { kind: "state", from: "review", to: "done" },
-    ]);
+    expect(transitions).toEqual([{ kind: "state", from: "review", to: "done" }]);
   });
 
   it("redacts a credential the agent printed instead of storing it in a payload (Principle IV)", async () => {
@@ -1061,6 +1059,20 @@ describe("the brief the agent is given", () => {
   });
 });
 
+/** One completed turn, which is what the mid-run diff capture keys off. */
+function usageEvent(messageId: string): AgentStreamEvent {
+  return {
+    kind: "usage",
+    messageId,
+    reported: true,
+    model: "claude-test",
+    inputTokens: 10,
+    outputTokens: 5,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+  };
+}
+
 describe("the diff a reviewer is shown", () => {
   let db: TestDb;
 
@@ -1099,6 +1111,90 @@ describe("the diff a reviewer is shown", () => {
     await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     expect(spies.cleanup).toBe(1);
+    const stored = (
+      await db.select().from(sessionEvent).where(eq(sessionEvent.sessionId, ids.sessionId))
+    ).filter((e) => e.kind === "diff");
+    expect(stored).toHaveLength(1);
+  });
+
+  it("is captured at a turn boundary too, so a live run can be watched", async () => {
+    // The reason this exists: an agent that finishes a turn by asking "shall I commit this?"
+    // has real work in its worktree and, with only the gate capturing, nothing in the log for
+    // the Changes panel to render. The operator answered blind.
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const runner = new ScriptedRunner(
+      [{ kind: "completed" }],
+      [{ kind: "stdout", channel: "assistant", text: "edited it" }, usageEvent("msg-1")],
+    );
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    const events = await db
+      .select()
+      .from(sessionEvent)
+      .where(eq(sessionEvent.sessionId, ids.sessionId))
+      .orderBy(asc(sessionEvent.seq));
+    const firstDiff = events.find((e) => e.kind === "diff");
+    const finished = events.find((e) => e.kind === "agent_done");
+    expect(firstDiff?.payload).toMatchObject({
+      diffRef: `gatecontrol-task-${ids.taskId}`,
+      files: [{ path: "src/latch.ts", status: "modified", additions: 4, deletions: 1 }],
+    });
+    // Before the marker that says the agent finished — which is the whole point: the record
+    // existed while the run was still open.
+    expect(finished).toBeDefined();
+    expect(firstDiff?.seq).toBeLessThan(finished?.seq ?? -1);
+  });
+
+  it("writes nothing for a turn that changed nothing since the last one", async () => {
+    // A long run is mostly turns that read. Capturing each one would fill the log with copies
+    // of a patch the panel already has.
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const runner = new ScriptedRunner(
+      [{ kind: "completed" }],
+      [usageEvent("msg-1"), usageEvent("msg-2"), usageEvent("msg-3")],
+    );
+    const { deps, spies } = makeDeps(db, runner, nullStream());
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    const stored = (
+      await db.select().from(sessionEvent).where(eq(sessionEvent.sessionId, ids.sessionId))
+    ).filter((e) => e.kind === "diff");
+    // Two turn captures — the first, and one trailing re-run coalescing the turns that landed
+    // while it was working — plus the gate's. All three asked git; only the first and the
+    // gate's wrote anything, because the patch never changed.
+    expect(spies.diffed).toHaveLength(3);
+    expect(stored).toHaveLength(2);
+  });
+
+  it("a mid-run capture failure neither fails the run nor stops the gate capturing", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const runner = new ScriptedRunner([{ kind: "completed" }], [usageEvent("msg-1")]);
+    const { deps } = makeDeps(db, runner, nullStream());
+    let calls = 0;
+    const flaky: TaskRunDeps = {
+      ...deps,
+      worktree: {
+        ...deps.worktree,
+        diff: async (path, patterns) => {
+          calls += 1;
+          if (calls === 1) throw new Error("git exploded mid-turn");
+          return deps.worktree.diff(path, patterns);
+        },
+      },
+    };
+
+    const result = await runTaskLifecycle(flaky, {
+      event: { data: ids },
+      step: scriptedStep(["approve"]),
+    });
+
+    expect(result.result).toBe("done");
     const stored = (
       await db.select().from(sessionEvent).where(eq(sessionEvent.sessionId, ids.sessionId))
     ).filter((e) => e.kind === "diff");
@@ -1422,6 +1518,85 @@ describe("the worktree a Task runs in", () => {
       };
     }
   }
+
+  /**
+   * The row, not the directory.
+   *
+   * `worktree` was read in two places — the delete preview and the Issue view, both asking "does
+   * this Task still hold a working copy" — and written in none, so both got `no` for every Task
+   * whatever was on disk. Only the tests ever inserted a row, which is why nothing caught it.
+   */
+  describe("the row that says the directory exists", () => {
+    it("is written for the worktree the agent made and GateControl adopted", async () => {
+      const ids = freshIds();
+      await seedRun(db, ids);
+      // A hard failure preserves the worktree, so the row can be observed still active.
+      const { deps } = makeDeps(
+        db,
+        new ScriptedRunner([{ kind: "failed", signal: {} }]),
+        nullStream(),
+      );
+
+      await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep([]) });
+
+      const rows = await db.select().from(worktree).where(eq(worktree.taskId, ids.taskId));
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        path: `/wt/${worktreeNameForTask(ids.taskId)}`,
+        branch: worktreeNameForTask(ids.taskId),
+        status: "active",
+      });
+    });
+
+    it("is written for a worktree GateControl provisioned itself", async () => {
+      const ids = freshIds();
+      await seedRun(db, ids, { agentProtocol: "acp" });
+      const { deps } = makeDeps(
+        db,
+        new ScriptedRunner([{ kind: "failed", signal: {} }]),
+        nullStream(),
+      );
+
+      await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep([]) });
+
+      const rows = await db.select().from(worktree).where(eq(worktree.taskId, ids.taskId));
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.status).toBe("active");
+    });
+
+    it("is marked removed once the directory has actually been cleaned up", async () => {
+      const ids = freshIds();
+      await seedRun(db, ids);
+      const { deps, spies } = makeDeps(
+        db,
+        new ScriptedRunner([{ kind: "completed" }]),
+        nullStream(),
+      );
+
+      await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+      expect(spies.cleanup).toBe(1);
+      const rows = await db.select().from(worktree).where(eq(worktree.taskId, ids.taskId));
+      // Kept rather than deleted: a Task whose worktree was cleaned up is a different fact from
+      // one that never had a worktree, and the path is the only record of where the work ran.
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.status).toBe("removed");
+    });
+
+    it("does not double a row when the round that adopts it runs twice", async () => {
+      const ids = freshIds();
+      await seedRun(db, ids);
+      const { deps } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+
+      await runTaskLifecycle(deps, {
+        event: { data: ids },
+        step: retryingStep(["approve"], "record-worktree-0"),
+      });
+
+      const rows = await db.select().from(worktree).where(eq(worktree.taskId, ids.taskId));
+      expect(rows).toHaveLength(1);
+    });
+  });
 
   it("asks the agent to create one worktree, named after the Task", async () => {
     const ids = freshIds();
@@ -2595,5 +2770,105 @@ describe("widgetAnswerMessage", () => {
     );
     expect(message).toContain("neither, use libSQL");
     expect(message).toContain("(nothing chosen)");
+  });
+});
+
+/**
+ * The completion gate's live half (F22 / the completion gate).
+ *
+ * The declaration used to reach the Task row only when the agent's *process* exited — and an
+ * agent that declares and then waits for the operator does not exit. A run could sit for minutes
+ * having said `changes_ready` with the board still drawing it as working, and refreshing the page
+ * would not have helped: there was nothing to fetch.
+ */
+describe("the agent's completion declaration", () => {
+  let db: TestDb;
+
+  beforeAll(() => {
+    process.env.GATECONTROL_SECRET_KEY ??= Buffer.alloc(32, 3).toString("base64");
+  });
+  beforeEach(() => {
+    db = createTestDb();
+  });
+
+  /** The fence is only scanned where the widget flag is on, so every test here turns it on. */
+  async function enableWidgets(ids: ReturnType<typeof freshIds>): Promise<void> {
+    await db
+      .update(workspace)
+      .set({ enabledFlags: { "ff-agent-widgets": true } })
+      .where(eq(workspace.id, ids.workspaceId));
+  }
+
+  const declaration = (outcome: string, summary?: string): AgentStreamEvent => ({
+    kind: "stdout",
+    channel: "assistant",
+    text: [
+      "```gatecontrol:widget",
+      JSON.stringify({ kind: "task_complete", outcome, ...(summary ? { summary } : {}) }),
+      "```",
+    ].join("\n"),
+  });
+
+  it("reaches the Task row while the agent is still running", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    await enableWidgets(ids);
+    const runner = new ScriptedRunner(
+      [{ kind: "completed" }],
+      [declaration("changes_ready", "Pinned 6 dependencies")],
+    );
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    const [row] = await db.select().from(task).where(eq(task.id, ids.taskId));
+    expect(row?.completedOutcome).toBe("changes_ready");
+    expect(row?.completedSummary).toBe("Pinned 6 dependencies");
+    expect(row?.completedAt).not.toBeNull();
+  });
+
+  it("announces it, because the Task's state has not changed to carry the news", async () => {
+    // Nothing else would tell the board: the card gains its control on this publish alone.
+    const ids = freshIds();
+    await seedRun(db, ids);
+    await enableWidgets(ids);
+    const runner = new ScriptedRunner([{ kind: "completed" }], [declaration("changes_ready")]);
+    const { deps, spies } = makeDeps(db, runner, nullStream());
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    const statuses = spies.published.filter((p) => p.event["kind"] === "status");
+    expect(statuses.some((p) => p.event["state"] === "running")).toBe(true);
+  });
+
+  it("keeps the last declaration when an agent declares twice", async () => {
+    // An agent can say it is done and then keep working; what counts is the last one standing.
+    const ids = freshIds();
+    await seedRun(db, ids);
+    await enableWidgets(ids);
+    const runner = new ScriptedRunner(
+      [{ kind: "completed" }],
+      [declaration("nothing_to_do"), declaration("changes_ready", "actually did something")],
+    );
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    const [row] = await db.select().from(task).where(eq(task.id, ids.taskId));
+    expect(row?.completedOutcome).toBe("changes_ready");
+    expect(row?.completedSummary).toBe("actually did something");
+  });
+
+  it("records `nothing_to_do` as itself, so the board offers no gate over an empty change", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    await enableWidgets(ids);
+    const runner = new ScriptedRunner([{ kind: "completed" }], [declaration("nothing_to_do")]);
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    const [row] = await db.select().from(task).where(eq(task.id, ids.taskId));
+    expect(row?.completedOutcome).toBe("nothing_to_do");
   });
 });

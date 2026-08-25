@@ -12,6 +12,7 @@ import { primaryTaskRepository } from "@gatecontrol/core";
 import {
   ArrowLeft,
   Check,
+  CheckCircle2,
   GitBranch,
   ListChecks,
   MessageSquare,
@@ -34,8 +35,8 @@ import { taskActionMessage } from "@/lib/task-errors";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
 import { AgentComposer } from "./agent-composer";
+import { ChangesPanel } from "./changes-panel";
 import { DeleteTaskAction } from "./delete-task-action";
-import { DiffView } from "./diff-view";
 import { type PermissionRequest, PermissionRequestDialog } from "./permission-request-dialog";
 import { SessionLog } from "./session-log";
 import { SplitPane } from "./split-pane";
@@ -241,6 +242,19 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
     },
   });
   /**
+   * The completion gate, from the page the run is happening on.
+   *
+   * A mutation of its own rather than `move`, for the reason the board gives: moving is a
+   * gesture the state machine may refuse, and this asserts the work is ready to judge — refused
+   * server-side when the agent has not said so.
+   */
+  const submitForReview = trpc.task.submitForReview.useMutation({
+    onSuccess: () => {
+      utils.task.get.invalidate({ id: taskId });
+      utils.task.list.invalidate();
+    },
+  });
+  /**
    * Starting the agent, from the same arrow that would otherwise only have written the state.
    *
    * `task.move` into `running` is accepted by the server — the transition is legal — and does
@@ -407,6 +421,31 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
               onMove={requestMove}
               pending={move.isPending || launch.isPending}
             />
+            {/*
+              The completion gate, where the operator already is.
+              
+              The card on the board carries the same control, and someone watching a run happen
+              should not have to leave the page it is happening on to act on it. Present only for
+              `changes_ready`: a run that finished having changed nothing has nothing to approve,
+              and one that gave up has not finished.
+            */}
+            {t.completedOutcome === "changes_ready" && t.state === "running" ? (
+              <button
+                type="button"
+                disabled={submitForReview.isPending}
+                onClick={() => submitForReview.mutate({ id: t.id })}
+                title={t.completedSummary ?? undefined}
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-state-done/35 bg-state-done/12 px-2 py-1 font-medium text-2xs text-state-done transition-colors hover:bg-state-done/20 disabled:opacity-50"
+              >
+                <CheckCircle2 className="size-3.5 shrink-0" aria-hidden />
+                Open review
+              </button>
+            ) : t.completedAt ? (
+              <span className="inline-flex shrink-0 items-center gap-1 rounded border border-border bg-muted/40 px-1.5 py-px text-2xs text-muted-foreground">
+                <CheckCircle2 className="size-3 shrink-0" aria-hidden />
+                {t.completedOutcome === "nothing_to_do" ? "Nothing to do" : "Stopped — blocked"}
+              </span>
+            ) : null}
           </div>
           <p className="mt-0.5 flex items-center gap-1.5 truncate font-mono text-2xs text-muted-foreground">
             <GitBranch className="size-3 shrink-0" aria-hidden />
@@ -508,43 +547,11 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
           <ScrollArea className="h-full">
             <div className="p-3">
               {/*
-            One group per Repository (issue #7 AC-4). A Task can span several, and a reviewer
-            shown one flat file list could not tell which repository a path came from —
-            `DiffView` is reused unchanged inside each group rather than learning to group.
-            With one repository there is no header at all, so a single-Repository Task looks
-            exactly as it did.
-          */}
-              {diffs.length > 1 ? (
-                <ScrollArea className="h-full">
-                  <div className="space-y-4">
-                    {diffs.map((entry, index) => (
-                      <section
-                        key={entry.repositoryId ?? entry.diffRef ?? index}
-                        aria-label={`Changes in ${entry.repositoryName ?? entry.diffRef}`}
-                      >
-                        <h2 className="mb-2 flex items-center gap-2 font-medium text-sm">
-                          <GitBranch
-                            className="size-3.5 shrink-0 text-muted-foreground"
-                            aria-hidden
-                          />
-                          <span className="truncate">
-                            {entry.repositoryName ?? "Unnamed repository"}
-                          </span>
-                          <span className="truncate font-mono text-2xs text-muted-foreground">
-                            {entry.diffRef}
-                          </span>
-                          <span className="shrink-0 font-mono text-2xs text-muted-foreground/70">
-                            {entry.files.length} file{entry.files.length === 1 ? "" : "s"}
-                          </span>
-                        </h2>
-                        <DiffView diff={entry} branch={entry.diffRef} />
-                      </section>
-                    ))}
-                  </div>
-                </ScrollArea>
-              ) : (
-                <DiffView diff={diffs[0] ?? null} branch={branch} />
-              )}
+                The source-control panel (spec F22), one per Repository (issue #7 AC-4). A Task
+                can span several, and a reviewer shown one flat file list could not tell which
+                repository a path came from.
+              */}
+              <ChangesPanel diffs={diffs} />
 
               {/*
                 Plan under result, in the column that is already about what the agent did. The

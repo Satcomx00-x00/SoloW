@@ -2,6 +2,7 @@ import type {
   ScmProvider,
   SessionEventPayload,
   SessionState,
+  TaskCompletionOutcome,
   TaskState,
 } from "@gatecontrol/contracts";
 import { parseSessionEventPayload, sessionEventPayloadSchema } from "@gatecontrol/contracts";
@@ -27,6 +28,7 @@ import {
   taskDependency,
   taskRepository,
   workspace,
+  worktree,
 } from "@gatecontrol/db";
 import { and, asc, desc, eq, gt, inArray } from "drizzle-orm";
 
@@ -244,6 +246,130 @@ export async function setTaskRepositoryResultBranch(
     .update(taskRepository)
     .set({ resultBranch, updatedAt: new Date().toISOString() })
     .where(and(eq(taskRepository.workspaceId, workspaceId), eq(taskRepository.id, attachmentId)));
+}
+
+/**
+ * Write down what the agent said about how its run ended (the completion gate).
+ *
+ * A report, never a decision: this does not move the Task, and it must not. The party that did
+ * the work is not the party that signs it off (Principle I) — what this buys is that the board
+ * can tell "finished, waiting for you" from "still working" and from "died", which it previously
+ * could not, and read it off the Task rather than by scanning every Task's event log.
+ *
+ * `at` is passed in rather than taken from the clock here, so the durable step that calls this
+ * writes the same value on a replay as it did on its first run (Principle III).
+ */
+export async function recordTaskCompletion(
+  db: Db,
+  workspaceId: string,
+  taskId: string,
+  completion: { outcome: TaskCompletionOutcome; summary: string | null; at: string },
+): Promise<void> {
+  await db
+    .update(task)
+    .set({
+      completedAt: completion.at,
+      completedOutcome: completion.outcome,
+      completedSummary: completion.summary,
+      updatedAt: new Date().toISOString(),
+    })
+    .where(and(eq(task.workspaceId, workspaceId), eq(task.id, taskId)));
+}
+
+/**
+ * Forget a previous run's declaration, at the moment a new run starts.
+ *
+ * Without this, a Task sent back for changes would keep the green "finished" control from the
+ * round before while its agent is mid-way through the next one — the board would be offering to
+ * review work that is being rewritten as you look at it.
+ */
+export async function clearTaskCompletion(
+  db: Db,
+  workspaceId: string,
+  taskId: string,
+): Promise<void> {
+  await db
+    .update(task)
+    .set({
+      completedAt: null,
+      completedOutcome: null,
+      completedSummary: null,
+      updatedAt: new Date().toISOString(),
+    })
+    .where(and(eq(task.workspaceId, workspaceId), eq(task.id, taskId)));
+}
+
+/**
+ * Record that a Task has a working copy on disk, and where (Principle II).
+ *
+ * Written at the moment the lifecycle learns the path — at provision for a worktree GateControl
+ * created, at adoption for one the agent created — because until then there is nothing truthful
+ * to record. The table was read in two places and written in none, so every caller asking "does
+ * this Task still hold a working copy" got the same answer, `no`, whatever was on disk.
+ *
+ * Idempotent on `(taskId, path)` by reading first rather than by a unique index: a durable step
+ * that retries re-adopts the same directory, and a second row for one directory would make
+ * "how many worktrees does this Task have" a question with two answers decided by insertion
+ * order. The index belongs in the schema — until it exists, this is the guard.
+ */
+export async function recordWorktree(
+  db: Db,
+  workspaceId: string,
+  input: { taskId: string; repositoryId: string; path: string; branch: string },
+): Promise<void> {
+  const [existing] = await db
+    .select({ id: worktree.id })
+    .from(worktree)
+    .where(
+      and(
+        eq(worktree.workspaceId, workspaceId),
+        eq(worktree.taskId, input.taskId),
+        eq(worktree.path, input.path),
+      ),
+    )
+    .limit(1);
+  if (existing) {
+    // A re-adopted worktree can legitimately be on a different branch than it was last round.
+    await db
+      .update(worktree)
+      .set({ branch: input.branch, status: "active", updatedAt: new Date().toISOString() })
+      .where(eq(worktree.id, existing.id));
+    return;
+  }
+  await db.insert(worktree).values({
+    workspaceId,
+    taskId: input.taskId,
+    repositoryId: input.repositoryId,
+    path: input.path,
+    branch: input.branch,
+    status: "active",
+  });
+}
+
+/**
+ * Mark a Task's working copies gone, after the directories really have been removed.
+ *
+ * The row is kept rather than deleted: `status` is what the two readers filter on, and a Task
+ * whose worktree was cleaned up is a different fact from a Task that never had one. Deleting
+ * would also lose the path, which is the only record of where the work happened.
+ */
+export async function markWorktreesRemoved(
+  db: Db,
+  workspaceId: string,
+  taskId: string,
+  paths: string[],
+): Promise<void> {
+  if (paths.length === 0) return;
+  await db
+    .update(worktree)
+    .set({ status: "removed", updatedAt: new Date().toISOString() })
+    .where(
+      and(
+        eq(worktree.workspaceId, workspaceId),
+        eq(worktree.taskId, taskId),
+        inArray(worktree.path, paths),
+      ),
+    );
 }
 
 /**

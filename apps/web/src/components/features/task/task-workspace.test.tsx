@@ -64,6 +64,9 @@ function task(over: Partial<TaskDto> = {}): TaskDto {
       },
     ],
     failureReason: null,
+    completedAt: null,
+    completedOutcome: null,
+    completedSummary: null,
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
     ...over,
@@ -506,10 +509,13 @@ describe("the Changes tab of a multi-Repository Task", () => {
     // Each group carries its own branch — one branch for the whole Task would be a lie.
     const libGroup = await screen.findByLabelText("Changes in shared-lib");
     expect(within(libGroup).getAllByText("feature/lib").length).toBeGreaterThan(0);
-    expect(within(libGroup).getByText("src/lib.ts")).toBeDefined();
+    expect(
+      within(within(libGroup).getByRole("list", { name: "Changes" })).getByTitle("src/lib.ts"),
+    ).toBeDefined();
     const apiGroup = await screen.findByLabelText("Changes in api");
-    expect(within(apiGroup).getByText("src/api.ts")).toBeDefined();
-    expect(within(apiGroup).queryByText("src/lib.ts")).toBeNull();
+    const apiFiles = within(apiGroup).getByRole("list", { name: "Changes" });
+    expect(within(apiFiles).getByTitle("src/api.ts")).toBeDefined();
+    expect(within(apiFiles).queryByTitle("src/lib.ts")).toBeNull();
   });
 
   it("shows a single Repository's change with no group header at all", async () => {
@@ -529,7 +535,9 @@ describe("the Changes tab of a multi-Repository Task", () => {
 
     await openChangesTab();
 
-    expect(await screen.findByText("src/api.ts")).toBeDefined();
+    expect(
+      within(await screen.findByRole("list", { name: "Changes" })).getByTitle("src/api.ts"),
+    ).toBeDefined();
     expect(screen.queryByLabelText("Changes in api")).toBeNull();
   });
 
@@ -554,7 +562,10 @@ describe("the Changes tab of a multi-Repository Task", () => {
 
     expect(await screen.findByLabelText("Changes in gatecontrol/task-1")).toBeDefined();
     expect(await screen.findByText("Unnamed repository")).toBeDefined();
-    expect(await screen.findByText("src/legacy.ts")).toBeDefined();
+    const unnamed = await screen.findByLabelText("Changes in gatecontrol/task-1");
+    expect(
+      within(within(unnamed).getByRole("list", { name: "Changes" })).getByTitle("src/legacy.ts"),
+    ).toBeDefined();
   });
 });
 
