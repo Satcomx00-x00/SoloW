@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX `worktree_task_path` ON `worktree` (`task_id`,`path`);

@@ -3,7 +3,8 @@
 import { ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { sectionFor } from "@/lib/navigation";
+import { projectIdFromPath, projectSectionFor, sectionFor } from "@/lib/navigation";
+import { trpc } from "@/trpc/react";
 import { CommandPaletteTrigger } from "./command-palette";
 import { CreateMenu } from "./create-menu";
 import { HeaderActionsOutlet } from "./header-actions";
@@ -11,17 +12,47 @@ import { HeaderActionsOutlet } from "./header-actions";
 /**
  * The shell's header: where you are on the left, what you can do on the right.
  *
- * The breadcrumb is a real trail, not a label — the section segment is a link, so a Task page
- * has a one-click way back that is not the browser's Back button.
+ * The breadcrumb is a real trail, not a label — every segment but the last is a link, so a Task
+ * page has a one-click way back that is not the browser's Back button.
+ *
+ * Its shape is the hierarchy stated in words: **Workspace › Project › Section › leaf.** That
+ * middle segment is the whole change — the trail used to read `Workspace › Board`, which said a
+ * board was a thing the Workspace had. It is not; it is a thing a Project has, and the crumb now
+ * says so on every screen and links back to the Project rather than to a flat list.
  *
  * `CreateMenu` is rendered here rather than contributed by a page, and that is the point: making
  * a Task or an Issue is not a property of the route you are on, so it is available on every one
- * of them (see that component for the five surfaces this replaced). `HeaderActionsOutlet` stays
- * for controls that genuinely do belong to one page.
+ * of them. `HeaderActionsOutlet` stays for controls that genuinely do belong to one page.
  */
+function Crumb({ href, children }: { href?: string | undefined; children: React.ReactNode }) {
+  if (!href) return <span className="truncate px-1 font-medium">{children}</span>;
+  return (
+    <Link
+      href={href}
+      className="shrink-0 truncate rounded px-1 py-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+    >
+      {children}
+    </Link>
+  );
+}
+
+function Separator() {
+  return <ChevronRight className="size-3.5 shrink-0 text-muted-foreground/40" aria-hidden />;
+}
+
 export function HeaderBar({ workspaceName }: { workspaceName: string }) {
   const pathname = usePathname();
+  const projectId = projectIdFromPath(pathname);
+  const projectSection = projectSectionFor(pathname);
   const section = sectionFor(pathname);
+
+  // Named, not just identified: a crumb reading the project's id would be a worse label than no
+  // crumb at all. Only asked for when there is a Project in the path.
+  const project = trpc.project.get.useQuery(
+    { projectId: projectId ?? "" },
+    { enabled: projectId !== null },
+  );
+
   // A Task's own title is fetched by the page, not here; the shell only knows it is *a* task.
   const leaf = pathname.startsWith("/task/")
     ? "Task"
@@ -32,25 +63,39 @@ export function HeaderBar({ workspaceName }: { workspaceName: string }) {
   return (
     <header className="flex h-11 shrink-0 items-center gap-2 border-b px-3">
       <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1 text-sm">
-        <span className="truncate text-muted-foreground">{workspaceName}</span>
-        {section && (
+        <span className="shrink-0 truncate text-muted-foreground">{workspaceName}</span>
+
+        {projectId ? (
           <>
-            <ChevronRight className="size-3.5 shrink-0 text-muted-foreground/40" aria-hidden />
-            {leaf ? (
-              <Link
-                href={section.href}
-                className="shrink-0 rounded px-1 py-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              >
-                {section.label}
-              </Link>
-            ) : (
-              <span className="truncate px-1 font-medium">{section.label}</span>
+            <Separator />
+            {/* Always a link, even on the Project's own overview: it is the trail's real hinge,
+                and the one crumb someone reaches for to get back out of a section. */}
+            <Crumb
+              href={projectSection?.path === "" && !leaf ? undefined : `/projects/${projectId}`}
+            >
+              {project.data?.title ?? "Project"}
+            </Crumb>
+            {projectSection && projectSection.path !== "" && (
+              <>
+                <Separator />
+                <Crumb href={leaf ? `/projects/${projectId}${projectSection.path}` : undefined}>
+                  {projectSection.label}
+                </Crumb>
+              </>
             )}
           </>
+        ) : (
+          section && (
+            <>
+              <Separator />
+              <Crumb href={leaf ? section.href : undefined}>{section.label}</Crumb>
+            </>
+          )
         )}
+
         {leaf && (
           <>
-            <ChevronRight className="size-3.5 shrink-0 text-muted-foreground/40" aria-hidden />
+            <Separator />
             <span className="truncate px-1 font-medium">{leaf}</span>
           </>
         )}

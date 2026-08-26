@@ -1,0 +1,1 @@
+ALTER TABLE `issue` ADD `linked_change_requests` text DEFAULT '[]' NOT NULL;

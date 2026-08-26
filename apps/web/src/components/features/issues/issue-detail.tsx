@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { useCallback } from "react";
 import { TaskCard } from "@/components/features/board/task-card";
 import { TaskStateBadge } from "@/components/features/board/task-state-badge";
+import { useBackToProject } from "@/components/features/shared/back-to-project";
 import { useProviderNames } from "@/components/hooks/use-provider-names";
 import { useEventStream } from "@/components/hooks/use-task-stream";
 import { Badge } from "@/components/ui/badge";
@@ -29,6 +30,9 @@ export function IssueDetail({ issueId }: { issueId: string }) {
   const router = useRouter();
   const utils = trpc.useUtils();
   const issue = trpc.issue.get.useQuery({ id: issueId });
+  // Back goes to the Project this Issue belongs to — the route is flat, so the destination has
+  // to be asked for rather than read off the address.
+  const back = useBackToProject(issueId, "/issues");
   const tasks = trpc.task.list.useQuery({ issueId }, { enabled: issue.isSuccess });
   // The Workspace's `blocked_by` edges (issue #6), so a blocked Task reads as blocked here too
   // rather than only on the board. Waited on rather than defaulted to empty: a card drawn before
@@ -92,7 +96,7 @@ export function IssueDetail({ issueId }: { issueId: string }) {
     <div className="mx-auto w-full max-w-3xl space-y-6 px-6 py-5">
       <div className="flex items-start gap-3">
         <Button asChild variant="ghost" size="icon" className="-ml-1 shrink-0">
-          <Link href="/issues" aria-label="Back to issues">
+          <Link href={back.href} aria-label={back.label}>
             <ArrowLeft />
           </Link>
         </Button>
@@ -152,7 +156,7 @@ export function IssueDetail({ issueId }: { issueId: string }) {
           <DeleteIssueAction
             issueId={data.id}
             issueTitle={data.title}
-            onSuccess={() => router.push("/issues")}
+            onSuccess={() => router.push(back.href)}
             trigger={
               <Button
                 variant="ghost"

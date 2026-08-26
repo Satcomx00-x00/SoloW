@@ -197,6 +197,16 @@ export const listTasksInput = z.object({
   issueId: idSchema.optional(),
   state: taskStateSchema.optional(),
   query: z.string().max(200).optional(),
+  /**
+   * Only the Tasks whose Issue this Project holds.
+   *
+   * The board lives inside a Project (F23), so it has to be *read* inside one too — a
+   * project-scoped board fed by an unscoped query would show the whole Workspace under a
+   * project's name, which is the one thing a scoped screen must never do.
+   */
+  projectId: idSchema.optional(),
+  /** Only the Tasks whose Issue belongs to no Project — the counterpart escape hatch. */
+  unassigned: z.boolean().optional(),
 });
 export type ListTasksInput = z.infer<typeof listTasksInput>;
 

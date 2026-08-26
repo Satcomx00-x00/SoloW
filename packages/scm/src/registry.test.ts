@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
+import { PROJECT_FIELD_TYPES } from "@gatecontrol/contracts";
 import {
   cloneUsernameFor,
   isProviderInstalled,
@@ -27,6 +28,7 @@ const TRACKER = {
     provider: "fixture.tracker",
     authenticate: async () => ({ ok: true as const }),
     listIssues: async () => [],
+    getIssue: async () => ({}) as never,
     listLabels: async () => [],
   },
 };
@@ -40,8 +42,55 @@ describe("the providers this build ships", () => {
     // removed what it claims to.
     expect(listProviderManifests().map((m) => m.id)).toEqual(["gitea", "github", "gitlab"]);
     for (const manifest of listProviderManifests()) {
-      expect(manifest.capabilities).toEqual(["issues", "repositories", "changeRequests"]);
+      for (const capability of ["issues", "repositories", "changeRequests"] as const) {
+        expect(manifest.capabilities).toContain(capability);
+      }
     }
+  });
+
+  it("does not require every provider to have every capability", () => {
+    // The property the registry exists for, and the one an equality assertion here would have
+    // quietly forbidden: GitHub and GitLab carry projects (F23), Gitea does not. A build where
+    // all three matched would prove nothing about the abstraction.
+    expect(providerManifest("github")?.capabilities).toContain("projects");
+    expect(providerManifest("gitlab")?.capabilities).toContain("projects");
+    expect(providerManifest("gitea")?.capabilities).not.toContain("projects");
+  });
+
+  describe("what a project can hold, per provider (Decision 0018)", () => {
+    it("GitHub expresses every field type, because Projects v2 does", () => {
+      const support = providerManifest("github")?.projectFields;
+      expect(support?.cannot).toEqual({});
+      for (const type of PROJECT_FIELD_TYPES) expect(support?.expresses).toContain(type);
+    });
+
+    it("GitLab refuses the types a scoped label cannot carry, with a reason a person can read", () => {
+      // The declaration that keeps GitLab first-class rather than a degraded GitHub. A scoped
+      // label is a single-select; faking a number inside a label name is how a planning tool
+      // starts lying about arithmetic.
+      const support = providerManifest("gitlab")?.projectFields;
+      expect(support?.expresses).toContain("single_select");
+      expect(support?.expresses).not.toContain("number");
+      expect(support?.cannot.number).toMatch(/paid tier/i);
+      expect(support?.cannot.date).toBeTruthy();
+      expect(support?.cannot.iteration).toBeTruthy();
+    });
+
+    it("every field type is either expressible or refused — never unanswered", () => {
+      // A type in neither is a provider that has not answered, and a table cannot render a
+      // column it has no answer for. Enforced by the schema; asserted here for both drivers.
+      for (const id of ["github", "gitlab"]) {
+        const support = providerManifest(id)?.projectFields;
+        for (const type of PROJECT_FIELD_TYPES) {
+          const answered = support?.expresses.includes(type) || type in (support?.cannot ?? {});
+          expect(answered).toBe(true);
+        }
+      }
+    });
+
+    it("a provider without the capability declares nothing about fields", () => {
+      expect(providerManifest("gitea")?.projectFields).toBeUndefined();
+    });
   });
 
   it("keeps each provider's own noun out of the domain and in its manifest", () => {

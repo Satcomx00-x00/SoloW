@@ -50,6 +50,7 @@ function issueWith(overrides: Partial<IssueDto> = {}): IssueDto {
     externalUrl: null,
     syncedAt: null,
     labels: ["hardware"],
+    linkedChangeRequests: [],
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
     ...overrides,
@@ -77,12 +78,22 @@ describe("issue filters ↔ URL", () => {
     });
   });
 
-  it("ignores a status or source that is not one of ours", () => {
+  it("ignores a status, or a source that is not a provider id at all", () => {
     // A hand-edited URL is untrusted input like any other — it narrows to nothing rather than
     // reaching the server as a value the input schema would reject.
-    const filters = readFilters(new URLSearchParams("status=urgent&source=jira"));
+    const filters = readFilters(new URLSearchParams("status=urgent&source=NOT A PROVIDER"));
     expect(filters.status).toBeNull();
     expect(filters.source).toBeNull();
+  });
+
+  it("keeps a provider id this build has never heard of", () => {
+    // Validated against the id *grammar*, not a list of three. Decision 0016 opened the source
+    // union precisely so an unfamiliar provider costs a badge rather than a feature (F21 FR-7):
+    // a Workspace with a Gitea integration must be able to filter by it, and hardcoding the
+    // known set here is the ninth of the eight branches F21 removed.
+    expect(readFilters(new URLSearchParams("source=gitea")).source).toBe("gitea");
+    expect(readFilters(new URLSearchParams("source=jira")).source).toBe("jira");
+    expect(readFilters(new URLSearchParams("source=local")).source).toBe("local");
   });
 
   it("round-trips back to a query string, and drops what is not set", () => {

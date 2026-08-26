@@ -1,10 +1,12 @@
 import { beforeAll, describe, expect, it } from "bun:test";
+import { STRANDED_REVIEW_REASON } from "@gatecontrol/core";
 import {
   agentCatalog,
   agentProfile,
   encryptSecret,
   executorProfile,
   issue,
+  review,
   secret,
   session,
   sessionEvent,
@@ -13,7 +15,12 @@ import {
 } from "@gatecontrol/db";
 import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
 import { and, eq } from "drizzle-orm";
-import { RECLAIM_STALE_MS, RECOVERED_REASON, reclaimOrphanedRuns } from "./reconcile.js";
+import {
+  RECLAIM_STALE_MS,
+  RECOVERED_REASON,
+  reclaimOrphanedRuns,
+  reportStrandedReviews,
+} from "./reconcile.js";
 
 /**
  * Reclaim a Task left `running` by a process that is provably gone (see `reconcile.ts`'s own
@@ -427,5 +434,74 @@ describe("reclaimOrphanedRuns when a previous sweep already closed the Session",
     const [row] = await db.select().from(task).where(eq(task.id, "task-reswept"));
     expect(row?.state).toBe("ready");
     expect(row?.failureReason).toBeNull();
+  });
+});
+
+describe("reportStrandedReviews", () => {
+  it("leaves a Task that is simply waiting for a person", async () => {
+    // The gate working is not a fault. Only a decision that was made and never took effect is.
+    const db = createTestDb();
+    await seedTask(db, { taskId: "task-waiting", taskState: "review" });
+
+    const count = await reportStrandedReviews(db, fakeRegistry(), fakeHub(), LONG_AFTER);
+
+    expect(count).toBe(0);
+    const [row] = await db.select().from(task).where(eq(task.id, "task-waiting"));
+    expect(row?.failureReason).toBeNull();
+  });
+
+  it("names a decision that was recorded and never applied", async () => {
+    const db = createTestDb();
+    const { sessionId } = await seedTask(db, { taskId: "task-stranded", taskState: "review" });
+    await db.insert(review).values({
+      id: "rev-stranded",
+      workspaceId: WS,
+      sessionId,
+      decision: "approve",
+      actorUserId: "u1",
+    });
+
+    const count = await reportStrandedReviews(db, fakeRegistry(), fakeHub(), LONG_AFTER);
+
+    expect(count).toBe(1);
+    const [row] = await db.select().from(task).where(eq(task.id, "task-stranded"));
+    // Still at the gate: the diff and the decision stay readable, and the reason says what broke.
+    expect(row?.state).toBe("review");
+    expect(row?.failureReason).toBe(STRANDED_REVIEW_REASON);
+  });
+
+  it("leaves a Task whose run is still registered", async () => {
+    const db = createTestDb();
+    const { sessionId } = await seedTask(db, { taskId: "task-live", taskState: "review" });
+    await db.insert(review).values({
+      id: "rev-live",
+      workspaceId: WS,
+      sessionId,
+      decision: "approve",
+      actorUserId: "u1",
+    });
+
+    const live = { get: () => ({}) } as unknown as Parameters<typeof reportStrandedReviews>[1];
+    const count = await reportStrandedReviews(db, live, fakeHub(), LONG_AFTER);
+
+    expect(count).toBe(0);
+  });
+
+  it("does not report the same Task twice", async () => {
+    // The reason it writes is the reason it filters on, so a second sweep is a no-op.
+    const db = createTestDb();
+    const { sessionId } = await seedTask(db, { taskId: "task-once", taskState: "review" });
+    await db.insert(review).values({
+      id: "rev-once",
+      workspaceId: WS,
+      sessionId,
+      decision: "approve",
+      actorUserId: "u1",
+    });
+
+    await reportStrandedReviews(db, fakeRegistry(), fakeHub(), LONG_AFTER);
+    const second = await reportStrandedReviews(db, fakeRegistry(), fakeHub(), LONG_AFTER);
+
+    expect(second).toBe(0);
   });
 });

@@ -85,11 +85,36 @@ export async function requireUnblocked(rctx: RequestContext, taskId: string): Pr
  * cannot start (its dependency graph changed since it failed) must not stop the rest of the
  * batch from resuming.
  */
-export async function resumeTask(rctx: RequestContext, taskId: string): Promise<TaskDto> {
+/**
+ * Start an agent on a Task. The one path into `running`, whoever asked.
+ *
+ * There used to be two: `launch`/`retry` created a Session and published to the durable engine,
+ * while `move` into `running` wrote the column and stopped — no Session, no agent, and a card
+ * sitting in Running with nothing behind it. The board offered both gestures and only one of them
+ * worked, which is a trap rather than a choice, and it stranded a real Task for hours.
+ *
+ * Unifying them also puts the concurrency cap on every entry. `resumeTask` skipped it, so a
+ * Workspace at its limit could be pushed past it by retrying rather than launching — the cap held
+ * on the path people used least.
+ */
+export async function startTaskRun(rctx: RequestContext, taskId: string): Promise<TaskDto> {
   const existing = unwrap(await getTaskById(rctx, taskId));
   unwrap(canTransitionTask(existing.state, "running"));
   await requireUnblocked(rctx, existing.id);
+
+  // The Agent Profile concurrency cap (spec FR-017), on every path into `running`.
+  const profile = unwrap(await getAgentProfile(rctx, existing.agentProfileId));
+  const running = await countRunningForAgentProfile(rctx, existing.agentProfileId);
+  if (!withinConcurrencyCap(profile.concurrencyCap, running)) {
+    throw new TRPCError({
+      code: "TOO_MANY_REQUESTS",
+      message: TaskErrorCode.ConcurrencyCapReached,
+    });
+  }
+
   const session = unwrap(await createSession(rctx, existing.id));
+  // `failureReason: null` explicitly, though `updateTaskState` now clears it on any exit from
+  // `failed` — a new run's Task must not carry the last one's reason whichever way it started.
   const updated = unwrap(
     await updateTaskState(rctx, existing.id, "running", { failureReason: null }),
   );
@@ -98,7 +123,17 @@ export async function resumeTask(rctx: RequestContext, taskId: string): Promise<
     taskId: existing.id,
     sessionId: session.id,
   });
+  await orchestrator.announceTask({
+    workspaceId: rctx.workspaceId,
+    taskId: existing.id,
+    state: updated.state,
+  });
   return updated;
+}
+
+/** Retry a failed or parked Task. Kept as its own name because that is what callers mean. */
+export async function resumeTask(rctx: RequestContext, taskId: string): Promise<TaskDto> {
+  return startTaskRun(rctx, taskId);
 }
 
 export const taskRouter = router({
@@ -210,15 +245,7 @@ export const taskRouter = router({
           message: TaskErrorCode.ConcurrencyCapReached,
         });
       }
-      unwrap(canTransitionTask(task.state, "running"));
-      const session = unwrap(await createSession(ctx.rctx, task.id));
-      const updated = unwrap(await updateTaskState(ctx.rctx, task.id, "running"));
-      await orchestrator.enqueueTaskRun({
-        workspaceId: ctx.rctx.workspaceId,
-        taskId: task.id,
-        sessionId: session.id,
-      });
-      return updated;
+      return startTaskRun(ctx.rctx, task.id);
     }),
 
   move: ownerProcedure
@@ -237,9 +264,10 @@ export const taskRouter = router({
     .mutation(async ({ ctx, input }) => {
       const task = unwrap(await getTaskById(ctx.rctx, input.id));
       unwrap(canTransitionTask(task.state, input.to));
-      // Moving is not starting — a blocked Task may still be dragged around the board. Only the
-      // move *into* `running` is a start, and it goes through the same gate as launch.
-      if (input.to === "running") await requireUnblocked(ctx.rctx, task.id);
+      // Moving into `running` *is* starting, and now does it: same Session, same concurrency cap,
+      // same publish to the durable engine as Launch and Retry. It used to write the column and
+      // nothing else, which left a card in Running with no agent behind it and no way to tell.
+      if (input.to === "running") return startTaskRun(ctx.rctx, task.id);
       const moved = unwrap(await updateTaskState(ctx.rctx, task.id, input.to));
       // Every client watching, not just the one that dragged the card.
       await orchestrator.announceTask({

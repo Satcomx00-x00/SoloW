@@ -74,6 +74,8 @@ export function issueToDto(row: IssueRow, rollup: IssueRollup): IssueDto {
     externalUrl: row.externalUrl,
     syncedAt: row.syncedAt,
     labels: row.labels,
+    // The provider's own links, mirrored and never authored here (F23 FR-8, issue #128).
+    linkedChangeRequests: row.linkedChangeRequests,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };

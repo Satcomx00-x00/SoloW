@@ -15,14 +15,15 @@ import {
 import { orchestratorEnv } from "./env.js";
 import { inngest } from "./inngest/client.js";
 import { handleEventPost } from "./inngest/events.js";
+import { repositorySync } from "./inngest/functions/repository-sync.js";
 import { taskRun } from "./inngest/functions/task-run.js";
 import { inngestServeHandler } from "./inngest/serve.js";
-import { reclaimOrphanedRuns } from "./reconcile.js";
+import { reclaimOrphanedRuns, reportStrandedReviews } from "./reconcile.js";
 import { hub } from "./ws/hub.js";
 import { attachSubscriber } from "./ws/replay.js";
 
 export { inngest };
-export const functions = [taskRun];
+export const functions = [taskRun, repositorySync];
 
 interface WsData {
   claims: StreamTicketClaims;
@@ -266,15 +267,23 @@ export function startWebSocketServer(
   // transient driver error) are exactly the transient kind, and a net that retires on its first
   // stumble is the shape of the bug this schedule replaced.
   const sweep = () =>
-    reclaimOrphanedRuns(deps.db, deps.registry, hub)
-      .then((count) => {
+    Promise.all([
+      reclaimOrphanedRuns(deps.db, deps.registry, hub).then((count) => {
         if (count > 0) {
           console.log(`[gatecontrol/orchestrator] reclaimed ${count} orphaned running task(s)`);
         }
-      })
-      .catch((cause) => {
-        console.error("[gatecontrol/orchestrator] reconciliation sweep failed:", cause);
-      });
+      }),
+      // The same sweep's other half: a Task at the gate whose decision was recorded and never
+      // applied, because the run holding the wait is gone. Run together so one schedule covers
+      // both ways a run goes missing.
+      reportStrandedReviews(deps.db, deps.registry, hub).then((count) => {
+        if (count > 0) {
+          console.log(`[gatecontrol/orchestrator] ${count} review decision(s) were never applied`);
+        }
+      }),
+    ]).catch((cause) => {
+      console.error("[gatecontrol/orchestrator] reconciliation sweep failed:", cause);
+    });
 
   setTimeout(() => {
     void sweep();

@@ -14,8 +14,8 @@ import { cn } from "@/lib/utils";
 export function lineTone(line: string): string {
   if (line.startsWith("+++") || line.startsWith("---")) return "text-muted-foreground/60";
   if (line.startsWith("@@")) return "text-state-parked";
-  if (line.startsWith("+")) return "text-state-done";
-  if (line.startsWith("-")) return "text-state-failed";
+  if (line.startsWith("+")) return "text-diff-added";
+  if (line.startsWith("-")) return "text-diff-removed";
   if (line.startsWith("diff --git")) return "text-muted-foreground font-medium";
   return "text-foreground/70";
 }

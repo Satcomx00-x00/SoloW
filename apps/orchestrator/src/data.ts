@@ -307,43 +307,33 @@ export async function clearTaskCompletion(
  * to record. The table was read in two places and written in none, so every caller asking "does
  * this Task still hold a working copy" got the same answer, `no`, whatever was on disk.
  *
- * Idempotent on `(taskId, path)` by reading first rather than by a unique index: a durable step
- * that retries re-adopts the same directory, and a second row for one directory would make
- * "how many worktrees does this Task have" a question with two answers decided by insertion
- * order. The index belongs in the schema — until it exists, this is the guard.
+ * Idempotent on `(taskId, path)`, and now by the unique index that pair carries rather than by
+ * reading first: a durable step that retries re-adopts the same directory, and a second row for
+ * one directory would make "how many worktrees does this Task have" a question with two answers
+ * decided by insertion order. The read-then-insert this replaced was a race dressed as a guard.
  */
 export async function recordWorktree(
   db: Db,
   workspaceId: string,
   input: { taskId: string; repositoryId: string; path: string; branch: string },
 ): Promise<void> {
-  const [existing] = await db
-    .select({ id: worktree.id })
-    .from(worktree)
-    .where(
-      and(
-        eq(worktree.workspaceId, workspaceId),
-        eq(worktree.taskId, input.taskId),
-        eq(worktree.path, input.path),
-      ),
-    )
-    .limit(1);
-  if (existing) {
-    // A re-adopted worktree can legitimately be on a different branch than it was last round.
-    await db
-      .update(worktree)
-      .set({ branch: input.branch, status: "active", updatedAt: new Date().toISOString() })
-      .where(eq(worktree.id, existing.id));
-    return;
-  }
-  await db.insert(worktree).values({
-    workspaceId,
-    taskId: input.taskId,
-    repositoryId: input.repositoryId,
-    path: input.path,
-    branch: input.branch,
-    status: "active",
-  });
+  await db
+    .insert(worktree)
+    .values({
+      workspaceId,
+      taskId: input.taskId,
+      repositoryId: input.repositoryId,
+      path: input.path,
+      branch: input.branch,
+      status: "active",
+    })
+    // A re-adopted worktree can legitimately be on a different branch than it was last round, and
+    // one marked removed by a cleanup can be adopted again — so the conflict updates rather than
+    // doing nothing, which is what `onConflictDoNothing` would have quietly got wrong.
+    .onConflictDoUpdate({
+      target: [worktree.taskId, worktree.path],
+      set: { branch: input.branch, status: "active", updatedAt: new Date().toISOString() },
+    });
 }
 
 /**

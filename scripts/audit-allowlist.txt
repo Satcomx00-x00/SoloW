@@ -33,3 +33,17 @@
 # additionally requires its UI server to be listening, which nothing here starts.
 1123525  # vite: server.fs.deny bypass on Windows
 1139528  # vitest: UI server arbitrary file read/execute
+
+# --- adm-zip (via inngest-cli) ----------------------------------------------------------------
+# `inngest-cli` is a devDependency and the only thing that reaches adm-zip: it unpacks the release
+# archive it downloads for itself, reached solely by `bunx inngest-cli dev` in scripts/dev.sh and
+# scripts/start.sh. Neither is a deployment — start.sh states in its own header that it is "a
+# local, single-Owner dev-owner-mode stack, not a production deployment" — and neither `apps/web`
+# nor `apps/orchestrator` bundles the CLI. A hosted deployment targets Inngest Cloud, which is the
+# SDK talking to an API, not this binary.
+# 1.43.0 is the latest release and still depends on `adm-zip@^0.5.10`; there is no upstream fix to
+# take.
+# REACHABLE AGAIN if the single-command launcher (issue #17) ever ships the Inngest Dev Server as
+# part of an install — at that point the CLI stops being a developer's tool and becomes something
+# an operator runs. Re-check this entry when #17 lands.
+1123686  # adm-zip: crafted ZIP triggers a 4GB memory allocation

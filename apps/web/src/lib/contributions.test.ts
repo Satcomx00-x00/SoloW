@@ -81,7 +81,7 @@ describe("a feature module contributing commands", () => {
 
   it("migrated the palette's own entries, so the destination list is a registration too", () => {
     const resolved = ids(commandRegistry.resolve(SIGNED_OUT));
-    expect(resolved).toContain("goto.board");
+    expect(resolved).toContain("goto.projects");
     expect(resolved).toContain("task.create");
   });
 

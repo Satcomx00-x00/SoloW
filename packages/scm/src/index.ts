@@ -1,11 +1,15 @@
 import type { IntegrationCapability, ProviderManifestDto } from "@gatecontrol/contracts";
+import { ISSUE_FIELDS, PROJECT_FIELD_TYPES } from "@gatecontrol/contracts";
 import { ProviderRegistry, toManifest } from "@gatecontrol/core";
 import { GiteaProvider } from "./gitea.js";
 import { GithubProvider } from "./github.js";
 import { GitlabProvider } from "./gitlab.js";
+import { GITLAB_FIELD_SUPPORT } from "./gitlab-projects.js";
 import type {
   ChangeRequestsCapability,
   IssuesCapability,
+  IssueWritesCapability,
+  ProjectsCapability,
   ProviderDriver,
   RepositoriesCapability,
 } from "./types.js";
@@ -13,6 +17,8 @@ import type {
 export { GiteaProvider } from "./gitea.js";
 export { GithubProvider } from "./github.js";
 export { GitlabProvider } from "./gitlab.js";
+// The paging bound a caller needs to tell a complete listing from a truncated one (issue #125).
+export { ISSUE_PAGE_CAP, ISSUE_PAGE_SIZE } from "./http.js";
 export * from "./types.js";
 
 /**
@@ -47,13 +53,31 @@ const patField = {
   secret: true,
 } as const;
 
+/**
+ * What a full source host can be asked to change on an issue.
+ *
+ * All three drivers here can write every field, which makes the `cannot` map empty and the
+ * declaration look ceremonial. It is not: the shape is what lets a *tracker* — a read-only mirror,
+ * a provider whose milestones are a paid tier — say so in a sentence instead of failing at the
+ * first save. A contract written only for providers that can do everything never finds out that
+ * one cannot, which is the mistake Decision 0018 was written about.
+ */
+const FULL_ISSUE_WRITES = { writes: ISSUE_FIELDS, cannot: {} } as const;
+
 const baseUrlField = (help: string, placeholder: string, required: boolean) =>
   ({ key: "baseUrl", label: "Base URL", help, placeholder, required, secret: false }) as const;
 
 registry.register({
   id: "github",
   name: "GitHub",
-  capabilities: ["issues", "repositories", "changeRequests"],
+  capabilities: ["issues", "issueWrites", "repositories", "changeRequests", "projects"],
+  /**
+   * Projects v2 expresses every type in the union — which is precisely why it must not be the
+   * only driver declaring this. A contract shaped around a provider that can do everything never
+   * discovers that another cannot (Decision 0018); GitLab, below, is that discovery.
+   */
+  projectFields: { expresses: PROJECT_FIELD_TYPES, cannot: {} },
+  issueWrites: FULL_ISSUE_WRITES,
   changeRequestNoun: "pull request",
   fields: [
     patField,
@@ -69,7 +93,13 @@ registry.register({
 registry.register({
   id: "gitlab",
   name: "GitLab",
-  capabilities: ["issues", "repositories", "changeRequests"],
+  capabilities: ["issues", "issueWrites", "repositories", "changeRequests", "projects"],
+  /**
+   * The declaration that keeps GitLab a first-class provider rather than a degraded GitHub: what
+   * a scoped label can carry, and the sentence a person reads where the rest would have been.
+   */
+  projectFields: GITLAB_FIELD_SUPPORT,
+  issueWrites: FULL_ISSUE_WRITES,
   changeRequestNoun: "merge request",
   fields: [
     patField,
@@ -85,7 +115,8 @@ registry.register({
 registry.register({
   id: "gitea",
   name: "Gitea",
-  capabilities: ["issues", "repositories", "changeRequests"],
+  capabilities: ["issues", "issueWrites", "repositories", "changeRequests"],
+  issueWrites: FULL_ISSUE_WRITES,
   changeRequestNoun: "pull request",
   fields: [
     patField,
@@ -140,9 +171,13 @@ export function providerFor(provider: string): ProviderDriver | null {
 export type DriverWith<C extends IntegrationCapability> = ProviderDriver &
   (C extends "issues"
     ? IssuesCapability
-    : C extends "repositories"
-      ? RepositoriesCapability
-      : ChangeRequestsCapability);
+    : C extends "issueWrites"
+      ? IssueWritesCapability
+      : C extends "repositories"
+        ? RepositoriesCapability
+        : C extends "projects"
+          ? ProjectsCapability
+          : ChangeRequestsCapability);
 
 export function providerWith<C extends IntegrationCapability>(
   provider: string,

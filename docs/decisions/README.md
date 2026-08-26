@@ -36,3 +36,5 @@ Rules for this log ([per our conventions](../CONVENTIONS.md)):
 | [0015](./0015-markdown-rendering-of-agent-output.md) | Render agent output as Markdown with react-markdown (no raw HTML) | Accepted |
 | [0016](./0016-integration-provider-registry.md) | Register integration providers by capability, rather than enumerating them | Accepted |
 | [0017](./0017-worktree-git-rpc.md) | Reach a Task's worktree through a synchronous RPC on the orchestrator | Accepted |
+| [0018](./0018-provider-owned-project-fields.md) | Mirror the provider's own planning fields, rather than owning a project model | Accepted |
+| [0019](./0019-editing-an-issue-where-it-lives.md) | Edit an imported Issue on the provider that owns it, never on the copy | Accepted |

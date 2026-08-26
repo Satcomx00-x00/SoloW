@@ -59,7 +59,7 @@ import {
  * passes it straight to `@gatecontrol/scm`, and it goes out of scope when the function returns.
  */
 
-async function loadCredential(
+export async function loadCredential(
   ctx: RequestContext,
   integrationId: string,
 ): Promise<
@@ -179,7 +179,7 @@ async function insertRepositoryRow(
  * knows what that provider is" have different fixes, and one error code for both would send an
  * Owner to reinstall something that is working exactly as declared.
  */
-function driverWith<C extends IntegrationCapability>(
+export function driverWith<C extends IntegrationCapability>(
   provider: string,
   capability: C,
 ): Result<DriverWith<C>, IntegrationErrorCode> {
@@ -602,6 +602,11 @@ export async function importIssues(
           externalId: i.externalId,
           externalNumber: i.number,
           externalUrl: i.url,
+          // The provider's own state and hierarchy, mirrored from the first read (issue #127).
+          // An Issue imported without them would sit in a project as a row that is neither open
+          // nor closed and belongs to no epic, until the next poll happened to touch it.
+          externalState: i.state,
+          externalParentId: i.parentExternalId ?? null,
           syncedAt,
         })),
       )

@@ -15,8 +15,8 @@ export const dynamic = "force-dynamic";
 
 export default async function SignInPage() {
   // Under the local dev-owner stand-in there is no sign-in to do.
-  if (devOwnerMode()) redirect("/board");
-  if (await resolveSession(await headers())) redirect("/board");
+  if (devOwnerMode()) redirect("/projects");
+  if (await resolveSession(await headers())) redirect("/projects");
 
   return (
     <main className="relative flex min-h-[100dvh] items-center justify-center overflow-hidden p-6">

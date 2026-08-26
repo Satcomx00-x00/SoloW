@@ -141,6 +141,55 @@
       "when": 1787599140717,
       "tag": "0019_abnormal_the_stranger",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1787648989315,
+      "tag": "0020_clean_scarlet_spider",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1787650419430,
+      "tag": "0021_careless_loki",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1787658298305,
+      "tag": "0022_lumpy_kree",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1787661475632,
+      "tag": "0023_talented_roxanne_simpson",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1787661644001,
+      "tag": "0024_kind_jane_foster",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1787661709554,
+      "tag": "0025_concerned_sentry",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1787675090312,
+      "tag": "0026_silly_prima",
+      "breakpoints": true
     }
   ]
 }

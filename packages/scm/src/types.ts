@@ -1,3 +1,10 @@
+import type {
+  ProjectFieldOption,
+  ProjectFieldType,
+  ProjectFieldValue,
+  ProjectIteration,
+} from "@gatecontrol/contracts";
+
 /**
  * The provider driver boundary (issue #15, split by capability in F21).
  *
@@ -42,6 +49,71 @@ export interface ExternalIssue {
   description: string | null;
   state: "open" | "closed";
   url: string;
+  /**
+   * Everything below is a **read-only mirror** (spec F23 FR-8, issue #122 AC-2).
+   *
+   * None of it is GateControl's to author: assignees, labels and hierarchy belong to the
+   * provider, and a planning table that let you edit them here would be editing a copy. They are
+   * carried because a row that cannot show who holds an issue is not a planning row — and
+   * because fetching them per row, on render, is what a mirror exists to avoid.
+   *
+   * Every one is optional. A driver that cannot answer omits the field rather than inventing an
+   * empty answer, so "nobody is assigned" stays distinguishable from "this provider does not
+   * report assignees".
+   */
+  assignees?: ExternalUser[];
+  labels?: string[];
+  milestone?: ExternalMilestone | null;
+  /**
+   * The parent issue or epic, for the hierarchy the table nests by.
+   *
+   * Three states, and the mirror writes a different thing for each: a string nests the row,
+   * `null` un-nests it because the provider said there is no parent, and **absent** means the
+   * provider was not able to say — an older self-hosted instance, a tier without epics, a
+   * failed side call. Only the second may erase an edge; treating absence as "no parent" would
+   * un-nest every row on a provider that simply does not report hierarchy.
+   *
+   * The id is in the same space as `externalId`, because that is what resolves it: a parent is
+   * matched against the other rows' own ids. A driver whose provider names parents in a
+   * different space says so in that space, and never in one where an unrelated issue could
+   * answer to the same number.
+   */
+  parentExternalId?: string | null;
+  /**
+   * Pull or merge requests the provider itself links to this issue.
+   *
+   * Only populated when the caller asked for it (`ListIssuesOptions.linkedChangeRequests`) —
+   * every provider reports links per issue rather than per listing, so this field costs one
+   * request per row and nothing else here does.
+   */
+  linkedChangeRequests?: ExternalLinkedChange[];
+  /** When the provider last changed it — the cursor an incremental sync pages on. */
+  updatedAt?: string;
+}
+
+/** A person, as much of one as a planning table needs. */
+export interface ExternalUser {
+  login: string;
+  name: string | null;
+  avatarUrl: string | null;
+}
+
+export interface ExternalMilestone {
+  externalId: string;
+  title: string;
+  /** GitLab milestones carry dates; GitHub's carry a due date only. Null where absent. */
+  startDate: string | null;
+  dueDate: string | null;
+}
+
+/** A change request the provider links to an issue, as much as a badge needs. */
+export interface ExternalLinkedChange {
+  externalId: string;
+  number: number;
+  title: string;
+  state: "open" | "closed" | "merged";
+  url: string;
+  mergedAt: string | null;
 }
 
 export interface ExternalChangeRequest {
@@ -99,6 +171,41 @@ export interface ExternalRepository {
 }
 
 /**
+ * What one issue listing is being asked for — and, the part that matters, what it is willing to
+ * pay the provider for.
+ *
+ * An options object rather than a second method, deliberately. The enrichment is one extra
+ * request *per issue*, and both the fan-out and the concurrency window that keeps it under a
+ * provider's secondary rate limit are provider knowledge: a separate
+ * `listLinkedChangeRequests(repo, issueNumber)` would hand every caller that wanted the column a
+ * loop to write and a limit to guess at, and the first one to use `Promise.all` would lose a
+ * whole repository's sync to a throttle. Asking for the same list with more on it keeps that
+ * decision where the provider's rules are known.
+ */
+export interface ListIssuesOptions {
+  /**
+   * An ISO timestamp the provider filters on — "changed after this".
+   *
+   * Optional because the manual import (F01) wants everything, and load-bearing because the
+   * automatic sync (issue #125) runs every few minutes: re-reading a repository's whole history
+   * on each pass is what exhausts a rate limit, and a watermark is the only thing that turns a
+   * poll into an incremental read. A driver whose provider offers no such filter ignores it and
+   * returns everything — correct, just not cheap.
+   */
+  since?: string;
+  /**
+   * Also read the change requests the provider links to each issue — **off by default**.
+   *
+   * It was unconditional, and that made every caller pay for a column only the planning table
+   * reads: connecting an Integration auto-imports issues from every repository the token can
+   * see, and each of those listings fanned out one request per issue to fill a field it then
+   * threw away. A hundred-issue repository cost a hundred and one requests to answer "which
+   * issues exist".
+   */
+  linkedChangeRequests?: boolean;
+}
+
+/**
  * The `issues` capability: work items and the vocabulary they are tagged with.
  *
  * `RepoRef` is what the provider calls the container an issue lives in — "owner/repo" on a
@@ -106,9 +213,69 @@ export interface ExternalRepository {
  * historical accident of GitHub being first, and it is only a string.
  */
 export interface IssuesCapability {
-  listIssues(credential: ScmCredential, repo: RepoRef): Promise<ExternalIssue[]>;
+  listIssues(
+    credential: ScmCredential,
+    repo: RepoRef,
+    options?: ListIssuesOptions,
+  ): Promise<ExternalIssue[]>;
+  /**
+   * One issue, in full.
+   *
+   * A listing drops assignees, labels and the milestone — deliberately, because a hundred-issue
+   * page does not need them and `ExternalIssue` keeps "absent" distinguishable from "empty". An
+   * editor is the opposite case: it needs exactly those, for one issue, current at the moment it
+   * opened. Reading them out of the mirror instead would show a form built from whatever the last
+   * poll happened to store.
+   */
+  getIssue(credential: ScmCredential, repo: RepoRef, issueNumber: number): Promise<ExternalIssue>;
   /** The container's own labels, for the Issue label picker (issue #15 reversal). */
   listLabels(credential: ScmCredential, repo: RepoRef): Promise<ExternalLabel[]>;
+}
+
+/**
+ * A change to an issue, as a patch: a key that is **absent is not being changed**.
+ *
+ * Absent and null are different answers, and both are meaningful here — `milestone: null` clears
+ * the milestone, `milestone` absent leaves whatever is there. An editor that sent its whole form
+ * every time would silently overwrite the fields it did not display, which is how a second client
+ * quietly reverts a colleague's edit.
+ */
+export interface IssuePatch {
+  title?: string;
+  description?: string | null;
+  state?: "open" | "closed";
+  /** Provider logins. An empty array un-assigns everyone; absent leaves the assignees alone. */
+  assignees?: string[];
+  /** Label names, replacing the set. Empty clears them. */
+  labels?: string[];
+  /** The provider's own milestone id, or null to clear it. */
+  milestone?: string | null;
+}
+
+/**
+ * The `issueWrites` capability: changing an issue on the provider that owns it.
+ *
+ * Every method answers with **what the provider now holds**, never an acknowledgement — the same
+ * rule `writeProjectFieldValue` follows and for the same reason (F23 NFR-7). A provider may
+ * normalise a title, refuse an assignee who has no access, or drop a label that does not exist;
+ * rendering back what was typed would show the operator their own input as though it were stored.
+ */
+export interface IssueWritesCapability {
+  updateIssue(
+    credential: ScmCredential,
+    repo: RepoRef,
+    /** The issue's number *within its container* — GitHub's `number`, GitLab's `iid`. */
+    issueNumber: number,
+    patch: IssuePatch,
+  ): Promise<ExternalIssue>;
+  /**
+   * Who may be assigned here.
+   *
+   * A list from the provider rather than a free-text login box: assigning someone with no access
+   * is refused by every provider, and a picker that offers the refusal is a picker that lies.
+   */
+  listAssignableUsers(credential: ScmCredential, repo: RepoRef): Promise<ExternalUser[]>;
+  listMilestones(credential: ScmCredential, repo: RepoRef): Promise<ExternalMilestone[]>;
 }
 
 /** The `repositories` capability: what can be cloned, and what branches it has. */
@@ -118,6 +285,19 @@ export interface RepositoriesCapability {
    * instead of a free-text box where a typo becomes a 404 at first sync.
    */
   listRepositories(credential: ScmCredential): Promise<ExternalRepository[]>;
+  /**
+   * One repository by its full name — including one the account does not own.
+   *
+   * `listRepositories` answers "what could I connect?", which is a different question: it is a
+   * page of the *account's* repositories. A project row can point at an issue in a repository
+   * outside that page entirely (another org, a public repository the operator only collaborates
+   * on), and connecting it needs the clone URL, which only the provider can give.
+   *
+   * Null when the repository does not exist or the token cannot see it — the two are deliberately
+   * one answer, because a provider reports them as one (a 404 for both) and guessing which would
+   * be inventing detail.
+   */
+  getRepository(credential: ScmCredential, repo: RepoRef): Promise<ExternalRepository | null>;
   listBranches(credential: ScmCredential, repo: RepoRef): Promise<ExternalBranch[]>;
 }
 
@@ -132,6 +312,169 @@ export interface RepositoriesCapability {
  */
 export interface ChangeRequestsCapability {
   listChangeRequests(credential: ScmCredential, repo: RepoRef): Promise<ExternalChangeRequest[]>;
+}
+
+/**
+ * The `projects` capability (spec F23, Decision 0018, issue #122).
+ *
+ * The one capability whose *shape* differs per provider rather than only its presence. GitHub
+ * Projects v2 holds arbitrary typed fields; GitLab holds scoped labels, and on paid tiers only,
+ * iterations and weights. So a driver declaring this capability also declares, in its manifest,
+ * which field types it can express and the reason for each it cannot — and callers ask the
+ * manifest, never the provider's name.
+ */
+export interface ProjectsCapability {
+  /** The projects this credential can see, for the picker that adopts one. */
+  listProjects(credential: ScmCredential): Promise<ExternalProject[]>;
+  /** A project's column set, with each field's type and whether this provider can hold it. */
+  readProjectFields(
+    credential: ScmCredential,
+    projectExternalId: string,
+  ): Promise<ExternalProjectField[]>;
+  /**
+   * One page of a project's rows.
+   *
+   * Paged with an opaque cursor the driver mints, stored on `project.sync_cursor`, so a sync
+   * interrupted halfway resumes where it stopped rather than re-reading a 2000-item project from
+   * the top (Principle III).
+   */
+  readProjectItems(
+    credential: ScmCredential,
+    projectExternalId: string,
+    cursor: string | null,
+  ): Promise<ExternalProjectItemPage>;
+  /**
+   * Write one field value, and answer with **what the provider now holds** — not an
+   * acknowledgement (issue #122 AC-3).
+   *
+   * The difference decides whether the table can be honest. A provider may normalise, refuse
+   * part of a value, or hold something subtly different from what was sent; rendering the value
+   * that was typed would show the operator their own input as though it were stored. Returning
+   * the stored value means the cell always shows what is actually there (F23 FR-4, NFR-7).
+   */
+  writeProjectFieldValue(
+    credential: ScmCredential,
+    write: ProjectFieldWrite,
+  ): Promise<ExternalProjectValue>;
+  /**
+   * Make sure the provider can *hold* a project's structure, creating what it cannot.
+   *
+   * The method that only exists because GitLab has no project object. GitHub Projects v2 arrives
+   * with its fields already defined, so its implementation reports that there was nothing to do;
+   * GitLab's creates the scoped labels that stand in for those fields (Decision 0018).
+   *
+   * Called unconditionally by the adopt flow, never behind a check on which provider this is —
+   * "ask for a capability, never for a provider" (Decision 0016) applies to a no-op as much as to
+   * real work, and a caller that branched here would be the ninth branch F21 removed eight of.
+   *
+   * **Never destructive.** A structure element that already exists is left exactly as it is,
+   * whatever its colour or description: this creates what is missing and touches nothing else.
+   */
+  provisionProjectStructure(
+    credential: ScmCredential,
+    projectExternalId: string,
+  ): Promise<ProjectStructureProvisioned>;
+}
+
+/** What a provisioning pass created, so it can be reported after the fact. */
+export interface ProjectStructureProvisioned {
+  /** Names of the structure elements this pass created. Empty when there was nothing to do. */
+  created: string[];
+  /** Elements that were already there and were deliberately left alone. */
+  existing: string[];
+}
+
+export interface ExternalProject {
+  externalId: string;
+  title: string;
+  url: string;
+  /**
+   * The user or organization the project belongs to, where the provider says.
+   *
+   * Two organizations each with a "Roadmap" are indistinguishable in a picker without it, and
+   * adopting the wrong one is a mistake nothing later would surface. Null where the provider has
+   * no notion of an owner distinct from the connection.
+   */
+  ownerLogin?: string | null;
+}
+
+/**
+ * A column, as the provider describes it.
+ *
+ * `type` is already translated into the product's closed union at the driver — a provider type
+ * with no member there arrives as `text`, `readOnly`, named as the provider names it, which is
+ * how the column set stays honest about what the project holds rather than hiding what it cannot
+ * render (F23, States & rules).
+ */
+export interface ExternalProjectField {
+  externalId: string;
+  name: string;
+  type: ProjectFieldType;
+  options: ProjectFieldOption[];
+  iterations: ProjectIteration[];
+  position: number;
+  readOnly: boolean;
+  /** Prose, shown to the operator where the input would have been. Null when it is editable. */
+  readOnlyReason: string | null;
+}
+
+export interface ExternalProjectValue {
+  fieldExternalId: string;
+  /** Already in the product's shape; `parseProjectFieldValue` reads it back against the field. */
+  value: ProjectFieldValue | null;
+}
+
+export interface ExternalProjectItem {
+  externalId: string;
+  /** The issue this row is. A row with no issue behind it (a Projects v2 draft) is omitted. */
+  issueExternalId: string;
+  position: number;
+  archivedAt: string | null;
+  values: ExternalProjectValue[];
+  /**
+   * The issue itself, when the provider hands it over with the row.
+   *
+   * A project is precisely the thing that spans repositories, and most of the ones it spans are
+   * not connected to this Workspace. Without this, such a row can never resolve to an Issue and
+   * is skipped on every pass for ever — a table with columns and no rows, reporting a count that
+   * reads like a race rather than a permanent mismatch. Carrying the issue lets the mirror
+   * *create* what it is missing instead of waiting for something that will never arrive.
+   *
+   * Optional, because a provider that cannot report it in the same call should say so by omitting
+   * it rather than by returning a half-built issue. Where it is absent the old behaviour stands:
+   * the row waits for the repository sync.
+   */
+  issue?: ExternalProjectItemIssue;
+}
+
+/** An issue carried alongside a project row, with the repository needed to connect it. */
+export interface ExternalProjectItemIssue extends ExternalIssue {
+  /** "owner/repo" — what a Repository row stores as `externalFullName`. */
+  repositoryFullName: RepoRef;
+}
+
+export interface ExternalProjectItemPage {
+  items: ExternalProjectItem[];
+  /** Null when the walk is finished — which is what clears `project.sync_cursor`. */
+  nextCursor: string | null;
+  /**
+   * Rows that exist on the provider but are not issues, counted rather than discarded.
+   *
+   * Every row in GateControl is an Issue (F23, Out of scope), so a Projects v2 draft card and a
+   * pull-request row both have to go. Silently is the one way they must not go: a table shorter
+   * than the same project on GitHub, with nothing to explain the difference, is indistinguishable
+   * from a broken import. Counting them lets the mirror say "12 rows, 3 drafts not shown".
+   */
+  drafts: number;
+  pullRequests: number;
+}
+
+export interface ProjectFieldWrite {
+  projectExternalId: string;
+  itemExternalId: string;
+  fieldExternalId: string;
+  /** Null clears the cell, which every provider distinguishes from an empty value. */
+  value: ProjectFieldValue | null;
 }
 
 /**
@@ -150,7 +493,13 @@ export interface ProviderBase {
 
 export interface ProviderDriver
   extends ProviderBase,
-    Partial<IssuesCapability & RepositoriesCapability & ChangeRequestsCapability> {}
+    Partial<
+      IssuesCapability &
+        IssueWritesCapability &
+        RepositoriesCapability &
+        ChangeRequestsCapability &
+        ProjectsCapability
+    > {}
 
 /**
  * The old name for a driver that happens to do everything — GitHub, GitLab and Gitea all are

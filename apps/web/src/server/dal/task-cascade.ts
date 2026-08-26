@@ -26,8 +26,10 @@ import { and, eq, inArray, or } from "drizzle-orm";
  * says the directories stay.
  */
 export function cascadeDeleteTasks(
-  // The transaction object drizzle hands the callback — same surface as `db`, no public type.
-  // biome-ignore lint/suspicious/noExplicitAny: drizzle exposes no exported transaction type.
+  // The transaction object drizzle hands the callback — same surface as `db`, and drizzle exports
+  // no type for it. No `biome-ignore` here: `noExplicitAny` does not fire on this project's
+  // server code, and a suppression that suppresses nothing is a comment asserting a rule that
+  // is not there — which is what `suppressions/unused` exists to catch.
   tx: any,
   workspaceId: string,
   taskIds: string[],

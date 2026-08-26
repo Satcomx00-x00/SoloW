@@ -74,6 +74,10 @@ export function TerminalView({
   // `activity` is in here because it is a row-height change like any other: the line appearing
   // when a tool call starts would otherwise push the tail under the fold without following it.
   const activityKey = activity ? `${activity.kind}:${"name" in activity ? activity.name : ""}` : "";
+  // The extra dependencies are the point, not an oversight: the effect's body reads none of them,
+  // and re-running when they change is precisely what keeps the view pinned to the tail as output
+  // arrives. Dropping them — which is what the rule asks for — stops the terminal following.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-run on growth, by design
   useEffect(() => {
     if (following) scrollToBottom();
   }, [following, scrollToBottom, rows.length, tailSize, tailLength, activityKey]);
@@ -123,9 +127,9 @@ export function TerminalView({
     return () => window.removeEventListener("keydown", onKey);
   }, [openSearch]);
 
-  // A new search starts from the top of the matches rather than wherever the last one ended.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the query, not the matches
-  // it produced — resetting whenever `matches` changed would fight the arrival of new output.
+  // A new search starts from the top of the matches rather than wherever the last one ended,
+  // and resetting whenever `matches` changed would fight the arrival of new output.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the query, not its matches
   useEffect(() => setActive(0), [query]);
 
   // Bring the active match into view. Queried from the DOM rather than threaded back through

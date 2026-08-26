@@ -49,9 +49,15 @@ export function PresentFiles({ widget }: WidgetRendererProps<PresentFilesWidget>
   );
 }
 
+/**
+ * `added`/`deleted` get the diff editor's own green/red, not a Task-state colour — a file's status
+ * here is the same fact the Changes tab's file list shows (`diff-view.tsx`), and the two must
+ * agree, or a "modified" file reads green in one and grey in the other for no reason a person can
+ * see. `modified`/`renamed` stay on the Task-state register: neither is a diff verdict.
+ */
 const STATUS_TONE: Record<NonNullable<PresentFilesWidget["files"][number]["status"]>, string> = {
-  added: "text-state-done",
+  added: "text-diff-added",
   modified: "text-state-running",
-  deleted: "text-state-failed",
+  deleted: "text-diff-removed",
   renamed: "text-muted-foreground",
 };

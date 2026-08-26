@@ -42,13 +42,13 @@ const GROUP_LABEL: Record<ScmGroup, string> = {
 
 /** The letter's colour says the same thing the letter does, for anyone scanning rather than reading. */
 const LETTER_TONE: Record<string, string> = {
-  A: "text-state-done",
-  "?": "text-state-done",
+  A: "text-diff-added",
+  "?": "text-diff-added",
   M: "text-state-running",
   R: "text-state-parked",
   C: "text-state-parked",
-  D: "text-state-failed",
-  U: "text-state-failed",
+  D: "text-diff-removed",
+  U: "text-diff-removed",
 };
 
 export interface SourceControlActions {
@@ -164,9 +164,9 @@ function FileRow({
         </button>
         {!file.binary && (file.additions !== null || file.deletions !== null) && (
           <span className="shrink-0 font-mono text-2xs tabular-nums">
-            {file.additions ? <span className="text-state-done">+{file.additions}</span> : null}
+            {file.additions ? <span className="text-diff-added">+{file.additions}</span> : null}
             {file.deletions ? (
-              <span className="ml-1 text-state-failed">-{file.deletions}</span>
+              <span className="ml-1 text-diff-removed">-{file.deletions}</span>
             ) : null}
           </span>
         )}

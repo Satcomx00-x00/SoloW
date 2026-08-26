@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { idSchema, issueStatusSchema, timestampsSchema } from "./common.js";
-import { issueSourceSchema } from "./scm.js";
+import { changeRequestStateSchema, issueSourceSchema } from "./scm.js";
 
 /**
  * REVERSAL (issue #15-follow-up, 2026-08-20): this file used to say a native Issue-creation
@@ -31,6 +31,32 @@ export const MAX_ISSUE_LABELS = 20;
 export const issueLabelsSchema = z.array(issueLabelSchema).max(MAX_ISSUE_LABELS);
 
 /**
+ * A pull or merge request the **provider itself** links to this Issue (spec F23 FR-8, issue #128).
+ *
+ * Read-only, for ever. GateControl does not open, review, approve or merge one from here — that
+ * is issue #71's, behind the review gate — and a badge that could would be the first step towards
+ * a second, worse client for the provider the team already has.
+ *
+ * Distinct from the branch a GateControl Task produced (issue #104). One is what the provider
+ * knows, the other is what an agent did here; showing them as one list would make it impossible
+ * to tell which of the two a reader is looking at.
+ *
+ * `state` reuses `changeRequestStateSchema` rather than declaring a second `open|closed|merged`:
+ * two enums for one vocabulary is how the two drift apart.
+ */
+export const linkedChangeRequestSchema = z.object({
+  /** The provider's own id — what makes a re-poll update a link rather than double it. */
+  externalId: z.string(),
+  number: z.number().int(),
+  title: z.string(),
+  state: changeRequestStateSchema,
+  url: z.string(),
+  /** Non-null only for `merged`. Merge is the transition a poll is most likely to be late on. */
+  mergedAt: z.string().nullable(),
+});
+export type LinkedChangeRequest = z.infer<typeof linkedChangeRequestSchema>;
+
+/**
  * The filters an Issue list can be narrowed by (spec F01 FR-2). Every one of them is optional
  * and they compose: the list is what survives all of them at once.
  *
@@ -50,6 +76,24 @@ export const listIssuesInput = z.object({
   source: issueSourceSchema.optional(),
   /** Narrows the Task-creation picker to the Issues that belong to one chosen Repository. */
   repositoryId: idSchema.optional(),
+  /**
+   * Only the Issues this Project holds — the rows of its `project_item` table.
+   *
+   * A Project is the top level of the interface (F23): every board, issue list and workflow is
+   * read inside one. This is the filter that makes that true of the data and not merely of the
+   * navigation, so a project-scoped screen cannot quietly show the whole Workspace.
+   */
+  projectId: idSchema.optional(),
+  /**
+   * Only the Issues that belong to **no** Project.
+   *
+   * The escape hatch, and deliberately not the default. An Issue imported before any Project
+   * existed, or one from a repository no Project tracks, would otherwise have no screen at all
+   * and would take its Tasks out of reach with it. Mutually exclusive with `projectId` in
+   * practice: asking for both is asking for the empty set, and the DAL answers exactly that
+   * rather than pretending one of them won.
+   */
+  unassigned: z.boolean().optional(),
 });
 export type ListIssuesInput = z.infer<typeof listIssuesInput>;
 
@@ -160,6 +204,12 @@ export const issueDto = z
     externalUrl: z.string().nullable(),
     syncedAt: z.string().nullable(),
     labels: z.array(z.string()),
+    /**
+     * The provider's own links, mirrored (F23 FR-8). Empty means the provider reports none —
+     * which the table renders as an empty cell rather than hiding the column, because "nothing
+     * is in flight" is the answer a reviewer came for.
+     */
+    linkedChangeRequests: z.array(linkedChangeRequestSchema),
   })
   .merge(timestampsSchema);
 export type IssueDto = z.infer<typeof issueDto>;

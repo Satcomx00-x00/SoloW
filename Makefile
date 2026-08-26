@@ -52,10 +52,14 @@ audit: ## Dependency audit at the project severity threshold
 audit-executor-boundary: ## No direct host access (Bun.spawn/$/fs) outside the local Executor (issue #1)
 	bun run audit:executor-boundary
 
+.PHONY: audit-provider-branching
+audit-provider-branching: ## No product code branching on a provider's id (issue #122, Decision 0016)
+	bun run scripts/audit-provider-branching.ts
+
 secretscan: ## Scan the repository and its history for committed secrets
 	bun run secretscan
 
-verify: lint typecheck test smoke openapi-check audit audit-executor-boundary secretscan e2e ## Every quality gate, in order
+verify: lint typecheck test smoke openapi-check audit audit-executor-boundary audit-provider-branching secretscan e2e ## Every quality gate, in order
 	@echo "all quality gates passed"
 
 dev: ## Start ALL services (web :5000 + orchestrator :5001 + Inngest Dev Server :8288) with hot reload; auto-migrates+seeds

@@ -4,7 +4,7 @@ import type { IssueDto } from "@gatecontrol/contracts";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ChevronRight, ExternalLink, Plus } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
-import { useForm } from "react-hook-form";
+import { type UseFormReturn, useForm } from "react-hook-form";
 import { z } from "zod";
 import { useProviderNames } from "@/components/hooks/use-provider-names";
 import { Badge } from "@/components/ui/badge";
@@ -39,7 +39,7 @@ import {
 import { ISSUE_STATUS_LABELS, ISSUE_STATUS_STYLE, issueSourceLabel } from "@/lib/issue-status";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
-import { onOpenCreateDialog } from "./create-dialog-bus";
+import { type CreateDialogPreset, onOpenCreateDialog } from "./create-dialog-bus";
 
 /**
  * The repository the agent is started in stays a single Select, and any others are ticked
@@ -140,15 +140,42 @@ function IssuePreview({ issue }: { issue: IssueDto }) {
  * menu drives this dialog from outside the board — and internal otherwise, so rendering it bare
  * still gives a working "New task" button.
  */
+/**
+ * Write a sender's starting point into the form.
+ *
+ * **Repository first.** The Issue picker is narrowed by the chosen Repository and stays disabled
+ * ("Select a repository first") until one is set, so writing the issue alone leaves a value that
+ * nothing on screen can show — a preset that looks like it did nothing.
+ *
+ * `shouldDirty` on purpose: these are values the operator chose by right-clicking a row, so Reset
+ * returns to an empty form rather than to their click.
+ */
+function applyPreset(
+  form: UseFormReturn<TaskFormValues>,
+  preset: CreateDialogPreset | undefined,
+): void {
+  if (!preset) return;
+  if (preset.repositoryId) {
+    form.setValue("repositoryId", preset.repositoryId, { shouldDirty: true });
+  }
+  if (preset.issueId) form.setValue("issueId", preset.issueId, { shouldDirty: true });
+}
+
 export function CreateTaskDialog({
   trigger,
   open: controlledOpen,
   onOpenChange,
+  preset,
 }: {
   /** Omitted when the caller opens the dialog itself; the default button is used otherwise. */
   trigger?: ReactNode;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  /**
+   * A starting point supplied by whoever asked for this dialog — a right-click on a project row
+   * knows the issue and its repository; the header's `New task` knows nothing.
+   */
+  preset?: CreateDialogPreset | undefined;
 } = {}) {
   const [internalOpen, setInternalOpen] = useState(false);
   const open = controlledOpen ?? internalOpen;
@@ -158,10 +185,6 @@ export function CreateTaskDialog({
   // Create menu. Skipped when controlled: the owner is already listening on the bus itself, and
   // both reacting would fight over one piece of state.
   const uncontrolled = controlledOpen === undefined;
-  useEffect(() => {
-    if (!uncontrolled) return;
-    return onOpenCreateDialog("task", () => setInternalOpen(true));
-  }, [uncontrolled]);
   // Unfiltered — used only to decide whether the Workspace has *any* Issue at all (the
   // "missingConfig" gate below). The picker itself reads from `issues` (filtered), so a
   // Repository with zero Issues narrows the picker to empty without hiding the whole form.
@@ -182,6 +205,31 @@ export function CreateTaskDialog({
       additionalRepositoryIds: [],
     },
   });
+
+  /*
+   * Anything in the shell can ask for this dialog by name — the command palette, the header's
+   * Create menu, and a right-click on a project row. Declared *after* the form because the
+   * sender's preset is written into it.
+   *
+   * Skipped when controlled: the owner is already listening on the bus itself, and both reacting
+   * would fight over one piece of state.
+   */
+  useEffect(() => {
+    if (!uncontrolled) return;
+    return onOpenCreateDialog("task", (sent) => {
+      applyPreset(form, sent);
+      setInternalOpen(true);
+    });
+  }, [uncontrolled, form]);
+
+  /*
+   * The controlled path's equivalent: the owner passes the preset down and it lands as the dialog
+   * opens. Both paths exist because both are real — the shell renders this dialog controlled, and
+   * a preset applied only in the subscription above would be dropped there without a trace.
+   */
+  useEffect(() => {
+    if (open && preset) applyPreset(form, preset);
+  }, [open, preset, form]);
 
   // The Issue picker narrows to the chosen Repository the moment one is picked (user report:
   // "the issue picker in Task creation should auto-populate from the selected Repository") —

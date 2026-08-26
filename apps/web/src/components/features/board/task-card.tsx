@@ -1,6 +1,14 @@
 import type { TaskDependencyDto, TaskDto } from "@gatecontrol/contracts";
 import { primaryTaskRepository, unsatisfiedDependencies } from "@gatecontrol/core";
-import { CheckCircle2, GitBranch, KeyRound, Library, Lock, RotateCcw } from "lucide-react";
+import {
+  CheckCircle2,
+  GitBranch,
+  KeyRound,
+  Library,
+  Lock,
+  RotateCcw,
+  TriangleAlert,
+} from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -9,6 +17,7 @@ import {
   INTERRUPTED_REASON,
   needsAttention,
   STATE_STYLE,
+  STRANDED_REVIEW_REASON,
 } from "@/lib/task-states";
 import { cn } from "@/lib/utils";
 import { waitingOn } from "./blockers";
@@ -185,6 +194,20 @@ export function TaskCard({
               >
                 <RotateCcw className="size-3 shrink-0" aria-hidden />
                 Interrupted by restart
+              </span>
+            ) : task.failureReason === STRANDED_REVIEW_REASON ? (
+              // Not a failure of the work: the change is on its branch and the decision is in the
+              // review record. What broke is the delivery, and Retry is the fix — so the card says
+              // that rather than showing a raw reason string nobody can act on.
+              <span
+                className={cn(
+                  "inline-flex items-center gap-1 rounded border px-1.5 py-px text-2xs",
+                  STATE_STYLE.review.badgeClassName,
+                )}
+                title="The run holding this review gate was gone when the decision arrived. Retry re-runs it; nothing was lost."
+              >
+                <TriangleAlert className="size-3 shrink-0" aria-hidden />
+                Decision not applied
               </span>
             ) : task.failureReason ? (
               <span

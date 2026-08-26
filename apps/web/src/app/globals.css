@@ -4,103 +4,118 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
- * GateControl surface system.
+ * GateControl surface system — shadcn/ui's stock "neutral" theme, chroma 0 throughout.
  *
- * The interface is a supervision console: several agents working in parallel, and the reader
- * needs to know at a glance which one needs them. Two ideas carry that.
+ * This used to carry a blue-violet cast (hue 265) as an elevation cue and seven hued Task-state
+ * colours as the primary way to tell a failed run from a finished one at a glance. Both are gone
+ * by decision: every base token below is pure grayscale (oklch's second component, chroma, is 0
+ * on all of them bar `--destructive`, which shadcn's own neutral theme keeps red), and the
+ * Task-state colours are flattened the same way, encoding urgency as *contrast weight* instead
+ * of hue — see the comment above `--state-idle`. `--destructive` stays red because it marks an
+ * irreversible action (delete), a different kind of signal than a Task's lifecycle, and shadcn's
+ * own default keeps it apart from the theme for exactly that reason.
  *
- * 1. Depth is an elevation ladder, not a set of unrelated greys. background → sidebar → card →
- *    popover each lift by a fixed step, all sharing one faint blue cast (hue 265, chroma ~0.008).
- *    A neutral grey at chroma 0 reads as switched-off; the cast is barely nameable but it makes
- *    the whole surface feel lit.
- * 2. Chroma is reserved. Almost nothing in the chrome is coloured, so when a Task turns amber
- *    it is the only warm thing on screen and the eye goes straight to it.
+ * Every state still carries its own icon (WCAG 1.4.1) — that was true before this change and
+ * matters more now that weight, not hue, is the colour signal doing the rest of the work.
  */
 
 :root {
-  --radius: 0.5rem;
+  --radius: 0.625rem;
 
-  --background: oklch(0.985 0.002 265);
-  --foreground: oklch(0.17 0.01 265);
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.17 0.01 265);
+  --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.17 0.01 265);
-  --primary: oklch(0.52 0.19 272);
-  --primary-foreground: oklch(0.99 0 0);
-  --secondary: oklch(0.955 0.004 265);
-  --secondary-foreground: oklch(0.24 0.01 265);
-  --muted: oklch(0.955 0.004 265);
-  --muted-foreground: oklch(0.5 0.012 265);
-  --accent: oklch(0.94 0.006 265);
-  --accent-foreground: oklch(0.24 0.01 265);
-  --destructive: oklch(0.55 0.21 25);
-  --border: oklch(0.17 0.01 265 / 11%);
-  --input: oklch(0.17 0.01 265 / 15%);
-  --ring: oklch(0.52 0.19 272);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
 
-  --sidebar: oklch(0.968 0.003 265);
-  --sidebar-foreground: oklch(0.17 0.01 265);
-  --sidebar-primary: oklch(0.52 0.19 272);
-  --sidebar-primary-foreground: oklch(0.99 0 0);
-  --sidebar-accent: oklch(0.93 0.006 265);
-  --sidebar-accent-foreground: oklch(0.24 0.01 265);
-  --sidebar-border: oklch(0.17 0.01 265 / 10%);
-  --sidebar-ring: oklch(0.52 0.19 272);
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
 
-  /* Edge highlight and cast shadow, tuned per theme so panels read as physical. */
+  /* Edge highlight and cast shadow, tuned per theme so panels read as physical. Pure black/white. */
   --edge-highlight: oklch(1 0 0 / 0%);
-  --shadow-panel: 0 1px 2px oklch(0.17 0.01 265 / 6%), 0 8px 24px oklch(0.17 0.01 265 / 6%);
-  --shadow-float: 0 2px 4px oklch(0.17 0.01 265 / 8%), 0 16px 48px oklch(0.17 0.01 265 / 12%);
+  --shadow-panel: 0 1px 2px oklch(0 0 0 / 6%), 0 8px 24px oklch(0 0 0 / 6%);
+  --shadow-float: 0 2px 4px oklch(0 0 0 / 8%), 0 16px 48px oklch(0 0 0 / 12%);
   --grain-opacity: 0;
 
   /*
-   * Task lifecycle colours. Semantic, not decorative: state is the single thing a reader comes
-   * to this tool to learn, and shadcn's four generic badge variants cannot carry seven states
-   * without collisions. Hue encodes urgency rather than category.
-   *
-   * `review` is the loudest because it is the only state waiting on a human. `parked` is
-   * deliberately the quietest, near-greyscale: it means "nothing for you to do, it resumes by
-   * itself", and a loud colour there would compete with the one state that does need you.
-   * Colour is never the only signal; every state also carries its own icon (WCAG 1.4.1).
+   * Task lifecycle colours, flattened to grayscale (this file's header explains why). Weight now
+   * carries what hue used to: `review` is darkest against a light background because it is the
+   * one state waiting on a human and used to be the loudest hue; `parked` is lightest because it
+   * is deliberately the quietest — "nothing for you to do, it resumes by itself" — and used to be
+   * the nearest to greyscale already. `failed` matches `review`'s weight: both need a human, and
+   * the icon is what tells them apart now that colour no longer does.
    */
-  --state-idle: oklch(0.55 0.012 265);
-  --state-queued: oklch(0.34 0.014 265);
-  --state-running: oklch(0.52 0.16 228);
-  --state-review: oklch(0.58 0.15 78);
-  --state-parked: oklch(0.52 0.035 258);
-  --state-failed: oklch(0.55 0.21 25);
-  --state-done: oklch(0.5 0.13 155);
+  --state-idle: oklch(0.55 0 0);
+  --state-queued: oklch(0.4 0 0);
+  --state-running: oklch(0.32 0 0);
+  --state-review: oklch(0.18 0 0);
+  --state-parked: oklch(0.65 0 0);
+  --state-failed: oklch(0.18 0 0);
+  --state-done: oklch(0.42 0 0);
+
+  /*
+   * The diff editor's own green/red — not a Task-state colour.
+   *
+   * The diff view (F22 FR-5, "exactly like VS Code") used to borrow `--state-done` /
+   * `--state-failed` for its added/removed lines, on the reasoning that both pairs meant
+   * roughly "good" and "bad". Flattening Task-state to grayscale took the diff's colour with it
+   * as a side effect nobody asked for: green-and-red is the one convention every git tool shares,
+   * and a diff that cannot show it is no longer "exactly like VS Code" in the way that was asked
+   * for. So the diff gets its own pair, kept apart from Task lifecycle on purpose — the two are
+   * unrelated facts that happened to share a token, and sharing it again later would silently
+   * recouple them.
+   */
+  --diff-added: oklch(0.62 0.15 145);
+  --diff-removed: oklch(0.6 0.19 25);
 }
 
 .dark {
-  --background: oklch(0.155 0.007 265);
-  --foreground: oklch(0.97 0.004 265);
-  --card: oklch(0.198 0.008 265);
-  --card-foreground: oklch(0.97 0.004 265);
-  --popover: oklch(0.222 0.009 265);
-  --popover-foreground: oklch(0.97 0.004 265);
-  --primary: oklch(0.63 0.18 272);
-  --primary-foreground: oklch(0.99 0.002 272);
-  --secondary: oklch(0.245 0.009 265);
-  --secondary-foreground: oklch(0.97 0.004 265);
-  --muted: oklch(0.235 0.008 265);
-  --muted-foreground: oklch(0.68 0.014 265);
-  --accent: oklch(0.27 0.011 265);
-  --accent-foreground: oklch(0.98 0.004 265);
-  --destructive: oklch(0.68 0.19 25);
-  --border: oklch(1 0 0 / 9%);
-  --input: oklch(1 0 0 / 13%);
-  --ring: oklch(0.63 0.18 272);
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.371 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
 
-  --sidebar: oklch(0.178 0.0075 265);
-  --sidebar-foreground: oklch(0.97 0.004 265);
-  --sidebar-primary: oklch(0.63 0.18 272);
-  --sidebar-primary-foreground: oklch(0.99 0.002 272);
-  --sidebar-accent: oklch(0.255 0.01 265);
-  --sidebar-accent-foreground: oklch(0.98 0.004 265);
-  --sidebar-border: oklch(1 0 0 / 8%);
-  --sidebar-ring: oklch(0.63 0.18 272);
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.922 0 0);
+  --sidebar-primary-foreground: oklch(0.205 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
 
   /* A 1px top highlight is what stops a dark panel reading as a hole in the page. */
   --edge-highlight: oklch(1 0 0 / 5%);
@@ -108,13 +123,17 @@
   --shadow-float: 0 2px 6px oklch(0 0 0 / 45%), 0 24px 64px oklch(0 0 0 / 40%);
   --grain-opacity: 0.028;
 
-  --state-idle: oklch(0.63 0.014 265);
-  --state-queued: oklch(0.86 0.008 265);
-  --state-running: oklch(0.73 0.145 228);
-  --state-review: oklch(0.82 0.145 78);
-  --state-parked: oklch(0.66 0.035 258);
-  --state-failed: oklch(0.71 0.175 25);
-  --state-done: oklch(0.75 0.145 155);
+  /* Inverted from `:root`: on a dark background, more contrast (higher L) is louder. */
+  --state-idle: oklch(0.65 0 0);
+  --state-queued: oklch(0.75 0 0);
+  --state-running: oklch(0.8 0 0);
+  --state-review: oklch(0.92 0 0);
+  --state-parked: oklch(0.55 0 0);
+  --state-failed: oklch(0.92 0 0);
+  --state-done: oklch(0.78 0 0);
+
+  --diff-added: oklch(0.72 0.17 145);
+  --diff-removed: oklch(0.72 0.19 25);
 }
 
 @theme inline {
@@ -197,6 +216,9 @@
   --color-state-parked: var(--state-parked);
   --color-state-failed: var(--state-failed);
   --color-state-done: var(--state-done);
+
+  --color-diff-added: var(--diff-added);
+  --color-diff-removed: var(--diff-removed);
 
   --shadow-panel: var(--shadow-panel);
   --shadow-float: var(--shadow-float);

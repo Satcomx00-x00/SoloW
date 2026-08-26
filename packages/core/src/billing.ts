@@ -108,6 +108,16 @@ export const CREDENTIAL_EXPIRED_REASON: FailureClass = "credential_expired";
  */
 export const INTERRUPTED_REASON: FailureClass = "interrupted";
 
+/**
+ * A review decision that was recorded and never applied.
+ *
+ * Not a failure of the work: the change is intact on its branch and the decision is in the review
+ * record. What failed is the delivery — the run holding the review gate was gone by the time the
+ * decision arrived — and retrying is what fixes it. Written by the orchestrator's reconciliation
+ * sweep and read by the board, which is why it lives here rather than in either of them.
+ */
+export const STRANDED_REVIEW_REASON = "review_decision_not_applied";
+
 export interface FailureSignal {
   quotaExhausted?: boolean;
   credentialInvalid?: boolean;

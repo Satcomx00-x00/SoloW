@@ -57,6 +57,7 @@ const issue: IssueDto = {
   externalUrl: "https://github.com/acme/api/issues/42",
   syncedAt: null,
   labels: ["bug"],
+  linkedChangeRequests: [],
   createdAt: "2026-01-01T00:00:00.000Z",
   updatedAt: "2026-01-01T00:00:00.000Z",
 };

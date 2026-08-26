@@ -52,7 +52,7 @@ describe("WidgetFenceScanner", () => {
   it("holds back a partial opener rather than printing it", () => {
     const scanner = new WidgetFenceScanner();
     expect(scanner.push("text ```gatecont").text).toBe("text ");
-    expect(scanner.push("rol:widget\n" + ASK + "\n```").widgets).toHaveLength(1);
+    expect(scanner.push(`rol:widget\n${ASK}\n\`\`\``).widgets).toHaveLength(1);
   });
 
   it("does not treat someone else's fence as a widget", () => {

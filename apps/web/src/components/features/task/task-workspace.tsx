@@ -27,6 +27,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useMemo, useState } from "react";
 import { TaskStateBadge } from "@/components/features/board/task-state-badge";
 import { ConfirmAction, ConfirmDialog } from "@/components/features/confirm-action";
+import { useBackToProject } from "@/components/features/shared/back-to-project";
 import { useTaskStream } from "@/components/hooks/use-task-stream";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -99,6 +100,8 @@ function StreamIndicator({ status }: { status: string }) {
 export function TaskWorkspace({ taskId }: { taskId: string }) {
   const utils = trpc.useUtils();
   const task = trpc.task.get.useQuery({ id: taskId });
+  // Back goes to the board of the Project holding this Task's Issue (see `useBackToProject`).
+  const back = useBackToProject(task.data?.issueId, "/board");
   const sessions = trpc.session.listForTask.useQuery({ taskId });
   const latest = sessions.data?.[0];
   const detail = trpc.session.get.useQuery(
@@ -403,7 +406,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
       {/* Task header */}
       <div className="flex items-center gap-3 border-b px-4 py-3">
         <Button asChild variant="ghost" size="icon" className="shrink-0">
-          <Link href="/board" aria-label="Back to board">
+          <Link href={back.href} aria-label={back.label}>
             <ArrowLeft />
           </Link>
         </Button>
@@ -459,7 +462,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
             to the board rather than re-rendering against a Task that no longer exists.
           */}
           <DeleteTaskAction
-            onDeleted={() => router.push("/board")}
+            onDeleted={() => router.push(back.href)}
             taskId={t.id}
             taskTitle={t.title}
             trigger={(openDialog) => (

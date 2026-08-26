@@ -19,16 +19,23 @@ import { type DiffCell, type DiffLine, parseUnifiedDiff, toSideBySide } from "./
  * additions and removals in place, which is better for a change that is mostly insertions.
  */
 
-/** Row tints, in the register the rest of the app already uses for done/failed. */
+/**
+ * Row tints — the diff's own green/red, not a Task-state colour.
+ *
+ * Used to borrow `--state-done`/`--state-failed`, which is exactly what made this view lose its
+ * colour the day Task lifecycle went monochrome. Green-and-red is the one convention every git
+ * tool shares (that is the whole of "exactly like VS Code" in this file's own header comment),
+ * so it gets tokens of its own that nothing about a Task's state can touch again.
+ */
 const CELL_TONE = {
-  deleted: "bg-state-failed/10",
-  added: "bg-state-done/10",
+  deleted: "bg-diff-removed/10",
+  added: "bg-diff-added/10",
   context: "",
 } as const;
 
 const MARK_TONE = {
-  deleted: "bg-state-failed/25",
-  added: "bg-state-done/25",
+  deleted: "bg-diff-removed/25",
+  added: "bg-diff-added/25",
 } as const;
 
 /** A line's text with the characters that actually changed marked inside it. */
@@ -136,8 +143,8 @@ function InlineRows({ lines }: { lines: DiffLine[] }) {
               aria-hidden
               className={cn(
                 "w-3 shrink-0 select-none text-center",
-                line.kind === "added" && "text-state-done",
-                line.kind === "deleted" && "text-state-failed",
+                line.kind === "added" && "text-diff-added",
+                line.kind === "deleted" && "text-diff-removed",
               )}
             >
               {line.kind === "added" ? "+" : line.kind === "deleted" ? "-" : ""}

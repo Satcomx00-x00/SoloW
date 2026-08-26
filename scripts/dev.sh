@@ -81,15 +81,23 @@ cleanup() {
 trap cleanup INT TERM EXIT
 
 echo "[dev] orchestrator → ws://localhost:$GATECONTROL_WS_PORT  (+ /events, /api/inngest)"
-bun --hot run apps/orchestrator/src/main.ts &
+# Deliberately **not** `--hot`, where the web app below is.
+#
+# Hot-reloading the orchestrator reloads the module graph an in-flight run is executing in, and
+# in practice that kills the run: three real runs were lost to it in one afternoon, each of them
+# an agent that had already done the work. The web app has no such state — a reload there costs a
+# re-render — so it keeps the fast loop, and this one trades an edit-time restart for runs that
+# survive being edited around. Restart the stack after changing anything under `apps/orchestrator`
+# or `packages/` for it to take effect.
+bun run apps/orchestrator/src/main.ts &
 PIDS="$PIDS $!"
 
 echo "[dev] inngest      → http://localhost:$GATECONTROL_INNGEST_PORT  (Dev Server, Decision 0004)"
 # `--persist` keeps the durable engine's state (queued events AND in-flight runs)
 # across restarts. Without it the Dev Server holds everything in memory, so any run
 # parked at the review gate (`task-run`'s `waitForEvent("review.decided")`) is lost
-# the moment the server restarts — and `bun --hot` above restarts the orchestrator
-# on every edit, which the Dev Server follows. A lost parked run leaves its Task
+# the moment the server restarts, and every manual restart of the orchestrator above
+# is one such moment. A lost parked run leaves its Task
 # stranded in `review`: `review.decide` then publishes `review.decided` to a wait
 # that no longer exists, the decision is recorded but never applied, and Approve /
 # Request changes appear dead. The app DB and the secret key are already persisted

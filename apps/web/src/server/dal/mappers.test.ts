@@ -31,6 +31,9 @@ describe("mappers", () => {
         externalUrl: null,
         syncedAt: null,
         labels: ["hardware"],
+        linkedChangeRequests: [],
+        externalState: null,
+        externalParentId: null,
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-02T00:00:00.000Z",
       };
@@ -57,6 +60,7 @@ describe("mappers", () => {
         externalUrl: null,
         syncedAt: null,
         labels: ["hardware"],
+        linkedChangeRequests: [],
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-02T00:00:00.000Z",
       });
@@ -83,6 +87,9 @@ describe("mappers", () => {
         externalUrl: "https://github.com/acme/gate/issues/42",
         syncedAt: "2026-01-03T00:00:00.000Z",
         labels: [],
+        linkedChangeRequests: [],
+        externalState: null,
+        externalParentId: null,
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
       };
@@ -113,6 +120,9 @@ describe("mappers", () => {
         externalUrl: null,
         syncedAt: null,
         labels: [],
+        linkedChangeRequests: [],
+        externalState: null,
+        externalParentId: null,
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
       };
@@ -216,6 +226,9 @@ describe("mappers", () => {
         location: "/srv/repos/gatecontrol",
         integrationId: null,
         externalFullName: null,
+        issuesSyncedAt: null,
+        syncStaleSince: null,
+        syncStaleReason: null,
         setupFilePatterns: [".env"],
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",

@@ -112,9 +112,29 @@ function BoardEmpty() {
  * (illegal transitions are rejected with a reason via the shared state machine), and per-card
  * actions (advance Backlog→Ready, Launch a Ready Task).
  */
-export function Board() {
+/**
+ * The board, scoped to where it is mounted.
+ *
+ * `projectId` is how a board inside a Project shows that Project's runs and nothing else — a
+ * project-scoped screen fed by an unscoped query would show the whole Workspace under a
+ * project's name, which is the one thing a scoped screen must never do. `unassigned` is the
+ * mirror image: the Tasks whose Issue no Project holds, which would otherwise be unreachable.
+ *
+ * Both absent is the Workspace-wide board, which nothing routes to any more but which the
+ * component still expresses honestly rather than by pretending a filter was applied.
+ */
+export function Board({
+  projectId,
+  unassigned,
+}: {
+  projectId?: string | undefined;
+  unassigned?: boolean | undefined;
+} = {}) {
   const utils = trpc.useUtils();
-  const tasksQuery = trpc.task.list.useQuery({});
+  const tasksQuery = trpc.task.list.useQuery({
+    ...(projectId ? { projectId } : {}),
+    ...(unassigned ? { unassigned: true } : {}),
+  });
   // The whole Workspace's edges in one query (issue #6): readiness is derived from the blockers'
   // states, so this is also what makes a card un-dim the moment its last predecessor is Done —
   // there is no per-Task "blocked" flag anywhere that could be left stale.

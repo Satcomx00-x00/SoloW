@@ -42,7 +42,7 @@ export function SignInForm({ ownerExists }: { ownerExists: boolean }) {
       }
       // A full navigation, not a client push: the session cookie has to reach the server
       // before the board's first request goes out.
-      router.replace("/board");
+      router.replace("/projects");
       router.refresh();
     } catch {
       setError("Could not reach the server.");

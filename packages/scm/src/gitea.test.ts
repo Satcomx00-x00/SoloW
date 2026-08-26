@@ -14,16 +14,28 @@ import { ScmProviderError } from "./types.js";
 let server: ReturnType<typeof Bun.serve>;
 let receivedAuth: string[] = [];
 let receivedPaths: string[] = [];
+/** Every non-GET request, so the verb and the body are asserted rather than assumed. */
+let receivedWrites: Array<{ method: string; path: string; body: unknown }> = [];
 
 const REPO = "acme/gate";
 
 beforeAll(() => {
   server = Bun.serve({
     port: 0,
-    fetch(req) {
+    async fetch(req) {
       receivedAuth.push(req.headers.get("authorization") ?? "");
       const url = new URL(req.url);
       receivedPaths.push(`${url.pathname}${url.search}`);
+      if (req.method !== "GET") {
+        receivedWrites.push({
+          method: req.method,
+          path: url.pathname,
+          body: await req
+            .clone()
+            .json()
+            .catch(() => undefined),
+        });
+      }
 
       if (url.pathname === "/api/v1/user") return Response.json({ login: "tea" });
 
@@ -121,6 +133,43 @@ beforeAll(() => {
         return Response.json({ default_branch: "trunk" });
       }
 
+      if (url.pathname === `/api/v1/repos/${REPO}/issues/10/labels`) {
+        return Response.json([]);
+      }
+      if (url.pathname === `/api/v1/repos/${REPO}/issues/10`) {
+        if (req.method === "PATCH") {
+          const patch = (await req.json()) as Record<string, unknown>;
+          return Response.json({
+            id: 1,
+            number: 10,
+            title: patch.title ?? "Latch",
+            body: patch.body ?? null,
+            state: patch.state ?? "open",
+            html_url: "u/i/10",
+            assignees: ((patch.assignees as string[]) ?? []).map((login) => ({ login })),
+            labels: [{ name: "bug" }],
+            milestone: patch.milestone ? { id: patch.milestone, title: "v1", due_on: null } : null,
+          });
+        }
+        return Response.json({
+          id: 1,
+          number: 10,
+          title: "Latch",
+          body: "sticks",
+          state: "open",
+          html_url: "u/i/10",
+          assignees: [{ login: "ada", full_name: "Ada", avatar_url: "a.png" }],
+          labels: [{ name: "bug" }],
+          milestone: { id: 3, title: "v1", due_on: null },
+        });
+      }
+      if (url.pathname === `/api/v1/repos/${REPO}/assignees`) {
+        return Response.json([{ login: "ada", full_name: "Ada", avatar_url: "a.png" }]);
+      }
+      if (url.pathname === `/api/v1/repos/${REPO}/milestones`) {
+        return Response.json([{ id: 3, title: "v1", due_on: null }]);
+      }
+
       return new Response("nope", { status: 404 });
     },
   });
@@ -175,6 +224,26 @@ describe("GiteaProvider", () => {
     });
   });
 
+  it("says nothing about a hierarchy Gitea does not have", async () => {
+    // Absent, not null. Gitea has no sub-issue or epic concept, so it never *reports* that an
+    // issue has no parent — and the mirror reads the difference: an absent parent leaves an
+    // established edge alone, a null one erases it (F23 FR-7). A driver that answered `null`
+    // here would un-nest every Gitea row on every poll.
+    const issues = await gitea.listIssues(credential(), REPO);
+    expect(issues.every((i) => !("parentExternalId" in i))).toBe(true);
+  });
+
+  it("reports no links even when asked, rather than reporting there are none", async () => {
+    // Gitea has no endpoint for which pull requests reference an issue. Opting in therefore
+    // costs nothing and answers nothing — and `[]` would be the one wrong answer, a row
+    // claiming nothing is in flight on a provider that was never asked.
+    receivedPaths = [];
+    const issues = await gitea.listIssues(credential(), REPO, { linkedChangeRequests: true });
+
+    expect(issues.every((i) => !("linkedChangeRequests" in i))).toBe(true);
+    expect(receivedPaths).toHaveLength(1);
+  });
+
   it("reads merged off the flag, not off the state", async () => {
     // Gitea leaves a merged pull request at `state: "closed"`. Trusting the state would report
     // every merged change as merely closed.
@@ -201,5 +270,49 @@ describe("GiteaProvider", () => {
     receivedPaths = [];
     await gitea.listIssues(credential(), REPO);
     expect(receivedPaths.at(-1)?.startsWith("/api/v1/")).toBe(true);
+  });
+});
+
+describe("writing an issue back to Gitea", () => {
+  it("sends a PATCH, and only the keys the patch carries", async () => {
+    receivedWrites = [];
+
+    await gitea.updateIssue(credential(), REPO, 10, { title: "Renamed" });
+
+    expect(receivedWrites).toHaveLength(1);
+    expect(receivedWrites[0]?.method).toBe("PATCH");
+    expect(receivedWrites[0]?.body).toEqual({ title: "Renamed" });
+  });
+
+  it("writes labels through their own endpoint, and before the issue itself", async () => {
+    // Gitea's issue PATCH ignores labels entirely. Sending them first means a failure there
+    // leaves the issue untouched rather than half-edited — a title that landed beside labels that
+    // did not is the state hardest to reason about afterwards.
+    receivedWrites = [];
+
+    await gitea.updateIssue(credential(), REPO, 10, { title: "Renamed", labels: ["bug"] });
+
+    expect(receivedWrites.map((w) => `${w.method} ${w.path}`)).toEqual([
+      `PUT /api/v1/repos/${REPO}/issues/10/labels`,
+      `PATCH /api/v1/repos/${REPO}/issues/10`,
+    ]);
+    // And the labels never travel in the issue patch, where they would be silently dropped.
+    expect(receivedWrites[1]?.body).toEqual({ title: "Renamed" });
+  });
+
+  it("clears a milestone with 0, which is what Gitea takes", async () => {
+    receivedWrites = [];
+
+    await gitea.updateIssue(credential(), REPO, 10, { milestone: null });
+
+    expect(receivedWrites[0]?.body).toEqual({ milestone: 0 });
+  });
+
+  it("reads one issue with what a listing drops", async () => {
+    const issue = await gitea.getIssue(credential(), REPO, 10);
+
+    expect(issue.assignees?.[0]?.name).toBe("Ada");
+    expect(issue.labels).toEqual(["bug"]);
+    expect(issue.milestone?.externalId).toBe("3");
   });
 });

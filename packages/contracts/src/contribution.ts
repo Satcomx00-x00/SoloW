@@ -29,7 +29,18 @@ export const contributionIdSchema = z
  * The surfaces a user can arrange. Closed on purpose: this string is the key half of a
  * per-user preference row, and a free-form key would let any client write unbounded rows.
  */
-export const surfaceKeySchema = z.enum(["status-bar", "commands", "notifications"]);
+/**
+ * `project-table` shares one arrangement across every Project, and that is not the compromise it
+ * looks like: field ids are unique per project, so an order or a hidden id belonging to another
+ * project simply matches nothing and is inert. One row per user, each project filtering it to
+ * its own fields.
+ */
+export const surfaceKeySchema = z.enum([
+  "status-bar",
+  "commands",
+  "notifications",
+  "project-table",
+]);
 export type SurfaceKey = z.infer<typeof surfaceKeySchema>;
 
 /**

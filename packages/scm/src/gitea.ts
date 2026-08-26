@@ -1,11 +1,15 @@
-import { scmFetch } from "./http.js";
+import { ISSUE_PAGE_SIZE, isNotFound, scmFetch, scmFetchPaged, scmSend } from "./http.js";
 import type {
   ChangeProvider,
   ExternalBranch,
   ExternalChangeRequest,
   ExternalIssue,
   ExternalLabel,
+  ExternalMilestone,
   ExternalRepository,
+  ExternalUser,
+  IssuePatch,
+  ListIssuesOptions,
   RepoRef,
   ScmCredential,
 } from "./types.js";
@@ -33,6 +37,44 @@ import type {
  *   is the bug the GitHub driver already documents.
  */
 
+/** One issue read alone — Gitea answers with the assignees, labels and milestone. */
+interface GiteaIssueDetail extends GiteaIssue {
+  assignees?: Array<{
+    login: string;
+    full_name?: string | null;
+    avatar_url?: string | null;
+  }> | null;
+  labels?: Array<{ name: string }>;
+  milestone?: { id: number; title: string; due_on: string | null } | null;
+  updated_at?: string;
+}
+
+function toDetailedIssue(r: GiteaIssueDetail): ExternalIssue {
+  return {
+    externalId: String(r.id),
+    number: r.number,
+    title: r.title,
+    description: r.body,
+    state: r.state,
+    url: r.html_url,
+    assignees: (r.assignees ?? []).map((u) => ({
+      login: u.login,
+      name: u.full_name || null,
+      avatarUrl: u.avatar_url ?? null,
+    })),
+    labels: (r.labels ?? []).map((l) => l.name),
+    milestone: r.milestone
+      ? {
+          externalId: String(r.milestone.id),
+          title: r.milestone.title,
+          startDate: null,
+          dueDate: r.milestone.due_on,
+        }
+      : null,
+    ...(r.updated_at ? { updatedAt: r.updated_at } : {}),
+  };
+}
+
 interface GiteaIssue {
   id: number;
   number: number;
@@ -59,6 +101,18 @@ interface GiteaPull {
 interface GiteaBranch {
   name: string;
   commit: { id: string; timestamp?: string | null };
+}
+
+function toExternalRepository(r: GiteaRepo): ExternalRepository {
+  return {
+    fullName: r.full_name,
+    name: r.name,
+    description: r.description,
+    defaultBranch: r.default_branch,
+    isPrivate: r.private,
+    url: r.html_url,
+    cloneUrl: r.clone_url,
+  };
 }
 
 interface GiteaRepo {
@@ -126,27 +180,135 @@ export class GiteaProvider implements ChangeProvider {
   async listRepositories(credential: ScmCredential): Promise<ExternalRepository[]> {
     const url = `${apiRoot(credential.baseUrl)}/user/repos?limit=100`;
     const rows = (await scmFetch("gitea", url, authHeaders(credential))) as GiteaRepo[];
-    return rows
-      .map((r) => ({
-        fullName: r.full_name,
-        name: r.name,
-        description: r.description,
-        defaultBranch: r.default_branch,
-        isPrivate: r.private,
-        url: r.html_url,
-        cloneUrl: r.clone_url,
-      }))
-      .sort((a, b) => a.fullName.localeCompare(b.fullName));
+    return rows.map(toExternalRepository).sort((a, b) => a.fullName.localeCompare(b.fullName));
+  }
+
+  async getRepository(
+    credential: ScmCredential,
+    repo: RepoRef,
+  ): Promise<ExternalRepository | null> {
+    try {
+      const row = (await scmFetch(
+        "gitea",
+        `${apiRoot(credential.baseUrl)}/repos/${repo}`,
+        authHeaders(credential),
+      )) as GiteaRepo;
+      return toExternalRepository(row);
+    } catch (cause) {
+      if (isNotFound(cause)) return null;
+      throw cause;
+    }
+  }
+
+  async getIssue(
+    credential: ScmCredential,
+    repo: RepoRef,
+    issueNumber: number,
+  ): Promise<ExternalIssue> {
+    const row = (await scmFetch(
+      "gitea",
+      `${apiRoot(credential.baseUrl)}/repos/${repo}/issues/${issueNumber}`,
+      authHeaders(credential),
+    )) as GiteaIssueDetail;
+    return toDetailedIssue(row);
+  }
+
+  async updateIssue(
+    credential: ScmCredential,
+    repo: RepoRef,
+    issueNumber: number,
+    patch: IssuePatch,
+  ): Promise<ExternalIssue> {
+    const url = `${apiRoot(credential.baseUrl)}/repos/${repo}/issues/${issueNumber}`;
+    const body: Record<string, unknown> = {};
+    if (patch.title !== undefined) body.title = patch.title;
+    if (patch.description !== undefined) body.body = patch.description;
+    if (patch.state !== undefined) body.state = patch.state;
+    if (patch.assignees !== undefined) body.assignees = patch.assignees;
+    if (patch.milestone !== undefined) {
+      // Gitea clears a milestone with 0, as GitLab does, and rejects a null.
+      body.milestone = patch.milestone === null ? 0 : Number(patch.milestone);
+    }
+
+    /*
+     * Labels are a second request, because Gitea's issue PATCH does not take them — it takes
+     * label *ids* nowhere and ignores the key. The dedicated endpoint takes names.
+     *
+     * Sent first, so that when it fails the issue is left untouched rather than half-edited: a
+     * title that landed beside labels that did not is the state hardest to reason about
+     * afterwards, since nothing on screen says which half happened.
+     */
+    if (patch.labels !== undefined) {
+      await scmSend("gitea", `${url}/labels`, authHeaders(credential), "PUT", {
+        labels: patch.labels,
+      });
+    }
+
+    const row = (await scmSend(
+      "gitea",
+      url,
+      authHeaders(credential),
+      "PATCH",
+      body,
+    )) as GiteaIssueDetail;
+    return toDetailedIssue(row);
+  }
+
+  async listAssignableUsers(credential: ScmCredential, repo: RepoRef): Promise<ExternalUser[]> {
+    const rows = (await scmFetch(
+      "gitea",
+      `${apiRoot(credential.baseUrl)}/repos/${repo}/assignees`,
+      authHeaders(credential),
+    )) as Array<{ login: string; full_name?: string | null; avatar_url?: string | null }>;
+    return rows.map((u) => ({
+      login: u.login,
+      name: u.full_name || null,
+      avatarUrl: u.avatar_url ?? null,
+    }));
+  }
+
+  async listMilestones(credential: ScmCredential, repo: RepoRef): Promise<ExternalMilestone[]> {
+    const rows = (await scmFetch(
+      "gitea",
+      `${apiRoot(credential.baseUrl)}/repos/${repo}/milestones?state=all`,
+      authHeaders(credential),
+    )) as Array<{ id: number; title: string; due_on: string | null }>;
+    return rows.map((m) => ({
+      externalId: String(m.id),
+      title: m.title,
+      startDate: null,
+      dueDate: m.due_on,
+    }));
   }
 
   /**
    * Pull requests are filtered out by the `pull_request` key, not by a state check: on Gitea as
    * on GitHub the issues endpoint returns both, and a change request shown as an importable
    * Issue is a Task opened against the wrong thing.
+   *
+   * **Neither `parentExternalId` nor `linkedChangeRequests` is set, and both omissions are the
+   * answer rather than a gap.** Gitea has no sub-issue or epic concept at all — it relates
+   * issues by dependency, which is a different claim — and no endpoint that reports which pull
+   * requests reference one. Absent means "this provider does not report that"; `null` and `[]`
+   * would both be Gitea asserting something it has never been asked. The mirror reads the
+   * difference: an absent parent leaves an edge alone, a null one erases it (F23 FR-7).
+   *
+   * `linkedChangeRequests` is therefore absent even when a caller opts in — asking a provider
+   * for a capability it does not have costs nothing here, and answers nothing.
    */
-  async listIssues(credential: ScmCredential, repo: RepoRef): Promise<ExternalIssue[]> {
-    const url = `${apiRoot(credential.baseUrl)}/repos/${repo}/issues?state=all&limit=100`;
-    const rows = (await scmFetch("gitea", url, authHeaders(credential))) as GiteaIssue[];
+  async listIssues(
+    credential: ScmCredential,
+    repo: RepoRef,
+    options?: ListIssuesOptions,
+  ): Promise<ExternalIssue[]> {
+    // Gitea follows GitHub's spelling here, as it does for most of this API.
+    const since = options?.since;
+    const query = `state=all&limit=${ISSUE_PAGE_SIZE}${since ? `&since=${encodeURIComponent(since)}` : ""}`;
+    const rows = await scmFetchPaged<GiteaIssue>(
+      "gitea",
+      (page) => `${apiRoot(credential.baseUrl)}/repos/${repo}/issues?${query}&page=${page}`,
+      authHeaders(credential),
+    );
     return rows
       .filter((r) => r.pull_request === undefined || r.pull_request === null)
       .map((r) => ({

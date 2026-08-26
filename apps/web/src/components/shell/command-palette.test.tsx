@@ -89,8 +89,11 @@ describe("the command palette's entries", () => {
     // By role rather than by text: "Settings" is both a heading and a destination, and only one
     // of the two is a command a person can choose.
     const offered = screen.getAllByRole("option").map((option) => option.textContent);
-    expect(offered).toContain("Board");
-    expect(offered).toContain("Issues");
+    // The workspace destinations — the ones that exist with no Project selected. A board and an
+    // issue list are reached through a Project now, and the palette cannot offer them statically
+    // because it would have to name a Project to do it.
+    expect(offered).toContain("Projects");
+    expect(offered).toContain("Unassigned");
     expect(offered).toContain("Settings");
     expect(offered).toContain("New task");
   });
@@ -144,10 +147,10 @@ describe("the command palette's entries", () => {
   it("runs a chosen command through the actions the surface supplied", () => {
     renderPalette();
 
-    fireEvent.click(screen.getByText("Board"));
+    fireEvent.click(screen.getByText("Projects"));
     fireEvent.click(screen.getByText("New task"));
 
-    expect(calls.navigated).toEqual(["/board"]);
+    expect(calls.navigated).toEqual(["/projects"]);
     expect(calls.created).toEqual(["task"]);
   });
 

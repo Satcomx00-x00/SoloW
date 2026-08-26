@@ -293,8 +293,8 @@ function Highlighted({
     <>
       {splitHighlights(text, query).map((segment, i) =>
         segment.match === null ? (
-          // biome-ignore lint/suspicious/noArrayIndexKey: segments are positional by definition —
-          // they are a split of one string, and re-splitting is what changes them.
+          // Segments are a split of one string, and re-splitting is what changes them.
+          // biome-ignore lint/suspicious/noArrayIndexKey: positional by definition
           <span key={i}>{segment.text}</span>
         ) : (
           <mark

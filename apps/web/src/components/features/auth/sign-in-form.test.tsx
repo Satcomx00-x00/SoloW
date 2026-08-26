@@ -62,7 +62,7 @@ function fill(email: string, password: string) {
 }
 
 describe("SignInForm — first run", () => {
-  it("creates the owner account and lands on the board", async () => {
+  it("creates the owner account and lands on the projects hub", async () => {
     render(<SignInForm ownerExists={false} />);
     expect(screen.getByText(/Only one account can be created/)).toBeDefined();
 
@@ -77,7 +77,9 @@ describe("SignInForm — first run", () => {
       name: "Ada",
     });
     expect(calls.signIn).toHaveLength(0);
-    await waitFor(() => expect(calls.replaced).toEqual(["/board"]));
+    // A Project is the top level, so a first sign-in lands on the list of them — the one
+    // screen that makes sense before any Project has been adopted.
+    await waitFor(() => expect(calls.replaced).toEqual(["/projects"]));
   });
 
   it("requires a password long enough for the server to accept", () => {

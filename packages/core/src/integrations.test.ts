@@ -14,8 +14,10 @@ import { ProviderRegistry, ProviderRegistryErrorCode, toManifest } from "./integ
 interface FakeDriver {
   authenticate(): Promise<{ ok: true }>;
   listIssues?(): Promise<string[]>;
+  getIssue?(): Promise<string>;
   listLabels?(): Promise<string[]>;
   listRepositories?(): Promise<string[]>;
+  getRepository?(): Promise<string | null>;
   listBranches?(): Promise<string[]>;
   listChangeRequests?(): Promise<string[]>;
 }
@@ -23,8 +25,10 @@ interface FakeDriver {
 const forge = (over: Partial<FakeDriver> = {}): FakeDriver => ({
   authenticate: async () => ({ ok: true }),
   listIssues: async () => [],
+  getIssue: async () => "",
   listLabels: async () => [],
   listRepositories: async () => [],
+  getRepository: async () => null,
   listBranches: async () => [],
   listChangeRequests: async () => [],
   ...over,
@@ -54,6 +58,7 @@ const tracker = (id: string) => ({
   driver: {
     authenticate: async () => ({ ok: true as const }),
     listIssues: async () => [],
+    getIssue: async () => "",
     listLabels: async () => [],
   },
 });

@@ -1,7 +1,7 @@
 "use client";
 
 import type { IssueDto, IssueSource, IssueStatus } from "@gatecontrol/contracts";
-import { CommonErrorCode } from "@gatecontrol/contracts";
+import { CommonErrorCode, issueSourceSchema } from "@gatecontrol/contracts";
 import { ChevronRight, ListFilter, Search, TriangleAlert, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -71,7 +71,11 @@ export function readFilters(params: URLSearchParams): IssueFilters {
     status: ISSUE_STATUSES.includes(status as IssueStatus) ? (status as IssueStatus) : null,
     query: params.get("q") ?? "",
     labels: params.getAll("label"),
-    source: source === "local" || source === "github" || source === "gitlab" ? source : null,
+    // Validated against the *grammar*, not against a list of three ids. Decision 0016 opened
+    // `issueSourceSchema` for exactly this reason: a Workspace with a Gitea integration would
+    // otherwise have its source filter silently dropped here, which is the failure F21 FR-7
+    // describes — an unfamiliar provider costing a feature rather than a badge.
+    source: issueSourceSchema.safeParse(source).success ? (source as IssueSource) : null,
   };
 }
 
@@ -274,7 +278,20 @@ function IssueRow({ issue }: { issue: IssueDto }) {
   );
 }
 
-export function IssuesView() {
+/**
+ * The issue list, scoped to where it is mounted.
+ *
+ * See `Board` for why the scope is a prop rather than something the view reads from the URL
+ * itself: the route already knows which Project it is, and a second reader of the same fact is a
+ * second chance for the two to disagree.
+ */
+export function IssuesView({
+  projectId,
+  unassigned,
+}: {
+  projectId?: string | undefined;
+  unassigned?: boolean | undefined;
+} = {}) {
   const providerName = useProviderNames();
   const router = useRouter();
   const params = useSearchParams();
@@ -284,6 +301,8 @@ export function IssuesView() {
     router.replace(toSearchParams({ ...filters, ...next }), { scroll: false });
 
   const issues = trpc.issue.list.useQuery({
+    ...(projectId ? { projectId } : {}),
+    ...(unassigned ? { unassigned: true } : {}),
     ...(filters.status ? { status: filters.status } : {}),
     ...(filters.query ? { query: filters.query } : {}),
     ...(filters.source ? { source: filters.source } : {}),

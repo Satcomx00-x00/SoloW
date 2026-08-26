@@ -9,7 +9,13 @@ import type {
   ExecutorKind,
   IssueSource,
   IssueStatus,
+  LinkedChangeRequest,
   McpScope,
+  ProjectFieldOption,
+  ProjectFieldType,
+  ProjectFilter,
+  ProjectIteration,
+  ProjectViewLayout,
   RepositorySource,
   ReviewDecision,
   ScmProvider,
@@ -127,6 +133,56 @@ export const issue = sqliteTable(
      * `repository.listLabels`, but nothing here enforces they still exist on the provider).
      */
     labels: text("labels", { mode: "json" }).$type<string[]>().notNull().default(sql`'[]'`),
+    /**
+     * Pull or merge requests the provider itself links to this Issue (spec F23 FR-8, issue #128).
+     *
+     * A JSON column for the same reason `labels` is one: a handful of entries per Issue, replaced
+     * wholesale by every poll and never queried by, where a join table would buy referential
+     * integrity over rows GateControl does not own and cost a join on every list read.
+     *
+     * Deliberately **not** the `change_request` table below. That one mirrors a repository's
+     * change requests and knows nothing about which of them closes which issue; this is the
+     * provider's own answer to that question, and it belongs to the issue it answers for.
+     *
+     * Deliberately **not** the branch a Task produced either (issue #104): provider-linked and
+     * agent-produced are two different facts, and one column holding both would answer neither.
+     */
+    linkedChangeRequests: text("linked_change_requests", { mode: "json" })
+      .$type<LinkedChangeRequest[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    /**
+     * Open or closed **on the provider** (spec F23 FR-13, issue #127 AC-3).
+     *
+     * Separate from `statusOverride` and from the status derived from Tasks, and it has to be:
+     * those are GateControl's answer to "how is this going", and this is the provider's answer to
+     * "is it finished". An epic's progress is counted from this one, because a Status field is a
+     * team's convention — renamable, reorderable, and left behind by whoever closed the issue on
+     * GitHub instead — where closed is a fact.
+     *
+     * Null for a local Issue and for one imported before the column existed. Null is *not* open:
+     * a mirror that guessed would report work as unfinished, or finished, on no evidence.
+     */
+    externalState: text("external_state").$type<"open" | "closed">(),
+    /**
+     * The parent issue's `externalId`, as the provider reported it (issue #127).
+     *
+     * A column on the child rather than an edge table, because every hierarchy this mirrors is
+     * single-parent — a GitHub sub-issue has one parent, a GitLab work item has one — so the edge
+     * *is* a property of the child. An edge table would let the mirror hold a shape no provider
+     * can express, and would then need a uniqueness constraint whose only job was to forbid it.
+     *
+     * The **provider's** id, not a local `issue.id`, and not a foreign key: the parent may not be
+     * imported yet, may live in a repository this Workspace never added, or may never arrive. A
+     * foreign key would force the edge to be dropped or the parent to be invented, and both lose
+     * information the provider gave us. Resolving it to a row is a read-time question, answered by
+     * `buildProjectHierarchy` — which is also where a parent that resolves to nothing becomes a
+     * top-level row rather than a dropped one.
+     *
+     * Nothing but the sync writes this. GateControl does not offer to create a parent the provider
+     * cannot store (F23, States & rules — the hierarchy is the provider's).
+     */
+    externalParentId: text("external_parent_id"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -146,6 +202,12 @@ export const issue = sqliteTable(
      * tripping this index.
      */
     byExternal: uniqueIndex("issue_repository_external").on(t.repositoryId, t.externalId),
+    /**
+     * "Which issues report this one as their parent" — the question a project table asks once per
+     * render, over the Workspace it is scoped to (Principle V). Without it that is a scan of every
+     * Issue the Workspace has ever imported.
+     */
+    byParent: index("issue_ws_parent").on(t.workspaceId, t.externalParentId),
   }),
 );
 
@@ -269,6 +331,23 @@ export const repository = sqliteTable(
     integrationId: text("integration_id").references(() => integration.id),
     /** The provider's own identifier — "owner/repo" for GitHub, "namespace/path" for GitLab. */
     externalFullName: text("external_full_name"),
+    /**
+     * The watermark an automatic issue sync resumes from (issue #125).
+     *
+     * The provider's own "updated after" filter, not a page number: pages shift under a sync as
+     * issues are edited, and re-reading a repository's whole history every few minutes is what
+     * exhausts a rate limit. Null means never synced, which is a full first read.
+     */
+    issuesSyncedAt: text("issues_synced_at"),
+    /**
+     * When this repository's data stopped being current, and why.
+     *
+     * Set when a poll backs off — a rate limit, an unreachable host — and cleared by the next
+     * poll that succeeds. It exists so a table can say it is showing stale data rather than
+     * present hours-old rows as current, which is the failure F23 NFR-3 names.
+     */
+    syncStaleSince: text("sync_stale_since"),
+    syncStaleReason: text("sync_stale_reason"),
     /**
      * Repository-relative globs for files copied into each new worktree (issue #52) — a `.env`
      * the agent needs to run the test suite, not a general "copy what git ignores".
@@ -617,6 +696,212 @@ export const taskDependency = sqliteTable(
   }),
 );
 
+/**
+ * A planning project, mirrored from a provider (spec F23, Decision 0018).
+ *
+ * Belongs to exactly one Integration, because its fields are that provider's fields — a project
+ * is not a GateControl concept that happens to be synced, it is a GitHub Project or a GitLab
+ * group plus a field mapping, cached here so a table can render without a network call per cell.
+ */
+export const project = sqliteTable(
+  "project",
+  {
+    id: id(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspace.id),
+    integrationId: text("integration_id")
+      .notNull()
+      .references(() => integration.id),
+    /** The provider's own id. Opaque, and the key — the title is a label people rename. */
+    providerProjectId: text("provider_project_id").notNull(),
+    title: text("title").notNull(),
+    /** When the mirror last agreed with the provider. Null until the first sync completes. */
+    syncedAt: text("synced_at"),
+    /**
+     * Where a paged sync got to, so a restart resumes rather than starting over.
+     *
+     * On the project rather than on the item, because the thing being resumed is the *walk*: an
+     * item-level marker would say which rows exist and not where the provider's pagination had
+     * reached, which is the only question a resume has to answer.
+     */
+    syncCursor: text("sync_cursor"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => ({
+    byWs: index("project_ws").on(t.workspaceId),
+    /** One row per provider project: a second would make "which mirror is current" ambiguous. */
+    byProvider: uniqueIndex("project_integration_provider").on(
+      t.integrationId,
+      t.providerProjectId,
+    ),
+  }),
+);
+
+/**
+ * One column of a project, as the provider describes it.
+ *
+ * `readOnly` and its reason are the provider's answer to "can you hold this", recorded at sync
+ * (Decision 0018). A GitLab Free instance stores its number fields here read-only with "weights
+ * need a paid tier" attached, and the table renders a value with a sentence rather than an input
+ * whose save would fail.
+ */
+export const projectField = sqliteTable(
+  "project_field",
+  {
+    id: id(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspace.id),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => project.id),
+    providerFieldId: text("provider_field_id").notNull(),
+    name: text("name").notNull(),
+    type: text("type").$type<ProjectFieldType>().notNull(),
+    /** Single-select options, as the provider names and colours them. */
+    options: text("options", { mode: "json" })
+      .$type<ProjectFieldOption[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    /** Iterations, for an iteration field. Empty for every other type. */
+    iterations: text("iterations", { mode: "json" })
+      .$type<ProjectIteration[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    position: integer("position").notNull().default(0),
+    readOnly: integer("read_only", { mode: "boolean" }).notNull().default(false),
+    readOnlyReason: text("read_only_reason"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => ({
+    byProject: index("project_field_project").on(t.projectId, t.position),
+    /** Keyed on the provider's id, so renaming a field updates it rather than doubling it. */
+    byProviderField: uniqueIndex("project_field_provider").on(t.projectId, t.providerFieldId),
+  }),
+);
+
+/**
+ * One row of the table: an Issue, in a project.
+ *
+ * `issueId` is the join to everything GateControl already owns — the row's Tasks, its review
+ * history, its worktrees. That join is the whole reason this is a projection over Issues rather
+ * than a second Issue model (F23, Summary).
+ */
+export const projectItem = sqliteTable(
+  "project_item",
+  {
+    id: id(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspace.id),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => project.id),
+    issueId: text("issue_id")
+      .notNull()
+      .references(() => issue.id),
+    providerItemId: text("provider_item_id").notNull(),
+    position: integer("position").notNull().default(0),
+    /** Archived on the provider. Kept, because a row that vanishes takes its history with it. */
+    archivedAt: text("archived_at"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => ({
+    byProject: index("project_item_project").on(t.projectId, t.position),
+    /** The reverse lookup: which projects hold this Issue. */
+    byIssue: index("project_item_issue").on(t.issueId),
+    byProviderItem: uniqueIndex("project_item_provider").on(t.projectId, t.providerItemId),
+  }),
+);
+
+/**
+ * One cell.
+ *
+ * `value` is JSON rather than a column per type, because a typed column set means a migration
+ * every time a provider grows a field type — and the value is parsed against its *field's* type
+ * on read (`parseProjectFieldValue`), so a value whose shape no longer matches degrades to an
+ * empty cell rather than to a row that will not render. The same rule `ui_preference` follows,
+ * for the same reason.
+ */
+export const projectValue = sqliteTable(
+  "project_value",
+  {
+    id: id(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspace.id),
+    itemId: text("item_id")
+      .notNull()
+      .references(() => projectItem.id),
+    fieldId: text("field_id")
+      .notNull()
+      .references(() => projectField.id),
+    value: text("value", { mode: "json" }).$type<unknown>(),
+    syncedAt: createdAt(),
+  },
+  (t) => ({
+    /** One value per cell. The pair is the identity, which makes a write an upsert. */
+    byCell: uniqueIndex("project_value_cell").on(t.itemId, t.fieldId),
+    byField: index("project_value_field").on(t.fieldId),
+  }),
+);
+
+/**
+ * One saved view over a project — a tab (spec F23 FR-9, issue #129).
+ *
+ * A configuration, never a copy of the rows: there is no item column here and there never will
+ * be one. Every tab reads the same `project_item`s, which is what makes a value edited under one
+ * tab an edit under all of them.
+ *
+ * The filter is stored as the parsed predicate rather than as the text someone typed, so the
+ * language has exactly one implementation (`@gatecontrol/core`'s parser) and a reader that is
+ * not the table — a count, an export, an MCP tool — cannot disagree with it about what a saved
+ * view means.
+ */
+export const projectView = sqliteTable(
+  "project_view",
+  {
+    id: id(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspace.id),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => project.id),
+    name: text("name").notNull(),
+    /** Tab order, ascending — the order the team put them in, not an alphabetisation. */
+    position: integer("position").notNull().default(0),
+    layout: text("layout").$type<ProjectViewLayout>().notNull().default("table"),
+    filter: text("filter", { mode: "json" })
+      .$type<ProjectFilter>()
+      .notNull()
+      .default(sql`'{"terms":[]}'`),
+    /** A single-select field id. Null renders one flat list, as the table already means. */
+    groupByFieldId: text("group_by_field_id"),
+    /** A field id or `@title`; the direction rides beside it. Null leaves the mirror's order. */
+    sortField: text("sort_field"),
+    sortDirection: text("sort_direction").$type<"asc" | "desc">(),
+    /**
+     * Which columns this view shows. **Null is every column** — not the same as an empty list:
+     * a view saved before a sync added a field should show that field, and a view whose author
+     * hid all of them should show none. One of those two views would be a lie if the column set
+     * defaulted to `[]`.
+     */
+    visibleFieldIds: text("visible_field_ids", { mode: "json" }).$type<string[]>(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => ({
+    /** The tab strip, in order. Every read of this table is "the views of one project". */
+    byProject: index("project_view_project").on(t.projectId, t.position),
+    byWs: index("project_view_ws").on(t.workspaceId),
+  }),
+);
+
 export const worktree = sqliteTable(
   "worktree",
   {
@@ -636,7 +921,18 @@ export const worktree = sqliteTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => ({ byTask: index("worktree_task").on(t.taskId) }),
+  (t) => ({
+    byTask: index("worktree_task").on(t.taskId),
+    /**
+     * A Task's worktree at a given path is one row.
+     *
+     * Unique because the pair *is* the identity: a directory belongs to one Task, and a second
+     * row for it would make "how many working copies does this Task hold" a question with two
+     * answers decided by insertion order. It also turns the write into an upsert — the DAL read
+     * first for idempotence before this index existed, which is a race dressed as a guard.
+     */
+    byPath: uniqueIndex("worktree_task_path").on(t.taskId, t.path),
+  }),
 );
 
 export const session = sqliteTable(
@@ -899,6 +1195,56 @@ export const uiPreference = sqliteTable(
 );
 
 /**
+ * Which provider login the signed-in user is, per Integration (spec F23 FR-11, `assignee:@me`).
+ *
+ * The planning table filters `My items` against the assignee logins the provider mirrored onto
+ * each row. A GateControl account name is not one of those, so without this table `@me` compares
+ * two unrelated names and matches only by coincidence — which is a `My items` tab that is empty
+ * for almost everybody and, for the one person whose names happen to agree, silently right.
+ *
+ * **Stated, not derived from the token, and that is the design.** The PAT belongs to the
+ * *Workspace*, not to the person reading: whoever connected the Integration issued it, and every
+ * member reads through it. So the provider's "who am I" endpoint answers *who issued this token*
+ * — deriving `@me` from it would show the token owner's items to everyone else, under a tab
+ * named after them. A wrong answer nobody can see is worse than no answer, so the mapping is one
+ * each user makes for themselves. (Deriving it as a *pre-filled suggestion* for the person who
+ * connected the Integration is the sensible next step, and needs a `viewer` capability on the
+ * driver registry — `authenticate()` today answers `{ ok }` and throws the login away.)
+ *
+ * `integrationId` is deliberately **not** a foreign key, following `integration.secretId` above:
+ * disconnecting an Integration must not be refused because someone once recorded their login for
+ * it. A row whose Integration is gone is unreachable — every read here joins through
+ * `integration`, which is also what keeps a reconnected Integration from inheriting a stale
+ * login belonging to a connection that no longer exists.
+ */
+export const providerIdentity = sqliteTable(
+  "provider_identity",
+  {
+    id: id(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspace.id),
+    integrationId: text("integration_id").notNull(),
+    /** `auth_user.id`, or the local stand-in owner when running on the dev-owner path. */
+    userId: text("user_id").notNull(),
+    /** The login exactly as the provider writes it; compared case-insensitively on read. */
+    login: text("login").notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => ({
+    /**
+     * Unique because the triple *is* the identity: a second row would make "who am I on this
+     * connection" a question with two answers decided by insertion order, and `@me` would then
+     * resolve differently depending on which one a query happened to read first. It is also what
+     * lets a correction be an upsert rather than a read-then-branch.
+     */
+    byOwner: uniqueIndex("provider_identity_owner").on(t.workspaceId, t.integrationId, t.userId),
+    byWs: index("provider_identity_ws").on(t.workspaceId),
+  }),
+);
+
+/**
  * The domain tables. BetterAuth's tables live in `auth-schema.ts` and are joined onto this in
  * `tables.ts` — kept in separate files because drizzle-kit reads each schema file standalone.
  */
@@ -915,6 +1261,11 @@ export const schema = {
   task,
   taskRepository,
   taskDependency,
+  project,
+  projectField,
+  projectItem,
+  projectValue,
+  projectView,
   workflow,
   workflowStep,
   worktree,
@@ -926,4 +1277,5 @@ export const schema = {
   secret,
   mcpToken,
   uiPreference,
+  providerIdentity,
 };

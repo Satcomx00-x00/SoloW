@@ -6,11 +6,14 @@ import {
   IssueErrorCode,
   issueDeletionImpactDto,
   issueDeletionImpactInput,
+  issueDetailDto,
+  issueDetailInput,
   issueDto,
   issueLabelListDto,
   issueListDto,
   listIssuesInput,
   setIssueStatusInput,
+  updateExternalIssueInput,
   updateIssueInput,
 } from "@gatecontrol/contracts";
 import { TRPCError } from "@trpc/server";
@@ -26,6 +29,7 @@ import {
   setIssueStatus,
   updateIssue,
 } from "../dal/issue.js";
+import { readIssueDetail, updateExternalIssue } from "../dal/issue-write.js";
 import { orchestrator } from "../orchestrator-client.js";
 import { ownerProcedure, router, unwrap } from "../trpc.js";
 
@@ -179,4 +183,48 @@ export const issueRouter = router({
       }
       return unwrap(await deleteIssue(ctx.rctx, input));
     }),
+
+  /**
+   * One imported Issue as its provider holds it *now*, with the vocabularies an editor needs.
+   *
+   * Live rather than from the mirror. A form built from the last poll opens on a title someone
+   * else changed an hour ago and saves over it with neither party seeing a conflict.
+   */
+  detail: ownerProcedure
+    .meta({
+      openapi: {
+        method: "GET",
+        path: "/issue.detail",
+        tags: ["issue"],
+        protect: true,
+        summary:
+          "One imported Issue read live from its provider, with the labels, people and milestones that provider will accept — and which fields it will accept a change to at all.",
+      },
+    })
+    .input(issueDetailInput)
+    .output(issueDetailDto)
+    .query(async ({ ctx, input }) => unwrap(await readIssueDetail(ctx.rctx, input))),
+
+  /**
+   * Change an imported Issue **on its provider** (spec F23 FR-13, Decision 0019).
+   *
+   * Distinct from `issue.update`, which edits a GateControl-owned Issue and still refuses to
+   * touch an imported one's title (`IssueErrorCode.SourceOwned`). That refusal is not
+   * contradicted here: editing the *copy* remains wrong. This edits the original and re-mirrors
+   * whatever the provider answers.
+   */
+  updateExternal: ownerProcedure
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/issue.updateExternal",
+        tags: ["issue"],
+        protect: true,
+        summary:
+          "Change an imported Issue on the provider that owns it. A field absent from the request is not changed; the answer is what the provider now holds, never what was sent.",
+      },
+    })
+    .input(updateExternalIssueInput)
+    .output(issueDetailDto)
+    .mutation(async ({ ctx, input }) => unwrap(await updateExternalIssue(ctx.rctx, input))),
 });

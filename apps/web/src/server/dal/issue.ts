@@ -17,8 +17,16 @@ import {
   type UpdateIssueInput,
 } from "@gatecontrol/contracts";
 import { activeTaskCount, deriveIssueStatus } from "@gatecontrol/core";
-import { issue, repository, session, task, worktree } from "@gatecontrol/db";
-import { and, desc, eq, inArray, like, or } from "drizzle-orm";
+import {
+  issue,
+  projectItem,
+  projectValue,
+  repository,
+  session,
+  task,
+  worktree,
+} from "@gatecontrol/db";
+import { and, desc, eq, inArray, like, notInArray, or } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
 import { type IssueRollup, issueToDto, NO_TASKS } from "./mappers.js";
 import { cascadeDeleteTasks } from "./task-cascade.js";
@@ -91,6 +99,46 @@ export async function listIssues(
   // Narrows the Task-creation picker to the Issues that belong to the Repository the Owner just
   // picked — no new query shape, one more `and()` clause on the same workspace-scoped read.
   if (input.repositoryId) conditions.push(eq(issue.repositoryId, input.repositoryId));
+
+  /*
+   * Project membership, as a subquery on `project_item` rather than a join.
+   *
+   * A join would multiply the row for an Issue that sits in two Projects, and the roll-up below
+   * counts Tasks per Issue — a duplicated row would count them twice and report a status derived
+   * from work that does not exist. `inArray` over the membership table asks the question the
+   * screen is actually asking ("is this Issue in that Project") and answers it once per Issue.
+   *
+   * `projectId` and `unassigned` together are a contradiction, and the honest answer to a
+   * contradiction is nothing: both clauses are applied, and an Issue cannot be both in a Project
+   * and in none. Silently dropping one would answer a question nobody asked.
+   */
+  if (input.projectId) {
+    conditions.push(
+      inArray(
+        issue.id,
+        ctx.db
+          .select({ id: projectItem.issueId })
+          .from(projectItem)
+          .where(
+            and(
+              eq(projectItem.workspaceId, ctx.workspaceId),
+              eq(projectItem.projectId, input.projectId),
+            ),
+          ),
+      ),
+    );
+  }
+  if (input.unassigned) {
+    conditions.push(
+      notInArray(
+        issue.id,
+        ctx.db
+          .select({ id: projectItem.issueId })
+          .from(projectItem)
+          .where(eq(projectItem.workspaceId, ctx.workspaceId)),
+      ),
+    );
+  }
 
   const rows = await ctx.db
     .select()
@@ -317,6 +365,33 @@ export async function deleteIssue(
 
       cascadeDeleteTasks(tx, ctx.workspaceId, taskIds);
     }
+
+    // The rows this Issue occupies in any planning project go with it (F23 / #121 AC-6). The
+    // *projects* do not: a project is a mirror of something on the provider, and deleting one
+    // Issue out of it is not a reason to forget the mirror. Before the FK below, this would have
+    // refused the delete outright.
+    tx.delete(projectValue)
+      .where(
+        and(
+          eq(projectValue.workspaceId, ctx.workspaceId),
+          inArray(
+            projectValue.itemId,
+            tx
+              .select({ id: projectItem.id })
+              .from(projectItem)
+              .where(
+                and(
+                  eq(projectItem.workspaceId, ctx.workspaceId),
+                  eq(projectItem.issueId, input.id),
+                ),
+              ),
+          ),
+        ),
+      )
+      .run();
+    tx.delete(projectItem)
+      .where(and(eq(projectItem.workspaceId, ctx.workspaceId), eq(projectItem.issueId, input.id)))
+      .run();
 
     tx.delete(issue)
       .where(and(eq(issue.workspaceId, ctx.workspaceId), eq(issue.id, input.id)))

@@ -5,6 +5,7 @@ import { ExecutorProfilesSection } from "./executor-profiles-section";
 import { FlagsSection } from "./flags-section";
 import { IntegrationsSection } from "./integrations-section";
 import { McpSection } from "./mcp-section";
+import { ProviderIdentitySection } from "./provider-identity-section";
 import { RepositoriesSection } from "./repositories-section";
 import { SecretsSection } from "./secrets-section";
 import { StatusBarSection } from "./status-bar-section";
@@ -32,6 +33,7 @@ export function Settings() {
       <ExecutorProfilesSection />
       <RepositoriesSection />
       <IntegrationsSection />
+      <ProviderIdentitySection />
       <McpSection />
       <StatusBarSection />
       <FlagsSection />

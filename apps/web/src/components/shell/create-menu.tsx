@@ -2,7 +2,11 @@
 
 import { ChevronDown, Download, FolderPlus, Plus, SquarePen, Zap } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import { type CreateKind, onOpenCreateDialog } from "@/components/features/board/create-dialog-bus";
+import {
+  type CreateDialogPreset,
+  type CreateKind,
+  onOpenCreateDialog,
+} from "@/components/features/board/create-dialog-bus";
 import { CreateTaskDialog } from "@/components/features/board/create-task-dialog";
 import { ConnectRepositoryDialog } from "@/components/features/issues/connect-repository-dialog";
 import { ImportIssuesDialog } from "@/components/features/issues/import-issues-dialog";
@@ -44,13 +48,32 @@ export function CreateMenu() {
   const [dialog, setDialog] = useState<CreateKind | null>(null);
   const utils = trpc.useUtils();
 
-  const close = useCallback(() => setDialog(null), []);
+  /**
+   * What the sender already knew, held here because *this* component owns the dialog.
+   *
+   * The dialog subscribes to the bus itself only when it is uncontrolled; here it is controlled,
+   * so a preset applied inside it would be dropped on the floor — which is exactly what happened
+   * the first time, and looked like "the preset does nothing".
+   */
+  const [preset, setPreset] = useState<CreateDialogPreset | undefined>(undefined);
+
+  const close = useCallback(() => {
+    setDialog(null);
+    // Cleared on close, or the next `New task` from the header would open on the last row someone
+    // right-clicked.
+    setPreset(undefined);
+  }, []);
 
   // The bus is the one entry point, so the command palette, the keyboard shortcuts below and the
   // menu items all arrive the same way and cannot drift apart.
   useEffect(() => {
     const kinds: CreateKind[] = ["task", "issue", "import-issues", "connect-repository"];
-    const unsubscribes = kinds.map((kind) => onOpenCreateDialog(kind, () => setDialog(kind)));
+    const unsubscribes = kinds.map((kind) =>
+      onOpenCreateDialog(kind, (sent) => {
+        setPreset(sent);
+        setDialog(kind);
+      }),
+    );
     return () => {
       for (const off of unsubscribes) off();
     };
@@ -121,7 +144,12 @@ export function CreateMenu() {
         that without a reset path in four separate components.
       */}
       {dialog === "task" && (
-        <CreateTaskDialog trigger={null} open onOpenChange={(next) => !next && close()} />
+        <CreateTaskDialog
+          trigger={null}
+          open
+          preset={preset}
+          onOpenChange={(next) => !next && close()}
+        />
       )}
       {dialog === "issue" && (
         <IssueFormDialog

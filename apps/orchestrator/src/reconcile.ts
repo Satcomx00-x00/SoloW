@@ -1,8 +1,8 @@
 import type { TaskCompletionOutcome } from "@gatecontrol/contracts";
 import { parseSessionEventPayload } from "@gatecontrol/contracts";
-import { INTERRUPTED_REASON } from "@gatecontrol/core";
-import { type Db, session, sessionEvent, task } from "@gatecontrol/db";
-import { and, desc, eq, ne } from "drizzle-orm";
+import { INTERRUPTED_REASON, STRANDED_REVIEW_REASON } from "@gatecontrol/core";
+import { type Db, review, session, sessionEvent, task } from "@gatecontrol/db";
+import { and, desc, eq, isNull, ne } from "drizzle-orm";
 import type { AgentRegistry } from "./agent/registry.js";
 import {
   appendSessionEvent,
@@ -201,6 +201,66 @@ export async function reclaimOrphanedRuns(
     reclaimed += 1;
   }
   return reclaimed;
+}
+
+/**
+ * The other way a run goes missing, and the one nobody watches for.
+ *
+ * A Task at the review gate is a run parked in `waitForEvent("review.decided")`. Lose that run —
+ * a durable engine restarted without `--persist`, a redrive that never came back — and the wait
+ * is gone while the Task still reads `review`. The operator then approves, `review.decide`
+ * records the decision and publishes the event, nothing is listening, and the Task sits in
+ * `review` for ever with a decision that was made and never applied. Approve and Request changes
+ * look dead, and there is nothing on screen to say why.
+ *
+ * The distinction that makes this safe to sweep: **a Task waiting for a person is not stranded.**
+ * Only one carrying a *recorded decision* that did not take effect is, and that is what is looked
+ * for here — a review row for the Session, with the Task still sitting at the gate long after.
+ *
+ * What it does not do is apply the decision. Committing here would be a second implementation of
+ * the approve path, running outside the durable loop that owns worktrees — the "two orchestration
+ * paths with undefined precedence" this codebase refuses everywhere else. It names the condition
+ * instead, so a person can retry, and the run that retries is the one that owns the work.
+ */
+export async function reportStrandedReviews(
+  db: Db,
+  registry: Pick<AgentRegistry, "get">,
+  hub: Pick<EventHub, "publish" | "boardChannel" | "taskChannel">,
+  now: () => Date = () => new Date(),
+): Promise<number> {
+  const inReview = await db
+    .select({ id: task.id, workspaceId: task.workspaceId, updatedAt: task.updatedAt })
+    .from(task)
+    .where(and(eq(task.state, "review"), isNull(task.failureReason)));
+
+  let reported = 0;
+  for (const row of inReview) {
+    if (registry.get(row.workspaceId, row.id)) continue;
+    if (now().getTime() - Date.parse(row.updatedAt) < RECLAIM_STALE_MS) continue;
+
+    const [decided] = await db
+      .select({ id: review.id })
+      .from(review)
+      .innerJoin(session, eq(session.id, review.sessionId))
+      .where(and(eq(review.workspaceId, row.workspaceId), eq(session.taskId, row.id)))
+      .limit(1);
+    // No decision means a person has simply not looked yet. That is the gate working.
+    if (!decided) continue;
+
+    await setTaskState(db, row.workspaceId, row.id, "review", {
+      failureReason: STRANDED_REVIEW_REASON,
+    });
+    const message = {
+      kind: "status" as const,
+      taskId: row.id,
+      state: "review" as const,
+      at: now().toISOString(),
+    };
+    hub.publish(hub.boardChannel(row.workspaceId), message);
+    hub.publish(hub.taskChannel(row.workspaceId, row.id), message);
+    reported += 1;
+  }
+  return reported;
 }
 
 /** When this Session last produced anything, falling back to when it began. */

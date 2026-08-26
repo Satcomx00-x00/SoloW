@@ -2,7 +2,9 @@ import {
   err,
   INTEGRATION_CAPABILITIES,
   type IntegrationCapability,
+  type IssueWriteSupport,
   ok,
+  type ProjectFieldSupport,
   type ProviderField,
   type ProviderId,
   type ProviderManifestDto,
@@ -42,6 +44,21 @@ export interface ProviderDescriptor<Driver> {
   readonly fields: readonly ProviderField[];
   /** The provider's own word for a change request, for display beside a link to its own UI. */
   readonly changeRequestNoun?: string;
+  /**
+   * Which project field types this provider can express, and why not for the rest.
+   *
+   * Required in practice for a provider declaring `projects`, and meaningless without it — the
+   * capability says "I have a project"; this says what that project can hold (Decision 0018).
+   */
+  readonly projectFields?: ProjectFieldSupport;
+  /**
+   * Which parts of an issue this provider can be asked to change, and why not for the rest.
+   *
+   * Stands to `issueWrites` as `projectFields` stands to `projects`: the capability says an edit
+   * can be sent, this says what an edit may contain. An editor reads it to decide which controls
+   * to render at all — never the provider's name.
+   */
+  readonly issueWrites?: IssueWriteSupport;
   readonly driver: Driver;
 }
 
@@ -69,9 +86,11 @@ const RESERVED_IDS: ReadonlySet<string> = new Set(["local"]);
  * a driver bug look like a provider outage.
  */
 const REQUIRED_METHODS: Record<IntegrationCapability, readonly string[]> = {
-  issues: ["listIssues", "listLabels"],
-  repositories: ["listRepositories", "listBranches"],
+  issues: ["listIssues", "getIssue", "listLabels"],
+  issueWrites: ["updateIssue", "listAssignableUsers", "listMilestones"],
+  repositories: ["listRepositories", "getRepository", "listBranches"],
   changeRequests: ["listChangeRequests"],
+  projects: ["listProjects", "readProjectFields", "readProjectItems", "writeProjectFieldValue"],
 };
 
 export class ProviderRegistry<Driver extends object> {
@@ -162,5 +181,11 @@ export function toManifest<Driver>(descriptor: ProviderDescriptor<Driver>): Prov
     capabilities: [...descriptor.capabilities],
     fields: [...descriptor.fields],
     ...(descriptor.changeRequestNoun ? { changeRequestNoun: descriptor.changeRequestNoun } : {}),
+    // Published to the client, because "can this project hold a number" is a question the table
+    // asks on every render and must not answer from a provider's name (Decision 0018).
+    ...(descriptor.projectFields ? { projectFields: descriptor.projectFields } : {}),
+    // Same reason: which controls an issue editor may draw is a question about the provider's
+    // abilities, asked on every render, and answering it from an id is what Decision 0016 forbids.
+    ...(descriptor.issueWrites ? { issueWrites: descriptor.issueWrites } : {}),
   };
 }

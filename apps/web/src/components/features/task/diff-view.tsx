@@ -18,9 +18,9 @@ import { PatchView } from "./patch-view";
  */
 
 const STATUS_STYLE: Record<DiffFileDto["status"], { icon: typeof FilePen; tone: string }> = {
-  added: { icon: FilePlus2, tone: "text-state-done" },
+  added: { icon: FilePlus2, tone: "text-diff-added" },
   modified: { icon: FilePen, tone: "text-state-running" },
-  deleted: { icon: FileMinus2, tone: "text-state-failed" },
+  deleted: { icon: FileMinus2, tone: "text-diff-removed" },
   renamed: { icon: FilePen, tone: "text-state-parked" },
 };
 
@@ -33,9 +33,9 @@ function FileRow({ file }: { file: DiffFileDto }) {
         {file.path}
       </span>
       <span className="shrink-0 font-mono text-2xs tabular-nums">
-        {file.additions > 0 && <span className="text-state-done">+{file.additions}</span>}
+        {file.additions > 0 && <span className="text-diff-added">+{file.additions}</span>}
         {file.additions > 0 && file.deletions > 0 && " "}
-        {file.deletions > 0 && <span className="text-state-failed">-{file.deletions}</span>}
+        {file.deletions > 0 && <span className="text-diff-removed">-{file.deletions}</span>}
         {file.additions === 0 && file.deletions === 0 && (
           <span className="text-muted-foreground/60">0</span>
         )}
@@ -85,8 +85,8 @@ export function DiffView({ diff, branch }: { diff: TaskDiffDto | null; branch: s
             <span className="text-muted-foreground">
               {diff.files.length === 1 ? "1 file" : `${diff.files.length} files`}
             </span>
-            {additions > 0 && <span className="ml-2 text-state-done">+{additions}</span>}
-            {deletions > 0 && <span className="ml-2 text-state-failed">-{deletions}</span>}
+            {additions > 0 && <span className="ml-2 text-diff-added">+{additions}</span>}
+            {deletions > 0 && <span className="ml-2 text-diff-removed">-{deletions}</span>}
           </span>
         </div>
         {diff.files.length === 0 ? (

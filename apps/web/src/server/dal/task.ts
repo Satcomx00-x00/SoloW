@@ -26,13 +26,14 @@ import {
 } from "@gatecontrol/core";
 import {
   agentProfile,
+  projectItem,
   session,
   task,
   taskDependency,
   taskRepository,
   worktree,
 } from "@gatecontrol/db";
-import { and, asc, desc, eq, inArray, like } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, like, notInArray } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
 import { taskToDto } from "./mappers.js";
 import { cascadeDeleteTasks } from "./task-cascade.js";
@@ -94,6 +95,43 @@ export async function listTasks(
   // `query` was accepted by the input schema and then dropped on the floor, so a filtered
   // request came back unfiltered and looked like it had worked. Matches `listIssues`.
   if (input.query) conditions.push(like(task.title, `%${input.query}%`));
+
+  /*
+   * A Task belongs to a Project through its Issue — there is no `task.project_id`, and there
+   * should not be: a Task is work on an Issue, and which Project holds that Issue is the
+   * Project's fact, not the Task's. So the filter reaches through `project_item`, and a Task
+   * whose Issue is later adopted into a Project appears on that board with nothing to migrate.
+   *
+   * Subquery rather than a join, for the same reason as `listIssues`: an Issue in two Projects
+   * would otherwise duplicate every Task under it.
+   */
+  if (input.projectId) {
+    conditions.push(
+      inArray(
+        task.issueId,
+        ctx.db
+          .select({ id: projectItem.issueId })
+          .from(projectItem)
+          .where(
+            and(
+              eq(projectItem.workspaceId, ctx.workspaceId),
+              eq(projectItem.projectId, input.projectId),
+            ),
+          ),
+      ),
+    );
+  }
+  if (input.unassigned) {
+    conditions.push(
+      notInArray(
+        task.issueId,
+        ctx.db
+          .select({ id: projectItem.issueId })
+          .from(projectItem)
+          .where(eq(projectItem.workspaceId, ctx.workspaceId)),
+      ),
+    );
+  }
 
   const rows = await ctx.db
     .select()

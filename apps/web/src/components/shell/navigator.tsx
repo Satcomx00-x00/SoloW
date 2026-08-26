@@ -2,11 +2,24 @@
 
 import type { IssueStatus, TaskState } from "@gatecontrol/contracts";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { ISSUE_STATUS_LABELS, ISSUE_STATUS_STYLE, ISSUE_STATUSES } from "@/lib/issue-status";
-import { sectionFor } from "@/lib/navigation";
+import {
+  PROJECT_SECTIONS,
+  projectIdFromPath,
+  projectSectionFor,
+  projectSectionHref,
+  sectionFor,
+} from "@/lib/navigation";
 import { BOARD_COLUMNS, STATE_LABELS, STATE_STYLE } from "@/lib/task-states";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
@@ -99,9 +112,9 @@ function CountRow({
   );
 }
 
-/** Board context: live per-state task counts. */
-function BoardNav() {
-  const tasks = trpc.task.list.useQuery({});
+/** Board context: live per-state task counts, for the Project the board is inside. */
+function BoardNav({ projectId }: { projectId?: string | undefined }) {
+  const tasks = trpc.task.list.useQuery(projectId ? { projectId } : {});
   const rows = tasks.data ?? [];
   const counts = rows.reduce<Record<string, number>>((acc, t) => {
     acc[t.state] = (acc[t.state] ?? 0) + 1;
@@ -136,13 +149,23 @@ function BoardNav() {
 }
 
 /** Issues context: counts per status, each row filtering the list. */
-function IssuesNav() {
-  const issues = trpc.issue.list.useQuery({});
+function IssuesNav({
+  projectId,
+  unassigned,
+}: {
+  projectId?: string | undefined;
+  unassigned?: boolean | undefined;
+}) {
+  const issues = trpc.issue.list.useQuery({
+    ...(projectId ? { projectId } : {}),
+    ...(unassigned ? { unassigned: true } : {}),
+  });
   const rows = issues.data ?? [];
   const counts = rows.reduce<Record<string, number>>((acc, i) => {
     acc[i.status] = (acc[i.status] ?? 0) + 1;
     return acc;
   }, {});
+  const base = projectId ? projectSectionHref(projectId, "/issues") : "/unassigned";
 
   return (
     <nav className="pb-3" aria-label="Issue statuses">
@@ -156,12 +179,15 @@ function IssuesNav() {
         }))}
       />
       <ul className="space-y-px px-2 pt-2">
+        {/* Every link stays inside the surface it was opened from: a status row on a Project's
+            issue list must not jump to a Workspace-wide one, or the filter would silently widen
+            the set it was narrowing. */}
         <CountRow
           icon={AllIcon}
           label="All issues"
           count={rows.length}
           tone="text-foreground/70"
-          href="/issues"
+          href={base}
         />
         {ISSUE_STATUSES.map((status: IssueStatus) => (
           <CountRow
@@ -170,7 +196,7 @@ function IssuesNav() {
             label={ISSUE_STATUS_LABELS[status]}
             count={counts[status] ?? 0}
             tone={ISSUE_STATUS_STYLE[status].text}
-            href={`/issues?status=${status}`}
+            href={`${base}?status=${status}`}
           />
         ))}
       </ul>
@@ -227,25 +253,126 @@ function SettingsNav() {
   );
 }
 
+/**
+ * The Project switcher, and the sections inside the Project it names.
+ *
+ * At the very top of the sidebar, because that is where the top of the hierarchy belongs. It used
+ * to sit in a toolbar above the project *table*, which said a Project was a property of that one
+ * screen — when the board, the issue list and the workflows are equally inside it. Switching here
+ * keeps you on the same section of the new Project rather than dumping you on its overview, which
+ * is what someone comparing two projects' boards actually wants.
+ */
+function ProjectNav({ projectId }: { projectId: string }) {
+  const pathname = usePathname();
+  const router = useRouter();
+  const projects = trpc.project.list.useQuery({});
+  const active = projectSectionFor(pathname);
+
+  return (
+    <>
+      <div className="px-2 pt-2.5">
+        <Select
+          value={projectId}
+          onValueChange={(id) => router.push(projectSectionHref(id, active?.path ?? ""))}
+        >
+          <SelectTrigger className="h-8 w-full text-xs" aria-label="Project">
+            <SelectValue placeholder="Project" />
+          </SelectTrigger>
+          <SelectContent>
+            {(projects.data ?? []).map((p) => (
+              <SelectItem key={p.id} value={p.id}>
+                {p.title}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <nav aria-label="Project sections">
+        <SectionLabel>In this project</SectionLabel>
+        <ul className="space-y-px px-2">
+          {PROJECT_SECTIONS.map((s) => {
+            const href = projectSectionHref(projectId, s.path);
+            const current = active?.path === s.path;
+            return (
+              <li key={s.path || "overview"}>
+                <Link
+                  href={href}
+                  aria-current={current ? "page" : undefined}
+                  className={cn(
+                    "flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors",
+                    current
+                      ? "bg-sidebar-accent font-medium text-foreground"
+                      : "text-foreground/75 hover:bg-sidebar-accent/50 hover:text-foreground",
+                  )}
+                >
+                  <s.icon aria-hidden strokeWidth={2} className="size-3.5 shrink-0" />
+                  <span className="min-w-0 flex-1 truncate">{s.label}</span>
+                  {s.wip && (
+                    // Said in the row rather than only as a colour, so it survives a screen
+                    // reader — the section is live but not finished (F03).
+                    <span className="shrink-0 rounded border px-1 text-[9px] text-muted-foreground uppercase">
+                      WIP
+                    </span>
+                  )}
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+      </nav>
+    </>
+  );
+}
+
 /** VS-Code-style navigator: the context panel next to the activity bar. */
 export function Navigator({ workspaceName }: { workspaceName: string }) {
   const pathname = usePathname();
+  const projectId = projectIdFromPath(pathname);
+  const projectSection = projectSectionFor(pathname);
   const section = sectionFor(pathname);
   const isSettings = section?.href === "/settings";
-  const isIssues = section?.href === "/issues";
+  const isUnassigned = section?.href === "/unassigned";
+
+  // The Project's name is the sidebar's title when you are inside one: the Workspace is already
+  // named in the breadcrumb, and repeating it here would spend the most prominent line in the
+  // sidebar on the thing you are least often choosing between.
+  const project = trpc.project.get.useQuery(
+    { projectId: projectId ?? "" },
+    { enabled: projectId !== null },
+  );
+
+  const title = projectId ? (project.data?.title ?? "Project") : (section?.label ?? workspaceName);
+  const caption = projectId
+    ? (projectSection?.caption ?? "Project")
+    : (section?.caption ?? "Workspace");
 
   return (
     <aside className="hidden w-60 shrink-0 flex-col border-r bg-sidebar md:flex">
       <div className="flex h-11 shrink-0 flex-col justify-center border-b px-3">
-        <span className="truncate font-semibold text-sm leading-tight">
-          {isSettings || isIssues ? (section?.label ?? workspaceName) : workspaceName}
-        </span>
-        <span className="truncate text-2xs text-muted-foreground leading-tight">
-          {section?.caption ?? "Workspace"}
-        </span>
+        <span className="truncate font-semibold text-sm leading-tight">{title}</span>
+        <span className="truncate text-2xs text-muted-foreground leading-tight">{caption}</span>
       </div>
       <ScrollArea className="flex-1">
-        {isSettings ? <SettingsNav /> : isIssues ? <IssuesNav /> : <BoardNav />}
+        {projectId ? (
+          <>
+            <ProjectNav projectId={projectId} />
+            {/*
+              The counts *below* the section list, never instead of it.
+
+              A sidebar that swapped its whole body per section made the Project's other sections
+              disappear the moment you entered one — you could reach a board and then had no way
+              back to the table except the breadcrumb. The sections stay put; the counts are extra
+              detail for the section you are actually in.
+            */}
+            {projectSection?.path === "/board" && <BoardNav projectId={projectId} />}
+            {projectSection?.path === "/issues" && <IssuesNav projectId={projectId} />}
+          </>
+        ) : isSettings ? (
+          <SettingsNav />
+        ) : isUnassigned ? (
+          <IssuesNav unassigned />
+        ) : null}
       </ScrollArea>
     </aside>
   );
