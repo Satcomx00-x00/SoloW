@@ -1,0 +1,53 @@
+{
+  "name": "solow",
+  "version": "0.0.1",
+  "description": "Solo Workflow \u2014 a self-hostable control plane for orchestrating AI coding agents in parallel under human review. Run it with `npx solow`.",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "homepage": "https://github.com/Satcomx00-x00/SoloW#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Satcomx00-x00/SoloW.git",
+    "directory": "packages/cli"
+  },
+  "bugs": {
+    "url": "https://github.com/Satcomx00-x00/SoloW/issues"
+  },
+  "keywords": [
+    "ai",
+    "agents",
+    "claude-code",
+    "acp",
+    "orchestration",
+    "kanban",
+    "code-review",
+    "self-hosted"
+  ],
+  "bin": {
+    "solow": "bin/solow.mjs"
+  },
+  "files": [
+    "bin/",
+    "dist/",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "bun": "^1.4.0",
+    "inngest-cli": "^1.44.0"
+  },
+  "scripts": {
+    "build": "bun run scripts/build.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check ."
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "bun-types": "^1.1.0",
+    "typescript": "^5.6.0"
+  }
+}

@@ -1,0 +1,110 @@
+name: Publish
+
+# Publishes the `solow` package to npm, which is what makes `npx solow` work.
+#
+# Releases are cut by tag: push `v0.2.0` and this builds and publishes 0.2.0. The tag is the
+# trigger *and* the source of truth for the version — the guard below refuses to publish if
+# packages/cli/package.json disagrees with it, so a tag can never ship a different version than
+# it names.
+#
+# Dry runs are available from the Actions tab (workflow_dispatch) and go all the way through
+# packing without publishing, so the build can be exercised without burning a version number.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build and pack, but do not publish"
+        type: boolean
+        default: true
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  # Lets npm attach a provenance attestation — a signed, public record tying the published
+  # tarball to this workflow run and this commit. Without it `npm publish --provenance` fails.
+  id-token: write
+
+env:
+  # Keep in sync with `packageManager` in package.json.
+  BUN_VERSION: "1.3.14"
+
+jobs:
+  publish:
+    name: Build and publish to npm
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      # npm itself does the publishing: Bun's publish does not support provenance, and
+      # `setup-node` is what writes the .npmrc that authenticates NODE_AUTH_TOKEN.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Cache Bun install cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # A tag that disagrees with the manifest means someone tagged without bumping (or bumped
+      # without tagging). Either way the release is not what it claims to be — stop before npm
+      # records a version that no tag points at.
+      - name: Version matches the tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          manifest="$(node -p "require('./packages/cli/package.json').version")"
+          if [ "$tag" != "$manifest" ]; then
+            echo "::error::tag v$tag does not match packages/cli/package.json ($manifest)"
+            exit 1
+          fi
+          echo "publishing version $manifest"
+
+      # The same gates `verify.yml` runs on every PR. Repeated here rather than assumed: a tag
+      # can be pushed at any commit, including one that never went through a pull request.
+      - name: Lint (Biome)
+        run: make lint
+
+      - name: Typecheck
+        run: make typecheck
+
+      - name: Unit tests
+        run: make test
+
+      # Produces packages/cli/dist: the traced standalone web build, the orchestrator and the
+      # database entry points as self-contained bundles, and the migration SQL.
+      - name: Build the package
+        run: bun run --filter solow build
+
+      - name: Inspect the tarball
+        working-directory: packages/cli
+        run: npm pack --dry-run
+
+      - name: Publish
+        if: ${{ github.event_name == 'push' || inputs.dry_run == false }}
+        working-directory: packages/cli
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Dry run complete
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: echo "Dry run — built and packed, nothing published."
