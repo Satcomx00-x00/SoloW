@@ -23,7 +23,7 @@ when the window resets.
 
 ## Considered options
 
-- **API keys only** (kandev's default posture) — Rejected as the only option: ignores the
+- **API keys only** (the usual default posture) — Rejected as the only option: ignores the
   large base of subscription users and their cost concerns.
 - **Inherit an interactive login profile only** — Rejected: only works where a human logged
   in interactively; fails for container, remote, and cloud Executors.
@@ -33,7 +33,7 @@ when the window resets.
 ## Consequences
 
 - Positive: users run agents on a plan they already pay for, everywhere; a primary
-  differentiator from kandev.
+  differentiator from comparable tools.
 - Positive: the Parked state and concurrency caps prevent silent quota exhaustion and
   surprise bills (product NFR-10).
 - Negative: subscription throughput is capped by quota windows, so wide fan-out still needs

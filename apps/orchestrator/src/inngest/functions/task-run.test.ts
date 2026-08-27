@@ -3029,9 +3029,9 @@ describe("an agent that declares it is finished and does not exit", () => {
  * A Profile's launch settings reach the run it launches (issue #94, AC-1 / AC-4).
  *
  * Model and mode used to be unexpressible: every run used whatever the CLI defaulted to, and the
- * one thing a Profile could say about *how* its agent starts was the permission mode. kandev's
- * own example — "Opus to design a plan, Sonnet to implement it, GPT to review" — is three model
- * choices, none of which had anywhere to live.
+ * one thing a Profile could say about *how* its agent starts was the permission mode. The
+ * canonical example — "Opus to design a plan, Sonnet to implement it, GPT to review" — is three
+ * model choices, none of which had anywhere to live.
  */
 describe("an Agent Profile's launch settings", () => {
   let db: TestDb;

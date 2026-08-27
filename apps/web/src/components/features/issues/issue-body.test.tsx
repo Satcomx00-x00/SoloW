@@ -40,6 +40,8 @@ function makeIssue(patch: Partial<IssueDto> = {}): IssueDto {
     syncedAt: null,
     labels: [],
     linkedChangeRequests: [],
+    assignees: [],
+    milestone: null,
     ...TIMESTAMPS,
     ...patch,
   };

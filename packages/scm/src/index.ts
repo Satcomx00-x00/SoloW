@@ -18,9 +18,9 @@ import type {
 export { GiteaProvider } from "./gitea.js";
 export { GithubProvider } from "./github.js";
 export { GitlabProvider } from "./gitlab.js";
-export { DEFAULT_LABEL_TAXONOMY } from "./label-taxonomy.js";
 // The paging bound a caller needs to tell a complete listing from a truncated one (issue #125).
 export { ISSUE_PAGE_CAP, ISSUE_PAGE_SIZE } from "./http.js";
+export { DEFAULT_LABEL_TAXONOMY } from "./label-taxonomy.js";
 export * from "./types.js";
 
 /**

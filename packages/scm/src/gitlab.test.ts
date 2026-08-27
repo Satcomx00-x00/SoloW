@@ -48,6 +48,9 @@ beforeAll(() => {
             description: "at dusk",
             state: "opened",
             web_url: "u/issues/3",
+            labels: ["bug", "status::doing"],
+            assignees: [{ username: "glab", name: "GLab", avatar_url: "a/glab.png" }],
+            milestone: { id: 90, title: "v1", start_date: "2026-08-01", due_date: "2026-09-01" },
           },
           { iid: 4, title: "Old issue", description: null, state: "closed", web_url: "u/issues/4" },
         ]);
@@ -325,6 +328,14 @@ describe("GitlabProvider", () => {
         description: "at dusk",
         state: "open",
         url: "u/issues/3",
+        labels: ["bug", "status::doing"],
+        assignees: [{ login: "glab", name: "GLab", avatarUrl: "a/glab.png" }],
+        milestone: {
+          externalId: "90",
+          title: "v1",
+          startDate: "2026-08-01",
+          dueDate: "2026-09-01",
+        },
       },
       {
         externalId: "4",
@@ -333,6 +344,9 @@ describe("GitlabProvider", () => {
         description: null,
         state: "closed",
         url: "u/issues/4",
+        labels: [],
+        assignees: [],
+        milestone: null,
       },
     ]);
   });

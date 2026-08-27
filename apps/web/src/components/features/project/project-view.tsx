@@ -30,12 +30,14 @@ import {
   Search,
   Table2,
   Tags,
+  Trash2,
   UserX,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { openCreateDialog } from "@/components/features/board/create-dialog-bus";
+import { ConfirmAction } from "@/components/features/confirm-action";
 import { AdoptProjectDialog } from "@/components/features/project/adopt-project-dialog";
 import { IssueLabel } from "@/components/features/project/issue-label";
 import { IssuePanel } from "@/components/features/project/issue-panel";
@@ -288,6 +290,20 @@ export function ProjectView({ projectId }: { projectId: string }) {
   const rescan = trpc.project.rescan.useMutation({ onSuccess: onSynced });
   /** Whichever of the two last ran — one banner, reporting the pass the operator asked for. */
   const lastPass = rescan.data ?? refresh.data;
+
+  /**
+   * Delete the Project itself (user request 2026-08-27) — its rows in SoloW's own database, never
+   * its Issues (they become unassigned, same as `ProjectRepositoriesDialog`'s detach) and, for a
+   * mirrored Project, never anything on the provider. Navigates back to the hub first: this page
+   * is about to describe a Project that no longer exists, so invalidating in place would refetch
+   * it into a 404 rather than let the operator leave.
+   */
+  const deleteProject = trpc.project.delete.useMutation({
+    onSuccess: () => {
+      router.push("/projects");
+      void utils.project.list.invalidate();
+    },
+  });
 
   /**
    * Which Issue the side panel is showing, or null for closed.
@@ -602,8 +618,27 @@ export function ProjectView({ projectId }: { projectId: string }) {
               <AdoptProjectDialog onAdopted={(id) => go({ project: id, view: null, q: null })} />
             </>
           )}
+          {/* Regardless of source — a local Project's Repositories dialog and a mirrored one's
+              sync controls both decide what's *in* the Project; deleting it is a different axis
+              and applies to either kind the same way. */}
+          <ConfirmAction
+            trigger={
+              <Button size="xs" variant="ghost" disabled={deleteProject.isPending}>
+                <Trash2 aria-hidden /> Delete
+              </Button>
+            }
+            title={`Delete "${project.data?.title ?? "this project"}"?`}
+            description="This removes the Project from SoloW — its saved views, fields and values. Its Issues are kept and become unassigned, and nothing is deleted on the provider."
+            confirmLabel="Delete project"
+            onConfirm={() => projectId && deleteProject.mutate({ projectId })}
+          />
         </span>
       </div>
+      {deleteProject.error && (
+        <p className="border-b px-4 py-2 text-destructive text-xs" role="alert">
+          {deleteProject.error.message}
+        </p>
+      )}
 
       <ProjectViewTabs
         views={views.data ?? []}

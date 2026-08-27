@@ -183,3 +183,63 @@ describe("local Project procedures", () => {
     ).toBe("NOT_FOUND");
   });
 });
+
+/**
+ * Deleting a Project (user request 2026-08-27): removes SoloW's own row and everything that
+ * belongs to it, but never the Issues it held — same guarantee as `detachRepository`, one level
+ * up. Proved end to end through the router for both kinds of Project, since `deleteProject`
+ * itself is provider-agnostic and neither this router procedure nor `attachRepository`'s own
+ * `PROJECT_NOT_LOCAL` refusal applies to it.
+ */
+describe("delete", () => {
+  let db: TestDb;
+
+  beforeEach(() => {
+    db = createTestDb();
+  });
+
+  it("deletes a local Project and leaves its Issues in place, unassigned", async () => {
+    const g = await seedWorkspaceGraph(db, "acme");
+    const api = caller(db, g.workspaceId);
+    const proj = await api.project.createLocal({ title: "Roadmap" });
+    await api.project.attachRepository({ projectId: proj.id, repositoryId: g.repositoryId });
+    const issue = await api.issue.create({
+      title: "Gate stuck",
+      repositoryId: g.repositoryId,
+      labels: [],
+    });
+
+    const result = await api.project.delete({ projectId: proj.id });
+
+    expect(result).toEqual({ id: proj.id });
+    expect(await errCode(() => api.project.get({ projectId: proj.id }))).toBe("NOT_FOUND");
+    // The Issue is untouched, and the same call that used to require a Project (issue.list
+    // filtered by it) still finds it — it is simply nobody's row any more.
+    expect(await api.issue.get({ id: issue.id })).toMatchObject({ id: issue.id });
+  });
+
+  it("deletes a mirrored Project the same way — SoloW's mirror, never the provider", async () => {
+    const g = await seedWorkspaceGraph(db, "acme");
+    const api = caller(db, g.workspaceId);
+    const mirrored = await seedMirroredProject(db, g.workspaceId);
+
+    const result = await api.project.delete({ projectId: mirrored.id });
+
+    expect(result).toEqual({ id: mirrored.id });
+    expect(await errCode(() => api.project.get({ projectId: mirrored.id }))).toBe("NOT_FOUND");
+  });
+
+  it("refuses to delete another Workspace's Project (Principle V)", async () => {
+    const acme = await seedWorkspaceGraph(db, "acme");
+    const intruder = await seedWorkspaceGraph(db, "intruder");
+    const acmeApi = caller(db, acme.workspaceId);
+    const proj = await acmeApi.project.createLocal({ title: "Roadmap" });
+
+    const intruderApi = caller(db, intruder.workspaceId);
+    expect(await errCode(() => intruderApi.project.delete({ projectId: proj.id }))).toBe(
+      "NOT_FOUND",
+    );
+    // Untouched: Acme can still see it.
+    expect(await acmeApi.project.get({ projectId: proj.id })).toMatchObject({ id: proj.id });
+  });
+});

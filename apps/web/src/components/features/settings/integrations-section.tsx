@@ -288,7 +288,11 @@ export function IntegrationsSection() {
                   <SelectContent>
                     {(integrations.data ?? []).map((i) => (
                       <SelectItem key={i.id} value={i.id}>
-                        {i.provider}
+                        {/* A Workspace may hold more than one Integration for the same provider
+                            (two self-hosted GitLab instances, or one self-hosted plus gitlab.com)
+                            — the host is what tells them apart, the same pair the badge above
+                            already shows per Integration (user request 2026-08-27). */}
+                        {i.provider} · {i.baseUrl ?? "cloud"}
                       </SelectItem>
                     ))}
                   </SelectContent>

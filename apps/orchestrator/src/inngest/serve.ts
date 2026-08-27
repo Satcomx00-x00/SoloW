@@ -1,6 +1,23 @@
 import { InngestCommHandler } from "inngest";
 import { inngest } from "./client.js";
+import { repositorySync } from "./functions/repository-sync.js";
 import { taskRun } from "./functions/task-run.js";
+
+/**
+ * The one list of functions Inngest actually knows about — every function this process runs must
+ * be in it, or Inngest can never discover it.
+ *
+ * Single source of truth on purpose (bug found 2026-08-27, user-reported: a GitLab repository's
+ * Issues never synced). `repositorySync` (issue #125's cron) was registered in `index.ts`'s own
+ * `functions` export and nowhere else — that export is only ever read for a boot-time log line
+ * (`main.ts`'s `${functions.length} Inngest function(s) registered`), never passed to the actual
+ * handler below, which had its own separate, hand-kept `[taskRun]` literal that nothing kept in
+ * sync with the first one. The log line said "2 functions registered" while Inngest itself,
+ * queried directly, reported one — `repositorySync`'s cron had never fired, for any provider,
+ * since the feature was introduced. `index.ts` now imports this constant rather than building its
+ * own list, so there is exactly one place a function can be added and forgotten from the other.
+ */
+export const INNGEST_FUNCTIONS = [taskRun, repositorySync];
 
 /**
  * The `/api/inngest` handler (Decision 0004), **streaming**.
@@ -40,7 +57,7 @@ import { taskRun } from "./functions/task-run.js";
 export const inngestServeHandler = new InngestCommHandler({
   frameworkName: "bun",
   client: inngest,
-  functions: [taskRun],
+  functions: INNGEST_FUNCTIONS,
   streaming: true,
   handler: (req: Request) => ({
     body: () => req.text(),

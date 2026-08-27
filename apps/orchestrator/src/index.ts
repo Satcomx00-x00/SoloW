@@ -11,15 +11,16 @@ import {
 import { orchestratorEnv } from "./env.js";
 import { inngest } from "./inngest/client.js";
 import { handleEventPost } from "./inngest/events.js";
-import { repositorySync } from "./inngest/functions/repository-sync.js";
-import { taskRun } from "./inngest/functions/task-run.js";
-import { inngestServeHandler } from "./inngest/serve.js";
+import { INNGEST_FUNCTIONS, inngestServeHandler } from "./inngest/serve.js";
 import { reclaimOrphanedRuns, reportStrandedReviews } from "./reconcile.js";
 import { hub } from "./ws/hub.js";
 import { attachSubscriber } from "./ws/replay.js";
 
 export { inngest };
-export const functions = [taskRun, repositorySync];
+// Re-exported from `serve.ts` rather than built here a second time — see that file's own comment
+// on the bug this used to be able to reproduce (this list drifting from the one Inngest is
+// actually served).
+export const functions = INNGEST_FUNCTIONS;
 
 interface WsData {
   claims: StreamTicketClaims;

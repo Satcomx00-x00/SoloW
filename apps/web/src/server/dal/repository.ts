@@ -43,7 +43,9 @@ async function enrichmentFor(
     const integrations = await ctx.db
       .select({ id: integration.id, provider: integration.provider, baseUrl: integration.baseUrl })
       .from(integration)
-      .where(and(eq(integration.workspaceId, ctx.workspaceId), inArray(integration.id, integrationIds)));
+      .where(
+        and(eq(integration.workspaceId, ctx.workspaceId), inArray(integration.id, integrationIds)),
+      );
     const byIntegration = new Map(integrations.map((i) => [i.id, i]));
     for (const row of rows) {
       const linked = row.integrationId ? byIntegration.get(row.integrationId) : undefined;
@@ -61,7 +63,9 @@ async function enrichmentFor(
     const counts = await ctx.db
       .select({ repositoryId: issue.repositoryId, n: count() })
       .from(issue)
-      .where(and(eq(issue.workspaceId, ctx.workspaceId), inArray(issue.repositoryId, repositoryIds)))
+      .where(
+        and(eq(issue.workspaceId, ctx.workspaceId), inArray(issue.repositoryId, repositoryIds)),
+      )
       .groupBy(issue.repositoryId);
     for (const { repositoryId, n } of counts) {
       // `inArray` above already excludes it, but the column itself is nullable (an Issue can
@@ -236,7 +240,9 @@ export async function listRepositoryLabels(
 export async function seedDefaultLabels(
   ctx: RequestContext,
   repositoryId: string,
-): Promise<Result<SeedDefaultLabelsResult, typeof CommonErrorCode.NotFound | IntegrationErrorCode>> {
+): Promise<
+  Result<SeedDefaultLabelsResult, typeof CommonErrorCode.NotFound | IntegrationErrorCode>
+> {
   const resolved = await loadRepositoryCredential(ctx, repositoryId);
   if (!resolved.ok) return resolved;
 

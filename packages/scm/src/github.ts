@@ -24,8 +24,8 @@ import type {
   LabelSeed,
   ListIssuesOptions,
   ProjectFieldWrite,
-  ProjectsCapability,
   ProjectStructureProvisioned,
+  ProjectsCapability,
   RepoRef,
   ScmCredential,
 } from "./types.js";
@@ -50,6 +50,35 @@ interface GithubIssueDetail extends GithubIssue {
   updated_at?: string;
 }
 
+/** GitHub reports assignees the same shape on every read that carries them at all. */
+function mapGithubAssignees(
+  assignees: GithubIssueDetail["assignees"],
+): NonNullable<ExternalIssue["assignees"]> {
+  return (assignees ?? []).map((u) => ({
+    login: u.login,
+    name: u.name ?? null,
+    avatarUrl: u.avatar_url ?? null,
+  }));
+}
+
+/** GitHub's labels are objects; a few older endpoints answer with bare strings. */
+function mapGithubLabels(labels: GithubIssueDetail["labels"]): string[] {
+  return (labels ?? []).map((l) => (typeof l === "string" ? l : l.name));
+}
+
+function mapGithubMilestone(
+  milestone: GithubIssueDetail["milestone"],
+): Exclude<ExternalIssue["milestone"], undefined> {
+  return milestone
+    ? {
+        externalId: String(milestone.number),
+        title: milestone.title,
+        startDate: null,
+        dueDate: milestone.due_on,
+      }
+    : null;
+}
+
 function toDetailedIssue(r: GithubIssueDetail): ExternalIssue {
   return {
     externalId: String(r.id),
@@ -58,21 +87,9 @@ function toDetailedIssue(r: GithubIssueDetail): ExternalIssue {
     description: r.body,
     state: r.state,
     url: r.html_url,
-    assignees: (r.assignees ?? []).map((u) => ({
-      login: u.login,
-      name: u.name ?? null,
-      avatarUrl: u.avatar_url ?? null,
-    })),
-    // GitHub's labels are objects; a few older endpoints answer with bare strings.
-    labels: (r.labels ?? []).map((l) => (typeof l === "string" ? l : l.name)),
-    milestone: r.milestone
-      ? {
-          externalId: String(r.milestone.number),
-          title: r.milestone.title,
-          startDate: null,
-          dueDate: r.milestone.due_on,
-        }
-      : null,
+    assignees: mapGithubAssignees(r.assignees),
+    labels: mapGithubLabels(r.labels),
+    milestone: mapGithubMilestone(r.milestone),
     ...(r.updated_at ? { updatedAt: r.updated_at } : {}),
   };
 }
@@ -427,7 +444,15 @@ export class GithubProvider implements ChangeProvider, ProjectsCapability {
     const query = `state=all&per_page=${ISSUE_PAGE_SIZE}${since ? `&since=${encodeURIComponent(since)}` : ""}`;
     // Every page, not the first: one page of 100 returned as though it were the listing is how a
     // 150-issue repository silently lost 50 of them (see `scmFetchPaged`).
-    const rows = await scmFetchPaged<GithubIssue>(
+    //
+    // `GithubIssueDetail`, not the bare `GithubIssue` the type used to say: GitHub's list
+    // endpoint returns labels, assignees and the milestone inline on every issue object, the
+    // same shape a single-issue read gets — no second request. Only the timeline (linked
+    // changes) and the hierarchy (parent) genuinely cost a fetch per issue, which is why those
+    // two stay behind their own enrichment below; labels/assignees/milestone were sitting in the
+    // response the whole time and simply were not read (bug found 2026-08-28, user-reported: a
+    // GitLab repository's Issues showed no labels after #125's automatic sync).
+    const rows = await scmFetchPaged<GithubIssueDetail>(
       "github",
       (page) => `${apiRoot(credential.baseUrl)}/repos/${repo}/issues?${query}&page=${page}`,
       authHeaders(credential),
@@ -456,6 +481,9 @@ export class GithubProvider implements ChangeProvider, ProjectsCapability {
         description: r.body,
         state: r.state,
         url: r.html_url,
+        labels: mapGithubLabels(r.labels),
+        assignees: mapGithubAssignees(r.assignees),
+        milestone: mapGithubMilestone(r.milestone),
         // Absent, never null, when the hierarchy could not be read at all — see `parentsOf`.
         ...(parent !== undefined ? { parentExternalId: parent } : {}),
         // Absent, never empty, when the timeline could not be read — see `linkedChanges`.
@@ -613,7 +641,11 @@ export class GithubProvider implements ChangeProvider, ProjectsCapability {
         authHeaders(credential),
         "POST",
         // GitHub takes `color` unprefixed, unlike the `#RRGGBB` `listLabels` normalizes it to.
-        { name: label.name, color: label.color.replace(/^#/, ""), description: label.description ?? "" },
+        {
+          name: label.name,
+          color: label.color.replace(/^#/, ""),
+          description: label.description ?? "",
+        },
       );
       created.push(label.name);
     }

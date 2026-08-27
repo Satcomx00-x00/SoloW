@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/select";
 import { WHOLE_PAGE } from "@/lib/paged";
 import { trpc } from "@/trpc/react";
+import { SeedDefaultLabelsButton } from "./seed-default-labels-button";
 import { SetupFileRows } from "./setup-file-rows";
 
 /** Connect Repositories from a local clone path or a remote git URL. */
@@ -112,6 +113,7 @@ export function RepositoriesSection() {
                       </Badge>
                       <span className="truncate text-muted-foreground text-xs">{r.location}</span>
                     </div>
+                    <SeedDefaultLabelsButton provider={r.provider} repositoryId={r.id} />
                     {/* Per-repository, because which files an agent needs is a property of the
                         repository, not of the Workspace (issue #52). */}
                     <SetupFileRows patterns={r.setupFilePatterns} repositoryId={r.id} />

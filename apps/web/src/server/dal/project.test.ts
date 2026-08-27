@@ -4,16 +4,21 @@ import { beforeEach, describe, expect, it } from "bun:test";
 import {
   encryptSecret,
   integration,
+  issue,
   project,
   projectField,
   projectItem,
+  projectRepository,
   projectValue,
+  projectView,
+  repository,
   secret,
 } from "@solow/db";
 import { createTestDb, type TestDb } from "@solow/db/testing";
 import { and, eq } from "drizzle-orm";
 import { deleteIssue } from "./issue.js";
 import {
+  deleteProject,
   getProject,
   listProjectItems,
   listProjects,
@@ -87,6 +92,85 @@ describe("getProject", () => {
 
     expect((await getProject(ctxFor(db, other), row.id)).ok).toBe(false);
     expect(await listProjects(ctxFor(db, other))).toHaveLength(0);
+  });
+
+  describe("a local Project — synthesized fields, end to end (user request 2026-08-28)", () => {
+    async function seedLocalProjectWithIssue() {
+      const [proj] = await db
+        .insert(project)
+        .values({
+          workspaceId: acme,
+          title: "Roadmap",
+          integrationId: null,
+          providerProjectId: null,
+        })
+        .returning();
+      if (!proj) throw new Error("failed to seed local project");
+      const [repo] = await db
+        .insert(repository)
+        .values({
+          workspaceId: acme,
+          name: "gate-firmware",
+          source: "local_path",
+          location: "/repo",
+        })
+        .returning();
+      if (!repo) throw new Error("failed to seed repository");
+      const iss = await seedIssue(db, acme, {
+        repositoryId: repo.id,
+        labels: ["status::doing", "prio/p1"],
+        assignees: [{ login: "ada", name: "Ada", avatarUrl: null }],
+        milestone: { externalId: "5", title: "v1", startDate: null, dueDate: "2026-09-01" },
+        externalState: "open",
+      });
+      const [item] = await db
+        .insert(projectItem)
+        .values({ workspaceId: acme, projectId: proj.id, issueId: iss.id, providerItemId: iss.id })
+        .returning();
+      if (!item) throw new Error("failed to seed project item");
+      return { projectId: proj.id, issueId: iss.id, repositoryName: repo.name };
+    }
+
+    it("getProject derives Status/Priority columns from the Issues it holds, not from project_field", async () => {
+      const { projectId } = await seedLocalProjectWithIssue();
+
+      const result = await getProject(ctxFor(db, acme), projectId);
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.data.fields.map((f) => f.name)).toContain("Status");
+      const status = result.data.fields.find((f) => f.name === "Status");
+      expect(status?.options.map((o) => o.name)).toEqual(["doing"]);
+      // Still true after this — this is what FR-21 actually promises.
+      expect(
+        await db.select().from(projectField).where(eq(projectField.projectId, projectId)),
+      ).toHaveLength(0);
+    });
+
+    it("listProjectItems carries the same derived values on each row", async () => {
+      const { projectId, issueId, repositoryName } = await seedLocalProjectWithIssue();
+
+      const page = await listProjectItems(ctxFor(db, acme), { projectId, limit: 10 });
+
+      expect(page.ok).toBe(true);
+      if (!page.ok) return;
+      const row = page.data.items.find((i) => i.issueId === issueId);
+      expect(row?.values["local:status"]).toEqual({
+        type: "single_select",
+        optionId: "status::doing",
+      });
+      expect(row?.values["local:priority"]).toEqual({ type: "single_select", optionId: "prio/p1" });
+      expect(row?.values["local:assignees"]).toEqual({
+        type: "user",
+        users: [{ login: "ada", name: "Ada", avatarUrl: null }],
+      });
+      expect(row?.values["local:milestone"]).toEqual({ type: "text", text: "v1" });
+      expect(row?.values["local:repository"]).toEqual({ type: "text", text: repositoryName });
+      // Still true — this is the invariant the whole feature has to hold without breaking.
+      expect(
+        await db.select().from(projectValue).where(eq(projectValue.workspaceId, acme)),
+      ).toHaveLength(0);
+    });
   });
 });
 
@@ -369,5 +453,91 @@ describe("setProjectSyncCursor", () => {
 
     const [stored] = await db.select().from(project).where(eq(project.id, row.id));
     expect(stored?.syncCursor).toBeNull();
+  });
+});
+
+describe("deleteProject", () => {
+  it("deletes every row that belongs to the Project, but never its Issues (user request 2026-08-27)", async () => {
+    const row = await seedProject(acme);
+    const ctx = ctxFor(db, acme);
+    const a = await seedIssue(db, acme, { title: "Kept A" });
+    const b = await seedIssue(db, acme, { title: "Kept B" });
+
+    const [field] = await db
+      .insert(projectField)
+      .values({
+        workspaceId: acme,
+        projectId: row.id,
+        providerFieldId: "field-status",
+        name: "Status",
+        type: "single_select",
+      })
+      .returning();
+    if (!field) throw new Error("failed to seed field");
+
+    const [itemA] = await db
+      .insert(projectItem)
+      .values({ workspaceId: acme, projectId: row.id, issueId: a.id, providerItemId: "PVTI_a" })
+      .returning();
+    if (!itemA) throw new Error("failed to seed item");
+    await db
+      .insert(projectItem)
+      .values({ workspaceId: acme, projectId: row.id, issueId: b.id, providerItemId: "PVTI_b" });
+    await db.insert(projectValue).values({
+      workspaceId: acme,
+      itemId: itemA.id,
+      fieldId: field.id,
+      value: { type: "single_select", optionId: "todo" },
+    });
+    await db.insert(projectView).values({ workspaceId: acme, projectId: row.id, name: "My view" });
+    const [repo] = await db
+      .insert(repository)
+      .values({ workspaceId: acme, name: "gate", source: "local_path", location: "/repo" })
+      .returning();
+    if (!repo) throw new Error("failed to seed repository");
+    await db
+      .insert(projectRepository)
+      .values({ workspaceId: acme, projectId: row.id, repositoryId: repo.id });
+
+    const result = await deleteProject(ctx, row.id);
+
+    expect(result).toEqual({ ok: true, data: { id: row.id } });
+    expect(await db.select().from(project).where(eq(project.id, row.id))).toHaveLength(0);
+    expect(
+      await db.select().from(projectItem).where(eq(projectItem.projectId, row.id)),
+    ).toHaveLength(0);
+    expect(
+      await db.select().from(projectValue).where(eq(projectValue.itemId, itemA.id)),
+    ).toHaveLength(0);
+    expect(
+      await db.select().from(projectField).where(eq(projectField.projectId, row.id)),
+    ).toHaveLength(0);
+    expect(
+      await db.select().from(projectView).where(eq(projectView.projectId, row.id)),
+    ).toHaveLength(0);
+    expect(
+      await db.select().from(projectRepository).where(eq(projectRepository.projectId, row.id)),
+    ).toHaveLength(0);
+
+    // The whole point: both Issues are exactly as they were, just no longer anyone's row.
+    const survivors = await db
+      .select({ id: issue.id, title: issue.title })
+      .from(issue)
+      .where(eq(issue.workspaceId, acme));
+    expect(survivors.map((s) => s.title).sort()).toEqual(["Kept A", "Kept B"]);
+  });
+
+  it("is scoped to the Workspace — another tenant cannot delete this Project", async () => {
+    const row = await seedProject(acme);
+
+    const result = await deleteProject(ctxFor(db, other), row.id);
+
+    expect(result.ok).toBe(false);
+    expect((await getProject(ctxFor(db, acme), row.id)).ok).toBe(true);
+  });
+
+  it("reports NotFound for a Project that does not exist", async () => {
+    const result = await deleteProject(ctxFor(db, acme), "no-such-project");
+    expect(result).toEqual({ ok: false, error: "NOT_FOUND" });
   });
 });

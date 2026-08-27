@@ -118,6 +118,9 @@ beforeAll(() => {
             body: "from GitHub",
             state: "open",
             html_url: "https://github.com/acme/gate/issues/10",
+            labels: [{ name: "bug" }, "prio/p1"],
+            assignees: [{ login: "octocat", name: "The Octocat", avatar_url: "a/octocat.png" }],
+            milestone: { number: 5, title: "v1", due_on: "2026-09-01T00:00:00Z" },
           },
           // GitHub's issues endpoint also returns pull requests — must be filtered out.
           {
@@ -420,6 +423,15 @@ describe("GithubProvider", () => {
         description: "from GitHub",
         state: "open",
         url: "https://github.com/acme/gate/issues/10",
+        // GitHub's labels are objects; only a few older endpoints answer with bare strings.
+        labels: ["bug", "prio/p1"],
+        assignees: [{ login: "octocat", name: "The Octocat", avatarUrl: "a/octocat.png" }],
+        milestone: {
+          externalId: "5",
+          title: "v1",
+          startDate: null,
+          dueDate: "2026-09-01T00:00:00Z",
+        },
         // GitHub answered for this issue and said it has no parent. Null is that answer; the
         // absence of the key would be a different one (issue #127).
         parentExternalId: null,

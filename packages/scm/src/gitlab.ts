@@ -22,8 +22,8 @@ import type {
   LabelSeed,
   ListIssuesOptions,
   ProjectFieldWrite,
-  ProjectsCapability,
   ProjectStructureProvisioned,
+  ProjectsCapability,
   RepoRef,
   ScmCredential,
 } from "./types.js";
@@ -48,6 +48,30 @@ interface GitlabIssueDetail extends GitlabIssue {
   updated_at?: string;
 }
 
+/** GitLab reports assignees the same shape on every read that carries them at all. */
+function mapGitlabAssignees(
+  assignees: GitlabIssueDetail["assignees"],
+): NonNullable<ExternalIssue["assignees"]> {
+  return (assignees ?? []).map((u) => ({
+    login: u.username,
+    name: u.name ?? null,
+    avatarUrl: u.avatar_url ?? null,
+  }));
+}
+
+function mapGitlabMilestone(
+  milestone: GitlabIssueDetail["milestone"],
+): Exclude<ExternalIssue["milestone"], undefined> {
+  return milestone
+    ? {
+        externalId: String(milestone.id),
+        title: milestone.title,
+        startDate: milestone.start_date,
+        dueDate: milestone.due_date,
+      }
+    : null;
+}
+
 function toDetailedIssue(r: GitlabIssueDetail): ExternalIssue {
   return {
     externalId: String(r.iid),
@@ -56,20 +80,9 @@ function toDetailedIssue(r: GitlabIssueDetail): ExternalIssue {
     description: r.description,
     state: r.state === "opened" ? "open" : "closed",
     url: r.web_url,
-    assignees: (r.assignees ?? []).map((u) => ({
-      login: u.username,
-      name: u.name ?? null,
-      avatarUrl: u.avatar_url ?? null,
-    })),
+    assignees: mapGitlabAssignees(r.assignees),
     labels: r.labels ?? [],
-    milestone: r.milestone
-      ? {
-          externalId: String(r.milestone.id),
-          title: r.milestone.title,
-          startDate: r.milestone.start_date,
-          dueDate: r.milestone.due_date,
-        }
-      : null,
+    milestone: mapGitlabMilestone(r.milestone),
     ...(r.updated_at ? { updatedAt: r.updated_at } : {}),
   };
 }
@@ -444,7 +457,13 @@ export class GitlabProvider implements ChangeProvider, ProjectsCapability {
     // GitLab spells the same filter `updated_after` (issue #125 AC-2).
     const since = options?.since;
     const query = `per_page=${ISSUE_PAGE_SIZE}${since ? `&updated_after=${encodeURIComponent(since)}` : ""}`;
-    const rows = await scmFetchPaged<GitlabIssue>(
+    // `GitlabIssueDetail`, not the bare `GitlabIssue` the type used to say: GitLab's list
+    // endpoint already returns labels, assignees and the milestone inline on every issue object
+    // — the same shape a single-issue read gets, no second request. Only the linked-changes
+    // timeline stays behind its own per-issue enrichment below (bug found 2026-08-28,
+    // user-reported: a GitLab repository's Issues showed no labels after #125's automatic sync —
+    // the data was in the response the whole time and simply was not read).
+    const rows = await scmFetchPaged<GitlabIssueDetail>(
       "gitlab",
       (page) =>
         `${apiRoot(credential.baseUrl)}/projects/${projectPath(repo)}/issues?${query}&page=${page}`,
@@ -466,6 +485,9 @@ export class GitlabProvider implements ChangeProvider, ProjectsCapability {
         description: r.description,
         state: r.state === "opened" ? "open" : ("closed" as const),
         url: r.web_url,
+        labels: r.labels ?? [],
+        assignees: mapGitlabAssignees(r.assignees),
+        milestone: mapGitlabMilestone(r.milestone),
         // Absent on a tier without epics — see `epicParentId`.
         ...(parent !== undefined ? { parentExternalId: parent } : {}),
         // Absent, not emptied, when the call failed — see `linkedChanges`.

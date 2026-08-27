@@ -7,7 +7,7 @@
 SoloW is a self-hostable control plane for running many AI coding agents in
 parallel under human oversight. Users administer work as **Tasks on a Kanban board,
 organised under Issues**, design multi-agent processes as **visual Workflows**, and
-review every change before it lands. It matches the capability of kandev and adds
+review every change before it lands. It matches the capability of comparable tools and adds
 first-class use of Claude subscription plans, durable and resumable orchestration, and a
 single codebase that runs both locally and as a hosted team service.
 
@@ -66,11 +66,11 @@ data to a closed cloud.
 - Acting as a general project-management suite beyond the work SoloW orchestrates.
 - Providing a managed commercial cloud as the only way to use the product.
 
-## Competitive positioning versus kandev
+## Competitive positioning
 
-SoloW matches kandev's feature breadth and differentiates on four points:
+SoloW matches the feature breadth of comparable tools and differentiates on four points:
 
-| Dimension | kandev | SoloW |
+| Dimension | Comparable tools | SoloW |
 |-----------|--------|-------------|
 | Subscription-based agents | Not first-class | First-class: run agents on a Claude Pro/Max plan across all executor types via a portable subscription token |
 | Orchestration durability | Hand-built | Durable and resumable, with first-class human-in-the-loop gates |

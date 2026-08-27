@@ -7,6 +7,7 @@ import type {
   ChangeRequestState,
   ExecutorConfig,
   ExecutorKind,
+  IssueMilestone,
   IssueSource,
   IssueStatus,
   LinkedChangeRequest,
@@ -15,6 +16,7 @@ import type {
   ProjectFieldType,
   ProjectFilter,
   ProjectIteration,
+  ProjectUser,
   ProjectViewLayout,
   RepositorySource,
   ReviewDecision,
@@ -151,6 +153,26 @@ export const issue = sqliteTable(
       .$type<LinkedChangeRequest[]>()
       .notNull()
       .default(sql`'[]'`),
+    /**
+     * Who the provider has this Issue assigned to, mirrored (spec F23 FR-8, user request
+     * 2026-08-28). A JSON column for the same reason `labels`/`linkedChangeRequests` are: a
+     * handful of people per Issue, replaced wholesale by every poll, never queried by.
+     *
+     * This existed as data the whole time — every driver's issue-read already parsed it off the
+     * provider's response — but nothing here had a column to put it in, so #125's automatic sync
+     * read it and threw it away on every single pass.
+     */
+    assignees: text("assignees", { mode: "json" })
+      .$type<ProjectUser[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    /**
+     * The milestone the provider has this Issue under, mirrored (spec F23 FR-8, user request
+     * 2026-08-28). Null for an Issue on no milestone, and for one imported before this column
+     * existed — the same "null is not a fact yet" rule `externalState` already states for
+     * exactly this reason.
+     */
+    milestone: text("milestone", { mode: "json" }).$type<IssueMilestone | null>(),
     /**
      * Open or closed **on the provider** (spec F23 FR-13, issue #127 AC-3).
      *
@@ -534,7 +556,7 @@ export const task = sqliteTable(
 
 /**
  * A Workflow — a repeatable pipeline of Steps, each run by its own Agent Profile (issue #5,
- * spec F03). The kandev example the issue is written around is one row here with three Steps:
+ * spec F03). The example the issue is written around is one row here with three Steps:
  * one agent plans, another implements, a third reviews.
  *
  * `version` is bumped by every Step write and recorded on a Task when it attaches, so editing a

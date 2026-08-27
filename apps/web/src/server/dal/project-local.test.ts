@@ -97,7 +97,11 @@ describe("createLocalProject", () => {
     expect(result.data.integrationId).toBeNull();
     expect(result.data.providerProjectId).toBeNull();
     expect(result.data.itemCount).toBe(0);
-    expect(result.data.fields).toEqual([]);
+    // Synthesized, not mirrored (user request 2026-08-28) — every one still read-only and every
+    // single-select still option-less, because there are no Issues yet to derive one from. See
+    // `project-local-fields.test.ts` for what a Project with Issues actually derives.
+    expect(result.data.fields.map((f) => f.name)).toContain("Status");
+    expect(result.data.fields.every((f) => f.readOnly)).toBe(true);
     // Set at creation — there is no provider to disagree with, so "never synced" would
     // misdescribe it forever.
     expect(result.data.syncedAt).not.toBeNull();

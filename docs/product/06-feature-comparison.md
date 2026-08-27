@@ -1,24 +1,22 @@
-# Feature Comparison — SoloW (current build) vs. kandev
+# Feature Comparison — SoloW (current build) vs. the category
 
 **Status:** Reference · **Last reviewed:** 2026-08-19
-**Reference product:** [`kdlbs/kandev`](https://github.com/kdlbs/kandev) — the product
-[Decision 0001](../decisions/0001-scope-near-clone-of-kandev.md) commits SoloW to
-near-clone in breadth.
+**Baseline:** the capability surface comparable tools in this category ship or advertise —
+the breadth [Decision 0001](../decisions/0001-scope-near-clone.md) commits SoloW to matching.
 
 This page compares **what SoloW actually ships today** (branch `001-core-program`,
-all 29 tasks of the core slice verified) against **the full capability surface kandev
-advertises** — its README feature list, [`docs/features.md`](https://github.com/kdlbs/kandev/blob/main/docs/features.md)
-inventory, and [`docs/roadmap.md`](https://github.com/kdlbs/kandev/blob/main/docs/roadmap.md).
+all 29 tasks of the core slice verified) against **that full capability surface**, drawn
+from the feature inventories and roadmaps those tools publish.
 
 It is a *state-of-the-code* comparison, not a spec comparison. SoloW's F01–F18
-specifications already describe most of kandev's breadth; this table records which of
+specifications already describe most of that breadth; this table records which of
 them have running code behind them.
 
 ## How to read the columns
 
 | Column | What it holds |
 |---|---|
-| **kandev capability** | The capability as kandev ships or advertises it |
+| **Reference capability** | The capability as comparable tools ship or advertise it |
 | **SoloW today** | What exists in this repository, with the code that backs the claim |
 | **Status** | ✅ built · 🟡 partial · 📄 spec only · ❌ absent · ⭐ SoloW-only |
 | **Best implementation — and what it unlocks** | The design that is *correct*, not merely sufficient, and the second-order effect: which other rows this feature makes possible, cheaper, or obsolete. Written adversarially — where the obvious implementation is a trap, the trap is named. |
@@ -43,7 +41,7 @@ lucide-react, TanStack Query, Tailwind 4.
 
 ## 1. Agent & task workflows
 
-| # | kandev capability | SoloW today | Status | Best implementation — and what it unlocks | UI shape & components |
+| # | Reference capability | SoloW today | Status | Best implementation — and what it unlocks | UI shape & components |
 |---|---|---|---|---|---|
 | 1 | Parallel task execution | Concurrent tasks in separate worktrees; proven by the `@critical` E2E | ✅ | Promote "isolation by worktree" into a real **admission controller**: a queue table ordered fair-share, with per-profile, per-executor and per-repository locks. Today's cap check at `task.launch` is a race under load. → makes 61 honest, is a precondition for 46–48, and gives 97 its queue-time metric | Queue depth meter in each column header; a **Sheet** "Queue" drawer listing pending launches with position and blocking reason. `existing` Column/Badge + **new** Sheet, Progress |
 | 2 | Kanban drag-and-drop board | 7 columns, dnd-kit with a drag handle + `KeyboardSensor` | ✅ | Columns must become **data (workflow steps), not a hardcoded enum** — otherwise F03 forks the board into a second model. Add optimistic move with server reconciliation and rollback. → unlocks 6, 8, 15, 43 | `existing` DndBoard/Column/TaskCard; **new** TanStack Virtual for long columns, Toast for rollback, DropdownMenu on the card for quick actions |
@@ -66,7 +64,7 @@ lucide-react, TanStack Query, Tailwind 4.
 
 ## 2. Agent interfaces
 
-| # | kandev capability | SoloW today | Status | Best implementation — and what it unlocks | UI shape & components |
+| # | Reference capability | SoloW today | Status | Best implementation — and what it unlocks | UI shape & components |
 |---|---|---|---|---|---|
 | 19 | 21+ agents (Codex, Copilot, Gemini, Cursor, Devin, Qwen…) | `agent_catalog` row, Workspace-scoped, seeded per Workspace with `claude_code` (#10) | ✅ | Shipped: the enum is gone. Adding a supported agent is now a catalog row plus a Profile pointing at it — no schema change, no DAL change. Still only one agent seeded; each new one is a row plus a driver behind its `protocol` (`apps/orchestrator/src/agent/protocols.ts`) once 20/21 exist | Settings → Agents: a `existing` Select bound to `profile.agentCatalog.list`, rendered on the profile form (`new` full Card grid with install state deferred to 27) |
 | 20 | ACP as the uniform agent boundary | ACP decided (ADR 0003) and an `AgentRunner` interface exists — but the one runner drives Claude Code's CLI `stream-json` | 🟡 | Write **one real ACP JSON-RPC client over stdio** (`initialize` → `session/new` → `session/prompt` → `session/update`, plus permission requests) and re-express the Claude runner as an adapter, making `stream-json` one transport among N. Row 19 is a promise the code cannot keep until this exists | No direct surface. It shows up as capability Badges on the agent card and as a permission-request `existing` AlertDialog in the workspace |
@@ -82,7 +80,7 @@ lucide-react, TanStack Query, Tailwind 4.
 
 ## 3. Integrated review workspace
 
-| # | kandev capability | SoloW today | Status | Best implementation — and what it unlocks | UI shape & components |
+| # | Reference capability | SoloW today | Status | Best implementation — and what it unlocks | UI shape & components |
 |---|---|---|---|---|---|
 | 30 | IDE-like unified view | Terminal / Changes / Conversation tabs + review gate | 🟡 | Move to a **resizable, persisted panel layout** (explorer / centre / activity) before adding any panel. Tabs do not scale to five surfaces, and retrofitting layout after 31–36 land means rewriting all of them | **new** react-resizable-panels (or dockview) as the shell; `existing` Tabs demoted to *inside* panels; layout persisted per user |
 | 31 | Real terminal (xterm.js, PTY) | Read-only streamed log rendered as text | 🟡 | Same channel as 21 — "activity log" and "terminal" are **two consumers of one transport**, not two features. Building a second streaming path here is the trap | **new** xterm.js with fit/search addons; a small toolbar for clear / copy / scroll-lock |
@@ -101,7 +99,7 @@ lucide-react, TanStack Query, Tailwind 4.
 
 ## 4. Executors & runtime
 
-| # | kandev capability | SoloW today | Status | Best implementation — and what it unlocks | UI shape & components |
+| # | Reference capability | SoloW today | Status | Best implementation — and what it unlocks | UI shape & components |
 |---|---|---|---|---|---|
 | 44 | Local process executor | `executorKindSchema = ["local"]` | ✅ | Formalise a single **`Executor` interface — spawn, exec, filesystem, port-forward, metrics, dispose — and make local its first implementation** *before* adding a second kind. Skip this and Docker, SSH and cloud each grow bespoke code paths that 27, 33, 35 and 53 then have to special-case three times | No surface of its own; appears as the kind in the executor profile `existing` Select |
 | 45 | Git worktree isolation | `worktree` table + provision/adopt/cleanup, and Claude Code's own `--worktree` for the run | ✅ | **Unify ownership on SoloW.** Isolation currently leans partly on the agent's own worktree flag, which means every new agent (19) must re-implement isolation or it silently regresses — the one guarantee with zero tolerance in the constitution | Worktree path and branch as a copyable row in the task header (`existing` Tooltip + copy Button) |
@@ -119,7 +117,7 @@ lucide-react, TanStack Query, Tailwind 4.
 
 ## 5. Authentication, billing & security
 
-| # | kandev capability | SoloW today | Status | Best implementation — and what it unlocks | UI shape & components |
+| # | Reference capability | SoloW today | Status | Best implementation — and what it unlocks | UI shape & components |
 |---|---|---|---|---|---|
 | 57 | Named secrets store | AES-256-GCM, write-only after entry, never in a DTO or log | ✅ | **Envelope encryption with a rotatable data key**, plus a per-secret usage audit (which profile or task read it, when) and reference-by-id everywhere instead of value injection. → prerequisite for 47 (SSH keys), 41 and 68 (git/API tokens) | Existing write-only section plus a "Used by" list per secret and a Rotate Button behind a `existing` AlertDialog |
 | 58 | Authentication for the deployment | **Shipping** — BetterAuth email + password, session guard on every procedure | ✅ ⭐ | Add session listing and revocation, optional OIDC, and **role assignment now, while the surface is small**. Retrofitting roles after multi-user exists means auditing every procedure a second time | Settings → Account: a sessions **new** Table with revoke, a provider Card row, and an invite `existing` Dialog |
@@ -135,9 +133,9 @@ lucide-react, TanStack Query, Tailwind 4.
 
 ## 6. Integrations & MCP
 
-> **Scope decision (2026-08-19):** the integration surface is limited to **GitHub and GitLab**. Jira, Linear, Sentry and Slack are closed as `wont-do`. Their rows are kept below rather than deleted, so the parity count against kandev stays honest — declining a capability is not the same as having it.
+> **Scope decision (2026-08-19):** the integration surface is limited to **GitHub and GitLab**. Jira, Linear, Sentry and Slack are closed as `wont-do`. Their rows are kept below rather than deleted, so the parity count against the category stays honest — declining a capability is not the same as having it.
 
-| # | kandev capability | SoloW today | Status | Best implementation — and what it unlocks | UI shape & components |
+| # | Reference capability | SoloW today | Status | Best implementation — and what it unlocks | UI shape & components |
 |---|---|---|---|---|---|
 | 68 | GitHub — import issues, link PRs, review activity | `integration` + `change_request` + `repository_branch` tables, `ChangeProvider` interface (#15) | ✅ | Shipped: idempotent import on `(integrationId, externalId)`, PAT-authenticated, contract-tested against a fixture server, no live API in CI. Change requests and branches sync on demand (v1: manual, not scheduled/webhook). `createChangeRequest`/write-back are explicitly not built — that's #71, gated on #7 | Settings → Integrations: a connect form + linked-repository list with a `new` Sync-now action; the Issues page's Import dialog (`new` Checkbox rows in a `existing` ScrollArea, not a full TanStack Table) |
 | 69 | GitLab | `GitlabProvider` over the same `ChangeProvider` interface (#15) | ✅ | Shipped alongside 68 rather than after it — the interface held with no changes: GitLab's `opened`/`merged`/`locked` states and `iid` numbering map onto the same neutral shape a GitHub PR does, proving the abstraction rather than assuming it | Same connect form (provider `existing` Select), same linked-repository list; no bespoke surface |
@@ -163,7 +161,7 @@ lucide-react, TanStack Query, Tailwind 4.
 
 ## 7. Platform, system management & delivery
 
-| # | kandev capability | SoloW today | Status | Best implementation — and what it unlocks | UI shape & components |
+| # | Reference capability | SoloW today | Status | Best implementation — and what it unlocks | UI shape & components |
 |---|---|---|---|---|---|
 | 89 | Self-hosted, open source, no telemetry | AGPL-3.0, local-first, no external services required | ✅ | Make it a **test, not a promise**: assert that a default run opens no outbound connection. This property erodes silently, one convenient SDK at a time | None |
 | 90 | Server-first — reachable from any device | Next.js + orchestrator processes | ✅ | Harden the bind and reverse-proxy story (auth on by default, no localhost-only assumptions, correct `secure` cookies behind TLS) **before** 43 makes remote access the normal case | None |
@@ -178,7 +176,7 @@ lucide-react, TanStack Query, Tailwind 4.
 | 99 | Guided first-run onboarding | `F18` spec only; Settings implies the order | 📄 | A **checklist derived from real state** (has a secret? a profile? a repository? a completed run?), not a scripted tour — derived state stays correct as features are added; a tour rots on contact | A dismissible `existing` Card on the board with a **new** Progress bar and deep links; the existing empty states become its CTAs |
 | 100 | Plugin system | — | ❌ | Define the **seams first** — command registry (42), status-bar contributions (54), notification channels (98), agent catalog (19). A plugin API is those four registries plus a manifest and a permission prompt; without them it is a rewrite | Settings → Plugins: list with an enable **new** Switch and a permissions `existing` Dialog on install |
 | 101 | Internationalisation | Explicitly deferred (TASK-021) | ❌ | Adopt the **message-catalog boundary now** while keeping a single locale. Wrapping strings across 200 components later costs an order of magnitude more than wrapping them as they are written | A language `existing` Select in account settings |
-| 102 | Office mode — agent teams, roles, skills, memory, approvals, routines, budgets | — (kandev's own is unreleased) | ❌ | Deliberately **last, and assembled rather than built**: agent instances (19 + 25), delegation (9 + 10 + 78), approvals (39 + 40), routines (a scheduler on 56), cost (64), memory (14). Every part has independent value; the mode is the composition | A separate route: agent roster **new** Table, an inbox list, dashboards — no new primitives |
+| 102 | Office mode — agent teams, roles, skills, memory, approvals, routines, budgets | — (unreleased in comparable tools too) | ❌ | Deliberately **last, and assembled rather than built**: agent instances (19 + 25), delegation (9 + 10 + 78), approvals (39 + 40), routines (a scheduler on 56), cost (64), memory (14). Every part has independent value; the mode is the composition | A separate route: agent roster **new** Table, an inbox list, dashboards — no new primitives |
 | 103 | Hosted, multi-user deployment | `F16` spec only; SQLite local-first, Postgres mirror is a documented follow-up | 📄 | The **Postgres dialect switch is the blocker**, and the column specs are already shared — then RBAC (58 + 59) and per-workspace resource limits. Do not add hosted-only features before the store is portable | Admin route: workspaces **new** Table, member management, quota `existing` Inputs |
 | 104 | Structured observability | Run context, state transitions, timings, exception capture, credential redaction | ✅ ⭐ | Emit **OpenTelemetry spans carrying the run context as attributes** so a self-hoster can point it at their own collector, and share the redaction scrubber with 16 — two scrubbers means one of them is wrong | None in-app beyond 95 |
 | 105 | Test and quality gates | Biome, 7/7 typecheck, 149+ unit, Playwright with a merge-blocking `@critical` isolation suite, gitleaks, OpenAPI freshness | ✅ ⭐ | Keep the `@critical` gate untouchable and add **per-PR budgets** (bundle size, query count, migration drift) plus 67's diff-secret-scan case. The isolation suite is the one gate that must never be marked flaky | None |
@@ -207,15 +205,15 @@ flatters itself.
 
 **Where SoloW is at parity or better.** The single-task loop is complete and tested
 end to end: issue → task → isolated worktree → live agent → diff → human decision → commit.
-Twelve rows carry ⭐ — capabilities kandev does not have today — grouping into six themes:
+Twelve rows carry ⭐ — capabilities comparable tools do not have today — grouping into six themes:
 review gating enforced inside a *durable* workflow, subscription-vs-API-key billing
 integrity with a verified environment strip, per-profile concurrency caps with
 park-on-quota, real authentication with workspace tenancy and rate limiting, a generated
 OpenAPI surface, and an observability plus quality-gate layer anchored by a merge-blocking
 isolation test.
 
-**Where the gap is widest.** Breadth. Everything that makes kandev a platform rather than a
-loop is missing: 20 of its 21 agents, three of its four executors, both in-scope integrations, the
+**Where the gap is widest.** Breadth. Everything that makes those tools a platform rather than
+a loop is missing: 20 of their ~21 agents, three of their four executors, both in-scope integrations, the
 entire MCP surface in both directions, workflows and sub-tasks, multi-repo and multi-branch
 tasks, and the whole system-management layer.
 
@@ -266,7 +264,7 @@ dependencies, and are labelled by priority, kind, area, effort and status.
 
 ## Related
 
-- [Decision 0001 — Build a near-clone of kandev](../decisions/0001-scope-near-clone-of-kandev.md)
+- [Decision 0001 — Build a near-clone rather than a narrower product](../decisions/0001-scope-near-clone.md)
 - [Decision 0003 — Integrate agents via ACP](../decisions/0003-agent-connection-protocol.md)
 - [Feature index F01–F18](../features/README.md)
 - [Core Program spec](../../specs/001-core-program/spec.md) — the slice this build implements

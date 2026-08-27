@@ -125,6 +125,8 @@ function issue(id: string, title: string): IssueDto {
     syncedAt: null,
     labels: [],
     linkedChangeRequests: [],
+    assignees: [],
+    milestone: null,
     ...TIMESTAMPS,
   };
 }
@@ -495,5 +497,30 @@ describe("sorting from the column headers", () => {
     });
 
     expect(await screen.findByText("No sort")).toBeDefined();
+  });
+});
+
+/**
+ * Deleting the Project itself (user request 2026-08-27) — a confirmation gate, then the mutation,
+ * the same two-step `ConfirmAction` interaction `project-repositories-dialog.test.tsx` already
+ * proves for detaching a Repository.
+ */
+describe("deleting a project", () => {
+  it("asks for confirmation before the mutation fires", async () => {
+    const calls: unknown[] = [];
+    renderWithTrpc(<ProjectView projectId="prj-1" />, {
+      ...handlers("ada-on-the-host"),
+      "project.delete": (input) => {
+        calls.push(input);
+        return { id: "prj-1" };
+      },
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: /delete/i }));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(calls).toEqual([]);
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete project" }));
+    await waitFor(() => expect(calls).toEqual([{ projectId: "prj-1" }]));
   });
 });

@@ -158,6 +158,11 @@ export async function syncRepositoryIssues(
           // the field, and the row keeps the links last confirmed: blanking a column because one
           // side call failed would be the table claiming nothing is in flight.
           ...(item.linkedChangeRequests ? { linkedChangeRequests: item.linkedChangeRequests } : {}),
+          // Who the provider has this assigned to, and its milestone (spec F23 FR-8, user
+          // request 2026-08-28) — omitted, never emptied, on a driver that could not read them,
+          // the same rule every other optional mirror field on this call follows.
+          ...(item.assignees ? { assignees: item.assignees } : {}),
+          ...(item.milestone !== undefined ? { milestone: item.milestone } : {}),
           // Closed on the provider is what an epic's progress is counted from (issue #127 AC-3),
           // so it is refreshed on every poll — FR-13's "without a person acting".
           externalState: item.state,
@@ -168,7 +173,12 @@ export async function syncRepositoryIssues(
             ? { externalParentId: item.parentExternalId }
             : {}),
           syncedAt: startedAt,
-          updatedAt: startedAt,
+          // The provider's own "last changed" time when it reported one — falling back to the
+          // poll's own clock only because the column cannot be null. A driver that could not
+          // read it left this row saying "as of this poll", which is honest; one that did is
+          // now believed over the poll's own clock (bug found 2026-08-28: every row here used to
+          // read "when we last synced" instead of "when the provider last changed it").
+          updatedAt: item.updatedAt ?? startedAt,
         })
         .where(eq(issue.id, existing.id));
       updated += 1;
@@ -189,9 +199,12 @@ export async function syncRepositoryIssues(
         externalUrl: item.url,
         ...(item.labels ? { labels: item.labels } : {}),
         ...(item.linkedChangeRequests ? { linkedChangeRequests: item.linkedChangeRequests } : {}),
+        ...(item.assignees ? { assignees: item.assignees } : {}),
+        ...(item.milestone !== undefined ? { milestone: item.milestone } : {}),
         externalState: item.state,
         externalParentId: item.parentExternalId ?? null,
         syncedAt: startedAt,
+        ...(item.updatedAt ? { updatedAt: item.updatedAt } : {}),
       })
       .returning({ id: issue.id });
     if (inserted) {

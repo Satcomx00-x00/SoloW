@@ -106,6 +106,22 @@ table because it exists, not because someone pressed a button.
   Repository or its Issues themselves.
 - **FR-21** A local Project SHALL never be synced to, or created on, any provider, and SHALL carry
   no `project_field` rows — there is no provider board those fields could have been read from.
+- **FR-22** THE SYSTEM SHALL let an Owner delete a Project — local or mirrored — removing it from
+  SoloW's own database (its saved views, fields, values and items) without deleting its Issues,
+  which are kept and become unassigned, and without deleting or otherwise touching anything on the
+  provider a mirrored Project came from.
+- **FR-23** THE SYSTEM SHALL derive Status, Priority, Size, Assignees, Milestone, Repository,
+  Created, Updated and Closed columns for a local Project from the Issues registered under it —
+  the single-select ones grouped from scoped labels (`status::doing`, `status/todo`; GitLab's own
+  convention and SoloW's seeded taxonomy read the same way), the rest read straight off the
+  Issue — computed at read time and never persisted as `project_field` rows, so FR-21 stays true.
+  Estimate, Iteration, Start date and Target date SHALL be declared unexpressible with a reason,
+  the same rule FR-16 already states for a mirrored GitLab Project: a local Project has no
+  provider board at all, so there is nowhere such a value could have been read from.
+- **FR-24** THE SYSTEM SHALL populate an Issue's assignees and milestone during automatic
+  ingestion (#125), not only when the Issue is read one at a time, and SHALL record the provider's
+  own last-changed time for an Issue when the provider reports one, rather than only the time of
+  the poll that read it.
 
 ## Non-functional requirements
 

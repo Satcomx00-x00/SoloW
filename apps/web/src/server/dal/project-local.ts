@@ -25,6 +25,7 @@ import {
 } from "@solow/db";
 import { and, count, eq, inArray } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
+import { deriveLocalProjectFields } from "./project-local-fields.js";
 
 /**
  * Local Projects (spec F23, Decision 0018's reversal, user request 2026-08-27).
@@ -68,7 +69,9 @@ export async function createLocalProject(
     title: row.title,
     syncedAt: row.syncedAt,
     itemCount: 0,
-    fields: [],
+    // The same synthesized set `getProject` would compute for this Project a moment later — a
+    // brand-new one just has no Issues yet to derive Status/Priority/Size options from.
+    fields: deriveLocalProjectFields([]).fields,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   });

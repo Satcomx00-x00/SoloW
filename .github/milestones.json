@@ -11,7 +11,7 @@
   },
   {
     "title": "Wave 3 — Capability breadth",
-    "description": "Where the parity gap against kandev is widest: Docker (#96) and SSH (#97) executors, CLI passthrough (#59), MCP task creation (#99), push and pull-request integration (#71), notifications (#92), analytics (#91), multi-branch tasks (#57).",
+    "description": "Where the parity gap against comparable tools is widest: Docker (#96) and SSH (#97) executors, CLI passthrough (#59), MCP task creation (#99), push and pull-request integration (#71), notifications (#92), analytics (#91), multi-branch tasks (#57).",
     "issues": [57, 59, 71, 91, 92, 96, 97, 99]
   },
   {

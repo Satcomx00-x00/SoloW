@@ -13,9 +13,19 @@ import {
   parseProjectFieldValue,
   type Result,
 } from "@solow/contracts";
-import { issue, project, projectField, projectItem, projectValue } from "@solow/db";
+import {
+  issue,
+  project,
+  projectField,
+  projectItem,
+  projectRepository,
+  projectValue,
+  projectView,
+  repository,
+} from "@solow/db";
 import { and, asc, count, eq, gt, inArray } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
+import { deriveLocalProjectFields, type LocalFieldIssue } from "./project-local-fields.js";
 
 /**
  * Project planning data access (spec F23, Decision 0018, issue #121).
@@ -41,6 +51,52 @@ function toFieldDto(row: typeof projectField.$inferSelect): ProjectFieldDto {
   };
 }
 
+/**
+ * The raw material `deriveLocalProjectFields` derives a local Project's columns from, for a page
+ * of its `project_item` rows — bounded the same way `listAllProjectItems` bounds its own read
+ * (`PROJECT_ITEM_CEILING`), since this exists to build a label *vocabulary*, not to be exhaustive
+ * over a Project too large for either to matter.
+ */
+async function localFieldIssuesFor(
+  ctx: RequestContext,
+  projectId: string,
+  limit: number,
+): Promise<LocalFieldIssue[]> {
+  const rows = await ctx.db
+    .select({
+      issueId: issue.id,
+      labels: issue.labels,
+      assignees: issue.assignees,
+      milestone: issue.milestone,
+      repositoryName: repository.name,
+      createdAt: issue.createdAt,
+      updatedAt: issue.updatedAt,
+      externalState: issue.externalState,
+    })
+    .from(projectItem)
+    .innerJoin(
+      issue,
+      and(eq(issue.id, projectItem.issueId), eq(issue.workspaceId, ctx.workspaceId)),
+    )
+    .leftJoin(
+      repository,
+      and(eq(repository.id, issue.repositoryId), eq(repository.workspaceId, ctx.workspaceId)),
+    )
+    .where(and(eq(projectItem.workspaceId, ctx.workspaceId), eq(projectItem.projectId, projectId)))
+    .limit(limit);
+
+  return rows.map((r) => ({
+    id: r.issueId,
+    labels: r.labels,
+    assignees: r.assignees,
+    milestone: r.milestone,
+    repositoryName: r.repositoryName,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+    externalState: r.externalState,
+  }));
+}
+
 export async function getProject(
   ctx: RequestContext,
   projectId: string,
@@ -52,16 +108,25 @@ export async function getProject(
     .limit(1);
   if (!row) return err(CommonErrorCode.NotFound);
 
-  const fields = await ctx.db
-    .select()
-    .from(projectField)
-    .where(and(eq(projectField.workspaceId, ctx.workspaceId), eq(projectField.projectId, row.id)))
-    .orderBy(asc(projectField.position));
-
   const [counted] = await ctx.db
     .select({ n: count() })
     .from(projectItem)
     .where(and(eq(projectItem.workspaceId, ctx.workspaceId), eq(projectItem.projectId, row.id)));
+
+  // A local Project's `project_field` table is always empty (FR-21) — its columns are derived
+  // from its Issues' own data instead, at read time (user request 2026-08-28). A mirrored
+  // Project keeps reading its synced fields exactly as before.
+  const fields = row.integrationId
+    ? (
+        await ctx.db
+          .select()
+          .from(projectField)
+          .where(
+            and(eq(projectField.workspaceId, ctx.workspaceId), eq(projectField.projectId, row.id)),
+          )
+          .orderBy(asc(projectField.position))
+      ).map(toFieldDto)
+    : deriveLocalProjectFields(await localFieldIssuesFor(ctx, row.id, PROJECT_ITEM_CEILING)).fields;
 
   return ok({
     id: row.id,
@@ -71,7 +136,7 @@ export async function getProject(
     title: row.title,
     syncedAt: row.syncedAt,
     itemCount: counted?.n ?? 0,
-    fields: fields.map(toFieldDto),
+    fields,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   });
@@ -172,11 +237,23 @@ export async function listProjectItems(
       parentExternalId: issue.externalParentId,
       repositoryId: issue.repositoryId,
       externalState: issue.externalState,
+      // Only read for a local Project (below), but cheap to carry on the same joined row rather
+      // than a second query — everything here already comes off `issue`, already joined.
+      labels: issue.labels,
+      assignees: issue.assignees,
+      milestone: issue.milestone,
+      repositoryName: repository.name,
+      issueCreatedAt: issue.createdAt,
+      issueUpdatedAt: issue.updatedAt,
     })
     .from(projectItem)
     .innerJoin(
       issue,
       and(eq(issue.id, projectItem.issueId), eq(issue.workspaceId, ctx.workspaceId)),
+    )
+    .leftJoin(
+      repository,
+      and(eq(repository.id, issue.repositoryId), eq(repository.workspaceId, ctx.workspaceId)),
     )
     .where(
       after === null || Number.isNaN(after) ? scope : and(scope, gt(projectItem.position, after)),
@@ -187,28 +264,49 @@ export async function listProjectItems(
   const [counted] = await ctx.db.select({ total: count() }).from(projectItem).where(scope);
   const total = counted?.total ?? 0;
 
-  const typeByFieldId = new Map(owned.data.fields.map((f) => [f.id, f.type]));
-  const ids = rows.map((r) => r.item.id);
-  const values = ids.length
-    ? await ctx.db
-        .select()
-        .from(projectValue)
-        .where(
-          and(eq(projectValue.workspaceId, ctx.workspaceId), inArray(projectValue.itemId, ids)),
-        )
-    : [];
-
   const byItem = new Map<string, ProjectItemDto["values"]>();
-  for (const row of values) {
-    const type = typeByFieldId.get(row.fieldId);
-    // A value whose field is gone is a value with no column to render in. Dropped rather than
-    // guessed at: the field list is the authority on what this project holds.
-    if (!type) continue;
-    const parsed = parseProjectFieldValue(type, row.value);
-    if (!parsed) continue;
-    const bag = byItem.get(row.itemId) ?? {};
-    bag[row.fieldId] = parsed;
-    byItem.set(row.itemId, bag);
+  if (owned.data.integrationId) {
+    const typeByFieldId = new Map(owned.data.fields.map((f) => [f.id, f.type]));
+    const ids = rows.map((r) => r.item.id);
+    const values = ids.length
+      ? await ctx.db
+          .select()
+          .from(projectValue)
+          .where(
+            and(eq(projectValue.workspaceId, ctx.workspaceId), inArray(projectValue.itemId, ids)),
+          )
+      : [];
+    for (const row of values) {
+      const type = typeByFieldId.get(row.fieldId);
+      // A value whose field is gone is a value with no column to render in. Dropped rather than
+      // guessed at: the field list is the authority on what this project holds.
+      if (!type) continue;
+      const parsed = parseProjectFieldValue(type, row.value);
+      if (!parsed) continue;
+      const bag = byItem.get(row.itemId) ?? {};
+      bag[row.fieldId] = parsed;
+      byItem.set(row.itemId, bag);
+    }
+  } else {
+    // A local Project's `project_value` table is always empty — its cells are derived the same
+    // way its columns are (see `getProject` and `project-local-fields.ts`), from exactly this
+    // page's Issues rather than the whole Project's (the vocabulary in `owned.data.fields` may
+    // be a superset, which is fine: a cell only needs its own value, never the full option list).
+    const { valuesByIssueId } = deriveLocalProjectFields(
+      rows.map((r) => ({
+        id: r.item.issueId,
+        labels: r.labels,
+        assignees: r.assignees,
+        milestone: r.milestone,
+        repositoryName: r.repositoryName,
+        createdAt: r.issueCreatedAt,
+        updatedAt: r.issueUpdatedAt,
+        externalState: r.externalState,
+      })),
+    );
+    for (const row of rows) {
+      byItem.set(row.item.id, valuesByIssueId.get(row.item.issueId) ?? {});
+    }
   }
 
   const items: ProjectItemDto[] = rows.map((row) => ({
@@ -370,4 +468,69 @@ export async function listAllProjectItems(
     }
     cursor = page.data.nextCursor;
   }
+}
+
+/**
+ * Delete a Project — local or mirrored — from SoloW's own database, and nothing else (user
+ * request 2026-08-27).
+ *
+ * Its rows go: saved views, field definitions and values, every item, and (for a local Project)
+ * the Repository registrations that decided its membership. Its **Issues do not** — the same
+ * guarantee FR-20 already makes one level down for detaching a single Repository, applied to the
+ * whole Project. An Issue's row lives in `issue` regardless of any Project; deleting `project_item`
+ * only removes the membership edge, which is exactly what makes an Issue "unassigned" again
+ * (`ProjectsHub`'s own unassigned-Issues list is precisely the set of Issues with no such edge).
+ * A mirrored Project is never touched on its provider either — this deletes SoloW's mirror of
+ * it, not the thing it mirrors (Decision 0018's "out of scope" is about the reverse direction:
+ * SoloW creating or deleting a project *on* a provider, which this is not).
+ *
+ * No `onDelete` cascades exist anywhere in this schema, so the order below is deliberate and
+ * manual, the same pattern `detachProjectRepository` already follows one level down: values
+ * before items (a value points at an item), everything else before the Project row itself.
+ */
+export async function deleteProject(
+  ctx: RequestContext,
+  projectId: string,
+): Promise<Result<{ id: string }, typeof CommonErrorCode.NotFound>> {
+  const [row] = await ctx.db
+    .select({ id: project.id })
+    .from(project)
+    .where(and(eq(project.workspaceId, ctx.workspaceId), eq(project.id, projectId)))
+    .limit(1);
+  if (!row) return err(CommonErrorCode.NotFound);
+
+  const itemIds = ctx.db
+    .select({ id: projectItem.id })
+    .from(projectItem)
+    .where(and(eq(projectItem.workspaceId, ctx.workspaceId), eq(projectItem.projectId, projectId)));
+
+  await ctx.db
+    .delete(projectValue)
+    .where(
+      and(eq(projectValue.workspaceId, ctx.workspaceId), inArray(projectValue.itemId, itemIds)),
+    );
+  await ctx.db
+    .delete(projectItem)
+    .where(and(eq(projectItem.workspaceId, ctx.workspaceId), eq(projectItem.projectId, projectId)));
+  await ctx.db
+    .delete(projectField)
+    .where(
+      and(eq(projectField.workspaceId, ctx.workspaceId), eq(projectField.projectId, projectId)),
+    );
+  await ctx.db
+    .delete(projectRepository)
+    .where(
+      and(
+        eq(projectRepository.workspaceId, ctx.workspaceId),
+        eq(projectRepository.projectId, projectId),
+      ),
+    );
+  await ctx.db
+    .delete(projectView)
+    .where(and(eq(projectView.workspaceId, ctx.workspaceId), eq(projectView.projectId, projectId)));
+  await ctx.db
+    .delete(project)
+    .where(and(eq(project.workspaceId, ctx.workspaceId), eq(project.id, projectId)));
+
+  return ok({ id: row.id });
 }

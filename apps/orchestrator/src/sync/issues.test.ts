@@ -150,6 +150,88 @@ describe("syncRepositoryIssues", () => {
     expect(rows[0]?.title).toBe("Cap the upload size (revised)");
   });
 
+  /**
+   * Assignees, milestone and the provider's own "updated at" (spec F23 FR-8, user request
+   * 2026-08-28) — this data was already fetched by the driver on every pass and thrown away, on
+   * both providers, because nothing here wrote it anywhere. Fixed alongside the SCM drivers that
+   * now populate `ExternalIssue.assignees`/`.milestone` on `listIssues`, not only on a
+   * single-issue read.
+   */
+  describe("assignees, milestone and the provider's own updated-at", () => {
+    it("persists assignees and milestone on import, and updates them on a later pass", async () => {
+      const { repositoryId } = await seed();
+      nextIssues = [
+        external({
+          assignees: [{ login: "ada", name: "Ada", avatarUrl: null }],
+          milestone: { externalId: "5", title: "v1", startDate: null, dueDate: "2026-09-01" },
+        }),
+      ];
+      let [row] = await linkedRepositories(db);
+      await syncRepositoryIssues(db, row as never);
+
+      let [stored] = await db.select().from(issue).where(eq(issue.repositoryId, repositoryId));
+      expect(stored?.assignees).toEqual([{ login: "ada", name: "Ada", avatarUrl: null }]);
+      expect(stored?.milestone).toEqual({
+        externalId: "5",
+        title: "v1",
+        startDate: null,
+        dueDate: "2026-09-01",
+      });
+
+      nextIssues = [
+        external({
+          assignees: [{ login: "grace", name: "Grace", avatarUrl: null }],
+          milestone: null,
+        }),
+      ];
+      [row] = await linkedRepositories(db);
+      await syncRepositoryIssues(db, row as never);
+
+      [stored] = await db.select().from(issue).where(eq(issue.repositoryId, repositoryId));
+      expect(stored?.assignees).toEqual([{ login: "grace", name: "Grace", avatarUrl: null }]);
+      // Reassigned to nobody, and the milestone cleared — both are the provider's answer this
+      // pass, not "the driver did not say" (see the `undefined` vs. explicit-`null` guard).
+      expect(stored?.milestone).toBeNull();
+    });
+
+    it("leaves assignees and milestone alone when the driver did not report them this pass", async () => {
+      const { repositoryId } = await seed();
+      nextIssues = [
+        external({
+          assignees: [{ login: "ada", name: "Ada", avatarUrl: null }],
+          milestone: { externalId: "5", title: "v1", startDate: null, dueDate: "2026-09-01" },
+        }),
+      ];
+      let [row] = await linkedRepositories(db);
+      await syncRepositoryIssues(db, row as never);
+
+      // A driver that could not read them omits the keys entirely (`undefined`, not `[]`/`null`).
+      nextIssues = [external({ title: "Cap the upload size (revised)" })];
+      [row] = await linkedRepositories(db);
+      await syncRepositoryIssues(db, row as never);
+
+      const [stored] = await db.select().from(issue).where(eq(issue.repositoryId, repositoryId));
+      expect(stored?.assignees).toEqual([{ login: "ada", name: "Ada", avatarUrl: null }]);
+      expect(stored?.milestone).toEqual({
+        externalId: "5",
+        title: "v1",
+        startDate: null,
+        dueDate: "2026-09-01",
+      });
+    });
+
+    it("stores the provider's own updatedAt when it reports one, not just the poll's clock", async () => {
+      const { repositoryId } = await seed();
+      nextIssues = [external({ updatedAt: "2026-05-01T00:00:00.000Z" })];
+      const [row] = await linkedRepositories(db);
+
+      await syncRepositoryIssues(db, row as never);
+
+      const [stored] = await db.select().from(issue).where(eq(issue.repositoryId, repositoryId));
+      expect(stored?.updatedAt).toBe("2026-05-01T00:00:00.000Z");
+    });
+  });
+
   describe("local Project membership (#125 / F23)", () => {
     it("attaches a newly-synced issue to every local Project its repository feeds", async () => {
       const { repositoryId } = await seed();

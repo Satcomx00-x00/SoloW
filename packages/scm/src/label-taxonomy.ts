@@ -57,7 +57,11 @@ export const DEFAULT_LABEL_TAXONOMY: LabelSeed[] = [
   { name: "status/todo", color: "#d4c5f9", description: "Not started" },
   { name: "status/in-progress", color: "#fbca04", description: "Actively being worked" },
   { name: "status/in-review", color: "#1d76db", description: "Change is up for review" },
-  { name: "status/blocked", color: "#e11d48", description: "Cannot proceed until something clears" },
+  {
+    name: "status/blocked",
+    color: "#e11d48",
+    description: "Cannot proceed until something clears",
+  },
   { name: "status/done", color: "#0e8a16", description: "Complete" },
 
   // area/* — a generic starting split, expected to grow with the repository.

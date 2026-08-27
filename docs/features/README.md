@@ -8,7 +8,7 @@ readers always know where to find each kind of information.
 
 ## Feature index and status
 
-Maturity: **Core** (required for parity with kandev) · **Edge** (SoloW
+Maturity: **Core** (required for parity with comparable tools) · **Edge** (SoloW
 differentiator) · **Later** (planned after first release).
 
 | ID | Feature | Maturity | Serves jobs |

@@ -2,9 +2,9 @@ import { z } from "zod";
 import { idSchema, timestampsSchema } from "./common.js";
 
 /**
- * Agent catalog (issue #10, spec F05). Agent identity is a row, not a code path: kandev
- * supports 21 agent CLIs, SoloW one — and the gap is one schema decision standing in
- * front of that work, not twenty integrations' worth. Adding a supported agent becomes a seed
+ * Agent catalog (issue #10, spec F05). Agent identity is a row, not a code path: comparable
+ * tools support upwards of 20 agent CLIs, SoloW one — and the gap is one schema decision
+ * standing in front of that work, not twenty integrations' worth. Adding a supported agent becomes a seed
  * row plus an Agent Profile pointing at it, never a change to application code (AC-1).
  *
  * Workspace-scoped, matching every other tenant-owned table (Principle V): a self-hoster who

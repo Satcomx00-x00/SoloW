@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
-  "//": "Mirrors kandev's .claude/settings.json (github.com/kdlbs/kandev): format every file the agent writes, immediately, in the same PostToolUse shape. kandev runs prettier for JS/TS and gofmt for Go; this repo has one formatter for everything, so both matchers call biome. Note what is NOT here: kandev ships no `permissions` block either — its agent's permission bypass is a per-profile CLI flag at launch, not a checked-in allowlist.",
+  "//": "Format every file the agent writes, immediately, via a PostToolUse hook. This repo has one formatter for everything, so both matchers call biome. Note what is NOT here: no `permissions` block — an agent's permission posture is a per-profile CLI flag at launch, not a checked-in allowlist.",
   "hooks": {
     "PostToolUse": [
       {

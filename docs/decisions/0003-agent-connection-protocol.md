@@ -13,7 +13,7 @@
 SoloW must drive many different AI coding-agent tools (Claude Code, Codex, Gemini CLI,
 and others). Integrating each one bespoke would be costly and fragile. A standard has emerged
 — the **Agent Client Protocol (ACP)** — that standardises how tools connect to coding agents,
-analogous to how the Language Server Protocol standardised editor tooling. It is what kandev
+analogous to how the Language Server Protocol standardised editor tooling. It is what comparable tools
 itself uses, and a large and growing set of agents support it.
 
 ## Decision

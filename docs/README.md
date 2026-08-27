@@ -3,7 +3,7 @@
 SoloW is an open-source, self-hostable platform for orchestrating many AI
 coding-agent CLIs (Claude Code, Codex, Gemini CLI, and 25+ others) in parallel,
 with a review-first workflow. It is a business-level alternative to
-[kandev](https://github.com/kdlbs/kandev).
+comparable tools in the category.
 
 This documentation is **business-level and implementation-agnostic** — it describes
 *what* the product does and *why*, not *how* it is coded. It contains no source code
@@ -27,10 +27,10 @@ of information has one predictable home:
 
 - **New to the product?** Start with [Vision & Scope](./product/01-vision-and-scope.md),
   then the [Feature Index](./features/README.md).
-- **Evaluating against kandev?** See [Vision & Scope](./product/01-vision-and-scope.md)
+- **Evaluating against comparable tools?** See [Vision & Scope](./product/01-vision-and-scope.md)
   (competitive positioning), the feature status matrix in the
   [Feature Index](./features/README.md), and the row-by-row
-  [Feature Comparison vs. kandev](./product/06-kandev-feature-comparison.md) for what the
+  [Feature Comparison](./product/06-feature-comparison.md) for what the
   current build actually implements.
 - **Understanding the system shape?** Read the [Architecture overview](./architecture/README.md).
 - **Understanding a specific choice?** Browse the [Decision Log](./decisions/README.md).

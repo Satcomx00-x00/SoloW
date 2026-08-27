@@ -87,7 +87,7 @@ describe("IntegrationsSection — importing", () => {
       },
     });
 
-    await pick("Integration", "github");
+    await pick("Integration", "github · cloud");
     await pick("Repository", /acme\/gate/);
     fireEvent.click(screen.getByRole("button", { name: "Import" }));
 
@@ -104,7 +104,7 @@ describe("IntegrationsSection — importing", () => {
       "integration.listExternalRepositories": () => [{ ...EXTERNAL_REPO, alreadyImported: true }],
     });
 
-    await pick("Integration", "github");
+    await pick("Integration", "github · cloud");
     await openSelect("Repository");
     const option = await screen.findByRole("option", { name: /acme\/gate/ });
     // Flagged rather than hidden: someone looking for a repository they imported last week has
@@ -134,7 +134,7 @@ describe("IntegrationsSection — importing", () => {
       },
     });
 
-    await pick("Integration", "github");
+    await pick("Integration", "github · cloud");
     await pick("Repository", /acme\/gate/);
     fireEvent.click(screen.getByRole("button", { name: "Import" }));
 

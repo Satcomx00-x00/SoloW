@@ -102,17 +102,17 @@
   {
     "name": "differentiator",
     "color": "FFD33D",
-    "description": "SoloW-only; kandev has no equivalent"
+    "description": "SoloW-only; comparable tools have no equivalent"
   },
   {
     "name": "wont-do",
     "color": "6E7781",
-    "description": "Deliberately out of scope — closed as not planned, reopenable"
+    "description": "Deliberately out of scope \u2014 closed as not planned, reopenable"
   },
   {
-    "name": "parity/kandev",
+    "name": "parity/reference",
     "color": "006B75",
-    "description": "Needed to match kandev's capability surface"
+    "description": "Needed to match the capability surface of comparable tools"
   },
   {
     "name": "good first issue",

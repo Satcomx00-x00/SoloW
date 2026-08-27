@@ -25,16 +25,20 @@ const attachedRepo = (over: Partial<Record<string, unknown>> = {}) => ({
   ...over,
 });
 
-const repoRow = (id: string, name: string) => ({
+const repoRow = (id: string, name: string, over: Partial<Record<string, unknown>> = {}) => ({
   id,
   name,
   source: "local_path",
   location: "/srv/repos/x",
   integrationId: null,
   externalFullName: null,
+  provider: null,
+  integrationBaseUrl: null,
+  issueCount: 0,
   setupFilePatterns: [],
   createdAt: "2026-08-27T00:00:00.000Z",
   updatedAt: "2026-08-27T00:00:00.000Z",
+  ...over,
 });
 
 async function open() {
@@ -89,9 +93,58 @@ describe("ProjectRepositoriesDialog", () => {
 
     await open();
     fireEvent.click(await screen.findByRole("combobox", { name: "Attach a repository" }));
-    fireEvent.click(await screen.findByRole("option", { name: "gate-control" }));
+    fireEvent.click(await screen.findByRole("option", { name: "gate-control (no issues)" }));
 
     await waitFor(() => expect(calls).toEqual([{ projectId: "prj-1", repositoryId: "repo-2" }]));
+  });
+
+  it("groups the unattached picker by provider and host, showing each repository's issue count", async () => {
+    renderWithTrpc(
+      <ProjectRepositoriesDialog
+        projectId="prj-1"
+        trigger={<button type="button">Repositories</button>}
+      />,
+      {
+        "project.repositories": () => [],
+        "repository.list": () => ({
+          items: [
+            repoRow("repo-local", "gate-docs"),
+            repoRow("repo-gh", "gate-control", {
+              provider: "github",
+              integrationBaseUrl: null,
+              issueCount: 12,
+            }),
+            repoRow("repo-gl-a", "gate-firmware", {
+              provider: "gitlab",
+              integrationBaseUrl: "gitlab.example.com",
+              issueCount: 1,
+            }),
+            repoRow("repo-gl-b", "gate-sensors", {
+              provider: "gitlab",
+              integrationBaseUrl: "gitlab.other.com",
+              issueCount: 0,
+            }),
+          ],
+          nextCursor: null,
+        }),
+      },
+    );
+
+    await open();
+    fireEvent.click(await screen.findByRole("combobox", { name: "Attach a repository" }));
+
+    // A purely local repository groups under "Local".
+    expect(await screen.findByText("Local")).toBeDefined();
+    // The public SaaS host groups under "cloud".
+    expect(screen.getByText("GitHub · cloud")).toBeDefined();
+    // Two self-hosted instances of the same provider are two distinguishable groups, not one.
+    expect(screen.getByText("GitLab · gitlab.example.com")).toBeDefined();
+    expect(screen.getByText("GitLab · gitlab.other.com")).toBeDefined();
+
+    expect(await screen.findByRole("option", { name: "gate-docs (no issues)" })).toBeDefined();
+    expect(screen.getByRole("option", { name: "gate-control (12 issues)" })).toBeDefined();
+    expect(screen.getByRole("option", { name: "gate-firmware (1 issue)" })).toBeDefined();
+    expect(screen.getByRole("option", { name: "gate-sensors (no issues)" })).toBeDefined();
   });
 
   it("detaching a repository with zero issues needs no confirmation", async () => {

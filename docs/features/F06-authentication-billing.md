@@ -9,7 +9,7 @@ Agent Profile: on a personal **Subscription** (a Claude Pro/Max plan) or on a me
 **API Key**. Subscription mode lets users run agents on a plan they already pay for, with no
 per-token charges. Because subscription plans have quota windows, SoloW makes agents
 quota-aware so parallel work never silently overruns a plan or unexpectedly switches to paid
-billing. This is a primary differentiator from kandev.
+billing. This is a primary differentiator from comparable tools.
 
 ## Jobs served
 

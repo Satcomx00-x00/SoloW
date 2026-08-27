@@ -113,7 +113,7 @@ async function fixture(db: TestDb, name: string) {
     });
 
   /**
-   * The kandev pipeline the issue is written around: one agent plans, another implements, a
+   * The pipeline the issue is written around: one agent plans, another implements, a
    * third reviews — three Steps, three different Agent Profiles, one Workflow.
    */
   const newPipeline = async (

@@ -19,7 +19,7 @@ Rules for this log ([per our conventions](../CONVENTIONS.md)):
 
 | # | Decision | Status |
 |---|----------|--------|
-| [0001](./0001-scope-near-clone-of-kandev.md) | Build a near-clone of kandev | Accepted |
+| [0001](./0001-scope-near-clone.md) | Build a near-clone rather than a narrower product | Accepted |
 | [0002](./0002-technology-stack.md) | Application + long-lived orchestrator, local-first with a path to hosted | Accepted |
 | [0003](./0003-agent-connection-protocol.md) | Integrate agents via the Agent Client Protocol (ACP) | Accepted |
 | [0004](./0004-durable-orchestration-engine.md) | Use a durable orchestration engine for Workflows and Tasks | Accepted |

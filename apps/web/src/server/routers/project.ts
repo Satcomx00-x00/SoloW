@@ -27,6 +27,7 @@ import {
 } from "@solow/contracts";
 import { z } from "zod";
 import {
+  deleteProject,
   getProject,
   listAllProjectItems,
   listProjectItems,
@@ -379,4 +380,19 @@ export const projectRouter = router({
     .input(projectViewIdInput)
     .output(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => unwrap(await deleteProjectView(ctx.rctx, input.viewId))),
+
+  delete: ownerProcedure
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/project.delete",
+        tags: ["project"],
+        protect: true,
+        summary:
+          "Delete a Project — local or mirrored — from SoloW's own database: its saved views, fields, values and items. Its Issues are kept and become unassigned; a mirrored Project's provider is never touched.",
+      },
+    })
+    .input(projectIdInput)
+    .output(z.object({ id: z.string() }))
+    .mutation(async ({ ctx, input }) => unwrap(await deleteProject(ctx.rctx, input.projectId))),
 });

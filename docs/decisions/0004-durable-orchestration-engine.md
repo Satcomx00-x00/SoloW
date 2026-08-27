@@ -18,7 +18,7 @@ significant state change is recorded so Runs and Tasks can resume and be reconst
 
 ## Considered options
 
-- **Hand-built orchestration** (kandev's approach) — Rejected as the baseline: reimplements
+- **Hand-built orchestration** (the common approach) — Rejected as the baseline: reimplements
   durability, retries, and human-wait handling, which is exactly where correctness is hard.
 - **A heavyweight enterprise workflow platform** — Rejected: powerful but too operationally
   heavy for a local-first product.

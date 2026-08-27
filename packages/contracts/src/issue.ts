@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { idSchema, issueStatusSchema, timestampsSchema } from "./common.js";
 import { pageInputSchema, pageOf } from "./page.js";
+import { projectUserSchema } from "./project.js";
 import { changeRequestStateSchema, issueSourceSchema } from "./scm.js";
 
 /**
@@ -56,6 +57,20 @@ export const linkedChangeRequestSchema = z.object({
   mergedAt: z.string().nullable(),
 });
 export type LinkedChangeRequest = z.infer<typeof linkedChangeRequestSchema>;
+
+/**
+ * The milestone the provider has this Issue under, mirrored (spec F23 FR-8, user request
+ * 2026-08-28). GitHub reports only a due date; GitLab reports both — `startDate` is simply null
+ * on a provider that has none, the same "absent means the provider does not say" rule every
+ * other optional mirror field here follows.
+ */
+export const issueMilestoneSchema = z.object({
+  externalId: z.string(),
+  title: z.string(),
+  startDate: z.string().nullable(),
+  dueDate: z.string().nullable(),
+});
+export type IssueMilestone = z.infer<typeof issueMilestoneSchema>;
 
 /**
  * The filters an Issue list can be narrowed by (spec F01 FR-2). Every one of them is optional
@@ -242,6 +257,13 @@ export const issueDto = z
      * is in flight" is the answer a reviewer came for.
      */
     linkedChangeRequests: z.array(linkedChangeRequestSchema),
+    /**
+     * Who the provider has this Issue assigned to, mirrored (spec F23 FR-8, user request
+     * 2026-08-28). Empty means the provider reports nobody — same "empty cell, not a hidden
+     * column" rule `linkedChangeRequests` follows.
+     */
+    assignees: z.array(projectUserSchema),
+    milestone: issueMilestoneSchema.nullable(),
   })
   .merge(timestampsSchema);
 export type IssueDto = z.infer<typeof issueDto>;

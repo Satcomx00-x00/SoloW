@@ -78,6 +78,10 @@ export function issueToDto(row: IssueRow, rollup: IssueRollup): IssueDto {
     labels: row.labels,
     // The provider's own links, mirrored and never authored here (F23 FR-8, issue #128).
     linkedChangeRequests: row.linkedChangeRequests,
+    // Mirrored the same way, and coalesced for the same reason `setupFilePatterns` is elsewhere:
+    // a row written before this column existed reads back `[]`/`null`, and the DTO promises both.
+    assignees: row.assignees ?? [],
+    milestone: row.milestone ?? null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -137,7 +141,11 @@ export interface RepositoryEnrichment {
   issueCount: number;
 }
 
-const NO_ENRICHMENT: RepositoryEnrichment = { provider: null, integrationBaseUrl: null, issueCount: 0 };
+const NO_ENRICHMENT: RepositoryEnrichment = {
+  provider: null,
+  integrationBaseUrl: null,
+  issueCount: 0,
+};
 
 export function repositoryToDto(
   row: RepositoryRow,
