@@ -121,7 +121,7 @@
     },
     "packages/cli": {
       "name": "solow",
-      "version": "0.1.0",
+      "version": "0.1.2",
       "bin": {
         "solow": "bin/solow.mjs",
       },
@@ -195,6 +195,7 @@
     },
   },
   "trustedDependencies": [
+    "bun",
     "inngest-cli",
   ],
   "packages": {

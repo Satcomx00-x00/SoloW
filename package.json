@@ -44,6 +44,7 @@
     "typescript": "^5.9.3"
   },
   "trustedDependencies": [
+    "bun",
     "inngest-cli"
   ]
 }
