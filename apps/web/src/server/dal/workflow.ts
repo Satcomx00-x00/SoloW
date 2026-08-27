@@ -20,7 +20,7 @@ import {
   type WorkflowListDto,
   type WorkflowStepDto,
   type WorkflowWithStepsDto,
-} from "@gatecontrol/contracts";
+} from "@solow/contracts";
 import {
   advanceWorkflowStep,
   appendRank,
@@ -29,7 +29,7 @@ import {
   rankForMove,
   resumeWorkflowCursor,
   sortSteps,
-} from "@gatecontrol/core";
+} from "@solow/core";
 import {
   agentProfile,
   review,
@@ -38,7 +38,7 @@ import {
   task,
   workflow,
   workflowStep,
-} from "@gatecontrol/db";
+} from "@solow/db";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
 

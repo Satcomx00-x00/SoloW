@@ -1,8 +1,10 @@
 import "server-only";
 import {
+  ADOPTED_PROJECT_SOURCE,
   CommonErrorCode,
   err,
   type ListProjectItemsInput,
+  LOCAL_PROJECT_SOURCE,
   ok,
   type ProjectDto,
   type ProjectFieldDto,
@@ -10,8 +12,8 @@ import {
   type ProjectItemPageDto,
   parseProjectFieldValue,
   type Result,
-} from "@gatecontrol/contracts";
-import { issue, project, projectField, projectItem, projectValue } from "@gatecontrol/db";
+} from "@solow/contracts";
+import { issue, project, projectField, projectItem, projectValue } from "@solow/db";
 import { and, asc, count, eq, gt, inArray } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
 
@@ -65,6 +67,7 @@ export async function getProject(
     id: row.id,
     integrationId: row.integrationId,
     providerProjectId: row.providerProjectId,
+    source: row.integrationId ? ADOPTED_PROJECT_SOURCE : LOCAL_PROJECT_SOURCE,
     title: row.title,
     syncedAt: row.syncedAt,
     itemCount: counted?.n ?? 0,
@@ -122,6 +125,7 @@ export async function listProjects(ctx: RequestContext): Promise<ProjectDto[]> {
     id: row.id,
     integrationId: row.integrationId,
     providerProjectId: row.providerProjectId,
+    source: row.integrationId ? ADOPTED_PROJECT_SOURCE : LOCAL_PROJECT_SOURCE,
     title: row.title,
     syncedAt: row.syncedAt,
     itemCount: counts.get(row.id) ?? 0,

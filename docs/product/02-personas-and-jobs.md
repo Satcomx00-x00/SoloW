@@ -2,7 +2,7 @@
 
 **Status:** Draft · **Owner:** Product · **Last reviewed:** 2026-08-17
 
-Personas describe who GateControl serves. Jobs-to-be-Done describe the outcomes they hire
+Personas describe who SoloW serves. Jobs-to-be-Done describe the outcomes they hire
 the product to achieve. Feature specifications trace back to these jobs.
 
 ## Personas
@@ -22,7 +22,7 @@ Responsible for approving agent-produced changes. Cares most about clear diffs, 
 why a change was made, and the ability to reject or request changes safely.
 
 ### P4 — The Operator
-Runs the hosted GateControl instance. Cares about deployment, secrets, access control,
+Runs the hosted SoloW instance. Cares about deployment, secrets, access control,
 resource limits, and reliability.
 
 ## Jobs-to-be-Done
@@ -61,7 +61,7 @@ Each job is phrased as: *When [situation], I want to [motivation], so I can [out
 - **J9 — Collaborate and share.** When a Task is done or noteworthy, I want to share a
   clean record of it, so teammates can learn from or build on it.
 
-- **J10 — Operate with confidence.** When I run GateControl for a team, I want clear
+- **J10 — Operate with confidence.** When I run SoloW for a team, I want clear
   control over access, secrets, and resource use, so I can trust it in shared use.
 
 ## Traceability

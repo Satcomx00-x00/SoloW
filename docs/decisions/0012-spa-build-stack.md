@@ -31,7 +31,7 @@ Build the web client as a dedicated **Vite + React Single Page Application** —
 with **no server-side rendering and no React Server Components** — served as static assets.
 The backend is a **standalone Node/TypeScript service** exposing the tRPC API, the generated
 `openapi.json`, and the WebSocket channel, running alongside the long-lived orchestration
-component. This supersedes the earlier "Next.js full-stack" framing of the stack; GateControl
+component. This supersedes the earlier "Next.js full-stack" framing of the stack; SoloW
 does not use Next.js.
 
 ## Considered options

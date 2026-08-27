@@ -18,7 +18,7 @@ import { join } from "node:path";
 export const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], {
   encoding: "utf8",
 }).trim();
-export const SCRATCH = join(ROOT, ".gatecontrol", "e2e");
+export const SCRATCH = join(ROOT, ".solow", "e2e");
 
 export const PATHS = {
   db: join(SCRATCH, "e2e.db"),
@@ -32,7 +32,7 @@ export const PATHS = {
 export const PORTS = { web: 5050, orchestrator: 5051, ws: 5052 } as const;
 
 /**
- * Spelled out rather than imported from `@gatecontrol/db` — the Playwright runner is Node, and
+ * Spelled out rather than imported from `@solow/db` — the Playwright runner is Node, and
  * that package pulls in `bun:sqlite`. Kept in step with `packages/db/src/seed.ts`.
  */
 export const SEED_WORKSPACE_A = "11111111-1111-4111-8111-111111111111";
@@ -40,18 +40,18 @@ export const SEED_WORKSPACE_B = "22222222-2222-4222-8222-222222222222";
 
 /** Deterministic test-only values — never used by a real deployment. */
 export const E2E_ENV = {
-  GATECONTROL_SQLITE_PATH: PATHS.db,
-  GATECONTROL_DB_DRIVER: "sqlite",
-  GATECONTROL_SECRET_KEY: Buffer.alloc(32, 7).toString("base64"),
-  GATECONTROL_AUTH_SECRET: "e2e-auth-secret-padded-to-thirty-two-chars",
-  GATECONTROL_STREAM_SECRET: "e2e-stream-secret",
-  GATECONTROL_DEV_OWNER: "on",
-  GATECONTROL_WEB_URL: `http://127.0.0.1:${PORTS.web}`,
-  GATECONTROL_WS_URL: `ws://127.0.0.1:${PORTS.ws}`,
-  GATECONTROL_WS_PORT: String(PORTS.ws),
-  GATECONTROL_ORCHESTRATOR_URL: `http://127.0.0.1:${PORTS.orchestrator}`,
-  GATECONTROL_WORKTREE_ROOT: PATHS.worktrees,
-  GATECONTROL_REPO_CACHE_ROOT: PATHS.repoCache,
+  SOLOW_SQLITE_PATH: PATHS.db,
+  SOLOW_DB_DRIVER: "sqlite",
+  SOLOW_SECRET_KEY: Buffer.alloc(32, 7).toString("base64"),
+  SOLOW_AUTH_SECRET: "e2e-auth-secret-padded-to-thirty-two-chars",
+  SOLOW_STREAM_SECRET: "e2e-stream-secret",
+  SOLOW_DEV_OWNER: "on",
+  SOLOW_WEB_URL: `http://127.0.0.1:${PORTS.web}`,
+  SOLOW_WS_URL: `ws://127.0.0.1:${PORTS.ws}`,
+  SOLOW_WS_PORT: String(PORTS.ws),
+  SOLOW_ORCHESTRATOR_URL: `http://127.0.0.1:${PORTS.orchestrator}`,
+  SOLOW_WORKTREE_ROOT: PATHS.worktrees,
+  SOLOW_REPO_CACHE_ROOT: PATHS.repoCache,
 } as const;
 
 const git = (args: string[], cwd?: string) =>
@@ -60,8 +60,8 @@ const git = (args: string[], cwd?: string) =>
 /** A throwaway git repository with one commit, holding exactly one distinguishing file. */
 function initRepo(dir: string, file: string, contents: string): void {
   git(["init", "--initial-branch=main", dir]);
-  git(["config", "user.email", "e2e@gatecontrol.test"], dir);
-  git(["config", "user.name", "GateControl E2E"], dir);
+  git(["config", "user.email", "e2e@solow.test"], dir);
+  git(["config", "user.name", "SoloW E2E"], dir);
   writeFileSync(join(dir, file), contents);
   git(["add", "-A"], dir);
   git(["commit", "-m", "initial"], dir);

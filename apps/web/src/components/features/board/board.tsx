@@ -5,8 +5,8 @@ import {
   type TaskDependencyDto,
   type TaskDto,
   type TaskState,
-} from "@gatecontrol/contracts";
-import { unsatisfiedDependencies } from "@gatecontrol/core";
+} from "@solow/contracts";
+import { unsatisfiedDependencies } from "@solow/core";
 import { ArrowRight, KeyRound, Link2, Play, RotateCcw, Trash2, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
@@ -16,6 +16,8 @@ import { DeleteTaskAction } from "@/components/features/task/delete-task-action"
 import { useEventStream } from "@/components/hooks/use-task-stream";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { settingsHref } from "@/lib/navigation";
+import { WHOLE_PAGE } from "@/lib/paged";
 import { taskActionMessage } from "@/lib/task-errors";
 import { BOARD_COLUMNS, CREDENTIAL_EXPIRED_REASON, STATE_LABELS } from "@/lib/task-states";
 import { trpc } from "@/trpc/react";
@@ -132,6 +134,7 @@ export function Board({
 } = {}) {
   const utils = trpc.useUtils();
   const tasksQuery = trpc.task.list.useQuery({
+    ...WHOLE_PAGE,
     ...(projectId ? { projectId } : {}),
     ...(unassigned ? { unassigned: true } : {}),
   });
@@ -143,7 +146,7 @@ export function Board({
   // issue #63). Both queries are already fetched elsewhere in the app with this same empty
   // input (`create-task-dialog.tsx`, `secrets-section.tsx`), so React Query serves this from
   // its existing cache far more often than it issues a new request.
-  const agentProfilesQuery = trpc.profile.agent.list.useQuery({});
+  const agentProfilesQuery = trpc.profile.agent.list.useQuery({ ...WHOLE_PAGE });
   const secretsQuery = trpc.secret.list.useQuery({});
   /**
    * The names behind the ids a card carries: which Repository its branch is in, and which Issue
@@ -154,11 +157,11 @@ export function Board({
    * moment — whereas holding the whole board behind two more requests would make every load
    * wait on data no decision depends on.
    */
-  const repositoriesQuery = trpc.repository.list.useQuery({});
-  const issuesQuery = trpc.issue.list.useQuery({});
+  const repositoriesQuery = trpc.repository.list.useQuery({ ...WHOLE_PAGE });
+  const issuesQuery = trpc.issue.list.useQuery({ ...WHOLE_PAGE });
   const references = useMemo<BoardReferences>(() => {
-    const byRepository = new Map((repositoriesQuery.data ?? []).map((r) => [r.id, r.name]));
-    const byIssue = new Map((issuesQuery.data ?? []).map((i) => [i.id, i]));
+    const byRepository = new Map((repositoriesQuery.data?.items ?? []).map((r) => [r.id, r.name]));
+    const byIssue = new Map((issuesQuery.data?.items ?? []).map((i) => [i.id, i]));
     return {
       repositoryName: (id) => byRepository.get(id) ?? null,
       issue: (id) => byIssue.get(id) ?? null,
@@ -227,7 +230,7 @@ export function Board({
     );
   }
 
-  const tasks = tasksQuery.data ?? [];
+  const tasks = tasksQuery.data?.items ?? [];
   const edges = dependenciesQuery.data ?? [];
   const blockersByTask = new Map<string, TaskDependencyDto[]>();
   for (const edge of edges) {
@@ -242,7 +245,10 @@ export function Board({
   // credential it is about to open rather than sending the Owner to a bare form.
   const secretNameById = new Map((secretsQuery.data ?? []).map((s) => [s.id, s.name]));
   const credentialNameByProfile = new Map(
-    (agentProfilesQuery.data ?? []).map((p) => [p.id, secretNameById.get(p.secretId) ?? null]),
+    (agentProfilesQuery.data?.items ?? []).map((p) => [
+      p.id,
+      secretNameById.get(p.secretId) ?? null,
+    ]),
   );
 
   const busy = move.isPending || launch.isPending || retry.isPending;
@@ -313,7 +319,9 @@ export function Board({
     const credentialName = credentialNameByProfile.get(task.agentProfileId);
     return (
       <Button key={`renew-${task.id}`} asChild size="xs" variant="outline">
-        <Link href={`/settings?renewSecret=${encodeURIComponent(credentialName ?? "")}#secrets`}>
+        <Link
+          href={`${settingsHref("secrets")}&renewSecret=${encodeURIComponent(credentialName ?? "")}`}
+        >
           <KeyRound /> Renew
         </Link>
       </Button>

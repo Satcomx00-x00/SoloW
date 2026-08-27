@@ -4,7 +4,7 @@
 
 ## Summary
 
-GateControl lets users share what agents did so teammates can learn from, review, or build
+SoloW lets users share what agents did so teammates can learn from, review, or build
 on it. The primary mechanism is a redacted, shareable Snapshot of a Task's Conversation and
 outcome.
 

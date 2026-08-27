@@ -2,7 +2,7 @@
 
 **Status:** Draft · **Owner:** Product · **Last reviewed:** 2026-08-17
 
-This document describes the business concepts of GateControl and how they relate. It is
+This document describes the business concepts of SoloW and how they relate. It is
 the conceptual model, not a database design. All terms are defined in the
 [Glossary](../glossary.md).
 

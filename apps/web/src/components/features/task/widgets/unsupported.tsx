@@ -1,6 +1,6 @@
 "use client";
 
-import type { unsupportedWidget } from "@gatecontrol/contracts";
+import type { unsupportedWidget } from "@solow/contracts";
 import { PackageOpen } from "lucide-react";
 import type { z } from "zod";
 import type { WidgetRendererProps } from "./registry";

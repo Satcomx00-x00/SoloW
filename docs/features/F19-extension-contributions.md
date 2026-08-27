@@ -4,7 +4,7 @@
 
 ## Summary
 
-Several surfaces in GateControl are not fixed lists but *assembled* ones: the command palette,
+Several surfaces in SoloW are not fixed lists but *assembled* ones: the command palette,
 the status bar, and — once notifications exist — the set of channels an event is delivered
 through. Each is made of things supplied by feature modules, ordered, conditionally visible,
 and arranged by the user. This feature defines that shared shape once, so a feature does not

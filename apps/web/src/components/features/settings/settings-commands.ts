@@ -2,6 +2,7 @@
 
 import { KeyRound, ListOrdered, PlugZap } from "lucide-react";
 import { commandRegistry, contribute } from "@/lib/contributions";
+import { settingsHref } from "@/lib/navigation";
 
 /**
  * Settings' entries in the command palette (issue #3, AC-4).
@@ -20,7 +21,7 @@ contribute(commandRegistry, {
     title: "Manage secrets",
     group: "Settings",
     icon: KeyRound,
-    run: (actions) => actions.navigate("/settings#secrets"),
+    run: (actions) => actions.navigate(settingsHref("secrets")),
   },
 });
 
@@ -31,7 +32,7 @@ contribute(commandRegistry, {
     title: "Connect a repository",
     group: "Settings",
     icon: PlugZap,
-    run: (actions) => actions.navigate("/settings#integrations"),
+    run: (actions) => actions.navigate(settingsHref("repositories")),
   },
 });
 
@@ -50,6 +51,6 @@ contribute(commandRegistry, {
     title: "Customize the status bar",
     group: "Settings",
     icon: ListOrdered,
-    run: (actions) => actions.navigate("/settings#status-bar"),
+    run: (actions) => actions.navigate(settingsHref("status-bar")),
   },
 });

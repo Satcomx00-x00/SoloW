@@ -2,7 +2,7 @@
 
 **Status:** Draft · **Owner:** Architecture · **Last reviewed:** 2026-08-17
 
-This section describes the major parts of GateControl and their responsibilities. It
+This section describes the major parts of SoloW and their responsibilities. It
 corresponds to the **C4 Container and Component** levels, described in prose. It is
 deliberately implementation-agnostic: it names responsibilities, not code.
 

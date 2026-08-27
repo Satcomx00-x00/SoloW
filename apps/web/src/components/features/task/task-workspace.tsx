@@ -3,12 +3,14 @@
 import type {
   SessionEventDto,
   SessionSummaryDto,
+  TaskDiffDto,
   TaskEvent,
   TaskInputAck,
+  TaskRepositoryDto,
   TaskState,
-} from "@gatecontrol/contracts";
-import { DEFAULT_TASK_PANE_LAYOUT, type TaskPaneLayout } from "@gatecontrol/contracts";
-import { primaryTaskRepository } from "@gatecontrol/core";
+} from "@solow/contracts";
+import { DEFAULT_TASK_PANE_LAYOUT, type TaskPaneLayout } from "@solow/contracts";
+import { primaryTaskRepository } from "@solow/core";
 import {
   ArrowLeft,
   Check,
@@ -32,6 +34,7 @@ import { useTaskStream } from "@/components/hooks/use-task-stream";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { WHOLE_PAGE } from "@/lib/paged";
 import { taskActionMessage } from "@/lib/task-errors";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
@@ -39,6 +42,7 @@ import { AgentComposer } from "./agent-composer";
 import { ChangesPanel } from "./changes-panel";
 import { DeleteTaskAction } from "./delete-task-action";
 import { type PermissionRequest, PermissionRequestDialog } from "./permission-request-dialog";
+import { groupChanges, summariseConsequences } from "./review-groups";
 import { SessionLog } from "./session-log";
 import { SplitPane } from "./split-pane";
 import { TaskAdvance } from "./task-advance";
@@ -47,7 +51,22 @@ import { latestTodos, TodoList } from "./todo-list";
 import { buildTranscript, openPermission, type PermissionRow } from "./transcript";
 
 /** Shared empty array, so "no events yet" keeps a stable identity across renders. */
+/**
+ * What the agent said about how its run ended, in the header.
+ *
+ * `changes_ready` reaches this only once the Task has left `running` — before that the same
+ * outcome renders as the "Open review" control above.
+ */
+const COMPLETION_LABEL: Record<string, string> = {
+  changes_ready: "Finished — changes ready",
+  nothing_to_do: "Nothing to do",
+  blocked: "Stopped — blocked",
+};
+
 const NO_EVENTS: SessionEventDto[] = [];
+/** Stable empties, for the same reason `NO_EVENTS` is one: a fresh literal misses every memo. */
+const NO_DIFFS: TaskDiffDto[] = [];
+const NO_ATTACHMENTS: TaskRepositoryDto[] = [];
 
 const STREAM_LABEL: Record<string, string> = {
   idle: "Not streaming",
@@ -276,6 +295,30 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   });
   const [pendingMove, setPendingMove] = useState<TaskState | null>(null);
 
+  /**
+   * Every group this one decision covers (issue #70).
+   *
+   * Built from the Task's attachments joined to the captured diffs, not from the diffs alone: a
+   * Task attached to three repositories routinely reaches the gate having changed one, and
+   * approving still records a branch for the other two. A reviewer shown only the changed
+   * repository would be wrong about what they had just approved — which is the whole of "one
+   * decision, all consequences visible".
+   *
+   * Above the guards below because these are hooks, for the same reason `rows` is.
+   */
+  const repositoryNames = trpc.repository.list.useQuery({ ...WHOLE_PAGE });
+  const nameFor = useCallback(
+    (repositoryId: string) =>
+      repositoryNames.data?.items.find((r) => r.id === repositoryId)?.name ?? null,
+    [repositoryNames.data],
+  );
+  const capturedDiffs = detail.data?.diffs ?? NO_DIFFS;
+  const attachments = task.data?.repositories ?? NO_ATTACHMENTS;
+  const reviewGroups = useMemo(
+    () => groupChanges(capturedDiffs, attachments, nameFor),
+    [capturedDiffs, attachments, nameFor],
+  );
+
   if (task.isLoading) {
     return (
       <div className="space-y-3 p-6" aria-hidden>
@@ -310,7 +353,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   // branch and change is shown.
   const primary = t.repositories.length > 0 ? primaryTaskRepository(t.repositories) : null;
   const branch = primary?.resultBranch ?? latest?.diffRef ?? null;
-  const diffs = detail.data?.diffs ?? [];
+  const diffs = capturedDiffs;
   // Derived from the transcript rather than held in state, so a reconnect replay reopens a
   // question that is still outstanding and never reopens one already settled (issue #58, AC-4).
   // It reads the built rows instead of rescanning `live.events` on every render, and it sees the
@@ -446,7 +489,15 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
             ) : t.completedAt ? (
               <span className="inline-flex shrink-0 items-center gap-1 rounded border border-border bg-muted/40 px-1.5 py-px text-2xs text-muted-foreground">
                 <CheckCircle2 className="size-3 shrink-0" aria-hidden />
-                {t.completedOutcome === "nothing_to_do" ? "Nothing to do" : "Stopped — blocked"}
+                {/*
+                  All three outcomes, named. This used to be a two-way split on `nothing_to_do`,
+                  which sent `changes_ready` into the "Stopped — blocked" arm — so the moment a
+                  successful run entered review, the header called it blocked while the
+                  transcript two inches below said "Finished — changes ready". Observed on a real
+                  run: two opposite claims on one screen, and the wrong one is the one in the
+                  header a reader trusts.
+                */}
+                {COMPLETION_LABEL[t.completedOutcome ?? "blocked"]}
               </span>
             ) : null}
           </div>
@@ -554,7 +605,19 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
                 can span several, and a reviewer shown one flat file list could not tell which
                 repository a path came from.
               */}
-              <ChangesPanel diffs={diffs} />
+              <ChangesPanel
+                diffs={diffs}
+                repositories={attachments}
+                repositoryName={nameFor}
+                /*
+                 * The change is read once, when the run reaches its review gate — so before a
+                 * Task has ever got there, "no changes" is a claim nobody has checked. A capture
+                 * having happened is what `diffs` being non-empty means; a Task past the gate
+                 * with genuinely nothing to show is the other case, and `completedAt` is the tell
+                 * that the run got far enough to look.
+                 */
+                captured={diffs.length > 0 || t.completedAt !== null}
+              />
 
               {/*
                 Plan under result, in the column that is already about what the agent did. The
@@ -592,46 +655,60 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
         )}
       >
         {inReview ? (
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              size="lg"
-              disabled={!canDecide}
-              loading={decide.isPending && decide.variables?.decision === "approve"}
-              onClick={() => runDecision("approve")}
-            >
-              <Check /> Approve
-            </Button>
-            <Button
-              size="lg"
-              variant="outline"
-              disabled={!canDecide}
-              loading={decide.isPending && decide.variables?.decision === "request_changes"}
-              onClick={() => runDecision("request_changes")}
-            >
-              <RotateCcw /> Request changes
-            </Button>
-            <ConfirmAction
-              disabled={!canDecide}
-              title="Reject these changes?"
-              description="The agent's work is discarded and the worktree is torn down. This cannot be undone. The task returns to Ready and would have to run again from scratch."
-              confirmLabel="Discard the changes"
-              onConfirm={() => runDecision("reject")}
-              trigger={
-                <Button
-                  size="lg"
-                  variant="ghost"
-                  disabled={!canDecide}
-                  className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                >
-                  <X /> Reject
-                </Button>
-              }
-            />
-            {decide.error && (
-              <span className="text-destructive text-sm" role="alert">
-                {decide.error.message}
-              </span>
-            )}
+          <div className="space-y-2">
+            {/*
+              What this one click is about to do, before it is clicked (issue #70 AC-2/AC-3).
+
+              One decision covers the whole Task — splitting it per repository would look more
+              granular and is worse, because it produces partially-integrated Tasks that nothing
+              in the model describes. So the scope of the single decision has to be legible, and
+              a reviewer who approves without scrolling the Changes column still sees it.
+            */}
+            <p className="flex items-center gap-1.5 text-muted-foreground text-xs">
+              <GitBranch aria-hidden className="size-3.5 shrink-0" />
+              Approving covers {summariseConsequences(reviewGroups)}.
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                size="lg"
+                disabled={!canDecide}
+                loading={decide.isPending && decide.variables?.decision === "approve"}
+                onClick={() => runDecision("approve")}
+              >
+                <Check /> Approve
+              </Button>
+              <Button
+                size="lg"
+                variant="outline"
+                disabled={!canDecide}
+                loading={decide.isPending && decide.variables?.decision === "request_changes"}
+                onClick={() => runDecision("request_changes")}
+              >
+                <RotateCcw /> Request changes
+              </Button>
+              <ConfirmAction
+                disabled={!canDecide}
+                title="Reject these changes?"
+                description="The agent's work is discarded and the worktree is torn down. This cannot be undone. The task returns to Ready and would have to run again from scratch."
+                confirmLabel="Discard the changes"
+                onConfirm={() => runDecision("reject")}
+                trigger={
+                  <Button
+                    size="lg"
+                    variant="ghost"
+                    disabled={!canDecide}
+                    className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  >
+                    <X /> Reject
+                  </Button>
+                }
+              />
+              {decide.error && (
+                <span className="text-destructive text-sm" role="alert">
+                  {decide.error.message}
+                </span>
+              )}
+            </div>
           </div>
         ) : (
           <p className="text-muted-foreground text-sm">

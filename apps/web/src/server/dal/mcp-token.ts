@@ -7,8 +7,8 @@ import {
   type McpTokenDto,
   ok,
   type Result,
-} from "@gatecontrol/contracts";
-import { generateMcpToken, mcpToken } from "@gatecontrol/db";
+} from "@solow/contracts";
+import { generateMcpToken, mcpToken } from "@solow/db";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
 import { mcpTokenToDto } from "./mappers.js";

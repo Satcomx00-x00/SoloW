@@ -1,6 +1,6 @@
 "use client";
 
-import type { ProjectViewDto } from "@gatecontrol/contracts";
+import type { ProjectViewDto } from "@solow/contracts";
 import { ChevronLeft, ChevronRight, MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";

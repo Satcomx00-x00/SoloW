@@ -1,16 +1,21 @@
 import "server-only";
 import {
   connectRepositoryInput,
+  listRepositoriesInput,
   listRepositoryLabelsInput,
   repositoryDto,
   repositoryLabelDto,
+  repositoryListDto,
+  seedDefaultLabelsInput,
+  seedDefaultLabelsResult,
   updateRepositorySetupInput,
-} from "@gatecontrol/contracts";
+} from "@solow/contracts";
 import { z } from "zod";
 import {
   connectRepository,
   listRepositories,
   listRepositoryLabels,
+  seedDefaultLabels,
   updateRepositorySetup,
 } from "../dal/repository.js";
 import { integrationsProcedure, ownerProcedure, router, unwrap } from "../trpc.js";
@@ -40,9 +45,9 @@ export const repositoryRouter = router({
         summary: "List connected Repositories, including which Integration each is linked to.",
       },
     })
-    .input(z.object({}))
-    .output(z.array(repositoryDto))
-    .query(async ({ ctx }) => unwrap(await listRepositories(ctx.rctx))),
+    .input(listRepositoriesInput)
+    .output(repositoryListDto)
+    .query(async ({ ctx, input }) => unwrap(await listRepositories(ctx.rctx, input))),
   updateSetup: ownerProcedure
     .meta({
       openapi: {
@@ -75,5 +80,23 @@ export const repositoryRouter = router({
     .output(z.array(repositoryLabelDto))
     .query(async ({ ctx, input }) =>
       unwrap(await listRepositoryLabels(ctx.rctx, input.repositoryId)),
+    ),
+  // `integrationsProcedure`, same reasoning as `listLabels` just above: this writes to whichever
+  // provider the Repository is linked to.
+  seedDefaultLabels: integrationsProcedure
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/repository.seedDefaultLabels",
+        tags: ["repository"],
+        protect: true,
+        summary:
+          "Create SoloW's default label taxonomy (type/, prio/, size/, status/, area/) on a linked Repository's GitHub/GitLab, leaving any label it already has untouched.",
+      },
+    })
+    .input(seedDefaultLabelsInput)
+    .output(seedDefaultLabelsResult)
+    .mutation(async ({ ctx, input }) =>
+      unwrap(await seedDefaultLabels(ctx.rctx, input.repositoryId)),
     ),
 });

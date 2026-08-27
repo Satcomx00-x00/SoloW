@@ -3,6 +3,7 @@ import type {
   ChangeProvider,
   ExternalBranch,
   ExternalChangeRequest,
+  ExternalComment,
   ExternalIssue,
   ExternalLabel,
   ExternalMilestone,
@@ -72,6 +73,32 @@ function toDetailedIssue(r: GiteaIssueDetail): ExternalIssue {
         }
       : null,
     ...(r.updated_at ? { updatedAt: r.updated_at } : {}),
+  };
+}
+
+interface GiteaComment {
+  id: number;
+  body: string | null;
+  html_url: string;
+  created_at: string;
+  updated_at?: string | null;
+  user?: { login: string; full_name?: string | null; avatar_url?: string | null } | null;
+}
+
+function toExternalComment(c: GiteaComment): ExternalComment {
+  return {
+    externalId: String(c.id),
+    author: c.user
+      ? {
+          login: c.user.login,
+          name: c.user.full_name || null,
+          avatarUrl: c.user.avatar_url ?? null,
+        }
+      : null,
+    body: c.body ?? "",
+    createdAt: c.created_at,
+    updatedAt: c.updated_at && c.updated_at !== c.created_at ? c.updated_at : null,
+    url: c.html_url,
   };
 }
 
@@ -211,6 +238,35 @@ export class GiteaProvider implements ChangeProvider {
       authHeaders(credential),
     )) as GiteaIssueDetail;
     return toDetailedIssue(row);
+  }
+
+  async listComments(
+    credential: ScmCredential,
+    repo: RepoRef,
+    issueNumber: number,
+  ): Promise<ExternalComment[]> {
+    const rows = (await scmFetch(
+      "gitea",
+      `${apiRoot(credential.baseUrl)}/repos/${repo}/issues/${issueNumber}/comments`,
+      authHeaders(credential),
+    )) as GiteaComment[];
+    return rows.map(toExternalComment);
+  }
+
+  async createComment(
+    credential: ScmCredential,
+    repo: RepoRef,
+    issueNumber: number,
+    body: string,
+  ): Promise<ExternalComment> {
+    const row = (await scmSend(
+      "gitea",
+      `${apiRoot(credential.baseUrl)}/repos/${repo}/issues/${issueNumber}/comments`,
+      authHeaders(credential),
+      "POST",
+      { body },
+    )) as GiteaComment;
+    return toExternalComment(row);
   }
 
   async updateIssue(

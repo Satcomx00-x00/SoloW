@@ -1,6 +1,6 @@
 # Documentation Conventions
 
-These conventions keep GateControl's documentation consistent, discoverable, and
+These conventions keep SoloW's documentation consistent, discoverable, and
 maintainable. They apply to every file under `docs/`.
 
 ## Docs-as-Code

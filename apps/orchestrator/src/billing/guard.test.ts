@@ -1,12 +1,12 @@
 import { beforeAll, describe, expect, it } from "bun:test";
 
 beforeAll(() => {
-  process.env.GATECONTROL_SECRET_KEY = Buffer.alloc(32, 7).toString("base64");
+  process.env.SOLOW_SECRET_KEY = Buffer.alloc(32, 7).toString("base64");
 });
 
 describe("prepareAgentEnv — decrypt + billing integrity", () => {
   it("subscription decrypts the token and strips ANTHROPIC_API_KEY", async () => {
-    const { encryptSecret } = await import("@gatecontrol/db");
+    const { encryptSecret } = await import("@solow/db");
     const { prepareAgentEnv } = await import("./guard.js");
     const ciphertext = encryptSecret("sk-ant-oat01-tok");
     const r = prepareAgentEnv({

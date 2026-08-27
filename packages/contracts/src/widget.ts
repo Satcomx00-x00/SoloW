@@ -377,7 +377,7 @@ export function normalizeWidgetName(raw: string): string {
  * The record is not lost — the turn is still in the session log, and the Conversation tab still
  * shows it. What is hidden is a duplicate, in the one view where the widget itself is on screen.
  */
-export const WIDGET_ANSWER_PREFIX = "[gatecontrol:widget-response]";
+export const WIDGET_ANSWER_PREFIX = "[solow:widget-response]";
 
 /**
  * An operator's answer to an interactive widget.

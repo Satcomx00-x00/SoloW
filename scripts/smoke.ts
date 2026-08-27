@@ -1,16 +1,16 @@
 /// <reference types="bun-types" />
 // Test-only default: the secret store needs a 32-byte base64 key. Real deployments
-// supply their own GATECONTROL_SECRET_KEY; here we set a deterministic dummy so the
+// supply their own SOLOW_SECRET_KEY; here we set a deterministic dummy so the
 // smoke test runs without external configuration. MUST be set before any module that
 // reads it (secret-store / env) is imported or invoked below.
-if (!process.env.GATECONTROL_SECRET_KEY) {
-  process.env.GATECONTROL_SECRET_KEY = Buffer.alloc(32, 9).toString("base64"); // test-only
+if (!process.env.SOLOW_SECRET_KEY) {
+  process.env.SOLOW_SECRET_KEY = Buffer.alloc(32, 9).toString("base64"); // test-only
 }
 
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BillingErrorCode } from "@gatecontrol/contracts";
+import { BillingErrorCode } from "@solow/contracts";
 import {
   agentCatalog,
   agentProfile,
@@ -23,8 +23,8 @@ import {
   task,
   taskRepository,
   workspace,
-} from "@gatecontrol/db";
-import { createTestDb } from "@gatecontrol/db/testing";
+} from "@solow/db";
+import { createTestDb } from "@solow/db/testing";
 import { $ } from "bun";
 import { FakeAgentRunner } from "../apps/orchestrator/src/agent/runner.js";
 import { prepareAgentEnv } from "../apps/orchestrator/src/billing/guard.js";
@@ -47,7 +47,7 @@ function assert(cond: unknown, msg: string): asserts cond {
 
 async function main(): Promise<void> {
   // Temp directories: a source git repo, plus worktree/cache roots for provisioning.
-  const scratch = mkdtempSync(join(tmpdir(), "gatecontrol-smoke-"));
+  const scratch = mkdtempSync(join(tmpdir(), "solow-smoke-"));
   const repoDir = join(scratch, "repo");
   const worktreeRoot = join(scratch, "worktrees");
   const repoCacheRoot = join(scratch, "cache");
@@ -153,7 +153,7 @@ async function main(): Promise<void> {
         workspaceId,
         taskId,
         repositoryId: repo.id,
-        checkoutBranch: `gatecontrol/task-${taskId}`,
+        checkoutBranch: `solow/task-${taskId}`,
         position: 0,
       })
       .returning();
@@ -222,7 +222,7 @@ async function main(): Promise<void> {
       repoCacheRoot,
     });
     assert(existsSync(wt.path), "worktree directory was created");
-    assert(wt.branch === `gatecontrol/task-${taskId}`, "worktree branch is deterministic");
+    assert(wt.branch === `solow/task-${taskId}`, "worktree branch is deterministic");
 
     // Fresh worktree has no changes yet.
     assert(!(await hasChanges(executor, wt.path)), "worktree starts clean");
@@ -251,7 +251,7 @@ async function main(): Promise<void> {
 
     // 8. The edit must show up as a diff, then get committed onto the task branch.
     assert(await hasChanges(executor, wt.path), "worktree has the agent's uncommitted changes");
-    await commitWorktree(executor, wt.path, "GateControl smoke");
+    await commitWorktree(executor, wt.path, "SoloW smoke");
     assert(!(await hasChanges(executor, wt.path)), "changes committed; worktree clean again");
 
     // 9. Advance the task to done, recording the result branch on the attachment (issue #7).

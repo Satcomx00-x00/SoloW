@@ -16,16 +16,16 @@ const webEnvSchema = z.object({
    * or guessable value means forged sessions — refuse to boot rather than warn.
    * Generate one with `openssl rand -base64 32`.
    */
-  GATECONTROL_AUTH_SECRET: z.string().min(32),
+  SOLOW_AUTH_SECRET: z.string().min(32),
   /** Base URL the SPA is served from. */
-  GATECONTROL_WEB_URL: z.string().url().default("http://localhost:5000"),
+  SOLOW_WEB_URL: z.string().url().default("http://localhost:5000"),
   /** WebSocket endpoint exposed by the orchestrator service. */
-  GATECONTROL_WS_URL: z.string().url().default("ws://localhost:5001"),
+  SOLOW_WS_URL: z.string().url().default("ws://localhost:5001"),
   /**
    * HMAC key for stream subscription tickets (TASK-018). Shared with the orchestrator, which
    * verifies what this app signs. Required — an unset key would mean unauthenticated streams.
    */
-  GATECONTROL_STREAM_SECRET: z.string().min(1),
+  SOLOW_STREAM_SECRET: z.string().min(1),
 });
 
 export type WebEnv = z.infer<typeof webEnvSchema>;
@@ -39,17 +39,17 @@ export function webEnv(): WebEnv {
 }
 
 /**
- * Local single-user dev mode. When `GATECONTROL_DEV_OWNER=on`, the API resolves a fixed local
+ * Local single-user dev mode. When `SOLOW_DEV_OWNER=on`, the API resolves a fixed local
  * Owner bound to the seeded Workspace and enables `ff-core-program` — a stand-in for BetterAuth
  * so the SPA slice can read live data before auth is wired. Never enable in production.
  * Parsed separately so it does not require the full (auth-secret-bearing) web env.
  */
 const devEnvSchema = z.object({
-  GATECONTROL_DEV_OWNER: z.enum(["on", "off"]).default("off"),
+  SOLOW_DEV_OWNER: z.enum(["on", "off"]).default("off"),
 });
 
 export function devOwnerMode(): boolean {
-  return devEnvSchema.parse(process.env).GATECONTROL_DEV_OWNER === "on";
+  return devEnvSchema.parse(process.env).SOLOW_DEV_OWNER === "on";
 }
 
 /**
@@ -58,9 +58,9 @@ export function devOwnerMode(): boolean {
  * same reason as the dev flag: it must be readable without the full web env.
  */
 const orchestratorEnvSchema = z.object({
-  GATECONTROL_ORCHESTRATOR_URL: z.string().url().optional(),
+  SOLOW_ORCHESTRATOR_URL: z.string().url().optional(),
 });
 
 export function orchestratorUrl(): string | undefined {
-  return orchestratorEnvSchema.parse(process.env).GATECONTROL_ORCHESTRATOR_URL;
+  return orchestratorEnvSchema.parse(process.env).SOLOW_ORCHESTRATOR_URL;
 }

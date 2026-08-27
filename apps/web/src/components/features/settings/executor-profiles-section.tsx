@@ -1,6 +1,6 @@
 "use client";
 
-import type { ExecutorConfig, ExecutorKind, ExecutorProfileDto } from "@gatecontrol/contracts";
+import type { ExecutorConfig, ExecutorKind, ExecutorProfileDto } from "@solow/contracts";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { WHOLE_PAGE } from "@/lib/paged";
 import { trpc } from "@/trpc/react";
 import { type EnvPair, EnvRows, fromEnvPairs, toEnvPairs } from "./env-rows";
 
@@ -66,7 +67,7 @@ function blankConfig(
 
 export function ExecutorProfilesSection() {
   const utils = trpc.useUtils();
-  const list = trpc.profile.executor.list.useQuery({});
+  const list = trpc.profile.executor.list.useQuery({ ...WHOLE_PAGE });
   const secrets = trpc.secret.list.useQuery({});
 
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -299,9 +300,9 @@ export function ExecutorProfilesSection() {
           </p>
         )}
 
-        {(list.data?.length ?? 0) > 0 && (
+        {(list.data?.items.length ?? 0) > 0 && (
           <div className="flex flex-wrap gap-2 border-t pt-4">
-            {(list.data ?? []).map((p) => (
+            {(list.data?.items ?? []).map((p) => (
               <Button key={p.id} onClick={() => edit(p)} size="sm" type="button" variant="ghost">
                 <Badge variant="secondary">
                   {p.name} · {KIND_LABELS[p.kind]}

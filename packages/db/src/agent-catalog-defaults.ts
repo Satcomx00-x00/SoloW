@@ -6,7 +6,7 @@ import { agentCatalog } from "./schema.js";
 /**
  * The `claude_code` catalog row every Workspace needs before an Agent Profile can be created
  * (issue #10). Agent identity is now a row rather than an enum, which means a brand-new
- * Workspace with zero catalog rows could not create even the one agent GateControl actually
+ * Workspace with zero catalog rows could not create even the one agent SoloW actually
  * ships — so whatever creates a Workspace must call this immediately after, the same way it
  * must create the Workspace itself. Shared between the real sign-up hook (`auth.ts`) and the
  * dev/test seed so both paths guarantee the same thing.

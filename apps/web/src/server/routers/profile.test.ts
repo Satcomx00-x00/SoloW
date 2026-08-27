@@ -1,8 +1,8 @@
 /// <reference types="bun-types" />
 
 import { beforeEach, describe, expect, it } from "bun:test";
-import { workspace } from "@gatecontrol/db";
-import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
+import { workspace } from "@solow/db";
+import { createTestDb, type TestDb } from "@solow/db/testing";
 import type { BaseContext } from "../trpc.js";
 import { appRouter } from "./index.js";
 

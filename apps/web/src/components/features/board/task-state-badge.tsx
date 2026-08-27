@@ -1,4 +1,4 @@
-import type { TaskState } from "@gatecontrol/contracts";
+import type { TaskState } from "@solow/contracts";
 import { isLiveState, STATE_LABELS, STATE_STYLE } from "@/lib/task-states";
 import { cn } from "@/lib/utils";
 

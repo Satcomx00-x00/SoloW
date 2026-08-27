@@ -1,7 +1,7 @@
 import "server-only";
-import type { ReviewDecision } from "@gatecontrol/contracts";
-import { CommonErrorCode, err, ok, type Result, type ReviewDto } from "@gatecontrol/contracts";
-import { review } from "@gatecontrol/db";
+import type { ReviewDecision } from "@solow/contracts";
+import { CommonErrorCode, err, ok, type Result, type ReviewDto } from "@solow/contracts";
+import { review } from "@solow/db";
 import { and, eq } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
 

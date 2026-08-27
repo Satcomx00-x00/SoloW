@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type FakeClaudeScript, writeFakeClaudeBin } from "@gatecontrol/claude-code/testing";
+import { type FakeClaudeScript, writeFakeClaudeBin } from "@solow/claude-code/testing";
 import { createLocalExecutor } from "../executor/local.js";
 import {
   ClaudeCodeRunner,
@@ -15,7 +15,7 @@ import {
 import type { AgentHandle, AgentStreamEvent } from "./runner.js";
 
 /**
- * Claude Code driven as GateControl's agent (task TASK-014), against a real child process
+ * Claude Code driven as SoloW's agent (task TASK-014), against a real child process
  * speaking the real stream-JSON protocol. What matters here is the contract the lifecycle
  * depends on: the run streams, it reports which worktree it is in, operator input reaches it,
  * stopping is not a failure, and a quota message parks rather than fails.
@@ -32,7 +32,7 @@ afterEach(async () => {
 });
 
 async function run(script: FakeClaudeScript = {}, prompt = "fix the latch") {
-  workdir = await mkdtemp(join(tmpdir(), "gatecontrol-cc-"));
+  workdir = await mkdtemp(join(tmpdir(), "solow-cc-"));
   const events: AgentStreamEvent[] = [];
   const command = await writeFakeClaudeBin(workdir, { cwd: workdir, ...script });
   handle = new ClaudeCodeRunner({ executor: createLocalExecutor(workdir) }).start({
@@ -49,7 +49,7 @@ async function run(script: FakeClaudeScript = {}, prompt = "fix the latch") {
 
 describe("worktreeNameForTask", () => {
   it("names the worktree after the Task, so a stray directory is traceable", () => {
-    expect(worktreeNameForTask("abc")).toBe("gatecontrol-task-abc");
+    expect(worktreeNameForTask("abc")).toBe("solow-task-abc");
     expect(worktreeNameForTask("a")).not.toBe(worktreeNameForTask("b"));
   });
 });
@@ -72,7 +72,7 @@ describe("ClaudeCodeRunner", () => {
   });
 
   it("reports the worktree Claude Code created, so the lifecycle can adopt it", async () => {
-    // This is the whole point of `--worktree`: GateControl no longer picks the directory, it
+    // This is the whole point of `--worktree`: SoloW no longer picks the directory, it
     // finds out which one the agent made.
     const { handle: h, workdir: dir } = await run();
     expect(await h.workspacePath).toBe(dir as string);
@@ -159,13 +159,13 @@ describe("ClaudeCodeRunner", () => {
   });
 
   it("fails rather than hangs when the binary does not exist", async () => {
-    workdir = await mkdtemp(join(tmpdir(), "gatecontrol-cc-"));
+    workdir = await mkdtemp(join(tmpdir(), "solow-cc-"));
     handle = new ClaudeCodeRunner({ executor: createLocalExecutor(workdir) }).start({
       command: join(workdir, "no-such-claude"),
       args: [],
       cwd: workdir,
       env: { PATH: process.env["PATH"] ?? "" },
-      worktreeName: "gatecontrol-task-x",
+      worktreeName: "solow-task-x",
       prompt: "go",
       onEvent: () => {},
     });

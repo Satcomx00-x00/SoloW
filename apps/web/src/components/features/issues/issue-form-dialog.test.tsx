@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { afterEach, describe, expect, it } from "bun:test";
-import type { IssueDto } from "@gatecontrol/contracts";
+import type { IssueDto } from "@solow/contracts";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderWithTrpc } from "@/test/trpc-harness";
 import { IssueFormDialog } from "./issue-form-dialog";
@@ -39,7 +39,7 @@ const linkedRepo = {
 
 function baseHandlers(over: Record<string, (input: unknown) => unknown> = {}) {
   return {
-    "repository.list": () => [localRepo, linkedRepo],
+    "repository.list": () => ({ items: [localRepo, linkedRepo], nextCursor: null }),
     "repository.listLabels": () => [
       { name: "bug", color: "#d73a4a", description: null },
       { name: "enhancement", color: "#a2eeef", description: null },
@@ -140,6 +140,8 @@ describe("IssueFormDialog — edit", () => {
       repositoryId: "repo-local",
       externalNumber: null,
       externalUrl: null,
+      externalId: null,
+      externalParentId: null,
       syncedAt: null,
       labels: ["bug"],
       linkedChangeRequests: [],

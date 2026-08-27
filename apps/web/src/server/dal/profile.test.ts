@@ -1,11 +1,7 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import {
-  AgentCatalogErrorCode,
-  AgentProfileErrorCode,
-  CommonErrorCode,
-} from "@gatecontrol/contracts";
-import { agentProfile, session, sessionUsage, workflow, workflowStep } from "@gatecontrol/db";
-import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
+import { AgentCatalogErrorCode, AgentProfileErrorCode, CommonErrorCode } from "@solow/contracts";
+import { agentProfile, session, sessionUsage, workflow, workflowStep } from "@solow/db";
+import { createTestDb, type TestDb } from "@solow/db/testing";
 import { eq } from "drizzle-orm";
 import {
   createAgentCatalogEntry,
@@ -57,6 +53,8 @@ describe("Agent Profile usage and deletion", () => {
       secretId: "secret-2",
       concurrencyCap: 3,
       permissionMode: "acceptEdits",
+      model: null,
+      modeId: null,
     });
     if (!created.ok) throw new Error("seed failed");
 
@@ -259,6 +257,8 @@ describe("createAgentCatalogEntry", () => {
       secretId: "secret-1",
       concurrencyCap: 3,
       permissionMode: "acceptEdits",
+      model: null,
+      modeId: null,
     });
 
     expect(profile.ok).toBe(true);

@@ -18,8 +18,8 @@ import {
   repositoryBranchDto,
   repositoryDto,
   syncRepositorySignalsInput,
-} from "@gatecontrol/contracts";
-import { listProviderManifests } from "@gatecontrol/scm";
+} from "@solow/contracts";
+import { listProviderManifests } from "@solow/scm";
 import { z } from "zod";
 import {
   connectIntegration,
@@ -148,7 +148,7 @@ export const integrationRouter = router({
         tags: ["integration"],
         protect: true,
         summary:
-          "Import selected external issues as GateControl Issues. Idempotent per Repository — re-importing the same ids is a visible no-op, not a duplicate.",
+          "Import selected external issues as SoloW Issues. Idempotent per Repository — re-importing the same ids is a visible no-op, not a duplicate.",
       },
     })
     .input(importIssuesInput)
@@ -162,7 +162,7 @@ export const integrationRouter = router({
         tags: ["integration"],
         protect: true,
         summary:
-          "Refresh a linked Repository's change requests (pull/merge requests) and branches from its provider. On-demand pull; GateControl never creates or modifies anything on the provider here.",
+          "Refresh a linked Repository's change requests (pull/merge requests) and branches from its provider. On-demand pull; SoloW never creates or modifies anything on the provider here.",
       },
     })
     .input(syncRepositorySignalsInput)

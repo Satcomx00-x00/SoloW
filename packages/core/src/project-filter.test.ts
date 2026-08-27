@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { describe, expect, it } from "bun:test";
-import { projectFilterSchema, projectFilterTermSchema } from "@gatecontrol/contracts";
+import { projectFilterSchema, projectFilterTermSchema } from "@solow/contracts";
 import {
   type FilterableItem,
   formatProjectFilter,

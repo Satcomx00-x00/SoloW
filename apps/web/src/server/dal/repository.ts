@@ -4,17 +4,76 @@ import {
   type ConnectRepositoryInput,
   err,
   IntegrationErrorCode,
+  type ListRepositoriesInput,
   ok,
   type RepositoryDto,
   type RepositoryLabelDto,
+  type RepositoryListDto,
   type Result,
+  type SeedDefaultLabelsResult,
   type UpdateRepositorySetupInput,
-} from "@gatecontrol/contracts";
-import { decryptForScmSync, integration, repository, secret } from "@gatecontrol/db";
-import { isProviderInstalled, providerWith, type ScmCredential } from "@gatecontrol/scm";
-import { and, desc, eq } from "drizzle-orm";
+} from "@solow/contracts";
+import { decryptForScmSync, integration, issue, repository, secret } from "@solow/db";
+import {
+  DEFAULT_LABEL_TAXONOMY,
+  isProviderInstalled,
+  providerWith,
+  type ScmCredential,
+} from "@solow/scm";
+import { and, count, eq, inArray } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
-import { repositoryToDto } from "./mappers.js";
+import { type RepositoryEnrichment, repositoryToDto } from "./mappers.js";
+import { pageAfter, pageLimit, pageOrder, pageProbe, toPage } from "./page.js";
+
+/**
+ * The provider + host + Issue count for a page of Repository rows, one batched pair of queries
+ * rather than one query per row (the same reasoning `listProjectRepositories` batches its own
+ * counts for) — so a page of a hundred repositories costs three queries, not two hundred and one.
+ */
+async function enrichmentFor(
+  ctx: RequestContext,
+  rows: Array<{ id: string; integrationId: string | null }>,
+): Promise<Map<string, RepositoryEnrichment>> {
+  const map = new Map<string, RepositoryEnrichment>(
+    rows.map((r) => [r.id, { provider: null, integrationBaseUrl: null, issueCount: 0 }]),
+  );
+
+  const integrationIds = [...new Set(rows.map((r) => r.integrationId).filter((id) => id !== null))];
+  if (integrationIds.length > 0) {
+    const integrations = await ctx.db
+      .select({ id: integration.id, provider: integration.provider, baseUrl: integration.baseUrl })
+      .from(integration)
+      .where(and(eq(integration.workspaceId, ctx.workspaceId), inArray(integration.id, integrationIds)));
+    const byIntegration = new Map(integrations.map((i) => [i.id, i]));
+    for (const row of rows) {
+      const linked = row.integrationId ? byIntegration.get(row.integrationId) : undefined;
+      if (!linked) continue;
+      const enrichment = map.get(row.id);
+      if (enrichment) {
+        enrichment.provider = linked.provider;
+        enrichment.integrationBaseUrl = linked.baseUrl;
+      }
+    }
+  }
+
+  const repositoryIds = rows.map((r) => r.id);
+  if (repositoryIds.length > 0) {
+    const counts = await ctx.db
+      .select({ repositoryId: issue.repositoryId, n: count() })
+      .from(issue)
+      .where(and(eq(issue.workspaceId, ctx.workspaceId), inArray(issue.repositoryId, repositoryIds)))
+      .groupBy(issue.repositoryId);
+    for (const { repositoryId, n } of counts) {
+      // `inArray` above already excludes it, but the column itself is nullable (an Issue can
+      // arrive with no Repository resolved yet), so the type still says so.
+      if (repositoryId === null) continue;
+      const enrichment = map.get(repositoryId);
+      if (enrichment) enrichment.issueCount = n;
+    }
+  }
+
+  return map;
+}
 
 export async function getRepository(
   ctx: RequestContext,
@@ -25,7 +84,9 @@ export async function getRepository(
     .from(repository)
     .where(and(eq(repository.workspaceId, ctx.workspaceId), eq(repository.id, id)))
     .limit(1);
-  return row ? ok(repositoryToDto(row)) : err(CommonErrorCode.NotFound);
+  if (!row) return err(CommonErrorCode.NotFound);
+  const enrichment = await enrichmentFor(ctx, [row]);
+  return ok(repositoryToDto(row, enrichment.get(row.id)));
 }
 
 export async function connectRepository(
@@ -44,13 +105,26 @@ export async function connectRepository(
   return row ? ok(repositoryToDto(row)) : err(CommonErrorCode.ValidationFailed);
 }
 
-export async function listRepositories(ctx: RequestContext): Promise<Result<RepositoryDto[]>> {
+export async function listRepositories(
+  ctx: RequestContext,
+  input: ListRepositoriesInput,
+): Promise<Result<RepositoryListDto>> {
+  const after = pageAfter(input.cursor, repository.createdAt, repository.id);
   const rows = await ctx.db
     .select()
     .from(repository)
-    .where(eq(repository.workspaceId, ctx.workspaceId))
-    .orderBy(desc(repository.createdAt));
-  return ok(rows.map(repositoryToDto));
+    .where(and(eq(repository.workspaceId, ctx.workspaceId), ...(after ? [after] : [])))
+    .orderBy(...pageOrder(repository.createdAt, repository.id))
+    .limit(pageProbe(pageLimit(input.limit)));
+  const page = toPage(rows, pageLimit(input.limit), (row) => ({
+    createdAt: row.createdAt,
+    id: row.id,
+  }));
+  const enrichment = await enrichmentFor(ctx, page.items);
+  return ok({
+    items: page.items.map((row) => repositoryToDto(row, enrichment.get(row.id))),
+    nextCursor: page.nextCursor,
+  });
 }
 
 /**
@@ -148,4 +222,36 @@ export async function listRepositoryLabels(
   }
   const labels = await driver.listLabels(resolved.data.credential, resolved.data.externalFullName);
   return ok(labels);
+}
+
+/**
+ * Seed a linked Repository with SoloW's default label taxonomy (user request 2026-08-27) —
+ * `type/*`, `prio/*`, `size/*`, `status/*`, `area/*` — for a repository that arrived with none of
+ * its own to classify Issues by, most often a fresh GitLab project.
+ *
+ * Same two refusals as `listRepositoryLabels`, for the same reasons: `NotLinked` for a purely
+ * local Repository, `CapabilityUnavailable`/`ProviderUnavailable` for one whose provider (or this
+ * build) has no way to create a label at all.
+ */
+export async function seedDefaultLabels(
+  ctx: RequestContext,
+  repositoryId: string,
+): Promise<Result<SeedDefaultLabelsResult, typeof CommonErrorCode.NotFound | IntegrationErrorCode>> {
+  const resolved = await loadRepositoryCredential(ctx, repositoryId);
+  if (!resolved.ok) return resolved;
+
+  const driver = providerWith(resolved.data.provider, "labelWrites");
+  if (!driver) {
+    return err(
+      isProviderInstalled(resolved.data.provider)
+        ? IntegrationErrorCode.CapabilityUnavailable
+        : IntegrationErrorCode.ProviderUnavailable,
+    );
+  }
+  const result = await driver.createLabels(
+    resolved.data.credential,
+    resolved.data.externalFullName,
+    DEFAULT_LABEL_TAXONOMY,
+  );
+  return ok(result);
 }

@@ -4,7 +4,7 @@
 
 ## Summary
 
-GateControl gives every Task its own isolated Git working copy — a Worktree — so multiple
+SoloW gives every Task its own isolated Git working copy — a Worktree — so multiple
 agents can work in parallel without colliding. A single Task can span multiple
 Repositories, each with its own branch and change set, so cross-repository work is a
 first-class capability.
@@ -28,19 +28,19 @@ first-class capability.
 ## Functional requirements
 
 - **FR-1** A user can connect one or more Git Repositories to a Workspace.
-- **FR-2** When a Task starts, GateControl provisions an isolated Worktree for each
+- **FR-2** When a Task starts, SoloW provisions an isolated Worktree for each
   Repository the Task touches, on its own branch.
 - **FR-3** Concurrent Tasks operate in separate Worktrees and never share working files.
 - **FR-4** A single Task can span multiple Repositories, each producing its own branch and
   change set.
 - **FR-5** A user can choose the base branch or commit a Task's Worktree starts from.
-- **FR-6** On acceptance of a Task's changes, GateControl supports integrating them
+- **FR-6** On acceptance of a Task's changes, SoloW supports integrating them
   (for example, creating a branch and a pull request per Repository) — see
   [F12](./F12-integrations.md) for source-host integration.
 - **FR-7** When a Task is completed or discarded, its Worktrees are cleaned up.
 - **FR-8** A Repository carries an allowlist of file patterns — its **setup files** — copied
   from the Repository into each new Worktree before the Agent works in it. The allowlist is
-  explicit: GateControl never copies "everything Git ignores".
+  explicit: SoloW never copies "everything Git ignores".
 
 ## Non-functional requirements
 
@@ -69,12 +69,12 @@ first-class capability.
 - **Who creates the primary Worktree depends on what the attachment asks for.** An Agent that
   makes its own (Claude Code's `--worktree`) is left to, because that is what lets several Tasks
   share one Repository — but such an Agent branches from HEAD and names the branch itself. So an
-  attachment that names a base ref, or a checkout branch other than the one GateControl derives,
-  is provisioned by GateControl and the Agent is started inside it. Otherwise the Owner's base
+  attachment that names a base ref, or a checkout branch other than the one SoloW derives,
+  is provisioned by SoloW and the Agent is started inside it. Otherwise the Owner's base
   ref would be stored, shown in the brief and silently ignored for the primary while every
   secondary honoured its own.
 - The brief names each Worktree's branch only once something can say what it is. A Worktree
-  GateControl provisioned is on the attachment's branch by construction; one the Agent made for
+  SoloW provisioned is on the attachment's branch by construction; one the Agent made for
   itself is on a branch only Git can report, so until it has been adopted the brief names the
   Repository without a branch rather than naming one that does not exist.
 - A Task's Worktrees exist for the Task's active life and are removed on completion or
@@ -103,7 +103,7 @@ first-class capability.
   launch are removed before the Task fails. They would otherwise keep their branches checked out
   and block the next launch from reusing them.
 - If Worktree cleanup fails, the failure is surfaced and does not block other Tasks.
-- If a setup-file pattern matches nothing — or a matched file cannot be copied — GateControl
+- If a setup-file pattern matches nothing — or a matched file cannot be copied — SoloW
   warns and the Task continues. A Repository configured on a machine that lacks one of the
   files should still run, with less for the Agent to go on.
 

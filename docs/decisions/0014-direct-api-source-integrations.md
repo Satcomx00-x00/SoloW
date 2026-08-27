@@ -16,17 +16,17 @@ against #15 surfaced three problems with the CLI approach that 0009 did not have
 - **Testability.** Issue #15's own Definition of Done requires "contract tests against a
   recorded fixture, no live API in CI" (constitution Principle VI). A fixture HTTP server is a
   few lines of `Bun.serve`; a fixture for a CLI binary's stdout/stderr/exit-code contract is a
-  second thing to build and keep in sync with two tools GateControl does not control the
+  second thing to build and keep in sync with two tools SoloW does not control the
   release cadence of.
-- **A runtime dependency GateControl cannot express in its own data model.** `gh auth login`
+- **A runtime dependency SoloW cannot express in its own data model.** `gh auth login`
   and `glab auth login` store credentials in the CLI's own local state (a config file, the OS
-  keychain) — a **process-local, host-local** credential. GateControl's credential model is a
+  keychain) — a **process-local, host-local** credential. SoloW's credential model is a
   Workspace-scoped, encrypted `Secret` row (Principle IV; [0005](./0005-subscription-authentication.md)
   established the same shape for agent credentials). Reusing an inherited CLI login means the
   integration's credential does not live in that model at all, and a hosted or multi-host
   deployment ([0008](./0008-data-store-strategy.md)) has no login to inherit.
 - **Two credential shapes for the same PAT.** A user who already has a GitHub PAT would need
-  to additionally run `gh auth login` and trust GateControl to find that state, rather than
+  to additionally run `gh auth login` and trust SoloW to find that state, rather than
   pasting the token once into the Secret store the rest of the product already uses for every
   other credential (subscription tokens, API keys).
 
@@ -61,11 +61,11 @@ documented contract.
 - Positive: no install-and-authenticate prerequisite for GitHub/GitLab specifically; the Setup
   Workflow's `gh`/`glab` preflight check (F18 FR-7) no longer applies to this pair (it may still
   apply to any future CLI-driven integration).
-- Negative: GateControl re-implements the slice of GitHub/GitLab's REST surface it needs
+- Negative: SoloW re-implements the slice of GitHub/GitLab's REST surface it needs
   (issues, pulls/merge requests, branches) rather than inheriting a maintained CLI — bounded by
   what `packages/scm`'s drivers cover, same tradeoff 0009 accepted in the other direction.
 - Negative: GitHub Enterprise Server / self-managed GitLab base-URL handling (`gh`/`glab` solve
-  this themselves) is now GateControl's own concern — handled by `ScmCredential.baseUrl` and a
+  this themselves) is now SoloW's own concern — handled by `ScmCredential.baseUrl` and a
   per-provider API-root convention (`/api/v3`, `/api/v4`).
 - Realises [F12](../features/F12-integrations.md) for GitHub and GitLab; other trackers remain
   out of scope (`wont-do`, per issue #15's stated scope).

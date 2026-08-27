@@ -122,15 +122,15 @@ Phase 4 vertical slice (sixth `/speckit-implement`) — **VERIFIED** (build unde
   `resolve.extensionAlias`; Next's duplicate type/lint pass disabled — we gate with tsc + Biome).
   Running server verified: `task.list`/`issue.list` return the seeded WS_A rows only (WS_B not
   leaked — tenancy holds through SPA→tRPC→DAL→bun:sqlite); `/board`→200, `/`→307→`/board`.
-- ➕ **Local dev-owner path**: `GATECONTROL_DEV_OWNER=on` → `context.ts` resolves a fixed Owner on
+- ➕ **Local dev-owner path**: `SOLOW_DEV_OWNER=on` → `context.ts` resolves a fixed Owner on
   the seeded Workspace with `ff-core-program` enabled (stand-in until BetterAuth is wired).
 - ➕ **Fixed `db:migrate`**: replaced the broken `drizzle-kit migrate` (better-sqlite3 native binding
   fails under Bun) with a `bun:sqlite` migrator (`packages/db/src/migrate.ts`).
 
 **Run the SPA locally** (from repo root):
-`GATECONTROL_SQLITE_PATH=./.gatecontrol/dev.db GATECONTROL_SECRET_KEY=$(openssl rand -base64 32) \
+`SOLOW_SQLITE_PATH=./.solow/dev.db SOLOW_SECRET_KEY=$(openssl rand -base64 32) \
  bun run db:migrate && … db:seed`, then in `apps/web`:
-`GATECONTROL_DEV_OWNER=on GATECONTROL_AUTH_SECRET=dev … bun --bun run dev` → http://localhost:3000/board
+`SOLOW_DEV_OWNER=on SOLOW_AUTH_SECRET=dev … bun --bun run dev` → http://localhost:3000/board
 
 **Verified with:** `bun --bun run build` (✓ compiled) → live `task.list` scoped to WS_A →
 `bun run typecheck` (6/6) → `bun run test` (107 pass) → `bunx biome check .` (clean) → `openapi:check`.
@@ -167,7 +167,7 @@ Phase 4 interactive-board pass (eighth `/speckit-implement`) — **VERIFIED** (b
   task (backlog) → move (ready) → launch (**running**). *Remaining for full TASK-021: dnd-kit drag
   + live WebSocket status.*
 - ➕ **Orchestrator-client dev degradation**: `enqueueTaskRun`/`resumeReview` log-and-return under
-  `GATECONTROL_DEV_OWNER=on` (so the SPA launch/review flow is demonstrable without the durable
+  `SOLOW_DEV_OWNER=on` (so the SPA launch/review flow is demonstrable without the durable
   service) and still **throw** in non-dev (missing wiring never silent).
 - ➕ **TASK-024**: added a board-actions rendering test (`renderActions` wired through
   BoardView→Column→TaskCard).
@@ -181,12 +181,12 @@ TASK-029 gitleaks/dep-audit. (Review + real-time need the WS client + a running 
 Realtime + E2E + gates pass (ninth `/speckit-implement`) — **VERIFIED** (all gates exit 0):
 - ✅ **TASK-018** WebSocket hub — *both* acceptance criteria now met. Connection auth via
   short-lived HMAC **subscription tickets** (`packages/core/src/stream.ts`, exported from
-  `@gatecontrol/core/stream` so `node:crypto` never enters the browser bundle): the API checks
+  `@solow/core/stream` so `node:crypto` never enters the browser bundle): the API checks
   session + Workspace ownership and signs a ticket naming one channel; the hub **derives the
   channel from the ticket's claims**, never from a query parameter (`authorizeUpgrade`).
   **Reconnect replay** (`attachSubscriber`): events after the client's `seq` are replayed from
   the session log, with live events buffered during replay so nothing is lost or duplicated.
-  New `stream.ticket` procedure (OpenAPI now **21 paths**); `GATECONTROL_STREAM_SECRET` shared
+  New `stream.ticket` procedure (OpenAPI now **21 paths**); `SOLOW_STREAM_SECRET` shared
   by both services (required — an unset key would mean unauthenticated streams).
 - ➕ **Gap found and closed**: the lifecycle published events but *never persisted them*, so
   replay had nothing to read and a reloaded Task page showed an empty terminal. `task-run.ts`
@@ -219,7 +219,7 @@ Realtime + E2E + gates pass (ninth `/speckit-implement`) — **VERIFIED** (all g
   runs the **real** `runTaskLifecycle` + worktree manager against a deterministic fake agent and
   consumes the same `{name,data}` events the API emits; it stands in only for the durable engine
   (inline steps, in-memory review waits — no durability claim).
-- ➕ **Event transport wired**: `orchestrator-client` POSTs to `GATECONTROL_ORCHESTRATOR_URL`
+- ➕ **Event transport wired**: `orchestrator-client` POSTs to `SOLOW_ORCHESTRATOR_URL`
   (`/events`, Inngest's `{name,data}` shape) when configured; dev-without-URL still logs-and-
   returns and non-dev still throws. `review.decide`'s dev stand-in transition is now skipped
   when a real engine is wired, so the two no longer race.
@@ -258,7 +258,7 @@ Real-ACP + steering pass (tenth `/speckit-implement`) — **VERIFIED** (every ga
     "allow" the agent offers and refuses if it offers none, because the disposable worktree plus
     the review gate — not a per-tool prompt no one is watching — are the safety boundary. Every
     decision is reported onto the stream, so it lands in the session log.
-  - The agent binary is now configuration: `GATECONTROL_AGENT_COMMAND` / `GATECONTROL_AGENT_ARGS`
+  - The agent binary is now configuration: `SOLOW_AGENT_COMMAND` / `SOLOW_AGENT_ARGS`
     (default `claude-code-acp`), since the ACP adapter ships separately from Claude Code.
 - ➕ **Gap found and closed: park-on-quota could never fire in production.** `SpawnAgentRunner`
   returned an empty `FailureSignal`, so `classifyRunFailure` always said `fail` — the Parked
@@ -283,7 +283,7 @@ Real-ACP + steering pass (tenth `/speckit-implement`) — **VERIFIED** (every ga
   changes and left **no review decision behind**. Approve stays one click — it is not destructive.
 - ➕ **E2E**: a new spec drives one instruction from the terminal through the hub and registry into
   the agent and back onto the stream; the reject spec now goes through the confirmation.
-- **Counts**: 6 packages → 7 (`@gatecontrol/acp`); 149 → **205 unit/integration tests**; 6 → **7
+- **Counts**: 6 packages → 7 (`@solow/acp`); 149 → **205 unit/integration tests**; 6 → **7
   Playwright specs**.
 
 **Verified with:** `bunx biome check .` (clean) → `bun run typecheck` (**8/8**) → `bun run test`
@@ -304,7 +304,7 @@ sign-up → sign-in → API → sign-out run against a real server):
 - ✅ **TASK-011** BetterAuth session + Workspace guard — the stub is gone. `resolveSession` now
   validates a real signed session and looks the Workspace up from its user, so `workspaceId`
   originates in the session and nowhere else (Principle V). Until now the whole product only
-  worked under `GATECONTROL_DEV_OWNER=on`; that path stays, clearly marked, for local dev and the
+  worked under `SOLOW_DEV_OWNER=on`; that path stays, clearly marked, for local dev and the
   E2E harness.
   - **Schema**: four `auth_*` tables in `packages/db/src/auth-schema.ts`, kept in their own file
     because they are the *source* of the tenant key rather than tenant-scoped data — every domain
@@ -330,7 +330,7 @@ sign-up → sign-in → API → sign-out run against a real server):
   put the kill switch in reach of whoever is signed in, which is the opposite of the point). The
   board explains the disabled state instead of showing the raw error code. Anything other than an
   explicit `true` — absent, null, malformed — reads as OFF.
-- ➕ **Hardened**: `GATECONTROL_AUTH_SECRET` now requires ≥32 characters and the app refuses to
+- ➕ **Hardened**: `SOLOW_AUTH_SECRET` now requires ≥32 characters and the app refuses to
   boot below that, rather than logging a warning and signing cookies with a guessable key.
 - ➕ **Pre-existing E2E flake found and fixed** (it surfaced when this pass added a third caller,
   and was luck, not correctness, before): `ensureRepository` read badge visibility immediately
@@ -395,17 +395,17 @@ openapi green; **Playwright not run this pass** (see below):
   programmatic mode, so every message, tool call and result arrives as a parseable event instead
   of terminal text to scrape, and a turn can be sent mid-session.
 - ✅ **`--worktree` is mandatory and unforgeable.** It is added by `buildArgs`, not by a call
-  site, and `GATECONTROL_AGENT_ARGS` is appended *after* the required flags so configuration
+  site, and `SOLOW_AGENT_ARGS` is appended *after* the required flags so configuration
   cannot drop it. Several Tasks share one repository; two agents in one working tree would
   overwrite each other (Principle II).
-- ➕ **Worktree ownership inverted.** GateControl used to `git worktree add` per Task. Running
+- ➕ **Worktree ownership inverted.** SoloW used to `git worktree add` per Task. Running
   `claude --worktree` inside that would nest a worktree in a worktree and put the agent's edits
-  where nothing downstream reads. So the agent now creates the worktree and GateControl *adopts*
+  where nothing downstream reads. So the agent now creates the worktree and SoloW *adopts*
   it: `prepareRepository` resolves and validates the repository up front (an unusable location
   still fails the Task before any agent starts), the runner reports the path from the session's
   own `system/init` event, and `adoptWorktree` confirms with **git** — not with a guessed naming
   convention — that the path really is a worktree of that repository. An agent that reports a
-  path outside the repository, or none at all, fails the Task rather than having GateControl
+  path outside the repository, or none at all, fails the Task rather than having SoloW
   commit from wherever it happened to be pointing. Diff, commit, discard and cleanup all target
   the adopted path.
 - ➕ **Bug found and fixed in the review loop.** A `request_changes` round re-ran the agent, and
@@ -605,7 +605,7 @@ mirror of the schema (Decision 0008 follow-up).
       kills; the run resolves *completed*, so partial work still reaches review.
 - Implemented with the official `@agentclientprotocol/sdk`; `node-pty` proved unnecessary since ACP
   is newline-delimited JSON-RPC on stdio, not a terminal (one fewer native dependency).
-- The agent binary is configuration (`GATECONTROL_AGENT_COMMAND`/`_ARGS`, default
+- The agent binary is configuration (`SOLOW_AGENT_COMMAND`/`_ARGS`, default
   `claude-code-acp`) — the ACP adapter for Claude Code ships separately from Claude Code.
 **Directives**: IV, and the uniform-agent boundary (Decision 0003).
 

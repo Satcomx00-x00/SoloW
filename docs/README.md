@@ -1,6 +1,6 @@
-# GateControl — Documentation
+# SoloW — Documentation
 
-GateControl is an open-source, self-hostable platform for orchestrating many AI
+SoloW is an open-source, self-hostable platform for orchestrating many AI
 coding-agent CLIs (Claude Code, Codex, Gemini CLI, and 25+ others) in parallel,
 with a review-first workflow. It is a business-level alternative to
 [kandev](https://github.com/kdlbs/kandev).

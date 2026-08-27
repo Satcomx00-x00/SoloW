@@ -1,10 +1,10 @@
 import { describe, expect, it } from "bun:test";
-import { agentProtocolSchema } from "@gatecontrol/contracts";
+import { agentProtocolSchema } from "@solow/contracts";
 import type { Executor } from "../executor/types.js";
 import { AcpRunner } from "./acp-runner.js";
 import { ClaudeCodeRunner } from "./claude-code-runner.js";
 import { AVAILABLE_AGENT_PROTOCOLS, hasAgentRunner } from "./protocols.js";
-import { createAgentRunner } from "./runners.js";
+import { createAgentRunner, unsupportedLaunchSettings } from "./runners.js";
 
 /**
  * The protocol → runner switch (issue #58, AC-3). The point of these is drift: the lifecycle
@@ -77,5 +77,37 @@ describe("createAgentRunner", () => {
     // A default runner here would silently run a passthrough Task as something else entirely.
     expect(createAgentRunner("cli_passthrough", { executor })).toBeNull();
     expect(AVAILABLE_AGENT_PROTOCOLS).not.toContain("cli_passthrough");
+  });
+});
+
+/**
+ * A launch setting the protocol cannot express (issue #94 AC-3).
+ *
+ * The rule is that a Profile's pin is either honoured or **said** — never quietly dropped. A run
+ * that used a different model than the Profile asked for, with the Profile still reading as
+ * though the pin held, is the silent substitution the criterion forbids by name.
+ */
+describe("unsupportedLaunchSettings", () => {
+  it("names a model ACP has no way to select", () => {
+    // `AcpMethod` carries `session/set_mode` and nothing for a model, so pinning one is a
+    // request SoloW cannot make. Inventing a method name and hoping is how a run fails in
+    // the middle instead of at the start.
+    expect(unsupportedLaunchSettings("acp", { model: "opus" })).toEqual(['model "opus"']);
+  });
+
+  it("names a mode the stream-json CLI has no notion of", () => {
+    expect(unsupportedLaunchSettings("claude_code_stream_json", { modeId: "plan" })).toEqual([
+      'mode "plan"',
+    ]);
+  });
+
+  it("says nothing about a setting the protocol does carry", () => {
+    expect(unsupportedLaunchSettings("claude_code_stream_json", { model: "opus" })).toEqual([]);
+    expect(unsupportedLaunchSettings("acp", { modeId: "plan" })).toEqual([]);
+  });
+
+  it("says nothing when a Profile pinned nothing at all", () => {
+    // The ordinary case: null everywhere means "whatever the agent chooses".
+    expect(unsupportedLaunchSettings("acp", { model: null, modeId: null })).toEqual([]);
   });
 });

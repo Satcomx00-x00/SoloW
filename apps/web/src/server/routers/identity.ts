@@ -5,7 +5,7 @@ import {
   projectIdentityInput,
   providerIdentityDto,
   setProviderIdentityInput,
-} from "@gatecontrol/contracts";
+} from "@solow/contracts";
 import { z } from "zod";
 import {
   clearProviderIdentity,

@@ -2,8 +2,8 @@
 import { readdirSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { Writable } from "node:stream";
-import { createDb } from "@gatecontrol/db";
-import { createLogger } from "@gatecontrol/observability";
+import { createDb } from "@solow/db";
+import { createLogger } from "@solow/observability";
 import { $ } from "bun";
 import { agentRegistry } from "../../apps/orchestrator/src/agent/registry.js";
 import type {
@@ -49,8 +49,8 @@ const STEERABLE = "[steerable]";
  * Deterministic agent standing in for Claude Code.
  *
  * It does what `claude --worktree` does: creates its own git worktree off the repository it was
- * pointed at, works only in there, and reports the path back so GateControl can adopt it. That
- * is what makes the isolation test meaningful under the new model — the agent, not GateControl,
+ * pointed at, works only in there, and reports the path back so SoloW can adopt it. That
+ * is what makes the isolation test meaningful under the new model — the agent, not SoloW,
  * chooses the directory, and the guarantee is that two agents on one repository never share one.
  *
  * It writes a marker into its worktree and records what it can see there. That recording is the

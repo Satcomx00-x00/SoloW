@@ -2,7 +2,7 @@
 
 **Status:** Draft · **Owner:** Architecture · **Last reviewed:** 2026-08-17
 
-This log records the significant decisions behind GateControl as Architecture Decision
+This log records the significant decisions behind SoloW as Architecture Decision
 Records (ADRs). Each ADR captures one decision, its context, the options considered, and the
 consequences — following the widely used
 [Nygard / MADR](https://adr.github.io) conventions.

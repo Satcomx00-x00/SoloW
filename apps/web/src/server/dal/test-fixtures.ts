@@ -5,8 +5,8 @@ import {
   issue,
   repository,
   workspace,
-} from "@gatecontrol/db";
-import type { TestDb } from "@gatecontrol/db/testing";
+} from "@solow/db";
+import type { TestDb } from "@solow/db/testing";
 import type { RequestContext } from "./context.js";
 
 /**
@@ -53,9 +53,9 @@ export async function seedWorkspaceGraph(db: TestDb, name: string) {
     .insert(repository)
     .values({
       workspaceId: ws.id,
-      name: "gatecontrol",
+      name: "solow",
       source: "local_path",
-      location: "/srv/repos/gatecontrol",
+      location: "/srv/repos/solow",
     })
     .returning();
   if (!agent || !executor || !repo) throw new Error("failed to seed profiles");

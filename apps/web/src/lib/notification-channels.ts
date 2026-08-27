@@ -13,7 +13,7 @@ import { contribute, type NotificationEvent, notificationChannelRegistry } from 
  * Delivery is a DOM event for the same reason the create dialog uses one: the bell UI does not
  * exist yet, and a channel that imported it would be the coupling the registry is here to avoid.
  */
-export const IN_APP_NOTIFICATION_EVENT = "gatecontrol:notification";
+export const IN_APP_NOTIFICATION_EVENT = "solow:notification";
 
 contribute(notificationChannelRegistry, {
   id: "notify.in-app",

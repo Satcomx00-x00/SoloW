@@ -5,7 +5,7 @@
 ## Summary
 
 Onboarding is a guided **Setup Workflow** that prepares a Workspace for use. Rather than
-leaving a new user to discover configuration screens on their own, GateControl walks them
+leaving a new user to discover configuration screens on their own, SoloW walks them
 through the essential steps as an ordered, resumable, self-verifying sequence — connecting
 source hosts, repositories, and integrations; creating at least one Agent Profile and one
 Executor Profile; choosing a billing mode; and confirming the setup works with a small
@@ -34,7 +34,7 @@ work share one mental model.
 
 ## Functional requirements
 
-- **FR-1** On first use of a Workspace, GateControl launches a guided Setup Workflow.
+- **FR-1** On first use of a Workspace, SoloW launches a guided Setup Workflow.
 - **FR-2** The Setup Workflow is presented as an ordered sequence of steps with visible
   progress and completion state, using the same guided step model as
   [Workflows](./F03-workflow-designer.md) where it aids clarity.

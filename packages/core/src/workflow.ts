@@ -6,7 +6,7 @@ import {
   type WorkflowAdvanceStatus,
   WorkflowErrorCode,
   type WorkflowStepGate,
-} from "@gatecontrol/contracts";
+} from "@solow/contracts";
 
 /**
  * Pure Workflow logic (issue #5, spec F03). Zero infrastructure imports; returns `Result`,

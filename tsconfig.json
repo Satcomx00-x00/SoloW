@@ -5,10 +5,10 @@
     "types": ["bun-types"],
     "baseUrl": ".",
     "paths": {
-      "@gatecontrol/contracts": ["packages/contracts/src/index.ts"],
-      "@gatecontrol/core": ["packages/core/src/index.ts"],
-      "@gatecontrol/db": ["packages/db/src/index.ts"],
-      "@gatecontrol/db/testing": ["packages/db/src/testing.ts"]
+      "@solow/contracts": ["packages/contracts/src/index.ts"],
+      "@solow/core": ["packages/core/src/index.ts"],
+      "@solow/db": ["packages/db/src/index.ts"],
+      "@solow/db/testing": ["packages/db/src/testing.ts"]
     }
   },
   "include": ["scripts"]

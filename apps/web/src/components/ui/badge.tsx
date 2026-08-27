@@ -5,19 +5,25 @@ import { Slot } from "radix-ui"
 import { cn } from "@/lib/utils"
 
 const badgeVariants = cva(
-  "inline-flex w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-full border border-transparent px-2 py-0.5 text-xs font-medium whitespace-nowrap transition-[color,box-shadow] aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&>svg]:pointer-events-none [&>svg]:size-3",
+  // No `border-transparent` here: it is a Tailwind utility, and utilities beat the components
+  // layer where `.badge-soft` lives — so a transparent border on the base would silently win over
+  // every soft variant's border colour. The variants that want no border say so themselves.
+  "inline-flex w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap transition-[color,box-shadow] aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&>svg]:pointer-events-none [&>svg]:size-3",
   {
     variants: {
+      // Soft, not filled. Every variant that carries a colour states it as `--badge-color` and
+      // lets `.badge-soft` (globals.css) do the mixing, so there is one definition of "soft" in
+      // the app rather than one per component. `ghost` and `link` are not badges visually and
+      // keep their own treatment.
       variant: {
-        default: "bg-primary text-primary-foreground [a&]:hover:bg-primary/90",
-        secondary:
-          "bg-secondary text-secondary-foreground [a&]:hover:bg-secondary/90",
+        default: "badge-soft [--badge-color:var(--primary)]",
+        secondary: "badge-soft [--badge-color:var(--muted-foreground)]",
         destructive:
-          "bg-destructive text-white focus-visible:ring-destructive/20 dark:bg-destructive/60 dark:focus-visible:ring-destructive/40 [a&]:hover:bg-destructive/90",
+          "badge-soft [--badge-color:var(--destructive)] focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40",
         outline:
-          "border-border text-foreground [a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
-        ghost: "[a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
-        link: "text-primary underline-offset-4 [a&]:hover:underline",
+          "badge-soft [--badge-color:var(--muted-foreground)] [a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
+        ghost: "border-transparent [a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
+        link: "border-transparent text-primary underline-offset-4 [a&]:hover:underline",
       },
     },
     defaultVariants: {

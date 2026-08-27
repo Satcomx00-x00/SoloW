@@ -3,7 +3,7 @@ import {
   CommonErrorCode,
   TaskDependencyErrorCode,
   TaskErrorCode,
-} from "@gatecontrol/contracts";
+} from "@solow/contracts";
 
 /**
  * Wire codes an action banner can receive, as sentences.

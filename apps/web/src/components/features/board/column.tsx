@@ -1,4 +1,4 @@
-import type { TaskDependencyDto, TaskDto, TaskState } from "@gatecontrol/contracts";
+import type { TaskDependencyDto, TaskDto, TaskState } from "@solow/contracts";
 import type { ReactNode } from "react";
 import { STATE_STYLE } from "@/lib/task-states";
 import { cn } from "@/lib/utils";

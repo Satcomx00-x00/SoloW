@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { describe, expect, it } from "bun:test";
-import type { WidgetResponse } from "@gatecontrol/contracts";
+import type { WidgetResponse } from "@solow/contracts";
 import { AgentRegistry } from "./registry.js";
 import type { AgentHandle } from "./runner.js";
 

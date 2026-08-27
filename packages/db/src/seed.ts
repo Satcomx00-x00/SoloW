@@ -1,4 +1,4 @@
-import { DEFAULT_AGENT_PERMISSION_MODE } from "@gatecontrol/contracts";
+import { DEFAULT_AGENT_PERMISSION_MODE } from "@solow/contracts";
 import { ensureDefaultAgentCatalog } from "./agent-catalog-defaults.js";
 import type { Db } from "./index.js";
 import { agentProfile, executorProfile, repository, secret, workspace } from "./schema.js";
@@ -16,7 +16,7 @@ import { encryptSecret } from "./secret-store.js";
  *
  * Idempotent: every row uses a fixed id and `onConflictDoNothing`, so re-running the seed is
  * safe and never duplicates. Secrets are encrypted at rest via the same store the app uses —
- * so `GATECONTROL_SECRET_KEY` must be present in the environment before calling `seed`.
+ * so `SOLOW_SECRET_KEY` must be present in the environment before calling `seed`.
  */
 
 // Stable ids make the seed idempotent (fixed PKs → onConflictDoNothing is a no-op on re-run).

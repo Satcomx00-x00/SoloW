@@ -1,10 +1,11 @@
 import { z } from "zod";
 import { idSchema, timestampsSchema } from "./common.js";
+import { PAGE_SIZE_DEFAULT, PAGE_SIZE_MAX } from "./page.js";
 
 /**
  * Project planning contracts (spec F23, Decision 0018).
  *
- * The provider owns these values and GateControl mirrors them. That is the one thing to keep in
+ * The provider owns these values and SoloW mirrors them. That is the one thing to keep in
  * mind reading this file: nothing here is authoritative, every shape is a cache of something a
  * provider said, and a disagreement is resolved by asking the provider again.
  */
@@ -123,7 +124,7 @@ export type ProjectFieldDto = z.infer<typeof projectFieldDto>;
 export const projectItemDto = z.object({
   id: idSchema,
   providerItemId: z.string(),
-  /** The Issue this row projects. Everything GateControl owns hangs off it. */
+  /** The Issue this row projects. Everything SoloW owns hangs off it. */
   issueId: idSchema,
   position: z.number().int().nonnegative(),
   archivedAt: z.string().nullable(),
@@ -155,13 +156,41 @@ export const projectItemDto = z.object({
 });
 export type ProjectItemDto = z.infer<typeof projectItemDto>;
 
+/**
+ * A local Project's own value of `source` (mirrors `LOCAL_ISSUE_SOURCE`, spec F01/F23, user
+ * request 2026-08-27) — reserved and never a real `integration.provider` id.
+ */
+export const LOCAL_PROJECT_SOURCE = "local";
+export const ADOPTED_PROJECT_SOURCE = "adopted";
+export const projectSourceSchema = z.enum([ADOPTED_PROJECT_SOURCE, LOCAL_PROJECT_SOURCE]);
+export type ProjectSource = z.infer<typeof projectSourceSchema>;
+
 export const projectDto = z
   .object({
     id: idSchema,
-    integrationId: idSchema,
-    providerProjectId: z.string(),
+    /** Null for a local Project (`source: "local"`) — see `source` below. */
+    integrationId: idSchema.nullable(),
+    providerProjectId: z.string().nullable(),
+    /**
+     * Which of the two kinds of Project this is, stated rather than left for a caller to infer
+     * from nullability — the same reasoning `issue.source` was given (F01), applied here for the
+     * first time on `project` (user request 2026-08-27).
+     *
+     * Two values, not one per provider: `issue.source` names *which* provider because an Issue's
+     * source decides what it can be edited into (F01 FR-3, per-provider capabilities). A
+     * Project's UI decision is coarser — "does this have a provider board behind it at all" — so
+     * a third value here would be a distinction nothing reads. Which provider a mirrored Project
+     * came from is still answerable, by the Integration `integrationId` names.
+     */
+    source: projectSourceSchema,
     title: z.string(),
-    /** When the mirror last agreed with the provider. Null before the first sync completes. */
+    /**
+     * When the mirror last agreed with the provider. Null before the first sync completes.
+     *
+     * Set once, at creation, for a local Project — there is no provider to disagree with, so
+     * "never synced" would misdescribe the one kind of Project for which it can never become
+     * true.
+     */
     syncedAt: z.string().nullable(),
     /**
      * How many rows this Project holds.
@@ -172,15 +201,61 @@ export const projectDto = z
      * *none*. A hub that counted them printed "0 fields" over a project with nineteen.
      */
     itemCount: z.number().int().nonnegative(),
+    /** Always empty for a local Project: there is no provider board to have declared any. */
     fields: z.array(projectFieldDto),
   })
   .merge(timestampsSchema);
 export type ProjectDto = z.infer<typeof projectDto>;
 
+/**
+ * Create a Project SoloW holds outright — no Integration, no provider board.
+ *
+ * The reversal issue #15 already made for Issues (Decision 0018's own "Out of scope" said
+ * SoloW never creates a project on a provider; this still does not — it creates one *in*
+ * SoloW instead), for the same reason: a provider with nothing to adopt — Gitea declares
+ * no `projects` capability at all, and a GitLab token that can see no group-level project is the
+ * same shape of nothing — otherwise leaves an Owner with no Project, ever.
+ */
+export const createLocalProjectInput = z.object({
+  title: z.string().min(1).max(200),
+});
+export type CreateLocalProjectInput = z.infer<typeof createLocalProjectInput>;
+
+/**
+ * A Repository registered under a local Project, and what it currently contributes.
+ *
+ * `issueCount` is what a detach confirmation reads from — the same reasoning
+ * `issueDeletionImpactDto` was given: state the consequence in a number before it happens,
+ * rather than after.
+ */
+export const projectRepositoryDto = z
+  .object({
+    id: idSchema,
+    repositoryId: idSchema,
+    repositoryName: z.string(),
+    issueCount: z.number().int().nonnegative(),
+  })
+  .merge(timestampsSchema);
+export type ProjectRepositoryDto = z.infer<typeof projectRepositoryDto>;
+export const projectRepositoryListDto = z.array(projectRepositoryDto);
+export type ProjectRepositoryListDto = z.infer<typeof projectRepositoryListDto>;
+
+export const attachProjectRepositoryInput = z.object({
+  projectId: idSchema,
+  repositoryId: idSchema,
+});
+export type AttachProjectRepositoryInput = z.infer<typeof attachProjectRepositoryInput>;
+
+export const detachProjectRepositoryInput = z.object({
+  projectId: idSchema,
+  repositoryId: idSchema,
+});
+export type DetachProjectRepositoryInput = z.infer<typeof detachProjectRepositoryInput>;
+
 export const listProjectItemsInput = z.object({
   projectId: idSchema,
   /** Paged, because a project is large on day one (F23 NFR-1). */
-  limit: z.number().int().min(1).max(500).default(100),
+  limit: z.number().int().min(1).max(PAGE_SIZE_MAX).default(PAGE_SIZE_DEFAULT),
   cursor: z.string().optional(),
 });
 export type ListProjectItemsInput = z.infer<typeof listProjectItemsInput>;
@@ -301,7 +376,7 @@ export const adoptProjectResultDto = z.object({
      * were connected on demand this number was a permanent state wearing a temporary word.
      */
     skipped: z.number().int().nonnegative(),
-    /** Rows the provider has that a GateControl table will not: every row here is an Issue. */
+    /** Rows the provider has that a SoloW table will not: every row here is an Issue. */
     drafts: z.number().int().nonnegative(),
     pullRequests: z.number().int().nonnegative(),
     /** Repositories connected to make the rows resolve — named, because it is a write. */

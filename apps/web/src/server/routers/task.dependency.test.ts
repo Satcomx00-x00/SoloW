@@ -1,14 +1,14 @@
 /// <reference types="bun-types" />
 
 import { beforeAll, beforeEach, describe, expect, it } from "bun:test";
-import { TaskDependencyErrorCode, type TaskState } from "@gatecontrol/contracts";
+import { TaskDependencyErrorCode, type TaskState } from "@solow/contracts";
 import {
   buildDependencyGraph,
   type DependencyGraph,
   parseDependencyCycleMessage,
-} from "@gatecontrol/core";
-import { ensureDefaultAgentCatalog, issue as issueTable, workspace } from "@gatecontrol/db";
-import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
+} from "@solow/core";
+import { ensureDefaultAgentCatalog, issue as issueTable, workspace } from "@solow/db";
+import { createTestDb, type TestDb } from "@solow/db/testing";
 import { dispatch } from "../mcp/protocol.js";
 import { resetRateLimits } from "../rate-limit.js";
 import type { BaseContext } from "../trpc.js";
@@ -18,7 +18,7 @@ import { appRouter } from "./index.js";
  * Task dependency integration tests (issue #6) against a real in-memory SQLite database, so the
  * edge table, its unique index and the workspace scoping are exercised rather than described.
  *
- * The graph reasoning itself is unit-tested in `@gatecontrol/core`; what is proved here is that
+ * The graph reasoning itself is unit-tested in `@solow/core`; what is proved here is that
  * the router reaches for it before writing, and that *every* automated start path goes through
  * the same gate — the invariant the issue says will otherwise be missed by whichever path is
  * added next.
@@ -130,12 +130,12 @@ describe("task dependencies", () => {
   let db: TestDb;
 
   beforeAll(() => {
-    process.env.GATECONTROL_SECRET_KEY ??= Buffer.alloc(32, 5).toString("base64");
-    process.env.GATECONTROL_STREAM_SECRET ??= "test-stream-secret";
-    process.env.GATECONTROL_AUTH_SECRET ??= "test-auth-secret";
+    process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 5).toString("base64");
+    process.env.SOLOW_STREAM_SECRET ??= "test-stream-secret";
+    process.env.SOLOW_AUTH_SECRET ??= "test-auth-secret";
     // Launch hands the run to the orchestrator; dev mode logs-and-returns so these tests can
     // exercise the start paths without a workflow engine running.
-    process.env.GATECONTROL_DEV_OWNER ??= "on";
+    process.env.SOLOW_DEV_OWNER ??= "on";
   });
 
   beforeEach(() => {

@@ -6,8 +6,10 @@ import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { WHOLE_PAGE } from "@/lib/paged";
 import { trpc } from "@/trpc/react";
 import { AdoptProjectDialog } from "./adopt-project-dialog";
+import { CreateLocalProjectDialog } from "./create-local-project-dialog";
 
 /**
  * The hub: every Project, and the way in to a new one.
@@ -17,7 +19,7 @@ import { AdoptProjectDialog } from "./adopt-project-dialog";
  * implies work exists in a flat pile at workspace level.
  *
  * The empty state does the onboarding the old flat rail never had a place for: it says what a
- * Project *is* here (a mirror of one that already exists on a provider, never one GateControl
+ * Project *is* here (a mirror of one that already exists on a provider, never one SoloW
  * creates — Decision 0018) and offers the one action that gets you past it.
  */
 export function ProjectsHub() {
@@ -25,7 +27,7 @@ export function ProjectsHub() {
   const projects = trpc.project.list.useQuery({});
   // The escape hatch's size, shown as a number rather than a permanent menu entry: it matters
   // when it is not zero and is noise when it is.
-  const unassigned = trpc.issue.list.useQuery({ unassigned: true });
+  const unassigned = trpc.issue.list.useQuery({ ...WHOLE_PAGE, unassigned: true });
 
   if (projects.isPending) {
     return (
@@ -45,20 +47,22 @@ export function ProjectsHub() {
         <FolderGit2 aria-hidden className="size-9 text-muted-foreground/40" />
         <h1 className="font-semibold text-base">Start with a project</h1>
         <p className="max-w-md text-muted-foreground text-sm leading-relaxed">
-          Everything in GateControl lives inside a project: the issues it holds, the board its
-          agents run on, the workflows that chain them. A project is <em>mirrored</em> from GitHub
-          or GitLab — GateControl never creates one on your provider.
+          Everything in SoloW lives inside a project: the issues it holds, the board its agents run
+          on, the workflows that chain them. A project is <em>mirrored</em> from GitHub or GitLab —
+          SoloW never creates one on your provider. If your tracker has nothing like that to mirror,
+          create one here instead — SoloW still creates nothing on your provider, only in itself.
         </p>
-        <div className="pt-1">
+        <div className="flex items-center gap-2 pt-1">
           <AdoptProjectDialog onAdopted={(id) => router.push(`/projects/${id}`)} />
+          <CreateLocalProjectDialog onCreated={(id) => router.push(`/projects/${id}`)} />
         </div>
-        {(unassigned.data ?? []).length > 0 && (
+        {(unassigned.data?.items ?? []).length > 0 && (
           <p className="pt-4 text-2xs text-muted-foreground/70">
             {/* Never a dead end: issues imported before any project existed still have a screen,
                 or the Tasks under them would go out of reach with them. */}
             <Link href="/unassigned" className="hover:underline">
-              {unassigned.data?.length} issue
-              {unassigned.data?.length === 1 ? "" : "s"} belong to no project yet
+              {unassigned.data?.items.length} issue
+              {unassigned.data?.items.length === 1 ? "" : "s"} belong to no project yet
             </Link>
           </p>
         )}
@@ -75,7 +79,10 @@ export function ProjectsHub() {
             Pick a project to plan it, run agents on it, and review what they change.
           </p>
         </div>
-        <AdoptProjectDialog onAdopted={(id) => router.push(`/projects/${id}`)} />
+        <div className="flex items-center gap-2">
+          <AdoptProjectDialog onAdopted={(id) => router.push(`/projects/${id}`)} />
+          <CreateLocalProjectDialog onCreated={(id) => router.push(`/projects/${id}`)} />
+        </div>
       </header>
 
       <ul className="space-y-2.5">
@@ -111,15 +118,15 @@ export function ProjectsHub() {
         ))}
       </ul>
 
-      {(unassigned.data ?? []).length > 0 && (
+      {(unassigned.data?.items ?? []).length > 0 && (
         <Link
           href="/unassigned"
           className="flex items-center gap-2 rounded-lg border border-dashed px-4 py-3 text-muted-foreground text-xs transition-colors hover:bg-accent/30 hover:text-foreground"
         >
           <Inbox aria-hidden className="size-4 shrink-0" />
           <span className="min-w-0 flex-1">
-            {unassigned.data?.length} issue{unassigned.data?.length === 1 ? "" : "s"} belong to no
-            project
+            {unassigned.data?.items.length} issue{unassigned.data?.items.length === 1 ? "" : "s"}{" "}
+            belong to no project
           </span>
         </Link>
       )}

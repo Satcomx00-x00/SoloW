@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { idSchema, issueStatusSchema, timestampsSchema } from "./common.js";
+import { pageInputSchema, pageOf } from "./page.js";
 import { changeRequestStateSchema, issueSourceSchema } from "./scm.js";
 
 /**
@@ -11,7 +12,7 @@ import { changeRequestStateSchema, issueSourceSchema } from "./scm.js";
  * `createIssueInput` is back.
  *
  * What survives from the reversed decision, because FR-3 still means it: an *imported* Issue's
- * `title`/`description` are the provider's own and GateControl still never edits them —
+ * `title`/`description` are the provider's own and SoloW still never edits them —
  * `updateIssueInput` refuses those two fields once `source !== "local"` (enforced in the DAL,
  * `apps/web/src/server/dal/issue.ts`). `labels` is the one field every Issue owns regardless of
  * source (it never belonged to FR-3's "canonical fields" list), so it stays editable always. A
@@ -33,11 +34,11 @@ export const issueLabelsSchema = z.array(issueLabelSchema).max(MAX_ISSUE_LABELS)
 /**
  * A pull or merge request the **provider itself** links to this Issue (spec F23 FR-8, issue #128).
  *
- * Read-only, for ever. GateControl does not open, review, approve or merge one from here — that
+ * Read-only, for ever. SoloW does not open, review, approve or merge one from here — that
  * is issue #71's, behind the review gate — and a badge that could would be the first step towards
  * a second, worse client for the provider the team already has.
  *
- * Distinct from the branch a GateControl Task produced (issue #104). One is what the provider
+ * Distinct from the branch a SoloW Task produced (issue #104). One is what the provider
  * knows, the other is what an agent did here; showing them as one list would make it impossible
  * to tell which of the two a reader is looking at.
  *
@@ -69,32 +70,34 @@ export type LinkedChangeRequest = z.infer<typeof linkedChangeRequestSchema>;
  * model, and F01's own "Out of scope" rules out custom fields. Adding it is a product decision,
  * not a gap in this list.
  */
-export const listIssuesInput = z.object({
-  status: issueStatusSchema.optional(),
-  query: z.string().max(200).optional(),
-  labels: issueLabelsSchema.optional(),
-  source: issueSourceSchema.optional(),
-  /** Narrows the Task-creation picker to the Issues that belong to one chosen Repository. */
-  repositoryId: idSchema.optional(),
-  /**
-   * Only the Issues this Project holds — the rows of its `project_item` table.
-   *
-   * A Project is the top level of the interface (F23): every board, issue list and workflow is
-   * read inside one. This is the filter that makes that true of the data and not merely of the
-   * navigation, so a project-scoped screen cannot quietly show the whole Workspace.
-   */
-  projectId: idSchema.optional(),
-  /**
-   * Only the Issues that belong to **no** Project.
-   *
-   * The escape hatch, and deliberately not the default. An Issue imported before any Project
-   * existed, or one from a repository no Project tracks, would otherwise have no screen at all
-   * and would take its Tasks out of reach with it. Mutually exclusive with `projectId` in
-   * practice: asking for both is asking for the empty set, and the DAL answers exactly that
-   * rather than pretending one of them won.
-   */
-  unassigned: z.boolean().optional(),
-});
+export const listIssuesInput = z
+  .object({
+    status: issueStatusSchema.optional(),
+    query: z.string().max(200).optional(),
+    labels: issueLabelsSchema.optional(),
+    source: issueSourceSchema.optional(),
+    /** Narrows the Task-creation picker to the Issues that belong to one chosen Repository. */
+    repositoryId: idSchema.optional(),
+    /**
+     * Only the Issues this Project holds — the rows of its `project_item` table.
+     *
+     * A Project is the top level of the interface (F23): every board, issue list and workflow is
+     * read inside one. This is the filter that makes that true of the data and not merely of the
+     * navigation, so a project-scoped screen cannot quietly show the whole Workspace.
+     */
+    projectId: idSchema.optional(),
+    /**
+     * Only the Issues that belong to **no** Project.
+     *
+     * The escape hatch, and deliberately not the default. An Issue imported before any Project
+     * existed, or one from a repository no Project tracks, would otherwise have no screen at all
+     * and would take its Tasks out of reach with it. Mutually exclusive with `projectId` in
+     * practice: asking for both is asking for the empty set, and the DAL answers exactly that
+     * rather than pretending one of them won.
+     */
+    unassigned: z.boolean().optional(),
+  })
+  .merge(pageInputSchema);
 export type ListIssuesInput = z.infer<typeof listIssuesInput>;
 
 export const getIssueInput = z.object({ id: idSchema });
@@ -103,6 +106,23 @@ export type GetIssueInput = z.infer<typeof getIssueInput>;
 /** Every distinct label in use in the Workspace, so the list filter can offer a real vocabulary. */
 export const issueLabelListDto = z.array(z.string());
 export type IssueLabelListDto = z.infer<typeof issueLabelListDto>;
+
+/**
+ * The label vocabulary **with the provider's colours**, for every linked Repository at once.
+ *
+ * Separate from `issueLabelListDto` on purpose. That one is a cheap read of the names already
+ * mirrored on each Issue; this one asks the providers, because a colour is not mirrored anywhere
+ * — and a caller that only wants names should not pay for network calls to get them.
+ *
+ * `color` is null for a label whose provider reports none. Rendering it neutral is then the
+ * honest answer: inventing a hue would tell the reader something the provider never said.
+ */
+export const issueLabelColorDto = z.object({
+  name: z.string(),
+  color: z.string().nullable(),
+});
+export const issueLabelColorListDto = z.array(issueLabelColorDto);
+export type IssueLabelColorListDto = z.infer<typeof issueLabelColorListDto>;
 
 /**
  * Set an Issue's status by hand (spec F01 FR-7), or hand it back to its Tasks with
@@ -165,7 +185,7 @@ export type IssueDeletionImpactInput = z.infer<typeof issueDeletionImpactInput>;
 /**
  * What a force delete would actually destroy — read by the confirmation dialog so the count it
  * states is the real one rather than a guess. `worktreeCount` is the number of `worktree` rows
- * still marked active: deleting them here removes GateControl's record of those working trees,
+ * still marked active: deleting them here removes SoloW's record of those working trees,
  * but not the directories themselves (removing those lives in the orchestrator, on the far side
  * of the Executor boundary), so the dialog warns rather than promises.
  */
@@ -202,6 +222,18 @@ export const issueDto = z
     repositoryId: idSchema.nullable(),
     externalNumber: z.number().int().nullable(),
     externalUrl: z.string().nullable(),
+    /**
+     * The provider's own id, and the id of the issue it hangs under.
+     *
+     * Carried so a *list* can draw the hierarchy the project table already draws. Without them an
+     * issue list has no way to tell a sub-issue from a top-level one, and every child of an epic
+     * appears beside its own parent as though it were a peer — which is what a reader then plans
+     * from.
+     *
+     * The number is not a substitute: it is unique per repository, and a parent is named by id.
+     */
+    externalId: z.string().nullable(),
+    externalParentId: z.string().nullable(),
     syncedAt: z.string().nullable(),
     labels: z.array(z.string()),
     /**
@@ -214,7 +246,8 @@ export const issueDto = z
   .merge(timestampsSchema);
 export type IssueDto = z.infer<typeof issueDto>;
 
-export const issueListDto = z.array(issueDto);
+/** A page of Issues — see `page.ts` for why every list procedure is one. */
+export const issueListDto = pageOf(issueDto);
 export type IssueListDto = z.infer<typeof issueListDto>;
 
 /**

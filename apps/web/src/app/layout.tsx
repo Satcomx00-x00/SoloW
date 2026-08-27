@@ -6,8 +6,11 @@ import { Providers } from "./providers";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "GateControl",
+  title: "SoloW",
   description: "Orchestrate AI coding agents in parallel under human review.",
+  // `app/icon.svg` is picked up by Next's file convention; naming it here as well is what stops
+  // the browser asking for `/favicon.ico` and getting a 404 on every single page load.
+  icons: { icon: "/icon.svg" },
 };
 
 /**

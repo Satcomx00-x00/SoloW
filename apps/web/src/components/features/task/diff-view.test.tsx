@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { afterEach, describe, expect, it } from "bun:test";
-import type { TaskDiffDto } from "@gatecontrol/contracts";
+import type { TaskDiffDto } from "@solow/contracts";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { DiffView } from "./diff-view";
 
@@ -14,7 +14,7 @@ import { DiffView } from "./diff-view";
 afterEach(cleanup);
 
 const diff = (over: Partial<TaskDiffDto> = {}): TaskDiffDto => ({
-  diffRef: "gatecontrol/task-1",
+  diffRef: "solow/task-1",
   files: [
     { path: "src/latch.ts", status: "modified", additions: 12, deletions: 3 },
     { path: "src/heater.ts", status: "added", additions: 40, deletions: 0 },
@@ -27,7 +27,7 @@ const diff = (over: Partial<TaskDiffDto> = {}): TaskDiffDto => ({
 
 describe("DiffView", () => {
   it("lists every changed file with its own totals", () => {
-    render(<DiffView diff={diff()} branch="gatecontrol/task-1" />);
+    render(<DiffView diff={diff()} branch="solow/task-1" />);
 
     const list = screen.getByLabelText("Changed files");
     for (const path of ["src/latch.ts", "src/heater.ts", "src/old-driver.ts"]) {
@@ -37,13 +37,13 @@ describe("DiffView", () => {
   });
 
   it("sums the change across files, so the size is readable at a glance", () => {
-    render(<DiffView diff={diff()} branch="gatecontrol/task-1" />);
+    render(<DiffView diff={diff()} branch="solow/task-1" />);
     expect(screen.getByText("+52")).toBeDefined();
     expect(screen.getByText("-60")).toBeDefined();
   });
 
   it("renders the patch body", () => {
-    render(<DiffView diff={diff()} branch="gatecontrol/task-1" />);
+    render(<DiffView diff={diff()} branch="solow/task-1" />);
     expect(screen.getByText("+new line")).toBeDefined();
     expect(screen.getByText("-old line")).toBeDefined();
   });
@@ -51,24 +51,24 @@ describe("DiffView", () => {
   it("says when the patch was cut short, rather than quietly showing part of it", () => {
     // A reviewer who cannot tell a truncated patch from a complete one may approve on a
     // partial read.
-    render(<DiffView diff={diff({ truncated: true })} branch="gatecontrol/task-1" />);
+    render(<DiffView diff={diff({ truncated: true })} branch="solow/task-1" />);
     expect(screen.getByText(/Patch truncated/)).toBeDefined();
     expect(screen.getByText(/file list above is complete/)).toBeDefined();
   });
 
   it("does not claim truncation when the patch is whole", () => {
-    render(<DiffView diff={diff()} branch="gatecontrol/task-1" />);
+    render(<DiffView diff={diff()} branch="solow/task-1" />);
     expect(screen.queryByText(/Patch truncated/)).toBeNull();
   });
 
   it("distinguishes a failed capture from an empty change", () => {
     // Both would otherwise render as "nothing here", and they mean very different things.
-    render(<DiffView diff={null} branch="gatecontrol/task-1" />);
+    render(<DiffView diff={null} branch="solow/task-1" />);
     expect(screen.getByText(/was not captured/)).toBeDefined();
-    expect(screen.getByText("gatecontrol/task-1")).toBeDefined();
+    expect(screen.getByText("solow/task-1")).toBeDefined();
 
     cleanup();
-    render(<DiffView diff={diff({ files: [], patch: "" })} branch="gatecontrol/task-1" />);
+    render(<DiffView diff={diff({ files: [], patch: "" })} branch="solow/task-1" />);
     expect(screen.getByText(/finished without changing any files/)).toBeDefined();
   });
 

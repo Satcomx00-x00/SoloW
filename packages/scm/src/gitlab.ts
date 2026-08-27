@@ -11,6 +11,7 @@ import type {
   ChangeProvider,
   ExternalBranch,
   ExternalChangeRequest,
+  ExternalComment,
   ExternalIssue,
   ExternalLabel,
   ExternalLinkedChange,
@@ -18,9 +19,11 @@ import type {
   ExternalRepository,
   ExternalUser,
   IssuePatch,
+  LabelSeed,
   ListIssuesOptions,
   ProjectFieldWrite,
   ProjectsCapability,
+  ProjectStructureProvisioned,
   RepoRef,
   ScmCredential,
 } from "./types.js";
@@ -127,6 +130,34 @@ function toExternalRepository(r: GitlabProject): ExternalRepository {
     isPrivate: r.visibility !== "public",
     url: r.web_url,
     cloneUrl: r.http_url_to_repo,
+  };
+}
+
+interface GitlabNote {
+  id: number;
+  body: string | null;
+  created_at: string;
+  updated_at?: string | null;
+  /** True for the bookkeeping entries GitLab mixes into the same endpoint. */
+  system?: boolean;
+  author?: { username: string; name?: string | null; avatar_url?: string | null } | null;
+}
+
+function toExternalComment(note: GitlabNote): ExternalComment {
+  return {
+    externalId: String(note.id),
+    author: note.author
+      ? {
+          login: note.author.username,
+          name: note.author.name ?? null,
+          avatarUrl: note.author.avatar_url ?? null,
+        }
+      : null,
+    body: note.body ?? "",
+    createdAt: note.created_at,
+    updatedAt: note.updated_at && note.updated_at !== note.created_at ? note.updated_at : null,
+    // GitLab does not give a note its own URL in this payload; the issue's page is where it is.
+    url: "",
   };
 }
 
@@ -282,6 +313,44 @@ export class GitlabProvider implements ChangeProvider, ProjectsCapability {
       authHeaders(credential),
     )) as GitlabIssueDetail;
     return toDetailedIssue(row);
+  }
+
+  async listComments(
+    credential: ScmCredential,
+    repo: RepoRef,
+    issueNumber: number,
+  ): Promise<ExternalComment[]> {
+    const rows = await scmFetchPaged<GitlabNote>(
+      "gitlab",
+      (page) =>
+        `${apiRoot(credential.baseUrl)}/projects/${encodeURIComponent(repo)}/issues/${issueNumber}/notes?per_page=100&sort=asc&order_by=created_at&page=${page}`,
+      authHeaders(credential),
+    );
+    /*
+     * System notes are dropped, and that is the whole reason this driver is not a one-liner.
+     *
+     * GitLab returns *notes*, and most of them are the system recording that somebody changed a
+     * label or moved a milestone. GitHub keeps that in a separate timeline. Showing them here
+     * would make one provider's issue read as a wall of bookkeeping and the other's as a
+     * conversation — the same screen meaning two different things depending on the host.
+     */
+    return rows.filter((note) => !note.system).map(toExternalComment);
+  }
+
+  async createComment(
+    credential: ScmCredential,
+    repo: RepoRef,
+    issueNumber: number,
+    body: string,
+  ): Promise<ExternalComment> {
+    const row = (await scmSend(
+      "gitlab",
+      `${apiRoot(credential.baseUrl)}/projects/${encodeURIComponent(repo)}/issues/${issueNumber}/notes`,
+      authHeaders(credential),
+      "POST",
+      { body },
+    )) as GitlabNote;
+    return toExternalComment(row);
   }
 
   async updateIssue(
@@ -462,6 +531,43 @@ export class GitlabProvider implements ChangeProvider, ProjectsCapability {
     const url = `${apiRoot(credential.baseUrl)}/projects/${projectPath(repo)}/labels?per_page=100`;
     const rows = (await scmFetch("gitlab", url, authHeaders(credential))) as GitlabLabel[];
     return rows.map((r) => ({ name: r.name, color: r.color, description: r.description }));
+  }
+
+  /**
+   * Create every label in `labels` this repository does not already have (user request
+   * 2026-08-27) — the same additive-only, idempotent rule `GitlabProjects.provisionProjectStructure`
+   * follows for its own scoped-label template, generalized to any label set a caller supplies.
+   *
+   * Matching is case-insensitive against `listLabels`'s own answer, so a repository that already
+   * spells one of these some other way is not given a near-duplicate.
+   */
+  async createLabels(
+    credential: ScmCredential,
+    repo: RepoRef,
+    labels: LabelSeed[],
+  ): Promise<ProjectStructureProvisioned> {
+    const present = new Set(
+      (await this.listLabels(credential, repo)).map((l) => l.name.toLowerCase()),
+    );
+    const created: string[] = [];
+    const existing: string[] = [];
+    for (const label of labels) {
+      if (present.has(label.name.toLowerCase())) {
+        existing.push(label.name);
+        continue;
+      }
+      // POST, sequentially — the same rate-limit reasoning `provisionProjectStructure` documents:
+      // one token issuing a burst of writes is what GitLab throttles first.
+      await scmSend(
+        "gitlab",
+        `${apiRoot(credential.baseUrl)}/projects/${projectPath(repo)}/labels`,
+        authHeaders(credential),
+        "POST",
+        { name: label.name, color: label.color, description: label.description ?? "" },
+      );
+      created.push(label.name);
+    }
+    return { created, existing };
   }
 
   async listBranches(credential: ScmCredential, repo: RepoRef): Promise<ExternalBranch[]> {

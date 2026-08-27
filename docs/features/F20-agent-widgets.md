@@ -10,8 +10,8 @@ it touched — either arrives as ASCII art or does not arrive at all, and anythi
 answer arrives as "please reply with 1, 2 or 3" and hopes.
 
 A **widget** is that same intent expressed as data the frontend can draw properly and the
-operator can answer by tapping. GateControl defines one agent-agnostic vocabulary
-(`@gatecontrol/contracts/widget.ts`), one transport (the session log, beside every other record
+operator can answer by tapping. SoloW defines one agent-agnostic vocabulary
+(`@solow/contracts/widget.ts`), one transport (the session log, beside every other record
 of a run), and one renderer registry, so a new widget is a schema variant and a component rather
 than a change to the stream, the transcript or the agent.
 
@@ -38,7 +38,7 @@ vanishing.
 ## Functional requirements
 
 - **FR-1** An agent can emit a widget without any protocol support, as a fenced block in its own
-  output (` ```gatecontrol:widget ` + JSON). Parsed in the orchestrator by `WidgetFenceScanner`,
+  output (` ```solow:widget ` + JSON). Parsed in the orchestrator by `WidgetFenceScanner`,
   which survives arbitrary chunking, removes the block from the prose, and gives up on a block
   that never closes rather than swallowing the transcript behind it.
 - **FR-2** Every producer funnels through `parseWidget`, which is total: a malformed payload, an
@@ -51,7 +51,7 @@ vanishing.
   tenant key, as a permission decision, and is recorded as its own `widget_response` record.
 - **FR-5** An answer is validated against the widget that asked: only options the agent itself
   offered, no duplicates, and the arity the mode requires — one for `single`, at least one for
-  `multi`, every option exactly once for `rank`. GateControl never invents an option.
+  `multi`, every option exactly once for `rank`. SoloW never invents an option.
 - **FR-6** `show_widget` content is rendered inside a sandboxed iframe with no `allow-same-origin`
   and its own restrictive CSP; scripts run only for the modules that mean behaviour
   (`interactive`, `mockup`). Model-written markup never enters the app's own document.
@@ -91,7 +91,7 @@ vanishing.
   widget into a call the agent waits on; the contract and the renderers are already shaped for it,
   and adding it is a second producer, not a second vocabulary.
 - The `planned` half of `WIDGET_CATALOG` — the domain widgets in particular (`places_map`,
-  `weather`, `image_search`) need data sources GateControl does not have.
+  `weather`, `image_search`) need data sources SoloW does not have.
 
 ## Related
 

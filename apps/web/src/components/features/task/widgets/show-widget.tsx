@@ -1,6 +1,6 @@
 "use client";
 
-import type { showWidgetWidget } from "@gatecontrol/contracts";
+import type { showWidgetWidget } from "@solow/contracts";
 import { useId } from "react";
 import type { z } from "zod";
 import { cn } from "@/lib/utils";

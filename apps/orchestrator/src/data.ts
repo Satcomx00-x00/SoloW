@@ -4,13 +4,13 @@ import type {
   SessionState,
   TaskCompletionOutcome,
   TaskState,
-} from "@gatecontrol/contracts";
-import { parseSessionEventPayload, sessionEventPayloadSchema } from "@gatecontrol/contracts";
+} from "@solow/contracts";
+import { parseSessionEventPayload, sessionEventPayloadSchema } from "@solow/contracts";
 import {
   type CompactionRange,
   planCompaction,
   type SessionLogEvent,
-} from "@gatecontrol/core/session-log";
+} from "@solow/core/session-log";
 import {
   agentCatalog,
   agentProfile,
@@ -29,7 +29,7 @@ import {
   taskRepository,
   workspace,
   worktree,
-} from "@gatecontrol/db";
+} from "@solow/db";
 import { and, asc, desc, eq, gt, inArray } from "drizzle-orm";
 
 /**
@@ -302,7 +302,7 @@ export async function clearTaskCompletion(
 /**
  * Record that a Task has a working copy on disk, and where (Principle II).
  *
- * Written at the moment the lifecycle learns the path — at provision for a worktree GateControl
+ * Written at the moment the lifecycle learns the path — at provision for a worktree SoloW
  * created, at adoption for one the agent created — because until then there is nothing truthful
  * to record. The table was read in two places and written in none, so every caller asking "does
  * this Task still hold a working copy" got the same answer, `no`, whatever was on disk.
@@ -382,6 +382,30 @@ export async function unsatisfiedDependencyIds(
     .innerJoin(task, eq(task.id, taskDependency.blockedByTaskId))
     .where(and(eq(taskDependency.workspaceId, workspaceId), eq(taskDependency.taskId, taskId)));
   return rows.filter((row) => row.state !== "done").map((row) => row.blockedByTaskId);
+}
+
+/**
+ * Refresh the catalog row's capability cache from what an agent just advertised (issue #94 AC-2).
+ *
+ * The cache is a fallback, not the truth — the truth is the handshake, and it only exists while
+ * a session is being opened. This write is what makes the Settings pickers non-empty *between*
+ * runs: the first launch of an agent teaches the catalog what it offers, and every form after
+ * that has a list to suggest from.
+ *
+ * Written only when the agent said anything (the caller already filters silence out), and
+ * written whole rather than merged: the advertised list *replaces* the cache because a model the
+ * agent no longer lists is exactly what the stale-pin warning needs to be able to notice.
+ */
+export async function updateAgentCatalogCapabilities(
+  db: Db,
+  workspaceId: string,
+  agentCatalogId: string,
+  capabilities: { models: string[]; modes: string[] },
+): Promise<void> {
+  await db
+    .update(agentCatalog)
+    .set({ capabilities, updatedAt: new Date().toISOString() })
+    .where(and(eq(agentCatalog.workspaceId, workspaceId), eq(agentCatalog.id, agentCatalogId)));
 }
 
 export async function setSessionState(

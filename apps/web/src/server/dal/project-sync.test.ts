@@ -10,10 +10,10 @@ import {
   projectValue,
   repository,
   secret,
-} from "@gatecontrol/db";
-import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
-import type { ExternalProjectItem } from "@gatecontrol/scm";
-import { testing } from "@gatecontrol/scm";
+} from "@solow/db";
+import { createTestDb, type TestDb } from "@solow/db/testing";
+import type { ExternalProjectItem } from "@solow/scm";
+import { testing } from "@solow/scm";
 import { eq } from "drizzle-orm";
 import { adoptProject, refreshProject, scanProject } from "./project-sync.js";
 import { ctxFor, seedWorkspaceGraph } from "./test-fixtures.js";
@@ -44,7 +44,7 @@ let carriedItems: ExternalProjectItem[] = [];
 let knownRepositories: Record<string, { name: string; cloneUrl: string }> = {};
 
 beforeAll(() => {
-  process.env.GATECONTROL_SECRET_KEY ??= Buffer.alloc(32, 3).toString("base64");
+  process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 3).toString("base64");
   testing.register({
     id: FIXTURE,
     name: "Fixture Planner",
@@ -84,6 +84,7 @@ beforeAll(() => {
         state: "open" as const,
         url: "u/1",
       }),
+      listComments: async () => [],
       listLabels: async () => [],
       listRepositories: async () => [],
       listBranches: async () => [],

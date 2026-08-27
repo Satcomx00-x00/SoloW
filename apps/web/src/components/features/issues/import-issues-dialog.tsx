@@ -1,6 +1,6 @@
 "use client";
 
-import type { ExternalIssuePreviewDto } from "@gatecontrol/contracts";
+import type { ExternalIssuePreviewDto } from "@solow/contracts";
 import { Check, Download, Search } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -25,6 +25,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { WHOLE_PAGE } from "@/lib/paged";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
 
@@ -60,8 +61,8 @@ export function ImportIssuesDialog({
   const [internalOpen, setInternalOpen] = useState(false);
   const open = controlledOpen ?? internalOpen;
   const utils = trpc.useUtils();
-  const repos = trpc.repository.list.useQuery({}, { enabled: open });
-  const linkedRepos = (repos.data ?? []).filter((r) => r.integrationId);
+  const repos = trpc.repository.list.useQuery({ ...WHOLE_PAGE }, { enabled: open });
+  const linkedRepos = (repos.data?.items ?? []).filter((r) => r.integrationId);
   const [repositoryId, setRepositoryId] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
@@ -130,7 +131,7 @@ export function ImportIssuesDialog({
     });
   }, [all, search, stateFilter]);
 
-  // Only what is both visible and not already in GateControl can be acted on, so that is what
+  // Only what is both visible and not already in SoloW can be acted on, so that is what
   // "select all" toggles against — offering to select rows whose checkbox is disabled would
   // produce a count the Import button then refuses to honour.
   const selectable = visible.filter((i) => !i.alreadyImported);
@@ -165,7 +166,7 @@ export function ImportIssuesDialog({
         <DialogHeader>
           <DialogTitle>Import issues</DialogTitle>
           <DialogDescription>
-            Pull issues from a connected GitHub or GitLab repository into GateControl.
+            Pull issues from a connected GitHub or GitLab repository into SoloW.
           </DialogDescription>
         </DialogHeader>
 

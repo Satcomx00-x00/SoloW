@@ -6,15 +6,19 @@ import type {
   ProjectFieldDto,
   ProjectFieldValue,
   ProjectItemDto,
-} from "@gatecontrol/contracts";
-import { PROJECT_TITLE_KEY } from "@gatecontrol/contracts";
+} from "@solow/contracts";
+import { PROJECT_TITLE_KEY } from "@solow/contracts";
 import {
   buildProjectHierarchy,
   countProjectRows,
+  type DerivedPriority,
+  type FlatProjectRow,
   flattenProjectHierarchy,
+  isPriorityFieldName,
   type ProjectHierarchyRow,
+  type ProjectRollup,
   type ProjectTreeNode,
-} from "@gatecontrol/core";
+} from "@solow/core";
 import {
   ArrowDown,
   ArrowUp,
@@ -26,12 +30,12 @@ import {
   Copy,
   ExternalLink,
   GitPullRequest,
-  Lock,
   PanelRight,
   Unlink,
   Zap,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { TaskStateBadge } from "@/components/features/board/task-state-badge";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -50,14 +54,24 @@ import {
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { ProjectCell } from "./project-cell";
+import { clampWidth, moveColumn, orderColumns } from "./column-sizing";
+import { isoToday } from "./date-input";
+import { IssueLabel, labelColour } from "./issue-label";
+import {
+  type DateCounterpart,
+  PriorityCell,
+  type PriorityChoice,
+  ProjectCell,
+} from "./project-cell";
 import { SubIssueProgress } from "./project-progress";
+import type { RowTaskSummary } from "./row-tasks";
+import { type RowWindow, windowOf } from "./row-window";
 
 /**
  * The project table (spec F23, issue #126).
  *
  * Columns come from the **project's own fields**, not from a list written here: a project with a
- * field GateControl has never heard of still shows it, named as the provider names it. A column
+ * field SoloW has never heard of still shows it, named as the provider names it. A column
  * set that silently omits what it cannot render lies about what the project holds.
  *
  * Read-only in this first cut. Inline editing writes to the provider and is the second half of
@@ -75,7 +89,7 @@ export interface ProjectRow {
    * The pull or merge requests the **provider** links to this row's Issue (F23 FR-8, issue #128).
    *
    * Not a project field, so not a column the provider reports: it hangs off the Issue, the same
-   * way the title does, and is resolved the same way. And not the branch a GateControl Task
+   * way the title does, and is resolved the same way. And not the branch a SoloW Task
    * produced (issue #104) — that is a different fact and gets a different column, or a reader
    * cannot tell what the provider knows from what an agent did here.
    */
@@ -88,6 +102,27 @@ export interface ProjectRow {
    * labels each. These come off the Issue, the same way the title does.
    */
   labels: string[];
+  /**
+   * The priority the Issue's **labels** state, where the project's own field holds none.
+   *
+   * Not a value and never stored as one. A GitHub project routinely carries a `Priority` field
+   * whose options were never configured while every issue in it is labelled `prio/p2` — the
+   * column then reads empty over a project that has priorities on every row. GitLab already has
+   * this: its `Priority` field *is* a scoped label (`DEFAULT_GITLAB_MAPPING`). This is the same
+   * reading, for the provider that has a field and no values in it.
+   *
+   * Null where the labels say nothing about priority, which is most rows on most projects.
+   */
+  priority: DerivedPriority | null;
+  /**
+   * What the agent runs on this Issue amount to (F23 FR-14, Decision 0006).
+   *
+   * The planning table sits above execution, and this is the one cell that looks down: it says
+   * whether an agent is on the row, waiting for a person, or has failed. Null for a row with no
+   * Tasks — which is not the same as a row whose Tasks are all done, and the cell draws them
+   * differently.
+   */
+  tasks: RowTaskSummary | null;
 }
 
 /**
@@ -99,9 +134,11 @@ export interface ProjectRow {
  * would make the table editorialise about a choice a team made deliberately.
  */
 const LINK_STATE_CLASS: Record<LinkedChangeRequest["state"], string> = {
-  open: "border-state-running/40 text-state-running",
-  merged: "border-state-done/40 text-state-done",
-  closed: "border-state-idle/40 text-state-idle",
+  open: "[--badge-color:var(--scm-open)]",
+  merged: "[--badge-color:var(--scm-merged)]",
+  // Closed-unmerged stays grey: someone decided against it, which is a decision and not an
+  // error, and painting it red would make the table editorialise about a deliberate choice.
+  closed: "[--badge-color:var(--scm-draft)]",
 };
 
 /**
@@ -120,7 +157,7 @@ const MAX_VISIBLE_LINKS = 3;
  * point of the refusal is that the reader must not mistake it for a project that simply has no
  * epic here: an unexplained top-level row and a refused one look identical.
  *
- * Deliberately flat in tone. It is the provider's data contradicting itself, not GateControl
+ * Deliberately flat in tone. It is the provider's data contradicting itself, not SoloW
  * failing, and a table that raises an alarm about someone else's sub-issue loop teaches its
  * reader to ignore markers.
  */
@@ -152,7 +189,7 @@ function LinkedChanges({ row }: { row: ProjectRow }) {
           rel="noreferrer"
           title={`#${link.number} ${link.title} — ${link.state}`}
           className={cn(
-            "inline-flex items-center gap-1 rounded-full border px-1.5 py-px font-mono text-2xs tabular-nums hover:underline",
+            "badge-soft inline-flex items-center gap-1 rounded-full border px-1.5 py-px font-mono text-2xs tabular-nums hover:underline",
             LINK_STATE_CLASS[link.state],
           )}
         >
@@ -172,7 +209,7 @@ function LinkedChanges({ row }: { row: ProjectRow }) {
 /**
  * A row, plus the four facts the hierarchy resolves on (spec F23 FR-7, issue #127).
  *
- * The nesting, the cycle refusal and the rollup are `@gatecontrol/core`'s, not this file's: they
+ * The nesting, the cycle refusal and the rollup are `@solow/core`'s, not this file's: they
  * are decisions about a graph, and a decision about a graph should be provable without a DOM.
  * What is left here is what a table is for — an indent, a chevron and a number.
  */
@@ -213,40 +250,153 @@ export { formatCellValue as formatValue } from "./project-cell";
 export const ROW_HEIGHT = 37;
 export const COLUMN_HEADER_HEIGHT = 34;
 export const GROUP_HEADER_HEIGHT = 44;
-/** The reference's default column width. Wide enough for a token and a caret without wrapping. */
-export const DEFAULT_COLUMN_WIDTH = 200;
+/**
+ * The reference's default column width (§1) — kept as the *maximum* an auto-sized column may
+ * take, not as the width every column gets.
+ *
+ * GitHub gives every column 200px whatever it holds, so a Status column of five-letter words is
+ * as wide as one holding a sentence. Sizing to content instead means a short column is short and
+ * the space goes to the columns that need it; the cap is what stops one long cell deciding the
+ * layout for everything to its right.
+ */
+export const AUTO_COLUMN_MAX_WIDTH = 260;
+/** A floor, so a column is never narrower than its own header. */
+export const AUTO_COLUMN_MIN_WIDTH = 72;
+
+/**
+ * The agent runs on a row, as one badge.
+ *
+ * The badge shows the state that most demands a person rather than the newest run — see
+ * `summariseRowTasks`, where that rule and its reason live. The count sits beside it when there
+ * is more than one, because a single badge over three Tasks would read as one Task.
+ */
+function RowTasks({ row }: { row: ProjectRow }) {
+  // An empty cell, not a hidden column: "no agent has touched this" is an answer a planner came
+  // for, and it is different from a row whose runs are finished.
+  if (!row.tasks) return <span className="text-muted-foreground/40">—</span>;
+  return (
+    <span className="flex items-center gap-1.5">
+      <TaskStateBadge state={row.tasks.state} size="sm" />
+      {row.tasks.total > 1 && (
+        <span className="font-mono text-2xs text-muted-foreground tabular-nums">
+          {row.tasks.total}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/**
+ * The other end of the range this cell is one end of, or nothing.
+ *
+ * Nothing is the ordinary answer: most date fields are not one end of anything, and a project with
+ * only a `Target date` gets a plain picker rather than one that talks about a start nobody set.
+ */
+function counterpartFor(
+  row: ProjectRow,
+  fieldId: string,
+  range: { start: ProjectFieldDto | null; end: ProjectFieldDto | null },
+): DateCounterpart | undefined {
+  const dateOf = (field: ProjectFieldDto | null): string | null => {
+    if (!field) return null;
+    const value = row.item.values[field.id];
+    return value?.type === "date" ? value.date : null;
+  };
+  if (range.start && range.end && fieldId === range.start.id) {
+    return { name: range.end.name, date: dateOf(range.end), role: "start" };
+  }
+  if (range.start && range.end && fieldId === range.end.id) {
+    return { name: range.start.name, date: dateOf(range.start), role: "end" };
+  }
+  return undefined;
+}
+
+/**
+ * How a priority read off a label is spelled in the Priority column.
+ *
+ * Three things it deliberately does, in order of how much they matter:
+ *
+ *  1. It says where the value came from, in a `title` the operator can read. This is not a value
+ *     the provider holds, and a column that silently filled itself in would be the table telling
+ *     a team something nobody put there.
+ *  2. It keeps the unset styling around it — the cell's dashed edge is drawn by `SelectCell` for
+ *     a row with no value, and that stays true.
+ *  3. A native `title`, not a `Tooltip`: this renders **inside** the select cell's trigger button,
+ *     and a `TooltipTrigger` there would nest a button inside a button.
+ *
+ * The colour is the **label's own**, from the provider's vocabulary — the same hue the chip in
+ * the Labels column carries, because it is the same label. Not a scale invented here: the theme's
+ * `--state-*` tokens are deliberately achromatic (the neutral shadcn palette), so a rank-to-hue
+ * table would have rendered four identical greys, and a fourth palette beside the diff, the SCM
+ * states and the provider labels is one more colour language than this product has room for.
+ */
+function DerivedPriorityBadge({
+  priority,
+  color,
+}: {
+  priority: DerivedPriority;
+  color?: string | null | undefined;
+}) {
+  const hex = labelColour(color);
+  return (
+    <span
+      className="badge-soft inline-flex h-4 shrink-0 items-center rounded-full border px-1.5 font-semibold text-2xs"
+      style={hex ? ({ "--badge-color": hex } as React.CSSProperties) : undefined}
+      title={`Read from the label \u201C${priority.label}\u201D. This project's Priority field holds no value for this row.`}
+    >
+      {priority.name}
+    </span>
+  );
+}
 
 /**
  * How many labels a row shows before it counts the rest.
  *
- * Overflow is counted, never dropped: an issue carrying six labels in a cell that fits three is
+ * Overflow is counted, never dropped: an issue carrying six labels in a cell that fits two is
  * still a six-label issue, and a row that silently showed half would answer "what is this tagged
  * with" wrongly.
  */
 const MAX_VISIBLE_LABELS = 2;
 
 /**
- * The Issue's labels, as tokens beside its title (§7).
+ * The Issue's labels, in the colours their repository gives them (§7).
  *
- * Neutral rather than in the repository's own colours, by the same decision that greyed every
- * other token here — so they read as a set of words, and shape carries what hue used to.
+ * `colours` is the vocabulary read from the providers — a label the vocabulary does not name
+ * renders neutral rather than guessing, which is the same rule the single-select tokens follow.
  */
-function RowLabels({ labels }: { labels: string[] }) {
+function RowLabels({
+  labels,
+  colours,
+}: {
+  labels: string[];
+  colours?: Readonly<Record<string, string | null>> | undefined;
+}) {
   if (labels.length === 0) return null;
   const shown = labels.slice(0, MAX_VISIBLE_LABELS);
   const overflow = labels.length - shown.length;
   return (
-    <span className="flex shrink-0 items-center gap-1" title={labels.join(", ")}>
+    <span className="flex shrink-0 items-center gap-1">
       {shown.map((name) => (
-        <span
-          key={name}
-          className="inline-flex h-5 shrink-0 items-center rounded-full border border-border bg-muted/60 px-1.5 font-medium text-2xs text-muted-foreground"
-        >
-          {name}
-        </span>
+        <IssueLabel key={name} name={name} color={colours?.[name]} />
       ))}
       {overflow > 0 && (
-        <span className="shrink-0 font-mono text-2xs text-muted-foreground/60">+{overflow}</span>
+        // The ones that did not fit, on hover — as labels, not as a comma-joined `title` string.
+        // A row carrying eight labels shows two and a number, and the number is only useful if
+        // the rest are one gesture away in the form they are drawn everywhere else.
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="shrink-0 cursor-default rounded px-1 font-mono text-2xs text-muted-foreground/60 hover:bg-accent hover:text-foreground">
+              +{overflow}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent className="max-w-64">
+            <span className="flex flex-wrap gap-1">
+              {labels.slice(MAX_VISIBLE_LABELS).map((name) => (
+                <IssueLabel key={name} name={name} color={colours?.[name]} />
+              ))}
+            </span>
+          </TooltipContent>
+        </Tooltip>
       )}
     </span>
   );
@@ -317,10 +467,14 @@ function RowMenu({
 /**
  * The issue's own state, as GitHub draws it (§3, §7).
  *
- * The same four glyphs, distinguished by **shape** rather than by hue: a circle with a dot is
- * open, a circle with a check is closed, a dashed circle is a row with no provider issue behind
- * it. GitHub tints them green and purple; this build is neutral by decision, and these shapes
- * carry the distinction on their own — which is why they were the right icons to borrow.
+ * The same four glyphs *and* the same colours: green for open, purple for closed, grey for a row
+ * with no provider issue behind it. Shape still carries the distinction on its own — which is why
+ * these were the right icons to borrow — and the colour is now what makes a column of them
+ * scannable at a glance.
+ *
+ * Their own tokens (`--scm-*`), not the Task lifecycle's greys and not the diff's red/green: this
+ * says what the *provider* says about an issue, which is a third unrelated fact. Sharing a token
+ * with either would recouple them the next time one changes.
  *
  * `closed` is the provider's own flag, never a Status column reading "Done": a status is a team's
  * convention and closed is a fact (F23 AC-2 / AC-3).
@@ -331,7 +485,7 @@ function IssueStateIcon({ row }: { row: ProjectRow }) {
       <Tooltip>
         <TooltipTrigger asChild>
           <span className="flex shrink-0 items-center">
-            <CircleDashed aria-hidden className="size-4 text-muted-foreground/50" />
+            <CircleDashed aria-hidden className="size-4 text-scm-draft" />
             <span className="sr-only">No provider issue</span>
           </span>
         </TooltipTrigger>
@@ -346,7 +500,10 @@ function IssueStateIcon({ row }: { row: ProjectRow }) {
     <Tooltip>
       <TooltipTrigger asChild>
         <span className="flex shrink-0 items-center">
-          <Icon aria-hidden className="size-4 text-muted-foreground" />
+          <Icon
+            aria-hidden
+            className={cn("size-4", closed ? "text-scm-closed" : "text-scm-open")}
+          />
           <span className="sr-only">{label}</span>
         </span>
       </TooltipTrigger>
@@ -371,6 +528,67 @@ function ariaSortFor(
 }
 
 /**
+ * The grab strip on a column's trailing edge (§6, "colonnes redimensionnables").
+ *
+ * Pointer events rather than a drag-and-drop library: a resize is one pointer following one axis,
+ * and `setPointerCapture` keeps the drag alive when the cursor outruns the 4px strip — which it
+ * always does. A DnD library would also fight the header's own drag-to-reorder, since both would
+ * claim the same gesture on the same element.
+ *
+ * Double-click fits the column to its content, which is the gesture every spreadsheet has taught
+ * and the only way back from a width dragged too small to read.
+ */
+function ResizeHandle({
+  onResize,
+  onAutoFit,
+  label,
+}: {
+  onResize: (width: number) => void;
+  onAutoFit: () => void;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={`Resize ${label}`}
+      // A button so it is focusable and named; the keyboard path is the arrow keys below, because
+      // a resize that only a mouse can reach is a column a keyboard user cannot fix.
+      onPointerDown={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const header = event.currentTarget.closest("th");
+        if (!header) return;
+        const startX = event.clientX;
+        const startWidth = header.getBoundingClientRect().width;
+        event.currentTarget.setPointerCapture(event.pointerId);
+
+        const move = (moved: PointerEvent) => onResize(startWidth + (moved.clientX - startX));
+        const done = () => {
+          window.removeEventListener("pointermove", move);
+          window.removeEventListener("pointerup", done);
+        };
+        window.addEventListener("pointermove", move);
+        window.addEventListener("pointerup", done);
+      }}
+      onDoubleClick={(event) => {
+        event.stopPropagation();
+        onAutoFit();
+      }}
+      onKeyDown={(event) => {
+        const header = event.currentTarget.closest("th");
+        if (!header) return;
+        const width = header.getBoundingClientRect().width;
+        // 16px a press, which is a visible change without being a jump.
+        if (event.key === "ArrowLeft") onResize(width - 16);
+        if (event.key === "ArrowRight") onResize(width + 16);
+        if (event.key === "Enter") onAutoFit();
+      }}
+      className="-mr-1 absolute inset-y-0 right-0 w-1.5 cursor-col-resize bg-transparent transition-colors hover:bg-ring/40 focus-visible:bg-ring/60"
+    />
+  );
+}
+
+/**
  * A column header that sorts (§6).
  *
  * The sort lives in the *view*, not here: this reports which column carries it and asks for a
@@ -388,26 +606,49 @@ function SortableHeader({
   sort,
   onSort,
   align = "start",
-  locked = false,
 }: {
   label: string;
   sortKey: string;
   sort: { field: string; direction: "asc" | "desc" } | null;
   onSort?: ((field: string) => void) | undefined;
   align?: "start" | "end";
-  locked?: boolean;
 }) {
   const active = sort?.field === sortKey;
   const body = (
     <>
-      <span className="truncate">{label}</span>
-      {locked && <Lock aria-hidden className="size-3 shrink-0 text-muted-foreground/50" />}
-      {active &&
-        (sort?.direction === "asc" ? (
+      {/*
+       * `whitespace-nowrap`, not `truncate`.
+       *
+       * A truncated header can shrink below its own text, and with content-sized columns that is
+       * exactly what happens to a column whose cells are empty: the browser sizes it to the `—`
+       * and the header clips to "Priori…". A header that cannot shrink contributes its full width
+       * to the column's natural size, so the column is at least as wide as its own name — bounded
+       * above by the cap, so a long field name still cannot run away with the layout.
+       */}
+      <span className="whitespace-nowrap">{label}</span>
+      {active ? (
+        sort?.direction === "asc" ? (
           <ArrowUp aria-hidden className="size-3 shrink-0" />
         ) : (
           <ArrowDown aria-hidden className="size-3 shrink-0" />
-        ))}
+        )
+      ) : (
+        onSort && (
+          /*
+           * A ghost arrow, visible only on hover.
+           *
+           * Sorting used to be reachable from a `Sort by` menu in the toolbar; the header is the
+           * only way now, and a control whose only affordance is a background tint on hover is
+           * one nobody discovers. The arrow occupies its space whether or not it is shown — with
+           * `opacity` rather than `hidden` — so a header does not jump sideways as the pointer
+           * crosses it, and it says which direction the first click gives you.
+           */
+          <ArrowUp
+            aria-hidden
+            className="size-3 shrink-0 opacity-0 transition-opacity group-hover/sort:opacity-40"
+          />
+        )
+      )}
     </>
   );
   const shape = cn(
@@ -419,13 +660,263 @@ function SortableHeader({
   return (
     <button
       type="button"
+      /*
+       * Says what the click does, not merely what the column is.
+       *
+       * The button's accessible name is the column's name, which is right — but a header that is
+       * also a three-state control has to state the state and the next step somewhere, and
+       * `aria-sort` on the `<th>` only carries the first half.
+       */
+      title={sortHint(label, active ? (sort?.direction ?? null) : null)}
       onClick={() => onSort(sortKey)}
-      className={cn(shape, "-mx-1 rounded px-1 py-0.5 hover:bg-accent/60")}
+      className={cn(shape, "group/sort -mx-1 rounded px-1 py-0.5 hover:bg-accent/60")}
     >
       {body}
     </button>
   );
 }
+
+/** What the next click on this header will do — the third state included. */
+function sortHint(label: string, direction: "asc" | "desc" | null): string {
+  if (direction === null) return `Sort by ${label}`;
+  return direction === "asc" ? `Sort by ${label}, descending` : `Clear the sort on ${label}`;
+}
+
+/**
+ * One drawn line of the body, memoized (issue #126 AC-6, second half).
+ *
+ * "Re-render only rows whose values changed" is not something a table gets for free once it draws
+ * fewer rows: scrolling changes state on the table, so without this every row still on screen
+ * re-renders on every frame of a wheel gesture — a hundred context menus and editable cells
+ * rebuilt to move the viewport by forty pixels.
+ *
+ * Which makes the prop list the load-bearing part. Everything here is either a value the row owns
+ * or something the table holds still across renders (`useMemo`ed lookups, `useCallback`ed
+ * handlers). The two that would otherwise defeat the memo are broken out deliberately:
+ * `isExpanded` rather than the expanded set, and `onToggle` taking the id — a set and a
+ * `setState` closure both change identity whenever any row opens, which would re-render all of
+ * them.
+ */
+/** One drawn line of the body: the heading of a group, or one row of the hierarchy. */
+type BodyLine =
+  | {
+      kind: "group";
+      key: string;
+      label: string;
+      nodes: ProjectTreeNode<NestableProjectRow>[];
+    }
+  | { kind: "row"; entry: FlatProjectRow<NestableProjectRow> };
+
+const BodyRow = memo(function BodyRow({
+  row,
+  depth,
+  hasChildren,
+  rollup,
+  inCycle,
+  isExpanded,
+  onToggle,
+  columns,
+  widths,
+  labelColours,
+  priorityChoices,
+  dateRange,
+  today,
+  pendingCells,
+  onEdit,
+  onOpenRow,
+  onSetPriority,
+  onStartTask,
+}: {
+  row: NestableProjectRow;
+  depth: number;
+  hasChildren: boolean;
+  rollup: ProjectRollup | null;
+  inCycle: boolean;
+  isExpanded: boolean;
+  onToggle: (itemId: string) => void;
+  columns: readonly ProjectFieldDto[];
+  widths: Readonly<Record<string, number>> | undefined;
+  labelColours: Readonly<Record<string, string | null>> | undefined;
+  priorityChoices: readonly PriorityChoice[] | undefined;
+  dateRange: { start: ProjectFieldDto | null; end: ProjectFieldDto | null };
+  today: string;
+  pendingCells: readonly string[];
+  onEdit?:
+    | ((row: ProjectRow, field: ProjectFieldDto, value: ProjectFieldValue | null) => void)
+    | undefined;
+  onOpenRow?: ((row: ProjectRow) => void) | undefined;
+  onSetPriority?: ((row: ProjectRow, label: string | null) => void) | undefined;
+  onStartTask?: ((row: ProjectRow) => void) | undefined;
+}) {
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <TableRow className="hover:bg-accent/30" style={{ height: ROW_HEIGHT }}>
+          {/*
+            The issue's own number — see the header for why it is not an
+            ordinal — and the way out to the provider.
+
+            The number is the one thing on this row that means something *there*
+            rather than here, so it is what links there. The title opens the
+            panel inside SoloW. Two destinations, two controls, rather than
+            one that guesses which you meant.
+          */}
+          <TableCell className="w-16 px-2 text-right align-middle font-mono text-2xs text-muted-foreground/60 tabular-nums">
+            {row.issueNumber === null ? (
+              ""
+            ) : row.issueUrl ? (
+              <a
+                href={row.issueUrl}
+                target="_blank"
+                rel="noreferrer"
+                title={`Open #${row.issueNumber} on the provider`}
+                className="hover:text-foreground hover:underline"
+              >
+                #{row.issueNumber}
+              </a>
+            ) : (
+              `#${row.issueNumber}`
+            )}
+          </TableCell>
+          <TableCell className="max-w-[460px] px-3 py-0 align-middle">
+            {/* Indented rather than drawn as a separate table per epic: one column of
+          titles stays scannable, and a child keeps every one of its own cells. */}
+            <span className="flex min-w-0 items-center gap-2" style={{ paddingLeft: depth * 16 }}>
+              {hasChildren ? (
+                <button
+                  type="button"
+                  aria-expanded={isExpanded}
+                  aria-label={`${isExpanded ? "Collapse" : "Expand"} ${row.title}`}
+                  onClick={() => onToggle(row.item.id)}
+                  className="shrink-0 text-muted-foreground hover:text-foreground"
+                >
+                  {isExpanded ? (
+                    <ChevronDown aria-hidden className="size-3" />
+                  ) : (
+                    <ChevronRight aria-hidden className="size-3" />
+                  )}
+                </button>
+              ) : (
+                // Keeps every title on the same line whether or not it has children,
+                // so an indent reads as depth rather than as a missing chevron.
+                <span aria-hidden className="size-3 shrink-0" />
+              )}
+              <IssueStateIcon row={row} />
+              {onOpenRow ? (
+                // A button, not the row: a row-wide click target swallows every cell
+                // editor inside it, and a title that opens a panel is the affordance
+                // GitHub Projects uses for the same reason.
+                <button
+                  type="button"
+                  onClick={() => onOpenRow(row)}
+                  title={row.title}
+                  className="truncate text-left hover:underline"
+                >
+                  {row.title}
+                </button>
+              ) : (
+                <span className="truncate" title={row.title}>
+                  {row.title}
+                </span>
+              )}
+              {inCycle && (
+                // A native `title` rather than the tooltip primitive `Cell` uses: at a
+                // thousand rows (NFR-1) a provider per row is a cost paid by every
+                // table for a marker almost none of them show. The sentence is in the
+                // row's text as well, because a marker that is only an icon is a
+                // refusal a screen reader never hears.
+                <span
+                  title={REFUSED_PARENT_NOTE}
+                  className="inline-flex shrink-0 items-center text-muted-foreground/70"
+                >
+                  <Unlink aria-hidden className="size-3" />
+                  <span className="sr-only">{REFUSED_PARENT_NOTE}</span>
+                </span>
+              )}
+            </span>
+          </TableCell>
+          <TableCell className="px-3 py-0 align-middle">
+            <RowTasks row={row} />
+          </TableCell>
+          <TableCell className="px-3 py-0 align-middle">
+            <LinkedChanges row={row} />
+          </TableCell>
+          <TableCell className="max-w-[260px] px-3 py-0 align-middle">
+            <RowLabels labels={row.labels} colours={labelColours} />
+          </TableCell>
+          {/* Counted from what is closed on the provider, never from a Status
+              column (AC-2 / AC-3), and across every repository the children
+              live in (AC-4). Its own column now rather than crowding the title
+              — a bar and a title competing for one cell made both harder to
+              read. */}
+          <TableCell className="px-3 py-0 align-middle">
+            {rollup ? (
+              <SubIssueProgress done={rollup.done} total={rollup.total} />
+            ) : (
+              <span className="text-muted-foreground/40">—</span>
+            )}
+          </TableCell>
+          {columns.map((field) => (
+            <TableCell
+              key={field.id}
+              className="px-3 py-0 align-middle"
+              // The same exact width as the header, or the two disagree and the
+              // widest cell wins — the browser sizing the column instead of the
+              // person who dragged it.
+              style={
+                widths?.[field.id]
+                  ? {
+                      width: widths[field.id],
+                      minWidth: widths[field.id],
+                      maxWidth: widths[field.id],
+                    }
+                  : { maxWidth: AUTO_COLUMN_MAX_WIDTH }
+              }
+            >
+              {/*
+                A Priority column the provider gave no options is not a control
+                that can be repaired by disabling it: the priority is on the
+                issue, in a label, and that is what the operator has to be able
+                to change. Where the field *does* have options it is the
+                authority and the ordinary cell is right.
+              */}
+              {isPriorityFieldName(field.name) && field.options.length === 0 && onSetPriority ? (
+                <PriorityCell
+                  current={row.priority}
+                  choices={priorityChoices ?? []}
+                  rowTitle={row.title}
+                  onPick={(label) => onSetPriority(row, label)}
+                  pending={pendingCells.includes(`${row.item.id}:${field.id}`)}
+                />
+              ) : (
+                <ProjectCell
+                  field={field}
+                  value={row.item.values[field.id]}
+                  rowTitle={row.title}
+                  fallback={
+                    isPriorityFieldName(field.name) && row.priority ? (
+                      <DerivedPriorityBadge
+                        priority={row.priority}
+                        color={labelColours?.[row.priority.label]}
+                      />
+                    ) : undefined
+                  }
+                  onEdit={
+                    field.readOnly || !onEdit ? undefined : (value) => onEdit(row, field, value)
+                  }
+                  counterpart={counterpartFor(row, field.id, dateRange)}
+                  today={today}
+                  pending={pendingCells.includes(`${row.item.id}:${field.id}`)}
+                />
+              )}
+            </TableCell>
+          ))}
+        </TableRow>
+      </ContextMenuTrigger>
+      <RowMenu row={row} onOpenRow={onOpenRow} onStartTask={onStartTask} />
+    </ContextMenu>
+  );
+});
 
 export function ProjectTable({
   project,
@@ -437,6 +928,14 @@ export function ProjectTable({
   onOpenRow,
   sort,
   onSort,
+  widths,
+  columnOrder,
+  labelColours,
+  priorityChoices,
+  today,
+  onSetPriority,
+  onResize,
+  onReorder,
   onStartTask,
   pendingCells = [],
 }: {
@@ -480,6 +979,34 @@ export function ProjectTable({
   sort?: { field: string; direction: "asc" | "desc" } | null | undefined;
   /** Ask for a different sort. Absent leaves the headers inert, which is what a read-only render wants. */
   onSort?: ((field: string) => void) | undefined;
+  /** Stored pixel widths by field id. A field absent from it sizes to its content. */
+  widths?: Readonly<Record<string, number>> | undefined;
+  /** The person's saved column order. Partial: anything unnamed keeps its own place, behind. */
+  columnOrder?: readonly string[] | undefined;
+  /** The provider's label vocabulary, so a label is the same colour here as in the drawer. */
+  labelColours?: Readonly<Record<string, string | null>> | undefined;
+  /**
+   * The priority labels this workspace's repositories define, most urgent first.
+   *
+   * Handed in rather than derived here: the vocabulary is a property of the repositories and is
+   * already fetched once for the whole table (see `labelColours`), and a column that computed its
+   * own option list from the rows on screen would offer fewer choices the more a filter narrowed.
+   */
+  priorityChoices?: readonly PriorityChoice[] | undefined;
+  /** The day relative dates resolve against. Defaulted from the clock; passed in by tests. */
+  today?: string | undefined;
+  /**
+   * Write a priority by **label**, for the projects whose Priority field holds no options.
+   *
+   * Deliberately not routed through `onEdit`: that writes a project field value, and this writes a
+   * label on the Issue. Two different writes to two different places, and collapsing them into one
+   * callback is how a cell ends up sending a field value nobody can store.
+   */
+  onSetPriority?: ((row: ProjectRow, label: string | null) => void) | undefined;
+  /** A column was dragged to a new width, or double-clicked to fit its content (null). */
+  onResize?: ((fieldId: string, width: number | null) => void) | undefined;
+  /** A column was dropped on another. The handler receives the complete new order. */
+  onReorder?: ((fieldIds: string[]) => void) | undefined;
   /**
    * Start a Task on a row's Issue — the right-click menu's one action that changes anything.
    *
@@ -498,15 +1025,105 @@ export function ProjectTable({
    * time it rendered, turning a 20-row table into 60 before anyone asked for it.
    */
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+  /**
+   * Held still across renders so `BodyRow`'s memo survives a scroll — a `setExpanded` closure
+   * written inline is a new function on every frame, and a new function is a new prop.
+   */
+  const toggleExpanded = useCallback((itemId: string) => {
+    setExpanded((current) => {
+      const next = new Set(current);
+      // Delete-or-add: one statement of the toggle, so the chevron and the rows it reveals
+      // cannot disagree about what "open" means.
+      if (!next.delete(itemId)) next.add(itemId);
+      return next;
+    });
+  }, []);
+
+  /**
+   * How tall the scrolling pane is and how far down it, which is the whole input to windowing
+   * (F23 NFR-1, issue #126 AC-6).
+   *
+   * Both start at zero and mean "not measured yet", which `windowOf` reads as "draw everything" —
+   * so the first paint is complete rather than empty, and narrows on the layout pass that follows.
+   */
+  const scroller = useRef<HTMLDivElement>(null);
+  const [pane, setPane] = useState({ scrollTop: 0, height: 0 });
+  useEffect(() => {
+    const element = scroller.current;
+    if (!element) return;
+    const measure = () =>
+      setPane((current) =>
+        // Compared before it is stored: a scroll event fires far more often than the numbers
+        // change, and an unconditional `setState` would re-render the table for every one of them.
+        current.scrollTop === element.scrollTop && current.height === element.clientHeight
+          ? current
+          : { scrollTop: element.scrollTop, height: element.clientHeight },
+      );
+    measure();
+    element.addEventListener("scroll", measure, { passive: true });
+    // Guarded rather than assumed: the pane is resized by the sidebar, by the window and by the
+    // filter bar wrapping, and none of those fire a scroll — but a test environment has no
+    // observer to give, and a table that threw there would be a table nothing could render.
+    const observer =
+      typeof ResizeObserver === "function" ? new ResizeObserver(() => measure()) : null;
+    observer?.observe(element);
+    return () => {
+      element.removeEventListener("scroll", measure);
+      observer?.disconnect();
+    };
+  }, []);
+
+  /**
+   * The column names this table owns, so a provider field carrying the same name can be told
+   * apart from it.
+   *
+   * GitHub's projects ship a built-in `Title` field, and a project can carry a real value in it
+   * that is *not* the issue's title — so the table legitimately shows two columns called Title
+   * and a reader has no way to know which is which. Suffixing the provider's one is the smallest
+   * honest fix: neither column is wrong, and hiding either would lose a fact.
+   */
+  const ownColumnNames = useMemo(
+    () => new Set(["Title", "Agent runs", "Linked changes", "Labels", "Sub-issues"]),
+    [],
+  );
 
   const columns = useMemo(
-    () => project.fields.filter((f) => !hiddenFieldIds.includes(f.id)),
-    [project.fields, hiddenFieldIds],
+    // Filtered first, then ordered: a hidden column must not occupy a slot in the arrangement,
+    // or dragging one column past a hidden one would leave a gap nobody can see or fill.
+    () =>
+      orderColumns(
+        project.fields.filter((f) => !hiddenFieldIds.includes(f.id)),
+        columnOrder ?? [],
+      ),
+    [project.fields, hiddenFieldIds, columnOrder],
   );
   const groupField = useMemo(
     () => project.fields.find((f) => f.id === groupByFieldId && f.type === "single_select") ?? null,
     [project.fields, groupByFieldId],
   );
+
+  /**
+   * Which two date fields are the two ends of one range.
+   *
+   * Matched by name, the same way the Priority column is: `Start date` and `Target date` are what
+   * GitHub Projects calls them, and a project whose dates are called something else simply gets two
+   * independent pickers — which is correct, because nothing here knows that they are related.
+   *
+   * The pairing buys one thing: each end can show the other. It does **not** make them one control
+   * (see `DateCounterpart`).
+   */
+  const dateRange = useMemo(() => {
+    const normalise = (name: string) => name.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const dates = project.fields.filter((f) => f.type === "date");
+    return {
+      start: dates.find((f) => normalise(f.name) === "startdate") ?? null,
+      end:
+        dates.find((f) => ["targetdate", "enddate", "duedate"].includes(normalise(f.name))) ?? null,
+    };
+  }, [project.fields]);
+
+  /** Resolved once for the whole table, so every cell agrees which day today is. */
+  const resolvedToday = useMemo(() => today ?? isoToday(new Date()), [today]);
 
   /**
    * The provider's hierarchy, as a forest. A child appears once, under its parent; a child whose
@@ -585,7 +1202,51 @@ export function ProjectTable({
     ].filter((g) => g.nodes.length > 0);
   }, [groupField, roots]);
 
-  if (project.fields.length === 0) {
+  /**
+   * The body as one flat list of lines — a group heading or a row — in the order they are drawn.
+   *
+   * This is what makes the table windowable: a viewport spans groups, so "which lines are on
+   * screen" is only answerable once the groups have stopped being separate lists. It is also
+   * where the filter is applied, exactly as it was when this lived in the JSX: the tree and its
+   * arithmetic come from every row, and only what is *drawn* is narrowed.
+   */
+  const lines = useMemo(() => {
+    const out: BodyLine[] = [];
+    for (const group of groups) {
+      if (groupField)
+        out.push({ kind: "group", key: group.key, label: group.label, nodes: group.nodes });
+      if (collapsed[group.key]) continue;
+      for (const entry of flattenProjectHierarchy(group.nodes, expanded)) {
+        // Drawn is the filter's answer; `rollup` on the entry is not filtered. A parent whose
+        // child matched stays, because hiding it would hide the match.
+        if (drawn !== null && !drawn.has(entry.row.item.id)) continue;
+        out.push({ kind: "row", entry });
+      }
+    }
+    return out;
+  }, [groups, groupField, collapsed, expanded, drawn]);
+
+  /**
+   * The heights, from the measurements at the top of this file rather than from the DOM.
+   *
+   * Every row is `ROW_HEIGHT` and every heading `GROUP_HEADER_HEIGHT` because both are fixed in
+   * the markup below — so there is nothing to measure, and no first paint spent measuring it.
+   */
+  const win: RowWindow = useMemo(
+    () =>
+      windowOf(
+        lines.map((line) => (line.kind === "group" ? GROUP_HEADER_HEIGHT : ROW_HEIGHT)),
+        pane.scrollTop,
+        pane.height,
+      ),
+    [lines, pane],
+  );
+
+  // A local Project has, and will always have, zero fields — there is no provider board behind
+  // it to have declared any (`projectDto.fields`'s own comment). That is not "not yet synced";
+  // it is the permanent and correct state for the kind of Project this is, so the guard below
+  // fires only for a mirrored Project waiting on its first sync.
+  if (project.fields.length === 0 && project.source === "adopted") {
     return (
       <p className="px-4 py-6 text-muted-foreground text-sm">
         This project has no fields yet. Refresh to read them from the provider.
@@ -596,8 +1257,18 @@ export function ProjectTable({
   return (
     // One provider for the whole table rather than one per cell — see `ProjectCell`.
     <TooltipProvider>
-      <div className="min-h-0 flex-1 overflow-auto">
-        <Table className="text-xs">
+      <div ref={scroller} className="min-h-0 flex-1 overflow-auto">
+        <Table
+          /*
+           * `w-auto`, not the primitive's `w-full`.
+           *
+           * A full-width table distributes its slack across the columns, so every column is
+           * *stretched* and none of them ends up the size of what it holds — which is the whole
+           * of "auto width". Sized to content it is as wide as it needs to be, and the container
+           * around it already scrolls horizontally for the case where that is wider than the pane.
+           */
+          className="w-auto text-xs"
+        >
           <TableHeader className="sticky top-0 z-10 bg-card">
             <TableRow className="hover:bg-transparent">
               {/* The gutter's own header cell. Without it the header row is one cell short of the
@@ -610,8 +1281,10 @@ export function ProjectTable({
                 <span className="sr-only">Row</span>
               </TableHead>
               <TableHead
-                className="min-w-64 px-3"
-                style={{ height: COLUMN_HEADER_HEIGHT }}
+                // The title is the row's identifier and the one column worth a wider cap: a
+                // sentence truncated at 260px is a title nobody can tell from its neighbour.
+                className="px-3"
+                style={{ height: COLUMN_HEADER_HEIGHT, minWidth: 220, maxWidth: 460 }}
                 aria-sort={ariaSortFor(sort, PROJECT_TITLE_KEY)}
               >
                 <SortableHeader
@@ -626,60 +1299,131 @@ export function ProjectTable({
                 position is therefore ours to decide rather than the provider's. "Linked changes"
                 because the domain says change request; the provider's noun is on the badge's own
                 page (issue #15's terminology rule). */}
-              <TableHead className="min-w-28 px-3" style={{ height: COLUMN_HEADER_HEIGHT }}>
+              {/* SoloW's own two columns, kept together and ahead of the provider's
+                  fields: both are facts about the Issue rather than columns the project defines,
+                  so their position is ours to decide rather than the provider's. */}
+              <TableHead className="px-3" style={{ height: COLUMN_HEADER_HEIGHT }}>
+                Agent runs
+              </TableHead>
+              <TableHead className="px-3" style={{ height: COLUMN_HEADER_HEIGHT }}>
                 Linked changes
               </TableHead>
-              {columns.map((field) => (
-                <TableHead
-                  key={field.id}
-                  className="px-3"
-                  style={{ height: COLUMN_HEADER_HEIGHT, minWidth: DEFAULT_COLUMN_WIDTH }}
-                  aria-sort={ariaSortFor(sort, field.id)}
-                >
-                  <SortableHeader
-                    label={field.name}
-                    sortKey={field.id}
-                    sort={sort ?? null}
-                    onSort={onSort}
-                    align={field.type === "number" ? "end" : "start"}
-                    // A field the provider will not let this build write is still a field it can
-                    // be sorted by — the lock is about editing, not about reading.
-                    locked={field.readOnly}
-                  />
-                </TableHead>
-              ))}
+              <TableHead className="px-3" style={{ height: COLUMN_HEADER_HEIGHT }}>
+                Labels
+              </TableHead>
+              <TableHead className="px-3" style={{ height: COLUMN_HEADER_HEIGHT }}>
+                Sub-issues
+              </TableHead>
+              {columns.map((field) => {
+                const stored = widths?.[field.id];
+                return (
+                  <TableHead
+                    key={field.id}
+                    className="relative px-3"
+                    style={{
+                      height: COLUMN_HEADER_HEIGHT,
+                      // A stored width is exact — `width` *and* both bounds, because a table cell
+                      // treats `width` as a suggestion and grows past it otherwise, which is how a
+                      // resized column springs back on the next render.
+                      ...(stored
+                        ? { width: stored, minWidth: stored, maxWidth: stored }
+                        : { minWidth: AUTO_COLUMN_MIN_WIDTH, maxWidth: AUTO_COLUMN_MAX_WIDTH }),
+                    }}
+                    aria-sort={ariaSortFor(sort, field.id)}
+                    /*
+                     * Reordering by dragging the header itself (§6). Native HTML5 drag rather than a
+                     * library: the gesture is one element dropped on another with no preview to
+                     * render, and a library would also have to be told not to claim the resize strip
+                     * living inside the same header.
+                     */
+                    draggable={Boolean(onReorder)}
+                    onDragStart={(event) => {
+                      event.dataTransfer.setData("text/plain", field.id);
+                      event.dataTransfer.effectAllowed = "move";
+                    }}
+                    onDragOver={(event) => {
+                      if (!onReorder) return;
+                      // Without this the drop never fires — the default is to reject.
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = "move";
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      const dragged = event.dataTransfer.getData("text/plain");
+                      if (!dragged || !onReorder) return;
+                      onReorder(
+                        moveColumn(
+                          columns.map((c) => c.id),
+                          dragged,
+                          field.id,
+                        ),
+                      );
+                    }}
+                  >
+                    <SortableHeader
+                      label={
+                        ownColumnNames.has(field.name) ? `${field.name} (project)` : field.name
+                      }
+                      sortKey={field.id}
+                      sort={sort ?? null}
+                      onSort={onSort}
+                      align={field.type === "number" ? "end" : "start"}
+                    />
+                    {onResize && (
+                      <ResizeHandle
+                        label={field.name}
+                        onResize={(width) => onResize(field.id, clampWidth(width))}
+                        onAutoFit={() => onResize(field.id, null)}
+                      />
+                    )}
+                  </TableHead>
+                );
+              })}
             </TableRow>
           </TableHeader>
-          {groups.map((group) => {
-            const open = !collapsed[group.key];
-            return (
-              <TableBody key={group.key || "__ungrouped"}>
-                {groupField && (
-                  <TableRow className="bg-card hover:bg-card">
-                    <TableHead
-                      colSpan={columns.length + 3}
-                      className="px-2 text-left font-medium text-2xs"
-                      style={{ height: GROUP_HEADER_HEIGHT }}
+          <TableBody>
+            {/*
+              One `tbody` for the whole table, not one per group.
+
+              A window spans groups — the top of the viewport can sit in `In progress` while the
+              bottom is already in `Done` — so the drawn lines have to be one list before they can
+              be sliced. The group headings are lines in it, which is also why `windowOf` walks
+              the heights instead of dividing by one: a heading is taller than a row.
+            */}
+            {win.padTop > 0 && (
+              // The lines above the window, as height and nothing else. `aria-hidden` keeps it out
+              // of the accessibility tree, where a spacer would otherwise be announced as a row.
+              <tr aria-hidden style={{ height: win.padTop }} />
+            )}
+            {lines.slice(win.from, win.to).map((line) =>
+              line.kind === "group" ? (
+                <TableRow key={`group:${line.key}`} className="bg-card hover:bg-card">
+                  <TableHead
+                    colSpan={columns.length + 6}
+                    className="px-2 text-left font-medium text-2xs"
+                    style={{ height: GROUP_HEADER_HEIGHT }}
+                  >
+                    <button
+                      type="button"
+                      aria-expanded={!collapsed[line.key]}
+                      onClick={() =>
+                        setCollapsed((c) => ({ ...c, [line.key]: !collapsed[line.key] }))
+                      }
+                      className="inline-flex items-center gap-1.5"
                     >
-                      <button
-                        type="button"
-                        aria-expanded={open}
-                        onClick={() => setCollapsed((c) => ({ ...c, [group.key]: open }))}
-                        className="inline-flex items-center gap-1.5"
-                      >
-                        {open ? (
-                          <ChevronDown aria-hidden className="size-3" />
-                        ) : (
-                          <ChevronRight aria-hidden className="size-3" />
-                        )}
-                        {/* The option dot of §6, neutral like every other token here: it marks
-                            the heading as a value of the grouped field, not a section title. */}
-                        <span
-                          aria-hidden
-                          className="size-2 shrink-0 rounded-full bg-muted-foreground/50"
-                        />
-                        <span className="font-semibold text-sm tracking-tight">{group.label}</span>
-                        {/*
+                      {collapsed[line.key] ? (
+                        <ChevronRight aria-hidden className="size-3" />
+                      ) : (
+                        <ChevronDown aria-hidden className="size-3" />
+                      )}
+                      {/* The option dot of §6, neutral like every other token here: it marks
+                          the heading as a value of the grouped field, not a section title. */}
+                      <span
+                        aria-hidden
+                        className="size-2 shrink-0 rounded-full bg-muted-foreground/50"
+                      />
+                      <span className="font-semibold text-sm tracking-tight">{line.label}</span>
+                      {/*
                         Every row in the group, children included — not the top-level ones.
 
                         Two counts sit on this screen: this one and the toolbar's `N items`, which
@@ -695,134 +1439,39 @@ export function ProjectTable({
                         child reachable is context, not a match, and counting it would inflate
                         every group by the epics above the matches.
                       */}
-                        {/* The round counter badge of §11. */}
-                        <span className="inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-muted px-1.5 font-semibold text-2xs text-muted-foreground tabular-nums">
-                          {countProjectRows(group.nodes, (row) => visible.has(row.id))}
-                        </span>
-                      </button>
-                    </TableHead>
-                  </TableRow>
-                )}
-                {open &&
-                  flattenProjectHierarchy(group.nodes, expanded)
-                    // Drawn is the filter's answer; `rollup` above is not filtered. A parent whose
-                    // child matched stays, because hiding it would hide the match.
-                    .filter(({ row }) => drawn === null || drawn.has(row.item.id))
-                    .map(({ row, depth, hasChildren, rollup, inCycle }) => (
-                      <ContextMenu key={row.item.id}>
-                        <ContextMenuTrigger asChild>
-                          <TableRow className="hover:bg-accent/30" style={{ height: ROW_HEIGHT }}>
-                            {/* The issue's own number — see the header for why it is not an ordinal. */}
-                            <TableCell className="w-16 px-2 text-right align-middle font-mono text-2xs text-muted-foreground/60 tabular-nums">
-                              {row.issueNumber === null ? "" : `#${row.issueNumber}`}
-                            </TableCell>
-                            <TableCell className="max-w-xl px-3 py-0 align-middle">
-                              {/* Indented rather than drawn as a separate table per epic: one column of
-                            titles stays scannable, and a child keeps every one of its own cells. */}
-                              <span
-                                className="flex min-w-0 items-center gap-2"
-                                style={{ paddingLeft: depth * 16 }}
-                              >
-                                {hasChildren ? (
-                                  <button
-                                    type="button"
-                                    aria-expanded={expanded.has(row.item.id)}
-                                    aria-label={`${expanded.has(row.item.id) ? "Collapse" : "Expand"} ${row.title}`}
-                                    onClick={() =>
-                                      setExpanded((current) => {
-                                        const next = new Set(current);
-                                        // Delete-or-add: one statement of the toggle, so the chevron and
-                                        // the rows it reveals cannot disagree about what "open" means.
-                                        if (!next.delete(row.item.id)) next.add(row.item.id);
-                                        return next;
-                                      })
-                                    }
-                                    className="shrink-0 text-muted-foreground hover:text-foreground"
-                                  >
-                                    {expanded.has(row.item.id) ? (
-                                      <ChevronDown aria-hidden className="size-3" />
-                                    ) : (
-                                      <ChevronRight aria-hidden className="size-3" />
-                                    )}
-                                  </button>
-                                ) : (
-                                  // Keeps every title on the same line whether or not it has children,
-                                  // so an indent reads as depth rather than as a missing chevron.
-                                  <span aria-hidden className="size-3 shrink-0" />
-                                )}
-                                <IssueStateIcon row={row} />
-                                {onOpenRow ? (
-                                  // A button, not the row: a row-wide click target swallows every cell
-                                  // editor inside it, and a title that opens a panel is the affordance
-                                  // GitHub Projects uses for the same reason.
-                                  <button
-                                    type="button"
-                                    onClick={() => onOpenRow(row)}
-                                    title={row.title}
-                                    className="truncate text-left hover:underline"
-                                  >
-                                    {row.title}
-                                  </button>
-                                ) : (
-                                  <span className="truncate" title={row.title}>
-                                    {row.title}
-                                  </span>
-                                )}
-                                <RowLabels labels={row.labels} />
-                                {inCycle && (
-                                  // A native `title` rather than the tooltip primitive `Cell` uses: at a
-                                  // thousand rows (NFR-1) a provider per row is a cost paid by every
-                                  // table for a marker almost none of them show. The sentence is in the
-                                  // row's text as well, because a marker that is only an icon is a
-                                  // refusal a screen reader never hears.
-                                  <span
-                                    title={REFUSED_PARENT_NOTE}
-                                    className="inline-flex shrink-0 items-center text-muted-foreground/70"
-                                  >
-                                    <Unlink aria-hidden className="size-3" />
-                                    <span className="sr-only">{REFUSED_PARENT_NOTE}</span>
-                                  </span>
-                                )}
-                                {rollup && (
-                                  // Counted from what is closed on the provider, never from a Status
-                                  // column (AC-2 / AC-3), and across every repository the children live
-                                  // in (AC-4). Beside the title because it is a fact about this issue,
-                                  // not a field the project reported.
-                                  // §4: one segment per sub-issue rather than a `3/4` label. The count
-                                  // and the percentage are both still there — the bar adds the shape.
-                                  <SubIssueProgress done={rollup.done} total={rollup.total} />
-                                )}
-                              </span>
-                            </TableCell>
-                            <TableCell className="max-w-48 px-3 py-0 align-middle">
-                              <LinkedChanges row={row} />
-                            </TableCell>
-                            {columns.map((field) => (
-                              <TableCell
-                                key={field.id}
-                                className={cn("max-w-48 px-3 py-0 align-middle")}
-                              >
-                                <ProjectCell
-                                  field={field}
-                                  value={row.item.values[field.id]}
-                                  rowTitle={row.title}
-                                  onEdit={
-                                    field.readOnly || !onEdit
-                                      ? undefined
-                                      : (value) => onEdit(row, field, value)
-                                  }
-                                  pending={pendingCells.includes(`${row.item.id}:${field.id}`)}
-                                />
-                              </TableCell>
-                            ))}
-                          </TableRow>
-                        </ContextMenuTrigger>
-                        <RowMenu row={row} onOpenRow={onOpenRow} onStartTask={onStartTask} />
-                      </ContextMenu>
-                    ))}
-              </TableBody>
-            );
-          })}
+                      {/* The round counter badge of §11. */}
+                      <span className="badge-soft inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full border px-1.5 font-semibold text-2xs [--badge-color:var(--muted-foreground)] tabular-nums">
+                        {countProjectRows(line.nodes, (row) => visible.has(row.id))}
+                      </span>
+                    </button>
+                  </TableHead>
+                </TableRow>
+              ) : (
+                <BodyRow
+                  key={line.entry.row.item.id}
+                  row={line.entry.row}
+                  depth={line.entry.depth}
+                  hasChildren={line.entry.hasChildren}
+                  rollup={line.entry.rollup}
+                  inCycle={line.entry.inCycle}
+                  isExpanded={expanded.has(line.entry.row.item.id)}
+                  onToggle={toggleExpanded}
+                  columns={columns}
+                  widths={widths}
+                  labelColours={labelColours}
+                  priorityChoices={priorityChoices}
+                  dateRange={dateRange}
+                  today={resolvedToday}
+                  pendingCells={pendingCells}
+                  onEdit={onEdit}
+                  onOpenRow={onOpenRow}
+                  onSetPriority={onSetPriority}
+                  onStartTask={onStartTask}
+                />
+              ),
+            )}
+            {win.padBottom > 0 && <tr aria-hidden style={{ height: win.padBottom }} />}
+          </TableBody>
         </Table>
       </div>
     </TooltipProvider>

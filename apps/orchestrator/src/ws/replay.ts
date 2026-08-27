@@ -1,6 +1,6 @@
-import type { SessionEventPayload, TaskEvent } from "@gatecontrol/contracts";
-import type { StreamTicketClaims } from "@gatecontrol/core/stream";
-import type { Db } from "@gatecontrol/db";
+import type { SessionEventPayload, TaskEvent } from "@solow/contracts";
+import type { StreamTicketClaims } from "@solow/core/stream";
+import type { Db } from "@solow/db";
 import { listTaskEventsSince } from "../data.js";
 import { hub } from "./hub.js";
 

@@ -1,8 +1,9 @@
 /// <reference types="bun-types" />
 
 import { afterEach, describe, expect, it, mock } from "bun:test";
-import type { IssueDto } from "@gatecontrol/contracts";
+import type { IssueDto } from "@solow/contracts";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { WHOLE_PAGE } from "@/lib/paged";
 import { renderWithTrpc } from "@/test/trpc-harness";
 
 /**
@@ -31,7 +32,7 @@ mock.module("next/navigation", () => ({
   useParams: () => ({}),
 }));
 
-const { IssuesView, readFilters, toSearchParams } = await import("./issues-view");
+const { IssuesView, nestIssues, readFilters, toSearchParams } = await import("./issues-view");
 
 function issueWith(overrides: Partial<IssueDto> = {}): IssueDto {
   return {
@@ -48,6 +49,8 @@ function issueWith(overrides: Partial<IssueDto> = {}): IssueDto {
     repositoryId: null,
     externalNumber: null,
     externalUrl: null,
+    externalId: null,
+    externalParentId: null,
     syncedAt: null,
     labels: ["hardware"],
     linkedChangeRequests: [],
@@ -107,13 +110,17 @@ describe("IssuesView", () => {
   it("asks issue.list for exactly the filters the URL names", async () => {
     at("status=open&q=latch&label=hardware&source=github");
     const { log } = renderWithTrpc(<IssuesView />, {
-      "issue.list": () => [issueWith()],
+      "issue.list": () => ({ items: [issueWith()], nextCursor: null }),
       "issue.labels": () => ["hardware", "ui"],
     });
 
     await waitFor(() => {
       const call = log.calls.find((c) => c.path === "issue.list");
+      // `WHOLE_PAGE` rides along on every read now (issue #82 AC-4): the bound is for the MCP
+      // surface, and a screen asks for as much as one request may carry. The claim here is still
+      // about the filters — that the URL's four are sent and nothing else is invented.
       expect(call?.input).toEqual({
+        ...WHOLE_PAGE,
         status: "open",
         query: "latch",
         source: "github",
@@ -125,13 +132,13 @@ describe("IssuesView", () => {
   it("sends no filter keys at all when the URL names none", async () => {
     at("");
     const { log } = renderWithTrpc(<IssuesView />, {
-      "issue.list": () => [issueWith()],
+      "issue.list": () => ({ items: [issueWith()], nextCursor: null }),
       "issue.labels": () => [],
     });
 
     await waitFor(() => {
       const call = log.calls.find((c) => c.path === "issue.list");
-      expect(call?.input).toEqual({});
+      expect(call?.input).toEqual({ ...WHOLE_PAGE });
     });
   });
 
@@ -140,7 +147,7 @@ describe("IssuesView", () => {
     renderWithTrpc(<IssuesView />, {
       // The one visible Issue carries "hardware" alone; "ui" must still be offered, or choosing
       // a label would delete every other option from the menu that offered it.
-      "issue.list": () => [issueWith()],
+      "issue.list": () => ({ items: [issueWith()], nextCursor: null }),
       "issue.labels": () => ["hardware", "ui"],
     });
 
@@ -152,7 +159,7 @@ describe("IssuesView", () => {
   it("hides the label filter entirely when the Workspace has no labels", async () => {
     at("");
     renderWithTrpc(<IssuesView />, {
-      "issue.list": () => [issueWith({ labels: [] })],
+      "issue.list": () => ({ items: [issueWith({ labels: [] })], nextCursor: null }),
       "issue.labels": () => [],
     });
 
@@ -163,7 +170,7 @@ describe("IssuesView", () => {
   it("clears search, labels and source — and leaves the status tab alone", async () => {
     at("status=open&q=latch&label=hardware&source=github");
     renderWithTrpc(<IssuesView />, {
-      "issue.list": () => [issueWith()],
+      "issue.list": () => ({ items: [issueWith()], nextCursor: null }),
       "issue.labels": () => ["hardware"],
     });
 
@@ -174,7 +181,7 @@ describe("IssuesView", () => {
   it("pushes a typed search into the URL once, after the typing stops", async () => {
     at("");
     renderWithTrpc(<IssuesView />, {
-      "issue.list": () => [issueWith()],
+      "issue.list": () => ({ items: [issueWith()], nextCursor: null }),
       "issue.labels": () => [],
     });
 
@@ -190,7 +197,7 @@ describe("IssuesView", () => {
   it("says the filters are what is hiding everything, not that there is nothing", async () => {
     at("q=nothing-matches-this");
     renderWithTrpc(<IssuesView />, {
-      "issue.list": () => [],
+      "issue.list": () => ({ items: [], nextCursor: null }),
       "issue.labels": () => ["hardware"],
     });
 
@@ -199,8 +206,72 @@ describe("IssuesView", () => {
 
   it("still says there is nothing when the Workspace really is empty", async () => {
     at("");
-    renderWithTrpc(<IssuesView />, { "issue.list": () => [], "issue.labels": () => [] });
+    renderWithTrpc(<IssuesView />, {
+      "issue.list": () => ({ items: [], nextCursor: null }),
+      "issue.labels": () => [],
+    });
 
     expect(await screen.findByText("No issues yet")).toBeTruthy();
+  });
+});
+
+describe("nestIssues", () => {
+  /*
+   * A flat list showed every child of an epic as a peer of its own parent — six rows reading as
+   * six independent pieces of work when they are one. Someone planning from that list counts
+   * seven things instead of one.
+   */
+  const issue = (id: string, over: Partial<IssueDto> = {}): IssueDto =>
+    ({
+      id,
+      title: id,
+      status: "open",
+      externalId: id,
+      externalParentId: null,
+      repositoryId: "repo-1",
+      labels: [],
+      linkedChangeRequests: [],
+      ...over,
+    }) as unknown as IssueDto;
+
+  it("puts a sub-issue under its epic and never beside it", () => {
+    const nested = nestIssues([
+      issue("child", { externalParentId: "epic" }),
+      issue("epic"),
+      issue("loose"),
+    ]);
+
+    const order = nested.map((n) => `${n.issue.id}@${n.depth}`);
+    expect(order).toEqual(["epic@0", "child@1", "loose@0"]);
+  });
+
+  it("keeps a child whose epic is not in the list, rather than losing it with the epic", () => {
+    // The epic lives in a repository nobody added, or was filtered out. Dropping the child would
+    // hide real work — the same refusal the project table makes (F23 AC-5).
+    const nested = nestIssues([issue("orphan", { externalParentId: "missing" })]);
+
+    expect(nested.map((n) => `${n.issue.id}@${n.depth}`)).toEqual(["orphan@0"]);
+  });
+
+  it("renders every issue exactly once", () => {
+    // The property that matters most: a list that duplicated a row would double-count the work.
+    const nested = nestIssues([
+      issue("epic"),
+      issue("a", { externalParentId: "epic" }),
+      issue("b", { externalParentId: "epic" }),
+    ]);
+
+    expect(nested).toHaveLength(3);
+    expect(new Set(nested.map((n) => n.issue.id)).size).toBe(3);
+  });
+
+  it("draws a parent chain that loops at the top level instead of recursing for ever", () => {
+    const nested = nestIssues([
+      issue("x", { externalParentId: "y" }),
+      issue("y", { externalParentId: "x" }),
+    ]);
+
+    expect(nested).toHaveLength(2);
+    expect(nested.every((n) => n.depth === 0)).toBe(true);
   });
 });

@@ -15,9 +15,9 @@ import { dbEnv } from "./env.js";
 const ALGO = "aes-256-gcm";
 
 function key(): Buffer {
-  const raw = Buffer.from(dbEnv().GATECONTROL_SECRET_KEY, "base64");
+  const raw = Buffer.from(dbEnv().SOLOW_SECRET_KEY, "base64");
   if (raw.length !== 32) {
-    throw new Error("GATECONTROL_SECRET_KEY must decode to 32 bytes (base64)");
+    throw new Error("SOLOW_SECRET_KEY must decode to 32 bytes (base64)");
   }
   return raw;
 }
@@ -54,7 +54,7 @@ export function decryptForAgentRun(ciphertext: string): string {
 /**
  * Web layer only, for the SCM integration DAL (issue #15). Decrypts a stored `scm_pat` so the
  * server process can call the GitHub/GitLab API directly with it. The result is passed straight
- * to `@gatecontrol/scm` and discarded — never returned from a DAL function, never mapped into a
+ * to `@solow/scm` and discarded — never returned from a DAL function, never mapped into a
  * DTO, never logged.
  */
 export function decryptForScmSync(ciphertext: string): string {

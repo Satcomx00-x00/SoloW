@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { afterEach, describe, expect, it } from "bun:test";
-import type { TaskDto, TaskState } from "@gatecontrol/contracts";
+import type { TaskDto, TaskState } from "@solow/contracts";
 import { cleanup, render, screen } from "@testing-library/react";
 import { BOARD_COLUMNS } from "@/lib/task-states";
 import { BoardView } from "./board";
@@ -24,7 +24,7 @@ function makeTask(over: Partial<TaskDto> & { id: string; state: TaskState }): Ta
         id: "attach-1",
         repositoryId: "repo-1",
         baseRef: null,
-        checkoutBranch: "gatecontrol/task-1",
+        checkoutBranch: "solow/task-1",
         resultBranch: null,
         position: 0,
       },

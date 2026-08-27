@@ -5,7 +5,7 @@
 ## Summary
 
 A Workflow is a repeatable, multi-step process that chains Agents and human decisions
-together. GateControl presents Workflows as a **visual node graph**: users design a
+together. SoloW presents Workflows as a **visual node graph**: users design a
 Workflow by arranging and connecting Steps on a canvas, and watch a live Run's progress
 overlaid on that same graph. This makes complex, multi-agent processes understandable and
 steerable without reading logs.

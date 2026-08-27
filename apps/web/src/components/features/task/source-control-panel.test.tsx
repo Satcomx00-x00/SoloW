@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { afterEach, describe, expect, it, mock } from "bun:test";
-import type { ScmFileDto, ScmWorktreeDto } from "@gatecontrol/contracts";
+import type { ScmFileDto, ScmWorktreeDto } from "@solow/contracts";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { SourceControlPanel } from "./source-control-panel";
 
@@ -31,7 +31,7 @@ const worktree = (over: Partial<ScmWorktreeDto> = {}): ScmWorktreeDto => ({
   repositoryId: "repo-1",
   repositoryName: "bot",
   branch: {
-    name: "gatecontrol/task-1",
+    name: "solow/task-1",
     detached: false,
     head: "abc12345",
     upstream: null,

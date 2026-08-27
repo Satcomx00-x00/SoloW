@@ -1,5 +1,5 @@
 import "server-only";
-import { type Db, FLAGS, type FlagKey, workspace } from "@gatecontrol/db";
+import { type Db, FLAGS, type FlagKey, workspace } from "@solow/db";
 import { eq } from "drizzle-orm";
 
 /**

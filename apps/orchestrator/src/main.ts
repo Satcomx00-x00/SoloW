@@ -8,6 +8,6 @@ import { functions, startWebSocketServer } from "./index.js";
  * below). All three routes live in `index.ts`; this file only starts the server and reports it.
  */
 const server = startWebSocketServer();
-console.log(`[gatecontrol/orchestrator] WebSocket hub listening on :${server.port}`);
-console.log(`[gatecontrol/orchestrator] /events and /api/inngest live on :${server.port}`);
-console.log(`[gatecontrol/orchestrator] ${functions.length} Inngest function(s) registered`);
+console.log(`[solow/orchestrator] WebSocket hub listening on :${server.port}`);
+console.log(`[solow/orchestrator] /events and /api/inngest live on :${server.port}`);
+console.log(`[solow/orchestrator] ${functions.length} Inngest function(s) registered`);

@@ -1,7 +1,7 @@
 "use client";
 
-import type { TaskDependencyDto, TaskDto } from "@gatecontrol/contracts";
-import { parseDependencyCycleMessage } from "@gatecontrol/core";
+import type { TaskDependencyDto, TaskDto } from "@solow/contracts";
+import { parseDependencyCycleMessage } from "@solow/core";
 import { Check, TriangleAlert } from "lucide-react";
 import { useState } from "react";
 import {

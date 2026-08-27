@@ -9,8 +9,8 @@ import {
   projectItem,
   projectValue,
   secret,
-} from "@gatecontrol/db";
-import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
+} from "@solow/db";
+import { createTestDb, type TestDb } from "@solow/db/testing";
 import { and, eq } from "drizzle-orm";
 import { deleteIssue } from "./issue.js";
 import {
@@ -258,9 +258,9 @@ describe("listProjectItems", () => {
 /**
  * What the table nests and counts by (issue #127).
  *
- * The hierarchy itself is `@gatecontrol/core`'s and proven there. What has to be true here is
+ * The hierarchy itself is `@solow/core`'s and proven there. What has to be true here is
  * that the row carries the *provider's* facts — parent, repository, closed — rather than
- * GateControl's own status, because an epic's progress counted from a Status column would be a
+ * SoloW's own status, because an epic's progress counted from a Status column would be a
  * percentage a team could rename.
  */
 describe("listProjectItems, hierarchy", () => {

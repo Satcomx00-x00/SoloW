@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { describe, expect, it } from "bun:test";
-import type { SessionEventDto, TaskEvent } from "@gatecontrol/contracts";
+import type { SessionEventDto, TaskEvent } from "@solow/contracts";
 import {
   agentActivity,
   buildTranscript,

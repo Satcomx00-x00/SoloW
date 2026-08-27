@@ -1,6 +1,6 @@
 import "server-only";
-import type { McpScope } from "@gatecontrol/contracts";
-import { type Db, hashMcpToken, mcpToken } from "@gatecontrol/db";
+import type { McpScope } from "@solow/contracts";
+import { type Db, hashMcpToken, mcpToken } from "@solow/db";
 import { and, eq, isNull } from "drizzle-orm";
 import { getWorkspaceFlags } from "../dal/workspace.js";
 import type { BaseContext } from "../trpc.js";

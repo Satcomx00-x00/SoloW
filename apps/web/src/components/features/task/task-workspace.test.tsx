@@ -6,7 +6,7 @@ import {
   TaskDependencyErrorCode,
   type TaskDto,
   TaskErrorCode,
-} from "@gatecontrol/contracts";
+} from "@solow/contracts";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import {
   type FakeSocket,
@@ -58,7 +58,7 @@ function task(over: Partial<TaskDto> = {}): TaskDto {
         id: "attach-1",
         repositoryId: "repo-1",
         baseRef: "main",
-        checkoutBranch: "gatecontrol/task-1",
+        checkoutBranch: "solow/task-1",
         resultBranch: null,
         position: 0,
       },
@@ -77,7 +77,7 @@ const session = {
   id: SESSION_ID,
   taskId: TASK_ID,
   state: "awaiting_review" as const,
-  diffRef: "gatecontrol/task-1",
+  diffRef: "solow/task-1",
   startedAt: "2026-01-01T00:00:00.000Z",
   endedAt: null,
 };
@@ -488,7 +488,7 @@ describe("the Changes tab of a multi-Repository Task", () => {
       "session.get": () =>
         detailWithDiffs([
           {
-            diffRef: "gatecontrol/task-1",
+            diffRef: "solow/task-1",
             repositoryId: "repo-1",
             repositoryName: "api",
             ...change("src/api.ts"),
@@ -504,15 +504,17 @@ describe("the Changes tab of a multi-Repository Task", () => {
 
     await openChangesTab();
 
-    expect(await screen.findByLabelText("Changes in api")).toBeDefined();
-    expect(await screen.findByLabelText("Changes in shared-lib")).toBeDefined();
+    // The label names `(repository, branch)`, which is what a group *is* (issue #70 AC-1) — a
+    // repository attached twice on two branches would otherwise give two groups one name.
+    expect(await screen.findByLabelText("Changes in api on solow/task-1")).toBeDefined();
+    expect(await screen.findByLabelText("Changes in shared-lib on feature/lib")).toBeDefined();
     // Each group carries its own branch — one branch for the whole Task would be a lie.
-    const libGroup = await screen.findByLabelText("Changes in shared-lib");
+    const libGroup = await screen.findByLabelText("Changes in shared-lib on feature/lib");
     expect(within(libGroup).getAllByText("feature/lib").length).toBeGreaterThan(0);
     expect(
       within(within(libGroup).getByRole("list", { name: "Changes" })).getByTitle("src/lib.ts"),
     ).toBeDefined();
-    const apiGroup = await screen.findByLabelText("Changes in api");
+    const apiGroup = await screen.findByLabelText("Changes in api on solow/task-1");
     const apiFiles = within(apiGroup).getByRole("list", { name: "Changes" });
     expect(within(apiFiles).getByTitle("src/api.ts")).toBeDefined();
     expect(within(apiFiles).queryByTitle("src/lib.ts")).toBeNull();
@@ -525,7 +527,7 @@ describe("the Changes tab of a multi-Repository Task", () => {
       "session.get": () =>
         detailWithDiffs([
           {
-            diffRef: "gatecontrol/task-1",
+            diffRef: "solow/task-1",
             repositoryId: "repo-1",
             repositoryName: "api",
             ...change("src/api.ts"),
@@ -538,7 +540,7 @@ describe("the Changes tab of a multi-Repository Task", () => {
     expect(
       within(await screen.findByRole("list", { name: "Changes" })).getByTitle("src/api.ts"),
     ).toBeDefined();
-    expect(screen.queryByLabelText("Changes in api")).toBeNull();
+    expect(screen.queryByLabelText("Changes in api on solow/task-1")).toBeNull();
   });
 
   it("renders a diff captured before Repositories were named as an unlabelled group", async () => {
@@ -548,7 +550,7 @@ describe("the Changes tab of a multi-Repository Task", () => {
       ...baseHandlers,
       "session.get": () =>
         detailWithDiffs([
-          { diffRef: "gatecontrol/task-1", ...change("src/legacy.ts") },
+          { diffRef: "solow/task-1", ...change("src/legacy.ts") },
           {
             diffRef: "feature/lib",
             repositoryId: "repo-2",
@@ -560,9 +562,10 @@ describe("the Changes tab of a multi-Repository Task", () => {
 
     await openChangesTab();
 
-    expect(await screen.findByLabelText("Changes in gatecontrol/task-1")).toBeDefined();
+    const label = "Changes in an unnamed repository on solow/task-1";
+    expect(await screen.findByLabelText(label)).toBeDefined();
     expect(await screen.findByText("Unnamed repository")).toBeDefined();
-    const unnamed = await screen.findByLabelText("Changes in gatecontrol/task-1");
+    const unnamed = await screen.findByLabelText(label);
     expect(
       within(within(unnamed).getByRole("list", { name: "Changes" })).getByTitle("src/legacy.ts"),
     ).toBeDefined();

@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { afterAll, afterEach, beforeAll, describe, expect, it, spyOn } from "bun:test";
-import type { SurfaceLayout } from "@gatecontrol/core";
+import type { SurfaceLayout } from "@solow/core";
 import { cleanup, screen, waitFor } from "@testing-library/react";
 import { AppContextProvider } from "@/lib/app-context";
 import { type ShellIdentity, statusItemRegistry } from "@/lib/contributions";
@@ -56,7 +56,7 @@ function renderBar(identity: ShellIdentity | null = null, layout?: SurfaceLayout
     <AppContextProvider value={{ identity }}>
       <StatusBar />
     </AppContextProvider>,
-    { "task.list": () => TASKS, ...preferences.handlers },
+    { "task.list": () => ({ items: TASKS, nextCursor: null }), ...preferences.handlers },
   );
 }
 
@@ -123,6 +123,8 @@ describe("StatusBar", () => {
     const { container } = renderBar(null, {
       order: ["status.review", "status.running", "status.tasks"],
       hidden: [],
+      shown: [],
+      widths: {},
     });
 
     await waitFor(() => expect(screen.getByText("3 tasks")).toBeDefined());
@@ -135,7 +137,7 @@ describe("StatusBar", () => {
   });
 
   it("gives a segment the user hid no space at all, rather than rendering it empty", async () => {
-    renderBar(null, { order: [], hidden: ["status.workspace"] });
+    renderBar(null, { order: [], hidden: ["status.workspace"], shown: [], widths: {} });
 
     await waitFor(() => expect(screen.getByText("3 tasks")).toBeDefined());
     await waitFor(() => expect(screen.queryByText("local workspace")).toBeNull());

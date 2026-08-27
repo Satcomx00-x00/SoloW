@@ -1,12 +1,6 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import {
-  authSchema,
-  createDb,
-  type Db,
-  ensureDefaultAgentCatalog,
-  workspace,
-} from "@gatecontrol/db";
+import { authSchema, createDb, type Db, ensureDefaultAgentCatalog, workspace } from "@solow/db";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { count, eq } from "drizzle-orm";
@@ -19,7 +13,7 @@ import { webEnv } from "../env.js";
  *
  * Two decisions worth stating outright:
  *
- * **One Owner per instance.** A self-hosted GateControl is one person's control plane, and its
+ * **One Owner per instance.** A self-hosted SoloW is one person's control plane, and its
  * Workspace holds their agent credentials. Leaving sign-up open would let anyone who can reach
  * the port create an account on someone else's machine, so the *second* sign-up is refused at
  * the database hook — the closest point to the write, where no route can route around it.
@@ -43,10 +37,10 @@ const MIN_PASSWORD_LENGTH = 12;
 export function createAuth(db: Db = createDb()) {
   const env = webEnv();
   return betterAuth({
-    appName: "GateControl",
-    secret: env.GATECONTROL_AUTH_SECRET,
-    baseURL: env.GATECONTROL_WEB_URL,
-    trustedOrigins: [env.GATECONTROL_WEB_URL],
+    appName: "SoloW",
+    secret: env.SOLOW_AUTH_SECRET,
+    baseURL: env.SOLOW_WEB_URL,
+    trustedOrigins: [env.SOLOW_WEB_URL],
     database: drizzleAdapter(db, { provider: "sqlite", schema: authSchema }),
     ...MODEL_NAMES,
     emailAndPassword: {
@@ -67,7 +61,7 @@ export function createAuth(db: Db = createDb()) {
         create: {
           before: async () => {
             if (await ownerExists(db)) {
-              throw new Error("GateControl is single-Owner: an account already exists.");
+              throw new Error("SoloW is single-Owner: an account already exists.");
             }
           },
           after: async (user) => {
@@ -81,7 +75,7 @@ export function createAuth(db: Db = createDb()) {
               enabledFlags: null,
             });
             // Agent identity is a catalog row, not an enum (issue #10) — without this, a
-            // brand-new Workspace could not create even the one agent GateControl ships.
+            // brand-new Workspace could not create even the one agent SoloW ships.
             await ensureDefaultAgentCatalog(db, workspaceId);
           },
         },

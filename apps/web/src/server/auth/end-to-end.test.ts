@@ -1,8 +1,8 @@
 /// <reference types="bun-types" />
 
 import { beforeAll, beforeEach, describe, expect, it } from "bun:test";
-import { issue as issueTable, workspace } from "@gatecontrol/db";
-import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
+import { issue as issueTable, workspace } from "@solow/db";
+import { createTestDb, type TestDb } from "@solow/db/testing";
 import { eq } from "drizzle-orm";
 import { getWorkspaceFlags } from "../dal/workspace.js";
 import { appRouter } from "../routers/index.js";
@@ -17,13 +17,13 @@ import { resolveSession } from "./session.js";
  * particular that `workspaceId` reaches the DAL from the session and from nowhere else.
  */
 
-const OWNER = { email: "owner@gatecontrol.test", password: "correct-horse-battery", name: "Owner" };
+const OWNER = { email: "owner@solow.test", password: "correct-horse-battery", name: "Owner" };
 
 beforeAll(() => {
-  process.env["GATECONTROL_AUTH_SECRET"] ??= "test-auth-secret-at-least-32-characters";
-  process.env["GATECONTROL_STREAM_SECRET"] ??= "test-stream-secret";
-  process.env["GATECONTROL_WEB_URL"] ??= "http://localhost:5000";
-  process.env["GATECONTROL_SECRET_KEY"] ??= Buffer.alloc(32, 7).toString("base64");
+  process.env["SOLOW_AUTH_SECRET"] ??= "test-auth-secret-at-least-32-characters";
+  process.env["SOLOW_STREAM_SECRET"] ??= "test-stream-secret";
+  process.env["SOLOW_WEB_URL"] ??= "http://localhost:5000";
+  process.env["SOLOW_SECRET_KEY"] ??= Buffer.alloc(32, 7).toString("base64");
 });
 
 let db: TestDb;
@@ -92,7 +92,7 @@ describe("signed-in Owner reaching the API", () => {
     const caller = appRouter.createCaller(await contextFor(cookie));
     const listed = await caller.issue.list({});
 
-    expect(listed.map((i) => i.id)).toEqual([seeded.id]);
+    expect(listed.items.map((i) => i.id)).toEqual([seeded.id]);
   });
 
   it("writes land in the Workspace the session names, not one the client picked", async () => {
@@ -120,7 +120,7 @@ describe("signed-in Owner reaching the API", () => {
       session: { workspaceId: (other as { id: string }).id, userId: "another-user" },
       flagOverrides: { "ff-core-program": true },
     });
-    expect(await theirs.repository.list({})).toHaveLength(0);
+    expect((await theirs.repository.list({})).items).toHaveLength(0);
   });
 
   it("is unauthorized with no cookie, before the flag is even consulted", async () => {

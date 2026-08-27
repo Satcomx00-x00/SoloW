@@ -1,4 +1,4 @@
-import type { AgentProtocol } from "@gatecontrol/contracts";
+import type { AgentProtocol } from "@solow/contracts";
 
 /**
  * Which agent protocols this orchestrator can actually drive (issues #10 and #58).
@@ -30,13 +30,13 @@ export function hasAgentRunner(protocol: AgentProtocol): boolean {
 }
 
 export function missingAgentRunnerReason(protocol: AgentProtocol): string {
-  return `no agent runner for protocol "${protocol}" — this GateControl build can only drive ${AVAILABLE_AGENT_PROTOCOLS.join(", ")}`;
+  return `no agent runner for protocol "${protocol}" — this SoloW build can only drive ${AVAILABLE_AGENT_PROTOCOLS.join(", ")}`;
 }
 
 /**
- * Whether the agent makes the Task's worktree itself, or GateControl has to.
+ * Whether the agent makes the Task's worktree itself, or SoloW has to.
  *
- * Claude Code does, via `--worktree`, and GateControl adopts whatever path it reports. ACP has
+ * Claude Code does, via `--worktree`, and SoloW adopts whatever path it reports. ACP has
  * no equivalent: an ACP agent works in the `cwd` it is given, so the lifecycle must provision
  * the worktree first and point the agent at it. The isolation guarantee (Principle II) is the
  * same either way — only who creates the directory changes — which is why this is a one-line

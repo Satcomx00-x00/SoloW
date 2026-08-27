@@ -1,0 +1,1 @@
+ALTER TABLE `project_view` ADD `hide_closed` integer DEFAULT false NOT NULL;

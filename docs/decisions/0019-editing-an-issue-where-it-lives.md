@@ -10,7 +10,7 @@
 [F23](../features/F23-project-planning.md) shipped with editing deliberately excluded: *"Editing
 titles, descriptions or comments. They stay the provider's ([F01](../features/F01-issue-management.md))."*
 [0018](./0018-provider-owned-project-fields.md) put the *project field* values on the provider
-and made GateControl their mirror, and the exclusion followed the same instinct — if we do not
+and made SoloW their mirror, and the exclusion followed the same instinct — if we do not
 own the value, do not offer to change it.
 
 Using the result made the gap plain. A planning table where the status can be changed but the
@@ -25,7 +25,7 @@ another, and only the first was ever considered.
 ## Decision
 
 **An imported Issue is edited by sending the change to the provider that owns it, and re-reading
-what the provider then holds.** GateControl never becomes a second author of the value.
+what the provider then holds.** SoloW never becomes a second author of the value.
 
 Concretely:
 

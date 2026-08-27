@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "bun:test";
-import type { SurfaceLayout } from "@gatecontrol/core";
+import type { SurfaceLayout } from "@solow/core";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { Command, CommandList } from "@/components/ui/command";
 import { AppContextProvider } from "@/lib/app-context";
@@ -104,7 +104,7 @@ describe("the command palette's entries", () => {
    * Settings, and silently ignored on the surface it describes.
    */
   it("hides a command the saved arrangement hides", () => {
-    renderPalette(null, { order: [], hidden: [PROBE_ID] });
+    renderPalette(null, { order: [], hidden: [PROBE_ID], shown: [], widths: {} });
 
     expect(screen.queryByText("Probe a contributed command")).toBeNull();
   });
@@ -118,11 +118,11 @@ describe("the command palette's entries", () => {
         .map((option) => option.textContent)
         .filter((title) => title === "Probe a contributed command" || title === "New task");
 
-    renderPalette(null, { order: [], hidden: [] });
+    renderPalette(null, { order: [], hidden: [], shown: [], widths: {} });
     const before = inCreateGroup();
 
     cleanup();
-    renderPalette(null, { order: [PROBE_ID], hidden: [] });
+    renderPalette(null, { order: [PROBE_ID], hidden: [], shown: [], widths: {} });
     const after = inCreateGroup();
 
     expect(before).toEqual(["New task", "Probe a contributed command"]);

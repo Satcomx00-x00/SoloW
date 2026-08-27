@@ -259,6 +259,32 @@ beforeAll(() => {
           milestone: { id: 90, title: "v1", start_date: null, due_date: "2026-09-01" },
         });
       }
+      if (url.pathname === `${project(PROJECT)}/issues/3/notes`) {
+        if (req.method === "POST") {
+          const body = (await req.json()) as { body: string };
+          return Response.json({
+            id: 9,
+            body: body.body,
+            created_at: "2026-08-26T10:00:00Z",
+            author: { username: "ada", name: "Ada" },
+          });
+        }
+        return Response.json([
+          {
+            id: 1,
+            body: "A person wrote this",
+            created_at: "2026-08-20T00:00:00Z",
+            author: { username: "ada", name: "Ada" },
+          },
+          {
+            id: 2,
+            body: "changed title from **A** to **B**",
+            created_at: "2026-08-20T00:01:00Z",
+            system: true,
+            author: { username: "ada" },
+          },
+        ]);
+      }
       if (url.pathname === `${project(PROJECT)}/users`) {
         return Response.json([
           { id: 7, username: "ada", name: "Ada", avatar_url: "a.png" },
@@ -412,7 +438,7 @@ describe("GitlabProvider", () => {
     });
 
     it("omits the parent entirely on a tier that has no epics", async () => {
-      // GitLab Free returns no `epic` key at all. Reporting `null` would be GateControl saying
+      // GitLab Free returns no `epic` key at all. Reporting `null` would be SoloW saying
       // the issue has no parent on a plan where it could not have one — and the mirror would
       // erase, on every poll, an edge that a Premium instance had established.
       const issues = await new GitlabProvider().listIssues(credential(), PROJECT);
@@ -501,6 +527,25 @@ describe("GitlabProvider", () => {
     ]);
   });
 
+  it("createLabels skips what's already there and POSTs only what's missing", async () => {
+    receivedWrites = [];
+    const result = await new GitlabProvider().createLabels(credential(), PROJECT, [
+      { name: "bug", color: "#ff0000", description: "would collide" },
+      { name: "type/feat", color: "#0e8a16", description: "A new feature" },
+    ]);
+
+    expect(result.existing).toEqual(["bug"]);
+    expect(result.created).toEqual(["type/feat"]);
+    // One write, POST — not the GET `provisionProjectStructure` originally shipped as a bug.
+    expect(receivedWrites).toHaveLength(1);
+    expect(receivedWrites[0]?.method).toBe("POST");
+    expect(receivedWrites[0]?.body).toEqual({
+      name: "type/feat",
+      color: "#0e8a16",
+      description: "A new feature",
+    });
+  });
+
   it("throws ScmProviderError on a non-2xx response, token never in the message", async () => {
     try {
       await new GitlabProvider().listIssues(credential(), "acme/private");
@@ -579,5 +624,31 @@ describe("writing an issue back to GitLab", () => {
     expect(issue.assignees?.map((u) => u.login)).toEqual(["ada"]);
     expect(issue.labels).toEqual(["bug"]);
     expect(issue.milestone?.dueDate).toBe("2026-09-01");
+  });
+});
+
+describe("issue comments on GitLab", () => {
+  const gitlab = () => new GitlabProvider();
+
+  it("drops the system notes, which are bookkeeping and not a conversation", async () => {
+    /*
+     * The whole reason this driver is not a one-liner. GitLab returns *notes*, and most of them
+     * are the system recording a label change; GitHub keeps that in a separate timeline. Passing
+     * them through would make one provider's issue read as a wall of bookkeeping and the other's
+     * as a discussion — the same screen meaning two different things depending on the host.
+     */
+    const comments = await gitlab().listComments(credential(), PROJECT, 3);
+
+    expect(comments.map((c) => c.body)).toEqual(["A person wrote this"]);
+  });
+
+  it("posts a note and reads back what GitLab stored", async () => {
+    receivedWrites = [];
+
+    const posted = await gitlab().createComment(credential(), PROJECT, 3, "Agreed");
+
+    expect(receivedWrites[0]?.method).toBe("POST");
+    expect(posted.body).toBe("Agreed");
+    expect(posted.author?.login).toBe("ada");
   });
 });

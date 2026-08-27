@@ -238,6 +238,26 @@ describe("provisionProjectStructure", () => {
     expect(result.created).toContain("size::XL");
   });
 
+  it("creates a label with POST, not GET — a GET silently does nothing on real GitLab", async () => {
+    // Regression for the bug this method shipped with: a GET to `/labels` answers with the
+    // existing list and creates nothing, but returns 200 with a plausible body, so a caller
+    // reading only the status code believes the write landed. Only asserting the query string
+    // (as this suite used to) cannot catch it — a GET and a POST carry the same query.
+    paths = [];
+    methods = [];
+    response = [];
+    const projects = new GitlabProjects();
+
+    await projects.provisionProjectStructure(credential(), "42");
+
+    const writeIndexes = paths.reduce<number[]>((acc, p, i) => {
+      if (p.includes("name=")) acc.push(i);
+      return acc;
+    }, []);
+    expect(writeIndexes.length).toBeGreaterThan(0);
+    for (const i of writeIndexes) expect(methods[i]).toBe("POST");
+  });
+
   it("never touches a label that already exists, whatever its colour", async () => {
     // A scoped label drives the team's boards and filters, not just this table. Creating
     // structure without asking is one thing; overwriting somebody's definition is another.

@@ -62,7 +62,7 @@ const VARIANTS: Array<[string, SessionEventPayload]> = [
     "a captured diff",
     {
       kind: "diff",
-      diffRef: "gatecontrol/task-1",
+      diffRef: "solow/task-1",
       files: [{ path: "src/latch.ts", status: "modified", additions: 3, deletions: 1 }],
       patch: "@@ -1 +1 @@",
       truncated: false,
@@ -136,7 +136,7 @@ describe("parseSessionEventPayload (rows written before the union existed)", () 
     // This is the "a Done Task can still show what was approved" property (Principle I): the
     // review page reads its diff out of this log and nothing rewrote the rows.
     const legacy = {
-      diffRef: "gatecontrol/task-1",
+      diffRef: "solow/task-1",
       files: [{ path: "src/latch.ts", status: "modified" as const, additions: 3, deletions: 1 }],
       patch: "@@ -1 +1 @@",
       truncated: false,

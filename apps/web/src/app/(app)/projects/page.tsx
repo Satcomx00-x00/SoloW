@@ -1,6 +1,6 @@
 import { ProjectsHub } from "@/components/features/project/projects-hub";
 
-export const metadata = { title: "Projects · GateControl" };
+export const metadata = { title: "Projects · SoloW" };
 
 /**
  * The app's front door.

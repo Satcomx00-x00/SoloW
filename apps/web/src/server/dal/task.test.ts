@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import { TaskErrorCode } from "@gatecontrol/contracts";
-import { CREDENTIAL_EXPIRED_REASON } from "@gatecontrol/core";
-import { agentProfile, repository } from "@gatecontrol/db";
-import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
+import { TaskErrorCode } from "@solow/contracts";
+import { CREDENTIAL_EXPIRED_REASON } from "@solow/core";
+import { agentProfile, repository } from "@solow/db";
+import { createTestDb, type TestDb } from "@solow/db/testing";
 import { eq } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
 import { getIssueById } from "./issue.js";
@@ -57,9 +57,7 @@ describe("task DAL", () => {
     expect(created.data.repositories[0]?.baseRef).toBeNull();
     // Derived server-side rather than left null: the unique key is (task, repository, branch),
     // and SQLite treats every NULL as distinct.
-    expect(created.data.repositories[0]?.checkoutBranch).toBe(
-      `gatecontrol/task-${created.data.id}`,
-    );
+    expect(created.data.repositories[0]?.checkoutBranch).toBe(`solow/task-${created.data.id}`);
 
     const fetched = await getTaskById(ctx, created.data.id);
     expect(fetched.ok).toBe(true);
@@ -113,8 +111,8 @@ describe("task DAL", () => {
     const onlyB = await listTasks(ctx, { issueId: issueB.data.id });
     expect(onlyB.ok).toBe(true);
     if (!onlyB.ok) return;
-    expect(onlyB.data.length).toBe(2);
-    expect(onlyB.data.every((t) => t.issueId === issueB.data.id)).toBe(true);
+    expect(onlyB.data.items.length).toBe(2);
+    expect(onlyB.data.items.every((t) => t.issueId === issueB.data.id)).toBe(true);
   });
 
   it("listTasks filters by title query, and does not silently ignore it", async () => {
@@ -140,10 +138,10 @@ describe("task DAL", () => {
     const hits = await listTasks(ctx, { query: "servo" });
     expect(hits.ok).toBe(true);
     if (!hits.ok) return;
-    expect(hits.data.map((t) => t.title)).toEqual(["Replace the servo stall detector"]);
+    expect(hits.data.items.map((t) => t.title)).toEqual(["Replace the servo stall detector"]);
 
     const none = await listTasks(ctx, { query: "nothing matches this" });
-    expect(none.ok && none.data).toEqual([]);
+    expect(none.ok && none.data.items).toEqual([]);
   });
 
   // Cross-workspace isolation (Principle V) for the task DAL.
@@ -174,7 +172,7 @@ describe("task DAL", () => {
     const listA = await listTasks(ctxA, {});
     expect(listA.ok).toBe(true);
     if (!listA.ok) return;
-    expect(listA.data.length).toBe(0);
+    expect(listA.data.items.length).toBe(0);
   });
 });
 
@@ -256,7 +254,9 @@ describe("a Task's Repository attachments", () => {
     const listed = await listTasks(ctx, {});
     expect(listed.ok).toBe(true);
     if (!listed.ok) return;
-    const byTitle = Object.fromEntries(listed.data.map((t) => [t.title, t.repositories.length]));
+    const byTitle = Object.fromEntries(
+      listed.data.items.map((t) => [t.title, t.repositories.length]),
+    );
     expect(byTitle).toEqual({ "one repo": 1, "two repos": 2 });
   });
 
@@ -401,7 +401,7 @@ describe("a Task's Repository attachments", () => {
     ).rejects.toThrow();
 
     const listed = await listTasks(ctx, {});
-    expect(listed.ok && listed.data).toEqual([]);
+    expect(listed.ok && listed.data.items).toEqual([]);
   });
 });
 

@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import type { TaskDependencyDto, TaskDto, TaskState } from "@gatecontrol/contracts";
+import type { TaskDependencyDto, TaskDto, TaskState } from "@solow/contracts";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { type FakeSocket, installFakeWebSocket, renderWithTrpc } from "@/test/trpc-harness";
 import { moveRefusal } from "./blockers";
@@ -26,7 +26,7 @@ function makeTask(over: Partial<TaskDto> & { id: string; state: TaskState }): Ta
         id: "attach-1",
         repositoryId: "repo-1",
         baseRef: null,
-        checkoutBranch: "gatecontrol/task-1",
+        checkoutBranch: "solow/task-1",
         resultBranch: null,
         position: 0,
       },
@@ -78,11 +78,14 @@ describe("Board dependencies", () => {
   it("marks a blocked card with a lock and its outstanding count, and disables Launch", async () => {
     renderWithTrpc(<Board />, {
       ...ticket,
-      "task.list": () => [
-        makeTask({ id: "a", state: "ready", title: "Wire the latch" }),
-        makeTask({ id: "b", state: "running", title: "Order the servo" }),
-        makeTask({ id: "c", state: "backlog", title: "Cut the bracket" }),
-      ],
+      "task.list": () => ({
+        items: [
+          makeTask({ id: "a", state: "ready", title: "Wire the latch" }),
+          makeTask({ id: "b", state: "running", title: "Order the servo" }),
+          makeTask({ id: "c", state: "backlog", title: "Cut the bracket" }),
+        ],
+        nextCursor: null,
+      }),
       "task.dependencies": () => [
         makeEdge("a", "b", "Order the servo", "running"),
         makeEdge("a", "c", "Cut the bracket", "backlog"),
@@ -99,7 +102,10 @@ describe("Board dependencies", () => {
   it("leaves an unblocked Ready Task launchable", async () => {
     const { log } = renderWithTrpc(<Board />, {
       ...ticket,
-      "task.list": () => [makeTask({ id: "a", state: "ready", title: "Wire the latch" })],
+      "task.list": () => ({
+        items: [makeTask({ id: "a", state: "ready", title: "Wire the latch" })],
+        nextCursor: null,
+      }),
       "task.dependencies": () => [],
       "task.launch": () => makeTask({ id: "a", state: "running" }),
     });
@@ -114,10 +120,13 @@ describe("Board dependencies", () => {
     let blockerState: TaskState = "running";
     renderWithTrpc(<Board />, {
       ...ticket,
-      "task.list": () => [
-        makeTask({ id: "a", state: "ready", title: "Wire the latch" }),
-        makeTask({ id: "b", state: blockerState, title: "Order the servo" }),
-      ],
+      "task.list": () => ({
+        items: [
+          makeTask({ id: "a", state: "ready", title: "Wire the latch" }),
+          makeTask({ id: "b", state: blockerState, title: "Order the servo" }),
+        ],
+        nextCursor: null,
+      }),
       "task.dependencies": () => [makeEdge("a", "b", "Order the servo", blockerState)],
     });
 
@@ -145,10 +154,13 @@ describe("Board dependencies", () => {
   it("names the offending path with Task titles when an edge is refused as a cycle", async () => {
     renderWithTrpc(<Board />, {
       ...ticket,
-      "task.list": () => [
-        makeTask({ id: "a", state: "backlog", title: "Wire the latch" }),
-        makeTask({ id: "b", state: "backlog", title: "Order the servo" }),
-      ],
+      "task.list": () => ({
+        items: [
+          makeTask({ id: "a", state: "backlog", title: "Wire the latch" }),
+          makeTask({ id: "b", state: "backlog", title: "Order the servo" }),
+        ],
+        nextCursor: null,
+      }),
       "task.dependencies": () => [],
       "task.addDependency": () => {
         throw new Error("TASK_DEPENDENCY_CYCLE: a → b → a");
@@ -178,7 +190,10 @@ describe("Board dependencies", () => {
 
     const { log } = renderWithTrpc(<Board />, {
       ...ticket,
-      "task.list": () => [makeTask({ id: "a", state: "ready", title: "Wire the latch" })],
+      "task.list": () => ({
+        items: [makeTask({ id: "a", state: "ready", title: "Wire the latch" })],
+        nextCursor: null,
+      }),
       "task.dependencies": () => edges,
     });
 
@@ -201,7 +216,10 @@ describe("Board dependencies", () => {
   it("reports a failed dependency query instead of showing every Task as ready", async () => {
     renderWithTrpc(<Board />, {
       ...ticket,
-      "task.list": () => [makeTask({ id: "a", state: "ready", title: "Wire the latch" })],
+      "task.list": () => ({
+        items: [makeTask({ id: "a", state: "ready", title: "Wire the latch" })],
+        nextCursor: null,
+      }),
       "task.dependencies": () => {
         throw new Error("edges unavailable");
       },
@@ -218,7 +236,10 @@ describe("Board dependencies", () => {
     // button, which reaches the same banner through the same mutation.
     renderWithTrpc(<Board />, {
       ...ticket,
-      "task.list": () => [makeTask({ id: "a", state: "backlog", title: "Wire the latch" })],
+      "task.list": () => ({
+        items: [makeTask({ id: "a", state: "backlog", title: "Wire the latch" })],
+        nextCursor: null,
+      }),
       "task.dependencies": () => [],
       "task.move": () => {
         throw new Error("TASK_BLOCKED");

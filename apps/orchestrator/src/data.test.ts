@@ -13,8 +13,8 @@ import {
   task,
   taskRepository,
   workspace,
-} from "@gatecontrol/db";
-import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
+} from "@solow/db";
+import { createTestDb, type TestDb } from "@solow/db/testing";
 import { and, asc, eq } from "drizzle-orm";
 import {
   appendSessionEvent,
@@ -30,9 +30,9 @@ import {
   setTaskState,
 } from "./data.js";
 
-// The secret store reads GATECONTROL_SECRET_KEY lazily; set it before any encryptSecret call.
+// The secret store reads SOLOW_SECRET_KEY lazily; set it before any encryptSecret call.
 beforeAll(() => {
-  process.env.GATECONTROL_SECRET_KEY = Buffer.alloc(32, 7).toString("base64");
+  process.env.SOLOW_SECRET_KEY = Buffer.alloc(32, 7).toString("base64");
 });
 
 const WS = "ws-alpha";
@@ -85,9 +85,9 @@ async function seed(db: TestDb) {
   await db.insert(repository).values({
     id: "repo-1",
     workspaceId: WS,
-    name: "gatecontrol",
+    name: "solow",
     source: "local_path",
-    location: "/srv/repos/gatecontrol",
+    location: "/srv/repos/solow",
   });
 
   await db.insert(issue).values({
@@ -111,7 +111,7 @@ async function seed(db: TestDb) {
     taskId: "task-1",
     repositoryId: "repo-1",
     baseRef: "main",
-    checkoutBranch: "gatecontrol/task-task-1",
+    checkoutBranch: "solow/task-task-1",
     position: 0,
   });
 
@@ -213,7 +213,7 @@ describe("loadTaskRunContext — several attached Repositories", () => {
       taskId: "task-1",
       repositoryId: "repo-2",
       baseRef: "develop",
-      checkoutBranch: "gatecontrol/task-task-1",
+      checkoutBranch: "solow/task-task-1",
       position,
     });
   }
@@ -225,7 +225,7 @@ describe("loadTaskRunContext — several attached Repositories", () => {
 
     const ctx = await loadTaskRunContext(db, WS, "task-1");
 
-    expect(ctx.repositories.map((b) => b.repository.name)).toEqual(["gatecontrol", "shared-lib"]);
+    expect(ctx.repositories.map((b) => b.repository.name)).toEqual(["solow", "shared-lib"]);
     expect(ctx.repositories.map((b) => b.attachment.baseRef)).toEqual(["main", "develop"]);
   });
 
@@ -238,7 +238,7 @@ describe("loadTaskRunContext — several attached Repositories", () => {
 
     const ctx = await loadTaskRunContext(db, WS, "task-1");
 
-    expect(ctx.repositories.map((b) => b.repository.name)).toEqual(["shared-lib", "gatecontrol"]);
+    expect(ctx.repositories.map((b) => b.repository.name)).toEqual(["shared-lib", "solow"]);
   });
 
   it("resolves each attachment's own clone credential", async () => {
@@ -260,7 +260,7 @@ describe("loadTaskRunContext — several attached Repositories", () => {
       workspaceId: WS,
       taskId: "task-1",
       repositoryId: "repo-local",
-      checkoutBranch: "gatecontrol/task-task-1",
+      checkoutBranch: "solow/task-task-1",
       position: 1,
     });
 
@@ -315,18 +315,18 @@ describe("setTaskRepositoryResultBranch", () => {
       workspaceId: WS,
       taskId: "task-1",
       repositoryId: "repo-2",
-      checkoutBranch: "gatecontrol/task-task-1",
+      checkoutBranch: "solow/task-task-1",
       position: 1,
     });
 
-    await setTaskRepositoryResultBranch(db, WS, "attach-1", "gatecontrol/task-task-1");
+    await setTaskRepositoryResultBranch(db, WS, "attach-1", "solow/task-task-1");
 
     const rows = await db
       .select()
       .from(taskRepository)
       .where(eq(taskRepository.taskId, "task-1"))
       .orderBy(taskRepository.position);
-    expect(rows[0]?.resultBranch).toBe("gatecontrol/task-task-1");
+    expect(rows[0]?.resultBranch).toBe("solow/task-task-1");
     expect(rows[1]?.resultBranch).toBeNull();
   });
 
@@ -363,7 +363,7 @@ describe("loadTaskRunContext", () => {
     expect(ctx.repositories).toHaveLength(1);
     expect(ctx.repositories[0]?.repository.id).toBe("repo-1");
     expect(ctx.repositories[0]?.repository.source).toBe("local_path");
-    expect(ctx.repositories[0]?.repository.location).toBe("/srv/repos/gatecontrol");
+    expect(ctx.repositories[0]?.repository.location).toBe("/srv/repos/solow");
     expect(ctx.repositories[0]?.attachment.baseRef).toBe("main");
 
     // The stored value is ciphertext, never plaintext (Principle IV).

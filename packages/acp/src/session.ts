@@ -98,7 +98,7 @@ export interface AcpOutcome {
 export interface AcpSessionOptions {
   /** The agent binary. */
   command: string;
-  /** Extra arguments from the catalog row, appended after any GateControl requires (none yet). */
+  /** Extra arguments from the catalog row, appended after any SoloW requires (none yet). */
   extraArgs?: string[];
   /**
    * Where the agent works. Unlike Claude Code, an ACP agent does not create a worktree — the
@@ -238,7 +238,7 @@ export function startAcpSession(options: AcpSessionOptions, prompt: string): Acp
         return await answerPermission(`${runTag}:${id}`, params);
       }
       // Everything else the agent might call — `fs/read_text_file`, `fs/write_text_file`,
-      // `terminal/create` — is a client capability GateControl advertised as false. Refusing
+      // `terminal/create` — is a client capability SoloW advertised as false. Refusing
       // with `-32601` is the enforcing half of AC-2: an agent must not be able to reach outside
       // its worktree through the orchestrator just because it asked nicely.
       throw new JsonRpcError(JsonRpcErrorCode.MethodNotFound, `method not found: ${method}`);
@@ -346,7 +346,25 @@ export function startAcpSession(options: AcpSessionOptions, prompt: string): Acp
           await peer.request(AcpMethod.SessionNew, { cwd: options.cwd, mcpServers: [] }),
         );
         sessionId = created.sessionId;
-        // A mode is only ever selected from the list the agent itself offered — GateControl
+        /*
+         * Report what the agent advertised, before anything is chosen from it (issue #94 AC-2).
+         *
+         * This is the only moment the lists exist: ACP advertises models and modes in the
+         * `session/new` result and nowhere else, so a consumer that wants to cache them for a
+         * picker has exactly this update to read. Ids, not display names — an id is what
+         * `session/set_mode` and a Profile's pin actually take, and a name is what rots when a
+         * provider rebrands.
+         */
+        const advertisedModels = (created.models?.availableModels ?? []).map((m) => m.modelId);
+        const advertisedModes = (created.modes?.availableModes ?? []).map((m) => m.id);
+        if (advertisedModels.length > 0 || advertisedModes.length > 0) {
+          options.onUpdate({
+            kind: "capabilities",
+            models: advertisedModels,
+            modes: advertisedModes,
+          });
+        }
+        // A mode is only ever selected from the list the agent itself offered — SoloW
         // never invents a mode id and hopes (AC-2).
         const available = created.modes?.availableModes ?? [];
         if (options.modeId && available.some((m) => m.id === options.modeId)) {

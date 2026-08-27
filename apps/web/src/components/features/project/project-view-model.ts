@@ -1,11 +1,17 @@
-import type { ProjectFieldDto, ProjectFieldValue, ProjectViewConfig } from "@gatecontrol/contracts";
-import { PROJECT_TITLE_KEY } from "@gatecontrol/contracts";
+import type {
+  ProjectFieldDto,
+  ProjectFieldValue,
+  ProjectSort,
+  ProjectViewConfig,
+} from "@solow/contracts";
+import { PROJECT_TITLE_KEY } from "@solow/contracts";
 import {
   type FilterableItem,
+  isPriorityFieldName,
   matchesProjectFilter,
   normaliseFilterKey,
   type ProjectFilterContext,
-} from "@gatecontrol/core";
+} from "@solow/core";
 import type { ProjectRow } from "@/components/features/project/project-table";
 
 /**
@@ -97,6 +103,14 @@ export function filterableItemFor(
   // The Issue's own facts, under the names the spec's example uses. Registered after the fields
   // so a project that has a column called `Labels` keeps its own meaning of the word.
   register(bag, "label", [...item.row.labels]);
+  /*
+   * A priority read off the labels answers `priority:` too — but only where the field itself said
+   * nothing. The field is the authority when it holds a value; this fills the silence, exactly as
+   * the column does, so `priority:P2` cannot match a row the Priority column shows as empty.
+   */
+  if (item.row.priority && (bag.priority ?? []).length === 0) {
+    bag.priority = [item.row.priority.name];
+  }
   return { title: item.row.title, fields: bag };
 }
 
@@ -133,6 +147,11 @@ function sortKey(
 ): { empty: boolean; number: number | null; text: string } {
   if (!field) return { empty: row.title === "", number: null, text: row.title.toLowerCase() };
   const value = row.item.values[field.id];
+  // A priority the column shows has to be a priority the sort can see, or "sort by Priority"
+  // sends every derived row to the bottom as though it had none.
+  if (!value && row.priority && isPriorityFieldName(field.name)) {
+    return { empty: false, number: row.priority.rank, text: row.priority.name.toLowerCase() };
+  }
   const values = value ? filterValuesFor(value, field) : [];
   const text = values.join(", ");
   return {
@@ -145,12 +164,8 @@ function sortKey(
 /**
  * The rows one view shows, in its order.
  *
- * Filter then sort, and neither step mutates the input: the caller holds one array of rows for
- * the whole screen, and a tab that sorted it in place would reorder every other tab with it.
- *
- * An unset value sorts last in **both** directions. Reversing a sort should not put the empty
- * cells first — nobody asks "sort by target date, descending" in order to read the rows that
- * have no target date.
+ * Filter, then sort through `sortProjectRows` — which the table also calls on the *unfiltered*
+ * set, because that is the one it draws its order from. Neither step mutates the input.
  */
 export function applyProjectView(
   items: readonly ProjectViewItem[],
@@ -163,21 +178,59 @@ export function applyProjectView(
     current: currentIterationsFor(fields, ctx.now ?? new Date()),
   };
 
-  const kept = items.filter((item) =>
+  /*
+   * Closed rows leave first, before the filter runs.
+   *
+   * `closed` is the provider's own state, not a Status field reading "Done" — a status is a
+   * team's convention and a convention is not a completion (`projectItemDto.closed`).
+   *
+   * What this does *not* do is change the arithmetic: the table builds its hierarchy and its
+   * epic rollups from the complete row set (`hierarchyRows`), so an epic still reads `5/8` while
+   * its five finished children are out of sight. Filtering the tree instead would re-mean the
+   * badge to "over the children that survived", which is a different and wrong number.
+   */
+  const shown = config.hideClosed ? items.filter((item) => !item.row.item.closed) : items;
+  const kept = shown.filter((item) =>
     matchesProjectFilter(config.filter, filterableItemFor(item, fields), filterCtx),
   );
-  const rows = kept.map((item) => item.row);
-  if (!config.sort) return rows;
+  return sortProjectRows(
+    kept.map((item) => item.row),
+    fields,
+    config.sort,
+  );
+}
+
+/**
+ * Rows in a sort's order. Filtering is somebody else's job.
+ *
+ * Separate from `applyProjectView` because the table needs the two independently, and conflating
+ * them is what made a header click do nothing visible: the table builds its hierarchy from the
+ * **complete** row set so an epic's rollup counts children the filter hid — and sibling order in
+ * that tree is the order that set arrives in. Sorting only the filtered copy therefore changed a
+ * list the table did not draw from. Both sets go through this function now, so there is one
+ * comparator and one answer to "what order is this project in".
+ *
+ * Never mutates: the caller holds one array for the whole screen, and a tab that sorted it in
+ * place would reorder every other tab with it.
+ *
+ * An unset value sorts last in **both** directions. Reversing a sort should not put the empty
+ * cells first — nobody asks "sort by target date, descending" in order to read the rows that
+ * have no target date.
+ */
+export function sortProjectRows(
+  rows: readonly ProjectRow[],
+  fields: readonly ProjectFieldDto[],
+  sort: ProjectSort | null,
+): ProjectRow[] {
+  if (!sort) return [...rows];
 
   const field =
-    config.sort.field === PROJECT_TITLE_KEY
-      ? null
-      : (fields.find((f) => f.id === config.sort?.field) ?? null);
+    sort.field === PROJECT_TITLE_KEY ? null : (fields.find((f) => f.id === sort.field) ?? null);
   // A sort naming a column this project no longer has leaves the mirror's own order alone. The
   // alternative — sorting every row by an empty key — looks like a shuffle nobody asked for.
-  if (!field && config.sort.field !== PROJECT_TITLE_KEY) return rows;
+  if (!field && sort.field !== PROJECT_TITLE_KEY) return [...rows];
 
-  const direction = config.sort.direction === "desc" ? -1 : 1;
+  const direction = sort.direction === "desc" ? -1 : 1;
   return [...rows].sort((a, b) => {
     const left = sortKey(a, field);
     const right = sortKey(b, field);
@@ -202,4 +255,75 @@ export function hiddenFieldIdsFor(
 ): string[] {
   if (visibleFieldIds === null) return [];
   return fields.filter((f) => !visibleFieldIds.includes(f.id)).map((f) => f.id);
+}
+
+/**
+ * The columns a project table hides until someone asks for them.
+ *
+ * A GitHub project arrives with nineteen fields, most of them built-ins the provider reports as
+ * read-only and fills in for nothing: `Milestone`, `Reviewers`, `Parent issue`, `Repository`.
+ * They render as a padlock and a dash on every single row — nineteen columns of which four carry
+ * data, and the four are off screen.
+ *
+ * The rule is read off the data, never off a list of field names: **read-only, and empty on every
+ * row loaded**. Both halves matter. A read-only field that *does* carry values is worth showing —
+ * it is how the provider states something. A writable field that is empty is worth showing too,
+ * because the empty cell is the control you fill in. Only the intersection is noise.
+ *
+ * Judged over the complete row set (`allItems` walks every page), so a column is not hidden for
+ * being empty on the first hundred rows.
+ */
+export function defaultHiddenFieldIds(
+  fields: readonly ProjectFieldDto[],
+  rows: readonly ProjectRow[],
+): string[] {
+  return fields
+    .filter(
+      (field) => field.readOnly && rows.every((row) => row.item.values[field.id] === undefined),
+    )
+    .map((field) => field.id);
+}
+
+/**
+ * Which columns are hidden, once the surface's default and the person's own choices are combined.
+ *
+ * Three states, not two: a field the person explicitly turned on beats the default, a field they
+ * explicitly turned off is off whatever the default says, and everything else falls to the
+ * default. Collapsing `shown` into "absent from hidden" would make the default re-hide a column
+ * the moment the page reloaded — the user would tick it on and watch it vanish again.
+ */
+export function effectiveHiddenFieldIds(input: {
+  fields: readonly ProjectFieldDto[];
+  rows: readonly ProjectRow[];
+  /** From the *view* — the team's column set. Null means every column.  */
+  visibleFieldIds: readonly string[] | null;
+  /** From this person's stored arrangement. */
+  hidden: readonly string[];
+  shown: readonly string[];
+}): string[] {
+  const hidden = new Set([
+    ...hiddenFieldIdsFor(input.fields, input.visibleFieldIds),
+    ...defaultHiddenFieldIds(input.fields, input.rows),
+    ...input.hidden,
+  ]);
+  for (const id of input.shown) hidden.delete(id);
+  return [...hidden];
+}
+
+/**
+ * The sort a column header click produces: **ascending → descending → none**.
+ *
+ * Three states, not two, and that is the whole of this function. While a toolbar dropdown also
+ * owned sorting, the header only had to flip a direction — "no sort" was a `No sort` row in that
+ * menu. The header is now the only control, so a sort you cannot undo from the same place you
+ * applied it is a one-way door: the reference table has that third click and this is it.
+ *
+ * A different column always starts ascending rather than inheriting the previous direction.
+ * Carrying it over means clicking `Status` after sorting `Target date` descending silently gives
+ * you Z→A on a column you have never sorted, which is a result nobody asked for and nothing on
+ * screen explains.
+ */
+export function cycleSort(current: ProjectSort | null, field: string): ProjectSort | null {
+  if (current?.field !== field) return { field, direction: "asc" };
+  return current.direction === "asc" ? { field, direction: "desc" } : null;
 }

@@ -10,7 +10,7 @@ import { z } from "zod";
  * `false`, and every optional call site is guarded by `requireCapability`.
  */
 
-/** The ACP major version GateControl speaks. */
+/** The ACP major version SoloW speaks. */
 export const ACP_PROTOCOL_VERSION = 1;
 
 /**
@@ -20,9 +20,9 @@ export const ACP_PROTOCOL_VERSION = 1;
 export const ACP_MIN_PROTOCOL_VERSION = 1;
 
 /**
- * What GateControl advertises *as a client* — and it is deliberately almost nothing.
+ * What SoloW advertises *as a client* — and it is deliberately almost nothing.
  *
- * ACP lets a client offer the agent a filesystem and a terminal to work through. GateControl
+ * ACP lets a client offer the agent a filesystem and a terminal to work through. SoloW
  * offers neither: the agent already runs inside its own git worktree, with its own tools, on
  * the Executor that Task selected (Principle II). Proxying `fs/write_text_file` through the
  * orchestrator would let an agent write anywhere the orchestrator can reach — outside the
@@ -31,7 +31,7 @@ export const ACP_MIN_PROTOCOL_VERSION = 1;
  * Advertising `false` is not decoration: `session.ts` answers any such incoming request with
  * `-32601`, which is the half of capability negotiation that actually protects something.
  */
-export const GATECONTROL_CLIENT_CAPABILITIES = {
+export const SOLOW_CLIENT_CAPABILITIES = {
   fs: { readTextFile: false, writeTextFile: false },
   terminal: false,
 } as const;
@@ -74,7 +74,7 @@ export interface NegotiatedCapabilities {
 
 export type AcpCapability = keyof Omit<NegotiatedCapabilities, "protocolVersion" | "authMethods">;
 
-/** Thrown when GateControl was about to use something the peer never advertised. */
+/** Thrown when SoloW was about to use something the peer never advertised. */
 export class CapabilityUnavailableError extends Error {
   constructor(readonly capability: string) {
     super(`the agent did not advertise the "${capability}" capability`);
@@ -96,14 +96,14 @@ export class ProtocolVersionError extends Error {
   }
 }
 
-/** The `initialize` params GateControl sends. */
+/** The `initialize` params SoloW sends. */
 export function initializeParams(): {
   protocolVersion: number;
-  clientCapabilities: typeof GATECONTROL_CLIENT_CAPABILITIES;
+  clientCapabilities: typeof SOLOW_CLIENT_CAPABILITIES;
 } {
   return {
     protocolVersion: ACP_PROTOCOL_VERSION,
-    clientCapabilities: GATECONTROL_CLIENT_CAPABILITIES,
+    clientCapabilities: SOLOW_CLIENT_CAPABILITIES,
   };
 }
 

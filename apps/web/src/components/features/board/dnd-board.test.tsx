@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { afterEach, describe, expect, it } from "bun:test";
-import type { TaskDto } from "@gatecontrol/contracts";
+import type { TaskDto } from "@solow/contracts";
 import { cleanup, render, screen } from "@testing-library/react";
 import { CARD_ENTRANCE_CLASS } from "./column";
 import { DndBoard } from "./dnd-board";
@@ -25,7 +25,7 @@ function makeTask(): TaskDto {
         id: "attach-1",
         repositoryId: "repo-1",
         baseRef: null,
-        checkoutBranch: "gatecontrol/task-1",
+        checkoutBranch: "solow/task-1",
         resultBranch: null,
         position: 0,
       },

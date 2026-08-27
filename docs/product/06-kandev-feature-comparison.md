@@ -1,16 +1,16 @@
-# Feature Comparison — GateControl (current build) vs. kandev
+# Feature Comparison — SoloW (current build) vs. kandev
 
 **Status:** Reference · **Last reviewed:** 2026-08-19
 **Reference product:** [`kdlbs/kandev`](https://github.com/kdlbs/kandev) — the product
-[Decision 0001](../decisions/0001-scope-near-clone-of-kandev.md) commits GateControl to
+[Decision 0001](../decisions/0001-scope-near-clone-of-kandev.md) commits SoloW to
 near-clone in breadth.
 
-This page compares **what GateControl actually ships today** (branch `001-core-program`,
+This page compares **what SoloW actually ships today** (branch `001-core-program`,
 all 29 tasks of the core slice verified) against **the full capability surface kandev
 advertises** — its README feature list, [`docs/features.md`](https://github.com/kdlbs/kandev/blob/main/docs/features.md)
 inventory, and [`docs/roadmap.md`](https://github.com/kdlbs/kandev/blob/main/docs/roadmap.md).
 
-It is a *state-of-the-code* comparison, not a spec comparison. GateControl's F01–F18
+It is a *state-of-the-code* comparison, not a spec comparison. SoloW's F01–F18
 specifications already describe most of kandev's breadth; this table records which of
 them have running code behind them.
 
@@ -19,8 +19,8 @@ them have running code behind them.
 | Column | What it holds |
 |---|---|
 | **kandev capability** | The capability as kandev ships or advertises it |
-| **GateControl today** | What exists in this repository, with the code that backs the claim |
-| **Status** | ✅ built · 🟡 partial · 📄 spec only · ❌ absent · ⭐ GateControl-only |
+| **SoloW today** | What exists in this repository, with the code that backs the claim |
+| **Status** | ✅ built · 🟡 partial · 📄 spec only · ❌ absent · ⭐ SoloW-only |
 | **Best implementation — and what it unlocks** | The design that is *correct*, not merely sufficient, and the second-order effect: which other rows this feature makes possible, cheaper, or obsolete. Written adversarially — where the obvious implementation is a trap, the trap is named. |
 | **UI shape & components** | The concrete surface (card, drawer, dialog, canvas…) and the components involved — `existing` for what is already in `apps/web/src/components/`, **new** for what must be coded or pulled in |
 
@@ -43,7 +43,7 @@ lucide-react, TanStack Query, Tailwind 4.
 
 ## 1. Agent & task workflows
 
-| # | kandev capability | GateControl today | Status | Best implementation — and what it unlocks | UI shape & components |
+| # | kandev capability | SoloW today | Status | Best implementation — and what it unlocks | UI shape & components |
 |---|---|---|---|---|---|
 | 1 | Parallel task execution | Concurrent tasks in separate worktrees; proven by the `@critical` E2E | ✅ | Promote "isolation by worktree" into a real **admission controller**: a queue table ordered fair-share, with per-profile, per-executor and per-repository locks. Today's cap check at `task.launch` is a race under load. → makes 61 honest, is a precondition for 46–48, and gives 97 its queue-time metric | Queue depth meter in each column header; a **Sheet** "Queue" drawer listing pending launches with position and blocking reason. `existing` Column/Badge + **new** Sheet, Progress |
 | 2 | Kanban drag-and-drop board | 7 columns, dnd-kit with a drag handle + `KeyboardSensor` | ✅ | Columns must become **data (workflow steps), not a hardcoded enum** — otherwise F03 forks the board into a second model. Add optimistic move with server reconciliation and rollback. → unlocks 6, 8, 15, 43 | `existing` DndBoard/Column/TaskCard; **new** TanStack Virtual for long columns, Toast for rollback, DropdownMenu on the card for quick actions |
@@ -57,7 +57,7 @@ lucide-react, TanStack Query, Tailwind 4.
 | 10 | Task dependencies / `blocked_by` | — | ❌ | `task_dependency` edge table with **cycle detection at write time** (DFS over the workspace subgraph, reject with the offending path) and one hard rule: a blocked task is never auto-started by any path. → makes 1's queue correct, feeds 5, 11, 79 | "Blocked by" multi-select **new** Combobox on task detail; lock icon + count on the card; a `existing` Dialog naming the cycle path on rejection |
 | 11 | Coordinator mode | — | ❌ | Not a feature to build — an **emergent property** of 9 + 10 + the task MCP (78). Building a bespoke coordinator first creates a second orchestration path that workflows will later contradict | A `existing` Switch on the agent profile plus a delegated-task tree in the workspace; no bespoke surface |
 | 12 | Multi-repository tasks | 1 repo per task (`task.repositoryId`, non-null) | ❌ | Replace the column with a `task_repository` join carrying base ref, branch and position. The orchestrator change is mostly **plural iteration** — every worktree, diff and commit path already keys on a worktree row. Do it *before* 68, so PR creation is per-repo from day one | Repository multi-select in the create `existing` Dialog; Changes tab gains per-repo group headers with their own branch and status. **new** Accordion, Combobox; `existing` DiffView reused per group |
-| 13 | Multi-branch tasks (several PRs) | 1 branch per task (`gatecontrol/task-<id>`) | ❌ | Falls out of 12 **for free** if the join key is `(repository, branch)` rather than repository. Choosing that key now, while still single-repo, is the cheapest future-proofing decision on this list | "Add branch" row inside the repo group: `existing` Input + Select for the base ref |
+| 13 | Multi-branch tasks (several PRs) | 1 branch per task (`solow/task-<id>`) | ❌ | Falls out of 12 **for free** if the join key is `(repository, branch)` rather than repository. Choosing that key now, while still single-repo, is the cheapest future-proofing decision on this list | "Add branch" row inside the repo group: `existing` Input + Select for the base ref |
 | 14 | Task documents with revision history | — | ❌ | `task_document` with **append-only revisions** (content hash + parent), so an agent rewriting a plan never silently destroys the previous one. → this is the substrate for 85, 86 and richer review context; small table, disproportionate leverage | A "Docs" tab: document list rail + editor pane. **new** CodeMirror 6 or Tiptap for markdown, revision picker `existing` Select with a diff toggle |
 | 15 | Task labels | — | ❌ | Workspace-scoped `label` + `task_label`, but ship **filtering in the same change** — labels without a filter are decoration. Model saved views at the same time | Colour `existing` Badge chips on cards; label picker **new** Combobox on detail; a filter bar above the board with removable chips |
 | 16 | Public share links (redacted Gists) | `F13` spec only | 📄 | Redaction must be a **server-side allowlist over event kinds plus a secret scrubber shared with 104**, and the preview must render the exact payload that will leave the machine. A client-side redactor here is a data-leak waiting to happen. Store a revocable share record | "Share" in a **new** DropdownMenu in the task header → `existing` Dialog with a scrollable preview, a "what was removed" summary, Publish / Revoke; live-share `existing` Badge on the card |
@@ -66,7 +66,7 @@ lucide-react, TanStack Query, Tailwind 4.
 
 ## 2. Agent interfaces
 
-| # | kandev capability | GateControl today | Status | Best implementation — and what it unlocks | UI shape & components |
+| # | kandev capability | SoloW today | Status | Best implementation — and what it unlocks | UI shape & components |
 |---|---|---|---|---|---|
 | 19 | 21+ agents (Codex, Copilot, Gemini, Cursor, Devin, Qwen…) | `agent_catalog` row, Workspace-scoped, seeded per Workspace with `claude_code` (#10) | ✅ | Shipped: the enum is gone. Adding a supported agent is now a catalog row plus a Profile pointing at it — no schema change, no DAL change. Still only one agent seeded; each new one is a row plus a driver behind its `protocol` (`apps/orchestrator/src/agent/protocols.ts`) once 20/21 exist | Settings → Agents: a `existing` Select bound to `profile.agentCatalog.list`, rendered on the profile form (`new` full Card grid with install state deferred to 27) |
 | 20 | ACP as the uniform agent boundary | ACP decided (ADR 0003) and an `AgentRunner` interface exists — but the one runner drives Claude Code's CLI `stream-json` | 🟡 | Write **one real ACP JSON-RPC client over stdio** (`initialize` → `session/new` → `session/prompt` → `session/update`, plus permission requests) and re-express the Claude runner as an adapter, making `stream-json` one transport among N. Row 19 is a promise the code cannot keep until this exists | No direct surface. It shows up as capability Badges on the agent card and as a permission-request `existing` AlertDialog in the workspace |
@@ -82,7 +82,7 @@ lucide-react, TanStack Query, Tailwind 4.
 
 ## 3. Integrated review workspace
 
-| # | kandev capability | GateControl today | Status | Best implementation — and what it unlocks | UI shape & components |
+| # | kandev capability | SoloW today | Status | Best implementation — and what it unlocks | UI shape & components |
 |---|---|---|---|---|---|
 | 30 | IDE-like unified view | Terminal / Changes / Conversation tabs + review gate | 🟡 | Move to a **resizable, persisted panel layout** (explorer / centre / activity) before adding any panel. Tabs do not scale to five surfaces, and retrofitting layout after 31–36 land means rewriting all of them | **new** react-resizable-panels (or dockview) as the shell; `existing` Tabs demoted to *inside* panels; layout persisted per user |
 | 31 | Real terminal (xterm.js, PTY) | Read-only streamed log rendered as text | 🟡 | Same channel as 21 — "activity log" and "terminal" are **two consumers of one transport**, not two features. Building a second streaming path here is the trap | **new** xterm.js with fit/search addons; a small toolbar for clear / copy / scroll-lock |
@@ -101,10 +101,10 @@ lucide-react, TanStack Query, Tailwind 4.
 
 ## 4. Executors & runtime
 
-| # | kandev capability | GateControl today | Status | Best implementation — and what it unlocks | UI shape & components |
+| # | kandev capability | SoloW today | Status | Best implementation — and what it unlocks | UI shape & components |
 |---|---|---|---|---|---|
 | 44 | Local process executor | `executorKindSchema = ["local"]` | ✅ | Formalise a single **`Executor` interface — spawn, exec, filesystem, port-forward, metrics, dispose — and make local its first implementation** *before* adding a second kind. Skip this and Docker, SSH and cloud each grow bespoke code paths that 27, 33, 35 and 53 then have to special-case three times | No surface of its own; appears as the kind in the executor profile `existing` Select |
-| 45 | Git worktree isolation | `worktree` table + provision/adopt/cleanup, and Claude Code's own `--worktree` for the run | ✅ | **Unify ownership on GateControl.** Isolation currently leans partly on the agent's own worktree flag, which means every new agent (19) must re-implement isolation or it silently regresses — the one guarantee with zero tolerance in the constitution | Worktree path and branch as a copyable row in the task header (`existing` Tooltip + copy Button) |
+| 45 | Git worktree isolation | `worktree` table + provision/adopt/cleanup, and Claude Code's own `--worktree` for the run | ✅ | **Unify ownership on SoloW.** Isolation currently leans partly on the agent's own worktree flag, which means every new agent (19) must re-implement isolation or it silently regresses — the one guarantee with zero tolerance in the constitution | Worktree path and branch as a copyable row in the task header (`existing` Tooltip + copy Button) |
 | 46 | Docker executor | `F07` spec only | 📄 | A driver over 44: image per profile, workspace mounted, agent baked into the image. → also delivers **reproducible agent environments**, which quietly fixes most "agent not installed / wrong version" preflight failures | Profile `existing` Card with image Input, mounts list, env key/value repeater, and a "Test connection" Button streaming into a `existing` Dialog |
 | 47 | Remote SSH executor | `F07` spec only | 📄 | Same driver shape; the hard parts are **key management (goes in the secret store, 57)** and file access for the diff and file tree over the executor filesystem interface — not the transport | Host / user / port `existing` Inputs, key `existing` Select sourced from secrets, a health `existing` Badge refreshed on a timer |
 | 48 | Cloud executor (sprites.dev) | `F07` spec only | 📄 | A remote executor **with a lifecycle** (provision / suspend / destroy) and a cost signal feeding 64. Worth building only after 46 and 47 have proven the interface holds | Same profile card plus a lifecycle-state `existing` Badge and a cost `existing` Tooltip |
@@ -119,7 +119,7 @@ lucide-react, TanStack Query, Tailwind 4.
 
 ## 5. Authentication, billing & security
 
-| # | kandev capability | GateControl today | Status | Best implementation — and what it unlocks | UI shape & components |
+| # | kandev capability | SoloW today | Status | Best implementation — and what it unlocks | UI shape & components |
 |---|---|---|---|---|---|
 | 57 | Named secrets store | AES-256-GCM, write-only after entry, never in a DTO or log | ✅ | **Envelope encryption with a rotatable data key**, plus a per-secret usage audit (which profile or task read it, when) and reference-by-id everywhere instead of value injection. → prerequisite for 47 (SSH keys), 41 and 68 (git/API tokens) | Existing write-only section plus a "Used by" list per secret and a Rotate Button behind a `existing` AlertDialog |
 | 58 | Authentication for the deployment | **Shipping** — BetterAuth email + password, session guard on every procedure | ✅ ⭐ | Add session listing and revocation, optional OIDC, and **role assignment now, while the surface is small**. Retrofitting roles after multi-user exists means auditing every procedure a second time | Settings → Account: a sessions **new** Table with revoke, a provider Card row, and an invite `existing` Dialog |
@@ -137,7 +137,7 @@ lucide-react, TanStack Query, Tailwind 4.
 
 > **Scope decision (2026-08-19):** the integration surface is limited to **GitHub and GitLab**. Jira, Linear, Sentry and Slack are closed as `wont-do`. Their rows are kept below rather than deleted, so the parity count against kandev stays honest — declining a capability is not the same as having it.
 
-| # | kandev capability | GateControl today | Status | Best implementation — and what it unlocks | UI shape & components |
+| # | kandev capability | SoloW today | Status | Best implementation — and what it unlocks | UI shape & components |
 |---|---|---|---|---|---|
 | 68 | GitHub — import issues, link PRs, review activity | `integration` + `change_request` + `repository_branch` tables, `ChangeProvider` interface (#15) | ✅ | Shipped: idempotent import on `(integrationId, externalId)`, PAT-authenticated, contract-tested against a fixture server, no live API in CI. Change requests and branches sync on demand (v1: manual, not scheduled/webhook). `createChangeRequest`/write-back are explicitly not built — that's #71, gated on #7 | Settings → Integrations: a connect form + linked-repository list with a `new` Sync-now action; the Issues page's Import dialog (`new` Checkbox rows in a `existing` ScrollArea, not a full TanStack Table) |
 | 69 | GitLab | `GitlabProvider` over the same `ChangeProvider` interface (#15) | ✅ | Shipped alongside 68 rather than after it — the interface held with no changes: GitLab's `opened`/`merged`/`locked` states and `iid` numbering map onto the same neutral shape a GitHub PR does, proving the abstraction rather than assuming it | Same connect form (provider `existing` Select), same linked-repository list; no bespoke surface |
@@ -163,7 +163,7 @@ lucide-react, TanStack Query, Tailwind 4.
 
 ## 7. Platform, system management & delivery
 
-| # | kandev capability | GateControl today | Status | Best implementation — and what it unlocks | UI shape & components |
+| # | kandev capability | SoloW today | Status | Best implementation — and what it unlocks | UI shape & components |
 |---|---|---|---|---|---|
 | 89 | Self-hosted, open source, no telemetry | AGPL-3.0, local-first, no external services required | ✅ | Make it a **test, not a promise**: assert that a default run opens no outbound connection. This property erodes silently, one convenient SDK at a time | None |
 | 90 | Server-first — reachable from any device | Next.js + orchestrator processes | ✅ | Harden the bind and reverse-proxy story (auth on by default, no localhost-only assumptions, correct `secure` cookies behind TLS) **before** 43 makes remote access the normal case | None |
@@ -195,7 +195,7 @@ lucide-react, TanStack Query, Tailwind 4.
 | ❌ Absent | 44 | 42% |
 | 🚫 Out of scope | 4 | 4% |
 
-Of the **101 rows still in scope**, GateControl covers **48%** at some level (built or
+Of the **101 rows still in scope**, SoloW covers **48%** at some level (built or
 partial) — no longer concentrated entirely in the core review-first loop, now that GitHub
 and GitLab import stand alongside it and the product is drivable from outside itself. The
 four out-of-scope
@@ -205,7 +205,7 @@ flatters itself.
 
 ## Reading the result
 
-**Where GateControl is at parity or better.** The single-task loop is complete and tested
+**Where SoloW is at parity or better.** The single-task loop is complete and tested
 end to end: issue → task → isolated worktree → live agent → diff → human decision → commit.
 Twelve rows carry ⭐ — capabilities kandev does not have today — grouping into six themes:
 review gating enforced inside a *durable* workflow, subscription-vs-API-key billing
@@ -260,8 +260,8 @@ Every row in this document is a GitHub issue, titled with its row number in brac
 shipped evidence and a recorded follow-up; the other 73 are open, carry `Blocked by #n`
 dependencies, and are labelled by priority, kind, area, effort and status.
 
-- **[Roadmap index — issue #109](https://github.com/Satcomx00-x00/GateControl/issues/109)** — row → issue map, the eight foundations, and the suggested delivery order
-- Three foundations have no row of their own: [#1](https://github.com/Satcomx00-x00/GateControl/issues/1) executor interface, [#2](https://github.com/Satcomx00-x00/GateControl/issues/2) session log, [#3](https://github.com/Satcomx00-x00/GateControl/issues/3) contribution registries
+- **[Roadmap index — issue #109](https://github.com/Satcomx00-x00/SoloW/issues/109)** — row → issue map, the eight foundations, and the suggested delivery order
+- Three foundations have no row of their own: [#1](https://github.com/Satcomx00-x00/SoloW/issues/1) executor interface, [#2](https://github.com/Satcomx00-x00/SoloW/issues/2) session log, [#3](https://github.com/Satcomx00-x00/SoloW/issues/3) contribution registries
 - [`scripts/labels.sh`](../../scripts/labels.sh) applies the label taxonomy's colours and descriptions
 
 ## Related

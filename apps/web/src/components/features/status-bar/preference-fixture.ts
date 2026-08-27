@@ -1,4 +1,4 @@
-import { DEFAULT_SURFACE_LAYOUT, type SurfaceLayout } from "@gatecontrol/core";
+import { DEFAULT_SURFACE_LAYOUT, type SurfaceLayout } from "@solow/core";
 import type { Handlers } from "@/test/trpc-harness";
 
 /**

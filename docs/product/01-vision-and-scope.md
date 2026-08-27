@@ -4,7 +4,7 @@
 
 ## TL;DR
 
-GateControl is a self-hostable control plane for running many AI coding agents in
+SoloW is a self-hostable control plane for running many AI coding agents in
 parallel under human oversight. Users administer work as **Tasks on a Kanban board,
 organised under Issues**, design multi-agent processes as **visual Workflows**, and
 review every change before it lands. It matches the capability of kandev and adds
@@ -63,14 +63,14 @@ data to a closed cloud.
 
 - Building or hosting new foundation models.
 - Replacing a full IDE for day-to-day manual coding.
-- Acting as a general project-management suite beyond the work GateControl orchestrates.
+- Acting as a general project-management suite beyond the work SoloW orchestrates.
 - Providing a managed commercial cloud as the only way to use the product.
 
 ## Competitive positioning versus kandev
 
-GateControl matches kandev's feature breadth and differentiates on four points:
+SoloW matches kandev's feature breadth and differentiates on four points:
 
-| Dimension | kandev | GateControl |
+| Dimension | kandev | SoloW |
 |-----------|--------|-------------|
 | Subscription-based agents | Not first-class | First-class: run agents on a Claude Pro/Max plan across all executor types via a portable subscription token |
 | Orchestration durability | Hand-built | Durable and resumable, with first-class human-in-the-loop gates |

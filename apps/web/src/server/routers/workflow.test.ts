@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { beforeAll, beforeEach, describe, expect, it } from "bun:test";
-import { CommonErrorCode, WorkflowErrorCode } from "@gatecontrol/contracts";
+import { CommonErrorCode, WorkflowErrorCode } from "@solow/contracts";
 import {
   ensureDefaultAgentCatalog,
   issue as issueTable,
@@ -10,8 +10,8 @@ import {
   session as sessionTable,
   task as taskTable,
   workspace,
-} from "@gatecontrol/db";
-import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
+} from "@solow/db";
+import { createTestDb, type TestDb } from "@solow/db/testing";
 import { eq } from "drizzle-orm";
 import { findMcpTool, listMcpTools } from "../mcp/tools.js";
 import { resetRateLimits } from "../rate-limit.js";
@@ -22,7 +22,7 @@ import { appRouter } from "./index.js";
  * Workflow integration tests (issue #5) against a real in-memory SQLite database, so the two
  * tables, the unique rank index and the Workspace scoping are exercised rather than described.
  *
- * The ordering and advance rules themselves are unit-tested in `@gatecontrol/core`. What is
+ * The ordering and advance rules themselves are unit-tested in `@solow/core`. What is
  * proved here is that the router reaches for them before writing, that the durable cursor is
  * what a later read actually gets back, and that the last Step cannot be finished without a
  * `review` row no matter how the Steps are configured (Principle I).
@@ -170,7 +170,7 @@ async function recordDecision(
 async function recordDiff(db: TestDb, wsId: string, taskId: string): Promise<void> {
   const [s] = await db
     .insert(sessionTable)
-    .values({ workspaceId: wsId, taskId, state: "awaiting_review", diffRef: "gatecontrol/task" })
+    .values({ workspaceId: wsId, taskId, state: "awaiting_review", diffRef: "solow/task" })
     .returning();
   if (!s) throw new Error("failed to seed session");
   await db.insert(sessionEventTable).values({
@@ -180,7 +180,7 @@ async function recordDiff(db: TestDb, wsId: string, taskId: string): Promise<voi
     kind: "diff",
     payload: {
       kind: "diff",
-      diffRef: "gatecontrol/task",
+      diffRef: "solow/task",
       files: [{ path: "latch.ts", status: "modified", additions: 3, deletions: 1 }],
       patch: "",
       truncated: false,
@@ -192,10 +192,10 @@ describe("workflows", () => {
   let db: TestDb;
 
   beforeAll(() => {
-    process.env.GATECONTROL_SECRET_KEY ??= Buffer.alloc(32, 7).toString("base64");
-    process.env.GATECONTROL_STREAM_SECRET ??= "test-stream-secret";
-    process.env.GATECONTROL_AUTH_SECRET ??= "test-auth-secret";
-    process.env.GATECONTROL_DEV_OWNER ??= "on";
+    process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 7).toString("base64");
+    process.env.SOLOW_STREAM_SECRET ??= "test-stream-secret";
+    process.env.SOLOW_AUTH_SECRET ??= "test-auth-secret";
+    process.env.SOLOW_DEV_OWNER ??= "on";
   });
 
   beforeEach(() => {

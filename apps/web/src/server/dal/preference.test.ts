@@ -1,8 +1,8 @@
 /// <reference types="bun-types" />
 
 import { beforeEach, describe, expect, it } from "bun:test";
-import { uiPreference } from "@gatecontrol/db";
-import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
+import { uiPreference } from "@solow/db";
+import { createTestDb, type TestDb } from "@solow/db/testing";
 import { and, eq } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
 import { getSurfaceLayout, setSurfaceLayout } from "./preference.js";
@@ -35,13 +35,19 @@ describe("getSurfaceLayout", () => {
     const result = await getSurfaceLayout(ctxFor(acme, "ada"), "status-bar");
 
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.data.layout).toEqual({ order: [], hidden: [] });
+    if (result.ok)
+      expect(result.data.layout).toEqual({ order: [], hidden: [], shown: [], widths: {} });
   });
 
   it("restores what a different session for the same user saved — the cross-device claim", async () => {
     await setSurfaceLayout(ctxFor(acme, "ada"), {
       surface: "status-bar",
-      layout: { order: ["status.review", "status.tasks"], hidden: ["status.workspace"] },
+      layout: {
+        order: ["status.review", "status.tasks"],
+        hidden: ["status.workspace"],
+        shown: [],
+        widths: {},
+      },
     });
 
     // A second device is a second RequestContext resolved from a second session.
@@ -57,7 +63,7 @@ describe("getSurfaceLayout", () => {
   it("keeps one user's arrangement out of another's, in the same Workspace", async () => {
     await setSurfaceLayout(ctxFor(acme, "ada"), {
       surface: "status-bar",
-      layout: { order: ["status.review"], hidden: [] },
+      layout: { order: ["status.review"], hidden: [], shown: [], widths: {} },
     });
 
     const grace = await getSurfaceLayout(ctxFor(acme, "grace"), "status-bar");
@@ -69,7 +75,7 @@ describe("getSurfaceLayout", () => {
   it("keeps the same account's arrangements apart across Workspaces (Principle V)", async () => {
     await setSurfaceLayout(ctxFor(acme, "ada"), {
       surface: "status-bar",
-      layout: { order: ["status.review"], hidden: [] },
+      layout: { order: ["status.review"], hidden: [], shown: [], widths: {} },
     });
 
     const elsewhere = await getSurfaceLayout(ctxFor(other, "ada"), "status-bar");
@@ -81,7 +87,7 @@ describe("getSurfaceLayout", () => {
   it("keeps two surfaces apart, so arranging one does not rearrange the other", async () => {
     await setSurfaceLayout(ctxFor(acme, "ada"), {
       surface: "status-bar",
-      layout: { order: ["status.review"], hidden: [] },
+      layout: { order: ["status.review"], hidden: [], shown: [], widths: {} },
     });
 
     const commands = await getSurfaceLayout(ctxFor(acme, "ada"), "commands");
@@ -113,15 +119,22 @@ describe("getSurfaceLayout", () => {
     const result = await getSurfaceLayout(ctxFor(acme, "ada"), "status-bar");
 
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.data.layout).toEqual({ order: [], hidden: [] });
+    if (result.ok)
+      expect(result.data.layout).toEqual({ order: [], hidden: [], shown: [], widths: {} });
   });
 });
 
 describe("setSurfaceLayout", () => {
   it("replaces the saved arrangement instead of adding a second row for the same surface", async () => {
     const ctx = ctxFor(acme, "ada");
-    await setSurfaceLayout(ctx, { surface: "status-bar", layout: { order: ["a"], hidden: [] } });
-    await setSurfaceLayout(ctx, { surface: "status-bar", layout: { order: ["b"], hidden: [] } });
+    await setSurfaceLayout(ctx, {
+      surface: "status-bar",
+      layout: { order: ["a"], hidden: [], shown: [], widths: {} },
+    });
+    await setSurfaceLayout(ctx, {
+      surface: "status-bar",
+      layout: { order: ["b"], hidden: [], shown: [], widths: {} },
+    });
 
     const rows = await db
       .select()
@@ -136,7 +149,7 @@ describe("setSurfaceLayout", () => {
   it("stores the arrangement under the tenant and user of the session", async () => {
     await setSurfaceLayout(ctxFor(acme, "ada"), {
       surface: "status-bar",
-      layout: { order: ["status.tasks"], hidden: [] },
+      layout: { order: ["status.tasks"], hidden: [], shown: [], widths: {} },
     });
 
     const [row] = await db.select().from(uiPreference);

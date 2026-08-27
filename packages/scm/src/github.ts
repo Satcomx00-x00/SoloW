@@ -13,6 +13,7 @@ import type {
   ChangeProvider,
   ExternalBranch,
   ExternalChangeRequest,
+  ExternalComment,
   ExternalIssue,
   ExternalLabel,
   ExternalLinkedChange,
@@ -20,9 +21,11 @@ import type {
   ExternalRepository,
   ExternalUser,
   IssuePatch,
+  LabelSeed,
   ListIssuesOptions,
   ProjectFieldWrite,
   ProjectsCapability,
+  ProjectStructureProvisioned,
   RepoRef,
   ScmCredential,
 } from "./types.js";
@@ -149,6 +152,30 @@ function toExternalRepository(r: GithubRepoSummary): ExternalRepository {
     isPrivate: r.private,
     url: r.html_url,
     cloneUrl: r.clone_url,
+  };
+}
+
+interface GithubComment {
+  id: number;
+  body: string | null;
+  html_url: string;
+  created_at: string;
+  updated_at?: string | null;
+  user?: { login: string; name?: string | null; avatar_url?: string | null } | null;
+}
+
+function toExternalComment(c: GithubComment): ExternalComment {
+  return {
+    externalId: String(c.id),
+    author: c.user
+      ? { login: c.user.login, name: c.user.name ?? null, avatarUrl: c.user.avatar_url ?? null }
+      : null,
+    body: c.body ?? "",
+    createdAt: c.created_at,
+    // GitHub sets `updated_at` to `created_at` on a comment nobody edited; reporting that as an
+    // edit would put "edited" on every comment in the thread.
+    updatedAt: c.updated_at && c.updated_at !== c.created_at ? c.updated_at : null,
+    url: c.html_url,
   };
 }
 
@@ -288,6 +315,40 @@ export class GithubProvider implements ChangeProvider, ProjectsCapability {
       authHeaders(credential),
     )) as GithubIssueDetail;
     return toDetailedIssue(row);
+  }
+
+  async listComments(
+    credential: ScmCredential,
+    repo: RepoRef,
+    issueNumber: number,
+  ): Promise<ExternalComment[]> {
+    // Every page: a long-running issue collects more than a hundred comments, and returning the
+    // first hundred as though they were the discussion is the same silent loss `scmFetchPaged`
+    // exists to prevent.
+    const rows = await scmFetchPaged<GithubComment>(
+      "github",
+      (page) =>
+        `${apiRoot(credential.baseUrl)}/repos/${repo}/issues/${issueNumber}/comments?per_page=100&page=${page}`,
+      authHeaders(credential),
+    );
+    return rows.map(toExternalComment);
+  }
+
+  async createComment(
+    credential: ScmCredential,
+    repo: RepoRef,
+    issueNumber: number,
+    body: string,
+  ): Promise<ExternalComment> {
+    const row = (await scmSend(
+      "github",
+      `${apiRoot(credential.baseUrl)}/repos/${repo}/issues/${issueNumber}/comments`,
+      authHeaders(credential),
+      "POST",
+      { body },
+    )) as GithubComment;
+    // What GitHub stored, from its own answer to the write.
+    return toExternalComment(row);
   }
 
   async updateIssue(
@@ -524,6 +585,39 @@ export class GithubProvider implements ChangeProvider, ProjectsCapability {
       color: r.color ? `#${r.color}` : null,
       description: r.description,
     }));
+  }
+
+  /**
+   * Create every label in `labels` this repository does not already have (user request
+   * 2026-08-27). Matching is case-insensitive against `listLabels`'s own answer, so a repository
+   * that already spells one of these some other way is not given a near-duplicate.
+   */
+  async createLabels(
+    credential: ScmCredential,
+    repo: RepoRef,
+    labels: LabelSeed[],
+  ): Promise<ProjectStructureProvisioned> {
+    const present = new Set(
+      (await this.listLabels(credential, repo)).map((l) => l.name.toLowerCase()),
+    );
+    const created: string[] = [];
+    const existing: string[] = [];
+    for (const label of labels) {
+      if (present.has(label.name.toLowerCase())) {
+        existing.push(label.name);
+        continue;
+      }
+      await scmSend(
+        "github",
+        `${apiRoot(credential.baseUrl)}/repos/${repo}/labels`,
+        authHeaders(credential),
+        "POST",
+        // GitHub takes `color` unprefixed, unlike the `#RRGGBB` `listLabels` normalizes it to.
+        { name: label.name, color: label.color.replace(/^#/, ""), description: label.description ?? "" },
+      );
+      created.push(label.name);
+    }
+    return { created, existing };
   }
 
   async listBranches(credential: ScmCredential, repo: RepoRef): Promise<ExternalBranch[]> {

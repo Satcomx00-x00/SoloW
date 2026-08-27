@@ -2,7 +2,7 @@ import { z } from "zod";
 
 /**
  * Feature flags surfaced from Settings (issue #21). The registry itself — the set of known
- * keys, their descriptions and defaults — lives in `@gatecontrol/db`'s `flag-registry.ts`; `key` is
+ * keys, their descriptions and defaults — lives in `@solow/db`'s `flag-registry.ts`; `key` is
  * typed as a plain validated string here rather than a duplicated enum, so registering a new
  * flag there is the only step needed to add one, not also an edit to this schema.
  */

@@ -1,4 +1,4 @@
-import type { ScmFileDto } from "@gatecontrol/contracts";
+import type { ScmFileDto } from "@solow/contracts";
 
 /**
  * The tree presentation of a change (spec F22 FR-4).

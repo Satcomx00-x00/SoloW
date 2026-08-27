@@ -1,6 +1,6 @@
 "use client";
 
-import type { SurfaceLayout } from "@gatecontrol/core";
+import type { SurfaceLayout } from "@solow/core";
 import { CornerDownLeft, Inbox, Search } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
@@ -17,6 +17,7 @@ import {
 import { useSurfaceLayout } from "@/hooks/use-surface-layout";
 import { useAppContext } from "@/lib/app-context";
 import { COMMAND_GROUPS, type CommandActions, commandRegistry } from "@/lib/contributions";
+import { WHOLE_PAGE } from "@/lib/paged";
 import "@/lib/contributions-boot";
 import { ISSUE_STATUS_LABELS, ISSUE_STATUS_STYLE } from "@/lib/issue-status";
 import { STATE_LABELS, STATE_STYLE } from "@/lib/task-states";
@@ -43,7 +44,7 @@ import { trpc } from "@/trpc/react";
 
 /** Long enough that the first letter does not fire a query, short enough to feel immediate. */
 const QUERY_DEBOUNCE_MS = 140;
-const OPEN_EVENT = "gatecontrol:open-command-palette";
+const OPEN_EVENT = "solow:open-command-palette";
 
 /** Opens the palette from anywhere — the rail's Search button, the header trigger. */
 export function openCommandPalette() {
@@ -67,12 +68,18 @@ export function CommandPalette() {
   const searching = debouncedQuery.length > 0;
 
   // Only fetch while the palette is open: this component mounts on every page of the shell.
-  const tasks = trpc.task.list.useQuery(searching ? { query: debouncedQuery } : {}, {
-    enabled: open,
-  });
-  const issues = trpc.issue.list.useQuery(searching ? { query: debouncedQuery } : {}, {
-    enabled: open,
-  });
+  const tasks = trpc.task.list.useQuery(
+    searching ? { ...WHOLE_PAGE, query: debouncedQuery } : WHOLE_PAGE,
+    {
+      enabled: open,
+    },
+  );
+  const issues = trpc.issue.list.useQuery(
+    searching ? { ...WHOLE_PAGE, query: debouncedQuery } : WHOLE_PAGE,
+    {
+      enabled: open,
+    },
+  );
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -124,8 +131,8 @@ export function CommandPalette() {
   // while `ContributedCommands` itself stays free of a query client (issue #3 AC-3).
   const { layout: commandLayout } = useSurfaceLayout(commandRegistry.surface);
 
-  const taskRows = tasks.data ?? [];
-  const issueRows = issues.data ?? [];
+  const taskRows = tasks.data?.items ?? [];
+  const issueRows = issues.data?.items ?? [];
   const loading = tasks.isFetching || issues.isFetching;
   const nothingFound = searching && !loading && taskRows.length === 0 && issueRows.length === 0;
 

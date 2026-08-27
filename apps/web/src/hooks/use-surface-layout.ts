@@ -6,7 +6,7 @@ import {
   type SurfaceKey,
   type SurfaceLayout,
   withVisibility,
-} from "@gatecontrol/core";
+} from "@solow/core";
 import { useCallback } from "react";
 import { trpc } from "@/trpc/react";
 
@@ -61,16 +61,24 @@ export function useSurfaceLayout(surface: SurfaceKey): SurfaceLayoutHandle {
       utils.preference.getSurfaceLayout.setData({ surface }, (previous) =>
         previous ? { ...previous, layout: next } : previous,
       );
-      save.mutate({ surface, layout: { order: [...next.order], hidden: [...next.hidden] } });
+      save.mutate({
+        surface,
+        layout: { order: [...next.order], hidden: [...next.hidden], shown: [], widths: {} },
+      });
     },
     [save, surface, utils],
   );
 
   const move = useCallback(
     (visibleOrder: readonly string[], id: string, delta: -1 | 1) => {
-      apply({ order: moveInOrder(visibleOrder, id, delta), hidden: layout.hidden });
+      apply({
+        order: moveInOrder(visibleOrder, id, delta),
+        hidden: layout.hidden,
+        shown: layout.shown,
+        widths: layout.widths,
+      });
     },
-    [apply, layout.hidden],
+    [apply, layout.hidden, layout.shown, layout.widths],
   );
 
   const setVisible = useCallback(

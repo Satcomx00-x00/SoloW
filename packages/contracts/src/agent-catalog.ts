@@ -3,7 +3,7 @@ import { idSchema, timestampsSchema } from "./common.js";
 
 /**
  * Agent catalog (issue #10, spec F05). Agent identity is a row, not a code path: kandev
- * supports 21 agent CLIs, GateControl one — and the gap is one schema decision standing in
+ * supports 21 agent CLIs, SoloW one — and the gap is one schema decision standing in
  * front of that work, not twenty integrations' worth. Adding a supported agent becomes a seed
  * row plus an Agent Profile pointing at it, never a change to application code (AC-1).
  *
@@ -14,7 +14,7 @@ import { idSchema, timestampsSchema } from "./common.js";
 export const agentProtocolSchema = z.enum([
   /**
    * Claude Code's own headless stream-JSON CLI protocol (`packages/claude-code`) — a vendor
-   * protocol, not ACP, and the only one GateControl can actually drive today. Kept distinct
+   * protocol, not ACP, and the only one SoloW can actually drive today. Kept distinct
    * from `acp` rather than pretended into it; see issue #58.
    */
   "claude_code_stream_json",
@@ -56,7 +56,7 @@ const catalogKey = z
  * `subscriptionEnvVar` / `meteredEnvVar` are the reason this table exists rather than a JSON
  * blob: the billing strip in `billing.ts` used to hardcode `CLAUDE_CODE_OAUTH_TOKEN` /
  * `ANTHROPIC_API_KEY`. That guarantee — subscription billing can never leak into metered API
- * billing (Principle IV) — is GateControl's headline differentiator, and it silently stops
+ * billing (Principle IV) — is SoloW's headline differentiator, and it silently stops
  * holding the moment a second agent lands unless which variables to strip is *data* the guard
  * reads, not a constant it assumes.
  */

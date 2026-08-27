@@ -15,6 +15,8 @@ interface FakeDriver {
   authenticate(): Promise<{ ok: true }>;
   listIssues?(): Promise<string[]>;
   getIssue?(): Promise<string>;
+  listComments?(): Promise<string[]>;
+  createComment?(): Promise<string>;
   listLabels?(): Promise<string[]>;
   listRepositories?(): Promise<string[]>;
   getRepository?(): Promise<string | null>;
@@ -26,6 +28,8 @@ const forge = (over: Partial<FakeDriver> = {}): FakeDriver => ({
   authenticate: async () => ({ ok: true }),
   listIssues: async () => [],
   getIssue: async () => "",
+  listComments: async () => [],
+  createComment: async () => "",
   listLabels: async () => [],
   listRepositories: async () => [],
   getRepository: async () => null,
@@ -59,6 +63,7 @@ const tracker = (id: string) => ({
     authenticate: async () => ({ ok: true as const }),
     listIssues: async () => [],
     getIssue: async () => "",
+    listComments: async () => [],
     listLabels: async () => [],
   },
 });

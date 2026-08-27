@@ -1,6 +1,6 @@
 # Glossary — Ubiquitous Language
 
-This glossary defines the shared vocabulary used across all GateControl documentation,
+This glossary defines the shared vocabulary used across all SoloW documentation,
 the user interface, and internal communication. Terms are capitalised throughout the
 docs when they refer to these specific concepts.
 
@@ -15,7 +15,7 @@ docs when they refer to these specific concepts.
   connect many Repositories.
 
 - **Issue** — The organising unit of work. An Issue represents a problem, request, or
-  feature to be addressed. It may be created natively in GateControl or synchronised from
+  feature to be addressed. It may be created natively in SoloW or synchronised from
   an external tracker (GitHub, Jira, Linear, GitLab, Sentry). Tasks are administered
   **under** an Issue.
 
@@ -40,9 +40,9 @@ docs when they refer to these specific concepts.
 ## Agents and sessions
 
 - **Agent** — An external AI coding-agent command-line tool (for example Claude Code,
-  Codex, Gemini CLI) that GateControl drives to perform work.
+  Codex, Gemini CLI) that SoloW drives to perform work.
 
-- **Agent Client Protocol (ACP)** — The open, standard protocol GateControl uses to
+- **Agent Client Protocol (ACP)** — The open, standard protocol SoloW uses to
   connect to Agents, analogous to how the Language Server Protocol standardised editor
   tooling.
 
@@ -56,7 +56,7 @@ docs when they refer to these specific concepts.
 - **Session** — A single run of an Agent against a Task, producing a Conversation, a
   stream of events, and a set of proposed changes. Sessions can be reviewed and resumed.
 
-- **Conversation** — The recorded exchange between a user, GateControl, and an Agent
+- **Conversation** — The recorded exchange between a user, SoloW, and an Agent
   within a Session.
 
 ## Workflows
@@ -85,22 +85,22 @@ docs when they refer to these specific concepts.
 
 ## Platform
 
-- **Local Deployment** — GateControl running entirely on one machine for a single user.
+- **Local Deployment** — SoloW running entirely on one machine for a single user.
 
-- **Hosted Deployment** — GateControl running as a shared, multi-user service.
+- **Hosted Deployment** — SoloW running as a shared, multi-user service.
 
 - **Integration** — A connection to an external service (issue tracker, chat, source host)
-  that GateControl reads from or writes to.
+  that SoloW reads from or writes to.
 
 - **Setup Workflow (Onboarding)** — The guided, resumable, self-verifying process that
   prepares a Workspace for use on first run and can be re-run later to add or change
   configuration.
 
 - **Integration** — A connected GitHub or GitLab account (Personal Access Token stored as a
-  Secret), driven through GateControl's own REST API client (`packages/scm`), not `gh`/`glab`
+  Secret), driven through SoloW's own REST API client (`packages/scm`), not `gh`/`glab`
   (see [Decision 0014](./decisions/0014-direct-api-source-integrations.md)).
 
-- **Change Request** — GateControl's provider-neutral term for a pull request (GitHub) or
+- **Change Request** — SoloW's provider-neutral term for a pull request (GitHub) or
   merge request (GitLab); the domain never encodes one provider's noun. Reference-only today
   (imported/synced, never created) — creating one is issue #71.
 
@@ -110,7 +110,7 @@ docs when they refer to these specific concepts.
 - **tRPC** — The typed request/response protocol the SPA uses for queries and mutations
   against the backend HTTP API.
 
-- **MCP (Model Context Protocol)** — The open protocol GateControl speaks at `/api/mcp` so
+- **MCP (Model Context Protocol)** — The open protocol SoloW speaks at `/api/mcp` so
   outside agents and scripts can drive it (issue #16). The tools it offers are *derived* from
   the tRPC procedures rather than defined separately, so the API and the tool list cannot
   disagree.

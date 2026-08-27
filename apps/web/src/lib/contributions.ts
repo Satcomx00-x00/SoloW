@@ -1,6 +1,6 @@
 "use client";
 
-import { type Contribution, createRegistry, type Registry } from "@gatecontrol/core";
+import { type Contribution, createRegistry, type Registry } from "@solow/core";
 import type { LucideIcon } from "lucide-react";
 import type { ComponentType } from "react";
 import type { CreateKind } from "@/components/features/board/create-dialog-bus";

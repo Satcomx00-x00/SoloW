@@ -6,13 +6,13 @@ import { z } from "zod";
  */
 const dbEnvSchema = z.object({
   /** Which store backs the single data model (Decision 0008). v1 ships SQLite. */
-  GATECONTROL_DB_DRIVER: z.enum(["sqlite", "postgres"]).default("sqlite"),
+  SOLOW_DB_DRIVER: z.enum(["sqlite", "postgres"]).default("sqlite"),
   /** SQLite file path (local). */
-  GATECONTROL_SQLITE_PATH: z.string().min(1).default(".gatecontrol/gatecontrol.db"),
+  SOLOW_SQLITE_PATH: z.string().min(1).default(".solow/solow.db"),
   /** Postgres connection string (hosted). */
-  GATECONTROL_DATABASE_URL: z.string().url().optional(),
+  SOLOW_DATABASE_URL: z.string().url().optional(),
   /** 32-byte key (base64) for secret encryption at rest. */
-  GATECONTROL_SECRET_KEY: z.string().min(1),
+  SOLOW_SECRET_KEY: z.string().min(1),
 });
 
 export type DbEnv = z.infer<typeof dbEnvSchema>;

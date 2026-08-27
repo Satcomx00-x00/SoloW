@@ -1,6 +1,6 @@
 "use client";
 
-import type { SessionEventDto, TodoItem } from "@gatecontrol/contracts";
+import type { SessionEventDto, TodoItem } from "@solow/contracts";
 import { LoaderCircle, Square, SquareCheckBig } from "lucide-react";
 import { cn } from "@/lib/utils";
 

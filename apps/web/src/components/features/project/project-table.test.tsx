@@ -6,9 +6,9 @@ import type {
   ProjectDto,
   ProjectFieldDto,
   ProjectItemDto,
-} from "@gatecontrol/contracts";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { formatValue, type ProjectRow, ProjectTable } from "./project-table";
+} from "@solow/contracts";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { formatValue, type ProjectRow, ProjectTable, ROW_HEIGHT } from "./project-table";
 
 /**
  * The project table (issue #126).
@@ -39,6 +39,7 @@ const field = (over: Partial<ProjectFieldDto> & Pick<ProjectFieldDto, "id">): Pr
 const project = (fields: ProjectFieldDto[]): ProjectDto => ({
   id: "prj-1",
   integrationId: "int-1",
+  source: "adopted",
   providerProjectId: "PVT_1",
   title: "Roadmap",
   syncedAt: "2026-08-25T10:00:00.000Z",
@@ -67,11 +68,40 @@ const row = (
     closed: false,
   },
   title,
+  priority: null,
   issueNumber: 42,
   issueUrl: null,
   linkedChangeRequests: [],
   labels: [],
+  tasks: null,
   ...over,
+});
+
+describe("a project with no fields", () => {
+  it("shows the table for a local Project — zero fields is permanent for it, not 'not yet synced'", () => {
+    render(
+      <ProjectTable
+        project={{ ...project([]), source: "local" }}
+        rows={[row("r1", "Cap the upload size")]}
+        groupByFieldId={null}
+      />,
+    );
+
+    expect(screen.getByRole("columnheader", { name: /title/i })).toBeDefined();
+    expect(screen.queryByText(/has no fields yet/)).toBeNull();
+  });
+
+  it("still shows the 'no fields yet' message for a mirrored Project waiting on its first sync", () => {
+    render(
+      <ProjectTable
+        project={{ ...project([]), source: "adopted" }}
+        rows={[]}
+        groupByFieldId={null}
+      />,
+    );
+
+    expect(screen.getByText(/has no fields yet/)).toBeDefined();
+  });
 });
 
 describe("ProjectTable", () => {
@@ -197,7 +227,7 @@ describe("ProjectTable", () => {
  *
  * Every assertion here is about a way the provider's answer can be worse than a tree: a parent
  * that is not in the project, a child in another repository, a cycle. The shape of the graph is
- * proven in `@gatecontrol/core`; what is proven here is that the table draws what it is given —
+ * proven in `@solow/core`; what is proven here is that the table draws what it is given —
  * collapsed, indented, counted, and never twice.
  */
 describe("hierarchy", () => {
@@ -714,6 +744,8 @@ describe("a rollup under an active filter", () => {
     issueUrl: null,
     linkedChangeRequests: [],
     labels: [],
+    priority: null,
+    tasks: null,
   });
 
   const family = [
@@ -824,5 +856,497 @@ describe("sorting from the column header", () => {
     expect(screen.getByRole("columnheader", { name: /^title/i }).getAttribute("aria-sort")).toBe(
       "none",
     );
+  });
+});
+
+describe("the Agent runs column", () => {
+  // `status()` is scoped to the hierarchy suite; this one builds its own single-select field.
+  const status = () => field({ id: "f1", name: "Status" });
+
+  /*
+   * F23 FR-14 and Decision 0006: the planning table sits above execution, and this is the one
+   * cell that looks down. Which state it shows is decided in `row-tasks.ts` and tested there;
+   * what is asserted here is that the cell draws it, and that "no run" and "a finished run" are
+   * drawn differently — conflating them would say an agent had finished work nobody started.
+   */
+  it("shows the summarised state, with a count when there is more than one run", () => {
+    render(
+      <ProjectTable
+        project={project([status()])}
+        rows={[{ ...row("r1", "Under review"), tasks: { state: "review", total: 3 } }]}
+        groupByFieldId={null}
+      />,
+    );
+
+    expect(screen.getByRole("columnheader", { name: /agent runs/i })).toBeDefined();
+    // The badge carries the state on a data attribute — the same hook the E2E suite reads.
+    expect(document.querySelector('[data-task-state="review"]')).not.toBeNull();
+    expect(screen.getByText("3")).toBeDefined();
+  });
+
+  it("does not print a count for a single run, which would read as a number of something", () => {
+    render(
+      <ProjectTable
+        project={project([status()])}
+        rows={[{ ...row("r1", "One run"), tasks: { state: "running", total: 1 } }]}
+        groupByFieldId={null}
+      />,
+    );
+
+    expect(document.querySelector('[data-task-state="running"]')).not.toBeNull();
+    expect(screen.queryByText("1")).toBeNull();
+  });
+
+  it("draws a row with no runs as empty, not as finished", () => {
+    render(
+      <ProjectTable
+        project={project([status()])}
+        rows={[row("r1", "Never touched")]}
+        groupByFieldId={null}
+      />,
+    );
+
+    expect(document.querySelector("[data-task-state]")).toBeNull();
+  });
+});
+
+describe("the issue number", () => {
+  it("links out to the provider, which is where that number means something", () => {
+    // The title opens the panel inside SoloW; the number leaves. Two destinations, two
+    // controls, rather than one that guesses which was meant.
+    render(
+      <ProjectTable
+        project={project([field({ id: "f1", name: "Status" })])}
+        rows={[
+          {
+            ...row("r1", "A row"),
+            issueNumber: 112,
+            issueUrl: "https://github.com/acme/gate/issues/112",
+          },
+        ]}
+        groupByFieldId={null}
+      />,
+    );
+
+    const link = screen.getByRole("link", { name: /#112/ });
+    expect(link.getAttribute("href")).toBe("https://github.com/acme/gate/issues/112");
+    // A new tab, and `noreferrer` with it: the destination is outside this app.
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("rel")).toContain("noreferrer");
+  });
+
+  it("is plain text for a row whose issue has no provider URL", () => {
+    // A locally-created Issue has nowhere to go. A link that led nowhere would be worse than
+    // text, because it looks like it works.
+    render(
+      <ProjectTable
+        project={project([field({ id: "f1", name: "Status" })])}
+        rows={[{ ...row("r1", "A row"), issueNumber: 7, issueUrl: null }]}
+        groupByFieldId={null}
+      />,
+    );
+
+    expect(screen.queryByRole("link", { name: /#7/ })).toBeNull();
+    expect(screen.getByText("#7")).toBeDefined();
+  });
+});
+
+/**
+ * The Priority column, over a project whose Priority field was never configured.
+ *
+ * This is not a hypothetical: a GitHub project ships a `Priority` single-select, a great many
+ * teams never add its options, and they write `prio/p2` on the issue instead. The column then
+ * reads empty over a project that has a priority on every row — which is the one thing a planning
+ * table must not do.
+ */
+describe("a priority the labels carry and the field does not", () => {
+  const priority = (over: Partial<ProjectFieldDto> = {}) =>
+    field({ id: "f-prio", name: "Priority", options: [], ...over });
+
+  it("shows the priority its labels state", () => {
+    render(
+      <ProjectTable
+        project={project([priority()])}
+        rows={[
+          {
+            ...row("r1", "Latch sticks"),
+            labels: ["prio/p2"],
+            priority: { rank: 2, name: "P2", label: "prio/p2" },
+          },
+        ]}
+        groupByFieldId={null}
+      />,
+    );
+
+    expect(screen.getByText("P2")).toBeDefined();
+  });
+
+  it("says where the value came from, rather than passing it off as the field's", () => {
+    // Nothing was written to the provider. A column that filled itself in silently would be
+    // telling a team something nobody put there.
+    render(
+      <ProjectTable
+        project={project([priority()])}
+        rows={[
+          {
+            ...row("r1", "Latch sticks"),
+            labels: ["prio/p2"],
+            priority: { rank: 2, name: "P2", label: "prio/p2" },
+          },
+        ]}
+        groupByFieldId={null}
+      />,
+    );
+
+    expect(screen.getByText("P2").getAttribute("title")).toContain("prio/p2");
+  });
+
+  it("leaves a column that is not Priority alone", () => {
+    // The derived value belongs in one column, matched by name. Drawn anywhere else it would be
+    // a value in a column on the strength of a guess.
+    render(
+      <ProjectTable
+        project={project([field({ id: "f-size", name: "Size", options: [] })])}
+        rows={[
+          {
+            ...row("r1", "Latch sticks"),
+            labels: ["prio/p2"],
+            priority: { rank: 2, name: "P2", label: "prio/p2" },
+          },
+        ]}
+        groupByFieldId={null}
+      />,
+    );
+
+    expect(screen.queryByText("P2")).toBeNull();
+  });
+
+  it("shows the field's own value where the field has one", () => {
+    // The field is the authority. A configured Priority column is never overwritten by a label.
+    render(
+      <ProjectTable
+        project={project([priority({ options: [{ id: "opt-high", name: "High" }] })])}
+        rows={[
+          {
+            ...row("r1", "Latch sticks", {
+              "f-prio": { type: "single_select", optionId: "opt-high" },
+            }),
+            labels: ["prio/p2"],
+            priority: { rank: 2, name: "P2", label: "prio/p2" },
+          },
+        ]}
+        groupByFieldId={null}
+      />,
+    );
+
+    expect(screen.getByText("High")).toBeDefined();
+    expect(screen.queryByText("P2")).toBeNull();
+  });
+});
+
+/**
+ * The Priority column, when the provider's field has no options to offer.
+ *
+ * The ordinary select opens on an empty list and says "add them on the provider" — true, and
+ * useless to somebody whose priorities are on every issue in the shape of a label. So the cell
+ * offers the priority labels that exist and writes one.
+ */
+describe("choosing a priority the labels carry", () => {
+  const priorityField = field({ id: "f-prio", name: "Priority", options: [] });
+  const choices = [
+    { rank: 1, name: "P1", label: "prio/p1", color: "#d73a4a" },
+    { rank: 2, name: "P2", label: "prio/p2", color: "#fbca04" },
+  ];
+
+  it("offers the priority labels the repositories define", async () => {
+    render(
+      <ProjectTable
+        project={project([priorityField])}
+        rows={[{ ...row("r1", "Latch sticks"), labels: [] }]}
+        groupByFieldId={null}
+        priorityChoices={choices}
+        onSetPriority={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("combobox", { name: /Priority for Latch sticks/ }));
+
+    expect(await screen.findByText("prio/p1")).toBeDefined();
+    expect(screen.getByText("prio/p2")).toBeDefined();
+  });
+
+  it("writes the label the operator chose", async () => {
+    const written: Array<string | null> = [];
+    render(
+      <ProjectTable
+        project={project([priorityField])}
+        rows={[{ ...row("r1", "Latch sticks"), labels: [] }]}
+        groupByFieldId={null}
+        priorityChoices={choices}
+        onSetPriority={(_row, label) => written.push(label)}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("combobox", { name: /Priority for Latch sticks/ }));
+    fireEvent.click(await screen.findByText("prio/p1"));
+
+    expect(written).toEqual(["prio/p1"]);
+  });
+
+  it("clears one", async () => {
+    const written: Array<string | null> = [];
+    render(
+      <ProjectTable
+        project={project([priorityField])}
+        rows={[
+          {
+            ...row("r1", "Latch sticks"),
+            labels: ["prio/p1"],
+            priority: { rank: 1, name: "P1", label: "prio/p1" },
+          },
+        ]}
+        groupByFieldId={null}
+        priorityChoices={choices}
+        onSetPriority={(_row, label) => written.push(label)}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("combobox", { name: /Priority for Latch sticks/ }));
+    fireEvent.click(await screen.findByText("Clear"));
+
+    expect(written).toEqual([null]);
+  });
+
+  it("leaves a configured Priority field to the ordinary editor", async () => {
+    // The field is the authority wherever it has options: writing a label there would edit
+    // something other than the column the operator is looking at.
+    const written: Array<string | null> = [];
+    render(
+      <ProjectTable
+        project={project([
+          field({ id: "f-prio", name: "Priority", options: [{ id: "o1", name: "High" }] }),
+        ])}
+        rows={[row("r1", "Latch sticks")]}
+        groupByFieldId={null}
+        priorityChoices={choices}
+        onSetPriority={(_row, label) => written.push(label)}
+        onEdit={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("combobox", { name: /Priority for Latch sticks/ }));
+
+    expect(await screen.findByText("High")).toBeDefined();
+    expect(screen.queryByText("prio/p1")).toBeNull();
+  });
+});
+
+/**
+ * The date cell.
+ *
+ * What it replaces is a native `<input type="date">`, whose picker is the browser's and whose text
+ * format is the operating system's. What a planning table needs instead is a token that reads as a
+ * date and a picker that understands how a date gets decided out loud.
+ */
+describe("the date cell", () => {
+  const start = field({ id: "f-start", name: "Start date", type: "date", options: [] });
+  const target = field({ id: "f-target", name: "Target date", type: "date", options: [] });
+
+  const withDates = (values: Record<string, { type: "date"; date: string }>) => ({
+    ...row("r1", "Latch sticks", values),
+  });
+
+  it("reads a date as a date, not as the stored string", () => {
+    render(
+      <ProjectTable
+        project={project([start])}
+        rows={[withDates({ "f-start": { type: "date", date: "2026-09-01" } })]}
+        groupByFieldId={null}
+        onEdit={() => {}}
+        today="2026-09-16"
+      />,
+    );
+
+    expect(screen.getByText("1 Sep 2026")).toBeDefined();
+  });
+
+  it("commits a relative date somebody typed", async () => {
+    const written: unknown[] = [];
+    render(
+      <ProjectTable
+        project={project([start])}
+        rows={[withDates({})]}
+        groupByFieldId={null}
+        onEdit={(_row, _field, value) => written.push(value)}
+        today="2026-09-16"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Start date for Latch sticks/ }));
+    const input = await screen.findByPlaceholderText(/next friday/);
+    fireEvent.change(input, { target: { value: "+2w" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(written).toEqual([{ type: "date", date: "2026-09-30" }]);
+  });
+
+  it("keeps unreadable input rather than storing a guess", async () => {
+    const written: unknown[] = [];
+    render(
+      <ProjectTable
+        project={project([start])}
+        rows={[withDates({})]}
+        groupByFieldId={null}
+        onEdit={(_row, _field, value) => written.push(value)}
+        today="2026-09-16"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Start date for Latch sticks/ }));
+    const input = await screen.findByPlaceholderText(/next friday/);
+    fireEvent.change(input, { target: { value: "01/09/2026" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(written).toEqual([]);
+  });
+
+  it("shows the other end of the range and how long the span is", async () => {
+    // The one number a person wants from a pair of dates is the length between them.
+    render(
+      <ProjectTable
+        project={project([start, target])}
+        rows={[
+          withDates({
+            "f-start": { type: "date", date: "2026-09-01" },
+            "f-target": { type: "date", date: "2026-10-13" },
+          }),
+        ]}
+        groupByFieldId={null}
+        onEdit={() => {}}
+        today="2026-09-16"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Target date for Latch sticks/ }));
+
+    expect(await screen.findByText(/Start date: 1 Sep 2026 · 6 weeks/)).toBeDefined();
+  });
+
+  it("says so when a target lands before its start", async () => {
+    // A backwards range is a mistake somebody has to be shown, not something to silently store.
+    render(
+      <ProjectTable
+        project={project([start, target])}
+        rows={[
+          withDates({
+            "f-start": { type: "date", date: "2026-10-01" },
+            "f-target": { type: "date", date: "2026-09-01" },
+          }),
+        ]}
+        groupByFieldId={null}
+        onEdit={() => {}}
+        today="2026-09-16"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Target date for Latch sticks/ }));
+
+    expect(await screen.findByText(/Before start date/)).toBeDefined();
+  });
+});
+
+/**
+ * Virtualization (spec F23 NFR-1, issue #126 AC-6).
+ *
+ * The table is expensive per row in a way a list is not — a context menu, a state icon, a task
+ * badge, a label list and one editable cell per provider field — so at the thousand items the
+ * NFR names, drawing all of them is the difference between a table and a stall.
+ *
+ * The measurement is what makes this testable at all: nothing has a height in this environment,
+ * and `windowOf` reads an unmeasured pane as "draw everything" on purpose. So these tests give
+ * the pane a height the way a browser would, and assert on what reaches the DOM.
+ */
+describe("ProjectTable at a thousand rows", () => {
+  const many = (n: number) => Array.from({ length: n }, (_, i) => row(`r${i}`, `Row number ${i}`));
+
+  /** A pane with a height, as a browser gives one. Restored after each test. */
+  function withPaneHeight(height: number): () => void {
+    const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight");
+    Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+      configurable: true,
+      get: () => height,
+    });
+    return () => {
+      if (original) Object.defineProperty(HTMLElement.prototype, "clientHeight", original);
+      else Reflect.deleteProperty(HTMLElement.prototype, "clientHeight");
+    };
+  }
+
+  it("draws a window of rows, not the whole project", async () => {
+    const restore = withPaneHeight(740);
+    try {
+      render(
+        <ProjectTable
+          project={project([field({ id: "f1", name: "Status" })])}
+          rows={many(1000)}
+          groupByFieldId={null}
+        />,
+      );
+
+      // Tens of rows in the DOM, not a thousand. The header is among them, hence the slack.
+      await waitFor(() => expect(screen.getAllByRole("row").length).toBeLessThan(60));
+      expect(screen.getByText("Row number 0")).toBeDefined();
+      // And the far end is genuinely absent rather than merely scrolled past — which is the whole
+      // claim: it was never rendered.
+      expect(screen.queryByText("Row number 900")).toBeNull();
+    } finally {
+      restore();
+    }
+  });
+
+  it("keeps the scroll height honest, so the scrollbar does not lie about what is left", async () => {
+    const restore = withPaneHeight(740);
+    try {
+      const { container } = render(
+        <ProjectTable
+          project={project([field({ id: "f1", name: "Status" })])}
+          rows={many(1000)}
+          groupByFieldId={null}
+        />,
+      );
+
+      // The two spacers stand in for every line not drawn. Their heights plus the drawn rows have
+      // to add up to the full list, or the pane scrolls to a bottom that is not the bottom.
+      await waitFor(() => expect(screen.getAllByRole("row").length).toBeLessThan(60));
+      const spacers = [...container.querySelectorAll("tr[aria-hidden]")];
+      const padded = spacers.reduce(
+        (total, tr) => total + Number.parseInt((tr as HTMLElement).style.height, 10),
+        0,
+      );
+      const drawn = screen.getAllByRole("row").length - 1; // less the header
+      expect(padded + drawn * ROW_HEIGHT).toBe(1000 * ROW_HEIGHT);
+    } finally {
+      restore();
+    }
+  });
+
+  it("draws every row of a project short enough to fit, with no spacers at all", () => {
+    // A twelve-row table has to be the table that existed before windowing — spacers on a short
+    // project are a bug waiting to be reported as one.
+    const restore = withPaneHeight(740);
+    try {
+      const { container } = render(
+        <ProjectTable
+          project={project([field({ id: "f1", name: "Status" })])}
+          rows={many(12)}
+          groupByFieldId={null}
+        />,
+      );
+
+      expect(screen.getAllByRole("row")).toHaveLength(13); // 12 rows + the header
+      expect(container.querySelectorAll("tr[aria-hidden]")).toHaveLength(0);
+    } finally {
+      restore();
+    }
   });
 });

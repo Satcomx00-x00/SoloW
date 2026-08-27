@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { executorKindSchema } from "@gatecontrol/contracts";
+import { executorKindSchema } from "@solow/contracts";
 import { AVAILABLE_EXECUTOR_KINDS, hasDriver, missingDriverReason } from "./drivers.js";
 
 describe("executor drivers (issue #73)", () => {

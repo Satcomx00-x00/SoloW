@@ -1,6 +1,6 @@
 "use client";
 
-import { GUARDED_ENV_VARS, isGuardedEnvVar } from "@gatecontrol/contracts";
+import { GUARDED_ENV_VARS, isGuardedEnvVar } from "@solow/contracts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";

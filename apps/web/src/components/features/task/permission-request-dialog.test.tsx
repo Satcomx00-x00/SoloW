@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { afterEach, describe, expect, it } from "bun:test";
-import type { TaskEvent } from "@gatecontrol/contracts";
+import type { TaskEvent } from "@solow/contracts";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import {
   type PermissionRequest,
@@ -11,7 +11,7 @@ import {
 
 /**
  * The operator's side of AC-4. Two properties matter and neither is cosmetic: the dialog offers
- * exactly the options the agent offered — never one GateControl invented — and a question that
+ * exactly the options the agent offered — never one SoloW invented — and a question that
  * has already been settled never comes back.
  */
 

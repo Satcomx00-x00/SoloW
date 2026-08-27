@@ -4,7 +4,7 @@ import {
   issueMcpTokenInput,
   mcpTokenDto,
   revokeMcpTokenInput,
-} from "@gatecontrol/contracts";
+} from "@solow/contracts";
 import { z } from "zod";
 import { issueMcpToken, listMcpTokens, revokeMcpToken } from "../dal/mcp-token.js";
 import { mcpProcedure, rateLimit, router, unwrap } from "../trpc.js";

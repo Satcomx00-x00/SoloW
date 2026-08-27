@@ -32,23 +32,23 @@ const STATUS: Record<
   pending: {
     label: "Pending",
     icon: CircleDot,
-    className: "border-state-queued/30 bg-state-queued/10 text-state-queued",
+    className: "badge-soft [--badge-color:var(--state-queued)]",
   },
   in_progress: {
     label: "Running",
     icon: LoaderCircle,
-    className: "border-state-running/35 bg-state-running/12 text-state-running",
+    className: "badge-soft [--badge-color:var(--state-running)]",
     spin: true,
   },
   completed: {
     label: "Completed",
     icon: CircleCheck,
-    className: "border-state-done/30 bg-state-done/12 text-state-done",
+    className: "badge-soft [--badge-color:var(--state-done)]",
   },
   failed: {
     label: "Failed",
     icon: CircleAlert,
-    className: "border-state-failed/40 bg-state-failed/12 text-state-failed",
+    className: "badge-soft [--badge-color:var(--state-failed)]",
   },
 };
 

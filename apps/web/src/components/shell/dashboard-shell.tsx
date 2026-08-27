@@ -42,7 +42,25 @@ export function DashboardShell({
             <Navigator workspaceName={workspaceName} />
             <div className="flex min-w-0 flex-1 flex-col">
               <HeaderBar workspaceName={workspaceName} />
-              <main className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">{children}</main>
+              {/*
+                `relative` is load-bearing, not decoration.
+
+                This is the SPA's only scrolling region, and without a positioning context on it
+                an absolutely-positioned descendant resolves against the *initial* containing
+                block instead — so it is neither clipped by this element nor scrolled with it,
+                and its static position, far down a long column, stretches the **document**
+                past the viewport. The browser then paints a second, page-level scrollbar beside
+                this one.
+
+                That is not hypothetical: every Radix `Select` renders a hidden native `<select>`
+                at `position: absolute` for form compatibility, and Settings holds a dozen of
+                them. The page measured 1524px tall inside an 820px viewport and scrolled in two
+                places at once. Making this element the containing block puts those descendants
+                back inside the region that owns them, and the document stays exactly `100dvh`.
+              */}
+              <main className="relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+                {children}
+              </main>
             </div>
           </div>
           <StatusBar />

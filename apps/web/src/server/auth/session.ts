@@ -1,5 +1,5 @@
 import "server-only";
-import { createDb, type Db } from "@gatecontrol/db";
+import { createDb, type Db } from "@solow/db";
 import { createAuth, workspaceForUser } from "./auth.js";
 
 /**

@@ -1,6 +1,6 @@
 "use client";
 
-import type { ScmFileDto, ScmGroup, ScmWorktreeDto } from "@gatecontrol/contracts";
+import type { ScmFileDto, ScmGroup, ScmWorktreeDto } from "@solow/contracts";
 import {
   ChevronDown,
   ChevronRight,

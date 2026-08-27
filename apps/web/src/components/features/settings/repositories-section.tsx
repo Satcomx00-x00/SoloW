@@ -1,6 +1,6 @@
 "use client";
 
-import type { RepositorySource } from "@gatecontrol/contracts";
+import type { RepositorySource } from "@solow/contracts";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,13 +14,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { WHOLE_PAGE } from "@/lib/paged";
 import { trpc } from "@/trpc/react";
 import { SetupFileRows } from "./setup-file-rows";
 
 /** Connect Repositories from a local clone path or a remote git URL. */
 export function RepositoriesSection() {
   const utils = trpc.useUtils();
-  const list = trpc.repository.list.useQuery({});
+  const list = trpc.repository.list.useQuery({ ...WHOLE_PAGE });
   const [name, setName] = useState("");
   const [source, setSource] = useState<RepositorySource>("local_path");
   const [location, setLocation] = useState("");
@@ -99,11 +100,11 @@ export function RepositoriesSection() {
         */}
         {list.isSuccess && (
           <section aria-label="Connected repositories" className="border-t pt-4">
-            {list.data.length === 0 ? (
+            {list.data.items.length === 0 ? (
               <p className="text-muted-foreground text-sm">No repositories connected yet.</p>
             ) : (
               <ul className="grid gap-4">
-                {list.data.map((r) => (
+                {list.data.items.map((r) => (
                   <li className="grid gap-3 rounded-md border p-3" key={r.id}>
                     <div className="flex items-center gap-2">
                       <Badge variant="secondary">

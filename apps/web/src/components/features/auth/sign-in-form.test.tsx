@@ -67,12 +67,12 @@ describe("SignInForm — first run", () => {
     expect(screen.getByText(/Only one account can be created/)).toBeDefined();
 
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Ada" } });
-    fill("ada@gatecontrol.test", "a-long-enough-password");
+    fill("ada@solow.test", "a-long-enough-password");
     fireEvent.click(screen.getByRole("button", { name: /Create owner account/ }));
 
     await waitFor(() => expect(calls.signUp).toHaveLength(1));
     expect(calls.signUp[0]).toEqual({
-      email: "ada@gatecontrol.test",
+      email: "ada@solow.test",
       password: "a-long-enough-password",
       name: "Ada",
     });
@@ -96,7 +96,7 @@ describe("SignInForm — returning owner", () => {
     expect(screen.queryByLabelText("Name")).toBeNull();
     expect(screen.queryByText(/Only one account can be created/)).toBeNull();
 
-    fill("ada@gatecontrol.test", "a-long-enough-password");
+    fill("ada@solow.test", "a-long-enough-password");
     fireEvent.click(screen.getByRole("button", { name: /Sign in/ }));
 
     await waitFor(() => expect(calls.signIn).toHaveLength(1));
@@ -107,7 +107,7 @@ describe("SignInForm — returning owner", () => {
     nextResult = { error: { message: "Invalid email or password" } };
     render(<SignInForm ownerExists />);
 
-    fill("ada@gatecontrol.test", "wrong-password-here");
+    fill("ada@solow.test", "wrong-password-here");
     fireEvent.click(screen.getByRole("button", { name: /Sign in/ }));
 
     expect((await screen.findByRole("alert")).textContent).toBe("Invalid email or password");

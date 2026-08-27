@@ -5,7 +5,7 @@ import {
   setTaskPaneLayoutInput,
   surfaceLayoutDto,
   taskPaneLayoutDto,
-} from "@gatecontrol/contracts";
+} from "@solow/contracts";
 import { z } from "zod";
 import {
   getSurfaceLayout,

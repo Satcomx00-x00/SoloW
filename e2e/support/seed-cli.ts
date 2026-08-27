@@ -3,7 +3,7 @@
  * E2E fixture seeding, run as a `bun` subprocess (issue #15).
  *
  * The Playwright test runner itself is Node, not Bun (see the note this replaces in
- * `isolation.spec.ts`), so a spec file cannot import `@gatecontrol/db` directly — that package
+ * `isolation.spec.ts`), so a spec file cannot import `@solow/db` directly — that package
  * reaches `bun:sqlite`. Every other place this suite needs the database from outside a browser
  * page already solves this by shelling out to a `bun run` subprocess (`prepareFixture`'s
  * `db:migrate`/`db:seed`); this is the same pattern for the two things a spec needs mid-run:
@@ -19,6 +19,7 @@
  * GitHub/GitLab repository) — this is test-only seeding, the same as `packages/db/src/seed.ts`
  * and every unit test's fixtures, not a second way to create an Issue in the product itself.
  */
+
 import {
   agentProfile,
   createDb,
@@ -30,11 +31,32 @@ import {
   secret,
   task,
   taskRepository,
-} from "@gatecontrol/db";
+} from "@solow/db";
 
-async function seedIssue(workspaceId: string, title: string): Promise<void> {
+async function seedIssue(workspaceId: string, repoName: string, title: string): Promise<void> {
   const db = createDb();
-  const [row] = await db.insert(issue).values({ workspaceId, title }).returning();
+  /*
+   * The Issue is attached to a Repository, because the product's own Issues always are:
+   * `createIssueInput` requires one precisely so the Task-creation picker's repository filter
+   * can find it — "a repository-less Issue would be a dead end there". This seed used to insert
+   * `repositoryId: null`, which is a row the product can no longer produce, and the suite spent
+   * its time asserting against a picker that (correctly) refused to list it.
+   *
+   * Resolved by name at seed time rather than seeded alongside, because the Repository is
+   * connected through the UI in the same test run and its id is not knowable in advance. `-`
+   * keeps the unattached shape reachable for the one test that wants it (the cross-Workspace
+   * listing check, where nobody ever opens a picker on it).
+   */
+  let repositoryId: string | null = null;
+  if (repoName !== "-") {
+    // Filtered in JS rather than SQL so this package needs no drizzle-orm of its own — a test
+    // Workspace holds a handful of repositories, and a seed is not where a query plan matters.
+    const rows = await db.select().from(repository);
+    const repo = rows.find((r) => r.workspaceId === workspaceId && r.name === repoName);
+    if (!repo) throw new Error(`seed-cli: no repository named "${repoName}" in ${workspaceId}`);
+    repositoryId = repo.id;
+  }
+  const [row] = await db.insert(issue).values({ workspaceId, title, repositoryId }).returning();
   if (!row) throw new Error("failed to seed issue");
   console.log(JSON.stringify({ id: row.id, title: row.title }));
 }
@@ -98,20 +120,24 @@ async function seedTask(workspaceId: string, title: string): Promise<void> {
     workspaceId,
     taskId: row.id,
     repositoryId: repo.id,
-    checkoutBranch: `gatecontrol/task-${row.id}`,
+    checkoutBranch: `solow/task-${row.id}`,
     position: 0,
   });
   console.log(JSON.stringify({ id: row.id, title: row.title }));
 }
 
-const [, , kind, workspaceId, ...titleParts] = process.argv;
-const title = titleParts.join(" ");
-if (!workspaceId || !title) {
-  console.error("usage: seed-cli.ts <issue|task> <workspaceId> <title>");
+const [, , kind, workspaceId, ...rest] = process.argv;
+if (!workspaceId || rest.length === 0) {
+  console.error("usage: seed-cli.ts issue <workspaceId> <repoName|-> <title…>");
+  console.error("       seed-cli.ts task <workspaceId> <title…>");
   process.exit(1);
 }
-if (kind === "issue") await seedIssue(workspaceId, title);
-else if (kind === "task") await seedTask(workspaceId, title);
+// The repository name rides ahead of the title because the title may hold spaces: everything
+// after the fixed positions is the title, and nothing has to be quoted twice.
+if (kind === "issue") {
+  const [repoName, ...titleParts] = rest;
+  await seedIssue(workspaceId, repoName ?? "-", titleParts.join(" "));
+} else if (kind === "task") await seedTask(workspaceId, rest.join(" "));
 else {
   console.error(`unknown kind: ${kind}`);
   process.exit(1);

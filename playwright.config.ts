@@ -45,7 +45,11 @@ export default defineConfig({
     {
       command: `bunx --bun next dev --port ${PORTS.web} --hostname 127.0.0.1`,
       cwd: "apps/web",
-      url: `http://127.0.0.1:${PORTS.web}/board`,
+      // `/projects` — the app's real front door. The old `/board` readiness URL outlived the
+      // route it named: boards moved under `/projects/:id`, the URL began answering 404, and
+      // Playwright treats a 404 as "not up yet", so the whole suite timed out before one test
+      // ran. Root-adjacent and unparameterised on purpose, so this cannot rot the same way.
+      url: `http://127.0.0.1:${PORTS.web}/projects`,
       reuseExistingServer: false,
       timeout: 180_000,
       env,

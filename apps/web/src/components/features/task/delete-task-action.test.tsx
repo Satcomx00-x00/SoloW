@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { afterEach, describe, expect, it } from "bun:test";
-import { TaskErrorCode } from "@gatecontrol/contracts";
+import { TaskErrorCode } from "@solow/contracts";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderWithTrpc } from "@/test/trpc-harness";
 import { DeleteTaskAction } from "./delete-task-action";

@@ -6,7 +6,7 @@ import { createTestDb, type TestDb } from "./testing.js";
 
 /**
  * Seed idempotency (task TASK-005). The seed must be safe to re-run: a second pass inserts
- * nothing new. Encryption needs GATECONTROL_SECRET_KEY, set before the store is used.
+ * nothing new. Encryption needs SOLOW_SECRET_KEY, set before the store is used.
  */
 
 async function count(db: TestDb, tbl: Parameters<ReturnType<TestDb["select"]>["from"]>[0]) {
@@ -18,7 +18,7 @@ describe("seed", () => {
   let db: TestDb;
 
   beforeAll(() => {
-    process.env.GATECONTROL_SECRET_KEY ??= Buffer.alloc(32, 9).toString("base64");
+    process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 9).toString("base64");
   });
 
   beforeEach(() => {

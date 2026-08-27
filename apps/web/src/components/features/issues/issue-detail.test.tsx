@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { afterEach, describe, expect, it, mock } from "bun:test";
-import type { IssueDto, TaskDependencyDto, TaskDto, TaskState } from "@gatecontrol/contracts";
+import type { IssueDto, TaskDependencyDto, TaskDto, TaskState } from "@solow/contracts";
 import { cleanup, screen, waitFor } from "@testing-library/react";
 import { renderWithTrpc } from "@/test/trpc-harness";
 
@@ -45,6 +45,8 @@ const issue: IssueDto = {
   repositoryId: null,
   externalNumber: null,
   externalUrl: null,
+  externalId: null,
+  externalParentId: null,
   syncedAt: null,
   labels: [],
   linkedChangeRequests: [],
@@ -65,7 +67,7 @@ function makeTask(id: string, state: TaskState, title: string): TaskDto {
         id: "attach-1",
         repositoryId: "repo-1",
         baseRef: null,
-        checkoutBranch: "gatecontrol/task-1",
+        checkoutBranch: "solow/task-1",
         resultBranch: null,
         position: 0,
       },
@@ -93,7 +95,7 @@ describe("IssueDetail", () => {
   it("marks a blocked Task here too, not only on the board", async () => {
     renderWithTrpc(<IssueDetail issueId={issue.id} />, {
       "issue.get": () => issue,
-      "task.list": () => [makeTask("a", "ready", "Wire the latch")],
+      "task.list": () => ({ items: [makeTask("a", "ready", "Wire the latch")], nextCursor: null }),
       "task.dependencies": () => [edge],
     });
 
@@ -110,7 +112,7 @@ describe("IssueDetail", () => {
 
     const { log } = renderWithTrpc(<IssueDetail issueId={issue.id} />, {
       "issue.get": () => issue,
-      "task.list": () => [makeTask("a", "ready", "Wire the latch")],
+      "task.list": () => ({ items: [makeTask("a", "ready", "Wire the latch")], nextCursor: null }),
       "task.dependencies": () => edges,
     });
 
@@ -124,7 +126,7 @@ describe("IssueDetail", () => {
   it("says so when the edges cannot be loaded", async () => {
     renderWithTrpc(<IssueDetail issueId={issue.id} />, {
       "issue.get": () => issue,
-      "task.list": () => [makeTask("a", "ready", "Wire the latch")],
+      "task.list": () => ({ items: [makeTask("a", "ready", "Wire the latch")], nextCursor: null }),
       "task.dependencies": () => {
         throw new Error("edges unavailable");
       },

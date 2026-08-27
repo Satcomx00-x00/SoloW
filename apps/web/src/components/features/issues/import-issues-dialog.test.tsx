@@ -47,9 +47,10 @@ const external = [
 ];
 
 const handlers = {
-  "repository.list": () => [
-    { id: "repo-1", name: "gate", integrationId: "int-1", externalFullName: "acme/gate" },
-  ],
+  "repository.list": () => ({
+    items: [{ id: "repo-1", name: "gate", integrationId: "int-1", externalFullName: "acme/gate" }],
+    nextCursor: null,
+  }),
   "integration.listExternalIssues": () => external,
 };
 
@@ -80,7 +81,7 @@ describe("ImportIssuesDialog", () => {
     renderOpen();
     await screen.findByText(/Fix the latch/);
 
-    // Three issues, but #19 is already in GateControl — so two are selectable.
+    // Three issues, but #19 is already in SoloW — so two are selectable.
     fireEvent.click(screen.getByRole("button", { name: /Select all 2/ }));
 
     await waitFor(() =>

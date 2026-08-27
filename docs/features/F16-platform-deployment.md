@@ -4,7 +4,7 @@
 
 ## Summary
 
-GateControl runs as both a local single-user tool and a hosted multi-user service, from one
+SoloW runs as both a local single-user tool and a hosted multi-user service, from one
 product. Local deployment is trivial to start; hosted deployment adds shared access, teams,
 and multi-tenancy. Users own their compute and data in both modes, with no required cloud
 service and no telemetry.
@@ -15,7 +15,7 @@ service and no telemetry.
 
 ## User stories
 
-- As a Solo Power User, I want to run GateControl on my own machine with minimal setup, so I
+- As a Solo Power User, I want to run SoloW on my own machine with minimal setup, so I
   can start immediately.
 - As a Team Lead, I want a shared, hosted instance my team can use together, so we
   collaborate.
@@ -24,13 +24,13 @@ service and no telemetry.
 ## Functional requirements
 
 ### Local deployment
-- **FR-1** GateControl runs entirely on one machine for a single user, storing its data and
+- **FR-1** SoloW runs entirely on one machine for a single user, storing its data and
   Worktrees locally.
 - **FR-2** Local deployment requires no external service and sends no telemetry
   (product [NFR-5](../product/03-product-requirements.md), [NFR-14](../product/03-product-requirements.md)).
 
 ### Hosted deployment
-- **FR-3** GateControl runs as a shared, multi-user service using the same product and
+- **FR-3** SoloW runs as a shared, multi-user service using the same product and
   capabilities as local deployment (product [NFR-13](../product/03-product-requirements.md)).
 - **FR-4** Hosted deployment supports multiple users organised into Workspaces, with each
   user able to access only the Workspaces they are granted.
@@ -40,7 +40,7 @@ service and no telemetry.
 ### Common
 - **FR-7** The same features behave identically across deployment modes, differing only in
   configuration.
-- **FR-8** GateControl is distributed so a user can obtain and run it without a proprietary
+- **FR-8** SoloW is distributed so a user can obtain and run it without a proprietary
   gatekeeper, consistent with its open-source nature.
 - **FR-9** A signed-in member can view and toggle their Workspace's feature flags from Settings
   (issue #21), not only via `scripts/flag.ts` on the machine running the instance. Turning

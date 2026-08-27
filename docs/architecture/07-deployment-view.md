@@ -2,7 +2,7 @@
 
 **Status:** Draft · **Owner:** Architecture / Operator · **Last reviewed:** 2026-08-17
 
-GateControl runs in two deployment modes from one product. This section describes both at a
+SoloW runs in two deployment modes from one product. This section describes both at a
 business-readable level. See [F16](../features/F16-platform-deployment.md) for the
 requirements and [Decision 0008](../decisions/0008-data-store-strategy.md) for the data
 store choice.

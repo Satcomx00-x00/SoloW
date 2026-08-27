@@ -1,6 +1,6 @@
 "use client";
 
-import type { TaskEvent } from "@gatecontrol/contracts";
+import type { TaskEvent } from "@solow/contracts";
 import { ShieldQuestion } from "lucide-react";
 import {
   AlertDialog,
@@ -21,7 +21,7 @@ export type PermissionRequest = Extract<TaskEvent, { kind: "permission_request" 
  * Two rules shape it, and both come from the same place as ACP's capability negotiation: never
  * invent something the other side did not offer, and never let silence read as consent.
  *
- * - **Only the agent's own options are shown**, in the order it listed them. GateControl does
+ * - **Only the agent's own options are shown**, in the order it listed them. SoloW does
  *   not add an "always allow" the agent never offered, and does not reword the ones it did.
  * - **There is no dismiss.** Closing the dialog would leave the operator believing they had
  *   declined while the run went on waiting. If the agent offered a refusal, refusing is one of
@@ -57,7 +57,7 @@ export function PermissionRequestDialog({
                 {/*
                   Deliberately says "the unattended policy decides" rather than "it is refused":
                   refusal is the default, but a deployment can set
-                  GATECONTROL_ACP_UNATTENDED_PERMISSION to the permissive posture, and a dialog
+                  SOLOW_ACP_UNATTENDED_PERMISSION to the permissive posture, and a dialog
                   that promised refusal on such a deployment would be telling the operator
                   something untrue at the exact moment they are deciding whether to walk away.
                 */}

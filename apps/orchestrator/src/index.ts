@@ -1,11 +1,7 @@
 /// <reference types="bun-types" />
-import { announceRequest, taskInputSchema } from "@gatecontrol/contracts";
-import {
-  type StreamTicketClaims,
-  streamChannel,
-  verifyStreamTicket,
-} from "@gatecontrol/core/stream";
-import { createDb, type Db } from "@gatecontrol/db";
+import { announceRequest, taskInputSchema } from "@solow/contracts";
+import { type StreamTicketClaims, streamChannel, verifyStreamTicket } from "@solow/core/stream";
+import { createDb, type Db } from "@solow/db";
 import {
   type AgentRegistry,
   agentRegistry,
@@ -46,7 +42,7 @@ function defaultWsDeps(): WsServerDeps {
   return {
     db: createDb(),
     now: () => Date.now(),
-    streamSecret: orchestratorEnv().GATECONTROL_STREAM_SECRET,
+    streamSecret: orchestratorEnv().SOLOW_STREAM_SECRET,
     registry: agentRegistry,
   };
 }
@@ -260,7 +256,7 @@ const RECONCILE_INTERVAL_MS = 60_000;
  * functions. Serverless-style Next.js cannot hold these, so they run here.
  */
 export function startWebSocketServer(
-  port = orchestratorEnv().GATECONTROL_WS_PORT,
+  port = orchestratorEnv().SOLOW_WS_PORT,
   deps: WsServerDeps = defaultWsDeps(),
 ) {
   // A failed sweep must never stop the next one: the reasons this throws (a locked database, a
@@ -270,7 +266,7 @@ export function startWebSocketServer(
     Promise.all([
       reclaimOrphanedRuns(deps.db, deps.registry, hub).then((count) => {
         if (count > 0) {
-          console.log(`[gatecontrol/orchestrator] reclaimed ${count} orphaned running task(s)`);
+          console.log(`[solow/orchestrator] reclaimed ${count} orphaned running task(s)`);
         }
       }),
       // The same sweep's other half: a Task at the gate whose decision was recorded and never
@@ -278,11 +274,11 @@ export function startWebSocketServer(
       // both ways a run goes missing.
       reportStrandedReviews(deps.db, deps.registry, hub).then((count) => {
         if (count > 0) {
-          console.log(`[gatecontrol/orchestrator] ${count} review decision(s) were never applied`);
+          console.log(`[solow/orchestrator] ${count} review decision(s) were never applied`);
         }
       }),
     ]).catch((cause) => {
-      console.error("[gatecontrol/orchestrator] reconciliation sweep failed:", cause);
+      console.error("[solow/orchestrator] reconciliation sweep failed:", cause);
     });
 
   setTimeout(() => {

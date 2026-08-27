@@ -6,19 +6,19 @@ import {
   ok,
   type Result,
   type SetFlagInput,
-} from "@gatecontrol/contracts";
-import { FLAGS, type FlagKey, setWorkspaceFlag } from "@gatecontrol/db";
+} from "@solow/contracts";
+import { FLAGS, type FlagKey, setWorkspaceFlag } from "@solow/db";
 import type { RequestContext } from "./context.js";
 import { getWorkspaceFlags } from "./workspace.js";
 
 /**
  * Request-context-scoped surface over the flag registry (issue #21).
  *
- * `@gatecontrol/db`'s `FLAGS` registry is the single source of truth for which flags exist,
+ * `@solow/db`'s `FLAGS` registry is the single source of truth for which flags exist,
  * their description and their default — this module never invents a second list. It only merges
  * that static registry with the caller's own Workspace's stored overrides (via
  * `dal/workspace.ts`'s `getWorkspaceFlags`, already scoped to one Workspace, unlike
- * `@gatecontrol/db`'s `listWorkspaceFlags` which returns every Workspace).
+ * `@solow/db`'s `listWorkspaceFlags` which returns every Workspace).
  */
 
 function isFlagKey(key: string): key is FlagKey {

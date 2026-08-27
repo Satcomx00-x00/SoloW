@@ -14,8 +14,8 @@ import {
   taskRepository,
   task as taskTable,
   workspace,
-} from "@gatecontrol/db";
-import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
+} from "@solow/db";
+import { createTestDb, type TestDb } from "@solow/db/testing";
 import { eq } from "drizzle-orm";
 import type { BaseContext } from "../trpc.js";
 import { appRouter } from "./index.js";
@@ -88,7 +88,7 @@ async function fixture(db: TestDb) {
     workspaceId: ws.id,
     taskId: task.id,
     repositoryId: repo.id,
-    checkoutBranch: `gatecontrol/task-${task.id}`,
+    checkoutBranch: `solow/task-${task.id}`,
     position: 0,
   });
   const [session] = await db
@@ -159,7 +159,7 @@ describe("session.get (issue #2)", () => {
     await legacyRow(db, fx, 0, "stdout", { text: "patched latch.ts\n" });
     await legacyRow(db, fx, 1, "tool_use", { name: "Edit" });
     await legacyRow(db, fx, 2, "diff", {
-      diffRef: "gatecontrol/task-1",
+      diffRef: "solow/task-1",
       files: [{ path: "src/latch.ts", status: "modified", additions: 3, deletions: 1 }],
       patch: "@@ -1 +1 @@",
       truncated: false,
@@ -167,7 +167,7 @@ describe("session.get (issue #2)", () => {
 
     const detail = await caller(db, fx.workspaceId).session.get({ sessionId: fx.sessionId });
     expect(detail.events.map((e) => e.kind)).toEqual(["assistant_turn", "tool_call", "diff"]);
-    expect(detail.diff?.diffRef).toBe("gatecontrol/task-1");
+    expect(detail.diff?.diffRef).toBe("solow/task-1");
     expect(detail.diff?.files).toHaveLength(1);
   });
 
@@ -221,7 +221,7 @@ describe("session.get (issue #2)", () => {
     // reviewer decides on, the fork point — is computed from all of it.
     const fx = await fixture(db);
     await legacyRow(db, fx, 0, "diff", {
-      diffRef: "gatecontrol/task-1",
+      diffRef: "solow/task-1",
       files: [{ path: "src/latch.ts", status: "modified", additions: 3, deletions: 1 }],
       patch: "@@ -1 +1 @@",
       truncated: false,
@@ -238,7 +238,7 @@ describe("session.get (issue #2)", () => {
 
     const detail = await caller(db, fx.workspaceId).session.get({ sessionId: fx.sessionId });
     expect(detail.events).toEqual([]);
-    expect(detail.diff?.diffRef).toBe("gatecontrol/task-1");
+    expect(detail.diff?.diffRef).toBe("solow/task-1");
     expect(detail.cursor?.seq).toBe(1);
   });
 

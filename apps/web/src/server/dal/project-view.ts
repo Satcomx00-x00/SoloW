@@ -13,8 +13,8 @@ import {
   type ReorderProjectViewsInput,
   type Result,
   type UpdateProjectViewInput,
-} from "@gatecontrol/contracts";
-import { project, projectView } from "@gatecontrol/db";
+} from "@solow/contracts";
+import { project, projectView } from "@solow/db";
 import { and, asc, eq, max } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
 
@@ -51,6 +51,7 @@ function toViewDto(row: typeof projectView.$inferSelect): ProjectViewDto {
         ? { field: row.sortField, direction: row.sortDirection }
         : null,
     visibleFieldIds: row.visibleFieldIds,
+    hideClosed: row.hideClosed,
   };
   return {
     id: row.id,
@@ -72,6 +73,7 @@ function toColumns(config: ProjectViewConfig) {
     sortField: config.sort?.field ?? null,
     sortDirection: config.sort?.direction ?? null,
     visibleFieldIds: config.visibleFieldIds,
+    hideClosed: config.hideClosed,
   };
 }
 

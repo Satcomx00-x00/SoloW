@@ -9,8 +9,8 @@ import {
   type SecretRefDto,
   type SecretUsageDto,
   type SetSecretInput,
-} from "@gatecontrol/contracts";
-import { agentProfile, encryptSecret, integration, secret } from "@gatecontrol/db";
+} from "@solow/contracts";
+import { agentProfile, encryptSecret, integration, secret } from "@solow/db";
 import { and, desc, eq } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
 import { secretToRef } from "./mappers.js";
@@ -97,7 +97,7 @@ export async function setSecret(
 /**
  * Delete a Secret, refusing while anything still holds it (spec F17 FR-6).
  *
- * The refusal is the point. GateControl keeps the only copy of the value, so deleting one an
+ * The refusal is the point. SoloW keeps the only copy of the value, so deleting one an
  * Integration or Agent Profile points at cannot be undone by re-entering it — that holder would
  * keep a `secret_id` naming a row that no longer exists, and say nothing about it until its next
  * sync or agent run failed to authenticate. The returned metadata is the row as it was, so a

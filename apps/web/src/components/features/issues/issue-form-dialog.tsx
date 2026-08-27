@@ -1,6 +1,6 @@
 "use client";
 
-import type { IssueDto } from "@gatecontrol/contracts";
+import type { IssueDto } from "@solow/contracts";
 import { X } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -25,6 +25,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { WHOLE_PAGE } from "@/lib/paged";
 import { trpc } from "@/trpc/react";
 
 /**
@@ -59,7 +60,7 @@ export function IssueFormDialog({
   const open = controlledOpen ?? internalOpen;
   const setOpen = onOpenChange ?? setInternalOpen;
   const utils = trpc.useUtils();
-  const repos = trpc.repository.list.useQuery({}, { enabled: open });
+  const repos = trpc.repository.list.useQuery({ ...WHOLE_PAGE }, { enabled: open });
 
   const [title, setTitle] = useState(issue?.title ?? "");
   const [description, setDescription] = useState(issue?.description ?? "");
@@ -79,7 +80,7 @@ export function IssueFormDialog({
     setTagText("");
   }, [open, issue]);
 
-  const selectedRepo = (repos.data ?? []).find((r) => r.id === repositoryId);
+  const selectedRepo = (repos.data?.items ?? []).find((r) => r.id === repositoryId);
   const fetchesLabels = Boolean(selectedRepo?.integrationId);
   const providerLabels = trpc.repository.listLabels.useQuery(
     { repositoryId },
@@ -176,7 +177,7 @@ export function IssueFormDialog({
           {fieldsLocked && (
             <p className="text-muted-foreground text-xs">
               Title and description come from {issue.source} and are not edited here — only labels
-              are GateControl's to change.
+              are SoloW's to change.
             </p>
           )}
           <div className="grid gap-2">
@@ -186,7 +187,7 @@ export function IssueFormDialog({
                 <SelectValue placeholder="Select a repository" />
               </SelectTrigger>
               <SelectContent>
-                {(repos.data ?? []).map((r) => (
+                {(repos.data?.items ?? []).map((r) => (
                   <SelectItem key={r.id} value={r.id}>
                     {r.name}
                   </SelectItem>

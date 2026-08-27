@@ -1,4 +1,4 @@
-import type { AcpPermissionOption, AcpPermissionRequest } from "@gatecontrol/acp";
+import type { AcpPermissionOption, AcpPermissionRequest } from "@solow/acp";
 import type { PermissionAnswer } from "./runner.js";
 
 /**
@@ -122,7 +122,7 @@ export class PermissionInbox {
   answer(requestId: string, optionId: string): PermissionAnswer {
     const entry = this.pending.get(requestId);
     if (!entry) return "not_pending";
-    // Only an option the agent actually offered: GateControl never invents one, for the same
+    // Only an option the agent actually offered: SoloW never invents one, for the same
     // reason it never assumes a capability that was not advertised (AC-2).
     if (!entry.options.some((o) => o.optionId === optionId)) return "option_not_offered";
     entry.settle({ outcome: "selected", optionId, decidedBy: "operator" });

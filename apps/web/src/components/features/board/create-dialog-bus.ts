@@ -15,7 +15,7 @@
  */
 export type CreateKind = "task" | "issue" | "import-issues" | "connect-repository";
 
-const EVENT = "gatecontrol:open-create-dialog";
+const EVENT = "solow:open-create-dialog";
 
 /**
  * What the sender already knows, so the dialog does not ask for it again.

@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { describe, expect, it } from "bun:test";
-import type { ScmFileDto } from "@gatecontrol/contracts";
+import type { ScmFileDto } from "@solow/contracts";
 import { buildScmTree, splitPath } from "./source-control-tree";
 
 const file = (path: string): ScmFileDto => ({

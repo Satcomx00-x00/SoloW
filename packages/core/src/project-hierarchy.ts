@@ -6,7 +6,7 @@
  * or a DOM to be proven. The same reasoning as the dependency graph in `task.ts` — every question
  * about the *shape* of a graph is answered here, once, where a test can reach it.
  *
- * The hierarchy is the provider's. GateControl reads whichever one exists — GitHub's sub-issues,
+ * The hierarchy is the provider's. SoloW reads whichever one exists — GitHub's sub-issues,
  * GitLab's epics and parent links — and never invents an edge of its own (F23, States & rules),
  * which is why nothing in this file constructs a parent: it only interprets what was reported.
  *

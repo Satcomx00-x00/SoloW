@@ -1,5 +1,5 @@
-import { createDb } from "@gatecontrol/db";
-import { createLogger } from "@gatecontrol/observability";
+import { createDb } from "@solow/db";
+import { createLogger } from "@solow/observability";
 import { linkedRepositories, syncRepositoryIssues } from "../../sync/issues.js";
 import { inngest } from "../client.js";
 

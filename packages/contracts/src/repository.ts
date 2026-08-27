@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { idSchema, repositorySourceSchema, timestampsSchema } from "./common.js";
+import { pageInputSchema, pageOf } from "./page.js";
 
 /**
  * Connect a Repository (spec FR-021, clarified 2026-08-17).
@@ -34,6 +35,22 @@ export const repositoryDto = z
     /** Set together, once linked to an Integration (issue #15) — null for a purely local repo. */
     integrationId: idSchema.nullable(),
     externalFullName: z.string().nullable(),
+    /**
+     * The Integration's own provider and host, carried alongside the repository rather than
+     * looked up separately (user request 2026-08-27).
+     *
+     * A Workspace can hold more than one Integration for the same provider — two self-hosted
+     * GitLab instances, or one self-hosted and gitlab.com — and nothing on `repository` itself
+     * says which one a row came from (`integrationId` is only a foreign key). A picker choosing
+     * between repositories has to be able to say "GitLab @ gitlab.example.com" rather than just
+     * "GitLab" twice with no way to tell them apart. Both null for a purely local repository,
+     * both set together like `integrationId` — there is no state where one is set without the
+     * other.
+     */
+    provider: z.string().nullable(),
+    integrationBaseUrl: z.string().nullable(),
+    /** How many Issues this Repository currently holds — for a picker to show before it commits. */
+    issueCount: z.number().int().nonnegative(),
     /** Files copied into every new worktree, as repository-relative globs (issue #52). */
     setupFilePatterns: z.array(z.string()),
   })
@@ -112,3 +129,38 @@ export const gitRefNameSchema = z
   .refine((r) => ![...r].some((c) => c.charCodeAt(0) < 0x20), {
     message: "ref must not contain a control character",
   });
+
+/**
+ * The Repositories a Workspace has connected, one page at a time.
+ *
+ * Paged like every other list for one reason: `repository.list` is an MCP tool, and #82 is the
+ * issue that says a discovery tool must bound what it spends of an agent's context. A Workspace
+ * rarely has a hundred repositories — but "rarely" is not a bound, and the surface that would
+ * suffer is the one nobody is watching.
+ */
+export const listRepositoriesInput = pageInputSchema;
+export type ListRepositoriesInput = z.infer<typeof listRepositoriesInput>;
+
+export const repositoryListDto = pageOf(repositoryDto);
+export type RepositoryListDto = z.infer<typeof repositoryListDto>;
+
+/**
+ * Seed a Repository's provider labels from SoloW's own default taxonomy (user request
+ * 2026-08-27): `type/*`, `prio/*`, `size/*`, `status/*`, `area/*`, written straight to whichever
+ * of GitHub or GitLab the Repository is linked to, so an Owner starting from an empty repository
+ * is not left to type out a label vocabulary by hand.
+ *
+ * Additive only, the same rule `provisionProjectStructure` follows for GitLab's scoped labels: a
+ * label the repository already has, under any of these prefixes or none, is left exactly as it
+ * is and only reported.
+ */
+export const seedDefaultLabelsInput = z.object({ repositoryId: idSchema });
+export type SeedDefaultLabelsInput = z.infer<typeof seedDefaultLabelsInput>;
+
+export const seedDefaultLabelsResult = z.object({
+  /** Label names this call created. */
+  created: z.array(z.string()),
+  /** Label names already present, left untouched. */
+  existing: z.array(z.string()),
+});
+export type SeedDefaultLabelsResult = z.infer<typeof seedDefaultLabelsResult>;

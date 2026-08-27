@@ -1,5 +1,5 @@
 import "server-only";
-import type { IntegrationCapability } from "@gatecontrol/contracts";
+import type { IntegrationCapability } from "@solow/contracts";
 import {
   type AutoSyncedRepositoryDto,
   type ChangeRequestDto,
@@ -23,7 +23,7 @@ import {
   type RepositoryDto,
   type Result,
   type SyncRepositorySignalsInput,
-} from "@gatecontrol/contracts";
+} from "@solow/contracts";
 import {
   changeRequest,
   decryptForScmSync,
@@ -32,7 +32,7 @@ import {
   repository,
   repositoryBranch,
   secret,
-} from "@gatecontrol/db";
+} from "@solow/db";
 import {
   type DriverWith,
   type ExternalRepository,
@@ -41,8 +41,8 @@ import {
   providerWith,
   type ScmCredential,
   type ScmProvider,
-} from "@gatecontrol/scm";
-import { and, desc, eq, inArray } from "drizzle-orm";
+} from "@solow/scm";
+import { and, count, desc, eq, inArray } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
 import {
   changeRequestToDto,
@@ -56,7 +56,7 @@ import {
 /**
  * SCM integrations (issue #15). Every function here is workspace-scoped (Principle V) and the
  * credential never leaves this module as plaintext — `loadCredential` decrypts it, the caller
- * passes it straight to `@gatecontrol/scm`, and it goes out of scope when the function returns.
+ * passes it straight to `@solow/scm`, and it goes out of scope when the function returns.
  */
 
 export async function loadCredential(
@@ -476,7 +476,7 @@ export async function listExternalRepositories(
  * The clone URL is read from the provider rather than taken from the caller, which is what makes
  * this safe to expose: the only repositories importable are the ones the stored token can
  * actually see, so an `externalFullName` naming someone else's repository is a NotFound, not an
- * attempt GateControl will go and make on the user's behalf.
+ * attempt SoloW will go and make on the user's behalf.
  *
  * Nothing is cloned here. The web app is not allowed to touch the execution host
  * (`scripts/audit-executor-boundary.ts`), and it does not need to be: recording the clone URL as
@@ -504,7 +504,19 @@ export async function importRepository(
       ),
     )
     .limit(1);
-  if (existing) return ok(repositoryToDto(existing));
+  if (existing) {
+    const [row] = await ctx.db
+      .select({ n: count() })
+      .from(issue)
+      .where(and(eq(issue.workspaceId, ctx.workspaceId), eq(issue.repositoryId, existing.id)));
+    return ok(
+      repositoryToDto(existing, {
+        provider: cred.data.row.provider,
+        integrationBaseUrl: cred.data.row.baseUrl,
+        issueCount: row?.n ?? 0,
+      }),
+    );
+  }
 
   const driver = driverWith(cred.data.row.provider, "repositories");
   if (!driver.ok) return err(driver.error);
@@ -530,7 +542,19 @@ export async function importRepository(
     // Swallowed by design — see comment above.
   }
 
-  return ok(repositoryToDto(row));
+  // Counted after the import attempt above, best-effort like the import itself: a transient
+  // failure there already leaves this repository at zero, which is the truth at this moment.
+  const [imported] = await ctx.db
+    .select({ n: count() })
+    .from(issue)
+    .where(and(eq(issue.workspaceId, ctx.workspaceId), eq(issue.repositoryId, row.id)));
+  return ok(
+    repositoryToDto(row, {
+      provider: cred.data.row.provider,
+      integrationBaseUrl: cred.data.row.baseUrl,
+      issueCount: imported?.n ?? 0,
+    }),
+  );
 }
 
 /** Preview a linked Repository's provider issues, flagging which are already imported. */
@@ -564,7 +588,7 @@ export async function listExternalIssues(
 }
 
 /**
- * Import selected external issues as GateControl Issues (AC-2). Idempotent on
+ * Import selected external issues as SoloW Issues (AC-2). Idempotent on
  * `(repositoryId, externalId)` — an id already imported *for this Repository* is skipped on
  * insert and its existing row is returned, so a second import of the same selection is visibly
  * a no-op, not a duplicate. Scoped to the Repository rather than the Integration: GitLab's issue

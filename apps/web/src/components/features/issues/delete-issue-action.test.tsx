@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { afterEach, describe, expect, it } from "bun:test";
-import { IssueErrorCode } from "@gatecontrol/contracts";
+import { IssueErrorCode } from "@solow/contracts";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderWithTrpc } from "@/test/trpc-harness";
 import { DeleteIssueAction } from "./delete-issue-action";

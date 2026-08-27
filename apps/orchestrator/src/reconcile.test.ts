@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from "bun:test";
-import { STRANDED_REVIEW_REASON } from "@gatecontrol/core";
+import { STRANDED_REVIEW_REASON } from "@solow/core";
 import {
   agentCatalog,
   agentProfile,
@@ -12,8 +12,8 @@ import {
   sessionEvent,
   task,
   workspace,
-} from "@gatecontrol/db";
-import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
+} from "@solow/db";
+import { createTestDb, type TestDb } from "@solow/db/testing";
 import { and, eq } from "drizzle-orm";
 import {
   RECLAIM_STALE_MS,
@@ -30,7 +30,7 @@ import {
  */
 
 beforeAll(() => {
-  process.env.GATECONTROL_SECRET_KEY = Buffer.alloc(32, 7).toString("base64");
+  process.env.SOLOW_SECRET_KEY = Buffer.alloc(32, 7).toString("base64");
 });
 
 const WS = "ws-alpha";
@@ -313,7 +313,7 @@ describe("reclaimOrphanedRuns after the agent finished", () => {
     // The Task does not move: entering review is the operator's one action (Principle I), and
     // the sweep has no more standing to open the gate than the run did.
     const db = createTestDb();
-    const sessionId = await seedWithMarker(db, "task-finished", "gatecontrol/task-finished");
+    const sessionId = await seedWithMarker(db, "task-finished", "solow/task-finished");
 
     const count = await reclaimOrphanedRuns(db, fakeRegistry(), fakeHub(), LONG_AFTER);
 
@@ -328,7 +328,7 @@ describe("reclaimOrphanedRuns after the agent finished", () => {
     expect(live?.state).toBe("awaiting_review");
     // The branch the marker carried — what the reviewer opens, and the only thing the gate
     // strictly needs.
-    expect(live?.diffRef).toBe("gatecontrol/task-finished");
+    expect(live?.diffRef).toBe("solow/task-finished");
   });
 
   it("records why the state changed, in a reason distinct from interrupted", async () => {
@@ -388,7 +388,7 @@ describe("reclaimOrphanedRuns after the agent finished", () => {
       kind: "diff",
       payload: {
         kind: "diff",
-        diffRef: "gatecontrol/task-produced",
+        diffRef: "solow/task-produced",
         files: [{ path: "a.ts", status: "modified", additions: 1, deletions: 0 }],
         patch: "",
         truncated: false,
@@ -420,7 +420,7 @@ describe("reclaimOrphanedRuns when a previous sweep already closed the Session",
       kind: "diff",
       payload: {
         kind: "diff",
-        diffRef: "gatecontrol/task-reswept",
+        diffRef: "solow/task-reswept",
         files: [{ path: "a.ts", status: "modified", additions: 1, deletions: 0 }],
         patch: "",
         truncated: false,

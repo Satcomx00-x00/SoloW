@@ -1,6 +1,6 @@
 "use client";
 
-import { type IssueDto, IssueErrorCode, type IssueStatus } from "@gatecontrol/contracts";
+import { type IssueDto, IssueErrorCode, type IssueStatus } from "@solow/contracts";
 import { Check, ChevronDown, RotateCcw, TriangleAlert } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -20,7 +20,7 @@ import { trpc } from "@/trpc/react";
  * The Issue's status, and the one control that lets a person disagree with it (spec F01 FR-7).
  *
  * An Issue's status is normally derived from its Tasks, which is right nearly always and wrong
- * in the cases that matter most: work finished outside GateControl, an Issue abandoned with
+ * in the cases that matter most: work finished outside SoloW, an Issue abandoned with
  * Tasks still on the board, a duplicate. So the badge is a menu, setting an override the DAL
  * records with who and when — and the override is shown *as* an override, with what the Tasks
  * say underneath it, because a status nobody can explain is worse than one nobody can change.

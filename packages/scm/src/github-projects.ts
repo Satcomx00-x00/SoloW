@@ -3,7 +3,7 @@ import type {
   ProjectFieldType,
   ProjectFieldValue,
   ProjectIteration,
-} from "@gatecontrol/contracts";
+} from "@solow/contracts";
 import { scmGraphql } from "./http.js";
 import type {
   ExternalProject,
@@ -104,8 +104,7 @@ export function toExternalField(field: GqlField, position: number): ExternalProj
     iterations: type === "iteration" ? toIterations(field) : [],
     position,
     readOnly: type === undefined,
-    readOnlyReason:
-      type === undefined ? `GateControl cannot edit a ${field.dataType} field yet` : null,
+    readOnlyReason: type === undefined ? `SoloW cannot edit a ${field.dataType} field yet` : null,
   };
 }
 
@@ -214,6 +213,12 @@ query($project: ID!, $after: String) {
             # about to be drawn in. Without it the table nests nothing: the parent id stays absent
             # on every issue the project scan imported, and "collapse the epic" has no epic.
             parent { databaseId }
+            # The pull requests GitHub itself says will close this issue. Asked for here rather
+            # than through the REST timeline, which costs one request *per issue*: this rides on
+            # the page query that was already being sent.
+            closedByPullRequestsReferences(first: 10, includeClosedPrs: true) {
+              nodes { id number title url state isDraft mergedAt }
+            }
           }
           ... on PullRequest { id databaseId }
         }
@@ -270,7 +275,7 @@ export class GithubProjects {
   /**
    * Nothing to do, and that is the honest answer rather than an omission.
    *
-   * A Projects v2 project defines its own fields; there is no structure for GateControl to
+   * A Projects v2 project defines its own fields; there is no structure for SoloW to
    * create. The method exists so the adopt flow can call it unconditionally — a caller that
    * skipped it for GitHub would be branching on a provider's identity to decide behaviour, which
    * is the one thing Decision 0016 forbids.
@@ -371,6 +376,17 @@ export class GithubProjects {
               updatedAt?: string;
               repository?: { nameWithOwner?: string } | null;
               parent?: { databaseId?: number } | null;
+              closedByPullRequestsReferences?: {
+                nodes?: Array<{
+                  id: string;
+                  number: number;
+                  title: string;
+                  url: string;
+                  state: string;
+                  isDraft?: boolean;
+                  mergedAt?: string | null;
+                }>;
+              };
               assignees?: {
                 nodes?: Array<{ login: string; name?: string | null; avatarUrl?: string | null }>;
               };
@@ -463,6 +479,36 @@ export class GithubProjects {
                 avatarUrl: u.avatarUrl ?? null,
               })),
               labels: (content.labels?.nodes ?? []).map((l) => l.name),
+              /*
+               * Absent, never empty, when GitHub did not answer.
+               *
+               * "This issue has no pull request" and "we could not find out" look identical in a
+               * table and only one of them is a fact — the same rule the REST path already keeps
+               * (see `linkedChanges`). The key is present here whenever the query returned the
+               * connection at all, which is why the check is on the connection and not its nodes.
+               */
+              ...(content.closedByPullRequestsReferences === undefined
+                ? {}
+                : {
+                    linkedChangeRequests: (content.closedByPullRequestsReferences.nodes ?? []).map(
+                      (pr) => ({
+                        externalId: pr.id,
+                        number: pr.number,
+                        title: pr.title,
+                        url: pr.url,
+                        // GitHub reports MERGED as a state of its own; everything else is open or
+                        // closed. A draft is still open — it is a PR nobody has finished, not one
+                        // that went away.
+                        state:
+                          pr.state === "MERGED"
+                            ? ("merged" as const)
+                            : pr.state === "CLOSED"
+                              ? ("closed" as const)
+                              : ("open" as const),
+                        mergedAt: pr.mergedAt ?? null,
+                      }),
+                    ),
+                  }),
               ...(parent === undefined ? {} : { parentExternalId: parent }),
               // Spread rather than assigned: `updatedAt: undefined` is a *present* key under
               // exactOptionalPropertyTypes, and the whole point of the optional fields on

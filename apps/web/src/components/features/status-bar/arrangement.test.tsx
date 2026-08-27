@@ -30,7 +30,7 @@ function renderBoth() {
       <StatusBarSection />
       <StatusBar />
     </AppContextProvider>,
-    { "task.list": () => TASKS, ...preferences.handlers },
+    { "task.list": () => ({ items: TASKS, nextCursor: null }), ...preferences.handlers },
   );
   const bar = () => result.container.querySelector("footer")?.textContent ?? "";
   return { ...result, preferences, bar };

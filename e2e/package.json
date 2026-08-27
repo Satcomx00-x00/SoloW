@@ -1,16 +1,16 @@
 {
-  "name": "@gatecontrol/e2e",
+  "name": "@solow/e2e",
   "version": "0.1.0",
   "private": true,
   "scripts": {
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@gatecontrol/contracts": "workspace:*",
-    "@gatecontrol/core": "workspace:*",
-    "@gatecontrol/db": "workspace:*",
-    "@gatecontrol/observability": "workspace:*",
-    "@gatecontrol/orchestrator": "workspace:*"
+    "@solow/contracts": "workspace:*",
+    "@solow/core": "workspace:*",
+    "@solow/db": "workspace:*",
+    "@solow/observability": "workspace:*",
+    "@solow/orchestrator": "workspace:*"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",

@@ -1,4 +1,4 @@
-# GateControl — developer tasks (Bun workspace)
+# SoloW — developer tasks (Bun workspace)
 # Usage: `make <target>` — run `make help` for the list.
 
 SHELL := bash

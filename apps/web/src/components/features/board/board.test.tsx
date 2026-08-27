@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { type TaskDto, TaskErrorCode, type TaskState } from "@gatecontrol/contracts";
+import { type TaskDto, TaskErrorCode, type TaskState } from "@solow/contracts";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { type FakeSocket, installFakeWebSocket, renderWithTrpc } from "@/test/trpc-harness";
 import { Board } from "./board";
@@ -23,7 +23,7 @@ function makeTask(over: Partial<TaskDto> & { id: string; state: TaskState }): Ta
         id: "attach-1",
         repositoryId: "repo-1",
         baseRef: null,
-        checkoutBranch: "gatecontrol/task-1",
+        checkoutBranch: "solow/task-1",
         resultBranch: null,
         position: 0,
       },
@@ -66,7 +66,10 @@ describe("Board (wired)", () => {
     let state: TaskState = "running";
     renderWithTrpc(<Board />, {
       ...ticket,
-      "task.list": () => [makeTask({ id: "task-1", state, title: "Fix the gate latch" })],
+      "task.list": () => ({
+        items: [makeTask({ id: "task-1", state, title: "Fix the gate latch" })],
+        nextCursor: null,
+      }),
       // The board waits for the edges before it draws: an undelivered dependency query would
       // otherwise let a blocked card render as launchable (issue #6).
       "task.dependencies": () => [],
@@ -100,7 +103,10 @@ describe("Board (wired)", () => {
     let state: TaskState = "backlog";
     const { log } = renderWithTrpc(<Board />, {
       ...ticket,
-      "task.list": () => [makeTask({ id: "task-1", state, title: "Investigate servo" })],
+      "task.list": () => ({
+        items: [makeTask({ id: "task-1", state, title: "Investigate servo" })],
+        nextCursor: null,
+      }),
       "task.dependencies": () => [],
       "task.move": (input) => {
         state = (input as { to: TaskState }).to;
@@ -123,7 +129,10 @@ describe("Board (wired)", () => {
   it("surfaces a rejected launch as a sentence, not as the wire code", async () => {
     renderWithTrpc(<Board />, {
       ...ticket,
-      "task.list": () => [makeTask({ id: "task-1", state: "ready", title: "Launchable" })],
+      "task.list": () => ({
+        items: [makeTask({ id: "task-1", state: "ready", title: "Launchable" })],
+        nextCursor: null,
+      }),
       "task.dependencies": () => [],
       "task.launch": () => {
         throw new Error(TaskErrorCode.ConcurrencyCapReached);
@@ -144,7 +153,10 @@ describe("Board (wired)", () => {
   it("falls back to a sentence for a code it does not know, rather than leaking it", async () => {
     renderWithTrpc(<Board />, {
       ...ticket,
-      "task.list": () => [makeTask({ id: "task-1", state: "ready", title: "Launchable" })],
+      "task.list": () => ({
+        items: [makeTask({ id: "task-1", state: "ready", title: "Launchable" })],
+        nextCursor: null,
+      }),
       "task.dependencies": () => [],
       "task.launch": () => {
         throw new Error("SOME_FUTURE_CODE");
@@ -177,18 +189,22 @@ describe("Board (wired)", () => {
   describe("credential-expired Tasks (spec AC-013, issue #63)", () => {
     const handlers = {
       ...ticket,
-      "task.list": () => [
-        makeTask({
-          id: "cred-1",
-          state: "failed",
-          title: "Stuck",
-          failureReason: "credential_expired",
-        }),
-      ],
+      "task.list": () => ({
+        items: [
+          makeTask({
+            id: "cred-1",
+            state: "failed",
+            title: "Stuck",
+            failureReason: "credential_expired",
+          }),
+        ],
+        nextCursor: null,
+      }),
       "task.dependencies": () => [],
-      "profile.agent.list": () => [
-        { id: "agent-1", secretId: "secret-1", name: "Claude", agentCatalogId: "cat-1" },
-      ],
+      "profile.agent.list": () => ({
+        items: [{ id: "agent-1", secretId: "secret-1", name: "Claude", agentCatalogId: "cat-1" }],
+        nextCursor: null,
+      }),
       "secret.list": () => [
         { id: "secret-1", name: "anthropic-api-key", kind: "api_key", usedBy: [] },
       ],
@@ -198,15 +214,20 @@ describe("Board (wired)", () => {
       renderWithTrpc(<Board />, handlers);
 
       const renew = await screen.findByRole("link", { name: /Renew/ });
-      expect(renew.getAttribute("href")).toBe("/settings?renewSecret=anthropic-api-key#secrets");
+      expect(renew.getAttribute("href")).toBe(
+        "/settings?section=secrets&renewSecret=anthropic-api-key",
+      );
     });
 
     it("offers no Renew link for a Task that failed for any other reason", async () => {
       renderWithTrpc(<Board />, {
         ...handlers,
-        "task.list": () => [
-          makeTask({ id: "ord-1", state: "failed", title: "Crashed", failureReason: "fail" }),
-        ],
+        "task.list": () => ({
+          items: [
+            makeTask({ id: "ord-1", state: "failed", title: "Crashed", failureReason: "fail" }),
+          ],
+          nextCursor: null,
+        }),
       });
 
       await screen.findByText("Crashed");
@@ -218,7 +239,7 @@ describe("Board (wired)", () => {
     const handlers = {
       ...ticket,
       "task.dependencies": () => [],
-      "profile.agent.list": () => [],
+      "profile.agent.list": () => ({ items: [], nextCursor: null }),
       "secret.list": () => [],
     };
 
@@ -226,12 +247,20 @@ describe("Board (wired)", () => {
       const retried: unknown[] = [];
       renderWithTrpc(<Board />, {
         ...handlers,
-        "task.list": () => [
-          // The exact reason an orchestrator restart leaves behind (issue: an Owner reported a
-          // Task's input box answering "No agent is running" forever after a restart) — Retry is
-          // how it comes back, since the worktree and its commits were never touched.
-          makeTask({ id: "int-1", state: "failed", title: "Stuck", failureReason: "interrupted" }),
-        ],
+        "task.list": () => ({
+          items: [
+            // The exact reason an orchestrator restart leaves behind (issue: an Owner reported a
+            // Task's input box answering "No agent is running" forever after a restart) — Retry is
+            // how it comes back, since the worktree and its commits were never touched.
+            makeTask({
+              id: "int-1",
+              state: "failed",
+              title: "Stuck",
+              failureReason: "interrupted",
+            }),
+          ],
+          nextCursor: null,
+        }),
         "task.retry": (input) => {
           retried.push(input);
           return makeTask({ id: "int-1", state: "running", title: "Stuck", failureReason: null });
@@ -246,14 +275,17 @@ describe("Board (wired)", () => {
     it("offers no Retry button for a credential-expired Task — Renew covers that path instead", async () => {
       renderWithTrpc(<Board />, {
         ...handlers,
-        "task.list": () => [
-          makeTask({
-            id: "cred-1",
-            state: "failed",
-            title: "Needs a credential",
-            failureReason: "credential_expired",
-          }),
-        ],
+        "task.list": () => ({
+          items: [
+            makeTask({
+              id: "cred-1",
+              state: "failed",
+              title: "Needs a credential",
+              failureReason: "credential_expired",
+            }),
+          ],
+          nextCursor: null,
+        }),
       });
 
       await screen.findByText("Needs a credential");
@@ -263,7 +295,10 @@ describe("Board (wired)", () => {
     it("offers no Retry button for a Task that has not failed", async () => {
       renderWithTrpc(<Board />, {
         ...handlers,
-        "task.list": () => [makeTask({ id: "run-1", state: "running", title: "Working" })],
+        "task.list": () => ({
+          items: [makeTask({ id: "run-1", state: "running", title: "Working" })],
+          nextCursor: null,
+        }),
       });
 
       await screen.findByText("Working");

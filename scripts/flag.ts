@@ -9,7 +9,7 @@ import {
   isFlagKey,
   listWorkspaceFlags,
   setWorkspaceFlag,
-} from "@gatecontrol/db";
+} from "@solow/db";
 
 /**
  * Turn a feature flag on or off for a Workspace, from the machine that runs the instance.
@@ -26,30 +26,30 @@ import {
  * the recovery path out of that. It is also the only way to target a Workspace other than the
  * caller's own, which the router deliberately does not expose.
  *
- * The set of flags comes from `@gatecontrol/db`'s registry, never a list kept here: a local copy
+ * The set of flags comes from `@solow/db`'s registry, never a list kept here: a local copy
  * went stale and started rejecting flags the UI was already offering.
  */
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 /**
- * `createDb()` validates the whole DB env up front, `GATECONTROL_SECRET_KEY` included — even
+ * `createDb()` validates the whole DB env up front, `SOLOW_SECRET_KEY` included — even
  * though flipping a flag touches no encrypted column. That key is exported by `scripts/dev.sh`
  * for the services it starts, so running this script on its own would otherwise die on a Zod
  * error before doing anything. Read the same file dev.sh generates, and only when the operator
  * has not set the variable themselves (a real deployment always has).
  */
 function loadDevSecretKey(): void {
-  if (process.env.GATECONTROL_SECRET_KEY) return;
-  const keyFile = join(ROOT, ".gatecontrol", "dev-secret.key");
+  if (process.env.SOLOW_SECRET_KEY) return;
+  const keyFile = join(ROOT, ".solow", "dev-secret.key");
   if (!existsSync(keyFile)) {
     console.error(
-      `GATECONTROL_SECRET_KEY is not set and ${keyFile} does not exist.\n` +
+      `SOLOW_SECRET_KEY is not set and ${keyFile} does not exist.\n` +
         "Start the stack once with `bun run dev` to generate it, or export the key yourself.",
     );
     process.exit(1);
   }
-  process.env.GATECONTROL_SECRET_KEY = readFileSync(keyFile, "utf8").trim();
+  process.env.SOLOW_SECRET_KEY = readFileSync(keyFile, "utf8").trim();
 }
 
 function usage(message: string): never {

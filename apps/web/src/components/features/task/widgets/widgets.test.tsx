@@ -1,8 +1,8 @@
 /// <reference types="bun-types" />
 
 import { afterEach, describe, expect, it } from "bun:test";
-import type { SessionEventDto, TaskEvent, Widget } from "@gatecontrol/contracts";
-import { WIDGET_ANSWER_PREFIX } from "@gatecontrol/contracts";
+import type { SessionEventDto, TaskEvent, Widget } from "@solow/contracts";
+import { WIDGET_ANSWER_PREFIX } from "@solow/contracts";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { buildTranscript } from "../transcript";
 import { AskUserInput } from "./ask-user-input";

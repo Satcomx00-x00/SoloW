@@ -1,7 +1,7 @@
 "use client";
 
-import type { IssueDto } from "@gatecontrol/contracts";
 import { zodResolver } from "@hookform/resolvers/zod";
+import type { IssueDto } from "@solow/contracts";
 import { ChevronRight, ExternalLink, Plus } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { type UseFormReturn, useForm } from "react-hook-form";
@@ -37,6 +37,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ISSUE_STATUS_LABELS, ISSUE_STATUS_STYLE, issueSourceLabel } from "@/lib/issue-status";
+import { WHOLE_PAGE } from "@/lib/paged";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
 import { type CreateDialogPreset, onOpenCreateDialog } from "./create-dialog-bus";
@@ -69,7 +70,7 @@ type TaskFormValues = z.infer<typeof taskFormSchema>;
  * another tab to read what they had just picked. Everything the Issue actually carries is here
  * instead — the body as written, its labels, its status, and the link back to the provider.
  *
- * Not its comments: GateControl does not have them. The import brings across a title, a body and
+ * Not its comments: SoloW does not have them. The import brings across a title, a body and
  * labels, and there is no `issue_comment` anywhere in the schema to read from — showing an empty
  * "Comments" heading would claim the discussion was empty rather than absent.
  *
@@ -93,7 +94,7 @@ function IssuePreview({ issue }: { issue: IssueDto }) {
         </Badge>
       </div>
 
-      {/* Where it really lives (spec F01 FR-4). The copy here is GateControl's; this is the
+      {/* Where it really lives (spec F01 FR-4). The copy here is SoloW's; this is the
           original, and it is the only way to reach the discussion the body does not include. */}
       {issue.externalUrl && (
         <a
@@ -188,10 +189,10 @@ export function CreateTaskDialog({
   // Unfiltered — used only to decide whether the Workspace has *any* Issue at all (the
   // "missingConfig" gate below). The picker itself reads from `issues` (filtered), so a
   // Repository with zero Issues narrows the picker to empty without hiding the whole form.
-  const allIssues = trpc.issue.list.useQuery({});
-  const agents = trpc.profile.agent.list.useQuery({});
-  const executors = trpc.profile.executor.list.useQuery({});
-  const repos = trpc.repository.list.useQuery({});
+  const allIssues = trpc.issue.list.useQuery({ ...WHOLE_PAGE });
+  const agents = trpc.profile.agent.list.useQuery({ ...WHOLE_PAGE });
+  const executors = trpc.profile.executor.list.useQuery({ ...WHOLE_PAGE });
+  const repos = trpc.repository.list.useQuery({ ...WHOLE_PAGE });
 
   const form = useForm<TaskFormValues>({
     resolver: zodResolver(taskFormSchema),
@@ -235,11 +236,13 @@ export function CreateTaskDialog({
   // "the issue picker in Task creation should auto-populate from the selected Repository") —
   // same `issue.list` query, one more input field, watched reactively off the form.
   const repositoryId = form.watch("repositoryId");
-  const issues = trpc.issue.list.useQuery(repositoryId ? { repositoryId } : {});
+  const issues = trpc.issue.list.useQuery(
+    repositoryId ? { ...WHOLE_PAGE, repositoryId } : WHOLE_PAGE,
+  );
   // `issue.list` already carries the body, the labels and the status — the same `issueDto` the
   // detail page reads — so showing the whole Issue costs no extra request.
   const issueId = form.watch("issueId");
-  const selectedIssue = (issues.data ?? []).find((i) => i.id === issueId) ?? null;
+  const selectedIssue = (issues.data?.items ?? []).find((i) => i.id === issueId) ?? null;
 
   const create = trpc.task.create.useMutation({
     onSuccess: () => {
@@ -250,10 +253,10 @@ export function CreateTaskDialog({
   });
 
   const missingConfig =
-    (allIssues.data?.length ?? 0) === 0 ||
-    (agents.data?.length ?? 0) === 0 ||
-    (executors.data?.length ?? 0) === 0 ||
-    (repos.data?.length ?? 0) === 0;
+    (allIssues.data?.items.length ?? 0) === 0 ||
+    (agents.data?.items.length ?? 0) === 0 ||
+    (executors.data?.items.length ?? 0) === 0 ||
+    (repos.data?.items.length ?? 0) === 0;
 
   const selectField = (
     name: "issueId" | "agentProfileId" | "executorProfileId" | "repositoryId",
@@ -315,7 +318,7 @@ export function CreateTaskDialog({
         </DialogHeader>
         {missingConfig ? (
           <p className="text-muted-foreground text-sm">
-            {(allIssues.data?.length ?? 0) === 0 ? (
+            {(allIssues.data?.items.length ?? 0) === 0 ? (
               <>
                 Create or import an Issue first — the{" "}
                 <span className="font-medium text-foreground">Create</span> menu in the header has
@@ -377,7 +380,7 @@ export function CreateTaskDialog({
                     "repositoryId",
                     "Repository",
                     "Select a repository",
-                    (repos.data ?? []).map((r) => ({ id: r.id, label: r.name })),
+                    (repos.data?.items ?? []).map((r) => ({ id: r.id, label: r.name })),
                     // A previously chosen Issue from a different Repository must not silently ride
                     // along once the Repository changes underneath it.
                     () => form.setValue("issueId", ""),
@@ -386,13 +389,13 @@ export function CreateTaskDialog({
                     "issueId",
                     "Issue",
                     repositoryId ? "Select an issue" : "Select a repository first",
-                    (issues.data ?? []).map((i) => ({ id: i.id, label: i.title })),
+                    (issues.data?.items ?? []).map((i) => ({ id: i.id, label: i.title })),
                     // The Task is the Issue's work, so it starts out named after it. Typing your
                     // own title stops that — `setValue` here leaves the field pristine, so
                     // `isDirty` means "a person edited this" and nothing else, and a deliberate
                     // title is not silently replaced by picking a different Issue afterwards.
                     (value) => {
-                      const picked = (issues.data ?? []).find((i) => i.id === value);
+                      const picked = (issues.data?.items ?? []).find((i) => i.id === value);
                       if (picked && !form.getFieldState("title").isDirty) {
                         form.setValue("title", picked.title);
                       }
@@ -406,13 +409,13 @@ export function CreateTaskDialog({
                     "agentProfileId",
                     "Agent profile",
                     "Select an agent",
-                    (agents.data ?? []).map((a) => ({ id: a.id, label: a.name })),
+                    (agents.data?.items ?? []).map((a) => ({ id: a.id, label: a.name })),
                   )}
                   {selectField(
                     "executorProfileId",
                     "Executor",
                     "Select an executor",
-                    (executors.data ?? []).map((x) => ({ id: x.id, label: x.name })),
+                    (executors.data?.items ?? []).map((x) => ({ id: x.id, label: x.name })),
                   )}
                 </div>
                 {/*
@@ -455,7 +458,7 @@ export function CreateTaskDialog({
                       control={form.control}
                       name="additionalRepositoryIds"
                       render={({ field }) => {
-                        const others = (repos.data ?? []).filter(
+                        const others = (repos.data?.items ?? []).filter(
                           (r) => r.id !== form.watch("repositoryId"),
                         );
                         if (others.length === 0) return <FormItem />;

@@ -2,14 +2,17 @@ import "server-only";
 import {
   agentCatalogEntryDto,
   agentProfileDto,
+  agentProfileListDto,
   createAgentCatalogEntryInput,
   createAgentProfileInput,
   createExecutorProfileInput,
   deleteAgentProfileInput,
   executorProfileDto,
+  executorProfileListDto,
+  listProfilesInput,
   updateAgentProfileInput,
   updateExecutorProfileInput,
-} from "@gatecontrol/contracts";
+} from "@solow/contracts";
 import { z } from "zod";
 import {
   createAgentCatalogEntry,
@@ -51,9 +54,9 @@ export const profileRouter = router({
             "List Agent Profiles available to bind to a Task, with how many Tasks, Workflow Steps and Sessions each is used by.",
         },
       })
-      .input(z.object({}))
-      .output(z.array(agentProfileDto))
-      .query(async ({ ctx }) => unwrap(await listAgentProfiles(ctx.rctx))),
+      .input(listProfilesInput)
+      .output(agentProfileListDto)
+      .query(async ({ ctx, input }) => unwrap(await listAgentProfiles(ctx.rctx, input))),
     update: ownerProcedure
       .meta({
         openapi: {
@@ -158,8 +161,8 @@ export const profileRouter = router({
           summary: "List Executor Profiles available to bind to a Task.",
         },
       })
-      .input(z.object({}))
-      .output(z.array(executorProfileDto))
-      .query(async ({ ctx }) => unwrap(await listExecutorProfiles(ctx.rctx))),
+      .input(listProfilesInput)
+      .output(executorProfileListDto)
+      .query(async ({ ctx, input }) => unwrap(await listExecutorProfiles(ctx.rctx, input))),
   }),
 });

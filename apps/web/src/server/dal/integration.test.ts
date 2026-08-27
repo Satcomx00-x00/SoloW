@@ -9,8 +9,8 @@ import {
   repositoryBranch,
   task,
   taskRepository,
-} from "@gatecontrol/db";
-import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
+} from "@solow/db";
+import { createTestDb, type TestDb } from "@solow/db/testing";
 import { eq } from "drizzle-orm";
 import { deleteIntegration } from "./integration.js";
 import { ctxFor, seedWorkspaceGraph } from "./test-fixtures.js";
@@ -127,7 +127,7 @@ describe("deleteIntegration", () => {
       workspaceId,
       taskId: attached.id,
       repositoryId,
-      checkoutBranch: `gatecontrol/task-${attached.id}`,
+      checkoutBranch: `solow/task-${attached.id}`,
     });
     return { issueId: importedIssue.id, taskId: attached.id };
   }

@@ -213,7 +213,7 @@ describe("keeping copied files out of the review", () => {
     expect(await hasChanges(executor, path, ["README.md"])).toBe(false);
     // Nor does approving the Task commit it onto the branch (Principle IV).
     writeFileSync(join(path, "src.ts"), "export const latch = true;\n");
-    await commitWorktree(executor, path, "GateControl: task tracked", ["README.md"]);
+    await commitWorktree(executor, path, "SoloW: task tracked", ["README.md"]);
     const committed = await $`git -C ${path} show --name-only --format= HEAD`.quiet().text();
     expect(committed).toContain("src.ts");
     expect(committed).not.toContain("README.md");

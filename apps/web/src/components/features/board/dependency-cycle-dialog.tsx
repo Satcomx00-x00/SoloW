@@ -1,6 +1,6 @@
 "use client";
 
-import type { TaskDto } from "@gatecontrol/contracts";
+import type { TaskDto } from "@solow/contracts";
 import { ArrowRight, RefreshCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {

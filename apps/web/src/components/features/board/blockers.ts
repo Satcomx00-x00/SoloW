@@ -1,5 +1,5 @@
-import type { TaskDependencyDto, TaskState } from "@gatecontrol/contracts";
-import { canTransitionTask } from "@gatecontrol/core";
+import type { TaskDependencyDto, TaskState } from "@solow/contracts";
+import { canTransitionTask } from "@solow/core";
 import { STATE_LABELS } from "@/lib/task-states";
 
 /**

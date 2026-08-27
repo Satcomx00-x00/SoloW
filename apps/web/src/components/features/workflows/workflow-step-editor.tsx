@@ -5,7 +5,7 @@ import type {
   WorkflowStepDto,
   WorkflowStepGate,
   WorkflowWithStepsDto,
-} from "@gatecontrol/contracts";
+} from "@solow/contracts";
 import { ChevronDown, ChevronUp, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { ConfirmAction } from "@/components/features/confirm-action";
@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { WHOLE_PAGE } from "@/lib/paged";
 import { trpc } from "@/trpc/react";
 
 /**
@@ -200,7 +201,7 @@ function StepCard({
 
 export function WorkflowStepEditor({ workflow }: { workflow: WorkflowWithStepsDto }) {
   const utils = trpc.useUtils();
-  const profiles = trpc.profile.agent.list.useQuery({});
+  const profiles = trpc.profile.agent.list.useQuery({ ...WHOLE_PAGE });
   const [name, setName] = useState("");
   const [agentProfileId, setAgentProfileId] = useState("");
 
@@ -212,7 +213,7 @@ export function WorkflowStepEditor({ workflow }: { workflow: WorkflowWithStepsDt
     },
   });
 
-  const options = profiles.data ?? [];
+  const options = profiles.data?.items ?? [];
 
   return (
     <section className="space-y-3">

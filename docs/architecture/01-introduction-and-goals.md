@@ -4,7 +4,7 @@
 
 ## Purpose
 
-GateControl orchestrates many AI coding agents in parallel under human review. This
+SoloW orchestrates many AI coding agents in parallel under human review. This
 document introduces the architectural goals that shape the system. The product goals are in
 [Vision & Scope](../product/01-vision-and-scope.md); this section captures the
 quality-driven goals the architecture must satisfy.

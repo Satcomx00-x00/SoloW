@@ -1,6 +1,6 @@
 "use client";
 
-import { type IssueDto, IssueErrorCode, type IssueStatus } from "@gatecontrol/contracts";
+import { type IssueDto, IssueErrorCode, type IssueStatus } from "@solow/contracts";
 import {
   Check,
   ChevronDown,

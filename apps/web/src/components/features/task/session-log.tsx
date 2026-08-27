@@ -1,6 +1,6 @@
 "use client";
 
-import type { SessionEventDto, SessionSummaryDto } from "@gatecontrol/contracts";
+import type { SessionEventDto, SessionSummaryDto } from "@solow/contracts";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";

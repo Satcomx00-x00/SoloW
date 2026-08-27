@@ -4,7 +4,7 @@
 
 ## Summary
 
-[F12](./F12-integrations.md) connects GateControl to GitHub and GitLab. This feature is about
+[F12](./F12-integrations.md) connects SoloW to GitHub and GitLab. This feature is about
 everything *behind* that: how a provider is described, registered and resolved, so that adding a
 third — Gitea, Jira, whatever a team already uses — is a driver and a descriptor rather than an
 edit in eight files.
@@ -24,7 +24,7 @@ one. See [Decision 0016](../decisions/0016-integration-provider-registry.md).
 ## Jobs served
 
 - **J2 — Organise agent work around issues.** — the job [F12](./F12-integrations.md) serves,
-  widened: issues can come from a tracker GateControl does not ship a driver for today.
+  widened: issues can come from a tracker SoloW does not ship a driver for today.
 - **J10 — Operate with confidence.**
 
 ## User stories
@@ -107,7 +107,7 @@ one. See [Decision 0016](../decisions/0016-integration-provider-registry.md).
   reason, and nothing is stored. A provider cannot be connected on the strength of having been
   registered.
 - **A provider removed while integrations exist** — those integrations become orphaned (above).
-  Their imported Issues keep their title, description and labels, because those are GateControl's
+  Their imported Issues keep their title, description and labels, because those are SoloW's
   copy; only the link back and the sync stop working.
 - **Two providers claiming the same id** — the second registration is refused (FR-5) and the
   conflict is reported. Silently preferring either one would make behaviour depend on load
@@ -121,7 +121,7 @@ one. See [Decision 0016](../decisions/0016-integration-provider-registry.md).
 - **Running untrusted provider code**, and everything it requires — declared permissions,
   isolation, mediated access to secrets and the network. A provider holds Personal Access
   Tokens; community-published drivers are a security project of their own.
-- **Which providers ship.** This feature makes a provider addable; whether GateControl carries a
+- **Which providers ship.** This feature makes a provider addable; whether SoloW carries a
   Jira driver is [F12](./F12-integrations.md)'s scope to state.
 - **Write-back** — opening change requests, commenting, reading checks (issue #71). The
   `changeRequests` capability is declared read-side here and grows those methods there.

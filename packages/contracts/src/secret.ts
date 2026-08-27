@@ -71,7 +71,7 @@ export type SetSecretResultDto = z.infer<typeof setSecretResultDto>;
 
 /**
  * Delete a Secret. Refused with `SECRET_IN_USE` while anything still references it — a stored
- * credential is the only copy GateControl has, and dropping one an Integration or Agent Profile
+ * credential is the only copy SoloW has, and dropping one an Integration or Agent Profile
  * points at breaks that holder with no way to put the value back (spec F17 FR-6).
  */
 export const deleteSecretInput = z.object({ id: idSchema });

@@ -1,7 +1,7 @@
 /**
  * Agent Client Protocol client (Decision 0003 / issue #58).
  *
- * GateControl is the *client* in ACP's terms: it starts the agent, negotiates what the agent can
+ * SoloW is the *client* in ACP's terms: it starts the agent, negotiates what the agent can
  * do, gives it work, watches it, answers the permissions it asks for, and cancels it. The
  * package is split so the protocol half is testable without a process — `jsonrpc.ts` is framing,
  * `protocol.ts` is vocabulary, `capabilities.ts` is negotiation, and only `session.ts` needs a
@@ -14,12 +14,12 @@ export {
   type AcpCapability,
   assertPromptBlocks,
   CapabilityUnavailableError,
-  GATECONTROL_CLIENT_CAPABILITIES,
   initializeParams,
   type NegotiatedCapabilities,
   negotiate,
   ProtocolVersionError,
   requireCapability,
+  SOLOW_CLIENT_CAPABILITIES,
 } from "./capabilities.js";
 export {
   encodeMessage,

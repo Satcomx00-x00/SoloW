@@ -11,7 +11,7 @@ import { idSchema, timestampsSchema } from "./common.js";
  * The filter is stored as a *predicate*, not as the text somebody typed and not as a function.
  * That is the whole reason this file exists: a closure cannot be written to a row, and a raw
  * string means every reader re-implements the language. A parsed predicate round-trips through
- * storage, and `@gatecontrol/core`'s parser is the only thing that has to know the syntax.
+ * storage, and `@solow/core`'s parser is the only thing that has to know the syntax.
  */
 
 /**
@@ -88,6 +88,18 @@ export const projectViewConfigSchema = z.object({
    * two views a lie.
    */
   visibleFieldIds: z.array(z.string()).nullable(),
+  /**
+   * Leave finished work out of the rows this view draws.
+   *
+   * Closed on the **provider**, which is `projectItemDto.closed` — not a Status field reading
+   * "Done". A Status is a team's convention and a convention is not a completion; a project that
+   * ships work under a status called `Released` would otherwise keep every one of those rows.
+   *
+   * Defaulted rather than required: every view saved before this existed must keep showing
+   * everything, because hiding rows from somebody's saved tab is not a migration, it is a change
+   * to what their tab means.
+   */
+  hideClosed: z.boolean().default(false),
 });
 export type ProjectViewConfig = z.infer<typeof projectViewConfigSchema>;
 
@@ -98,6 +110,7 @@ export const DEFAULT_PROJECT_VIEW_CONFIG: ProjectViewConfig = {
   groupByFieldId: null,
   sort: null,
   visibleFieldIds: null,
+  hideClosed: false,
 };
 
 export const projectViewDto = z

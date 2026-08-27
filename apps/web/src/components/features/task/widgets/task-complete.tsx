@@ -1,6 +1,6 @@
 "use client";
 
-import type { Widget } from "@gatecontrol/contracts";
+import type { Widget } from "@solow/contracts";
 import { CircleCheck, CircleSlash, OctagonMinus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { WidgetRendererProps } from "./registry";
@@ -9,7 +9,7 @@ import type { WidgetRendererProps } from "./registry";
  * The agent saying how its run ended.
  *
  * Worth drawing rather than folding into the state change beneath it, because the two say
- * different things. "This Task is in Review" is GateControl's record; this is the agent's own
+ * different things. "This Task is in Review" is SoloW's record; this is the agent's own
  * account, in its own words, and it is the only place a reviewer learns *why* there is nothing to
  * look at — that the brief was already satisfied, or that it stopped because it could not go on.
  *

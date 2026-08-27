@@ -1,12 +1,17 @@
 /// <reference types="bun-types" />
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
-import { encryptSecret, integration, issue, repository, secret } from "@gatecontrol/db";
-import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
-import type { IssuePatch } from "@gatecontrol/scm";
-import { testing } from "@gatecontrol/scm";
+import { encryptSecret, integration, issue, repository, secret } from "@solow/db";
+import { createTestDb, type TestDb } from "@solow/db/testing";
+import type { IssuePatch } from "@solow/scm";
+import { testing } from "@solow/scm";
 import { eq } from "drizzle-orm";
-import { readIssueDetail, updateExternalIssue } from "./issue-write.js";
+import {
+  createIssueComment,
+  listIssueComments,
+  readIssueDetail,
+  updateExternalIssue,
+} from "./issue-write.js";
 import { ctxFor, seedWorkspaceGraph } from "./test-fixtures.js";
 
 /**
@@ -24,9 +29,18 @@ let db: TestDb;
 let acme: string;
 /** Every patch the driver was handed, so absence can be asserted and not merely assumed. */
 let received: IssuePatch[] = [];
+/** The comment thread the fixture provider currently holds. */
+let thread: Array<{
+  externalId: string;
+  author: { login: string; name: string | null; avatarUrl: string | null } | null;
+  body: string;
+  createdAt: string;
+  updatedAt: string | null;
+  url: string;
+}> = [];
 
 beforeAll(() => {
-  process.env.GATECONTROL_SECRET_KEY ??= Buffer.alloc(32, 5).toString("base64");
+  process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 5).toString("base64");
   const readIssue = {
     externalId: "9001",
     number: 42,
@@ -53,11 +67,25 @@ beforeAll(() => {
       authenticate: async () => ({ ok: true as const }),
       listIssues: async () => [],
       getIssue: async () => readIssue,
+      listComments: async () => thread,
       listLabels: async () => [{ name: "hardware", color: "aabbcc", description: null }],
       listAssignableUsers: async () => [{ login: "ada", name: "Ada", avatarUrl: null }],
       listMilestones: async () => [
         { externalId: "7", title: "v1", startDate: null, dueDate: null },
       ],
+      createComment: async (_c: unknown, _r: string, _n: number, body: string) => {
+        const posted = {
+          externalId: `c${thread.length + 1}`,
+          author: { login: "ada", name: "Ada", avatarUrl: null },
+          // Normalised on purpose: the DAL must answer with what the provider stored.
+          body: `${body} (normalised)`,
+          createdAt: "2026-08-26T00:00:00.000Z",
+          updatedAt: null,
+          url: "u/c",
+        };
+        thread = [...thread, posted];
+        return posted;
+      },
       updateIssue: async (_c: unknown, _r: string, _n: number, patch: IssuePatch) => {
         received.push(patch);
         return {
@@ -81,6 +109,7 @@ beforeAll(() => {
       authenticate: async () => ({ ok: true as const }),
       listIssues: async () => [],
       getIssue: async () => readIssue,
+      listComments: async () => [],
       listLabels: async () => [],
     },
   });
@@ -93,7 +122,14 @@ afterAll(() => {
 async function seed(provider: string): Promise<string> {
   const [token] = await db
     .insert(secret)
-    .values({ workspaceId: acme, name: "pat", kind: "scm_pat", ciphertext: encryptSecret("t") })
+    // Named per provider: a Workspace's secret names are unique, so a test seeding two
+    // integrations would otherwise collide on the index rather than on anything it meant to test.
+    .values({
+      workspaceId: acme,
+      name: `pat-${provider}`,
+      kind: "scm_pat",
+      ciphertext: encryptSecret("t"),
+    })
     .returning();
   const [connected] = await db
     .insert(integration)
@@ -133,6 +169,7 @@ beforeEach(async () => {
   db = createTestDb();
   acme = (await seedWorkspaceGraph(db, "acme")).workspaceId;
   received = [];
+  thread = [];
 });
 
 describe("readIssueDetail", () => {
@@ -248,5 +285,72 @@ describe("updateExternalIssue", () => {
 
     expect(result.ok).toBe(false);
     expect(received).toHaveLength(0);
+  });
+});
+
+describe("issue comments", () => {
+  it("reads the thread live rather than from a mirror", async () => {
+    // A comment thread is the one part of an issue that changes without anything here doing it,
+    // and a stale copy of a conversation is worse than no copy — it looks like the whole of it.
+    thread = [
+      {
+        externalId: "c1",
+        author: { login: "ada", name: "Ada", avatarUrl: null },
+        body: "First",
+        createdAt: "2026-08-20T00:00:00.000Z",
+        updatedAt: null,
+        url: "u/c1",
+      },
+    ];
+    const issueId = await seed(FIXTURE);
+
+    const result = await listIssueComments(ctxFor(db, acme), { issueId });
+
+    expect(result.ok && result.data.comments.map((c) => c.body)).toEqual(["First"]);
+  });
+
+  it("offers a composer only where posting can actually work", async () => {
+    // A provider that reads and does not write shows the discussion with no box, rather than a
+    // box that fails on submit.
+    const writable = await seed(FIXTURE);
+    const readOnly = await seed(READONLY);
+
+    expect((await listIssueComments(ctxFor(db, acme), { issueId: writable })).ok).toBe(true);
+    const a = await listIssueComments(ctxFor(db, acme), { issueId: writable });
+    const b = await listIssueComments(ctxFor(db, acme), { issueId: readOnly });
+
+    expect(a.ok && a.data.canComment).toBe(true);
+    expect(b.ok && b.data.canComment).toBe(false);
+  });
+
+  it("answers a post with the whole thread, not with the text that was sent", async () => {
+    /*
+     * Two reasons and the second decides it: a provider may normalise what was posted, and
+     * somebody else may have commented while this one was being written. Only the whole thread
+     * is a response that cannot be missing a message.
+     */
+    const issueId = await seed(FIXTURE);
+
+    const result = await createIssueComment(ctxFor(db, acme), { issueId, body: "Looks right" });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.comments.map((c) => c.body)).toEqual(["Looks right (normalised)"]);
+  });
+
+  it("refuses to post through a provider that cannot write", async () => {
+    const issueId = await seed(READONLY);
+
+    const result = await createIssueComment(ctxFor(db, acme), { issueId, body: "hello" });
+
+    expect(result.ok).toBe(false);
+  });
+
+  it("will not read another workspace's discussion", async () => {
+    // Principle V, said out loud on the newest read.
+    const issueId = await seed(FIXTURE);
+    const other = (await seedWorkspaceGraph(db, "other")).workspaceId;
+
+    expect((await listIssueComments(ctxFor(db, other), { issueId })).ok).toBe(false);
   });
 });

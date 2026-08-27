@@ -1,8 +1,8 @@
 /// <reference types="bun-types" />
 
 import { afterEach, describe, expect, it } from "bun:test";
-import type { ProjectViewDto } from "@gatecontrol/contracts";
-import { DEFAULT_PROJECT_VIEW_CONFIG } from "@gatecontrol/contracts";
+import type { ProjectViewDto } from "@solow/contracts";
+import { DEFAULT_PROJECT_VIEW_CONFIG } from "@solow/contracts";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { moveInOrder, ProjectViewTabs } from "./project-view-tabs";
 

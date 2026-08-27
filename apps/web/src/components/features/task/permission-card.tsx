@@ -15,7 +15,7 @@ import type { PermissionRow } from "./transcript";
  * anyway. Inline, the question sits where the run reached it and the transcript stays readable.
  *
  * What is *not* reinvented here is the wording and the two rules behind it, both lifted from the
- * dialog: only the agent's own options are offered, in the order it listed them — GateControl
+ * dialog: only the agent's own options are offered, in the order it listed them — SoloW
  * never invents an "always allow" — and there is no dismiss, because a card that could be waved
  * away would leave an operator believing they had declined while the run went on waiting.
  *
@@ -81,7 +81,7 @@ export function PermissionCard({
 
       {row.options.length > 0 ? (
         // Plain buttons in the agent's own order: the first option an agent lists is the one it
-        // considers the ordinary answer, and reordering them would be GateControl editing the
+        // considers the ordinary answer, and reordering them would be SoloW editing the
         // question. DOM order is the tab order, so that ordering is what keyboard users get.
         <div className="flex flex-wrap gap-2 pt-0.5">
           {row.options.map((option) => (

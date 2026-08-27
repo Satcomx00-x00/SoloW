@@ -1,5 +1,5 @@
-import type { TaskDependencyDto, TaskDto } from "@gatecontrol/contracts";
-import { primaryTaskRepository, unsatisfiedDependencies } from "@gatecontrol/core";
+import type { TaskDependencyDto, TaskDto } from "@solow/contracts";
+import { primaryTaskRepository, unsatisfiedDependencies } from "@solow/core";
 import {
   CheckCircle2,
   GitBranch,
@@ -16,6 +16,7 @@ import {
   CREDENTIAL_EXPIRED_REASON,
   INTERRUPTED_REASON,
   needsAttention,
+  PARTIAL_INTEGRATION_REASON,
   STATE_STYLE,
   STRANDED_REVIEW_REASON,
 } from "@/lib/task-states";
@@ -208,6 +209,20 @@ export function TaskCard({
               >
                 <TriangleAlert className="size-3 shrink-0" aria-hidden />
                 Decision not applied
+              </span>
+            ) : task.failureReason === PARTIAL_INTEGRATION_REASON ? (
+              // The one failure where the work is *partly landed*. Retry would commit a second
+              // time to the branches that already took, so the card says what happened and sends
+              // the reader to the session log, which names which half is which (issue #70 AC-4).
+              <span
+                className={cn(
+                  "inline-flex items-center gap-1 rounded border px-1.5 py-px text-2xs",
+                  STATE_STYLE.failed.badgeClassName,
+                )}
+                title="Some of this task's repositories were committed and others were not. Open the task to see which — the branches that landed are real."
+              >
+                <TriangleAlert className="size-3 shrink-0" aria-hidden />
+                Partly integrated
               </span>
             ) : task.failureReason ? (
               <span

@@ -13,7 +13,7 @@ import {
   sessionForkCursorInput,
   type TaskDiffDto,
   taskDiffDto,
-} from "@gatecontrol/contracts";
+} from "@solow/contracts";
 import { z } from "zod";
 import { getReviewForSession } from "../dal/review.js";
 import {

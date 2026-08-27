@@ -1,14 +1,15 @@
 "use client";
 
-import type { IssueDto, IssueSource, IssueStatus } from "@gatecontrol/contracts";
-import { CommonErrorCode, issueSourceSchema } from "@gatecontrol/contracts";
+import type { IssueDto, IssueSource, IssueStatus } from "@solow/contracts";
+import { CommonErrorCode, issueSourceSchema } from "@solow/contracts";
+import { buildProjectHierarchy } from "@solow/core";
 import { ChevronRight, ListFilter, Search, TriangleAlert, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { IssueLabel } from "@/components/features/project/issue-label";
 import { useProviderNames } from "@/components/hooks/use-provider-names";
 import { useEventStream } from "@/components/hooks/use-task-stream";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -30,6 +31,7 @@ import {
   ISSUE_STATUSES,
   issueSourceLabel,
 } from "@/lib/issue-status";
+import { WHOLE_PAGE } from "@/lib/paged";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
 
@@ -232,12 +234,69 @@ function FilterBar({
   );
 }
 
-function IssueRow({ issue }: { issue: IssueDto }) {
+/**
+ * Order the list so a sub-issue only ever appears **under its epic**, never beside it.
+ *
+ * A flat list showed every child of an epic as a peer of its own parent — six rows that read as
+ * six independent pieces of work when they are one. Someone planning from that list counts the
+ * epic and its children as seven things instead of one.
+ *
+ * The tree comes from `buildProjectHierarchy`, the same function the project table uses, so the
+ * two surfaces cannot disagree about what nests under what — including its refusals: a parent
+ * chain that loops is dropped to the top level rather than recursed into, and a child whose epic
+ * is not in this list stays visible at the top level rather than vanishing with it.
+ *
+ * Always expanded here. The table collapses because it is a planning grid where an epic's rows
+ * are noise until asked for; a list is read top to bottom, and a chevron hiding half of it would
+ * be a filter nobody applied.
+ */
+export function nestIssues(issues: readonly IssueDto[]): Array<{ issue: IssueDto; depth: number }> {
+  const byId = new Map(issues.map((i) => [i.id, i]));
+  const roots = buildProjectHierarchy(
+    issues.map((issue) => ({
+      id: issue.id,
+      externalId: issue.externalId,
+      parentExternalId: issue.externalParentId,
+      repositoryId: issue.repositoryId,
+      // The hierarchy helper counts closed children for a rollup this list does not draw; the
+      // status is still the honest answer to "is this closed".
+      closed: issue.status === "closed",
+    })),
+  );
+
+  const flat: Array<{ issue: IssueDto; depth: number }> = [];
+  const walk = (
+    nodes: ReadonlyArray<{ row: { id: string }; children: unknown[] }>,
+    depth: number,
+  ) => {
+    for (const node of nodes) {
+      const issue = byId.get(node.row.id);
+      if (issue) flat.push({ issue, depth });
+      walk(node.children as typeof nodes, depth + 1);
+    }
+  };
+  walk(roots as never, 0);
+  return flat;
+}
+
+function IssueRow({
+  issue,
+  depth = 0,
+  colours,
+}: {
+  issue: IssueDto;
+  depth?: number;
+  /** The provider's own label colours, absent while they are still being fetched. */
+  colours?: Record<string, string | null> | undefined;
+}) {
   const { icon: Icon, text } = ISSUE_STATUS_STYLE[issue.status];
   return (
     <li>
       <Link
         href={`/issues/${issue.id}`}
+        // Indented rather than drawn in a nested list: one column of titles stays scannable, and
+        // the indent is the whole signal that this row belongs to the one above it.
+        style={depth > 0 ? { marginLeft: depth * 24 } : undefined}
         className="group flex items-start gap-3 rounded-lg border bg-card px-3.5 py-3 transition-all duration-150 hover:-translate-y-px hover:border-ring/35 hover:shadow-panel"
       >
         <Icon aria-hidden strokeWidth={2.25} className={cn("mt-0.5 size-4 shrink-0", text)} />
@@ -256,9 +315,7 @@ function IssueRow({ issue }: { issue: IssueDto }) {
           {issue.labels.length > 0 && (
             <div className="mt-1.5 flex flex-wrap gap-1">
               {issue.labels.map((label) => (
-                <Badge key={label} variant="secondary" className="text-2xs">
-                  {label}
-                </Badge>
+                <IssueLabel key={label} name={label} color={colours?.[label]} />
               ))}
             </div>
           )}
@@ -301,6 +358,7 @@ export function IssuesView({
     router.replace(toSearchParams({ ...filters, ...next }), { scroll: false });
 
   const issues = trpc.issue.list.useQuery({
+    ...WHOLE_PAGE,
     ...(projectId ? { projectId } : {}),
     ...(unassigned ? { unassigned: true } : {}),
     ...(filters.status ? { status: filters.status } : {}),
@@ -311,6 +369,16 @@ export function IssuesView({
   // The whole vocabulary, not the labels of what survived the current filter — otherwise
   // choosing one label would delete every other option from the menu that offered it.
   const labels = trpc.issue.labels.useQuery({});
+  /*
+   * The same vocabulary the project table paints with, asked for the same way. A label is the
+   * provider's, and a list that greys out what the table colours would read as two different
+   * label systems rather than one seen twice.
+   */
+  const labelVocabulary = trpc.issue.labelColors.useQuery({});
+  const labelColours = useMemo(
+    () => Object.fromEntries((labelVocabulary.data ?? []).map((l) => [l.name, l.color])),
+    [labelVocabulary.data],
+  );
   const utils = trpc.useUtils();
 
   /**
@@ -371,7 +439,7 @@ export function IssuesView({
         ))}
 
       {issues.isSuccess &&
-        (issues.data.length === 0 ? (
+        (issues.data.items.length === 0 ? (
           <div className="space-y-2 py-10">
             <h2 className="font-medium text-sm">
               {narrowed ? "Nothing matches these filters" : "No issues yet"}
@@ -386,15 +454,15 @@ export function IssuesView({
           <>
             {narrowed && (
               <p className="text-muted-foreground text-xs">
-                {issues.data.length === 1 ? "1 issue" : `${issues.data.length} issues`}
+                {issues.data.items.length === 1 ? "1 issue" : `${issues.data.items.length} issues`}
                 {filters.source
                   ? ` · ${issueSourceLabel(filters.source, providerName(filters.source))}`
                   : ""}
               </p>
             )}
             <ul className="space-y-2">
-              {issues.data.map((issue) => (
-                <IssueRow key={issue.id} issue={issue} />
+              {nestIssues(issues.data.items).map(({ issue, depth }) => (
+                <IssueRow key={issue.id} issue={issue} depth={depth} colours={labelColours} />
               ))}
             </ul>
           </>

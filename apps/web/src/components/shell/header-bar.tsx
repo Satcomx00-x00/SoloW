@@ -85,6 +85,16 @@ export function HeaderBar({ workspaceName }: { workspaceName: string }) {
             )}
           </>
         ) : (
+          /*
+           * No section crumb on a Task's own page.
+           *
+           * `/task/:id` is a flat route, so the trail has nothing in it to say which Project the
+           * Task belongs to — and `sectionFor` answers "Projects" for every one of them, which
+           * is a guess. It reads as a fact: a Task whose Issue is in no Project at all showed
+           * `Workspace › Projects › Task`, naming a container it is not in. Saying less is the
+           * honest option, and the crumb was never a link on this route anyway.
+           */
+          !pathname.startsWith("/task/") &&
           section && (
             <>
               <Separator />

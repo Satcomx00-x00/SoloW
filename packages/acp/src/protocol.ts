@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /**
- * The ACP wire vocabulary GateControl acts on (Decision 0003).
+ * The ACP wire vocabulary SoloW acts on (Decision 0003).
  *
  * Written in the same permissive spirit as `packages/claude-code/src/events.ts`, and for the
  * same reason: the agent on the other end is a separate product on its own release cadence, so
@@ -29,7 +29,7 @@ export const AcpMethod = {
   TerminalCreate: "terminal/create",
 } as const;
 
-/** Content blocks. Text is the only kind GateControl produces; the rest it only reads. */
+/** Content blocks. Text is the only kind SoloW produces; the rest it only reads. */
 export const contentBlockSchema = z.object({ type: z.string() }).passthrough();
 const textContentSchema = z.object({ type: z.literal("text"), text: z.string() }).passthrough();
 
@@ -57,7 +57,7 @@ export const promptResultSchema = z.object({ stopReason: z.string().optional() }
 
 /**
  * A `session/update` notification. `sessionUpdate` is the discriminator; everything under it
- * is shape-checked only where GateControl reads it.
+ * is shape-checked only where SoloW reads it.
  */
 export const sessionNotificationSchema = z
   .object({
@@ -91,7 +91,7 @@ const modeUpdateSchema = z
  *
  * `toolCall.rawInput` is present on the wire and is deliberately *not* modelled: the raw input
  * of a tool call can carry the contents of a file being written, which can carry a credential.
- * GateControl surfaces the title, the kind and the options — enough for an operator to decide
+ * SoloW surfaces the title, the kind and the options — enough for an operator to decide
  * — and never puts the raw input on its own wire or in a log (Principle IV).
  */
 export const permissionRequestSchema = z
@@ -119,7 +119,7 @@ export const permissionRequestSchema = z
   })
   .passthrough();
 
-/** One permission option, as the agent offered it. GateControl never invents one. */
+/** One permission option, as the agent offered it. SoloW never invents one. */
 export interface AcpPermissionOption {
   optionId: string;
   name: string;
@@ -127,9 +127,16 @@ export interface AcpPermissionOption {
   kind: string;
 }
 
-/** What GateControl does with an ACP session, flattened out of the protocol's shapes. */
+/** What SoloW does with an ACP session, flattened out of the protocol's shapes. */
 export type AcpUpdate =
   | { kind: "session"; sessionId: string; cwd: string }
+  /**
+   * What the agent advertised at `session/new` (issue #94 AC-2): the models it can run and the
+   * modes it offers. Emitted once per session, and only when the agent said anything — an agent
+   * that advertises nothing produces no update, so a consumer can tell "said nothing" from
+   * "said the empty list" and never overwrites a cache with silence.
+   */
+  | { kind: "capabilities"; models: string[]; modes: string[] }
   | { kind: "text"; channel: "assistant" | "thinking" | "user"; text: string }
   | { kind: "tool_call"; name: string; toolCallId: string | null; status: string | null }
   | { kind: "mode"; modeId: string }
@@ -153,13 +160,13 @@ export type AcpUpdate =
     }
   | { kind: "result"; ok: boolean; stopReason: string | null; error: string | null };
 
-/** The prompt content blocks for a plain text turn — the only shape GateControl sends. */
+/** The prompt content blocks for a plain text turn — the only shape SoloW sends. */
 export function textPrompt(text: string): Array<{ type: "text"; text: string }> {
   return [{ type: "text", text }];
 }
 
 /**
- * Flatten one `session/update` notification into the updates GateControl streams and logs.
+ * Flatten one `session/update` notification into the updates SoloW streams and logs.
  *
  * An unrecognised `sessionUpdate` yields nothing rather than throwing — a newer agent emitting
  * a kind this build has never heard of should be quiet, not fatal.

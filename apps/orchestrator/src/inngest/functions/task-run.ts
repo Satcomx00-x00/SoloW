@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import {
-  type AgentPermissionMode,
   type AgentProtocol,
   parseSessionEventPayload,
   reviewDecisionSchema,
@@ -15,14 +14,15 @@ import {
   type WidgetResponse,
   widgetExpectsResponse,
   widgetOptions,
-} from "@gatecontrol/contracts";
+} from "@solow/contracts";
 import {
   CREDENTIAL_EXPIRED_REASON,
   classifyRunFailure,
+  PARTIAL_INTEGRATION_REASON,
   primaryTaskRepository,
   taskCheckoutBranch,
-} from "@gatecontrol/core";
-import { createDb, type Db, decryptForScmSync } from "@gatecontrol/db";
+} from "@solow/core";
+import { createDb, type Db, decryptForScmSync } from "@solow/db";
 import {
   captureException,
   createLogger,
@@ -30,8 +30,8 @@ import {
   logStateTransition,
   logWorktreeBinding,
   withRunContext,
-} from "@gatecontrol/observability";
-import { cloneUsernameFor } from "@gatecontrol/scm";
+} from "@solow/observability";
+import { cloneUsernameFor } from "@solow/scm";
 import { z } from "zod";
 import { worktreeNameForTask } from "../../agent/claude-code-runner.js";
 import {
@@ -41,7 +41,11 @@ import {
 } from "../../agent/protocols.js";
 import { type AgentRegistry, agentRegistry } from "../../agent/registry.js";
 import type { AgentRunner, AgentTextChannel } from "../../agent/runner.js";
-import { createAgentRunner } from "../../agent/runners.js";
+import {
+  type AgentLaunchSettings,
+  createAgentRunner,
+  unsupportedLaunchSettings,
+} from "../../agent/runners.js";
 import { WIDGET_BRIEF_INSTRUCTIONS, WidgetFenceScanner } from "../../agent/widget-fence.js";
 import { prepareAgentEnv } from "../../billing/guard.js";
 import {
@@ -63,7 +67,9 @@ import {
   type TaskRepositoryBinding,
   type TaskRunContext,
   unsatisfiedDependencyIds,
+  updateAgentCatalogCapabilities,
 } from "../../data.js";
+
 import { orchestratorEnv } from "../../env.js";
 import { hasDriver, missingDriverReason } from "../../executor/drivers.js";
 import { createLocalExecutor } from "../../executor/local.js";
@@ -149,6 +155,16 @@ const MAX_REVIEW_ROUNDS = 5;
 const TASK_RUN_RETRIES = 2;
 
 /**
+ * How long a declared-finished agent is given to say anything more before the round is ended.
+ *
+ * Long enough that a model which declares and then adds a closing paragraph is not cut off;
+ * short enough that a run does not spend a meaningful part of Inngest's execution budget waiting
+ * on a process that has nothing left to do. Every further event re-arms it, so this is a
+ * *silence* budget rather than a deadline on the agent.
+ */
+const COMPLETION_GRACE_MS = 15_000;
+
+/**
  * Worktree operations the lifecycle depends on (real impls in `defaultDeps`), already bound to
  * an `Executor` (issue #1) — the lifecycle itself stays executor-agnostic.
  */
@@ -160,7 +176,7 @@ export interface WorktreeOps {
   prepare(params: ProvisionParams): Promise<string>;
   /**
    * Create the Task's worktree, for a protocol whose agent cannot (issue #58). ACP has no
-   * notion of a worktree: the agent works in the `cwd` it is handed, so GateControl makes the
+   * notion of a worktree: the agent works in the `cwd` it is handed, so SoloW makes the
    * directory and points it there. The isolation guarantee is unchanged (Principle II) — only
    * who runs `git worktree add` moves.
    */
@@ -200,7 +216,7 @@ export interface TaskRunDeps {
    * (spec F05), so two Tasks in the same Workspace can run the same agent under different
    * postures — one that may reach the shell, one that may not.
    */
-  runner: (protocol: AgentProtocol, permissionMode: AgentPermissionMode) => AgentRunner | null;
+  runner: (protocol: AgentProtocol, settings: AgentLaunchSettings) => AgentRunner | null;
   worktreeRoot: string;
   repoCacheRoot: string;
   logger: Logger;
@@ -208,6 +224,12 @@ export interface TaskRunDeps {
   hub: HubLike;
   /** Where the hub finds the agent belonging to a Task, to deliver input or a stop. */
   registry: AgentRegistry;
+  /**
+   * How long a declared-finished agent may stay silent before the round is ended
+   * (`COMPLETION_GRACE_MS`). Injected only so a test can shorten it — the wait is real time, and
+   * a test that spent fifteen seconds proving a timer fired would be a test nobody runs.
+   */
+  completionGraceMs?: number;
 }
 
 /** Production wiring. */
@@ -215,17 +237,19 @@ export function defaultDeps(): TaskRunDeps {
   const env = orchestratorEnv();
   // One local executor (issue #1) for the whole lifecycle: today the only kind, tomorrow one of
   // several a Task's Executor Profile can select — everything below reaches the host through it.
-  const executor = createLocalExecutor(env.GATECONTROL_WORKTREE_ROOT);
+  const executor = createLocalExecutor(env.SOLOW_WORKTREE_ROOT);
   return {
     db: createDb(),
-    runner: (protocol, permissionMode) =>
+    runner: (protocol, settings) =>
       createAgentRunner(protocol, {
         executor,
-        permissionMode,
-        unattendedPermissionPosture: env.GATECONTROL_ACP_UNATTENDED_PERMISSION,
+        permissionMode: settings.permissionMode,
+        ...(settings.model ? { model: settings.model } : {}),
+        ...(settings.modeId ? { modeId: settings.modeId } : {}),
+        unattendedPermissionPosture: env.SOLOW_ACP_UNATTENDED_PERMISSION,
       }),
-    worktreeRoot: env.GATECONTROL_WORKTREE_ROOT,
-    repoCacheRoot: env.GATECONTROL_REPO_CACHE_ROOT,
+    worktreeRoot: env.SOLOW_WORKTREE_ROOT,
+    repoCacheRoot: env.SOLOW_REPO_CACHE_ROOT,
     logger: createLogger({ service: "orchestrator" }),
     worktree: {
       prepare: (params) => prepareRepository(executor, params),
@@ -557,7 +581,43 @@ export async function runTaskLifecycle(
    * a runner that was never built for it.
    */
   const protocol = ctx.agentCatalog.protocol;
-  const runner = deps.runner(protocol, ctx.agentProfile.permissionMode);
+  /**
+   * What this Profile asked to launch with (issue #94).
+   *
+   * The Profile's settings, not a constant — that is the whole of AC-1 — and they reach the run
+   * through the one seam that already existed for the permission mode.
+   */
+  const launchSettings: AgentLaunchSettings = {
+    permissionMode: ctx.agentProfile.permissionMode,
+    ...(ctx.agentProfile.model ? { model: ctx.agentProfile.model } : {}),
+    ...(ctx.agentProfile.modeId ? { modeId: ctx.agentProfile.modeId } : {}),
+  };
+  const runner = deps.runner(protocol, launchSettings);
+
+  /*
+   * A setting this protocol cannot carry is **said**, never dropped (issue #94 AC-3).
+   *
+   * A Profile pinned to a model that its agent's protocol has no way to select would otherwise
+   * run on whatever the agent chose, with the Profile still reading as though the pin held — a
+   * silent substitution, which is the one outcome that AC forbids by name. It is a notice rather
+   * than a refusal: the work can still be done, and failing a Task over a setting nobody can act
+   * on mid-run would be the worse trade. The reviewer reads it in the same log as everything
+   * else the run said about itself.
+   */
+  const unsupported = unsupportedLaunchSettings(protocol, launchSettings);
+  if (unsupported.length > 0) {
+    await step.run("launch-settings-unsupported", async () => {
+      await appendSessionEvent(db, workspaceId, {
+        sessionId,
+        seq: await nextSessionEventSeq(db, workspaceId, sessionId),
+        payload: {
+          kind: "notice",
+          text: `This agent profile pins ${unsupported.join(" and ")}, which ${protocol} cannot select. The run used the agent's own choice instead.`,
+        },
+      });
+    });
+  }
+
   if (!hasAgentRunner(protocol) || !runner) {
     const reason = missingAgentRunnerReason(protocol);
     await step.run("agent-runner-unavailable", async () => {
@@ -701,14 +761,14 @@ export async function runTaskLifecycle(
   const repoPath = repoPathFor(primaryBinding);
 
   /**
-   * The worktrees GateControl creates itself — in their own durable step, before the first
+   * The worktrees SoloW creates itself — in their own durable step, before the first
    * round, so an orchestrator restart resumes with the same directories rather than branching a
    * second set from the base refs (Principle III).
    *
    * For a protocol whose agent makes its own worktree only the *secondary* attachments are
    * created here, and the agent still makes the primary — unless that attachment named a base
    * ref or a branch the agent has no way to honour, which puts it in this list too. For a
-   * protocol whose agent cannot, GateControl creates all of them. Either way every attachment
+   * protocol whose agent cannot, SoloW creates all of them. Either way every attachment
    * ends up with an isolated worktree of its own, on the branch the attachment says it is on.
    *
    * Caught, not left to escape, for the same reason the prepare loop is: a Task that cannot be
@@ -787,8 +847,8 @@ export async function runTaskLifecycle(
   /**
    * Copy each secondary worktree's own setup files in as soon as it exists (issue #52).
    *
-   * The primary's copy waits for the agent to announce where it went — GateControl does not
-   * always own that directory — but a secondary worktree is one GateControl just created, so
+   * The primary's copy waits for the agent to announce where it went — SoloW does not
+   * always own that directory — but a secondary worktree is one SoloW just created, so
    * there is nothing to wait for and no path to confirm. Best-effort, like the primary's: a
    * pattern that matches nothing must not fail a Task that would otherwise run.
    */
@@ -853,7 +913,7 @@ export async function runTaskLifecycle(
 
   /**
    * The worktree every later step — diff, commit, discard, cleanup — acts on. Read back from
-   * the agent (Claude Code makes its own) or set from what GateControl provisioned (ACP), and
+   * the agent (Claude Code makes its own) or set from what SoloW provisioned (ACP), and
    * confirmed with git either way before anything is written into it.
    */
   let wt: Worktree | null = provisioned;
@@ -861,7 +921,7 @@ export async function runTaskLifecycle(
   /**
    * Every worktree this Task has, in attachment order, once the primary one is known.
    *
-   * The primary is whatever the agent reported and git confirmed; the others are what GateControl
+   * The primary is whatever the agent reported and git confirmed; the others are what SoloW
    * provisioned. An attachment with no worktree yet is left out rather than represented by a
    * placeholder — there is nothing to diff, commit or clean up for it.
    */
@@ -991,9 +1051,49 @@ export async function runTaskLifecycle(
       // being spread onto the socket — which is what used to make the log's vocabulary the
       // transport's ("stdout", "tool_use") and let the two paths drift apart. A record with no
       // wire form is still written; it simply publishes nothing.
+      /**
+       * Ending the round once the agent has said it is finished and gone quiet.
+       *
+       * `await handle.outcome` waits for the agent **process to exit**, and a declaring agent
+       * does not exit — Claude Code says `task_complete` and then sits waiting for whatever the
+       * operator wants next. That is a reasonable thing for a CLI to do and a fatal thing for a
+       * durable run to wait on: the step never returns, so Inngest never checkpoints it, the
+       * platform kills the request after its execution budget (8 minutes, observed), and the
+       * whole function is retried from the top — for ever. The gate step below it never runs, so
+       * `waitForEvent` is never reached, so the `review.decided` event an approval publishes
+       * arrives at a run that is not listening. That is the failure this file's own comment
+       * predicted ("an agent that declares and then waits for the operator does not exit") and
+       * worked around for the *board* by recording the declaration mid-run; the run itself was
+       * still hanging.
+       *
+       * So the declaration ends the round — after a grace period, not at once. The comment on
+       * `completion` is right that an agent can declare and keep working: a `task_complete`
+       * followed by more output is a declaration that has been superseded, and cutting the agent
+       * off mid-thought would lose that work. Any further output therefore re-arms the timer, and
+       * only silence ends the round.
+       */
+      let completionStop: ReturnType<typeof setTimeout> | null = null;
+      const armCompletionStop = () => {
+        if (completionStop) clearTimeout(completionStop);
+        completionStop = setTimeout(() => {
+          completionStop = null;
+          // `stop`, not `kill`: the runner tears the process down through its own protocol, so
+          // the outcome the step is awaiting resolves the way it would on a natural exit.
+          void live?.stop();
+        }, deps.completionGraceMs ?? COMPLETION_GRACE_MS);
+        // Never a reason to hold the process open on its own.
+        (completionStop as { unref?: () => void }).unref?.();
+      };
+      const disarmCompletionStop = () => {
+        if (completionStop) clearTimeout(completionStop);
+        completionStop = null;
+      };
+
       const emit = (rawPayload: SessionEventPayload) => {
         // Nothing to append to and nothing worth publishing: the Session is gone.
         if (abandoned) return;
+        // The agent is still talking, so whatever it declared is not the last word yet.
+        if (completionStop) armCompletionStop();
         const at = seq++;
         // One record, read back through the union *before* either destination sees it.
         //
@@ -1193,6 +1293,9 @@ export async function runTaskLifecycle(
           if (widget.kind === "task_complete") {
             completion.widget = widget;
             const declared = widget;
+            // The agent has said it is done. Give it room to say more, then end the round —
+            // see `armCompletionStop`.
+            armCompletionStop();
             writes = writes
               .then(() =>
                 recordTaskCompletion(db, workspaceId, taskId, {
@@ -1222,7 +1325,7 @@ export async function runTaskLifecycle(
       // the Task's worktree. Later rounds continue *inside* that worktree — a reviewer asking
       // for changes wants the work carried on, and asking for the worktree again would branch a
       // fresh one from the base ref and throw the earlier round away. An ACP Task arrives here
-      // with `wt` already set to the worktree GateControl provisioned, so it takes the same
+      // with `wt` already set to the worktree SoloW provisioned, so it takes the same
       // path from its very first round — as does a Claude Code Task whose primary attachment
       // named a base ref or a branch of its own.
       const resuming = wt;
@@ -1289,6 +1392,19 @@ export async function runTaskLifecycle(
               optionId: e.optionId,
               decidedBy: e.decidedBy,
             });
+          } else if (e.kind === "capabilities") {
+            /*
+             * Cache what the agent advertised (issue #94 AC-2), on the same fire-and-forget
+             * chain as the completion record: the run must not fail because its narration did
+             * not land, and a capability list is narration — the fallback a Settings form reads
+             * between runs, never something this run depends on.
+             */
+            const advertised = { models: e.models, modes: e.modes };
+            writes = writes
+              .then(() =>
+                updateAgentCatalogCapabilities(db, workspaceId, ctx.agentCatalog.id, advertised),
+              )
+              .catch((cause) => captureException(log, cause, { stage: "capabilities-cache" }));
           } else recordUsage(e);
         },
       });
@@ -1339,6 +1455,7 @@ export async function runTaskLifecycle(
         if (round === 0 && reported) await seed(reported);
         outcome = await handle.outcome;
       } finally {
+        disarmCompletionStop();
         deregister();
         // Drain an in-flight turn capture first: it appends through `emit`, so a capture still
         // running would otherwise chain its write on after the drain below had already passed.
@@ -1427,7 +1544,7 @@ export async function runTaskLifecycle(
     if (run.worktree) {
       wt = run.worktree;
       // The audit line binding a worktree to its Task (Principle IV) is emitted on adoption,
-      // because that is the first moment GateControl knows which directory the agent used.
+      // because that is the first moment SoloW knows which directory the agent used.
       logWorktreeBinding(log, { workspaceId, taskId, worktreePath: run.worktree.path });
       // And the row saying the same thing, for everything that has to answer "does this Task
       // still hold a working copy" without a filesystem to look at — the delete preview and the
@@ -1547,7 +1664,7 @@ export async function runTaskLifecycle(
     const { decision, feedback } = reviewData.parse(decidedEvent.data);
 
     if (decision === "approve") {
-      await step.run(`approve-${round}`, async () => {
+      const outcome = await step.run(`approve-${round}`, async () => {
         // One commit per worktree, and each attachment records the branch its own change landed
         // on: a single column on `task` could only ever name one of the branches a reviewer
         // would then need to fetch (issue #7 AC-4).
@@ -1558,27 +1675,92 @@ export async function runTaskLifecycle(
         // ordinary rather than exotic: the agent runs in one working directory, so a Task
         // spanning three repositories routinely reaches the gate having changed one of them. The
         // branch is still recorded, because it exists and is what a reviewer would fetch.
+        //
+        // Each group is integrated **inside its own try** (issue #70 AC-4). One decision covers
+        // the whole Task, so a failure part-way through leaves it partially integrated — the
+        // second repository committed, the third not — and letting the step simply throw would
+        // report that as "the approve failed", which is the one reading that is false. Inngest
+        // would then retry it, committing a second time to the branches that already took.
+        const integrated: string[] = [];
+        const failed: { branch: string; error: string }[] = [];
         for (const entry of gate) {
-          if (await deps.worktree.hasChanges(entry.worktree.path, patternsFor(entry))) {
-            await deps.worktree.commit(
-              entry.worktree.path,
-              `GateControl: task ${taskId}`,
-              patternsFor(entry),
+          try {
+            if (await deps.worktree.hasChanges(entry.worktree.path, patternsFor(entry))) {
+              await deps.worktree.commit(
+                entry.worktree.path,
+                `SoloW: task ${taskId}`,
+                patternsFor(entry),
+              );
+            }
+            await setTaskRepositoryResultBranch(
+              db,
+              workspaceId,
+              entry.binding.attachment.id,
+              entry.worktree.branch,
             );
+            integrated.push(entry.worktree.branch);
+          } catch (cause) {
+            failed.push({
+              branch: entry.worktree.branch,
+              error: cause instanceof Error ? cause.message : String(cause),
+            });
           }
-          await setTaskRepositoryResultBranch(
-            db,
-            workspaceId,
-            entry.binding.attachment.id,
-            entry.worktree.branch,
-          );
         }
+
+        if (failed.length > 0) {
+          /*
+           * Fail loudly, with the partial state named.
+           *
+           * The names go in the session log rather than in `failureReason`, which stays a class
+           * the way `credential_expired` and `interrupted` are — the board matches on it, and a
+           * reason carrying branch names would match nothing. The log is where the reviewer who
+           * has to decide what to do about a half-landed change is already looking.
+           */
+          await appendSessionEvent(db, workspaceId, {
+            sessionId,
+            seq: await nextSessionEventSeq(db, workspaceId, sessionId),
+            payload: {
+              kind: "notice",
+              text: [
+                "Approval integrated only part of this task.",
+                integrated.length > 0
+                  ? `Committed and recorded: ${integrated.join(", ")}.`
+                  : "Nothing was committed.",
+                `Not integrated: ${failed.map((f) => `${f.branch} (${f.error})`).join("; ")}.`,
+                "The branches listed as committed are real and already hold the change — decide what to do with them by hand.",
+              ].join(" "),
+            },
+          });
+          await setTaskState(db, workspaceId, taskId, "failed", {
+            failureReason: PARTIAL_INTEGRATION_REASON,
+          });
+          await recordTransition("review", "failed", PARTIAL_INTEGRATION_REASON);
+          await setSessionState(db, workspaceId, sessionId, "closed", {
+            endedAt: new Date().toISOString(),
+          });
+          return { integrated, failed };
+        }
+
         await setTaskState(db, workspaceId, taskId, "done");
         await recordTransition("review", "done");
         await setSessionState(db, workspaceId, sessionId, "closed", {
           endedAt: new Date().toISOString(),
         });
+        return { integrated, failed };
       });
+
+      if (outcome.failed.length > 0) {
+        logStateTransition(log, { workspaceId, taskId, from: "review", to: "failed" });
+        // Branch names, not diff content — safe to log, and the only way an operator learns which
+        // half of a partially-integrated Task landed without opening the session.
+        captureException(log, new Error(`partial integration: ${outcome.failed.length} failed`), {
+          failureReason: PARTIAL_INTEGRATION_REASON,
+          integrated: outcome.integrated,
+          notIntegrated: outcome.failed.map((f) => f.branch),
+        });
+        announce("failed");
+        return { taskId, result: PARTIAL_INTEGRATION_REASON };
+      }
       logStateTransition(log, { workspaceId, taskId, from: "review", to: "done" });
       announce("done");
       break;
@@ -1642,7 +1824,7 @@ export async function runTaskLifecycle(
     ? worktreeBindings(adopted)
     : ctx.repositories.flatMap((binding) => {
         // Every attachment, not just the secondaries: when the primary's worktree is one
-        // GateControl provisioned, a run that ended before the agent reported anything still has
+        // SoloW provisioned, a run that ended before the agent reported anything still has
         // that directory to remove.
         const worktree = provisionedByAttachment.get(binding.attachment.id);
         return worktree ? [{ binding, worktree }] : [];
@@ -1690,10 +1872,10 @@ function briefWorkspaces(
       binding === primaryBinding ? primaryWorktree : provisioned.get(binding.attachment.id);
     return {
       repositoryName: binding.repository.name,
-      // The branch the agent will actually find itself on. A worktree GateControl provisioned is
+      // The branch the agent will actually find itself on. A worktree SoloW provisioned is
       // on the attachment's branch by construction, and one that does not exist yet will be —
-      // but a worktree the agent made for itself is on a branch it named (`gatecontrol-task-<id>`,
-      // not `gatecontrol/task-<id>`), which is only knowable once git has been asked. Until then
+      // but a worktree the agent made for itself is on a branch it named (`solow-task-<id>`,
+      // not `solow/task-<id>`), which is only knowable once git has been asked. Until then
       // the brief says nothing rather than naming a branch that does not exist: the brief is the
       // *only* mechanism by which a multi-repository agent learns its own layout, so a wrong
       // line in it is worse than a missing one.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { BillingErrorCode } from "@gatecontrol/contracts";
+import { BillingErrorCode } from "@solow/contracts";
 import {
   classifyRunFailure,
   detectFailureSignal,

@@ -1,7 +1,15 @@
+import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { PATHS, SEED_WORKSPACE_A, SEED_WORKSPACE_B } from "../support/fixture.js";
+import {
+  connectRepository,
+  createTask,
+  launchTask,
+  launchToReview,
+  openTask,
+} from "../support/flows.js";
 import { seedIssue, seedTask } from "../support/seed.js";
 
 /**
@@ -10,8 +18,11 @@ import { seedIssue, seedTask } from "../support/seed.js";
  * Two independent guarantees, both non-negotiable:
  *  · Principle II — concurrent Tasks work in separate worktrees and never observe each other's
  *    files.
- *  · Principle V — a user of one Workspace cannot reach another Workspace's Task, through the
+ *  · Principle V — a user of one Workspace cannot reach another Workspace's work, through the
  *    UI or through the API, and no data about it leaks in the refusal.
+ *
+ * Driven through today's journey (Create menu → Issue page → Task page — see
+ * `support/flows.ts`); the assertions themselves are unchanged, because the principles are.
  */
 
 const REPO_NAME = "e2e-fixture-repo";
@@ -29,86 +40,20 @@ const OTHER_WORKSPACE_TASK = seedTask(OTHER_WORKSPACE, OTHER_WORKSPACE_TASK_TITL
 
 type Page = import("@playwright/test").Page;
 
-async function connectRepository(page: Page, name: string, location: string): Promise<void> {
-  // See the note in happy.spec.ts: decide only once the list has resolved, or a second copy of
-  // the repository gets connected and the Repository selector becomes ambiguous.
-  await expect(page.getByLabel("Connected repositories")).toBeVisible();
-  const badge = page.getByText(`${name} · local_path`);
-  if (await badge.isVisible()) return;
-  await page.getByLabel("Name").last().fill(name);
-  await page.getByLabel("Location").fill(location);
-  await page.getByRole("button", { name: "Connect repository" }).click();
-  await expect(badge).toBeVisible();
-}
+/** `git` inside one of the fixture repositories — how a branch's existence is checked for real. */
+const gitIn = (cwd: string, args: string[]) =>
+  execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
 
 async function ensureRepository(page: Page): Promise<void> {
-  await page.goto("/settings");
+  await page.goto("/settings?section=repositories");
   await connectRepository(page, REPO_NAME, PATHS.repo);
 }
 
 /** Both fixture repositories connected, for the multi-repository Task (issue #7). */
 async function ensureBothRepositories(page: Page): Promise<void> {
-  await page.goto("/settings");
+  await page.goto("/settings?section=repositories");
   await connectRepository(page, REPO_NAME, PATHS.repo);
   await connectRepository(page, REPO2_NAME, PATHS.repo2);
-}
-
-async function pickOption(page: Page, label: string, option: string): Promise<void> {
-  await page.getByRole("combobox", { name: label }).click();
-  await page.getByRole("option", { name: option }).click();
-}
-
-async function createTask(
-  page: Page,
-  title: string,
-  issue: string,
-  /** Repositories to tick under Advanced → "Also works in": each gets its own worktree and branch. */
-  alsoWorksIn: readonly string[] = [],
-): Promise<void> {
-  await page.getByRole("button", { name: "New task" }).click();
-  const dialog = page.getByRole("dialog", { name: "New task" });
-  await dialog.getByLabel("Title").fill(title);
-  // Repository before Issue: the Issue picker now narrows to the chosen Repository (issue #15),
-  // and picking a Repository resets any already-picked Issue — so Repository has to go first.
-  await pickOption(page, "Repository", REPO_NAME);
-  await pickOption(page, "Issue", issue);
-  await pickOption(page, "Agent profile", "Claude Code (subscription)");
-  await pickOption(page, "Executor", "Local executor");
-  if (alsoWorksIn.length > 0) {
-    // A second repository is the exception, so the form folds it away — the disclosure has to be
-    // opened before the checkboxes exist on screen.
-    await dialog.getByText("Advanced", { exact: true }).click();
-    for (const name of alsoWorksIn) {
-      await dialog.getByRole("checkbox", { name, exact: true }).click();
-    }
-  }
-  await dialog.getByRole("button", { name: "Create task" }).click();
-  await expect(dialog).toBeHidden();
-}
-
-function cardIn(page: Page, column: string, title: string) {
-  return page.getByLabel(`${column} column`).getByText(title, { exact: true });
-}
-
-/** Take a Task to the review gate and return its id — its worktree stays alive while it waits. */
-async function launchToReview(page: Page, title: string): Promise<string> {
-  await page
-    .getByLabel("Backlog column")
-    .locator("li", { hasText: title })
-    .getByRole("button", { name: "Ready" })
-    .click();
-  await page
-    .getByLabel("Ready column")
-    .locator("li", { hasText: title })
-    .getByRole("button", { name: "Launch" })
-    .click();
-  await expect(cardIn(page, "Review", title)).toBeVisible();
-
-  await cardIn(page, "Review", title).click();
-  await expect(page).toHaveURL(/\/task\/[0-9a-f-]+$/);
-  const id = new URL(page.url()).pathname.split("/").pop() as string;
-  await page.goto("/board");
-  return id;
 }
 
 test.describe("@critical isolation", () => {
@@ -121,37 +66,42 @@ test.describe("@critical isolation", () => {
     const titleB = `Task beta ${stamp}`;
 
     await ensureRepository(page);
-    await page.goto("/board");
-    seedIssue(SEED_WORKSPACE_A, issueTitle);
+    const issue = seedIssue(SEED_WORKSPACE_A, issueTitle, REPO_NAME);
 
-    await createTask(page, titleA, issueTitle);
-    await createTask(page, titleB, issueTitle);
+    await createTask(page, { title: titleA, issue: issueTitle, repository: REPO_NAME });
+    await createTask(page, { title: titleB, issue: issueTitle, repository: REPO_NAME });
 
-    // Launches are staggered so two `git worktree add` calls do not contend for the repo lock;
-    // both Tasks are still in flight together — each parked at its own review gate with its own
-    // worktree live on disk, which is the state this assertion is about.
-    const idA = await launchToReview(page, titleA);
-    const idB = await launchToReview(page, titleB);
+    /*
+     * Launches are staggered so two `git worktree add` calls do not contend for the repo lock;
+     * both Tasks are still in flight together afterwards. "In flight" today means the agent has
+     * declared and the run holds the gate open with the worktree live on disk — the Task never
+     * enters review on its own, and it does not need to for this assertion: the worktrees are
+     * the subject, and they exist from the launch until a decision.
+     */
+    const idA = await openTask(page, issue.id, titleA);
+    await launchTask(page);
+    const idB = await openTask(page, issue.id, titleB);
+    await launchTask(page);
     expect(idA).not.toBe(idB);
 
-    // Named by the agent: `claude --worktree gatecontrol-task-<id>` is what creates these.
-    const pathA = join(PATHS.worktrees, `gatecontrol-task-${idA}`);
-    const pathB = join(PATHS.worktrees, `gatecontrol-task-${idB}`);
+    // Named by the agent: `claude --worktree solow-task-<id>` is what creates these.
+    const pathA = join(PATHS.worktrees, `solow-task-${idA}`);
+    const pathB = join(PATHS.worktrees, `solow-task-${idB}`);
     const filesA = readdirSync(pathA);
     const filesB = readdirSync(pathB);
 
     // Each worktree holds its own Task's marker and nothing of the other's.
-    expect(filesA).toContain(`marker-gatecontrol-task-${idA}.txt`);
-    expect(filesA).not.toContain(`marker-gatecontrol-task-${idB}.txt`);
-    expect(filesB).toContain(`marker-gatecontrol-task-${idB}.txt`);
-    expect(filesB).not.toContain(`marker-gatecontrol-task-${idA}.txt`);
+    expect(filesA).toContain(`marker-solow-task-${idA}.txt`);
+    expect(filesA).not.toContain(`marker-solow-task-${idB}.txt`);
+    expect(filesB).toContain(`marker-solow-task-${idB}.txt`);
+    expect(filesB).not.toContain(`marker-solow-task-${idA}.txt`);
 
     // And what each agent could actually see from inside its worktree was only its own file.
     expect(readFileSync(join(pathA, "visible.txt"), "utf8").trim()).toBe(
-      `marker-gatecontrol-task-${idA}.txt`,
+      `marker-solow-task-${idA}.txt`,
     );
     expect(readFileSync(join(pathB, "visible.txt"), "utf8").trim()).toBe(
-      `marker-gatecontrol-task-${idB}.txt`,
+      `marker-solow-task-${idB}.txt`,
     );
   });
 
@@ -163,35 +113,56 @@ test.describe("@critical isolation", () => {
     const title = `Task spanning two repos ${stamp}`;
 
     await ensureBothRepositories(page);
-    await page.goto("/board");
-    seedIssue(SEED_WORKSPACE_A, issueTitle);
+    const issue = seedIssue(SEED_WORKSPACE_A, issueTitle, REPO_NAME);
 
-    await createTask(page, title, issueTitle, [REPO2_NAME]);
-    const id = await launchToReview(page, title);
+    await createTask(page, {
+      title,
+      issue: issueTitle,
+      repository: REPO_NAME,
+      alsoWorksIn: [REPO2_NAME],
+    });
+    const id = await openTask(page, issue.id, title);
+    await launchToReview(page);
 
     // The primary worktree is the one the agent made, at exactly the path a single-Repository
-    // Task has always used. The secondary is a sibling GateControl provisioned, named for the
+    // Task has always used. The secondary is a sibling SoloW provisioned, named for the
     // attachment — no Owner-authored text ever reaches the path.
-    const primary = join(PATHS.worktrees, `gatecontrol-task-${id}`);
+    const primary = join(PATHS.worktrees, `solow-task-${id}`);
     const siblings = readdirSync(PATHS.worktrees).filter((entry) => entry.startsWith(`${id}--`));
     expect(siblings).toHaveLength(1);
     const secondary = join(PATHS.worktrees, siblings[0] as string);
 
     // Each worktree holds only its own Repository's content: the marker the agent wrote is in
     // the primary and nowhere else, and the second Repository's file is only in the secondary.
-    expect(readdirSync(primary)).toContain(`marker-gatecontrol-task-${id}.txt`);
+    expect(readdirSync(primary)).toContain(`marker-solow-task-${id}.txt`);
     expect(readdirSync(primary)).toContain("README.md");
     expect(readdirSync(primary)).not.toContain("LIB.md");
     expect(readdirSync(secondary)).toContain("LIB.md");
     expect(readdirSync(secondary)).not.toContain("README.md");
-    expect(readdirSync(secondary)).not.toContain(`marker-gatecontrol-task-${id}.txt`);
+    expect(readdirSync(secondary)).not.toContain(`marker-solow-task-${id}.txt`);
 
-    // ...and the review page presents the change grouped per Repository, not as one flat list.
-    await page.goto(`/task/${id}`);
-    await page.getByRole("tab", { name: "Changes" }).click();
-    // Exact, so a substring match can never make one group stand in for the other.
-    await expect(page.getByLabel(`Changes in ${REPO_NAME}`, { exact: true })).toBeVisible();
-    await expect(page.getByLabel(`Changes in ${REPO2_NAME}`, { exact: true })).toBeVisible();
+    // ...and the review page presents the change grouped per `(repository, branch)`, not as one
+    // flat list (issue #70 AC-1) — in the Changes column of the split pane, which is on screen
+    // without a click. Anchored on the repository name rather than matched loosely, so one group
+    // can never stand in for the other; the branch follows it in the same label because that is
+    // what a group *is*.
+    await expect(page.getByLabel(new RegExp(`^Changes in ${REPO_NAME} on `))).toBeVisible();
+    await expect(page.getByLabel(new RegExp(`^Changes in ${REPO2_NAME} on `))).toBeVisible();
+
+    // The consequence of the single decision, stated before it is taken (AC-2/AC-3). One
+    // approval, two repositories — the reviewer must be able to read that without scrolling.
+    await expect(page.getByText(/Approving covers 2 repositories, 2 branches/)).toBeVisible();
+
+    // Approve once, and both branches exist afterwards. This is the claim that makes "one
+    // decision, all consequences" true rather than merely displayed.
+    await page.getByRole("button", { name: "Approve" }).click();
+    const branch = `solow-task-${id}`;
+    await expect
+      .poll(() => gitIn(PATHS.repo, ["branch", "--list", branch]), { timeout: 20_000 })
+      .toContain(branch);
+    await expect
+      .poll(() => gitIn(PATHS.repo2, ["branch", "--list"]), { timeout: 20_000 })
+      .toContain(id);
   });
 
   test("another Workspace's Task is unreachable by URL (Principle V)", async ({ page }) => {
@@ -218,9 +189,20 @@ test.describe("@critical isolation", () => {
     expect(body).not.toContain(OTHER_WORKSPACE);
   });
 
-  test("the board only ever lists this Workspace's Tasks (Principle V)", async ({ page }) => {
-    await page.goto("/board");
-    await expect(page.getByLabel("Task board")).toBeVisible();
+  test("the issue lists only ever show this Workspace's work (Principle V)", async ({ page }) => {
+    /*
+     * This used to assert against the flat `/board`, which no longer exists — boards live inside
+     * Projects now, and the fixture repository belongs to none. The principle is about listing
+     * surfaces, not about the board specifically, so it moves to the listing surface a
+     * project-less Workspace actually has: `/unassigned`. Workspace B's issue is seeded fresh
+     * here rather than at module load, so the assertion cannot pass by the seed having failed.
+     */
+    const foreign = `Foreign issue ${Date.now()}`;
+    seedIssue(OTHER_WORKSPACE, foreign);
+
+    await page.goto("/unassigned");
+    await expect(page.getByText(/issues?$/).first()).toBeVisible();
+    await expect(page.getByText(foreign)).toHaveCount(0);
     await expect(page.getByText(OTHER_WORKSPACE_TASK_TITLE)).toHaveCount(0);
   });
 });

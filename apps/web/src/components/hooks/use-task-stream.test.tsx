@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { afterEach, describe, expect, it } from "bun:test";
-import type { TaskEvent, TaskInputAck } from "@gatecontrol/contracts";
+import type { TaskEvent, TaskInputAck } from "@solow/contracts";
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { renderWithTrpc } from "@/test/trpc-harness";

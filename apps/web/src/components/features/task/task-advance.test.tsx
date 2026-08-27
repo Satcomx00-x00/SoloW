@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { afterEach, describe, expect, it } from "bun:test";
-import type { TaskState } from "@gatecontrol/contracts";
+import type { TaskState } from "@solow/contracts";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { TaskAdvance } from "./task-advance";
 

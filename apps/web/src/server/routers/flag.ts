@@ -1,5 +1,5 @@
 import "server-only";
-import { CommonErrorCode, flagDto, setFlagInput } from "@gatecontrol/contracts";
+import { CommonErrorCode, flagDto, setFlagInput } from "@solow/contracts";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import type { RequestContext } from "../dal/context.js";

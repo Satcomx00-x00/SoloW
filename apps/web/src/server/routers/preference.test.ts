@@ -1,8 +1,8 @@
 /// <reference types="bun-types" />
 
 import { beforeEach, describe, expect, it } from "bun:test";
-import { workspace } from "@gatecontrol/db";
-import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
+import { workspace } from "@solow/db";
+import { createTestDb, type TestDb } from "@solow/db/testing";
 import type { BaseContext } from "../trpc.js";
 import { appRouter } from "./index.js";
 
@@ -47,7 +47,7 @@ describe("preference.setSurfaceLayout", () => {
     const first = caller({ workspaceId, userId: "ada" });
     await first.preference.setSurfaceLayout({
       surface: "status-bar",
-      layout: { order: ["status.review", "status.tasks"], hidden: [] },
+      layout: { order: ["status.review", "status.tasks"], hidden: [], shown: [], widths: {} },
     });
 
     const second = caller({ workspaceId, userId: "ada" });
@@ -69,7 +69,7 @@ describe("preference.setSurfaceLayout", () => {
         c.preference.setSurfaceLayout({
           // @ts-expect-error — the point of the test is the runtime refusal of an unknown surface.
           surface: "anything-at-all",
-          layout: { order: [], hidden: [] },
+          layout: { order: [], hidden: [], shown: [], widths: {} },
         }),
       ),
     ).toBe("BAD_REQUEST");
@@ -81,7 +81,7 @@ describe("preference.setSurfaceLayout", () => {
       await errCode(() =>
         c.preference.setSurfaceLayout({
           surface: "status-bar",
-          layout: { order: ["A".repeat(500)], hidden: [] },
+          layout: { order: ["A".repeat(500)], hidden: [], shown: [], widths: {} },
         }),
       ),
     ).toBe("BAD_REQUEST");

@@ -1,6 +1,6 @@
 "use client";
 
-import type { DiffFileDto, TaskDiffDto } from "@gatecontrol/contracts";
+import type { DiffFileDto, TaskDiffDto } from "@solow/contracts";
 import { FileMinus2, FilePen, FilePlus2, GitBranch } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PatchView } from "./patch-view";

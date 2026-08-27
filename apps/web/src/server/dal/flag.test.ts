@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import { FLAGS } from "@gatecontrol/db";
-import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
+import { FLAGS } from "@solow/db";
+import { createTestDb, type TestDb } from "@solow/db/testing";
 import { listFlags, setFlag } from "./flag.js";
 import { ctxFor, seedWorkspaceGraph } from "./test-fixtures.js";
 

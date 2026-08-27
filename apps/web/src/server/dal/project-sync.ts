@@ -7,7 +7,7 @@ import {
   ok,
   type ProjectFieldValue,
   type Result,
-} from "@gatecontrol/contracts";
+} from "@solow/contracts";
 import {
   integration,
   issue,
@@ -16,8 +16,8 @@ import {
   projectItem,
   projectValue,
   repository,
-} from "@gatecontrol/db";
-import type { ExternalProjectItem, ScmCredential } from "@gatecontrol/scm";
+} from "@solow/db";
+import type { ExternalProjectItem, ScmCredential } from "@solow/scm";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
 import { driverWith, importIssues, loadCredential } from "./integration.js";
@@ -26,7 +26,7 @@ import { getProject, replaceProjectFields, setProjectSyncCursor } from "./projec
 /**
  * Adopting a provider's project, and refreshing the mirror (spec F23, issue #126).
  *
- * GateControl does not create a project on the provider — it mirrors one that already exists
+ * SoloW does not create a project on the provider — it mirrors one that already exists
  * (Decision 0018, Out of scope). So "adopt" is the whole of setup: point at a project the token
  * can see, read its columns, and pull the first page of rows.
  *
@@ -385,6 +385,9 @@ async function materialiseIssues(
           externalUrl: item.issue.url,
           externalState: item.issue.state,
           ...(item.issue.labels ? { labels: item.issue.labels } : {}),
+          ...(item.issue.linkedChangeRequests
+            ? { linkedChangeRequests: item.issue.linkedChangeRequests }
+            : {}),
           ...(item.issue.parentExternalId === undefined
             ? {}
             : { externalParentId: item.issue.parentExternalId }),
@@ -414,6 +417,9 @@ async function materialiseIssues(
           externalState: sql`excluded.external_state`,
           externalUrl: sql`excluded.external_url`,
           ...(rows.some(({ item }) => item.issue.labels) ? { labels: sql`excluded.labels` } : {}),
+          ...(rows.some(({ item }) => item.issue.linkedChangeRequests)
+            ? { linkedChangeRequests: sql`excluded.linked_change_requests` }
+            : {}),
           ...(rows.some(({ item }) => item.issue.parentExternalId !== undefined)
             ? { externalParentId: sql`excluded.external_parent_id` }
             : {}),
@@ -459,6 +465,11 @@ export async function refreshProject(
     .where(and(eq(project.workspaceId, ctx.workspaceId), eq(project.id, projectId)))
     .limit(1);
   if (!row) return err(CommonErrorCode.NotFound);
+  // A local Project has no provider board to read — refreshing one is the wrong verb, not a
+  // fault. `NotFound` rather than a more specific code: the caller already reads either as "there
+  // is nothing to do here" (see `refresh`/`rescan` in the router, both `.mutation`s a local
+  // Project's UI never offers a button for in the first place).
+  if (!row.integrationId || !row.providerProjectId) return err(CommonErrorCode.NotFound);
 
   const credential = await loadCredential(ctx, row.integrationId);
   if (!credential.ok) return err(CommonErrorCode.NotFound);
@@ -676,6 +687,11 @@ export async function setProjectValue(
     )
     .limit(1);
   if (!item) return err(CommonErrorCode.NotFound);
+
+  // Unreachable today — a local Project has no `project_field` rows, so the lookup above already
+  // refused. Kept explicit rather than asserted past: nothing stops a future caller adding a
+  // field to a local Project, and this line is what would refuse that write correctly on day one.
+  if (!row.integrationId || !row.providerProjectId) return err(IntegrationErrorCode.NotLinked);
 
   const credential = await loadCredential(ctx, row.integrationId);
   if (!credential.ok) return err(CommonErrorCode.NotFound);

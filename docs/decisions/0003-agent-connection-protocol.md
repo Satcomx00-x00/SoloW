@@ -10,7 +10,7 @@
 
 ## Context
 
-GateControl must drive many different AI coding-agent tools (Claude Code, Codex, Gemini CLI,
+SoloW must drive many different AI coding-agent tools (Claude Code, Codex, Gemini CLI,
 and others). Integrating each one bespoke would be costly and fragile. A standard has emerged
 — the **Agent Client Protocol (ACP)** — that standardises how tools connect to coding agents,
 analogous to how the Language Server Protocol standardised editor tooling. It is what kandev
@@ -19,14 +19,14 @@ itself uses, and a large and growing set of agents support it.
 ## Decision
 
 Integrate all agents through **ACP**, a single open standard, as the uniform boundary between
-GateControl and agent tools.
+SoloW and agent tools.
 
 ## Considered options
 
 - **Bespoke per-agent integrations** — Rejected: high cost, brittle, does not scale to many
   agents.
 - **A build-your-own-agent framework** (in-process reasoning loop) — Rejected: the wrong
-  layer. GateControl orchestrates *existing external agent tools*; it does not build an
+  layer. SoloW orchestrates *existing external agent tools*; it does not build an
   agent's reasoning loop, so frameworks for that solve a different problem.
 - **ACP standard boundary (chosen)** — one interface to many agents; adding an agent is
   configuration, not engineering.
@@ -54,7 +54,7 @@ Landed with issue #58 (2026-08-20). Per acceptance criterion:
   the agent said nothing about it. `session/load` and `session/set_mode` are only ever sent when
   the agent advertised them, a prompt carrying an unadvertised content-block type is refused
   before it is written, and a peer below the minimum protocol version fails the run naming both
-  versions. The half that actually protects something is the mirror: GateControl advertises
+  versions. The half that actually protects something is the mirror: SoloW advertises
   `fs.readTextFile`, `fs.writeTextFile` and `terminal` as **false**, and answers any such
   incoming request with `-32601`. An agent edits its own worktree with its own tools; proxying a
   filesystem through the orchestrator would widen the blast radius past the worktree for no gain.
@@ -75,7 +75,7 @@ Landed with issue #58 (2026-08-20). Per acceptance criterion:
   on a timer is a silent grant with a delay in front of it, and it is a wider posture than the
   `acceptEdits` it was meant to match, which stops for everything that is not a file edit. A
   deployment that wants the permissive behaviour asks for it by name
-  (`GATECONTROL_ACP_UNATTENDED_PERMISSION=allow_once`, reaching
+  (`SOLOW_ACP_UNATTENDED_PERMISSION=allow_once`, reaching
   `AcpRunnerOptions.unattendedPermissionPosture`); nothing gets it by leaving something unset.
   The cost is honest and accepted: an unattended run asking for something it needs ends early
   rather than proceeding without consent. The tool call's `rawInput` is never
@@ -106,11 +106,11 @@ adapter for two reasons: subscription billing works through the vendor CLI's own
 separate binary, so forcing it through ACP would add a dependency and a hop without changing
 what the orchestrator sees. The two differ in exactly one operational detail — Claude Code makes
 the Task's worktree itself (`--worktree`) and an ACP agent works in the `cwd` it is given, so
-GateControl provisions it — which `agentCreatesOwnWorktree` answers in one line.
+SoloW provisions it — which `agentCreatesOwnWorktree` answers in one line.
 
 That provisioning is idempotent, and has to be: the branch name and the directory are both pure
 functions of the Task id, and nothing ever deletes the branch (`cleanupWorktree` removes the
-directory and leaves `gatecontrol/task-<id>` behind). A relaunch after a review rejection, a
+directory and leaves `solow/task-<id>` behind). A relaunch after a review rejection, a
 `task.retry` after a failure and an Inngest step retry inside one run all look identical from
 git's side, so `provisionWorktree` reuses the Task's existing worktree when git already has it on
 the right branch and resets the branch to the base ref otherwise. A provisioning failure sets the
@@ -120,7 +120,7 @@ with nothing recorded is the one outcome an operator can neither read nor act on
 ### Why an in-house client rather than the official SDK
 
 `@agentclientprotocol/sdk` was considered and not taken. The conformance tests the Definition of
-Done asks for have to exercise *GateControl's* framing, negotiation and cancellation paths, and
+Done asks for have to exercise *SoloW's* framing, negotiation and cancellation paths, and
 `Executor.ProcessHandle` exposes an `AsyncIterable` plus a flushable sink rather than WHATWG
 streams — the shim would have been larger than the framing it replaced. It also keeps a new
 runtime dependency out of the credential-bearing path. The cost is owning schema drift as ACP
@@ -134,7 +134,7 @@ a string rather than an enum.
   the agent's advertised modes, and `session/set_mode` is wired and guarded; writing what was
   negotiated back to `agent_catalog.capabilities` is not done.
 - **Row 76 — passthrough MCP.** `session/new` is sent with `mcpServers: []`. An agent driven by
-  GateControl therefore reaches only the MCP servers it configures for itself; nothing the
+  SoloW therefore reaches only the MCP servers it configures for itself; nothing the
   Workspace holds is passed through to it. Known and outside #58's acceptance criteria.
 - **Authentication.** `initialize` negotiates `authMethods` and `NegotiatedCapabilities` carries
   them, but `AcpMethod.Authenticate` is declared and never called: the client goes straight from

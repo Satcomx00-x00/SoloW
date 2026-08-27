@@ -1,11 +1,11 @@
-import { MAX_WIDGET_CONTENT, parseWidget, type Widget } from "@gatecontrol/contracts";
+import { MAX_WIDGET_CONTENT, parseWidget, type Widget } from "@solow/contracts";
 
 /**
- * Pull widget emissions out of an agent's prose (see `@gatecontrol/contracts/widget.ts`).
+ * Pull widget emissions out of an agent's prose (see `@solow/contracts/widget.ts`).
  *
  * An agent's only output channel is text, so a widget arrives as a fenced block:
  *
- * ```gatecontrol:widget
+ * ```solow:widget
  * {"kind":"ask_user_input","prompt":"Which database?","options":[…]}
  * ```
  *
@@ -31,7 +31,7 @@ import { MAX_WIDGET_CONTENT, parseWidget, type Widget } from "@gatecontrol/contr
  * whether it is drawn or explained.
  */
 
-const OPEN = "```gatecontrol:widget";
+const OPEN = "```solow:widget";
 const CLOSE = "```";
 
 /**
@@ -160,9 +160,9 @@ function readBlock(body: string): Widget {
  */
 export const WIDGET_BRIEF_INSTRUCTIONS = [
   "You can render interactive widgets in the operator's UI instead of describing them in prose.",
-  "Emit one as a fenced block whose info string is exactly `gatecontrol:widget`, containing JSON:",
+  "Emit one as a fenced block whose info string is exactly `solow:widget`, containing JSON:",
   "",
-  "```gatecontrol:widget",
+  "```solow:widget",
   '{"kind":"ask_user_input","prompt":"Which database?","mode":"single",',
   ' "options":[{"id":"pg","label":"PostgreSQL"},{"id":"sqlite","label":"SQLite"}]}',
   "```",
@@ -181,7 +181,7 @@ export const WIDGET_BRIEF_INSTRUCTIONS = [
   "   the shape and will be rejected. This is the record of what you actually verified; an item",
   "   you did not check is `todo`, not `done`, and a `blocked` one carries its reason in `note`.",
   "",
-  "```gatecontrol:widget",
+  "```solow:widget",
   '{"kind":"step_card","title":"Update packages","steps":[',
   ' {"id":"pin","label":"Pin every real dependency","state":"done"},',
   ' {"id":"imports","label":"Fix the BAIT.py import break","state":"blocked",',
@@ -193,7 +193,7 @@ export const WIDGET_BRIEF_INSTRUCTIONS = [
   "   - `nothing_to_do`  the brief was already satisfied, or was a question, and you changed nothing",
   "   - `blocked`        you could not finish, and the `summary` says what stopped you",
   "",
-  "```gatecontrol:widget",
+  "```solow:widget",
   '{"kind":"task_complete","outcome":"changes_ready","summary":"Pinned 5 dependencies"}',
   "```",
   "",

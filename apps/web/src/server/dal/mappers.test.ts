@@ -1,11 +1,11 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 
-// The secret store reads GATECONTROL_SECRET_KEY lazily (via the validated env module),
+// The secret store reads SOLOW_SECRET_KEY lazily (via the validated env module),
 // so setting it before the first encryptSecret call is sufficient. 32 bytes, base64.
-process.env.GATECONTROL_SECRET_KEY = Buffer.alloc(32, 7).toString("base64");
+process.env.SOLOW_SECRET_KEY = Buffer.alloc(32, 7).toString("base64");
 
-import { encryptSecret, type issue, secret, type taskRepository, workspace } from "@gatecontrol/db";
-import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
+import { encryptSecret, type issue, secret, type taskRepository, workspace } from "@solow/db";
+import { createTestDb, type TestDb } from "@solow/db/testing";
 import { and, eq } from "drizzle-orm";
 import { issueToDto, NO_TASKS, repositoryToDto, secretToRef, taskToDto } from "./mappers.js";
 
@@ -58,6 +58,9 @@ describe("mappers", () => {
         repositoryId: null,
         externalNumber: null,
         externalUrl: null,
+        // Carried so an issue *list* can draw the hierarchy the project table already draws.
+        externalId: null,
+        externalParentId: null,
         syncedAt: null,
         labels: ["hardware"],
         linkedChangeRequests: [],
@@ -173,7 +176,7 @@ describe("mappers", () => {
       taskId: "task-1",
       repositoryId: "repo-1",
       baseRef: "main",
-      checkoutBranch: "gatecontrol/task-task-1",
+      checkoutBranch: "solow/task-task-1",
       resultBranch: null,
       position: 0,
       createdAt: "2026-01-01T00:00:00.000Z",
@@ -221,9 +224,9 @@ describe("mappers", () => {
       const dto = repositoryToDto({
         id: "repo-1",
         workspaceId: "ws-1",
-        name: "gatecontrol",
+        name: "solow",
         source: "local_path",
-        location: "/srv/repos/gatecontrol",
+        location: "/srv/repos/solow",
         integrationId: null,
         externalFullName: null,
         issuesSyncedAt: null,
@@ -235,16 +238,43 @@ describe("mappers", () => {
       });
       expect(dto).toEqual({
         id: "repo-1",
-        name: "gatecontrol",
+        name: "solow",
         source: "local_path",
-        location: "/srv/repos/gatecontrol",
+        location: "/srv/repos/solow",
         integrationId: null,
         externalFullName: null,
+        provider: null,
+        integrationBaseUrl: null,
+        issueCount: 0,
         setupFilePatterns: [".env"],
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",
       });
       expect(Object.keys(dto)).not.toContain("workspaceId");
+    });
+
+    it("carries the joined provider, base URL and issue count when a caller supplies them", () => {
+      const dto = repositoryToDto(
+        {
+          id: "repo-1",
+          workspaceId: "ws-1",
+          name: "solow",
+          source: "remote_url",
+          location: "https://gitlab.example.com/acme/gate.git",
+          integrationId: "int-1",
+          externalFullName: "acme/gate",
+          issuesSyncedAt: null,
+          syncStaleSince: null,
+          syncStaleReason: null,
+          setupFilePatterns: [],
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+        { provider: "gitlab", integrationBaseUrl: "https://gitlab.example.com", issueCount: 7 },
+      );
+      expect(dto.provider).toBe("gitlab");
+      expect(dto.integrationBaseUrl).toBe("https://gitlab.example.com");
+      expect(dto.issueCount).toBe(7);
     });
   });
 

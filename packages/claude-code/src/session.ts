@@ -46,11 +46,11 @@ export interface ClaudeOutcome {
 export interface ClaudeSessionOptions {
   /** The `claude` binary. */
   command: string;
-  /** Extra arguments from configuration, appended after the ones GateControl requires. */
+  /** Extra arguments from configuration, appended after the ones SoloW requires. */
   extraArgs?: string[];
   /**
    * The repository to run in. Claude Code creates its worktree relative to this, so it is the
-   * repository root — *not* a worktree GateControl made, which would nest one inside another.
+   * repository root — *not* a worktree SoloW made, which would nest one inside another.
    */
   cwd: string;
   /** Environment for the agent process. Replaces, never extends (Principle IV). */
@@ -64,12 +64,14 @@ export interface ClaudeSessionOptions {
   worktreeName: string | null;
   /** Claude Code's permission mode for the run. */
   permissionMode: string;
+  /** The model id to launch with, or absent to let the CLI choose (issue #94). */
+  model?: string;
   onUpdate: (update: ClaudeUpdate) => void;
   onStderr?: (text: string) => void;
 }
 
 /**
- * The arguments GateControl requires, in front of any configured extras.
+ * The arguments SoloW requires, in front of any configured extras.
  *
  * Exported so a test can assert the shape without spawning anything — in particular that
  * `--worktree` is always present, which is the guarantee the rest of the system leans on.
@@ -77,6 +79,8 @@ export interface ClaudeSessionOptions {
 export function buildArgs(options: {
   worktreeName: string | null;
   permissionMode: string;
+  /** The model id to launch with, or absent to let the CLI choose. */
+  model?: string;
   extraArgs?: string[];
 }): string[] {
   return [
@@ -95,6 +99,15 @@ export function buildArgs(options: {
     // are the safety boundary instead (see the orchestrator's runner for the reasoning).
     "--permission-mode",
     options.permissionMode,
+    /*
+     * The model the Agent Profile pinned (issue #94), or nothing at all.
+     *
+     * Absent rather than a default: which models exist is the provider's business and changes on
+     * its schedule, so a value written down here would become a launch failure the first time one
+     * was retired. Omitting the flag leaves the choice to the CLI, which is the only answer that
+     * cannot go stale.
+     */
+    ...(options.model ? ["--model", options.model] : []),
     ...(options.extraArgs ?? []),
   ];
 }
@@ -125,6 +138,7 @@ export function startClaudeSession(
       ...buildArgs({
         worktreeName: options.worktreeName,
         permissionMode: options.permissionMode,
+        ...(options.model ? { model: options.model } : {}),
         ...(options.extraArgs ? { extraArgs: options.extraArgs } : {}),
       }),
     ],

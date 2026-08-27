@@ -1,6 +1,6 @@
 "use client";
 
-import type { TaskDeletionImpactDto } from "@gatecontrol/contracts";
+import type { TaskDeletionImpactDto } from "@solow/contracts";
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { ConfirmDialog } from "@/components/features/confirm-action";

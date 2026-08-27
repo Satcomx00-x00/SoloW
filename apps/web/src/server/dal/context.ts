@@ -1,5 +1,5 @@
 import "server-only";
-import type { Db } from "@gatecontrol/db";
+import type { Db } from "@solow/db";
 
 /**
  * Every DAL call takes a RequestContext carrying the authenticated identity and the

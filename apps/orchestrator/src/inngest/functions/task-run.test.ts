@@ -3,12 +3,11 @@
 import { beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { Writable } from "node:stream";
 import {
-  type AgentPermissionMode,
   type AgentProtocol,
   type ExecutorConfig,
   TaskErrorCode,
   WIDGET_ANSWER_PREFIX,
-} from "@gatecontrol/contracts";
+} from "@solow/contracts";
 import {
   agentCatalog,
   agentProfile,
@@ -25,9 +24,9 @@ import {
   taskRepository,
   workspace,
   worktree,
-} from "@gatecontrol/db";
-import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
-import { createLogger } from "@gatecontrol/observability";
+} from "@solow/db";
+import { createTestDb, type TestDb } from "@solow/db/testing";
+import { createLogger } from "@solow/observability";
 import { asc, eq } from "drizzle-orm";
 import { worktreeNameForTask } from "../../agent/claude-code-runner.js";
 import { AgentRegistry } from "../../agent/registry.js";
@@ -38,6 +37,7 @@ import type {
   AgentStartOpts,
   AgentStreamEvent,
 } from "../../agent/runner.js";
+import type { AgentLaunchSettings } from "../../agent/runners.js";
 import { listTaskEventsSince } from "../../data.js";
 import { RepositoryUnusableError } from "../../worktree/manager.js";
 import {
@@ -95,7 +95,7 @@ async function seedRun(
     /**
      * A base ref on the *primary* attachment. Left unset by default, which is the ordinary case
      * and the one where a `--worktree` agent is still allowed to make its own worktree; a test
-     * that wants GateControl to branch the primary itself names one.
+     * that wants SoloW to branch the primary itself names one.
      */
     baseRef?: string;
     /** A checkout branch on the primary; defaults to the name the DAL derives. */
@@ -169,7 +169,7 @@ async function seedRun(
     taskId: ids.taskId,
     repositoryId: repoId,
     baseRef: opts.baseRef ?? null,
-    checkoutBranch: opts.checkoutBranch ?? `gatecontrol/task-${ids.taskId}`,
+    checkoutBranch: opts.checkoutBranch ?? `solow/task-${ids.taskId}`,
     position: 0,
   });
   for (const [index, extra] of (opts.extraRepositories ?? []).entries()) {
@@ -188,7 +188,7 @@ async function seedRun(
       taskId: ids.taskId,
       repositoryId: extraRepoId,
       baseRef: "main",
-      checkoutBranch: extra.checkoutBranch ?? `gatecontrol/task-${ids.taskId}`,
+      checkoutBranch: extra.checkoutBranch ?? `solow/task-${ids.taskId}`,
       position: index + 1,
     });
   }
@@ -249,6 +249,45 @@ function retryingStep(decisions: ScriptedDecision[], retryStepId: string): StepL
 }
 
 /** Fake agent runner returning queued outcomes; records how many times it started. */
+/**
+ * An agent that declares itself finished and then **does not exit** — the real behaviour of a
+ * CLI agent that waits for whatever the operator wants next.
+ *
+ * Its `outcome` only resolves once `stop()` is called, which is exactly the contract the
+ * lifecycle now relies on: the declaration ends the round, the runner is torn down, and the
+ * promise the step is awaiting settles. Before that, the step waited on a process that was never
+ * going to leave, the request outlived Inngest's execution budget, and the run was retried from
+ * the top for ever — so the review gate below it never ran.
+ */
+class DeclaringRunner implements AgentRunner {
+  starts = 0;
+  stops = 0;
+  start(opts: AgentStartOpts): AgentHandle {
+    this.starts += 1;
+    // The declaration, as a fenced widget in the model's own prose — the path a real agent takes.
+    opts.onEvent({
+      kind: "stdout",
+      channel: "assistant",
+      text: '```solow:widget\n{"kind":"task_complete","outcome":"changes_ready","summary":"done"}\n```\n',
+    });
+    let settle: (outcome: AgentOutcome) => void = () => {};
+    const outcome = new Promise<AgentOutcome>((resolve) => {
+      settle = resolve;
+    });
+    return {
+      outcome,
+      workspacePath: Promise.resolve<string | null>(
+        opts.worktreeName ? `/wt/${opts.worktreeName}` : opts.cwd,
+      ),
+      send: async () => true,
+      stop: async () => {
+        this.stops += 1;
+        settle({ kind: "completed" });
+      },
+    };
+  }
+}
+
 class ScriptedRunner implements AgentRunner {
   starts = 0;
   /** How many times the lifecycle asked this run to stop — asserted by the abandon path. */
@@ -300,7 +339,7 @@ interface Spies {
   published: Array<{ channel: string; event: Record<string, unknown> }>;
   /** Every setup-file copy the lifecycle asked for (issue #52), in order. */
   seeded: Array<{ repoPath: string; worktreePath: string; patterns: string[] }>;
-  /** Worktrees GateControl created itself, for a protocol whose agent cannot (issue #58). */
+  /** Worktrees SoloW created itself, for a protocol whose agent cannot (issue #58). */
   provisioned: string[];
   /** What each of those was asked to branch, and from where (issue #7 AC-1). */
   provisionedFrom: Array<{ path: string; baseRef: string | null; checkoutBranch: string | null }>;
@@ -345,7 +384,7 @@ function makeDeps(
         p.attachmentId ? `/repo/${p.taskId}--${p.attachmentId}` : `/repo/${p.taskId}`,
       provision: async (p) => {
         const suffix = p.attachmentId ? `--${p.attachmentId}` : "";
-        const path = `/wt/gatecontrol-task-${p.taskId}${suffix}`;
+        const path = `/wt/solow-task-${p.taskId}${suffix}`;
         spies.provisioned.push(path);
         spies.provisionedFrom.push({
           path,
@@ -354,7 +393,7 @@ function makeDeps(
         });
         return {
           path,
-          branch: p.checkoutBranch ?? `gatecontrol/task-${p.taskId}`,
+          branch: p.checkoutBranch ?? `solow/task-${p.taskId}`,
           repoPath: p.attachmentId ? `/repo/${p.taskId}--${p.attachmentId}` : `/repo/${p.taskId}`,
         };
       },
@@ -418,7 +457,7 @@ describe("runTaskLifecycle (integration)", () => {
   let db: TestDb;
 
   beforeAll(() => {
-    process.env.GATECONTROL_SECRET_KEY ??= Buffer.alloc(32, 3).toString("base64");
+    process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 3).toString("base64");
   });
 
   beforeEach(() => {
@@ -962,7 +1001,7 @@ describe("the brief the agent is given", () => {
   let db: TestDb;
 
   beforeAll(() => {
-    process.env.GATECONTROL_SECRET_KEY ??= Buffer.alloc(32, 3).toString("base64");
+    process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 3).toString("base64");
   });
   beforeEach(() => {
     db = createTestDb();
@@ -1077,7 +1116,7 @@ describe("the diff a reviewer is shown", () => {
   let db: TestDb;
 
   beforeAll(() => {
-    process.env.GATECONTROL_SECRET_KEY ??= Buffer.alloc(32, 3).toString("base64");
+    process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 3).toString("base64");
   });
   beforeEach(() => {
     db = createTestDb();
@@ -1095,7 +1134,7 @@ describe("the diff a reviewer is shown", () => {
     ).filter((e) => e.kind === "diff");
     expect(captured).toBeDefined();
     expect(captured?.payload).toMatchObject({
-      diffRef: `gatecontrol-task-${ids.taskId}`,
+      diffRef: `solow-task-${ids.taskId}`,
       files: [{ path: "src/latch.ts", status: "modified", additions: 4, deletions: 1 }],
       truncated: false,
     });
@@ -1139,7 +1178,7 @@ describe("the diff a reviewer is shown", () => {
     const firstDiff = events.find((e) => e.kind === "diff");
     const finished = events.find((e) => e.kind === "agent_done");
     expect(firstDiff?.payload).toMatchObject({
-      diffRef: `gatecontrol-task-${ids.taskId}`,
+      diffRef: `solow-task-${ids.taskId}`,
       files: [{ path: "src/latch.ts", status: "modified", additions: 4, deletions: 1 }],
     });
     // Before the marker that says the agent finished — which is the whole point: the record
@@ -1304,7 +1343,7 @@ describe("resuming a Task that has become blocked (issue #6)", () => {
   let db: TestDb;
 
   beforeAll(() => {
-    process.env.GATECONTROL_SECRET_KEY ??= Buffer.alloc(32, 3).toString("base64");
+    process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 3).toString("base64");
   });
   beforeEach(() => {
     db = createTestDb();
@@ -1329,7 +1368,7 @@ describe("resuming a Task that has become blocked (issue #6)", () => {
       workspaceId: ids.workspaceId,
       taskId: blockerId,
       repositoryId: `repo-${ids.taskId}`,
-      checkoutBranch: `gatecontrol/task-${blockerId}`,
+      checkoutBranch: `solow/task-${blockerId}`,
     });
     await db.insert(taskDependency).values({
       id: `dep-${ids.taskId}`,
@@ -1404,7 +1443,7 @@ describe("setup files copied into the agent's worktree (issue #52)", () => {
   let db: TestDb;
 
   beforeAll(() => {
-    process.env.GATECONTROL_SECRET_KEY ??= Buffer.alloc(32, 3).toString("base64");
+    process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 3).toString("base64");
   });
   beforeEach(() => {
     db = createTestDb();
@@ -1496,7 +1535,7 @@ describe("the worktree a Task runs in", () => {
   let db: TestDb;
 
   beforeAll(() => {
-    process.env.GATECONTROL_SECRET_KEY ??= Buffer.alloc(32, 3).toString("base64");
+    process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 3).toString("base64");
   });
   beforeEach(() => {
     db = createTestDb();
@@ -1527,7 +1566,7 @@ describe("the worktree a Task runs in", () => {
    * whatever was on disk. Only the tests ever inserted a row, which is why nothing caught it.
    */
   describe("the row that says the directory exists", () => {
-    it("is written for the worktree the agent made and GateControl adopted", async () => {
+    it("is written for the worktree the agent made and SoloW adopted", async () => {
       const ids = freshIds();
       await seedRun(db, ids);
       // A hard failure preserves the worktree, so the row can be observed still active.
@@ -1548,7 +1587,7 @@ describe("the worktree a Task runs in", () => {
       });
     });
 
-    it("is written for a worktree GateControl provisioned itself", async () => {
+    it("is written for a worktree SoloW provisioned itself", async () => {
       const ids = freshIds();
       await seedRun(db, ids, { agentProtocol: "acp" });
       const { deps } = makeDeps(
@@ -1609,7 +1648,7 @@ describe("the worktree a Task runs in", () => {
     // Run in the repository, and let `claude --worktree` make the directory. That is what
     // keeps concurrent Tasks on one repository apart (Principle II).
     expect(runner.asked).toEqual([
-      { cwd: `/repo/${ids.taskId}`, worktreeName: `gatecontrol-task-${ids.taskId}` },
+      { cwd: `/repo/${ids.taskId}`, worktreeName: `solow-task-${ids.taskId}` },
     ]);
   });
 
@@ -1628,7 +1667,7 @@ describe("the worktree a Task runs in", () => {
 
     expect(runner.asked).toHaveLength(2);
     expect(runner.asked[1]).toEqual({
-      cwd: `/wt/gatecontrol-task-${ids.taskId}`,
+      cwd: `/wt/solow-task-${ids.taskId}`,
       worktreeName: null,
     });
   });
@@ -1660,7 +1699,7 @@ describe("the worktree a Task runs in", () => {
     expect(await taskState(db, ids.taskId)).toBe("failed");
   });
 
-  it("cleans up the worktree the agent made, not one GateControl guessed at", async () => {
+  it("cleans up the worktree the agent made, not one SoloW guessed at", async () => {
     const ids = freshIds();
     await seedRun(db, ids);
     const runner = new WorktreeRecordingRunner();
@@ -1680,7 +1719,7 @@ describe("the worktree a Task runs in", () => {
       { event: { data: ids }, step: scriptedStep(["approve"]) },
     );
 
-    expect(cleaned).toEqual([`/wt/gatecontrol-task-${ids.taskId}`]);
+    expect(cleaned).toEqual([`/wt/solow-task-${ids.taskId}`]);
     expect(spies.commit).toBe(1);
   });
 
@@ -1715,7 +1754,7 @@ describe("the worktree a Task runs in", () => {
 
       await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
-      // seedRun's catalog row sets command "fake" — there is no GATECONTROL_AGENT_COMMAND any
+      // seedRun's catalog row sets command "fake" — there is no SOLOW_AGENT_COMMAND any
       // more for this to have fallen back to.
       expect(runner.commands).toEqual(["fake"]);
     });
@@ -1744,7 +1783,7 @@ describe("a Task driven over ACP (issue #58)", () => {
   let db: TestDb;
 
   beforeAll(() => {
-    process.env.GATECONTROL_SECRET_KEY ??= Buffer.alloc(32, 3).toString("base64");
+    process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 3).toString("base64");
   });
 
   beforeEach(() => {
@@ -1777,9 +1816,9 @@ describe("a Task driven over ACP (issue #58)", () => {
 
     await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
-    expect(spies.provisioned).toEqual([`/wt/gatecontrol-task-${ids.taskId}`]);
+    expect(spies.provisioned).toEqual([`/wt/solow-task-${ids.taskId}`]);
     expect(runner.worktreeNames).toEqual([null]);
-    expect(runner.cwds).toEqual([`/wt/gatecontrol-task-${ids.taskId}`]);
+    expect(runner.cwds).toEqual([`/wt/solow-task-${ids.taskId}`]);
   });
 
   it("leaves the Claude Code path creating its own worktree, exactly as before", async () => {
@@ -1876,8 +1915,8 @@ describe("a Task driven over ACP (issue #58)", () => {
     expect(runner.starts).toBe(2);
     // Both launches asked for the same worktree, and the second one committed.
     expect(spies.provisioned).toEqual([
-      `/wt/gatecontrol-task-${ids.taskId}`,
-      `/wt/gatecontrol-task-${ids.taskId}`,
+      `/wt/solow-task-${ids.taskId}`,
+      `/wt/solow-task-${ids.taskId}`,
     ]);
     expect(spies.commit).toBe(1);
   });
@@ -1891,7 +1930,7 @@ describe("a Task driven over ACP (issue #58)", () => {
     const runner = new ScriptedRunner([{ kind: "completed" }]);
     const { deps, spies } = makeDeps(db, runner, nullStream());
     deps.worktree.provision = async () => {
-      throw new Error("fatal: a branch named 'gatecontrol/task-1' already exists");
+      throw new Error("fatal: a branch named 'solow/task-1' already exists");
     };
 
     const result = await runTaskLifecycle(deps, {
@@ -1934,7 +1973,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
   let db: TestDb;
 
   beforeAll(() => {
-    process.env.GATECONTROL_SECRET_KEY ??= Buffer.alloc(32, 3).toString("base64");
+    process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 3).toString("base64");
   });
   beforeEach(() => {
     db = createTestDb();
@@ -1952,8 +1991,8 @@ describe("a Task spanning several Repositories (issue #7)", () => {
     // Two worktrees, two distinct paths. The primary's is byte-identical to what a
     // single-Repository Task gets, so nothing about the existing shape moved.
     expect(spies.provisioned).toEqual([
-      `/wt/gatecontrol-task-${ids.taskId}`,
-      `/wt/gatecontrol-task-${ids.taskId}--${attachmentId(ids.taskId, "lib")}`,
+      `/wt/solow-task-${ids.taskId}`,
+      `/wt/solow-task-${ids.taskId}--${attachmentId(ids.taskId, "lib")}`,
     ]);
     expect(new Set(spies.provisioned).size).toBe(2);
   });
@@ -1966,11 +2005,61 @@ describe("a Task spanning several Repositories (issue #7)", () => {
 
     await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
-    // Only the secondary is provisioned by GateControl; the agent is still asked for its own.
+    // Only the secondary is provisioned by SoloW; the agent is still asked for its own.
     expect(spies.provisioned).toEqual([
-      `/wt/gatecontrol-task-${ids.taskId}--${attachmentId(ids.taskId, "lib")}`,
+      `/wt/solow-task-${ids.taskId}--${attachmentId(ids.taskId, "lib")}`,
     ]);
     expect(runner.worktreeNames).toEqual([worktreeNameForTask(ids.taskId)]);
+  });
+
+  /**
+   * A partial integration (issue #70 AC-4).
+   *
+   * One decision covers the whole Task, so an approval that commits the first repository and
+   * fails on the second leaves it *partially integrated* — a state nothing in the model
+   * describes. The rule is that it must fail loudly with the partial state named, never half
+   * succeed quietly, because the branches that did land are real and someone has to decide what
+   * to do about them.
+   */
+  it("AC-4: fails the Task and names both halves when only some repositories integrate", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids, { agentProtocol: "acp", ...twoRepositories });
+    const { deps, spies } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+    const secondary = `/wt/solow-task-${ids.taskId}--${attachmentId(ids.taskId, "lib")}`;
+    deps.worktree.commit = async (path, message, patterns) => {
+      if (path === secondary) throw new Error("index.lock exists");
+      spies.commit += 1;
+      spies.committed.push(path);
+      spies.excluded.push(patterns);
+      void message;
+    };
+
+    const result = await runTaskLifecycle(deps, {
+      event: { data: ids },
+      step: scriptedStep(["approve"]),
+    });
+
+    // Not `done`, and not a thrown step either — a throw would report "the approve failed", which
+    // is the one reading that is false, and Inngest would retry it into a second commit on the
+    // branch that already took.
+    expect(result.result).toBe("partial_integration");
+    expect(await taskState(db, ids.taskId)).toBe("failed");
+    expect(await taskFailureReason(db, ids.taskId)).toBe("partial_integration");
+    // The first repository really was committed. That is the whole reason this cannot be retried.
+    expect(spies.committed).toEqual([`/wt/solow-task-${ids.taskId}`]);
+
+    // And both halves are named where the reviewer is already looking.
+    const events = await db
+      .select()
+      .from(sessionEvent)
+      .where(eq(sessionEvent.sessionId, ids.sessionId))
+      .orderBy(asc(sessionEvent.seq));
+    const notice = events
+      .map((row) => JSON.stringify(row.payload))
+      .find((text) => text.includes("integrated only part"));
+    expect(notice).toBeDefined();
+    expect(notice).toContain(`solow/task-${ids.taskId}`);
+    expect(notice).toContain("index.lock exists");
   });
 
   it("AC-3: fails the Task naming the Repository it could not prepare, before any agent starts", async () => {
@@ -2035,13 +2124,13 @@ describe("a Task spanning several Repositories (issue #7)", () => {
 
     expect(spies.provisionedFrom).toEqual([
       {
-        path: `/wt/gatecontrol-task-${ids.taskId}`,
+        path: `/wt/solow-task-${ids.taskId}`,
         baseRef: "release/2.1",
-        checkoutBranch: `gatecontrol/task-${ids.taskId}`,
+        checkoutBranch: `solow/task-${ids.taskId}`,
       },
     ]);
-    // The agent is started inside the worktree GateControl made, and asked for none of its own.
-    expect(runner.cwds).toEqual([`/wt/gatecontrol-task-${ids.taskId}`]);
+    // The agent is started inside the worktree SoloW made, and asked for none of its own.
+    expect(runner.cwds).toEqual([`/wt/solow-task-${ids.taskId}`]);
     expect(runner.worktreeNames).toEqual([null]);
   });
 
@@ -2055,7 +2144,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
 
     expect(spies.provisionedFrom).toEqual([
       {
-        path: `/wt/gatecontrol-task-${ids.taskId}`,
+        path: `/wt/solow-task-${ids.taskId}`,
         baseRef: null,
         checkoutBranch: "release/2.1-fix",
       },
@@ -2066,7 +2155,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
   it("names in the brief the branch the agent is on, not the one the attachment stores", async () => {
     // The brief is the *only* mechanism by which a multi-repository agent learns its layout, so
     // a branch line it cannot act on is worse than none. A `--worktree` agent names its own
-    // branch (`gatecontrol-task-<id>`), which the attachment's `gatecontrol/task-<id>` is not.
+    // branch (`solow-task-<id>`), which the attachment's `solow/task-<id>` is not.
     const ids = freshIds();
     await seedRun(db, ids, {
       extraRepositories: [{ key: "lib", name: "shared-lib", checkoutBranch: "feature/lib" }],
@@ -2081,12 +2170,12 @@ describe("a Task spanning several Repositories (issue #7)", () => {
 
     // Round one: nothing has asked git yet, so the primary line carries no branch at all.
     expect(runner.prompts[0]).toContain("- repo — you are working here");
-    expect(runner.prompts[0]).not.toContain(`gatecontrol/task-${ids.taskId}`);
+    expect(runner.prompts[0]).not.toContain(`solow/task-${ids.taskId}`);
     // Round two: the worktree has been adopted, so the brief can name what git reported.
     expect(runner.prompts[1]).toContain(
-      `- repo (branch gatecontrol-task-${ids.taskId}) — you are working here`,
+      `- repo (branch solow-task-${ids.taskId}) — you are working here`,
     );
-    // The secondary's branch is GateControl's own, and is named from the first round.
+    // The secondary's branch is SoloW's own, and is named from the first round.
     expect(runner.prompts[0]).toContain("- shared-lib (branch feature/lib)");
   });
 
@@ -2120,8 +2209,8 @@ describe("a Task spanning several Repositories (issue #7)", () => {
 
     expect(result.result).toBe("worktree_unavailable");
     expect(spies.cleaned).toEqual([
-      `/wt/gatecontrol-task-${ids.taskId}`,
-      `/wt/gatecontrol-task-${ids.taskId}--${attachmentId(ids.taskId, "lib")}`,
+      `/wt/solow-task-${ids.taskId}`,
+      `/wt/solow-task-${ids.taskId}--${attachmentId(ids.taskId, "lib")}`,
     ]);
   });
 
@@ -2178,8 +2267,8 @@ describe("a Task spanning several Repositories (issue #7)", () => {
     deps.worktree.provision = async (p) => {
       if (p.attachmentId) throw new Error("fatal: branch already checked out");
       return {
-        path: `/wt/gatecontrol-task-${p.taskId}`,
-        branch: `gatecontrol/task-${p.taskId}`,
+        path: `/wt/solow-task-${p.taskId}`,
+        branch: `solow/task-${p.taskId}`,
         repoPath: `/repo/${p.taskId}`,
       };
     };
@@ -2198,9 +2287,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
     const ids = freshIds();
     await seedRun(db, ids, {
       agentProtocol: "acp",
-      extraRepositories: [
-        { key: "lib", name: "shared-lib", checkoutBranch: `gatecontrol/lib-only` },
-      ],
+      extraRepositories: [{ key: "lib", name: "shared-lib", checkoutBranch: `solow/lib-only` }],
     });
     const { deps, spies } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
 
@@ -2215,10 +2302,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
     expect(diffs.map((d) => d.repositoryName)).toEqual(["repo", "shared-lib"]);
     expect(new Set(diffs.map((d) => d.repositoryId)).size).toBe(2);
     // Each group names the branch its own worktree sits on, not one branch for the whole Task.
-    expect(diffs.map((d) => d.diffRef)).toEqual([
-      `gatecontrol-task-${ids.taskId}`,
-      "gatecontrol/lib-only",
-    ]);
+    expect(diffs.map((d) => d.diffRef)).toEqual([`solow-task-${ids.taskId}`, "solow/lib-only"]);
     // Each worktree was diffed once — a reviewer sees both changes, not the primary's twice.
     expect(new Set(spies.diffed).size).toBe(2);
   });
@@ -2261,10 +2345,10 @@ describe("a Task spanning several Repositories (issue #7)", () => {
       .orderBy(asc(taskRepository.position));
     // A single column on `task` could only ever have named one of these branches. The primary's
     // is the branch the adoption check read back from git; the secondary's is the branch
-    // GateControl checked its worktree out on.
+    // SoloW checked its worktree out on.
     expect(attachments.map((a) => a.resultBranch)).toEqual([
-      `gatecontrol-task-${ids.taskId}`,
-      `gatecontrol/task-${ids.taskId}`,
+      `solow-task-${ids.taskId}`,
+      `solow/task-${ids.taskId}`,
     ]);
   });
 
@@ -2313,8 +2397,8 @@ describe("a Task spanning several Repositories (issue #7)", () => {
 
     await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
-    const secondary = `/wt/gatecontrol-task-${ids.taskId}--${attachmentId(ids.taskId, "lib")}`;
-    expect(runner.cwds).toEqual([`/wt/gatecontrol-task-${ids.taskId}`]);
+    const secondary = `/wt/solow-task-${ids.taskId}--${attachmentId(ids.taskId, "lib")}`;
+    expect(runner.cwds).toEqual([`/wt/solow-task-${ids.taskId}`]);
     expect(runner.prompts[0]).toContain("# Repositories");
     expect(runner.prompts[0]).toContain("shared-lib");
     expect(runner.prompts[0]).toContain(secondary);
@@ -2355,9 +2439,9 @@ describe("a Task spanning several Repositories (issue #7)", () => {
     await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     // The new primary keeps the Task's own path; the demoted one becomes the sibling.
-    expect(runner.cwds).toEqual([`/wt/gatecontrol-task-${ids.taskId}`]);
+    expect(runner.cwds).toEqual([`/wt/solow-task-${ids.taskId}`]);
     expect(runner.prompts[0]).toContain(
-      `/wt/gatecontrol-task-${ids.taskId}--${attachmentId(ids.taskId)}`,
+      `/wt/solow-task-${ids.taskId}--${attachmentId(ids.taskId)}`,
     );
   });
 
@@ -2391,7 +2475,7 @@ describe("approving a multi-Repository Task that changed only some of them", () 
   let db: TestDb;
 
   beforeAll(() => {
-    process.env.GATECONTROL_SECRET_KEY ??= Buffer.alloc(32, 3).toString("base64");
+    process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 3).toString("base64");
   });
   beforeEach(() => {
     db = createTestDb();
@@ -2417,7 +2501,7 @@ describe("approving a multi-Repository Task that changed only some of them", () 
     expect(result.result).toBe("done");
     expect(await taskState(db, ids.taskId)).toBe("done");
     expect(spies.commit).toBe(1);
-    expect(spies.committed[0]).toBe(`/wt/gatecontrol-task-${ids.taskId}`);
+    expect(spies.committed[0]).toBe(`/wt/solow-task-${ids.taskId}`);
 
     // Both branches are still recorded: the secondary's exists and is what a reviewer fetches.
     const attachments = await db
@@ -2453,9 +2537,9 @@ describe("task-run permission mode", () => {
     const asked: Array<string | undefined> = [];
     const wrapped = {
       ...deps,
-      runner: (protocol: AgentProtocol, mode: AgentPermissionMode) => {
-        asked.push(mode);
-        return deps.runner(protocol, mode);
+      runner: (protocol: AgentProtocol, settings: AgentLaunchSettings) => {
+        asked.push(settings.permissionMode);
+        return deps.runner(protocol, settings);
       },
     };
 
@@ -2474,9 +2558,9 @@ describe("task-run permission mode", () => {
     const asked: Array<string | undefined> = [];
     const wrapped = {
       ...deps,
-      runner: (protocol: AgentProtocol, mode: AgentPermissionMode) => {
-        asked.push(mode);
-        return deps.runner(protocol, mode);
+      runner: (protocol: AgentProtocol, settings: AgentLaunchSettings) => {
+        asked.push(settings.permissionMode);
+        return deps.runner(protocol, settings);
       },
     };
 
@@ -2513,7 +2597,7 @@ describe("task-run widgets", () => {
 
   it("records what the agent said about stopping, when it said anything", async () => {
     // Without a `task_complete` the marker still gets written — the fix must not depend on an
-    // agent knowing GateControl exists — so this is about the enrichment, not the mechanism.
+    // agent knowing SoloW exists — so this is about the enrichment, not the mechanism.
     const ids = freshIds();
     await seedRun(db, ids);
     await enableWidgets(ids);
@@ -2524,7 +2608,7 @@ describe("task-run widgets", () => {
         {
           kind: "stdout",
           channel: "assistant",
-          text: `Nothing needed.\n\`\`\`gatecontrol:widget\n${report}\n\`\`\``,
+          text: `Nothing needed.\n\`\`\`solow:widget\n${report}\n\`\`\``,
         },
       ],
     );
@@ -2555,7 +2639,7 @@ describe("task-run widgets", () => {
         {
           kind: "stdout",
           channel: "assistant",
-          text: `Picking a store.\n\`\`\`gatecontrol:widget\n${ASK}\n\`\`\`\nStanding by.`,
+          text: `Picking a store.\n\`\`\`solow:widget\n${ASK}\n\`\`\`\nStanding by.`,
         },
       ],
     );
@@ -2593,7 +2677,7 @@ describe("task-run widgets", () => {
     const runner = new ScriptedRunner([{ kind: "completed" }]);
     const { deps } = makeDeps(db, runner, nullStream());
     await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
-    expect(runner.prompts[0]).toContain("gatecontrol:widget");
+    expect(runner.prompts[0]).toContain("solow:widget");
 
     const off = freshIds();
     await seedRun(db, off);
@@ -2601,7 +2685,7 @@ describe("task-run widgets", () => {
     const { deps: offDeps } = makeDeps(db, quiet, nullStream());
     await runTaskLifecycle(offDeps, { event: { data: off }, step: scriptedStep(["approve"]) });
     // A Workspace without the flag gets the brief it always got, byte for byte.
-    expect(quiet.prompts[0]).not.toContain("gatecontrol:widget");
+    expect(quiet.prompts[0]).not.toContain("solow:widget");
   });
 
   it("leaves the output untouched for a Workspace with the flag off", async () => {
@@ -2613,7 +2697,7 @@ describe("task-run widgets", () => {
         {
           kind: "stdout",
           channel: "assistant",
-          text: `\`\`\`gatecontrol:widget\n${ASK}\n\`\`\``,
+          text: `\`\`\`solow:widget\n${ASK}\n\`\`\``,
         },
       ],
     );
@@ -2631,7 +2715,7 @@ describe("task-run widgets", () => {
       .filter((e) => e.kind === "assistant_turn")
       .map((e) => (e.payload as { text: string }).text)
       .join("");
-    expect(prose).toContain("gatecontrol:widget");
+    expect(prose).toContain("solow:widget");
   });
 
   it("does not read a widget out of the model's reasoning", async () => {
@@ -2644,7 +2728,7 @@ describe("task-run widgets", () => {
         {
           kind: "stdout",
           channel: "thinking",
-          text: `maybe \`\`\`gatecontrol:widget\n${ASK}\n\`\`\``,
+          text: `maybe \`\`\`solow:widget\n${ASK}\n\`\`\``,
         },
       ],
     );
@@ -2785,7 +2869,7 @@ describe("the agent's completion declaration", () => {
   let db: TestDb;
 
   beforeAll(() => {
-    process.env.GATECONTROL_SECRET_KEY ??= Buffer.alloc(32, 3).toString("base64");
+    process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 3).toString("base64");
   });
   beforeEach(() => {
     db = createTestDb();
@@ -2803,7 +2887,7 @@ describe("the agent's completion declaration", () => {
     kind: "stdout",
     channel: "assistant",
     text: [
-      "```gatecontrol:widget",
+      "```solow:widget",
       JSON.stringify({ kind: "task_complete", outcome, ...(summary ? { summary } : {}) }),
       "```",
     ].join("\n"),
@@ -2870,5 +2954,238 @@ describe("the agent's completion declaration", () => {
 
     const [row] = await db.select().from(task).where(eq(task.id, ids.taskId));
     expect(row?.completedOutcome).toBe("nothing_to_do");
+  });
+});
+
+/**
+ * An agent that declares itself finished and stays alive (issue observed end to end 2026-08-27).
+ *
+ * This is the defect that made the whole nominal path unreachable, and it is worth stating
+ * plainly because every symptom pointed somewhere else. `await handle.outcome` waits for the
+ * agent **process** to exit. A CLI agent that says "changes_ready" does not exit — it waits for
+ * the operator. So the `agent-run` step never returned, Inngest never checkpointed it, the
+ * platform killed the request after its execution budget, and the run was retried from the top
+ * for ever. Every step below it — the review gate, `waitForEvent`, the commit — was unreachable,
+ * while the agent's own side effects (its edits, its transcript, its declaration) all landed
+ * normally. The product looked like it was working right up to the moment approving a change
+ * did nothing.
+ */
+describe("an agent that declares it is finished and does not exit", () => {
+  let db: TestDb;
+
+  beforeAll(() => {
+    process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 3).toString("base64");
+  });
+
+  beforeEach(() => {
+    db = createTestDb();
+  });
+
+  it("ends the round on the declaration rather than waiting for a process that never leaves", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    // The declaration travels as a fenced widget, which the lifecycle only scans for when the
+    // Workspace has widgets on.
+    await db
+      .update(workspace)
+      .set({ enabledFlags: { "ff-agent-widgets": true } })
+      .where(eq(workspace.id, ids.workspaceId));
+    const runner = new DeclaringRunner();
+    const { deps, spies } = makeDeps(db, runner, nullStream());
+    // Real time, shortened. The behaviour under test is a silence timer, so there has to be one.
+    deps.completionGraceMs = 20;
+
+    const result = await runTaskLifecycle(deps, {
+      event: { data: ids },
+      step: scriptedStep(["approve"]),
+    });
+
+    // It got past the agent step at all — which is the whole claim.
+    expect(runner.stops).toBe(1);
+    expect(result.result).toBe("done");
+    expect(await taskState(db, ids.taskId)).toBe("done");
+    // And the work was integrated, which is what the run existed to do.
+    expect(spies.commit).toBe(1);
+  });
+
+  it("records the declaration it was given", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    await db
+      .update(workspace)
+      .set({ enabledFlags: { "ff-agent-widgets": true } })
+      .where(eq(workspace.id, ids.workspaceId));
+    const { deps } = makeDeps(db, new DeclaringRunner(), nullStream());
+    deps.completionGraceMs = 20;
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    const [row] = await db.select().from(task).where(eq(task.id, ids.taskId)).limit(1);
+    expect(row?.completedOutcome).toBe("changes_ready");
+  });
+});
+
+/**
+ * A Profile's launch settings reach the run it launches (issue #94, AC-1 / AC-4).
+ *
+ * Model and mode used to be unexpressible: every run used whatever the CLI defaulted to, and the
+ * one thing a Profile could say about *how* its agent starts was the permission mode. kandev's
+ * own example — "Opus to design a plan, Sonnet to implement it, GPT to review" — is three model
+ * choices, none of which had anywhere to live.
+ */
+describe("an Agent Profile's launch settings", () => {
+  let db: TestDb;
+
+  beforeAll(() => {
+    process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 3).toString("base64");
+  });
+
+  beforeEach(() => {
+    db = createTestDb();
+  });
+
+  /** What the lifecycle asked the runner factory to build. */
+  async function settingsFor(ids: Ids): Promise<AgentLaunchSettings[]> {
+    const { deps } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+    const asked: AgentLaunchSettings[] = [];
+    const wrapped = {
+      ...deps,
+      runner: (protocol: AgentProtocol, settings: AgentLaunchSettings) => {
+        asked.push(settings);
+        return deps.runner(protocol, settings);
+      },
+    };
+    await runTaskLifecycle(wrapped, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    return asked;
+  }
+
+  it("carries the model and mode the Profile pinned", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    await db
+      .update(agentProfile)
+      .set({ model: "claude-opus-4", modeId: "plan" })
+      .where(eq(agentProfile.id, `agent-${ids.taskId}`));
+
+    expect(await settingsFor(ids)).toEqual([
+      { permissionMode: "acceptEdits", model: "claude-opus-4", modeId: "plan" },
+    ]);
+  });
+
+  it("pins nothing when the Profile pinned nothing", async () => {
+    // Null is the ordinary value and means "whatever the agent chooses". A default written into
+    // the code would be a model id that rots the first time a provider retires one.
+    const ids = freshIds();
+    await seedRun(db, ids);
+
+    expect(await settingsFor(ids)).toEqual([{ permissionMode: "acceptEdits" }]);
+  });
+
+  it("says so in the log when the protocol cannot select what was pinned (AC-3)", async () => {
+    // Not a refusal — the work can still be done — but never a silent substitution either.
+    const ids = freshIds();
+    await seedRun(db, ids, { agentProtocol: "acp" });
+    await db
+      .update(agentProfile)
+      .set({ model: "claude-opus-4" })
+      .where(eq(agentProfile.id, `agent-${ids.taskId}`));
+
+    await settingsFor(ids);
+
+    const notices = (
+      await db.select().from(sessionEvent).where(eq(sessionEvent.sessionId, ids.sessionId))
+    )
+      .map((row) => JSON.stringify(row.payload))
+      .filter((text) => text.includes("cannot select"));
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toContain("claude-opus-4");
+  });
+});
+
+/**
+ * The catalog's capability cache is fed by the runs themselves (issue #94 AC-2).
+ *
+ * The cache existed from the start — `agent_catalog.capabilities`, "a cache of the agent's last
+ * advertised models/modes" — but nothing ever wrote it: the handshake parsed the lists and threw
+ * them away, so the fallback every picker was told to rely on was permanently empty. The first
+ * launch of an agent is what teaches the catalog what it offers.
+ */
+describe("caching what an agent advertises", () => {
+  let db: TestDb;
+
+  beforeAll(() => {
+    process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 3).toString("base64");
+  });
+
+  beforeEach(() => {
+    db = createTestDb();
+  });
+
+  const capabilitiesOf = async (taskId: string) => {
+    const [row] = await db
+      .select()
+      .from(agentCatalog)
+      .where(eq(agentCatalog.id, `catalog-${taskId}`))
+      .limit(1);
+    return row?.capabilities;
+  };
+
+  it("writes the advertised lists onto the catalog row", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids, { agentProtocol: "acp" });
+    const runner = new ScriptedRunner(
+      [{ kind: "completed" }],
+      [
+        { kind: "capabilities", models: ["claude-opus-4"], modes: ["plan", "code"] },
+        { kind: "stdout", channel: "assistant", text: "working" },
+      ],
+    );
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    expect(await capabilitiesOf(ids.taskId)).toEqual({
+      models: ["claude-opus-4"],
+      modes: ["plan", "code"],
+    });
+  });
+
+  it("replaces the cache whole, so a retired model actually leaves it", async () => {
+    // Merged instead of replaced, a model the agent no longer lists would sit in the cache for
+    // ever — and the stale-pin warning reads the cache to notice exactly that retirement.
+    const ids = freshIds();
+    await seedRun(db, ids, { agentProtocol: "acp" });
+    await db
+      .update(agentCatalog)
+      .set({ capabilities: { models: ["retired-model"], modes: ["old"] } })
+      .where(eq(agentCatalog.id, `catalog-${ids.taskId}`));
+    const runner = new ScriptedRunner(
+      [{ kind: "completed" }],
+      [{ kind: "capabilities", models: ["claude-opus-4"], modes: [] }],
+    );
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    expect(await capabilitiesOf(ids.taskId)).toEqual({ models: ["claude-opus-4"], modes: [] });
+  });
+
+  it("leaves the cache alone when the run advertised nothing", async () => {
+    // The ACP client only emits the update when the agent said anything, so "no event" is the
+    // silence case — and silence must not blank a cache an earlier run filled.
+    const ids = freshIds();
+    await seedRun(db, ids, { agentProtocol: "acp" });
+    await db
+      .update(agentCatalog)
+      .set({ capabilities: { models: ["claude-opus-4"], modes: ["plan"] } })
+      .where(eq(agentCatalog.id, `catalog-${ids.taskId}`));
+    const { deps } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    expect(await capabilitiesOf(ids.taskId)).toEqual({
+      models: ["claude-opus-4"],
+      modes: ["plan"],
+    });
   });
 });

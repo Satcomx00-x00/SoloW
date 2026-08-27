@@ -1,6 +1,6 @@
 "use client";
 
-import type { IssueDto } from "@gatecontrol/contracts";
+import type { IssueDto } from "@solow/contracts";
 import { createContext, type ReactNode, useContext } from "react";
 
 /**

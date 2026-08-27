@@ -11,7 +11,7 @@ one user and hosted for a team.
 
 ## Decision
 
-Structure GateControl as **two collaborating parts**: an **interactive application** for the
+Structure SoloW as **two collaborating parts**: an **interactive application** for the
 user-facing surfaces and data, and a **separate long-lived orchestration component** that
 launches and supervises agents, manages working copies, and streams activity. Target
 **local-first** operation now, with the **same product** able to run hosted later.

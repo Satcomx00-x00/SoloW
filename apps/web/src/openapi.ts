@@ -9,12 +9,12 @@ import { appRouter } from "./server/routers/index.js";
  */
 export function buildOpenApiDocument(): OpenAPIObject {
   return generateOpenApiDocument(appRouter, {
-    title: "GateControl API",
+    title: "SoloW API",
     version: "0.1.0",
     baseUrl: "/api",
     description: "tRPC-over-HTTP surface for the core-program loop (Decision 0011).",
     securitySchemes: {
-      session: { type: "apiKey", in: "cookie", name: "gatecontrol.session" },
+      session: { type: "apiKey", in: "cookie", name: "solow.session" },
     },
   });
 }

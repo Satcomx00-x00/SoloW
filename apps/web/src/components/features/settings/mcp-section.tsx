@@ -1,6 +1,6 @@
 "use client";
 
-import type { McpScope } from "@gatecontrol/contracts";
+import type { McpScope } from "@solow/contracts";
 import { Check, Copy } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -65,12 +65,12 @@ function CopyButton({ text, label }: { text: string; label: string }) {
  * substitute it themselves.
  */
 function snippetsFor(url: string): { id: string; label: string; body: string }[] {
-  const claudeCode = `claude mcp add --transport http gatecontrol ${url} \\
+  const claudeCode = `claude mcp add --transport http solow ${url} \\
   --header "Authorization: Bearer <token>"`;
 
   const json = (key: string) =>
     JSON.stringify(
-      { mcpServers: { gatecontrol: { [key]: url, headers: { Authorization: "Bearer <token>" } } } },
+      { mcpServers: { solow: { [key]: url, headers: { Authorization: "Bearer <token>" } } } },
       null,
       2,
     );
@@ -110,8 +110,8 @@ export function McpSection() {
       <CardHeader>
         <CardTitle>MCP</CardTitle>
         <CardDescription>
-          Drive GateControl from an outside agent. A token carries one Workspace and one scope — the
-          same permission checks apply as in this UI.
+          Drive SoloW from an outside agent. A token carries one Workspace and one scope — the same
+          permission checks apply as in this UI.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">

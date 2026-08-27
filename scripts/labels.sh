@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Apply the GateControl issue-label taxonomy from `.github/labels.json`.
+# Apply the SoloW issue-label taxonomy from `.github/labels.json`.
 #
 # This is the local equivalent of the "Sync issue labels" workflow — same manifest,
 # same behaviour — for when you would rather not wait for CI. Idempotent: creates

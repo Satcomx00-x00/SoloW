@@ -9,7 +9,7 @@ import {
   taskDependency,
   taskRepository,
   worktree,
-} from "@gatecontrol/db";
+} from "@solow/db";
 import { and, eq, inArray, or } from "drizzle-orm";
 
 /**

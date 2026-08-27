@@ -1,8 +1,8 @@
 /// <reference types="bun-types" />
 
 import { beforeEach, describe, expect, it } from "bun:test";
-import type { TaskEvent } from "@gatecontrol/contracts";
-import { signStreamTicket } from "@gatecontrol/core/stream";
+import type { TaskEvent } from "@solow/contracts";
+import { signStreamTicket } from "@solow/core/stream";
 import {
   agentCatalog,
   agentProfile,
@@ -14,8 +14,8 @@ import {
   task,
   taskRepository,
   workspace,
-} from "@gatecontrol/db";
-import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
+} from "@solow/db";
+import { createTestDb, type TestDb } from "@solow/db/testing";
 import { AgentRegistry } from "../agent/registry.js";
 import type { AgentHandle, PermissionAnswer } from "../agent/runner.js";
 import { attachSubscriber, authorizeUpgrade, handleClientFrame } from "../index.js";
@@ -132,7 +132,7 @@ describe("attachSubscriber (reconnect replay)", () => {
       workspaceId,
       taskId,
       repositoryId: `repo-${suffix}`,
-      checkoutBranch: `gatecontrol/task-${taskId}`,
+      checkoutBranch: `solow/task-${taskId}`,
     });
     await db.insert(session).values({ id: `sess-${taskId}`, workspaceId, taskId, state: "active" });
     for (let seq = 0; seq < count; seq++) {
@@ -247,7 +247,7 @@ describe("handleClientFrame (operator input and stop)", () => {
       inputs: [] as string[],
       stopped: false,
       outcome: Promise.resolve({ kind: "completed" as const }),
-      workspacePath: Promise.resolve<string | null>("/wt/gatecontrol-task-1"),
+      workspacePath: Promise.resolve<string | null>("/wt/solow-task-1"),
       async send(text: string) {
         state.inputs.push(text);
         return true;
@@ -359,7 +359,7 @@ describe("handleClientFrame (permission answers)", () => {
     const answers: Array<{ requestId: string; optionId: string }> = [];
     const handle: AgentHandle = {
       outcome: Promise.resolve({ kind: "completed" as const }),
-      workspacePath: Promise.resolve<string | null>("/wt/gatecontrol-task-1"),
+      workspacePath: Promise.resolve<string | null>("/wt/solow-task-1"),
       async send() {
         return true;
       },
@@ -475,7 +475,7 @@ describe("handleClientFrame (permission answers)", () => {
       sessionId: "sess-1",
       handle: {
         outcome: Promise.resolve({ kind: "completed" as const }),
-        workspacePath: Promise.resolve<string | null>("/wt/gatecontrol-task-1"),
+        workspacePath: Promise.resolve<string | null>("/wt/solow-task-1"),
         async send() {
           return true;
         },

@@ -4,8 +4,8 @@ import { beforeAll, describe, expect, it } from "bun:test";
 /**
  * Tests for the AES-256-GCM secret store (Principle IV / spec F17).
  *
- * The env module (`./env.ts`) reads GATECONTROL_SECRET_KEY from process.env and caches the
- * result on first access, so the key MUST be present before @gatecontrol/db is imported. We
+ * The env module (`./env.ts`) reads SOLOW_SECRET_KEY from process.env and caches the
+ * result on first access, so the key MUST be present before @solow/db is imported. We
  * set it in beforeAll and pull the module in via dynamic import to guarantee that ordering.
  */
 
@@ -15,7 +15,7 @@ let encryptSecret: SecretStore["encryptSecret"];
 let decryptForAgentRun: SecretStore["decryptForAgentRun"];
 
 beforeAll(async () => {
-  process.env.GATECONTROL_SECRET_KEY = Buffer.alloc(32, 7).toString("base64");
+  process.env.SOLOW_SECRET_KEY = Buffer.alloc(32, 7).toString("base64");
   const mod = await import("./secret-store.js");
   encryptSecret = mod.encryptSecret;
   decryptForAgentRun = mod.decryptForAgentRun;

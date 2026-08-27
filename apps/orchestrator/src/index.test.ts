@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { describe, expect, it } from "bun:test";
-import { signStreamTicket } from "@gatecontrol/core/stream";
+import { signStreamTicket } from "@solow/core/stream";
 import { handleAnnouncePost } from "./index.js";
 
 /**

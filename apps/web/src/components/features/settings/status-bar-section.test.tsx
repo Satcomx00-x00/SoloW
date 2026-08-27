@@ -117,7 +117,12 @@ describe("StatusBarSection", () => {
   });
 
   it("reflects an arrangement that was already saved, rather than starting from the defaults", async () => {
-    const preferences = preferenceFixture({ order: [], hidden: ["status.workspace"] });
+    const preferences = preferenceFixture({
+      order: [],
+      hidden: ["status.workspace"],
+      shown: [],
+      widths: {},
+    });
     renderWithTrpc(
       <AppContextProvider value={{ identity: null }}>
         <StatusBarSection />

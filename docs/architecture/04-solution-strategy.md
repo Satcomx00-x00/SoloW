@@ -16,14 +16,14 @@ manages working copies, streams activity). The two share state and communicate c
 
 ## Strategy 2 — Integrate agents through one standard protocol
 
-Rather than integrating each agent tool bespoke, GateControl connects to all of them through
+Rather than integrating each agent tool bespoke, SoloW connects to all of them through
 a single open standard (the Agent Client Protocol). Adding a new agent is a configuration
 act, not an engineering one. → [Decision 0003](../decisions/0003-agent-connection-protocol.md)
 
 ## Strategy 3 — Make orchestration durable and resumable
 
 Multi-step Workflows and long Tasks must survive interruption and pause cleanly for human
-decisions. GateControl uses a durable orchestration engine so progress is recorded, human
+decisions. SoloW uses a durable orchestration engine so progress is recorded, human
 gates are first-class waits, and interrupted work resumes from its last completed step rather
 than restarting. → [Decision 0004](../decisions/0004-durable-orchestration-engine.md)
 

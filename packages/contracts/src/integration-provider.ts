@@ -2,7 +2,7 @@ import { z } from "zod";
 import { projectFieldTypeSchema } from "./project.js";
 
 /**
- * What an integration provider *is*, as far as anything outside `@gatecontrol/scm` is concerned
+ * What an integration provider *is*, as far as anything outside `@solow/scm` is concerned
  * (F21, [Decision 0016](../../../docs/decisions/0016-integration-provider-registry.md)).
  *
  * The set of providers used to be a `z.enum(["github", "gitlab"])` in `scm.ts`, and adding a
@@ -16,8 +16,8 @@ import { projectFieldTypeSchema } from "./project.js";
  * So a provider declares a **manifest** naming what it can do, and callers ask for a capability
  * rather than for a provider. What lives here is only the part that crosses a boundary: the
  * capability names, the id grammar, and the descriptor the settings UI draws its picker and its
- * connect form from. The registry itself is pure logic in `@gatecontrol/core`, and the drivers
- * are in `@gatecontrol/scm` — the same three-way split `contribution.ts` already uses.
+ * connect form from. The registry itself is pure logic in `@solow/core`, and the drivers
+ * are in `@solow/scm` — the same three-way split `contribution.ts` already uses.
  */
 
 /**
@@ -40,6 +40,14 @@ export const integrationCapabilitySchema = z.enum([
   "repositories",
   "changeRequests",
   "projects",
+  /**
+   * Creating a label the container does not have yet (user request 2026-08-27).
+   *
+   * Separate from `issueWrites`: a provider can accept `labels` on an issue patch without
+   * offering an endpoint that invents new label names, and the two are different questions to a
+   * caller deciding whether "initialize default labels" is worth offering at all.
+   */
+  "labelWrites",
 ]);
 export type IntegrationCapability = z.infer<typeof integrationCapabilitySchema>;
 

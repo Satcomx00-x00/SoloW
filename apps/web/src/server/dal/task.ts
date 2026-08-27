@@ -17,13 +17,13 @@ import {
   TaskErrorCode,
   type TaskListDto,
   type TaskState,
-} from "@gatecontrol/contracts";
+} from "@solow/contracts";
 import {
   buildDependencyGraph,
   CREDENTIAL_EXPIRED_REASON,
   checkDependencyEdge,
   taskCheckoutBranch,
-} from "@gatecontrol/core";
+} from "@solow/core";
 import {
   agentProfile,
   projectItem,
@@ -32,10 +32,11 @@ import {
   taskDependency,
   taskRepository,
   worktree,
-} from "@gatecontrol/db";
-import { and, asc, desc, eq, inArray, like, notInArray } from "drizzle-orm";
+} from "@solow/db";
+import { and, asc, eq, inArray, like, notInArray } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
 import { taskToDto } from "./mappers.js";
+import { pageAfter, pageLimit, pageOrder, pageProbe, toPage } from "./page.js";
 import { cascadeDeleteTasks } from "./task-cascade.js";
 
 /**
@@ -133,16 +134,27 @@ export async function listTasks(
     );
   }
 
+  // One page, keyset — see `page.ts`. Every filter above is SQL, so the page the database
+  // returns is the page the caller gets and the cursor needs no correcting.
+  const after = pageAfter(input.cursor, task.createdAt, task.id);
   const rows = await ctx.db
     .select()
     .from(task)
-    .where(and(...conditions))
-    .orderBy(desc(task.createdAt));
+    .where(and(...conditions, ...(after ? [after] : [])))
+    .orderBy(...pageOrder(task.createdAt, task.id))
+    .limit(pageProbe(pageLimit(input.limit)));
+  const page = toPage(rows, pageLimit(input.limit), (row) => ({
+    createdAt: row.createdAt,
+    id: row.id,
+  }));
   const attachments = await attachmentsForTasks(
     ctx,
-    rows.map((row) => row.id),
+    page.items.map((row) => row.id),
   );
-  return ok(rows.map((row) => taskToDto(row, attachments.get(row.id) ?? [])));
+  return ok({
+    items: page.items.map((row) => taskToDto(row, attachments.get(row.id) ?? [])),
+    nextCursor: page.nextCursor,
+  });
 }
 
 /**
@@ -308,7 +320,7 @@ export async function countRunningForAgentProfile(
 
 /**
  * Task dependencies (issue #6). Every question about the *shape* of the graph is still answered
- * in `@gatecontrol/core`, so there is exactly one place cycle detection lives and it is one a
+ * in `@solow/core`, so there is exactly one place cycle detection lives and it is one a
  * test can reach without a database; what happens here is only *when* that answer is asked for —
  * inside the same transaction as the write, which is the part core cannot own.
  *

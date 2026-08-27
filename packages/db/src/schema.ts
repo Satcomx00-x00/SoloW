@@ -26,12 +26,12 @@ import type {
   WorkflowAdvanceOn,
   WorkflowStepAutomation,
   WorkflowStepGate,
-} from "@gatecontrol/contracts";
+} from "@solow/contracts";
 import { sql } from "drizzle-orm";
 import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 /**
- * GateControl data model — SQLite dialect (local-first primary store, Decision 0008).
+ * SoloW data model — SQLite dialect (local-first primary store, Decision 0008).
  *
  * NOTE (Decision 0008 / risk R-6): "one data model, two stores" is implemented for
  * SQLite here. Drizzle uses separate dialect builders (sqliteTable vs pgTable), so the
@@ -138,7 +138,7 @@ export const issue = sqliteTable(
      *
      * A JSON column for the same reason `labels` is one: a handful of entries per Issue, replaced
      * wholesale by every poll and never queried by, where a join table would buy referential
-     * integrity over rows GateControl does not own and cost a join on every list read.
+     * integrity over rows SoloW does not own and cost a join on every list read.
      *
      * Deliberately **not** the `change_request` table below. That one mirrors a repository's
      * change requests and knows nothing about which of them closes which issue; this is the
@@ -155,7 +155,7 @@ export const issue = sqliteTable(
      * Open or closed **on the provider** (spec F23 FR-13, issue #127 AC-3).
      *
      * Separate from `statusOverride` and from the status derived from Tasks, and it has to be:
-     * those are GateControl's answer to "how is this going", and this is the provider's answer to
+     * those are SoloW's answer to "how is this going", and this is the provider's answer to
      * "is it finished". An epic's progress is counted from this one, because a Status field is a
      * team's convention — renamable, reorderable, and left behind by whoever closed the issue on
      * GitHub instead — where closed is a fact.
@@ -179,7 +179,7 @@ export const issue = sqliteTable(
      * `buildProjectHierarchy` — which is also where a parent that resolves to nothing becomes a
      * top-level row rather than a dropped one.
      *
-     * Nothing but the sync writes this. GateControl does not offer to create a parent the provider
+     * Nothing but the sync writes this. SoloW does not offer to create a parent the provider
      * cannot store (F23, States & rules — the hierarchy is the provider's).
      */
     externalParentId: text("external_parent_id"),
@@ -221,7 +221,7 @@ export const issue = sqliteTable(
  *
  * `subscriptionEnvVar` / `meteredEnvVar` are why this is a table and not a JSON blob: the
  * billing strip (`resolveAgentRunEnv`) used to hardcode Claude Code's two variable names. That
- * guarantee is GateControl's headline differentiator, and it must not silently stop holding the
+ * guarantee is SoloW's headline differentiator, and it must not silently stop holding the
  * moment a second agent's row is added — so which variables to strip is read off this row, not
  * assumed.
  */
@@ -280,6 +280,15 @@ export const agentProfile = sqliteTable(
       .$type<AgentPermissionMode>()
       .notNull()
       .default("acceptEdits"),
+    /**
+     * Which model and mode this Profile launches its agent with (issue #94).
+     *
+     * Nullable, and null is the ordinary value: it means "whatever the agent chooses". A default
+     * written here would be a model id that rots the first time a provider retires one, and a
+     * stale pin fails at launch rather than at the moment somebody could have fixed it.
+     */
+    model: text("model"),
+    modeId: text("mode_id"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -300,7 +309,7 @@ export const executorProfile = sqliteTable(
      */
     kind: text("kind").$type<ExecutorKind>().notNull().default("local"),
     /**
-     * Per-kind configuration, validated by the discriminated union in `@gatecontrol/contracts`
+     * Per-kind configuration, validated by the discriminated union in `@solow/contracts`
      * (issue #73). One JSON column rather than a column — or a table — per kind is what makes a
      * new Executor kind a driver plus a union member instead of a migration (AC-5).
      *
@@ -392,7 +401,7 @@ export const repositoryBranch = sqliteTable(
 
 /**
  * A Repository's change requests (GitHub pull requests / GitLab merge requests), as last synced
- * from its Integration (issue #15). Reference-only today — GateControl does not open or merge
+ * from its Integration (issue #15). Reference-only today — SoloW does not open or merge
  * these; that is issue #71, gated on #7.
  */
 export const changeRequest = sqliteTable(
@@ -565,7 +574,7 @@ export const workflow = sqliteTable(
  * that would have to be kept in step with the first.
  *
  * `rank` is a lexicographic string, not an integer position — see `rankBetween` in
- * `@gatecontrol/core` for why. Inserting a Step in the middle writes exactly one row and leaves
+ * `@solow/core` for why. Inserting a Step in the middle writes exactly one row and leaves
  * every other row's `rank` and `updated_at` untouched.
  */
 export const workflowStep = sqliteTable(
@@ -666,7 +675,7 @@ export const taskRepository = sqliteTable(
  *
  * There is no constraint here that keeps the graph acyclic, and there cannot be — reachability
  * is not something SQLite can express. The invariant is enforced at write time by
- * `checkDependencyEdge` in `@gatecontrol/core`, before the insert, so a cycle is refused with
+ * `checkDependencyEdge` in `@solow/core`, before the insert, so a cycle is refused with
  * the offending path instead of being discovered later as a Task that silently never starts.
  *
  * `createdAt` only, no `updatedAt`: an edge is declared or withdrawn, never amended — the same
@@ -697,11 +706,26 @@ export const taskDependency = sqliteTable(
 );
 
 /**
- * A planning project, mirrored from a provider (spec F23, Decision 0018).
+ * A planning project — mirrored from a provider, or held **locally** (spec F23, Decision 0018,
+ * user request 2026-08-27).
  *
- * Belongs to exactly one Integration, because its fields are that provider's fields — a project
- * is not a GateControl concept that happens to be synced, it is a GitHub Project or a GitLab
- * group plus a field mapping, cached here so a table can render without a network call per cell.
+ * The mirrored case is what 0018 is about: a project is a GitHub Project or a GitLab
+ * group-plus-labels, and belongs to exactly one Integration because its fields are that
+ * provider's fields. But 0018's own words are "GitLab has no GitHub Projects" — and for a
+ * provider with nothing to adopt at all (Gitea has no `projects` capability; a GitLab instance
+ * a token cannot see a group-level project on is the same shape of nothing), the mirrored case
+ * left an Owner with no Project, ever. That is the gap this reopens, on the same terms issue
+ * #15 already used to reopen local Issue creation: **SoloW still creates nothing on any
+ * provider.** A local Project is a container SoloW owns outright, and the Repositories
+ * registered under it (`projectRepository`) are how its Issues are decided — every Issue in a
+ * member Repository is a member of the Project, kept that way as new Issues arrive
+ * (`attachIssueToLocalProjects`), the same automatic-ingestion promise #125 makes for Issues
+ * themselves.
+ *
+ * `integrationId`/`providerProjectId` are therefore nullable, together: both null is a local
+ * Project, both set is a mirrored one. There is no third state, which is why nothing here
+ * validates the pair beyond the type — the DAL is the one layer that ever constructs a row, and
+ * every path it offers writes one or the other whole.
  */
 export const project = sqliteTable(
   "project",
@@ -710,20 +734,25 @@ export const project = sqliteTable(
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => workspace.id),
-    integrationId: text("integration_id")
-      .notNull()
-      .references(() => integration.id),
-    /** The provider's own id. Opaque, and the key — the title is a label people rename. */
-    providerProjectId: text("provider_project_id").notNull(),
+    /** Null for a local Project — see the table's own comment. */
+    integrationId: text("integration_id").references(() => integration.id),
+    /** The provider's own id. Opaque, and the key — the title is a label people rename. Null for a local Project. */
+    providerProjectId: text("provider_project_id"),
     title: text("title").notNull(),
-    /** When the mirror last agreed with the provider. Null until the first sync completes. */
+    /**
+     * When the mirror last agreed with the provider. Null until the first sync completes — and,
+     * for a local Project, set once at creation rather than left null forever: there is no
+     * provider to disagree with, so "never synced" would read as a fault this Project can never
+     * clear, on the one kind of Project for which that is simply not true.
+     */
     syncedAt: text("synced_at"),
     /**
      * Where a paged sync got to, so a restart resumes rather than starting over.
      *
      * On the project rather than on the item, because the thing being resumed is the *walk*: an
      * item-level marker would say which rows exist and not where the provider's pagination had
-     * reached, which is the only question a resume has to answer.
+     * reached, which is the only question a resume has to answer. Always null for a local
+     * Project — there is no provider walk to resume.
      */
     syncCursor: text("sync_cursor"),
     createdAt: createdAt(),
@@ -731,11 +760,55 @@ export const project = sqliteTable(
   },
   (t) => ({
     byWs: index("project_ws").on(t.workspaceId),
-    /** One row per provider project: a second would make "which mirror is current" ambiguous. */
+    /**
+     * One row per provider project: a second would make "which mirror is current" ambiguous.
+     * Silent on a local Project — SQLite treats every NULL in a unique index as distinct from
+     * every other, so `(null, null)` never collides with itself, which is exactly "not this
+     * constraint's business" rather than "coincidentally allowed".
+     */
     byProvider: uniqueIndex("project_integration_provider").on(
       t.integrationId,
       t.providerProjectId,
     ),
+  }),
+);
+
+/**
+ * A Repository registered under a local Project (spec F23, user request 2026-08-27).
+ *
+ * This is what makes a local Project's membership a *decision* rather than a sync: a mirrored
+ * Project's rows come from walking a provider's own board, and a local Project has no board to
+ * walk, so an Owner states which Repositories' Issues belong to it instead. Every Issue in a
+ * registered Repository becomes a `project_item` here — on registration (the backfill) and on
+ * arrival (`attachIssueToLocalProjects`, called from Issue creation and from #125's automatic
+ * ingestion) — so the Project stays populated the same "nothing is imported by hand" way F23
+ * already promises, without a provider board behind it to promise it *from*.
+ *
+ * Meaningless on a mirrored Project, which is why nothing here references one by name: the DAL
+ * refuses to attach a Repository to a Project that has an `integrationId`, because a mirrored
+ * Project's membership is the provider's answer, not this table's.
+ */
+export const projectRepository = sqliteTable(
+  "project_repository",
+  {
+    id: id(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspace.id),
+    projectId: text("project_id")
+      .notNull()
+      .references(() => project.id),
+    repositoryId: text("repository_id")
+      .notNull()
+      .references(() => repository.id),
+    createdAt: createdAt(),
+  },
+  (t) => ({
+    byWs: index("project_repository_ws").on(t.workspaceId),
+    /** One membership per pair — attaching twice is a no-op the unique index refuses, not a duplicate. */
+    byPair: uniqueIndex("project_repository_pair").on(t.projectId, t.repositoryId),
+    /** The reverse lookup: which local Projects does this Repository feed. Ingestion's own read. */
+    byRepository: index("project_repository_repository").on(t.repositoryId),
   }),
 );
 
@@ -786,7 +859,7 @@ export const projectField = sqliteTable(
 /**
  * One row of the table: an Issue, in a project.
  *
- * `issueId` is the join to everything GateControl already owns — the row's Tasks, its review
+ * `issueId` is the join to everything SoloW already owns — the row's Tasks, its review
  * history, its worktrees. That join is the whole reason this is a projection over Issues rather
  * than a second Issue model (F23, Summary).
  */
@@ -858,7 +931,7 @@ export const projectValue = sqliteTable(
  * tab an edit under all of them.
  *
  * The filter is stored as the parsed predicate rather than as the text someone typed, so the
- * language has exactly one implementation (`@gatecontrol/core`'s parser) and a reader that is
+ * language has exactly one implementation (`@solow/core`'s parser) and a reader that is
  * not the table — a count, an export, an MCP tool — cannot disagree with it about what a saved
  * view means.
  */
@@ -892,6 +965,14 @@ export const projectView = sqliteTable(
      * defaulted to `[]`.
      */
     visibleFieldIds: text("visible_field_ids", { mode: "json" }).$type<string[]>(),
+    /**
+     * Leave rows the provider has closed out of this view.
+     *
+     * Defaults to false so every view saved before this column existed keeps showing everything:
+     * hiding rows from somebody's saved tab is not a migration, it is a change to what their tab
+     * means.
+     */
+    hideClosed: integer("hide_closed", { mode: "boolean" }).notNull().default(false),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -1018,13 +1099,13 @@ export const sessionSummary = sqliteTable(
  *
  * Written at the moment a turn completes, because this is the one record in the product that
  * cannot be reconstructed later: the agent reports usage once, in its own event stream, and
- * GateControl is the only thing watching. A run that happens before this table exists is
+ * SoloW is the only thing watching. A run that happens before this table exists is
  * permanently unmeasurable.
  *
  * Three deliberate choices:
  *
  *  - **No monetary column.** Counts and model are facts; price is a moving external opinion.
- *    Cost is derived at query time (`deriveCostUsd` in `@gatecontrol/core`) so a price change
+ *    Cost is derived at query time (`deriveCostUsd` in `@solow/core`) so a price change
  *    never rewrites what was recorded.
  *  - **`reported` marks coverage.** A turn whose agent said nothing about usage is still
  *    inserted, with `reported: false` and zero counts, so a gap in coverage is visible instead
@@ -1198,7 +1279,7 @@ export const uiPreference = sqliteTable(
  * Which provider login the signed-in user is, per Integration (spec F23 FR-11, `assignee:@me`).
  *
  * The planning table filters `My items` against the assignee logins the provider mirrored onto
- * each row. A GateControl account name is not one of those, so without this table `@me` compares
+ * each row. A SoloW account name is not one of those, so without this table `@me` compares
  * two unrelated names and matches only by coincidence — which is a `My items` tab that is empty
  * for almost everybody and, for the one person whose names happen to agree, silently right.
  *

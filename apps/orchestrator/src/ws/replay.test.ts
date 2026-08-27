@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { beforeEach, describe, expect, it } from "bun:test";
-import type { SessionEventPayload, TaskEvent } from "@gatecontrol/contracts";
+import type { SessionEventPayload, TaskEvent } from "@solow/contracts";
 import {
   agentCatalog,
   agentProfile,
@@ -11,8 +11,8 @@ import {
   sessionEvent,
   task,
   workspace,
-} from "@gatecontrol/db";
-import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
+} from "@solow/db";
+import { createTestDb, type TestDb } from "@solow/db/testing";
 import { compactSession } from "../data.js";
 import { attachSubscriber, toTaskEvent } from "./replay.js";
 

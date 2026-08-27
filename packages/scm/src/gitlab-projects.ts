@@ -1,8 +1,4 @@
-import type {
-  ProjectFieldOption,
-  ProjectFieldType,
-  ProjectFieldValue,
-} from "@gatecontrol/contracts";
+import type { ProjectFieldOption, ProjectFieldType, ProjectFieldValue } from "@solow/contracts";
 import { scmFetch, scmSend } from "./http.js";
 import type {
   ExternalProject,
@@ -294,9 +290,19 @@ export class GitlabProjects {
         const url = new URL(root);
         url.searchParams.set("name", name);
         url.searchParams.set("color", TEMPLATE_COLOR[prefix] ?? "#6b7280");
+        /*
+         * POST, not GET — the same class of bug `writeProjectFieldValue` documents below.
+         *
+         * `scmFetch` issues a GET. GitLab answers a GET on `/labels` with the existing label
+         * list, ignoring `name`/`color` entirely: 200, a plausible array, and no label created.
+         * `already` was then computed correctly on the *next* run, so this looked idempotent —
+         * every run just re-attempted the same creation and silently did nothing, forever. The
+         * fixture test never caught it because it answers any verb with the same canned body and
+         * never asserted which one arrived.
+         */
+        await scmSend(PROVIDER, url.toString(), this.headers(credential), "POST");
         // One at a time, sequentially: GitLab rate-limits bursty writes from one token, and a
         // half-created label set is easier to reason about than a half-failed parallel batch.
-        await scmFetch(PROVIDER, url.toString(), this.headers(credential));
         created.push(name);
       }
     }

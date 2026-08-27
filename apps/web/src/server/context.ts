@@ -1,5 +1,5 @@
 import "server-only";
-import { createDb, SEED_WORKSPACE_A } from "@gatecontrol/db";
+import { createDb, SEED_WORKSPACE_A } from "@solow/db";
 import { resolveSession } from "./auth/session.js";
 import { getWorkspaceFlags } from "./dal/workspace.js";
 import { devOwnerMode } from "./env.js";

@@ -1,6 +1,6 @@
 "use client";
 
-import type { askUserInputWidget } from "@gatecontrol/contracts";
+import type { askUserInputWidget } from "@solow/contracts";
 import { ArrowDown, ArrowUp } from "lucide-react";
 import { useId, useState } from "react";
 import type { z } from "zod";

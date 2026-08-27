@@ -6,7 +6,7 @@ import {
   type Result,
   type SurfaceKey,
   type SurfaceLayout,
-} from "@gatecontrol/contracts";
+} from "@solow/contracts";
 
 /**
  * Contribution registries (issue #3).
@@ -40,13 +40,13 @@ export interface Contribution<T, Ctx> {
 
 /**
  * A user's arrangement of one surface, the key naming the surface itself, and the arrangement
- * that means "nothing saved yet" — all defined in `@gatecontrol/contracts` and re-exported here
+ * that means "nothing saved yet" — all defined in `@solow/contracts` and re-exported here
  * so a caller working with a registry does not have to know that an arrangement is also a
  * stored, parsed thing. There is one definition of each: an arrangement crosses the wire and a
  * preference row, so the parse boundary owns it.
  */
-export type { SurfaceKey, SurfaceLayout } from "@gatecontrol/contracts";
-export { DEFAULT_SURFACE_LAYOUT } from "@gatecontrol/contracts";
+export type { SurfaceKey, SurfaceLayout } from "@solow/contracts";
+export { DEFAULT_SURFACE_LAYOUT } from "@solow/contracts";
 
 export const RegistryErrorCode = {
   DuplicateId: "REGISTRY_DUPLICATE_ID",
@@ -128,10 +128,24 @@ export function moveInOrder(order: readonly string[], id: string, delta: -1 | 1)
   return next;
 }
 
-/** Show or hide one contribution, leaving the arrangement's order untouched. */
+/**
+ * Show or hide one contribution, leaving the arrangement's order untouched.
+ *
+ * Both lists are written, because visibility is now a three-state: showing an item records it in
+ * `shown` so a surface default cannot re-hide it on the next load, and hiding one clears that
+ * record. Writing only `hidden` would leave a stale `shown` behind, and the item would come back.
+ */
 export function withVisibility(layout: SurfaceLayout, id: string, visible: boolean): SurfaceLayout {
   const hidden = layout.hidden.filter((h) => h !== id);
-  return { order: [...layout.order], hidden: visible ? hidden : [...hidden, id] };
+  const shown = layout.shown.filter((s) => s !== id);
+  return {
+    order: [...layout.order],
+    hidden: visible ? hidden : [...hidden, id],
+    shown: visible ? [...shown, id] : shown,
+    // Untouched: a column's width is not a fact about whether it is on screen, and dropping it
+    // here would reset every width the moment someone hid one column.
+    widths: { ...layout.widths },
+  };
 }
 
 export interface Registry<T, Ctx> {

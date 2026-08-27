@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { describe, expect, it } from "bun:test";
-import { WorkflowErrorCode, type WorkflowStepGate } from "@gatecontrol/contracts";
+import { WorkflowErrorCode, type WorkflowStepGate } from "@solow/contracts";
 import {
   advanceWorkflowStep,
   appendRank,

@@ -1,6 +1,6 @@
 "use client";
 
-import type { stepCardWidget } from "@gatecontrol/contracts";
+import type { stepCardWidget } from "@solow/contracts";
 import type { LucideIcon } from "lucide-react";
 import { Check, Circle, CircleDot, TriangleAlert } from "lucide-react";
 import type { z } from "zod";

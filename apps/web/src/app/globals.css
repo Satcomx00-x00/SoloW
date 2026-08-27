@@ -4,7 +4,7 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
- * GateControl surface system — shadcn/ui's stock "neutral" theme, chroma 0 throughout.
+ * SoloW surface system — shadcn/ui's stock "neutral" theme, chroma 0 throughout.
  *
  * This used to carry a blue-violet cast (hue 265) as an elevation cue and seven hued Task-state
  * colours as the primary way to tell a failed run from a finished one at a glance. Both are gone
@@ -86,6 +86,21 @@
    */
   --diff-added: oklch(0.62 0.15 145);
   --diff-removed: oklch(0.6 0.19 25);
+
+  /*
+   * Issue and pull-request state, in the provider's own colours.
+   *
+   * A third pair kept apart from both the greyed Task lifecycle and the diff, for the reason the
+   * diff got its own: these say what *GitHub* says about an issue, and green-for-open /
+   * purple-for-closed is a convention every reader of that provider already has. Borrowing the
+   * Task tokens would recouple two unrelated facts the moment one of them changed again.
+   *
+   * The chrome stays neutral. These colour four glyphs, nothing else.
+   */
+  --scm-open: oklch(0.62 0.15 145);
+  --scm-closed: oklch(0.58 0.18 300);
+  --scm-merged: oklch(0.58 0.18 300);
+  --scm-draft: oklch(0.55 0 0);
 }
 
 .dark {
@@ -134,6 +149,12 @@
 
   --diff-added: oklch(0.72 0.17 145);
   --diff-removed: oklch(0.72 0.19 25);
+
+  /* GitHub's own dark-dimmed values: #57AB5A open, #986EE2 closed/merged. */
+  --scm-open: oklch(0.68 0.13 145);
+  --scm-closed: oklch(0.65 0.16 300);
+  --scm-merged: oklch(0.65 0.16 300);
+  --scm-draft: oklch(0.65 0 0);
 }
 
 @theme inline {
@@ -220,6 +241,11 @@
   --color-diff-added: var(--diff-added);
   --color-diff-removed: var(--diff-removed);
 
+  --color-scm-open: var(--scm-open);
+  --color-scm-closed: var(--scm-closed);
+  --color-scm-merged: var(--scm-merged);
+  --color-scm-draft: var(--scm-draft);
+
   --shadow-panel: var(--shadow-panel);
   --shadow-float: var(--shadow-float);
 }
@@ -278,6 +304,27 @@
 }
 
 @layer components {
+  /*
+   * The soft badge, one definition (daisyUI's `badge-soft`).
+   *
+   * Every badge in the app is this shape: the colour at full strength for the text, and the same
+   * colour mixed into the *surface* at 8% for the fill and 10% for the border.
+   *
+   * Mixed with `--background` rather than with `transparent`, which is the part worth keeping.
+   * A translucent badge takes on whatever is behind it, so the same label is one colour on a row
+   * and another on that row hovered — the badge appears to change meaning when nothing changed.
+   * Mixing into the surface gives an opaque tint that stays put.
+   *
+   * `--badge-color` is what a caller sets: a provider's hex, or one of the app's own tokens. The
+   * fallback is the foreground, so a badge that sets nothing is a neutral badge rather than an
+   * invisible one.
+   */
+  .badge-soft {
+    color: var(--badge-color, var(--foreground));
+    background-color: color-mix(in oklab, var(--badge-color, var(--foreground)) 8%, var(--background));
+    border-color: color-mix(in oklab, var(--badge-color, var(--foreground)) 10%, var(--background));
+  }
+
   /*
    * The spinner.
    *

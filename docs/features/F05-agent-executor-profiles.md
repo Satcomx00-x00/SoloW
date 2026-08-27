@@ -76,7 +76,7 @@ ceiling.
   - `acceptEdits` — the agent edits inside its worktree and asks for everything else.
   - `plan` — it may read and reason but not change anything.
 
-  The default is the permissive one, and that is the decision rather than an oversight. GateControl runs an agent **headless**, and the stream-json
+  The default is the permissive one, and that is the decision rather than an oversight. SoloW runs an agent **headless**, and the stream-json
   protocol has no channel to ask an operator on (`claude-code-runner.ts` documents this: the
   review gate, not a prompt nobody will see, is the safety boundary). So under `acceptEdits`
   every shell command and every fetch is refused by a prompt with no answerer, and a Task needing
@@ -89,7 +89,7 @@ ceiling.
   never read afterwards as one where somebody did. Immediately, not on the deadline: a deadline is
   how long a person gets, and waiting one out for a decision nobody is coming to make is the same
   stall in slower clothing. Any other mode leaves ACP on the deployment's own unattended posture
-  (`GATECONTROL_ACP_UNATTENDED_PERMISSION`), which still refuses unless a deployment named
+  (`SOLOW_ACP_UNATTENDED_PERMISSION`), which still refuses unless a deployment named
   otherwise.
 - **FR-2** A user can create, edit, duplicate, and delete Agent Profiles within a Workspace.
   Editing shipped 2026-08-22 (`profile.agent.update`) for the three fields that describe how a
@@ -112,6 +112,27 @@ ceiling.
   Executor Profile.
 - **FR-9** A Profile in active use cannot be deleted without warning; the user is told which
   Tasks or Workflows depend on it.
+
+- **FR-N1** An Agent Profile MAY pin the **model** and the **mode** its agent launches with
+  (issue #94). Both are nullable and null is the ordinary value: it means "whatever the agent
+  chooses". A default written into the code would be a model id that rots the first time a
+  provider retires one, and a stale pin fails at launch rather than at the moment somebody could
+  have fixed it.
+- **FR-N2** A pin travels only to a protocol that can express it — `--model` for the stream-json
+  CLI, `session/set_mode` for ACP — and a mode id is only ever one the agent itself advertised.
+- **FR-N3** WHERE a protocol cannot select what a Profile pinned, THE SYSTEM SHALL say so in the
+  run's own log and use the agent's choice. It SHALL NOT substitute silently: a run that used a
+  different model than the Profile asked for, with the Profile still reading as though the pin
+  held, is the failure this rule exists to prevent.
+- **FR-N4** Each ACP run refreshes `agent_catalog.capabilities` from what the agent advertised
+  at its handshake — the cache **replaces** rather than merges, so a retired model actually
+  leaves it, and an agent that advertised nothing leaves the cache alone, so silence never
+  blanks what an earlier run learned. The pin fields in Settings suggest from this cache
+  (datalist over free text — present after a first run, empty before one, never claimed
+  complete).
+- **FR-N5** A Profile whose pin the agent's last handshake no longer lists is marked in
+  Settings — judged only when the cache says anything, so "never ran" does not read as
+  "retired". The mark is the fix-it-early half of FR-N3's never-substitute rule.
 
 ## Non-functional requirements
 

@@ -8,7 +8,7 @@ import {
   TaskErrorCode,
   type TaskState,
   taskStateSchema,
-} from "@gatecontrol/contracts";
+} from "@solow/contracts";
 
 /**
  * Pure Task business logic (plan §5). Zero infrastructure imports; returns `Result`,
@@ -122,9 +122,9 @@ export function buildCreateTaskPayload(
  * Tasks wrote it — and `setTaskRepositoriesInput` derives it to tell an Owner that two entries
  * are the same attachment written two ways. That last one is a contract, which cannot import
  * this package, so the template lives there and is re-exported here; every consumer keeps
- * importing it from `@gatecontrol/core` and there is still exactly one copy of it.
+ * importing it from `@solow/core` and there is still exactly one copy of it.
  */
-export { taskCheckoutBranch } from "@gatecontrol/contracts";
+export { taskCheckoutBranch } from "@solow/contracts";
 
 /** The shape "which attachment is primary" is decided from — nothing else about it matters. */
 export interface TaskRepositoryPosition {

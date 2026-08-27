@@ -1,6 +1,6 @@
 "use client";
 
-import { type IssueDeletionImpactDto, IssueErrorCode } from "@gatecontrol/contracts";
+import { type IssueDeletionImpactDto, IssueErrorCode } from "@solow/contracts";
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { ConfirmAction, ConfirmDialog } from "@/components/features/confirm-action";

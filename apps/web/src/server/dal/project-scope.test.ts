@@ -1,8 +1,8 @@
 /// <reference types="bun-types" />
 
 import { beforeEach, describe, expect, it } from "bun:test";
-import { encryptSecret, integration, project, projectItem, secret, task } from "@gatecontrol/db";
-import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
+import { encryptSecret, integration, project, projectItem, secret, task } from "@solow/db";
+import { createTestDb, type TestDb } from "@solow/db/testing";
 import { listIssues } from "./issue.js";
 import { projectIdForIssue } from "./project.js";
 import { listTasks } from "./task.js";
@@ -26,7 +26,7 @@ let acme: string;
 let _profiles: { agentProfileId: string; executorProfileId: string };
 
 beforeEach(async () => {
-  process.env.GATECONTROL_SECRET_KEY ??= Buffer.alloc(32, 9).toString("base64");
+  process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 9).toString("base64");
   db = createTestDb();
   const graph = await seedWorkspaceGraph(db, "acme");
   acme = graph.workspaceId;
@@ -83,8 +83,8 @@ describe("listIssues, scoped to a project", () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.data.map((i) => i.title)).toEqual(["In the roadmap"]);
-    expect(result.data.map((i) => i.id)).not.toContain(loose.id);
+    expect(result.data.items.map((i) => i.title)).toEqual(["In the roadmap"]);
+    expect(result.data.items.map((i) => i.id)).not.toContain(loose.id);
   });
 
   it("counts an issue once when it sits in two projects", async () => {
@@ -98,7 +98,7 @@ describe("listIssues, scoped to a project", () => {
 
     const result = await listIssues(ctxFor(db, acme), { projectId: a });
 
-    expect(result.ok && result.data).toHaveLength(1);
+    expect(result.ok && result.data.items).toHaveLength(1);
   });
 
   it("returns nothing when asked for a project's issues and the unassigned ones at once", async () => {
@@ -111,7 +111,7 @@ describe("listIssues, scoped to a project", () => {
 
     const result = await listIssues(ctxFor(db, acme), { projectId: roadmap, unassigned: true });
 
-    expect(result.ok && result.data).toHaveLength(0);
+    expect(result.ok && result.data.items).toHaveLength(0);
   });
 });
 
@@ -129,19 +129,19 @@ describe("the unassigned escape hatch", () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.data.map((i) => i.title).sort()).toEqual(["Loose one", "Loose two"]);
+    expect(result.data.items.map((i) => i.title).sort()).toEqual(["Loose one", "Loose two"]);
   });
 
   it("lets an issue leave the hatch by being adopted, with nothing to migrate", async () => {
     const loose = await seedIssue(db, acme, { title: "Adopted later" });
     const before = await listIssues(ctxFor(db, acme), { unassigned: true });
-    expect(before.ok && before.data).toHaveLength(1);
+    expect(before.ok && before.data.items).toHaveLength(1);
 
     const roadmap = await seedProject("Roadmap");
     await addToProject(roadmap, loose.id, "it-1");
 
     const after = await listIssues(ctxFor(db, acme), { unassigned: true });
-    expect(after.ok && after.data).toHaveLength(0);
+    expect(after.ok && after.data.items).toHaveLength(0);
   });
 });
 
@@ -174,8 +174,8 @@ describe("listTasks, scoped to a project", () => {
     const scoped = await listTasks(ctxFor(db, acme), { projectId: roadmap });
     const loose_ = await listTasks(ctxFor(db, acme), { unassigned: true });
 
-    expect(scoped.ok && scoped.data.map((t) => t.title)).toEqual(["Inside the project"]);
-    expect(loose_.ok && loose_.data.map((t) => t.title)).toEqual(["Outside every project"]);
+    expect(scoped.ok && scoped.data.items.map((t) => t.title)).toEqual(["Inside the project"]);
+    expect(loose_.ok && loose_.data.items.map((t) => t.title)).toEqual(["Outside every project"]);
   });
 });
 

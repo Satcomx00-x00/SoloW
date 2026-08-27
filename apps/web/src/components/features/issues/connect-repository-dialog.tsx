@@ -1,6 +1,6 @@
 "use client";
 
-import type { RepositorySource } from "@gatecontrol/contracts";
+import type { RepositorySource } from "@solow/contracts";
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";

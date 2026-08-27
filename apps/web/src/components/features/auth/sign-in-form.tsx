@@ -11,7 +11,7 @@ import { signIn, signUp } from "@/lib/auth-client";
 /**
  * Sign-in, or first-run Owner setup (task TASK-011).
  *
- * A GateControl instance has exactly one Owner, so this is one form in two modes rather than two
+ * A SoloW instance has exactly one Owner, so this is one form in two modes rather than two
  * pages: before the Owner exists it creates the account, afterwards it signs in. The server is
  * the authority on which — `ownerExists` is read there and passed in — and it refuses a second
  * account regardless of what this form sends.
@@ -56,11 +56,11 @@ export function SignInForm({ ownerExists }: { ownerExists: boolean }) {
       <div className="surface-edge rounded-2xl border bg-card/80 p-7 shadow-float backdrop-blur-xl">
         <div className="mb-6 space-y-1.5">
           <h1 className="font-semibold text-xl tracking-[-0.01em]">
-            {ownerExists ? "Sign in" : "Set up GateControl"}
+            {ownerExists ? "Sign in" : "Set up SoloW"}
           </h1>
           <p className="text-sm text-muted-foreground leading-relaxed">
             {ownerExists
-              ? "Sign in to your GateControl workspace."
+              ? "Sign in to your SoloW workspace."
               : "Create the owner account for this instance. Only one account can be created."}
           </p>
         </div>

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
-import { encryptSecret, integration, issue, repository, secret, workspace } from "@gatecontrol/db";
-import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
+import { encryptSecret, integration, issue, repository, secret, workspace } from "@solow/db";
+import { createTestDb, type TestDb } from "@solow/db/testing";
 import { eq } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
 import {
@@ -14,7 +14,7 @@ import {
 
 /**
  * DAL tests against a scripted fixture GitLab server (Principle VI — no live API in CI),
- * exercising `@gatecontrol/scm`'s real `GitlabProvider` through it rather than mocking the
+ * exercising `@solow/scm`'s real `GitlabProvider` through it rather than mocking the
  * provider layer. Centred on the bug an adversarial review caught before merge: GitLab's issue
  * `iid` restarts per project, so two Repositories linked to one Integration must not collide.
  *
@@ -22,7 +22,7 @@ import {
  * against `server`, but the workspace preloads happy-dom globally (bunfig.toml) for React
  * component tests, and happy-dom's `fetch` polyfill cannot parse Bun.serve's responses over
  * loopback (a happy-dom/Bun compat bug — HPE_UNEXPECTED_CONTENT_LENGTH — reproducible with no
- * GateControl code involved). `integration.test.ts` runs this file in an isolated subprocess,
+ * SoloW code involved). `integration.test.ts` runs this file in an isolated subprocess,
  * with a bunfig that preloads only the `server-only` stub, not happy-dom.
  */
 
@@ -57,7 +57,7 @@ const PROJECTS: Record<string, { issues: unknown[]; mrs: unknown[]; branches: un
 };
 
 beforeAll(() => {
-  process.env.GATECONTROL_SECRET_KEY ??= Buffer.alloc(32, 4).toString("base64");
+  process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 4).toString("base64");
   server = Bun.serve({
     port: 0,
     fetch(req) {
@@ -185,7 +185,7 @@ describe("importRepository", () => {
     const { ctx, integrationId } = await seedImportedRepos();
 
     // Not in the provider's list for this token. Reading the clone URL from the provider rather
-    // than from the caller is what makes this a NotFound instead of a repository GateControl
+    // than from the caller is what makes this a NotFound instead of a repository SoloW
     // would go and try to clone on someone's behalf.
     const result = await importRepository(ctx, {
       integrationId,

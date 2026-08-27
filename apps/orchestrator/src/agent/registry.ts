@@ -1,4 +1,4 @@
-import type { WidgetResponse } from "@gatecontrol/contracts";
+import type { WidgetResponse } from "@solow/contracts";
 import type { AgentHandle, PermissionAnswer } from "./runner.js";
 
 /**

@@ -3,7 +3,7 @@ import { z } from "zod";
 /**
  * Claude Code's headless stream-JSON protocol (`claude -p --output-format stream-json`).
  *
- * One JSON object per line on stdout. This models only the parts GateControl acts on and is
+ * One JSON object per line on stdout. This models only the parts SoloW acts on and is
  * deliberately permissive everywhere else: the CLI is a separate product on its own release
  * cadence, and a field appearing that we did not anticipate must not stop a run. Anything
  * unrecognised parses to `null` and is skipped rather than throwing.
@@ -38,7 +38,7 @@ const contentBlockSchema = z.object({ type: z.string() }).passthrough();
 
 /**
  * The session preamble. `cwd` is the load-bearing field: with `--worktree`, this is the
- * worktree Claude Code created, and it is how GateControl learns where the agent is working
+ * worktree Claude Code created, and it is how SoloW learns where the agent is working
  * without having to guess a naming convention.
  */
 export const initEventSchema = z
@@ -126,7 +126,7 @@ export type StreamEvent = z.infer<typeof streamEventSchema>;
 export type InitEvent = z.infer<typeof initEventSchema>;
 export type ResultEvent = z.infer<typeof resultEventSchema>;
 
-/** What GateControl does with a stream event, flattened out of the CLI's message shapes. */
+/** What SoloW does with a stream event, flattened out of the CLI's message shapes. */
 export type ClaudeUpdate =
   | { kind: "session"; cwd: string | null; sessionId: string | null }
   | { kind: "text"; channel: "assistant" | "thinking"; text: string }
@@ -189,7 +189,7 @@ export function parseStreamLine(line: string): StreamEvent | null {
   return parsed.success ? parsed.data : null;
 }
 
-/** Flatten one stream event into the updates GateControl streams and logs. */
+/** Flatten one stream event into the updates SoloW streams and logs. */
 export function toUpdates(event: StreamEvent): ClaudeUpdate[] {
   if (event.type === "system") {
     const init = initEventSchema.safeParse(event);

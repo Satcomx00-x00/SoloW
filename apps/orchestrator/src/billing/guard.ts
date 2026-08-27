@@ -1,11 +1,11 @@
-import { type AuthMode, BillingErrorCode, err, type Result } from "@gatecontrol/contracts";
+import { type AuthMode, BillingErrorCode, err, type Result } from "@solow/contracts";
 import {
   classifyRunFailure,
   type FailureSignal,
   resolveAgentRunEnv,
   withinConcurrencyCap,
-} from "@gatecontrol/core";
-import { decryptForAgentRun } from "@gatecontrol/db";
+} from "@solow/core";
+import { decryptForAgentRun } from "@solow/db";
 
 /**
  * Orchestrator-side billing/credential guard (Principle IV). Decrypts the credential and

@@ -9,6 +9,6 @@ export default defineConfig({
   schema: ["./src/schema.ts", "./src/auth-schema.ts"],
   out: "./migrations",
   dbCredentials: {
-    url: process.env.GATECONTROL_SQLITE_PATH ?? ".gatecontrol/gatecontrol.db",
+    url: process.env.SOLOW_SQLITE_PATH ?? ".solow/solow.db",
   },
 });

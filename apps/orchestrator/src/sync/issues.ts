@@ -1,12 +1,13 @@
 import {
+  attachIssueToLocalProjects,
   type Db,
   decryptForScmSync,
   integration,
   issue,
   repository,
   secret,
-} from "@gatecontrol/db";
-import { ISSUE_PAGE_CAP, ISSUE_PAGE_SIZE, providerWith } from "@gatecontrol/scm";
+} from "@solow/db";
+import { ISSUE_PAGE_CAP, ISSUE_PAGE_SIZE, providerWith } from "@solow/scm";
 import { and, eq, isNotNull } from "drizzle-orm";
 
 /**
@@ -174,22 +175,35 @@ export async function syncRepositoryIssues(
       continue;
     }
 
-    await db.insert(issue).values({
-      workspaceId: row.workspaceId,
-      title: item.title,
-      description: item.description,
-      source: connected.provider,
-      integrationId: connected.id,
-      repositoryId: row.id,
-      externalId: item.externalId,
-      externalNumber: item.number,
-      externalUrl: item.url,
-      ...(item.labels ? { labels: item.labels } : {}),
-      ...(item.linkedChangeRequests ? { linkedChangeRequests: item.linkedChangeRequests } : {}),
-      externalState: item.state,
-      externalParentId: item.parentExternalId ?? null,
-      syncedAt: startedAt,
-    });
+    const [inserted] = await db
+      .insert(issue)
+      .values({
+        workspaceId: row.workspaceId,
+        title: item.title,
+        description: item.description,
+        source: connected.provider,
+        integrationId: connected.id,
+        repositoryId: row.id,
+        externalId: item.externalId,
+        externalNumber: item.number,
+        externalUrl: item.url,
+        ...(item.labels ? { labels: item.labels } : {}),
+        ...(item.linkedChangeRequests ? { linkedChangeRequests: item.linkedChangeRequests } : {}),
+        externalState: item.state,
+        externalParentId: item.parentExternalId ?? null,
+        syncedAt: startedAt,
+      })
+      .returning({ id: issue.id });
+    if (inserted) {
+      // A local Project's membership is decided by which Repository an Issue arrived in
+      // (#125), so an Issue this loop just brought in for the first time must join every
+      // local Project its Repository is registered under — the same "no manual import"
+      // promise the rest of this function keeps, extended to F23's local Projects.
+      await attachIssueToLocalProjects(db, row.workspaceId, {
+        issueId: inserted.id,
+        repositoryId: row.id,
+      });
+    }
     imported += 1;
   }
 

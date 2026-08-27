@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import { IssuesView } from "@/components/features/issues/issues-view";
 
-export const metadata = { title: "Unassigned · GateControl" };
+export const metadata = { title: "Unassigned · SoloW" };
 
 /**
  * The issues that belong to no Project.

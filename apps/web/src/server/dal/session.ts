@@ -10,13 +10,13 @@ import {
   type SessionEventPayload,
   type SessionState,
   sessionEventPayloadSchema,
-} from "@gatecontrol/contracts";
+} from "@solow/contracts";
 import {
   type SessionLogEvent,
   sessionCursorAt,
   verifySessionCursor,
-} from "@gatecontrol/core/session-log";
-import { session, sessionEvent, sessionSummary } from "@gatecontrol/db";
+} from "@solow/core/session-log";
+import { session, sessionEvent, sessionSummary } from "@solow/db";
 import { and, asc, desc, eq, gt, gte, lte } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
 

@@ -4,7 +4,7 @@
 
 ## Summary
 
-GateControl drives many different AI coding-agent command-line tools through a single,
+SoloW drives many different AI coding-agent command-line tools through a single,
 standard protocol, and runs many of them at once. This lets users choose the best agent for
 each Task and parallelise work without integrating each agent individually.
 
@@ -24,18 +24,18 @@ each Task and parallelise work without integrating each agent individually.
 
 ## Functional requirements
 
-- **FR-1** GateControl connects to Agents through a single open standard protocol (the
+- **FR-1** SoloW connects to Agents through a single open standard protocol (the
   Agent Client Protocol), so many different agent tools are supported through one
   mechanism.
 - **FR-2** A user can select which Agent (via an Agent Profile) runs a given Task or
   Workflow Step.
-- **FR-3** GateControl can run multiple Agents concurrently, each in its own Session and
+- **FR-3** SoloW can run multiple Agents concurrently, each in its own Session and
   Worktree, bounded by concurrency limits.
 - **FR-4** For each Session, the user can view the Agent's live activity, send input, and
   stop the Agent.
-- **FR-5** GateControl surfaces an Agent's requests for tool use and, where the Agent
+- **FR-5** SoloW surfaces an Agent's requests for tool use and, where the Agent
   Profile requires it, holds them for human approval before they proceed.
-- **FR-6** GateControl reports each Agent's status (starting, working, awaiting input,
+- **FR-6** SoloW reports each Agent's status (starting, working, awaiting input,
   awaiting review, finished, failed) uniformly across agent tools.
 - **FR-7** Newly supported agents can be made available by adding an Agent Profile, without
   changing how the rest of the system works.
@@ -59,7 +59,7 @@ each Task and parallelise work without integrating each agent individually.
 
 - If an Agent tool is not installed or reachable in the chosen Executor, the Task fails with
   a clear, actionable reason.
-- If an Agent stops responding, GateControl marks the Session as failed and allows retry.
+- If an Agent stops responding, SoloW marks the Session as failed and allows retry.
 - If concurrency is saturated, additional Agents queue rather than overcommitting resources.
 
 ## Out of scope

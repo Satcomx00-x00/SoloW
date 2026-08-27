@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type AcpScript, writeFakeAcpBin } from "@gatecontrol/acp/testing";
+import { type AcpScript, writeFakeAcpBin } from "@solow/acp/testing";
 import { createLocalExecutor } from "../executor/local.js";
 import { AcpRunner, toStreamEvent } from "./acp-runner.js";
 import type { AgentHandle, AgentStreamEvent } from "./runner.js";
@@ -34,7 +34,7 @@ async function run(
     CLAUDE_CODE_OAUTH_TOKEN: "the-credential",
   },
 ) {
-  workdir = await mkdtemp(join(tmpdir(), "gatecontrol-acp-"));
+  workdir = await mkdtemp(join(tmpdir(), "solow-acp-"));
   const events: AgentStreamEvent[] = [];
   const command = await writeFakeAcpBin(workdir, script);
   handle = new AcpRunner({
@@ -154,7 +154,7 @@ describe("AcpRunner", () => {
   });
 
   it("fails rather than hangs when the binary does not exist", async () => {
-    workdir = await mkdtemp(join(tmpdir(), "gatecontrol-acp-"));
+    workdir = await mkdtemp(join(tmpdir(), "solow-acp-"));
     handle = new AcpRunner({ executor: createLocalExecutor(workdir) }).start({
       command: join(workdir, "no-such-agent"),
       args: [],
@@ -260,7 +260,7 @@ describe("AcpRunner permissions (AC-4)", () => {
   });
 
   it("grants on the deadline only for a deployment that configured that posture", async () => {
-    workdir = await mkdtemp(join(tmpdir(), "gatecontrol-acp-"));
+    workdir = await mkdtemp(join(tmpdir(), "solow-acp-"));
     const events: AgentStreamEvent[] = [];
     const command = await writeFakeAcpBin(workdir, {
       turns: [{ permission: { title: "Write .env", options }, text: ["wrote it"] }],
@@ -297,7 +297,7 @@ describe("AcpRunner credential isolation (AC-5 / Principle IV)", () => {
   it("hands the agent process only the credential the billing guard shaped", async () => {
     // The fake writes the *names* of its environment variables — never the values — into the
     // worktree, which is the only way to see what a spawned child actually received.
-    process.env["GATECONTROL_ACP_TEST_MARKER"] ??= "present-in-the-orchestrator";
+    process.env["SOLOW_ACP_TEST_MARKER"] ??= "present-in-the-orchestrator";
     const { handle: h, workdir: dir } = await run({
       writeEnvNames: "env-names.json",
       turns: [{ text: ["ok"] }],
@@ -312,7 +312,7 @@ describe("AcpRunner credential isolation (AC-5 / Principle IV)", () => {
     expect(names).not.toContain("ANTHROPIC_API_KEY");
     // …and neither must anything of the orchestrator's own environment, which proves the child
     // environment was *replaced* rather than merged.
-    expect(names).not.toContain("GATECONTROL_ACP_TEST_MARKER");
+    expect(names).not.toContain("SOLOW_ACP_TEST_MARKER");
   });
 });
 

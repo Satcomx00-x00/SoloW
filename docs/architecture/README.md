@@ -2,7 +2,7 @@
 
 **Status:** Draft · **Owner:** Architecture · **Last reviewed:** 2026-08-17
 
-This section documents GateControl's architecture at a business-readable altitude, using
+This section documents SoloW's architecture at a business-readable altitude, using
 the [arc42](https://arc42.org) template for structure and the [C4 model](https://c4model.com)
 for describing system views. It contains no source code; it explains how the system is
 shaped and why, and links to the [Decision Log](../decisions/README.md) for the reasoning
@@ -25,7 +25,7 @@ behind each significant choice.
 
 ## The one-paragraph shape
 
-GateControl is a control plane. A person interacts with an application that presents Boards,
+SoloW is a control plane. A person interacts with an application that presents Boards,
 Issues, Workflows, and a review workspace. Behind it, a long-lived orchestration component
 launches and supervises external AI coding agents through a standard protocol, each in an
 isolated working copy inside a chosen execution environment, and streams their activity back

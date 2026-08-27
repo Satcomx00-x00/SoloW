@@ -1,5 +1,5 @@
 import "server-only";
-import type { McpScope } from "@gatecontrol/contracts";
+import type { McpScope } from "@solow/contracts";
 import { TRPCError } from "@trpc/server";
 import { appRouter } from "../routers/index.js";
 import type { BaseContext } from "../trpc.js";
@@ -10,7 +10,7 @@ import { findMcpTool, listMcpTools } from "./tools.js";
  * MCP's JSON-RPC layer (issue #16 AC-1), kept free of HTTP so every branch — including the
  * error branches that matter most — is testable against plain objects.
  *
- * Only the tools half of MCP is implemented. GateControl has no prompts, resources, or sampling
+ * Only the tools half of MCP is implemented. SoloW has no prompts, resources, or sampling
  * to offer, and advertising capabilities the server does not have makes clients probe endpoints
  * that will only ever fail.
  */
@@ -18,7 +18,7 @@ import { findMcpTool, listMcpTools } from "./tools.js";
 /** Negotiated against the client's request; this is the revision the tool surface is written to. */
 export const SUPPORTED_PROTOCOL_VERSION = "2025-06-18";
 
-const SERVER_INFO = { name: "gatecontrol", version: "0.1.0" } as const;
+const SERVER_INFO = { name: "solow", version: "0.1.0" } as const;
 
 /** JSON-RPC 2.0 error codes (the spec's reserved range). */
 export const JsonRpcError = {

@@ -5,7 +5,7 @@
  * switch. Flags are read on every tRPC entry point and at orchestrator run start. Granularity is
  * per-Workspace (v1: single Workspace → effectively local-global).
  *
- * It lives in `@gatecontrol/db`, beside the `enabled_flags` column it describes, rather than in
+ * It lives in `@solow/db`, beside the `enabled_flags` column it describes, rather than in
  * the web app: the operator script (`scripts/flag.ts`), the API and the DAL all need the same
  * list, and the one time it lived in only one of them the script drifted to a stale hardcoded
  * subset and refused to enable flags the UI was already offering. Anything that can reach the
@@ -43,7 +43,7 @@ export const FLAGS: Record<FlagKey, FlagDefinition> = {
   "ff-mcp": {
     key: "ff-mcp",
     description:
-      "External MCP server — drive GateControl from outside agents over a scoped token (issue #16).",
+      "External MCP server — drive SoloW from outside agents over a scoped token (issue #16).",
     default: false,
     granularity: "workspace",
   },

@@ -1,11 +1,11 @@
 import { describe, expect, it } from "bun:test";
-import { taskCheckoutBranch } from "@gatecontrol/core";
+import { taskCheckoutBranch } from "@solow/core";
 import type { ExecOpts, ExecResult, Executor } from "../executor/types.js";
 import { prepareRepository, worktreeBranch, worktreePath } from "./manager.js";
 
 describe("worktree naming", () => {
   it("branch and path are deterministic and task-scoped", () => {
-    expect(worktreeBranch("t1")).toBe("gatecontrol/task-t1");
+    expect(worktreeBranch("t1")).toBe("solow/task-t1");
     expect(worktreePath("/wt", "t1")).toBe("/wt/t1");
     expect(worktreeBranch("a")).not.toBe(worktreeBranch("b"));
   });
@@ -91,7 +91,7 @@ describe("cloning an imported repository", () => {
     // It also must not reach the URL, which git would write into .git/config permanently.
     expect(clone?.cmd.join(" ")).not.toContain(TOKEN);
     expect(clone?.cmd).toContain("https://gitlab.com/acme/gate.git");
-    expect(clone?.opts.env?.GATECONTROL_SCM_TOKEN).toBe(TOKEN);
+    expect(clone?.opts.env?.SOLOW_SCM_TOKEN).toBe(TOKEN);
   });
 
   it("clears any host credential helper before installing its own", async () => {
@@ -107,7 +107,7 @@ describe("cloning an imported repository", () => {
     // Integration's token; then the helper that reads the environment variable.
     expect(helpers[0]).toBe("credential.helper=");
     expect(helpers[1]).toContain("username=x-access-token");
-    expect(helpers[1]).toContain("$GATECONTROL_SCM_TOKEN");
+    expect(helpers[1]).toContain("$SOLOW_SCM_TOKEN");
   });
 
   it("disables git's terminal prompt so a bad token fails instead of hanging", async () => {

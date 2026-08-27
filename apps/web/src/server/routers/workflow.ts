@@ -20,7 +20,7 @@ import {
   workflowDto,
   workflowListDto,
   workflowWithStepsDto,
-} from "@gatecontrol/contracts";
+} from "@solow/contracts";
 import {
   acknowledgeTaskWorkflowDrift,
   addWorkflowStep,
@@ -46,7 +46,7 @@ import { router, unwrap, workflowProcedure } from "../trpc.js";
  * a Workflow mutates Tasks, so it must not stay reachable when the core kill switch is off.
  *
  * Nothing here re-implements a rule. Ownership, ordering and the advance decision all live in
- * the DAL and `@gatecontrol/core`; this file is the shape of the surface and the mapping from a
+ * the DAL and `@solow/core`; this file is the shape of the surface and the mapping from a
  * `Result` error to an HTTP status, which is what `unwrap` does.
  */
 export const workflowRouter = router({

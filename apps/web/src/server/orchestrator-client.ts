@@ -1,6 +1,6 @@
 import "server-only";
-import type { ReviewDecision, TaskState } from "@gatecontrol/contracts";
-import { signStreamTicket } from "@gatecontrol/core/stream";
+import type { ReviewDecision, TaskState } from "@solow/contracts";
+import { signStreamTicket } from "@solow/core/stream";
 import { devOwnerMode, orchestratorUrl, webEnv } from "./env.js";
 
 /**
@@ -8,12 +8,12 @@ import { devOwnerMode, orchestratorUrl, webEnv } from "./env.js";
  * The API never runs agents itself; it emits events the durable `task-run` workflow
  * consumes (plan §9).
  *
- * Transport: when `GATECONTROL_ORCHESTRATOR_URL` is set, events are POSTed to that service's
+ * Transport: when `SOLOW_ORCHESTRATOR_URL` is set, events are POSTed to that service's
  * `/events` endpoint as `{ name, data }` — the shape Inngest's own event API uses, so the
  * hosted deployment can point at Inngest and the local one at the orchestrator process. The
  * orchestrator's own `/events` route (`apps/orchestrator/src/inngest/events.ts`) forwards
  * every POST into a real `inngest.send()`, so this is a genuine handoff to the durable engine
- * (Decision 0004), not a stub. Without `GATECONTROL_ORCHESTRATOR_URL`, dev mode logs-and-returns
+ * (Decision 0004), not a stub. Without `SOLOW_ORCHESTRATOR_URL`, dev mode logs-and-returns
  * so the SPA flow stays demonstrable, and non-dev throws so missing wiring is never silent.
  */
 export interface OrchestratorClient {
@@ -45,7 +45,7 @@ export interface OrchestratorClient {
   announceTask(input: { workspaceId: string; taskId: string; state: TaskState }): Promise<void>;
 }
 
-const UNWIRED = "orchestrator not configured (GATECONTROL_ORCHESTRATOR_URL unset)";
+const UNWIRED = "orchestrator not configured (SOLOW_ORCHESTRATOR_URL unset)";
 
 async function emit(name: string, data: unknown): Promise<void> {
   const base = orchestratorUrl();
@@ -99,7 +99,7 @@ export const orchestrator: OrchestratorClient = {
     try {
       const ticket = signStreamTicket(
         { workspaceId: input.workspaceId, taskId: input.taskId },
-        webEnv().GATECONTROL_STREAM_SECRET,
+        webEnv().SOLOW_STREAM_SECRET,
         Date.now(),
       );
       await fetch(new URL("/announce", base), {

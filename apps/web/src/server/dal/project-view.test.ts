@@ -1,11 +1,11 @@
 /// <reference types="bun-types" />
 
 import { beforeEach, describe, expect, it } from "bun:test";
-import type { ProjectViewConfig } from "@gatecontrol/contracts";
-import { DEFAULT_PROJECT_VIEW_CONFIG } from "@gatecontrol/contracts";
-import { formatProjectFilter, parseProjectFilter } from "@gatecontrol/core";
-import { encryptSecret, integration, project, projectView, secret } from "@gatecontrol/db";
-import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
+import type { ProjectViewConfig } from "@solow/contracts";
+import { DEFAULT_PROJECT_VIEW_CONFIG } from "@solow/contracts";
+import { formatProjectFilter, parseProjectFilter } from "@solow/core";
+import { encryptSecret, integration, project, projectView, secret } from "@solow/db";
+import { createTestDb, type TestDb } from "@solow/db/testing";
 import { eq } from "drizzle-orm";
 import {
   createProjectView,

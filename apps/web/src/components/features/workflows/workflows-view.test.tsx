@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { afterEach, describe, expect, it } from "bun:test";
-import type { WorkflowStepDto, WorkflowWithStepsDto } from "@gatecontrol/contracts";
+import type { WorkflowStepDto, WorkflowWithStepsDto } from "@solow/contracts";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderWithTrpc } from "@/test/trpc-harness";
 import { WorkflowsView } from "./workflows-view";
@@ -62,10 +62,13 @@ function handlersFor(overrides: Record<string, (input: unknown) => unknown> = {}
       },
     ],
     "workflow.get": () => PIPELINE,
-    "profile.agent.list": () => [
-      { id: "ap-1", name: "Opus" },
-      { id: "ap-2", name: "Codex" },
-    ],
+    "profile.agent.list": () => ({
+      items: [
+        { id: "ap-1", name: "Opus" },
+        { id: "ap-2", name: "Codex" },
+      ],
+      nextCursor: null,
+    }),
     ...overrides,
   };
 }

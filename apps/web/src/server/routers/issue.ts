@@ -1,21 +1,24 @@
 import "server-only";
 import {
+  createIssueCommentInput,
   createIssueInput,
   deleteIssueInput,
   getIssueInput,
   IssueErrorCode,
+  issueCommentListDto,
   issueDeletionImpactDto,
   issueDeletionImpactInput,
   issueDetailDto,
   issueDetailInput,
   issueDto,
+  issueLabelColorListDto,
   issueLabelListDto,
   issueListDto,
   listIssuesInput,
   setIssueStatusInput,
   updateExternalIssueInput,
   updateIssueInput,
-} from "@gatecontrol/contracts";
+} from "@solow/contracts";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import {
@@ -23,20 +26,26 @@ import {
   deleteIssue,
   getIssueById,
   issueDeletionImpact,
+  listIssueLabelColors,
   listIssueLabels,
   listIssues,
   runningTasksForIssue,
   setIssueStatus,
   updateIssue,
 } from "../dal/issue.js";
-import { readIssueDetail, updateExternalIssue } from "../dal/issue-write.js";
+import {
+  createIssueComment,
+  listIssueComments,
+  readIssueDetail,
+  updateExternalIssue,
+} from "../dal/issue-write.js";
 import { orchestrator } from "../orchestrator-client.js";
 import { ownerProcedure, router, unwrap } from "../trpc.js";
 
 /**
  * Issue CRUD (issue #15 reversal, 2026-08-20): `create`/`update`/`delete` sit alongside
- * `integration.importIssues` as a second way an Issue enters GateControl — see `issue.ts`'s
- * header comment in `@gatecontrol/contracts` for the full reasoning. `update` refuses a
+ * `integration.importIssues` as a second way an Issue enters SoloW — see `issue.ts`'s
+ * header comment in `@solow/contracts` for the full reasoning. `update` refuses a
  * title/description change on anything but a locally created Issue (spec F01 FR-3); `delete`
  * refuses while the Issue still has Tasks rather than cascading, unless the caller passes
  * `force` — which stops any running Task through the orchestrator first, then cascades.
@@ -88,6 +97,28 @@ export const issueRouter = router({
     .input(z.object({}))
     .output(issueLabelListDto)
     .query(async ({ ctx }) => unwrap(await listIssueLabels(ctx.rctx))),
+
+  /**
+   * The same vocabulary **with the provider's colours** — what a table needs to paint a label.
+   *
+   * Its own route because it costs one provider call per linked Repository, where `labels` above
+   * is a single database read. A caller that only wants names must not pay for the network.
+   */
+  labelColors: ownerProcedure
+    .meta({
+      openapi: {
+        method: "GET",
+        path: "/issue.labelColors",
+        tags: ["issue"],
+        protect: true,
+        summary:
+          "Every label the linked Repositories define, with the colour its provider gives it. Null where the provider reports none.",
+      },
+    })
+    .input(z.object({}))
+    .output(issueLabelColorListDto)
+    .query(async ({ ctx }) => unwrap(await listIssueLabelColors(ctx.rctx))),
+
   setStatus: ownerProcedure
     .meta({
       openapi: {
@@ -208,7 +239,7 @@ export const issueRouter = router({
   /**
    * Change an imported Issue **on its provider** (spec F23 FR-13, Decision 0019).
    *
-   * Distinct from `issue.update`, which edits a GateControl-owned Issue and still refuses to
+   * Distinct from `issue.update`, which edits a SoloW-owned Issue and still refuses to
    * touch an imported one's title (`IssueErrorCode.SourceOwned`). That refusal is not
    * contradicted here: editing the *copy* remains wrong. This edits the original and re-mirrors
    * whatever the provider answers.
@@ -227,4 +258,36 @@ export const issueRouter = router({
     .input(updateExternalIssueInput)
     .output(issueDetailDto)
     .mutation(async ({ ctx, input }) => unwrap(await updateExternalIssue(ctx.rctx, input))),
+
+  /** The discussion on one imported Issue, read live from its provider. */
+  comments: ownerProcedure
+    .meta({
+      openapi: {
+        method: "GET",
+        path: "/issue.comments",
+        tags: ["issue"],
+        protect: true,
+        summary:
+          "The comments on one imported Issue, oldest first, read live from its provider. A provider's activity entries are not comments and are not included.",
+      },
+    })
+    .input(issueDetailInput)
+    .output(issueCommentListDto)
+    .query(async ({ ctx, input }) => unwrap(await listIssueComments(ctx.rctx, input))),
+
+  /** Post a comment, and answer with the thread as it now stands. */
+  comment: ownerProcedure
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/issue.comment",
+        tags: ["issue"],
+        protect: true,
+        summary:
+          "Post a comment on an imported Issue. Answers with the whole thread as the provider now holds it, never with the text that was sent.",
+      },
+    })
+    .input(createIssueCommentInput)
+    .output(issueCommentListDto)
+    .mutation(async ({ ctx, input }) => unwrap(await createIssueComment(ctx.rctx, input))),
 });

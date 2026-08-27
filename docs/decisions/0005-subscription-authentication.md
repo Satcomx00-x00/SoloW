@@ -5,7 +5,7 @@
 ## Context
 
 Many users already pay for a Claude Pro/Max subscription and want to run agents on it rather
-than paying per token through an API key. Because GateControl drives the real agent CLI (see
+than paying per token through an API key. Because SoloW drives the real agent CLI (see
 [0003](./0003-agent-connection-protocol.md)), an agent inherits whatever authentication that
 CLI has. A portable subscription token can be provisioned once and supplied to agents in any
 Executor. Two hazards must be managed: an API-key credential present in the environment

@@ -4,14 +4,14 @@
 
 ## Summary
 
-Issues are the organising unit of work in GateControl. Every Task exists to advance an
-Issue. An Issue reaches GateControl one of two ways: **imported** from a connected GitHub or
+Issues are the organising unit of work in SoloW. Every Task exists to advance an
+Issue. An Issue reaches SoloW one of two ways: **imported** from a connected GitHub or
 GitLab repository (see [F12](./F12-integrations.md)), or **created directly** from the shell
 header's Create menu with a title, description, a Repository, and labels (reversing the 2026-08-19
 product decision, issue #15 — user reports showed a Workspace with no connected tracker, or a
 user who wants to jot an Issue down before it exists upstream, had no way to use the board).
-Whichever way an Issue arrives, its Tasks and derived status are always GateControl's own; an
-*imported* Issue's title and description remain the provider's — GateControl never edits them.
+Whichever way an Issue arrives, its Tasks and derived status are always SoloW's own; an
+*imported* Issue's title and description remain the provider's — SoloW never edits them.
 
 ## Jobs served
 
@@ -51,7 +51,7 @@ Whichever way an Issue arrives, its Tasks and derived status are always GateCont
   an omission in the list.
 - **FR-3** An Issue is created either by importing it from a connected GitHub or GitLab
   repository (see [F12](./F12-integrations.md)) or directly, per FR-1. Title and description
-  are locked to the provider's own once an Issue is imported — GateControl refuses to edit
+  are locked to the provider's own once an Issue is imported — SoloW refuses to edit
   them — but are freely editable for a locally created Issue. Labels are always editable,
   regardless of source: a Repository linked to an Integration offers a picker of the
   repository's real labels (fetched live, `repository.listLabels`); a local-path Repository has
@@ -92,8 +92,8 @@ Whichever way an Issue arrives, its Tasks and derived status are always GateCont
 
 - Issue states: **Open → In Progress → Resolved → Closed**.
 - An imported Issue's canonical fields (title, description) are owned by its source and are
-  not edited in GateControl; GateControl-specific fields (its Tasks, its derived status) are
-  owned by GateControl.
+  not edited in SoloW; SoloW-specific fields (its Tasks, its derived status) are
+  owned by SoloW.
 - Deleting an Issue is blocked while it has Tasks; the user must first move or remove those
   Tasks.
 

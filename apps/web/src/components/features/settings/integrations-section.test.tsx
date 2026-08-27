@@ -30,9 +30,9 @@ const GITHUB = {
 
 const LINKED_REPO = {
   id: "repo-1",
-  name: "gatecontrol",
+  name: "solow",
   source: "local_path",
-  location: "/srv/repos/gatecontrol",
+  location: "/srv/repos/solow",
   integrationId: "int-1",
   externalFullName: "acme/gate",
   ...TIMESTAMPS,
@@ -43,7 +43,7 @@ function baseHandlers(repos: unknown[] = []) {
   return {
     "integration.list": () => [GITHUB],
     "secret.list": () => [],
-    "repository.list": () => repos,
+    "repository.list": () => ({ items: repos, nextCursor: null }),
   };
 }
 
@@ -183,7 +183,7 @@ describe("IntegrationsSection", () => {
     const description = dialog.textContent ?? "";
 
     // The consequence is stated in the user's own nouns, not as a count of rows.
-    expect(description).toContain("1 linked repository (gatecontrol) will be unlinked");
+    expect(description).toContain("1 linked repository (solow) will be unlinked");
     expect(description).toContain("branches and change requests synced from it are removed");
     // And the part that is *not* destroyed is said explicitly — otherwise a cautious user
     // assumes their imported work goes with it and never disconnects at all.

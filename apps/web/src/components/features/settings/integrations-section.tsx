@@ -1,6 +1,6 @@
 "use client";
 
-import type { ScmProvider } from "@gatecontrol/contracts";
+import type { ScmProvider } from "@solow/contracts";
 import { RefreshCw, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { ConfirmAction } from "@/components/features/confirm-action";
@@ -16,6 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { WHOLE_PAGE } from "@/lib/paged";
 import { trpc } from "@/trpc/react";
 
 /**
@@ -27,7 +28,7 @@ export function IntegrationsSection() {
   const utils = trpc.useUtils();
   const integrations = trpc.integration.list.useQuery({});
   const secrets = trpc.secret.list.useQuery({});
-  const repos = trpc.repository.list.useQuery({});
+  const repos = trpc.repository.list.useQuery({ ...WHOLE_PAGE });
   const patSecrets = (secrets.data ?? []).filter((s) => s.kind === "scm_pat");
 
   /**
@@ -109,7 +110,7 @@ export function IntegrationsSection() {
 
   /** What disconnecting *this* Integration would take with it, in the user's own data. */
   const linkedTo = (integrationId: string) =>
-    (repos.data ?? []).filter((r) => r.integrationId === integrationId);
+    (repos.data?.items ?? []).filter((r) => r.integrationId === integrationId);
 
   return (
     <Card id="integrations" className="scroll-mt-16">
@@ -264,7 +265,7 @@ export function IntegrationsSection() {
           No local Repository to pick any more. Importing used to mean binding a Repository the
           user had already connected by path to a provider repo, which put "have a clone on disk"
           in front of the thing they actually wanted — working on a repository they can see on
-          GitHub. Now the pick *is* the Repository: GateControl records the provider's clone URL,
+          GitHub. Now the pick *is* the Repository: SoloW records the provider's clone URL,
           and the orchestrator clones it the first time a Task runs against it.
         */}
         {(integrations.data?.length ?? 0) > 0 && (
@@ -353,11 +354,11 @@ export function IntegrationsSection() {
           </div>
         )}
 
-        {(repos.data ?? []).filter((r) => r.integrationId).length > 0 && (
+        {(repos.data?.items ?? []).filter((r) => r.integrationId).length > 0 && (
           <div className="space-y-2 border-t pt-4">
             <p className="font-medium text-sm">Imported repositories</p>
             <ul className="space-y-2">
-              {(repos.data ?? [])
+              {(repos.data?.items ?? [])
                 .filter((r) => r.integrationId)
                 .map((r) => (
                   <li key={r.id} className="flex items-center justify-between gap-3">

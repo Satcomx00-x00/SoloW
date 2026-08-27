@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { agentProtocolSchema } from "@gatecontrol/contracts";
+import { agentProtocolSchema } from "@solow/contracts";
 import {
   AVAILABLE_AGENT_PROTOCOLS,
   agentCreatesOwnWorktree,

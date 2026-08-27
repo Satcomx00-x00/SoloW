@@ -1,7 +1,7 @@
 import "server-only";
-import { CommonErrorCode, type Result } from "@gatecontrol/contracts";
-import type { Db } from "@gatecontrol/db";
-import { type FlagKey, isEnabled } from "@gatecontrol/db";
+import { CommonErrorCode, type Result } from "@solow/contracts";
+import type { Db } from "@solow/db";
+import { type FlagKey, isEnabled } from "@solow/db";
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import type { OpenApiMeta } from "trpc-to-openapi";

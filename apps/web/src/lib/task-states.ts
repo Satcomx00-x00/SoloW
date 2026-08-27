@@ -1,10 +1,11 @@
-import type { TaskState } from "@gatecontrol/contracts";
+import type { TaskState } from "@solow/contracts";
 
 export {
   CREDENTIAL_EXPIRED_REASON,
   INTERRUPTED_REASON,
+  PARTIAL_INTEGRATION_REASON,
   STRANDED_REVIEW_REASON,
-} from "@gatecontrol/core";
+} from "@solow/core";
 
 import {
   Circle,
@@ -72,49 +73,49 @@ export interface StateStyle {
 export const STATE_STYLE: Record<TaskState, StateStyle> = {
   backlog: {
     icon: Circle,
-    badgeClassName: "border-state-idle/25 bg-state-idle/10 text-state-idle",
+    badgeClassName: "badge-soft [--badge-color:var(--state-idle)]",
     textClassName: "text-state-idle",
     barClassName: "bg-state-idle",
     hint: "Not started",
   },
   ready: {
     icon: CircleDot,
-    badgeClassName: "border-state-queued/30 bg-state-queued/10 text-state-queued",
+    badgeClassName: "badge-soft [--badge-color:var(--state-queued)]",
     textClassName: "text-state-queued",
     barClassName: "bg-state-queued",
     hint: "Queued, ready to launch",
   },
   running: {
     icon: LoaderCircle,
-    badgeClassName: "border-state-running/35 bg-state-running/12 text-state-running",
+    badgeClassName: "badge-soft [--badge-color:var(--state-running)]",
     textClassName: "text-state-running",
     barClassName: "bg-state-running",
     hint: "An agent is working",
   },
   review: {
     icon: Eye,
-    badgeClassName: "border-state-review/45 bg-state-review/15 text-state-review",
+    badgeClassName: "badge-soft [--badge-color:var(--state-review)]",
     textClassName: "text-state-review",
     barClassName: "bg-state-review",
     hint: "Waiting for your review",
   },
   parked: {
     icon: CirclePause,
-    badgeClassName: "border-state-parked/30 bg-state-parked/12 text-state-parked",
+    badgeClassName: "badge-soft [--badge-color:var(--state-parked)]",
     textClassName: "text-state-parked",
     barClassName: "bg-state-parked",
     hint: "Paused on quota, resumes automatically",
   },
   failed: {
     icon: CircleAlert,
-    badgeClassName: "border-state-failed/40 bg-state-failed/12 text-state-failed",
+    badgeClassName: "badge-soft [--badge-color:var(--state-failed)]",
     textClassName: "text-state-failed",
     barClassName: "bg-state-failed",
     hint: "The run failed, retry to try again",
   },
   done: {
     icon: CircleCheck,
-    badgeClassName: "border-state-done/30 bg-state-done/12 text-state-done",
+    badgeClassName: "badge-soft [--badge-color:var(--state-done)]",
     textClassName: "text-state-done",
     barClassName: "bg-state-done",
     hint: "Approved and committed",

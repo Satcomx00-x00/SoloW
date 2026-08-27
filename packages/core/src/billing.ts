@@ -5,7 +5,7 @@ import {
   isGuardedEnvVar,
   ok,
   type Result,
-} from "@gatecontrol/contracts";
+} from "@solow/contracts";
 
 /**
  * Billing & credential shaping (constitution Principle IV — NON-NEGOTIABLE; spec F06).
@@ -20,7 +20,7 @@ import {
  * hardcoded `CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY` pair, which is Claude Code's own
  * naming and would have been silently wrong for the next agent's catalog row. Both names now
  * come from the running Agent Profile's `agent_catalog` row, so the guarantee holds for
- * whichever agent is actually running, not just the first one GateControl shipped.
+ * whichever agent is actually running, not just the first one SoloW shipped.
  */
 
 export interface ResolveEnvParams {
@@ -117,6 +117,21 @@ export const INTERRUPTED_REASON: FailureClass = "interrupted";
  * sweep and read by the board, which is why it lives here rather than in either of them.
  */
 export const STRANDED_REVIEW_REASON = "review_decision_not_applied";
+
+/**
+ * An approval that integrated some of a Task's repositories and not others (issue #70 AC-4).
+ *
+ * A Task spans repositories, and one approval commits to each of them in turn. If the third
+ * commit fails after the first two landed, the Task is *partially integrated* — a state nothing
+ * in the model describes and nobody can act on without knowing which half is which. The rule the
+ * spec sets is that it must fail loudly with the partial state named, never half-succeed
+ * quietly, so the Task ends `failed` carrying this reason and a `notice` in its session log
+ * listing the branches that integrated and the ones that did not.
+ *
+ * Deliberately not retried into `done`: what to do about a half-landed change is a person's
+ * decision, and an automatic second attempt would commit twice to the branches that already took.
+ */
+export const PARTIAL_INTEGRATION_REASON = "partial_integration";
 
 export interface FailureSignal {
   quotaExhausted?: boolean;

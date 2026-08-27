@@ -1,7 +1,7 @@
 "use client";
 
-import type { ProjectFieldDto } from "@gatecontrol/contracts";
-import { normaliseFilterKey } from "@gatecontrol/core";
+import type { ProjectFieldDto } from "@solow/contracts";
+import { normaliseFilterKey } from "@solow/core";
 import { CalendarOff } from "lucide-react";
 import { useMemo } from "react";
 import type { ProjectRow } from "@/components/features/project/project-table";

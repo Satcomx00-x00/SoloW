@@ -13,7 +13,7 @@ import {
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
-import type { TaskDependencyDto, TaskDto, TaskState } from "@gatecontrol/contracts";
+import type { TaskDependencyDto, TaskDto, TaskState } from "@solow/contracts";
 import { GripVertical } from "lucide-react";
 import type { ReactNode } from "react";
 import { useState } from "react";

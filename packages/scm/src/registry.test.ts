@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { PROJECT_FIELD_TYPES } from "@gatecontrol/contracts";
+import { PROJECT_FIELD_TYPES } from "@solow/contracts";
 import {
   cloneUsernameFor,
   isProviderInstalled,
@@ -29,6 +29,7 @@ const TRACKER = {
     authenticate: async () => ({ ok: true as const }),
     listIssues: async () => [],
     getIssue: async () => ({}) as never,
+    listComments: async () => [],
     listLabels: async () => [],
   },
 };

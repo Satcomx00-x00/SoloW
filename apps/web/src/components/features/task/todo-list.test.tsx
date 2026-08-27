@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { afterEach, describe, expect, it } from "bun:test";
-import type { SessionEventDto, TodoItem } from "@gatecontrol/contracts";
+import type { SessionEventDto, TodoItem } from "@solow/contracts";
 import { cleanup, render, screen } from "@testing-library/react";
 import { latestTodos, TodoList } from "./todo-list";
 

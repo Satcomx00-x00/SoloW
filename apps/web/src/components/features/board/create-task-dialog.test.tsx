@@ -11,26 +11,34 @@ import { CreateTaskDialog } from "./create-task-dialog";
  */
 
 const handlers = {
-  "issue.list": () => [
-    {
-      id: "issue-1",
-      title: "Ship it",
-      description: "The upload endpoint rejects files over 2 MB.",
-      status: "open",
-      taskCount: 0,
-      labels: ["bug"],
-      source: "github",
-      externalNumber: 42,
-      externalUrl: "https://github.com/acme/api/issues/42",
-    },
-  ],
-  "profile.agent.list": () => [{ id: "agent-1", name: "Claude" }],
-  "profile.executor.list": () => [{ id: "exec-1", name: "Local" }],
-  "repository.list": () => [
-    { id: "repo-1", name: "api", source: "local_path", location: "/srv/api" },
-    { id: "repo-2", name: "shared-lib", source: "local_path", location: "/srv/lib" },
-  ],
-  "task.list": () => [],
+  "issue.list": () => ({
+    items: [
+      {
+        id: "issue-1",
+        title: "Ship it",
+        description: "The upload endpoint rejects files over 2 MB.",
+        status: "open",
+        taskCount: 0,
+        labels: ["bug"],
+        source: "github",
+        externalNumber: 42,
+        externalUrl: "https://github.com/acme/api/issues/42",
+        externalId: null,
+        externalParentId: null,
+      },
+    ],
+    nextCursor: null,
+  }),
+  "profile.agent.list": () => ({ items: [{ id: "agent-1", name: "Claude" }], nextCursor: null }),
+  "profile.executor.list": () => ({ items: [{ id: "exec-1", name: "Local" }], nextCursor: null }),
+  "repository.list": () => ({
+    items: [
+      { id: "repo-1", name: "api", source: "local_path", location: "/srv/api" },
+      { id: "repo-2", name: "shared-lib", source: "local_path", location: "/srv/lib" },
+    ],
+    nextCursor: null,
+  }),
+  "task.list": () => ({ items: [], nextCursor: null }),
 };
 
 async function pick(label: string, option: string): Promise<void> {

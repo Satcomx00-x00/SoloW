@@ -1,6 +1,6 @@
 "use client";
 
-import { CommonErrorCode } from "@gatecontrol/contracts";
+import { CommonErrorCode } from "@solow/contracts";
 import { Trash2, TriangleAlert } from "lucide-react";
 import { useState } from "react";
 import { ConfirmAction } from "@/components/features/confirm-action";

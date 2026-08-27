@@ -4,13 +4,13 @@
 
 ## Summary
 
-Integrations connect GateControl to the tools teams already use. **GitHub, GitLab and Gitea
+Integrations connect SoloW to the tools teams already use. **GitHub, GitLab and Gitea
 ship today.** Which providers exist is no longer a property of this feature: a provider is a
 driver and a manifest registered behind [F21](./F21-integration-providers.md), so adding a
 fourth is proportional to the provider rather than to the codebase, and a tracker with issues
 and no repositories — Jira, Linear — is now expressible rather than structurally excluded. What
-GateControl *carries* is still a product decision, and today it carries three. A connected
-Integration is what gives GateControl real Issues to work from (see
+SoloW *carries* is still a product decision, and today it carries three. A connected
+Integration is what gives SoloW real Issues to work from (see
 [F01](./F01-issue-management.md), which has no native "create Issue" path any more), and
 keeps a linked Repository's branches and change requests (pull requests / merge requests)
 visible alongside the Tasks that touch it.
@@ -25,8 +25,8 @@ product functions fully without any of them, and behind the `ff-integrations` fl
 default OFF.
 
 This feature also covers integration in the **opposite direction**: the external **MCP
-server** (issue #16), which lets outside agents and scripts drive GateControl rather than
-GateControl reaching out to them. It is the same product surface seen from the other side —
+server** (issue #16), which lets outside agents and scripts drive SoloW rather than
+SoloW reaching out to them. It is the same product surface seen from the other side —
 the MCP tools are *derived* from the same tRPC procedures the SPA calls and `openapi.json`
 documents, so there is no second definition of any operation to drift. It sits behind its own
 `ff-mcp` flag, default OFF.
@@ -38,16 +38,16 @@ documents, so there is no second definition of any operation to drift. It sits b
 
 ## User stories
 
-- As a Team Lead, I want to import Issues from our existing tracker, so GateControl
+- As a Team Lead, I want to import Issues from our existing tracker, so SoloW
   reflects our real backlog instead of a second, disconnected one.
 - As a Reviewer, I want to see a Task's repository's open change requests and branches
-  without leaving GateControl, so I have the full picture in one place.
+  without leaving SoloW, so I have the full picture in one place.
 - As an Operator, I want to connect a self-managed GitHub Enterprise or GitLab instance,
   not just the public SaaS hosts.
 
 ## Functional requirements
 
-- **FR-1** GateControl integrates with GitHub and GitLab to import Issues (see
+- **FR-1** SoloW integrates with GitHub and GitLab to import Issues (see
   [F01](./F01-issue-management.md)) and to display each linked Repository's branches and
   change requests.
 - **FR-2** A user connects an Integration by selecting a provider (GitHub or GitLab), a
@@ -66,7 +66,7 @@ documents, so there is no second definition of any operation to drift. It sits b
 - **FR-5** A user refreshes ("sync now") a linked Repository's change requests and
   branches on demand. v1 is manual/on-demand only; scheduled or webhook-driven sync is
   future work (issue #15 calls this out explicitly: design for webhooks, ship polling).
-- **FR-6** GateControl does not currently write anything back to GitHub or GitLab — there
+- **FR-6** SoloW does not currently write anything back to GitHub or GitLab — there
   is no status write-back, no comment posting, and no change-request creation yet (that is
   issue #71, gated on issue #7). An Integration's `writeBackEnabled` flag is stored, off by
   default, ready for when write-back is built, but nothing reads it yet.
@@ -88,7 +88,7 @@ documents, so there is no second definition of any operation to drift. It sits b
 
 ### External MCP server (issue #16)
 
-- **FR-8** GateControl exposes an MCP endpoint at `/api/mcp` over Streamable HTTP, answering
+- **FR-8** SoloW exposes an MCP endpoint at `/api/mcp` over Streamable HTTP, answering
   a POST as either `application/json` or a single-message SSE stream, and opening a
   server→client SSE stream on GET.
 - **FR-9** The MCP tool definitions are derived from the tRPC procedures — name, input schema
@@ -105,6 +105,27 @@ documents, so there is no second definition of any operation to drift. It sits b
   is displayed exactly once at issue time; it is stored only as a SHA-256 hash, so a lost token
   is reissued rather than recovered. Revocation takes effect on the token's next request, and a
   revoked token is refused indistinguishably from an unknown one.
+
+### Discovery, bounded (issue #82)
+
+- **FR-13** Every list a discovery tool reads — `issue.list`, `task.list`, `repository.list`
+  and the two profile lists — is **paged**, and a caller that names no `limit` receives
+  `PAGE_SIZE_DEFAULT` rows rather than the whole table. The bound is a property of the
+  contract, not a courtesy the caller may forget: these procedures are tools by construction
+  (FR-9), and an unbounded one spends an agent's context listing four hundred rows to answer a
+  question about three.
+- **FR-14** Paging is a **keyset cursor** over `(createdAt, id)`, never an offset. These tables
+  are written by the poll, the orchestrator and the person reading at the same time, and a row
+  created between two pages shifts every offset after it — the reader then skips a row without
+  either page looking wrong. The id is in the cursor because a sync writes a batch of rows in
+  one millisecond, and a tie makes the ordering partial.
+- **FR-15** The cursor is opaque, and a cursor that does not parse is read as no cursor: a
+  stale bookmark answers with the first page rather than failing the list.
+- **FR-16** A cursor carries no authority. It is a value the caller hands back, so the
+  Workspace scope is re-applied on every page — a cursor from one Workspace cannot walk into
+  another's rows (Principle V).
+- **FR-17** SoloW's own screens read these lists with `PAGE_SIZE_MAX`, and a surface that
+  *counts* states a floor (`500+`) rather than a number the read cannot support.
 
 ## Non-functional requirements
 
@@ -126,7 +147,7 @@ documents, so there is no second definition of any operation to drift. It sits b
   change requests — unlinks its Repositories, and keeps imported Issues, which are work
   items Tasks point at.
 - Canonical data owned by an external system (an imported Issue's title and description)
-  is not edited in GateControl — see [F01](./F01-issue-management.md).
+  is not edited in SoloW — see [F01](./F01-issue-management.md).
 
 ## Edge cases & failure handling
 
@@ -145,13 +166,13 @@ documents, so there is no second definition of any operation to drift. It sits b
 ## Out of scope
 
 - Jira, Linear, Sentry, Slack (`wont-do` — issue #15).
-- Pushing a branch or opening a change request from GateControl (issue #71).
+- Pushing a branch or opening a change request from SoloW (issue #71).
 - Webhook-driven or scheduled sync (v1 is on-demand only).
 - Queued or background auto-sync: `connect`'s automatic Repository/Issue import (FR-13) is
   synchronous and capped at 20 Repositories; there is no job queue in apps/web to route the
   rest through, so a Workspace connecting an account with more than 20 repositories finishes
   the remainder through the manual picker, not a background process.
-- MCP prompts, resources, and sampling — GateControl has none to offer, and advertising
+- MCP prompts, resources, and sampling — SoloW has none to offer, and advertising
   capabilities the server does not have makes clients probe endpoints that only ever fail.
 - Per-procedure MCP token permissions. Scope is `read` / `read_write`, mirroring the
   query/mutation split the router already makes; a finer catalogue is additive later.

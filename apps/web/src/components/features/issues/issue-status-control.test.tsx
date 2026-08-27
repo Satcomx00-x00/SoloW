@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { afterEach, describe, expect, it } from "bun:test";
-import { type IssueDto, IssueErrorCode } from "@gatecontrol/contracts";
+import { type IssueDto, IssueErrorCode } from "@solow/contracts";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderWithTrpc } from "@/test/trpc-harness";
 import { IssueStatusControl } from "./issue-status-control";
@@ -29,6 +29,8 @@ function issueWith(overrides: Partial<IssueDto> = {}): IssueDto {
     repositoryId: null,
     externalNumber: null,
     externalUrl: null,
+    externalId: null,
+    externalParentId: null,
     syncedAt: null,
     labels: [],
     linkedChangeRequests: [],

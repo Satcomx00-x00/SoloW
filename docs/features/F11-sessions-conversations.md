@@ -5,7 +5,7 @@
 ## Summary
 
 A Session is a single run of an Agent against a Task, and the Conversation is its recorded
-exchange. GateControl keeps Sessions and Conversations so users can understand what an
+exchange. SoloW keeps Sessions and Conversations so users can understand what an
 Agent did, resume its work with full context, and revisit it later.
 
 ## Jobs served
@@ -84,7 +84,7 @@ Agent did, resume its work with full context, and revisit it later.
 - Model-authored summaries. A summary is derived from the events it covers, so it costs nothing
   and says the same thing every time it is produced; a written one can replace the text later
   without changing what a summary *is*.
-- Redaction beyond this run's own credential. A recorded event has the values GateControl itself
+- Redaction beyond this run's own credential. A recorded event has the values SoloW itself
   put in the agent's environment removed from it; a secret the agent learned somewhere else is a
   question for the export rules in [F13](./F13-collaboration-sharing.md).
 - Capturing tool inputs and results. A tool call's raw input can hold the contents of a file

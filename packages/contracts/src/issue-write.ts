@@ -5,7 +5,7 @@ import { issueFieldSchema } from "./integration-provider.js";
 /**
  * Editing an imported Issue where it lives (spec F23 FR-13, Decision 0019).
  *
- * The rule this file exists to keep: **GateControl does not own any of these values.** An edit is
+ * The rule this file exists to keep: **SoloW does not own any of these values.** An edit is
  * sent to the provider and the answer is the provider's own reading of what it now holds — never
  * the value that was typed. Everything mirrored locally is refreshed from that answer, so the
  * mirror cannot drift into a second, quieter truth about the same issue.
@@ -37,6 +37,17 @@ export type IssueMilestoneDto = z.infer<typeof issueMilestoneDto>;
  * else changed an hour ago and saves over it without either party seeing a conflict; a form built
  * from the provider's current answer at least starts from the truth.
  */
+/** One child of an epic, as much of it as a list in a panel needs. */
+export const subIssueDto = z.object({
+  issueId: idSchema,
+  number: z.number().int().nullable(),
+  title: z.string(),
+  url: z.string().nullable(),
+  /** Closed **on the provider** — never a Status column reading "Done" (F23 AC-2 / AC-3). */
+  closed: z.boolean(),
+});
+export type SubIssueDto = z.infer<typeof subIssueDto>;
+
 export const issueDetailDto = z.object({
   issueId: idSchema,
   externalNumber: z.number().int(),
@@ -51,6 +62,16 @@ export const issueDetailDto = z.object({
   availableLabels: z.array(z.object({ name: z.string(), color: z.string().nullable() })),
   availableAssignees: z.array(issueUserDto),
   availableMilestones: z.array(issueMilestoneDto),
+  /**
+   * The issues that name this one as their parent — what makes this panel an *epic's* panel.
+   *
+   * Resolved server-side rather than handed in by whichever surface opened the drawer: a panel
+   * that only knew its children when opened from the project table would be a different panel
+   * depending on where you came from, which is the kind of difference nobody remembers.
+   *
+   * Empty for an ordinary issue, and the panel then shows nothing rather than an empty heading.
+   */
+  subIssues: z.array(subIssueDto),
   /**
    * Which of these the provider will actually accept a change to, and the sentence to show where
    * a control would otherwise be (Decision 0016: ask for a capability, never for a provider).
@@ -81,3 +102,39 @@ export const updateExternalIssueInput = z.object({
   milestone: z.string().nullable().optional(),
 });
 export type UpdateExternalIssueInput = z.infer<typeof updateExternalIssueInput>;
+
+/**
+ * One comment on an issue, as the drawer draws it.
+ *
+ * `body` is raw Markdown, rendered client-side — never HTML from the provider. A provider's HTML
+ * would have to be trusted or sanitised, and the same renderer already draws the issue body two
+ * inches above it.
+ */
+export const issueCommentDto = z.object({
+  externalId: z.string(),
+  author: issueUserDto.nullable(),
+  body: z.string(),
+  createdAt: z.string(),
+  /** Set only when the comment was edited after posting — "edited" on every row is not a fact. */
+  updatedAt: z.string().nullable(),
+  url: z.string(),
+});
+export type IssueCommentDto = z.infer<typeof issueCommentDto>;
+
+export const issueCommentListDto = z.object({
+  comments: z.array(issueCommentDto),
+  /**
+   * Whether this build can post one.
+   *
+   * Read off the provider's declaration, so a read-only tracker shows the discussion with no
+   * composer rather than a composer that fails on submit.
+   */
+  canComment: z.boolean(),
+});
+export type IssueCommentListDto = z.infer<typeof issueCommentListDto>;
+
+export const createIssueCommentInput = z.object({
+  issueId: idSchema,
+  body: z.string().min(1).max(65_536),
+});
+export type CreateIssueCommentInput = z.infer<typeof createIssueCommentInput>;

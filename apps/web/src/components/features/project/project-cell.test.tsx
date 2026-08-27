@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { afterEach, describe, expect, it } from "bun:test";
-import type { ProjectFieldDto, ProjectFieldValue } from "@gatecontrol/contracts";
+import type { ProjectFieldDto, ProjectFieldValue } from "@solow/contracts";
 import { cleanup, fireEvent, render as rtlRender, screen } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ProjectCell } from "./project-cell";
@@ -228,5 +228,104 @@ describe("people", () => {
     // The login is the fallback: an avatar with no name is a circle, and a circle answers nobody's
     // question about who holds a row. Uppercasing is a style, so the text stays the login's own.
     expect(screen.getByText("ad")).toBeDefined();
+  });
+});
+
+describe("an option's colour", () => {
+  /*
+   * The bug this covers, and it produced *no error at all*: Projects v2 stores an option's colour
+   * as a palette **name** (`GREEN`), not a hex. Treating that as a colour yields `#GREEN`, which
+   * CSS discards silently — every token fell back to grey and the column looked untouched.
+   */
+  const coloured = (color: string | undefined) =>
+    field({
+      id: "f1",
+      name: "Status",
+      options: [
+        color === undefined ? { id: "o1", name: "Backlog" } : { id: "o1", name: "Backlog", color },
+      ],
+    });
+
+  const styleOf = (color: string | undefined) => {
+    const { container } = render(
+      <ProjectCell
+        field={coloured(color)}
+        value={{ type: "single_select", optionId: "o1" }}
+        rowTitle="A row"
+      />,
+    );
+    return container.querySelector("span")?.getAttribute("style") ?? "";
+  };
+
+  it("renders GitHub's palette name as the colour it names", () => {
+    expect(styleOf("GREEN")).toContain("#57AB5A");
+  });
+
+  it("accepts a hex too, because GitLab's scoped labels report one", () => {
+    expect(styleOf("#aabbcc")).toContain("#aabbcc");
+  });
+
+  it("accepts a bare hex, which is the form GitHub uses for repository labels", () => {
+    expect(styleOf("d73a4a")).toContain("#d73a4a");
+  });
+
+  it("stays neutral for a vocabulary neither provider has taught us", () => {
+    // Inventing a hue for an unknown name would tell the reader something the provider never said.
+    expect(styleOf("chartreuse-ish")).toBe("");
+  });
+
+  it("stays neutral when the provider reports no colour at all", () => {
+    expect(styleOf(undefined)).toBe("");
+  });
+});
+
+describe("the option list", () => {
+  it("draws each option as the token it will become, in the provider's colour", async () => {
+    /*
+     * The mismatch this fixes: a chosen cell showed `Ready` in green and the menu it was chosen
+     * from showed a neutral dot beside grey text. Two readings of one option, and picking one
+     * meant reading the words rather than recognising the token.
+     */
+    render(
+      <ProjectCell
+        field={field({
+          id: "f1",
+          name: "Status",
+          options: [
+            { id: "o1", name: "Ready", color: "GREEN" },
+            { id: "o2", name: "Blocked", color: "RED" },
+          ],
+        })}
+        value={undefined}
+        rowTitle="A row"
+        onEdit={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("combobox", { name: /Status for A row/ }));
+
+    const ready = await screen.findByText("Ready");
+    // The token wraps the name, and it is the wrapper that carries the colour.
+    expect(ready.parentElement?.getAttribute("style")).toContain("#57AB5A");
+    expect(screen.getByText("Blocked").parentElement?.getAttribute("style")).toContain("#E5534B");
+  });
+
+  it("still says where to add options for a field that has none", async () => {
+    // SoloW cannot add them — the provider owns the field's vocabulary (Decision 0018).
+    render(
+      <ProjectCell
+        field={field({ id: "f1", name: "Size", options: [] })}
+        value={undefined}
+        rowTitle="A row"
+        onEdit={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("combobox", { name: /Size for A row/ }));
+
+    // The regression: this sentence used to live inside `CommandEmpty`, which cmdk draws in
+    // response to a search — so the field with *no* options, the one case it was written for,
+    // opened on a popover with a heading, a Clear row and no explanation whatsoever.
+    expect(await screen.findByText(/has no options yet/)).toBeDefined();
   });
 });

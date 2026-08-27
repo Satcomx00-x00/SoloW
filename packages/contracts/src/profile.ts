@@ -5,6 +5,7 @@ import {
   executorConfigSchema,
   executorKindSchema,
 } from "./executor-config.js";
+import { pageInputSchema, pageOf } from "./page.js";
 
 /**
  * How much an agent may do without stopping to ask (spec F05).
@@ -19,7 +20,7 @@ import {
  *   would do" rather than "do it".
  * - `bypassPermissions` — it never asks.
  *
- * The last one deserves its name. GateControl runs an agent headless, in a worktree, with **no
+ * The last one deserves its name. SoloW runs an agent headless, in a worktree, with **no
  * channel to ask an operator on** for the stream-json protocol — so under `acceptEdits` every
  * shell command and every fetch is refused by a prompt nobody can answer, and a task that needs
  * either simply cannot be done (observed: an agent asking for `pip index versions` in a loop
@@ -33,7 +34,7 @@ export type AgentPermissionMode = z.infer<typeof agentPermissionModeSchema>;
 /**
  * What a Profile runs as when it says nothing.
  *
- * `bypassPermissions`, by decision (2026-08-22): GateControl runs agents headless, and under any
+ * `bypassPermissions`, by decision (2026-08-22): SoloW runs agents headless, and under any
  * asking mode a prompt reaches nobody — so the cautious-looking default did not produce caution,
  * it produced runs that failed partway through with the work half done. The bound on an agent is
  * the worktree it is confined to and the review gate every change still stops at (Principle I),
@@ -49,6 +50,23 @@ export const DEFAULT_AGENT_PERMISSION_MODE: AgentPermissionMode = "bypassPermiss
  * `agentKind` enum — which agent this Profile runs, and how, is data in `agent_catalog`, not a
  * literal the contract has to know about.
  */
+
+/**
+ * What a Profile chooses about *how* its agent is launched (spec F05, issue #94).
+ *
+ * Both are **null by default, and null means "whatever the agent chooses"** — not a value picked
+ * here. An agent advertises its own models and modes at handshake, and those lists change on the
+ * provider's schedule, not this codebase's: a default written down here would be a choice that
+ * rots into a launch failure the first time a model is retired. Null is the only value that
+ * cannot go stale.
+ *
+ * `model` is the model id as the agent names it. `modeId` is one of the modes it advertises —
+ * ACP's `session/set_mode` takes exactly this, and the client already refuses to send an id the
+ * agent never offered rather than guessing.
+ */
+export const agentModelIdSchema = z.string().min(1).max(120);
+export const agentModeIdSchema = z.string().min(1).max(120);
+
 export const createAgentProfileInput = z.object({
   name: z.string().min(1).max(120),
   agentCatalogId: idSchema,
@@ -57,6 +75,9 @@ export const createAgentProfileInput = z.object({
   secretId: idSchema,
   concurrencyCap: z.number().int().min(1).max(20).default(3),
   permissionMode: agentPermissionModeSchema.default(DEFAULT_AGENT_PERMISSION_MODE),
+  /** Null — the default — leaves the choice to the agent. See `agentModelIdSchema`. */
+  model: agentModelIdSchema.nullable().default(null),
+  modeId: agentModeIdSchema.nullable().default(null),
 });
 export type CreateAgentProfileInput = z.infer<typeof createAgentProfileInput>;
 
@@ -85,6 +106,8 @@ export const agentProfileDto = z
     secretId: idSchema,
     concurrencyCap: z.number().int(),
     permissionMode: agentPermissionModeSchema,
+    model: agentModelIdSchema.nullable(),
+    modeId: agentModeIdSchema.nullable(),
     usage: agentProfileUsageDto,
   })
   .merge(timestampsSchema);
@@ -101,6 +124,13 @@ export const updateAgentProfileInput = z.object({
   name: z.string().min(1).max(120).optional(),
   concurrencyCap: z.number().int().min(1).max(20).optional(),
   permissionMode: agentPermissionModeSchema.optional(),
+  /*
+   * `.nullable().optional()` on both, and the two mean different things: absent leaves the
+   * setting alone, null hands the choice back to the agent. Collapsing them would make "stop
+   * pinning a model" unexpressible.
+   */
+  model: agentModelIdSchema.nullable().optional(),
+  modeId: agentModeIdSchema.nullable().optional(),
 });
 export type UpdateAgentProfileInput = z.infer<typeof updateAgentProfileInput>;
 
@@ -141,3 +171,17 @@ export const executorProfileDto = z
   })
   .merge(timestampsSchema);
 export type ExecutorProfileDto = z.infer<typeof executorProfileDto>;
+
+/**
+ * The two profile catalogues, paged — see `listRepositoriesInput` for why a small list is paged
+ * too. `agentCatalog` is deliberately not among them: it is the fixed set of agents this build
+ * knows how to run, not a collection that grows with use.
+ */
+export const listProfilesInput = pageInputSchema;
+export type ListProfilesInput = z.infer<typeof listProfilesInput>;
+
+export const agentProfileListDto = pageOf(agentProfileDto);
+export type AgentProfileListDto = z.infer<typeof agentProfileListDto>;
+
+export const executorProfileListDto = pageOf(executorProfileDto);
+export type ExecutorProfileListDto = z.infer<typeof executorProfileListDto>;

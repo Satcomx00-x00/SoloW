@@ -1,6 +1,6 @@
 "use client";
 
-import { TASK_PANE_MAX_WIDTH, TASK_PANE_MIN_WIDTH } from "@gatecontrol/contracts";
+import { TASK_PANE_MAX_WIDTH, TASK_PANE_MIN_WIDTH } from "@solow/contracts";
 import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";

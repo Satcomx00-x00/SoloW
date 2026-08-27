@@ -1,5 +1,5 @@
 import "server-only";
-import { createDb, type Db } from "@gatecontrol/db";
+import { createDb, type Db } from "@solow/db";
 import { bearerFrom, resolveMcpPrincipal, stampTokenUsed } from "./auth.js";
 import {
   dispatch,
@@ -38,7 +38,7 @@ const SSE_HEADERS = {
 function unauthorized(message: string): Response {
   return new Response(JSON.stringify({ error: message }), {
     status: 401,
-    headers: { ...JSON_HEADERS, "www-authenticate": 'Bearer realm="gatecontrol-mcp"' },
+    headers: { ...JSON_HEADERS, "www-authenticate": 'Bearer realm="solow-mcp"' },
   });
 }
 

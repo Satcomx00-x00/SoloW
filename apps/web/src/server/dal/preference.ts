@@ -14,8 +14,8 @@ import {
   type TaskPaneLayout,
   type TaskPaneLayoutDto,
   taskPaneLayoutSchema,
-} from "@gatecontrol/contracts";
-import { uiPreference } from "@gatecontrol/db";
+} from "@solow/contracts";
+import { uiPreference } from "@solow/db";
 import { and, eq } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
 

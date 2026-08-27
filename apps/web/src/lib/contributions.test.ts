@@ -51,10 +51,10 @@ describe("the notification channel registry", () => {
       .find((c) => c.id === "notify.in-app");
     const delivered: unknown[] = [];
     const listener = (event: Event) => delivered.push((event as CustomEvent).detail);
-    document.addEventListener("gatecontrol:notification", listener);
+    document.addEventListener("solow:notification", listener);
 
     await channel?.render.deliver({ kind: "task.review", title: "Keypad task needs review" });
-    document.removeEventListener("gatecontrol:notification", listener);
+    document.removeEventListener("solow:notification", listener);
 
     expect(delivered).toEqual([{ kind: "task.review", title: "Keypad task needs review" }]);
   });
@@ -75,7 +75,7 @@ describe("a feature module contributing commands", () => {
 
     command?.render.run(actions);
 
-    expect(navigated).toEqual(["/settings#secrets"]);
+    expect(navigated).toEqual(["/settings?section=secrets"]);
     expect(command?.render.group).toBe("Settings");
   });
 
@@ -134,6 +134,9 @@ describe("a feature module contributing commands", () => {
     // a comment does not count as reaching into it.
     const imported = [...source.matchAll(/^import\s[^"']*["']([^"']+)["'];$/gm)].map((m) => m[1]);
 
-    expect(imported).toEqual(["lucide-react", "@/lib/contributions"]);
+    // `@/lib/navigation` is the app's route registry — data, with no surface behind it. A command
+    // that spelled its own destination would be a second opinion about where Settings lives, and
+    // the rule this test protects is about reaching *into* the palette, not about knowing an href.
+    expect(imported).toEqual(["lucide-react", "@/lib/contributions", "@/lib/navigation"]);
   });
 });

@@ -30,8 +30,8 @@ CREATE UNIQUE INDEX `task_repository_task_position` ON `task_repository` (`task_
 -- and `position` 0.
 --
 -- `checkout_branch` prefers the recorded `result_branch`: a Task that already finished under the
--- `claude_code` protocol sits on a branch the *agent* named (`gatecontrol-task-<id>`), not the
--- one GateControl derives, and the join row has to point at the branch a reviewer can actually
+-- `claude_code` protocol sits on a branch the *agent* named (`solow-task-<id>`), not the
+-- one SoloW derives, and the join row has to point at the branch a reviewer can actually
 -- fetch. Where nothing was recorded the derived name is written, which is the name the row would
 -- have been given had it been created today — the same default `taskCheckoutBranch` supplies for
 -- an attachment that names no branch. Under a protocol whose agent makes its own worktree that
@@ -46,6 +46,6 @@ INSERT INTO `task_repository`
    `result_branch`, `position`, `created_at`, `updated_at`)
 SELECT
   lower(hex(randomblob(16))), `workspace_id`, `id`, `repository_id`, `base_ref`,
-  COALESCE(`result_branch`, 'gatecontrol/task-' || `id`), `result_branch`, 0,
+  COALESCE(`result_branch`, 'solow/task-' || `id`), `result_branch`, 0,
   `created_at`, `updated_at`
 FROM `task`;

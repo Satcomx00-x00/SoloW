@@ -3,11 +3,11 @@ import {
   ACP_PROTOCOL_VERSION,
   assertPromptBlocks,
   CapabilityUnavailableError,
-  GATECONTROL_CLIENT_CAPABILITIES,
   initializeParams,
   negotiate,
   ProtocolVersionError,
   requireCapability,
+  SOLOW_CLIENT_CAPABILITIES,
 } from "./capabilities.js";
 
 /**
@@ -67,7 +67,7 @@ describe("negotiate", () => {
 });
 
 describe("requireCapability", () => {
-  it("throws naming the capability GateControl was about to assume", () => {
+  it("throws naming the capability SoloW was about to assume", () => {
     const caps = negotiate({ protocolVersion: 1 });
     expect(() => requireCapability(caps, "loadSession")).toThrow(CapabilityUnavailableError);
     expect(() => requireCapability(caps, "loadSession")).toThrow("loadSession");
@@ -92,18 +92,18 @@ describe("assertPromptBlocks", () => {
   });
 });
 
-describe("what GateControl advertises as a client", () => {
+describe("what SoloW advertises as a client", () => {
   it("offers the agent no filesystem and no terminal", () => {
     // The enforcing half is in session.ts (`-32601`), but the advertisement has to agree with
     // it: telling an agent it may read files and then refusing every read is worse than saying
     // no up front.
-    expect(GATECONTROL_CLIENT_CAPABILITIES).toEqual({
+    expect(SOLOW_CLIENT_CAPABILITIES).toEqual({
       fs: { readTextFile: false, writeTextFile: false },
       terminal: false,
     });
     expect(initializeParams()).toEqual({
       protocolVersion: ACP_PROTOCOL_VERSION,
-      clientCapabilities: GATECONTROL_CLIENT_CAPABILITIES,
+      clientCapabilities: SOLOW_CLIENT_CAPABILITIES,
     });
   });
 });

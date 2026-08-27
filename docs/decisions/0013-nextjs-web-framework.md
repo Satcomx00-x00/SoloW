@@ -29,7 +29,7 @@ experience:
   connections or agent processes well — preserving the application/orchestrator split of
   [Decision 0002](./0002-technology-stack.md).
 
-This supersedes [Decision 0012](./0012-spa-build-stack.md); GateControl uses Next.js, not
+This supersedes [Decision 0012](./0012-spa-build-stack.md); SoloW uses Next.js, not
 Vite.
 
 ## Considered options

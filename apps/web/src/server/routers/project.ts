@@ -2,8 +2,11 @@ import "server-only";
 import {
   adoptProjectInput,
   adoptProjectResultDto,
+  attachProjectRepositoryInput,
   availableProjectDto,
+  createLocalProjectInput,
   createProjectViewInput,
+  detachProjectRepositoryInput,
   idSchema,
   listProjectItemsInput,
   listProjectViewsInput,
@@ -12,6 +15,8 @@ import {
   projectItemPageDto,
   projectItemsDto,
   projectRefreshDto,
+  projectRepositoryDto,
+  projectRepositoryListDto,
   projectScanDto,
   projectValueDto,
   projectViewDto,
@@ -19,7 +24,7 @@ import {
   reorderProjectViewsInput,
   setProjectValueInput,
   updateProjectViewInput,
-} from "@gatecontrol/contracts";
+} from "@solow/contracts";
 import { z } from "zod";
 import {
   getProject,
@@ -28,6 +33,12 @@ import {
   listProjects,
   projectIdForIssue,
 } from "../dal/project.js";
+import {
+  attachProjectRepository,
+  createLocalProject,
+  detachProjectRepository,
+  listProjectRepositories,
+} from "../dal/project-local.js";
 import {
   adoptProject,
   listAvailableProjects,
@@ -140,6 +151,83 @@ export const projectRouter = router({
     .input(adoptProjectInput)
     .output(adoptProjectResultDto)
     .mutation(async ({ ctx, input }) => unwrap(await adoptProject(ctx.rctx, input))),
+
+  /**
+   * Create a Project SoloW holds outright — no Integration, no provider board (issue #15's
+   * reversal, applied to Projects: user request 2026-08-27). The one path to a Project for a
+   * Workspace whose providers have nothing to adopt.
+   */
+  createLocal: ownerProcedure
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/project.createLocal",
+        tags: ["project"],
+        protect: true,
+        summary:
+          "Create a local Project — a container SoloW owns outright, with no provider board behind it. Its membership is decided by which Repositories are registered under it, not by a sync.",
+      },
+    })
+    .input(createLocalProjectInput)
+    .output(projectDto)
+    .mutation(async ({ ctx, input }) => unwrap(await createLocalProject(ctx.rctx, input))),
+
+  /**
+   * The Repositories registered under a Project — a local Project's membership decision, made
+   * visible. Readable on a mirrored Project too, where it is always empty.
+   */
+  repositories: ownerProcedure
+    .meta({
+      openapi: {
+        method: "GET",
+        path: "/project.repositories",
+        tags: ["project"],
+        protect: true,
+        summary:
+          "The Repositories registered under a Project, and how many Issues each currently contributes. Empty on a mirrored Project — its membership comes from a sync, not this list.",
+      },
+    })
+    .input(projectIdInput)
+    .output(projectRepositoryListDto)
+    .query(async ({ ctx, input }) => unwrap(await listProjectRepositories(ctx.rctx, input))),
+
+  /**
+   * Register a Repository under a local Project, backfilling every Issue it already holds.
+   * Refused on a mirrored Project — its membership is the provider's board, not this table's.
+   */
+  attachRepository: ownerProcedure
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/project.attachRepository",
+        tags: ["project"],
+        protect: true,
+        summary:
+          "Register a Repository under a local Project. Every Issue it already holds is attached immediately, and every Issue it gets later arrives the same way. Refused on a mirrored Project.",
+      },
+    })
+    .input(attachProjectRepositoryInput)
+    .output(projectRepositoryDto)
+    .mutation(async ({ ctx, input }) => unwrap(await attachProjectRepository(ctx.rctx, input))),
+
+  /**
+   * Drop a Repository from a local Project, and every row it put there — the reverse of
+   * `attachRepository`.
+   */
+  detachRepository: ownerProcedure
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/project.detachRepository",
+        tags: ["project"],
+        protect: true,
+        summary:
+          "Remove a Repository from a local Project. Every project item and value that Repository's Issues held in this Project is removed with it; the Issues and the Repository itself are untouched.",
+      },
+    })
+    .input(detachProjectRepositoryInput)
+    .output(z.object({ projectId: idSchema, repositoryId: idSchema }))
+    .mutation(async ({ ctx, input }) => unwrap(await detachProjectRepository(ctx.rctx, input))),
 
   setValue: ownerProcedure
     .meta({

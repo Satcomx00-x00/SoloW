@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import type { TaskState } from "@gatecontrol/contracts";
+import type { TaskState } from "@solow/contracts";
 import { activeTaskCount, deriveIssueStatus } from "./issue.js";
 
 describe("deriveIssueStatus", () => {

@@ -1,8 +1,8 @@
 /// <reference types="bun-types" />
-import type { FailureSignal } from "@gatecontrol/core";
+import type { FailureSignal } from "@solow/core";
 
 /**
- * Agent runner (spec F04 / task TASK-014, issue #58). GateControl drives an external coding
+ * Agent runner (spec F04 / task TASK-014, issue #58). SoloW drives an external coding
  * agent over whichever protocol its catalog row declares. This interface is the seam that keeps
  * orchestration independent of both: `AcpRunner` speaks the Agent Client Protocol (Decision
  * 0003), `ClaudeCodeRunner` speaks Claude Code's own stream-JSON mode, `createAgentRunner`
@@ -59,6 +59,12 @@ export type AgentStreamEvent =
       toolKind: string | null;
       options: Array<{ optionId: string; name: string; kind: string }>;
     }
+  /**
+   * What the agent advertised it can be (issue #94 AC-2): its model list and its mode list, as
+   * ids. Emitted at most once per run, at the handshake, and only when the agent said anything —
+   * so a consumer refreshing a cache never mistakes silence for "the agent offers nothing".
+   */
+  | { kind: "capabilities"; models: string[]; modes: string[] }
   /** How a permission was settled, and by whom — the audit half of AC-4. */
   | {
       kind: "permission_resolved";
@@ -89,7 +95,7 @@ export interface AgentStartOpts {
    * The *repository* to run in, not a per-Task worktree.
    *
    * The agent creates its own worktree (`claude --worktree`), which is what lets several Tasks
-   * share one repository safely. Pointing this at a worktree GateControl had already made would
+   * share one repository safely. Pointing this at a worktree SoloW had already made would
    * nest one inside another and put the agent's edits somewhere nothing downstream reads.
    */
   cwd: string;
@@ -113,7 +119,7 @@ export interface AgentHandle {
   /**
    * The directory the agent is actually working in, once it says so.
    *
-   * GateControl adopts this rather than assuming a path: the worktree is the agent's to create,
+   * SoloW adopts this rather than assuming a path: the worktree is the agent's to create,
    * and every later step — diff, commit on approve, discard on reject, cleanup — has to act on
    * the real one. `null` means the agent never reported a workspace, which the lifecycle must
    * treat as a failure to isolate rather than carry on regardless.

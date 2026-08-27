@@ -1,7 +1,7 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "GateControl API",
+    "title": "SoloW API",
     "description": "tRPC-over-HTTP surface for the core-program loop (Decision 0011).",
     "version": "0.1.0"
   },
@@ -583,6 +583,7 @@
                     },
                     "integrationId": {
                       "type": "string",
+                      "nullable": true,
                       "minLength": 1
                     },
                     "login": {
@@ -741,6 +742,22 @@
             "schema": {
               "type": "boolean"
             }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -749,171 +766,194 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "id": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "title": {
-                        "type": "string"
-                      },
-                      "description": {
-                        "type": "string",
-                        "nullable": true
-                      },
-                      "status": {
-                        "type": "string",
-                        "enum": [
-                          "open",
-                          "in_progress",
-                          "resolved",
-                          "closed"
-                        ]
-                      },
-                      "derivedStatus": {
-                        "type": "string",
-                        "enum": [
-                          "open",
-                          "in_progress",
-                          "resolved",
-                          "closed"
-                        ]
-                      },
-                      "statusOverride": {
-                        "type": "string",
-                        "nullable": true,
-                        "enum": [
-                          "open",
-                          "in_progress",
-                          "resolved",
-                          "closed",
-                          null
-                        ]
-                      },
-                      "statusOverrideAt": {
-                        "type": "string",
-                        "nullable": true
-                      },
-                      "taskCount": {
-                        "type": "integer",
-                        "minimum": 0
-                      },
-                      "activeTaskCount": {
-                        "type": "integer",
-                        "minimum": 0
-                      },
-                      "source": {
-                        "anyOf": [
-                          {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "status": {
                             "type": "string",
                             "enum": [
-                              "local"
+                              "open",
+                              "in_progress",
+                              "resolved",
+                              "closed"
                             ]
                           },
-                          {
+                          "derivedStatus": {
                             "type": "string",
-                            "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$",
-                            "minLength": 1,
-                            "maxLength": 64
-                          }
-                        ]
-                      },
-                      "repositoryId": {
-                        "type": "string",
-                        "nullable": true,
-                        "minLength": 1
-                      },
-                      "externalNumber": {
-                        "type": "integer",
-                        "nullable": true
-                      },
-                      "externalUrl": {
-                        "type": "string",
-                        "nullable": true
-                      },
-                      "syncedAt": {
-                        "type": "string",
-                        "nullable": true
-                      },
-                      "labels": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
-                      },
-                      "linkedChangeRequests": {
-                        "type": "array",
-                        "items": {
-                          "type": "object",
-                          "properties": {
-                            "externalId": {
+                            "enum": [
+                              "open",
+                              "in_progress",
+                              "resolved",
+                              "closed"
+                            ]
+                          },
+                          "statusOverride": {
+                            "type": "string",
+                            "nullable": true,
+                            "enum": [
+                              "open",
+                              "in_progress",
+                              "resolved",
+                              "closed",
+                              null
+                            ]
+                          },
+                          "statusOverrideAt": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "taskCount": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "activeTaskCount": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "source": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "local"
+                                ]
+                              },
+                              {
+                                "type": "string",
+                                "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$",
+                                "minLength": 1,
+                                "maxLength": 64
+                              }
+                            ]
+                          },
+                          "repositoryId": {
+                            "type": "string",
+                            "nullable": true,
+                            "minLength": 1
+                          },
+                          "externalNumber": {
+                            "type": "integer",
+                            "nullable": true
+                          },
+                          "externalUrl": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "externalId": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "externalParentId": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "syncedAt": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "labels": {
+                            "type": "array",
+                            "items": {
                               "type": "string"
-                            },
-                            "number": {
-                              "type": "integer"
-                            },
-                            "title": {
-                              "type": "string"
-                            },
-                            "state": {
-                              "type": "string",
-                              "enum": [
-                                "open",
-                                "closed",
-                                "merged"
-                              ]
-                            },
-                            "url": {
-                              "type": "string"
-                            },
-                            "mergedAt": {
-                              "type": "string",
-                              "nullable": true
                             }
                           },
-                          "required": [
-                            "externalId",
-                            "number",
-                            "title",
-                            "state",
-                            "url",
-                            "mergedAt"
-                          ]
-                        }
-                      },
-                      "createdAt": {
-                        "type": "string",
-                        "format": "date-time"
-                      },
-                      "updatedAt": {
-                        "type": "string",
-                        "format": "date-time"
+                          "linkedChangeRequests": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "externalId": {
+                                  "type": "string"
+                                },
+                                "number": {
+                                  "type": "integer"
+                                },
+                                "title": {
+                                  "type": "string"
+                                },
+                                "state": {
+                                  "type": "string",
+                                  "enum": [
+                                    "open",
+                                    "closed",
+                                    "merged"
+                                  ]
+                                },
+                                "url": {
+                                  "type": "string"
+                                },
+                                "mergedAt": {
+                                  "type": "string",
+                                  "nullable": true
+                                }
+                              },
+                              "required": [
+                                "externalId",
+                                "number",
+                                "title",
+                                "state",
+                                "url",
+                                "mergedAt"
+                              ]
+                            }
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "updatedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "title",
+                          "description",
+                          "status",
+                          "derivedStatus",
+                          "statusOverride",
+                          "statusOverrideAt",
+                          "taskCount",
+                          "activeTaskCount",
+                          "source",
+                          "repositoryId",
+                          "externalNumber",
+                          "externalUrl",
+                          "externalId",
+                          "externalParentId",
+                          "syncedAt",
+                          "labels",
+                          "linkedChangeRequests",
+                          "createdAt",
+                          "updatedAt"
+                        ]
                       }
                     },
-                    "required": [
-                      "id",
-                      "title",
-                      "description",
-                      "status",
-                      "derivedStatus",
-                      "statusOverride",
-                      "statusOverrideAt",
-                      "taskCount",
-                      "activeTaskCount",
-                      "source",
-                      "repositoryId",
-                      "externalNumber",
-                      "externalUrl",
-                      "syncedAt",
-                      "labels",
-                      "linkedChangeRequests",
-                      "createdAt",
-                      "updatedAt"
-                    ]
-                  }
+                    "nextCursor": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ]
                 }
               }
             }
@@ -1083,6 +1123,14 @@
                       "type": "string",
                       "nullable": true
                     },
+                    "externalId": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "externalParentId": {
+                      "type": "string",
+                      "nullable": true
+                    },
                     "syncedAt": {
                       "type": "string",
                       "nullable": true
@@ -1156,6 +1204,8 @@
                     "repositoryId",
                     "externalNumber",
                     "externalUrl",
+                    "externalId",
+                    "externalParentId",
                     "syncedAt",
                     "labels",
                     "linkedChangeRequests",
@@ -1240,6 +1290,98 @@
                   "type": "array",
                   "items": {
                     "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.NOT_FOUND"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/issue.labelColors": {
+      "get": {
+        "operationId": "issue-labelColors",
+        "summary": "Every label the linked Repositories define, with the colour its provider gives it. Null where the provider reports none.",
+        "tags": [
+          "issue"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "color": {
+                        "type": "string",
+                        "nullable": true
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "color"
+                    ]
                   }
                 }
               }
@@ -1434,6 +1576,14 @@
                       "type": "string",
                       "nullable": true
                     },
+                    "externalId": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "externalParentId": {
+                      "type": "string",
+                      "nullable": true
+                    },
                     "syncedAt": {
                       "type": "string",
                       "nullable": true
@@ -1507,6 +1657,8 @@
                     "repositoryId",
                     "externalNumber",
                     "externalUrl",
+                    "externalId",
+                    "externalParentId",
                     "syncedAt",
                     "labels",
                     "linkedChangeRequests",
@@ -1700,6 +1852,14 @@
                       "type": "string",
                       "nullable": true
                     },
+                    "externalId": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "externalParentId": {
+                      "type": "string",
+                      "nullable": true
+                    },
                     "syncedAt": {
                       "type": "string",
                       "nullable": true
@@ -1773,6 +1933,8 @@
                     "repositoryId",
                     "externalNumber",
                     "externalUrl",
+                    "externalId",
+                    "externalParentId",
                     "syncedAt",
                     "labels",
                     "linkedChangeRequests",
@@ -1964,6 +2126,14 @@
                       "type": "string",
                       "nullable": true
                     },
+                    "externalId": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "externalParentId": {
+                      "type": "string",
+                      "nullable": true
+                    },
                     "syncedAt": {
                       "type": "string",
                       "nullable": true
@@ -2037,6 +2207,8 @@
                     "repositoryId",
                     "externalNumber",
                     "externalUrl",
+                    "externalId",
+                    "externalParentId",
                     "syncedAt",
                     "labels",
                     "linkedChangeRequests",
@@ -2485,6 +2657,39 @@
                         ]
                       }
                     },
+                    "subIssues": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "issueId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "number": {
+                            "type": "integer",
+                            "nullable": true
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "url": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "closed": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "issueId",
+                          "number",
+                          "title",
+                          "url",
+                          "closed"
+                        ]
+                      }
+                    },
                     "writes": {
                       "type": "array",
                       "items": {
@@ -2537,6 +2742,7 @@
                     "availableLabels",
                     "availableAssignees",
                     "availableMilestones",
+                    "subIssues",
                     "writes",
                     "cannot"
                   ]
@@ -2822,6 +3028,39 @@
                         ]
                       }
                     },
+                    "subIssues": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "issueId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "number": {
+                            "type": "integer",
+                            "nullable": true
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "url": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "closed": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "issueId",
+                          "number",
+                          "title",
+                          "url",
+                          "closed"
+                        ]
+                      }
+                    },
                     "writes": {
                       "type": "array",
                       "items": {
@@ -2874,8 +3113,313 @@
                     "availableLabels",
                     "availableAssignees",
                     "availableMilestones",
+                    "subIssues",
                     "writes",
                     "cannot"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/issue.comments": {
+      "get": {
+        "operationId": "issue-comments",
+        "summary": "The comments on one imported Issue, oldest first, read live from its provider. A provider's activity entries are not comments and are not included.",
+        "tags": [
+          "issue"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "issueId",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "comments": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "externalId": {
+                            "type": "string"
+                          },
+                          "author": {
+                            "type": "object",
+                            "nullable": true,
+                            "properties": {
+                              "login": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "avatarUrl": {
+                                "type": "string",
+                                "nullable": true
+                              }
+                            },
+                            "required": [
+                              "login",
+                              "name",
+                              "avatarUrl"
+                            ]
+                          },
+                          "body": {
+                            "type": "string"
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "updatedAt": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "url": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "externalId",
+                          "author",
+                          "body",
+                          "createdAt",
+                          "updatedAt",
+                          "url"
+                        ]
+                      }
+                    },
+                    "canComment": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "comments",
+                    "canComment"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.NOT_FOUND"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/issue.comment": {
+      "post": {
+        "operationId": "issue-comment",
+        "summary": "Post a comment on an imported Issue. Answers with the whole thread as the provider now holds it, never with the text that was sent.",
+        "tags": [
+          "issue"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "issueId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "body": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 65536
+                  }
+                },
+                "required": [
+                  "issueId",
+                  "body"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "comments": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "externalId": {
+                            "type": "string"
+                          },
+                          "author": {
+                            "type": "object",
+                            "nullable": true,
+                            "properties": {
+                              "login": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "avatarUrl": {
+                                "type": "string",
+                                "nullable": true
+                              }
+                            },
+                            "required": [
+                              "login",
+                              "name",
+                              "avatarUrl"
+                            ]
+                          },
+                          "body": {
+                            "type": "string"
+                          },
+                          "createdAt": {
+                            "type": "string"
+                          },
+                          "updatedAt": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "url": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "externalId",
+                          "author",
+                          "body",
+                          "createdAt",
+                          "updatedAt",
+                          "url"
+                        ]
+                      }
+                    },
+                    "canComment": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "comments",
+                    "canComment"
                   ]
                 }
               }
@@ -2947,7 +3491,8 @@
                 "issueWrites",
                 "repositories",
                 "changeRequests",
-                "projects"
+                "projects",
+                "labelWrites"
               ]
             }
           }
@@ -2982,7 +3527,8 @@
                             "issueWrites",
                             "repositories",
                             "changeRequests",
-                            "projects"
+                            "projects",
+                            "labelWrites"
                           ]
                         },
                         "minItems": 1
@@ -3843,6 +4389,18 @@
                       "type": "string",
                       "nullable": true
                     },
+                    "provider": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "integrationBaseUrl": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "issueCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
                     "setupFilePatterns": {
                       "type": "array",
                       "items": {
@@ -3865,6 +4423,9 @@
                     "location",
                     "integrationId",
                     "externalFullName",
+                    "provider",
+                    "integrationBaseUrl",
+                    "issueCount",
                     "setupFilePatterns",
                     "createdAt",
                     "updatedAt"
@@ -4046,7 +4607,7 @@
     "/integration.importIssues": {
       "post": {
         "operationId": "integration-importIssues",
-        "summary": "Import selected external issues as GateControl Issues. Idempotent per Repository — re-importing the same ids is a visible no-op, not a duplicate.",
+        "summary": "Import selected external issues as SoloW Issues. Idempotent per Repository — re-importing the same ids is a visible no-op, not a duplicate.",
         "tags": [
           "integration"
         ],
@@ -4174,6 +4735,14 @@
                         "type": "string",
                         "nullable": true
                       },
+                      "externalId": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "externalParentId": {
+                        "type": "string",
+                        "nullable": true
+                      },
                       "syncedAt": {
                         "type": "string",
                         "nullable": true
@@ -4247,6 +4816,8 @@
                       "repositoryId",
                       "externalNumber",
                       "externalUrl",
+                      "externalId",
+                      "externalParentId",
                       "syncedAt",
                       "labels",
                       "linkedChangeRequests",
@@ -4304,7 +4875,7 @@
     "/integration.syncRepositorySignals": {
       "post": {
         "operationId": "integration-syncRepositorySignals",
-        "summary": "Refresh a linked Repository's change requests (pull/merge requests) and branches from its provider. On-demand pull; GateControl never creates or modifies anything on the provider here.",
+        "summary": "Refresh a linked Repository's change requests (pull/merge requests) and branches from its provider. On-demand pull; SoloW never creates or modifies anything on the provider here.",
         "tags": [
           "integration"
         ],
@@ -4987,11 +5558,33 @@
                             "maxLength": 64
                           },
                           "maxItems": 200
+                        },
+                        "shown": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$",
+                            "minLength": 1,
+                            "maxLength": 64
+                          },
+                          "maxItems": 200,
+                          "default": []
+                        },
+                        "widths": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "integer",
+                            "minimum": 60,
+                            "maximum": 900
+                          },
+                          "default": {}
                         }
                       },
                       "required": [
                         "order",
-                        "hidden"
+                        "hidden",
+                        "shown",
+                        "widths"
                       ]
                     }
                   },
@@ -5108,6 +5701,26 @@
                           "maxLength": 64
                         },
                         "maxItems": 200
+                      },
+                      "shown": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$",
+                          "minLength": 1,
+                          "maxLength": 64
+                        },
+                        "maxItems": 200,
+                        "default": []
+                      },
+                      "widths": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "type": "integer",
+                          "minimum": 60,
+                          "maximum": 900
+                        },
+                        "default": {}
                       }
                     },
                     "required": [
@@ -5171,11 +5784,33 @@
                             "maxLength": 64
                           },
                           "maxItems": 200
+                        },
+                        "shown": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$",
+                            "minLength": 1,
+                            "maxLength": 64
+                          },
+                          "maxItems": 200,
+                          "default": []
+                        },
+                        "widths": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "integer",
+                            "minimum": 60,
+                            "maximum": 900
+                          },
+                          "default": {}
                         }
                       },
                       "required": [
                         "order",
-                        "hidden"
+                        "hidden",
+                        "shown",
+                        "widths"
                       ]
                     }
                   },
@@ -5997,6 +6632,22 @@
             "schema": {
               "type": "boolean"
             }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -6005,127 +6656,140 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "id": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "issueId": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "title": {
-                        "type": "string"
-                      },
-                      "state": {
-                        "type": "string",
-                        "enum": [
-                          "backlog",
-                          "ready",
-                          "running",
-                          "review",
-                          "parked",
-                          "failed",
-                          "done"
-                        ]
-                      },
-                      "agentProfileId": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "executorProfileId": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "repositories": {
-                        "type": "array",
-                        "items": {
-                          "type": "object",
-                          "properties": {
-                            "id": {
-                              "type": "string",
-                              "minLength": 1
-                            },
-                            "repositoryId": {
-                              "type": "string",
-                              "minLength": 1
-                            },
-                            "baseRef": {
-                              "type": "string",
-                              "nullable": true
-                            },
-                            "checkoutBranch": {
-                              "type": "string"
-                            },
-                            "resultBranch": {
-                              "type": "string",
-                              "nullable": true
-                            },
-                            "position": {
-                              "type": "integer",
-                              "minimum": 0
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "issueId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": [
+                              "backlog",
+                              "ready",
+                              "running",
+                              "review",
+                              "parked",
+                              "failed",
+                              "done"
+                            ]
+                          },
+                          "agentProfileId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "executorProfileId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "repositories": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "repositoryId": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "baseRef": {
+                                  "type": "string",
+                                  "nullable": true
+                                },
+                                "checkoutBranch": {
+                                  "type": "string"
+                                },
+                                "resultBranch": {
+                                  "type": "string",
+                                  "nullable": true
+                                },
+                                "position": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "repositoryId",
+                                "baseRef",
+                                "checkoutBranch",
+                                "resultBranch",
+                                "position"
+                              ]
                             }
                           },
-                          "required": [
-                            "id",
-                            "repositoryId",
-                            "baseRef",
-                            "checkoutBranch",
-                            "resultBranch",
-                            "position"
-                          ]
-                        }
-                      },
-                      "failureReason": {
-                        "type": "string",
-                        "nullable": true
-                      },
-                      "completedAt": {
-                        "type": "string",
-                        "nullable": true
-                      },
-                      "completedOutcome": {
-                        "type": "string",
-                        "nullable": true,
-                        "enum": [
-                          "changes_ready",
-                          "nothing_to_do",
-                          "blocked",
-                          null
+                          "failureReason": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "completedAt": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "completedOutcome": {
+                            "type": "string",
+                            "nullable": true,
+                            "enum": [
+                              "changes_ready",
+                              "nothing_to_do",
+                              "blocked",
+                              null
+                            ]
+                          },
+                          "completedSummary": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "updatedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "issueId",
+                          "title",
+                          "state",
+                          "agentProfileId",
+                          "executorProfileId",
+                          "repositories",
+                          "failureReason",
+                          "completedAt",
+                          "completedOutcome",
+                          "completedSummary",
+                          "createdAt",
+                          "updatedAt"
                         ]
-                      },
-                      "completedSummary": {
-                        "type": "string",
-                        "nullable": true
-                      },
-                      "createdAt": {
-                        "type": "string",
-                        "format": "date-time"
-                      },
-                      "updatedAt": {
-                        "type": "string",
-                        "format": "date-time"
                       }
                     },
-                    "required": [
-                      "id",
-                      "issueId",
-                      "title",
-                      "state",
-                      "agentProfileId",
-                      "executorProfileId",
-                      "repositories",
-                      "failureReason",
-                      "completedAt",
-                      "completedOutcome",
-                      "completedSummary",
-                      "createdAt",
-                      "updatedAt"
-                    ]
-                  }
+                    "nextCursor": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ]
                 }
               }
             }
@@ -7851,6 +8515,20 @@
                       "bypassPermissions"
                     ],
                     "default": "bypassPermissions"
+                  },
+                  "model": {
+                    "type": "string",
+                    "nullable": true,
+                    "minLength": 1,
+                    "maxLength": 120,
+                    "default": null
+                  },
+                  "modeId": {
+                    "type": "string",
+                    "nullable": true,
+                    "minLength": 1,
+                    "maxLength": 120,
+                    "default": null
                   }
                 },
                 "required": [
@@ -7904,6 +8582,18 @@
                         "bypassPermissions"
                       ]
                     },
+                    "model": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1,
+                      "maxLength": 120
+                    },
+                    "modeId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1,
+                      "maxLength": 120
+                    },
                     "usage": {
                       "type": "object",
                       "properties": {
@@ -7943,6 +8633,8 @@
                     "secretId",
                     "concurrencyCap",
                     "permissionMode",
+                    "model",
+                    "modeId",
                     "usage",
                     "createdAt",
                     "updatedAt"
@@ -8006,93 +8698,138 @@
             "session": []
           }
         ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful response",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "id": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "name": {
-                        "type": "string"
-                      },
-                      "agentCatalogId": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "authMode": {
-                        "type": "string",
-                        "enum": [
-                          "subscription",
-                          "api_key"
-                        ]
-                      },
-                      "secretId": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "concurrencyCap": {
-                        "type": "integer"
-                      },
-                      "permissionMode": {
-                        "type": "string",
-                        "enum": [
-                          "acceptEdits",
-                          "plan",
-                          "bypassPermissions"
-                        ]
-                      },
-                      "usage": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
                         "type": "object",
                         "properties": {
-                          "taskCount": {
-                            "type": "integer",
-                            "minimum": 0
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
                           },
-                          "workflowStepCount": {
-                            "type": "integer",
-                            "minimum": 0
+                          "name": {
+                            "type": "string"
                           },
-                          "sessionUsageCount": {
-                            "type": "integer",
-                            "minimum": 0
+                          "agentCatalogId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "authMode": {
+                            "type": "string",
+                            "enum": [
+                              "subscription",
+                              "api_key"
+                            ]
+                          },
+                          "secretId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "concurrencyCap": {
+                            "type": "integer"
+                          },
+                          "permissionMode": {
+                            "type": "string",
+                            "enum": [
+                              "acceptEdits",
+                              "plan",
+                              "bypassPermissions"
+                            ]
+                          },
+                          "model": {
+                            "type": "string",
+                            "nullable": true,
+                            "minLength": 1,
+                            "maxLength": 120
+                          },
+                          "modeId": {
+                            "type": "string",
+                            "nullable": true,
+                            "minLength": 1,
+                            "maxLength": 120
+                          },
+                          "usage": {
+                            "type": "object",
+                            "properties": {
+                              "taskCount": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "workflowStepCount": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "sessionUsageCount": {
+                                "type": "integer",
+                                "minimum": 0
+                              }
+                            },
+                            "required": [
+                              "taskCount",
+                              "workflowStepCount",
+                              "sessionUsageCount"
+                            ]
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "updatedAt": {
+                            "type": "string",
+                            "format": "date-time"
                           }
                         },
                         "required": [
-                          "taskCount",
-                          "workflowStepCount",
-                          "sessionUsageCount"
+                          "id",
+                          "name",
+                          "agentCatalogId",
+                          "authMode",
+                          "secretId",
+                          "concurrencyCap",
+                          "permissionMode",
+                          "model",
+                          "modeId",
+                          "usage",
+                          "createdAt",
+                          "updatedAt"
                         ]
-                      },
-                      "createdAt": {
-                        "type": "string",
-                        "format": "date-time"
-                      },
-                      "updatedAt": {
-                        "type": "string",
-                        "format": "date-time"
                       }
                     },
-                    "required": [
-                      "id",
-                      "name",
-                      "agentCatalogId",
-                      "authMode",
-                      "secretId",
-                      "concurrencyCap",
-                      "permissionMode",
-                      "usage",
-                      "createdAt",
-                      "updatedAt"
-                    ]
-                  }
+                    "nextCursor": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ]
                 }
               }
             }
@@ -8190,6 +8927,18 @@
                       "plan",
                       "bypassPermissions"
                     ]
+                  },
+                  "model": {
+                    "type": "string",
+                    "nullable": true,
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "modeId": {
+                    "type": "string",
+                    "nullable": true,
+                    "minLength": 1,
+                    "maxLength": 120
                   }
                 },
                 "required": [
@@ -8240,6 +8989,18 @@
                         "bypassPermissions"
                       ]
                     },
+                    "model": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1,
+                      "maxLength": 120
+                    },
+                    "modeId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1,
+                      "maxLength": 120
+                    },
                     "usage": {
                       "type": "object",
                       "properties": {
@@ -8279,6 +9040,8 @@
                     "secretId",
                     "concurrencyCap",
                     "permissionMode",
+                    "model",
+                    "modeId",
                     "usage",
                     "createdAt",
                     "updatedAt"
@@ -8402,6 +9165,18 @@
                         "bypassPermissions"
                       ]
                     },
+                    "model": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1,
+                      "maxLength": 120
+                    },
+                    "modeId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1,
+                      "maxLength": 120
+                    },
                     "usage": {
                       "type": "object",
                       "properties": {
@@ -8441,6 +9216,8 @@
                     "secretId",
                     "concurrencyCap",
                     "permissionMode",
+                    "model",
+                    "modeId",
                     "usage",
                     "createdAt",
                     "updatedAt"
@@ -9920,241 +10697,272 @@
             "session": []
           }
         ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful response",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "id": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "name": {
-                        "type": "string"
-                      },
-                      "kind": {
-                        "type": "string",
-                        "enum": [
-                          "local",
-                          "docker",
-                          "ssh",
-                          "cloud"
-                        ]
-                      },
-                      "config": {
-                        "oneOf": [
-                          {
-                            "type": "object",
-                            "properties": {
-                              "kind": {
-                                "type": "string",
-                                "enum": [
-                                  "local"
-                                ]
-                              },
-                              "prepareScript": {
-                                "type": "string",
-                                "maxLength": 20000
-                              },
-                              "env": {
-                                "type": "object",
-                                "additionalProperties": {
-                                  "type": "string"
-                                },
-                                "default": {}
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "env"
-                            ],
-                            "additionalProperties": false
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
                           },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "kind": {
-                                "type": "string",
-                                "enum": [
-                                  "docker"
-                                ]
-                              },
-                              "image": {
-                                "type": "string",
-                                "minLength": 1
-                              },
-                              "mounts": {
-                                "type": "array",
-                                "items": {
-                                  "type": "object",
-                                  "properties": {
-                                    "source": {
-                                      "type": "string",
-                                      "minLength": 1
-                                    },
-                                    "target": {
-                                      "type": "string",
-                                      "pattern": "^/"
-                                    },
-                                    "readOnly": {
-                                      "type": "boolean",
-                                      "default": false
-                                    }
+                          "name": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "local",
+                              "docker",
+                              "ssh",
+                              "cloud"
+                            ]
+                          },
+                          "config": {
+                            "oneOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "local"
+                                    ]
                                   },
-                                  "required": [
-                                    "source",
-                                    "target",
-                                    "readOnly"
-                                  ],
-                                  "additionalProperties": false
+                                  "prepareScript": {
+                                    "type": "string",
+                                    "maxLength": 20000
+                                  },
+                                  "env": {
+                                    "type": "object",
+                                    "additionalProperties": {
+                                      "type": "string"
+                                    },
+                                    "default": {}
+                                  }
                                 },
-                                "maxItems": 32,
-                                "default": []
+                                "required": [
+                                  "kind",
+                                  "env"
+                                ],
+                                "additionalProperties": false
                               },
-                              "network": {
-                                "type": "string",
-                                "minLength": 1
-                              },
-                              "prepareScript": {
-                                "type": "string",
-                                "maxLength": 20000
-                              },
-                              "env": {
+                              {
                                 "type": "object",
-                                "additionalProperties": {
-                                  "type": "string"
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "docker"
+                                    ]
+                                  },
+                                  "image": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "mounts": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "source": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        },
+                                        "target": {
+                                          "type": "string",
+                                          "pattern": "^/"
+                                        },
+                                        "readOnly": {
+                                          "type": "boolean",
+                                          "default": false
+                                        }
+                                      },
+                                      "required": [
+                                        "source",
+                                        "target",
+                                        "readOnly"
+                                      ],
+                                      "additionalProperties": false
+                                    },
+                                    "maxItems": 32,
+                                    "default": []
+                                  },
+                                  "network": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "prepareScript": {
+                                    "type": "string",
+                                    "maxLength": 20000
+                                  },
+                                  "env": {
+                                    "type": "object",
+                                    "additionalProperties": {
+                                      "type": "string"
+                                    },
+                                    "default": {}
+                                  }
                                 },
-                                "default": {}
+                                "required": [
+                                  "kind",
+                                  "image",
+                                  "mounts",
+                                  "env"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "ssh"
+                                    ]
+                                  },
+                                  "host": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "port": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 65535,
+                                    "default": 22
+                                  },
+                                  "user": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "keySecretId": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "prepareScript": {
+                                    "type": "string",
+                                    "maxLength": 20000
+                                  },
+                                  "env": {
+                                    "type": "object",
+                                    "additionalProperties": {
+                                      "type": "string"
+                                    },
+                                    "default": {}
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "host",
+                                  "port",
+                                  "user",
+                                  "keySecretId",
+                                  "env"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "cloud"
+                                    ]
+                                  },
+                                  "provider": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "region": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "size": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "credentialSecretId": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "prepareScript": {
+                                    "type": "string",
+                                    "maxLength": 20000
+                                  },
+                                  "env": {
+                                    "type": "object",
+                                    "additionalProperties": {
+                                      "type": "string"
+                                    },
+                                    "default": {}
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "provider",
+                                  "size",
+                                  "credentialSecretId",
+                                  "env"
+                                ],
+                                "additionalProperties": false
                               }
-                            },
-                            "required": [
-                              "kind",
-                              "image",
-                              "mounts",
-                              "env"
-                            ],
-                            "additionalProperties": false
+                            ]
                           },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "kind": {
-                                "type": "string",
-                                "enum": [
-                                  "ssh"
-                                ]
-                              },
-                              "host": {
-                                "type": "string",
-                                "minLength": 1
-                              },
-                              "port": {
-                                "type": "integer",
-                                "minimum": 1,
-                                "maximum": 65535,
-                                "default": 22
-                              },
-                              "user": {
-                                "type": "string",
-                                "minLength": 1
-                              },
-                              "keySecretId": {
-                                "type": "string",
-                                "minLength": 1
-                              },
-                              "prepareScript": {
-                                "type": "string",
-                                "maxLength": 20000
-                              },
-                              "env": {
-                                "type": "object",
-                                "additionalProperties": {
-                                  "type": "string"
-                                },
-                                "default": {}
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "host",
-                              "port",
-                              "user",
-                              "keySecretId",
-                              "env"
-                            ],
-                            "additionalProperties": false
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
                           },
-                          {
-                            "type": "object",
-                            "properties": {
-                              "kind": {
-                                "type": "string",
-                                "enum": [
-                                  "cloud"
-                                ]
-                              },
-                              "provider": {
-                                "type": "string",
-                                "minLength": 1
-                              },
-                              "region": {
-                                "type": "string",
-                                "minLength": 1
-                              },
-                              "size": {
-                                "type": "string",
-                                "minLength": 1
-                              },
-                              "credentialSecretId": {
-                                "type": "string",
-                                "minLength": 1
-                              },
-                              "prepareScript": {
-                                "type": "string",
-                                "maxLength": 20000
-                              },
-                              "env": {
-                                "type": "object",
-                                "additionalProperties": {
-                                  "type": "string"
-                                },
-                                "default": {}
-                              }
-                            },
-                            "required": [
-                              "kind",
-                              "provider",
-                              "size",
-                              "credentialSecretId",
-                              "env"
-                            ],
-                            "additionalProperties": false
+                          "updatedAt": {
+                            "type": "string",
+                            "format": "date-time"
                           }
+                        },
+                        "required": [
+                          "id",
+                          "name",
+                          "kind",
+                          "config",
+                          "createdAt",
+                          "updatedAt"
                         ]
-                      },
-                      "createdAt": {
-                        "type": "string",
-                        "format": "date-time"
-                      },
-                      "updatedAt": {
-                        "type": "string",
-                        "format": "date-time"
                       }
                     },
-                    "required": [
-                      "id",
-                      "name",
-                      "kind",
-                      "config",
-                      "createdAt",
-                      "updatedAt"
-                    ]
-                  }
+                    "nextCursor": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ]
                 }
               }
             }
@@ -10240,10 +11048,19 @@
                       },
                       "integrationId": {
                         "type": "string",
+                        "nullable": true,
                         "minLength": 1
                       },
                       "providerProjectId": {
-                        "type": "string"
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "source": {
+                        "type": "string",
+                        "enum": [
+                          "adopted",
+                          "local"
+                        ]
                       },
                       "title": {
                         "type": "string"
@@ -10370,6 +11187,7 @@
                       "id",
                       "integrationId",
                       "providerProjectId",
+                      "source",
                       "title",
                       "syncedAt",
                       "itemCount",
@@ -10472,10 +11290,19 @@
                     },
                     "integrationId": {
                       "type": "string",
+                      "nullable": true,
                       "minLength": 1
                     },
                     "providerProjectId": {
-                      "type": "string"
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "source": {
+                      "type": "string",
+                      "enum": [
+                        "adopted",
+                        "local"
+                      ]
                     },
                     "title": {
                       "type": "string"
@@ -10602,6 +11429,7 @@
                     "id",
                     "integrationId",
                     "providerProjectId",
+                    "source",
                     "title",
                     "syncedAt",
                     "itemCount",
@@ -11476,10 +12304,19 @@
                         },
                         "integrationId": {
                           "type": "string",
+                          "nullable": true,
                           "minLength": 1
                         },
                         "providerProjectId": {
-                          "type": "string"
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "adopted",
+                            "local"
+                          ]
                         },
                         "title": {
                           "type": "string"
@@ -11606,6 +12443,7 @@
                         "id",
                         "integrationId",
                         "providerProjectId",
+                        "source",
                         "title",
                         "syncedAt",
                         "itemCount",
@@ -11697,6 +12535,596 @@
                     "structure",
                     "issues",
                     "rows"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/project.createLocal": {
+      "post": {
+        "operationId": "project-createLocal",
+        "summary": "Create a local Project — a container SoloW owns outright, with no provider board behind it. Its membership is decided by which Repositories are registered under it, not by a sync.",
+        "tags": [
+          "project"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  }
+                },
+                "required": [
+                  "title"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "integrationId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
+                    "providerProjectId": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "source": {
+                      "type": "string",
+                      "enum": [
+                        "adopted",
+                        "local"
+                      ]
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "syncedAt": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "itemCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "fields": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "providerFieldId": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "text",
+                              "number",
+                              "date",
+                              "single_select",
+                              "iteration",
+                              "user",
+                              "url"
+                            ]
+                          },
+                          "options": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "name": {
+                                  "type": "string"
+                                },
+                                "color": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "name"
+                              ]
+                            }
+                          },
+                          "iterations": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "title": {
+                                  "type": "string"
+                                },
+                                "startDate": {
+                                  "type": "string"
+                                },
+                                "endDate": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "title",
+                                "startDate",
+                                "endDate"
+                              ]
+                            }
+                          },
+                          "position": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "readOnly": {
+                            "type": "boolean"
+                          },
+                          "readOnlyReason": {
+                            "type": "string",
+                            "nullable": true
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "providerFieldId",
+                          "name",
+                          "type",
+                          "options",
+                          "iterations",
+                          "position",
+                          "readOnly",
+                          "readOnlyReason"
+                        ]
+                      }
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "integrationId",
+                    "providerProjectId",
+                    "source",
+                    "title",
+                    "syncedAt",
+                    "itemCount",
+                    "fields",
+                    "createdAt",
+                    "updatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/project.repositories": {
+      "get": {
+        "operationId": "project-repositories",
+        "summary": "The Repositories registered under a Project, and how many Issues each currently contributes. Empty on a mirrored Project — its membership comes from a sync, not this list.",
+        "tags": [
+          "project"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "projectId",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "repositoryId": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "repositoryName": {
+                        "type": "string"
+                      },
+                      "issueCount": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "createdAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "updatedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "repositoryId",
+                      "repositoryName",
+                      "issueCount",
+                      "createdAt",
+                      "updatedAt"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.NOT_FOUND"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/project.attachRepository": {
+      "post": {
+        "operationId": "project-attachRepository",
+        "summary": "Register a Repository under a local Project. Every Issue it already holds is attached immediately, and every Issue it gets later arrives the same way. Refused on a mirrored Project.",
+        "tags": [
+          "project"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "projectId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "repositoryId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "projectId",
+                  "repositoryId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "repositoryId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "repositoryName": {
+                      "type": "string"
+                    },
+                    "issueCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "repositoryId",
+                    "repositoryName",
+                    "issueCount",
+                    "createdAt",
+                    "updatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/project.detachRepository": {
+      "post": {
+        "operationId": "project-detachRepository",
+        "summary": "Remove a Repository from a local Project. Every project item and value that Repository's Issues held in this Project is removed with it; the Issues and the Repository itself are untouched.",
+        "tags": [
+          "project"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "projectId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "repositoryId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "projectId",
+                  "repositoryId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "projectId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "repositoryId": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "projectId",
+                    "repositoryId"
                   ]
                 }
               }
@@ -12652,6 +14080,10 @@
                             "items": {
                               "type": "string"
                             }
+                          },
+                          "hideClosed": {
+                            "type": "boolean",
+                            "default": false
                           }
                         },
                         "required": [
@@ -12659,7 +14091,8 @@
                           "filter",
                           "groupByFieldId",
                           "sort",
-                          "visibleFieldIds"
+                          "visibleFieldIds",
+                          "hideClosed"
                         ]
                       },
                       "createdAt": {
@@ -12876,6 +14309,10 @@
                         "items": {
                           "type": "string"
                         }
+                      },
+                      "hideClosed": {
+                        "type": "boolean",
+                        "default": false
                       }
                     },
                     "required": [
@@ -13028,6 +14465,10 @@
                           "items": {
                             "type": "string"
                           }
+                        },
+                        "hideClosed": {
+                          "type": "boolean",
+                          "default": false
                         }
                       },
                       "required": [
@@ -13035,7 +14476,8 @@
                         "filter",
                         "groupByFieldId",
                         "sort",
-                        "visibleFieldIds"
+                        "visibleFieldIds",
+                        "hideClosed"
                       ]
                     },
                     "createdAt": {
@@ -13241,6 +14683,10 @@
                         "items": {
                           "type": "string"
                         }
+                      },
+                      "hideClosed": {
+                        "type": "boolean",
+                        "default": false
                       }
                     },
                     "required": [
@@ -13392,6 +14838,10 @@
                           "items": {
                             "type": "string"
                           }
+                        },
+                        "hideClosed": {
+                          "type": "boolean",
+                          "default": false
                         }
                       },
                       "required": [
@@ -13399,7 +14849,8 @@
                         "filter",
                         "groupByFieldId",
                         "sort",
-                        "visibleFieldIds"
+                        "visibleFieldIds",
+                        "hideClosed"
                       ]
                     },
                     "createdAt": {
@@ -13642,6 +15093,10 @@
                             "items": {
                               "type": "string"
                             }
+                          },
+                          "hideClosed": {
+                            "type": "boolean",
+                            "default": false
                           }
                         },
                         "required": [
@@ -13649,7 +15104,8 @@
                           "filter",
                           "groupByFieldId",
                           "sort",
-                          "visibleFieldIds"
+                          "visibleFieldIds",
+                          "hideClosed"
                         ]
                       },
                       "createdAt": {
@@ -13891,6 +15347,18 @@
                       "type": "string",
                       "nullable": true
                     },
+                    "provider": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "integrationBaseUrl": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "issueCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
                     "setupFilePatterns": {
                       "type": "array",
                       "items": {
@@ -13913,6 +15381,9 @@
                     "location",
                     "integrationId",
                     "externalFullName",
+                    "provider",
+                    "integrationBaseUrl",
+                    "issueCount",
                     "setupFilePatterns",
                     "createdAt",
                     "updatedAt"
@@ -13976,69 +15447,115 @@
             "session": []
           }
         ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful response",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "id": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "name": {
-                        "type": "string"
-                      },
-                      "source": {
-                        "type": "string",
-                        "enum": [
-                          "local_path",
-                          "remote_url"
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "source": {
+                            "type": "string",
+                            "enum": [
+                              "local_path",
+                              "remote_url"
+                            ]
+                          },
+                          "location": {
+                            "type": "string"
+                          },
+                          "integrationId": {
+                            "type": "string",
+                            "nullable": true,
+                            "minLength": 1
+                          },
+                          "externalFullName": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "provider": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "integrationBaseUrl": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "issueCount": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "setupFilePatterns": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "updatedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name",
+                          "source",
+                          "location",
+                          "integrationId",
+                          "externalFullName",
+                          "provider",
+                          "integrationBaseUrl",
+                          "issueCount",
+                          "setupFilePatterns",
+                          "createdAt",
+                          "updatedAt"
                         ]
-                      },
-                      "location": {
-                        "type": "string"
-                      },
-                      "integrationId": {
-                        "type": "string",
-                        "nullable": true,
-                        "minLength": 1
-                      },
-                      "externalFullName": {
-                        "type": "string",
-                        "nullable": true
-                      },
-                      "setupFilePatterns": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
-                      },
-                      "createdAt": {
-                        "type": "string",
-                        "format": "date-time"
-                      },
-                      "updatedAt": {
-                        "type": "string",
-                        "format": "date-time"
                       }
                     },
-                    "required": [
-                      "id",
-                      "name",
-                      "source",
-                      "location",
-                      "integrationId",
-                      "externalFullName",
-                      "setupFilePatterns",
-                      "createdAt",
-                      "updatedAt"
-                    ]
-                  }
+                    "nextCursor": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "nextCursor"
+                  ]
                 }
               }
             }
@@ -14171,6 +15688,18 @@
                       "type": "string",
                       "nullable": true
                     },
+                    "provider": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "integrationBaseUrl": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "issueCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
                     "setupFilePatterns": {
                       "type": "array",
                       "items": {
@@ -14193,6 +15722,9 @@
                     "location",
                     "integrationId",
                     "externalFullName",
+                    "provider",
+                    "integrationBaseUrl",
+                    "issueCount",
                     "setupFilePatterns",
                     "createdAt",
                     "updatedAt"
@@ -14335,6 +15867,109 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/error.NOT_FOUND"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/repository.seedDefaultLabels": {
+      "post": {
+        "operationId": "repository-seedDefaultLabels",
+        "summary": "Create SoloW's default label taxonomy (type/, prio/, size/, status/, area/) on a linked Repository's GitHub/GitLab, leaving any label it already has untouched.",
+        "tags": [
+          "repository"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "repositoryId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "repositoryId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "created": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "existing": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "created",
+                    "existing"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
                 }
               }
             }
@@ -21325,7 +22960,7 @@
       "session": {
         "type": "apiKey",
         "in": "cookie",
-        "name": "gatecontrol.session"
+        "name": "solow.session"
       }
     },
     "schemas": {

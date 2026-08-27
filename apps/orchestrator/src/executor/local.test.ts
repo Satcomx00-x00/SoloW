@@ -75,10 +75,10 @@ describe("fs — root-jailed (AC-2)", () => {
 
 describe("spawn — environment is verbatim (AC-3)", () => {
   it("gives the child none of the parent's environment beyond what it was handed", async () => {
-    process.env["GATECONTROL_TEST_LEAK"] = "must-not-reach-the-child";
+    process.env["SOLOW_TEST_LEAK"] = "must-not-reach-the-child";
     try {
       const executor = createLocalExecutor(await freshRoot());
-      const proc = executor.spawn(["sh", "-c", 'echo "LEAK=[$GATECONTROL_TEST_LEAK]"'], {
+      const proc = executor.spawn(["sh", "-c", 'echo "LEAK=[$SOLOW_TEST_LEAK]"'], {
         cwd: root as string,
         env: { PATH: process.env["PATH"] ?? "" },
       });
@@ -86,15 +86,15 @@ describe("spawn — environment is verbatim (AC-3)", () => {
       await proc.exited;
       expect(output).toContain("LEAK=[]");
     } finally {
-      delete process.env["GATECONTROL_TEST_LEAK"];
+      delete process.env["SOLOW_TEST_LEAK"];
     }
   });
 
   it("passes through exactly the environment it was given", async () => {
     const executor = createLocalExecutor(await freshRoot());
-    const proc = executor.spawn(["sh", "-c", 'echo "MARKER=[$GATECONTROL_TEST_MARKER]"'], {
+    const proc = executor.spawn(["sh", "-c", 'echo "MARKER=[$SOLOW_TEST_MARKER]"'], {
       cwd: root as string,
-      env: { PATH: process.env["PATH"] ?? "", GATECONTROL_TEST_MARKER: "present" },
+      env: { PATH: process.env["PATH"] ?? "", SOLOW_TEST_MARKER: "present" },
     });
     const output = await new Response(proc.stdout as unknown as ReadableStream).text();
     await proc.exited;

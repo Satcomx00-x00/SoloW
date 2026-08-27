@@ -13,11 +13,11 @@ import { trpc } from "@/trpc/react";
  * Who you are on each connected provider (spec F23 FR-11) — what `assignee:@me` resolves to.
  *
  * The planning table's `My items` tab filters against the assignee logins the provider mirrored
- * onto each row. A GateControl account name is not one of those, so until this is stated the tab
+ * onto each row. A SoloW account name is not one of those, so until this is stated the tab
  * matches on coincidence: empty for almost everyone, and quietly right for the one person whose
  * two names happen to agree.
  *
- * **Why you type it instead of GateControl reading it off the token.** The token belongs to the
+ * **Why you type it instead of SoloW reading it off the token.** The token belongs to the
  * Workspace, not to you: whoever connected the Integration issued it, and everyone here reads
  * through it. So the provider's "who am I" endpoint answers *who issued this token* — which for
  * everyone else in the Workspace is somebody else's name, under a tab called `My items`. That is

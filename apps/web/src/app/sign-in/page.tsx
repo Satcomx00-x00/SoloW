@@ -40,7 +40,7 @@ export default async function SignInPage() {
           aria-hidden
         >
           <svg viewBox="0 0 20 20" className="size-5" fill="none">
-            <title>GateControl</title>
+            <title>SoloW</title>
             {/* The post, and the arm lifted to let one thing through. */}
             <path d="M5 3.5v13" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" />
             <path

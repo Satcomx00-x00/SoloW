@@ -4,7 +4,7 @@
 
 ## Summary
 
-GateControl reports on how much work is getting done and how, so users and operators can
+SoloW reports on how much work is getting done and how, so users and operators can
 understand throughput, agent activity, and the balance between subscription and metered
 billing.
 
@@ -23,14 +23,14 @@ billing.
 
 ## Functional requirements
 
-- **FR-1** GateControl reports completed Tasks over time, per Workspace.
-- **FR-2** GateControl reports agent activity: number of Sessions, agent turns, and Workflow
+- **FR-1** SoloW reports completed Tasks over time, per Workspace.
+- **FR-2** SoloW reports agent activity: number of Sessions, agent turns, and Workflow
   Runs completed.
-- **FR-3** GateControl reports the split of Agent activity between Subscription and API-key
+- **FR-3** SoloW reports the split of Agent activity between Subscription and API-key
   billing modes.
-- **FR-4** GateControl reports concurrency: how many Tasks ran in parallel and how often work
+- **FR-4** SoloW reports concurrency: how many Tasks ran in parallel and how often work
   was Parked or queued.
-- **FR-5** GateControl reports Workflow Run outcomes, including Runs successfully resumed
+- **FR-5** SoloW reports Workflow Run outcomes, including Runs successfully resumed
   after interruption.
 - **FR-6** Reports can be scoped and filtered by Issue, Agent Profile, Executor Profile, and
   time range.

@@ -4,7 +4,7 @@ import { idSchema } from "./common.js";
 /**
  * Contribution registries — the shapes that cross a boundary (issue #3).
  *
- * The registry itself is pure logic and lives in `@gatecontrol/core`; what lives here is
+ * The registry itself is pure logic and lives in `@solow/core`; what lives here is
  * everything that has to survive a round trip: the closed set of arrangeable surfaces, the id
  * grammar, and the arrangement a user saves. They are contracts rather than core types because
  * an arrangement is stored in a row and shipped over tRPC, so it is parsed on the way in and on
@@ -50,6 +50,16 @@ export type SurfaceKey = z.infer<typeof surfaceKeySchema>;
  */
 const MAX_ARRANGED_IDS = 200;
 
+/**
+ * What a stored column width may be.
+ *
+ * Below the minimum a column cannot show its own header, which makes the table unreadable in a
+ * way the person who dragged it there cannot undo without knowing which column they broke. Above
+ * the maximum one column pushes the rest off screen.
+ */
+export const MIN_COLUMN_WIDTH = 60;
+export const MAX_COLUMN_WIDTH = 900;
+
 export const surfaceLayoutSchema = z.object({
   /**
    * A partial list on purpose: an item added by an upgrade (or by a plugin installed yesterday)
@@ -58,6 +68,34 @@ export const surfaceLayoutSchema = z.object({
    */
   order: z.array(contributionIdSchema).max(MAX_ARRANGED_IDS).readonly(),
   hidden: z.array(contributionIdSchema).max(MAX_ARRANGED_IDS).readonly(),
+  /**
+   * Explicitly turned **on**, overriding a surface's own default.
+   *
+   * The third state, and it has to exist. A surface may hide something by default — the project
+   * table hides a column the provider reports read-only and fills in for no row, because that
+   * column is a padlock and a dash on every line — and "the user has not decided" then has to be
+   * tellable from "the user turned it back on". With only `hidden`, the two are the same absence,
+   * and the default would silently re-hide a column the moment the page reloaded.
+   *
+   * Optional so every layout saved before this existed still parses, and empty by default: no
+   * entry here means the surface's own default decides.
+   */
+  shown: z.array(contributionIdSchema).max(MAX_ARRANGED_IDS).readonly().default([]),
+  /**
+   * Per-item pixel widths, for a surface whose items are columns.
+   *
+   * Only the project table uses this; the status bar and the palette have nothing to size. It
+   * lives here anyway rather than in a table-specific store because it is the same *kind* of
+   * fact as `order` and `hidden` — this person's arrangement of this surface — and a second
+   * preference row for it would be a second thing to keep in step.
+   *
+   * Bounded on both ends: a column narrower than `MIN_COLUMN_WIDTH` cannot show its own header,
+   * and one wider than `MAX_COLUMN_WIDTH` pushes every other column off screen. A stored value is
+   * user-supplied, so it is clamped on the way in rather than trusted.
+   */
+  widths: z
+    .record(contributionIdSchema, z.number().int().min(MIN_COLUMN_WIDTH).max(MAX_COLUMN_WIDTH))
+    .default({}),
 });
 
 /**
@@ -68,7 +106,12 @@ export const surfaceLayoutSchema = z.object({
 export type SurfaceLayout = z.infer<typeof surfaceLayoutSchema>;
 
 /** No arrangement saved yet: everything visible, in registered priority order. */
-export const DEFAULT_SURFACE_LAYOUT: SurfaceLayout = { order: [], hidden: [] };
+export const DEFAULT_SURFACE_LAYOUT: SurfaceLayout = {
+  order: [],
+  hidden: [],
+  shown: [],
+  widths: {},
+};
 
 export const getSurfaceLayoutInput = z.object({ surface: surfaceKeySchema });
 export type GetSurfaceLayoutInput = z.infer<typeof getSurfaceLayoutInput>;

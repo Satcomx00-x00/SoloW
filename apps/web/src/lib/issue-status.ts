@@ -1,4 +1,4 @@
-import { type IssueSource, type IssueStatus, LOCAL_ISSUE_SOURCE } from "@gatecontrol/contracts";
+import { type IssueSource, type IssueStatus, LOCAL_ISSUE_SOURCE } from "@solow/contracts";
 import {
   CircleCheck,
   CircleDashed,
@@ -19,7 +19,7 @@ export interface IssueStatusStyle {
   icon: LucideIcon;
   /** Foreground colour on its own, for a bare glyph or label. */
   text: string;
-  /** Tinted pill: fill, text and hairline edge. */
+  /** Soft pill: `.badge-soft` plus the hue it should mix, so there is one definition of "soft". */
   badge: string;
 }
 
@@ -34,22 +34,22 @@ export const ISSUE_STATUS_STYLE: Record<IssueStatus, IssueStatusStyle> = {
   open: {
     icon: CircleDashed,
     text: "text-state-queued",
-    badge: "border-state-queued/30 bg-state-queued/10 text-state-queued",
+    badge: "badge-soft [--badge-color:var(--state-queued)]",
   },
   in_progress: {
     icon: LoaderCircle,
     text: "text-state-running",
-    badge: "border-state-running/35 bg-state-running/12 text-state-running",
+    badge: "badge-soft [--badge-color:var(--state-running)]",
   },
   resolved: {
     icon: CircleCheck,
     text: "text-state-done",
-    badge: "border-state-done/30 bg-state-done/12 text-state-done",
+    badge: "badge-soft [--badge-color:var(--state-done)]",
   },
   closed: {
     icon: CircleSlash,
     text: "text-state-idle",
-    badge: "border-state-idle/25 bg-state-idle/10 text-state-idle",
+    badge: "badge-soft [--badge-color:var(--state-idle)]",
   },
 };
 

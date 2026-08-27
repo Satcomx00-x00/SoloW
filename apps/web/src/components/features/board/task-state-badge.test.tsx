@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { afterEach, describe, expect, it } from "bun:test";
-import type { TaskState } from "@gatecontrol/contracts";
+import type { TaskState } from "@solow/contracts";
 import { cleanup, render, screen } from "@testing-library/react";
 import { BOARD_COLUMNS, STATE_LABELS, STATE_STYLE } from "@/lib/task-states";
 import { TaskStateBadge } from "./task-state-badge";

@@ -4,7 +4,7 @@
 
 ## Summary
 
-GateControl has a board of Tasks — the *execution* layer, where an agent's run advances one
+SoloW has a board of Tasks — the *execution* layer, where an agent's run advances one
 Issue. What it has never had is the layer above: the table a team plans in. Which issues exist,
 what state they are in, who holds them, how big they are, which iteration they belong to, which
 epic they roll up into, and which pull request will close them.
@@ -33,7 +33,7 @@ table because it exists, not because someone pressed a button.
 
 ## User stories
 
-- As a Team Lead, I want the table my team already plans in, so adopting GateControl does not
+- As a Team Lead, I want the table my team already plans in, so adopting SoloW does not
   mean keeping a second backlog.
 - As a Team Lead, I want it to work on GitLab, so the tool is not chosen by which host we use.
 - As a Team Lead, I want a status I change here to be the status my team sees in GitHub or
@@ -90,6 +90,22 @@ table because it exists, not because someone pressed a button.
 - **FR-17** WHEN a change omits a field, THE SYSTEM SHALL leave that field alone. Absent and
   cleared are different instructions, and an editor that sent its whole form would silently
   revert every field it did not display.
+- **FR-18** WHERE a provider has nothing shaped like a Project to mirror — GitLab, whose "Projects"
+  are its repositories, or a provider that declares no `projects` capability at all — THE SYSTEM
+  SHALL let a person create a Project SoloW holds outright, instead of adopting one. This
+  reverses [Decision 0018](../decisions/0018-provider-owned-project-fields.md)'s exclusion of
+  provider-side creation only in the direction it never covered: nothing is created *on* a
+  provider by this, matching the precedent set for local Issues by #15.
+- **FR-19** THE SYSTEM SHALL let an Owner register a Repository under a local Project. A local
+  Project has no provider board to walk for membership, so this registration decides it directly:
+  every Issue the Repository already holds is backfilled in, and every Issue it gains afterward —
+  created locally or ingested by #125 — is attached automatically. A Repository MAY be registered
+  under more than one local Project.
+- **FR-20** THE SYSTEM SHALL let an Owner remove a Repository from a local Project, deleting that
+  Repository's items (and any field values on them) from the Project without touching the
+  Repository or its Issues themselves.
+- **FR-21** A local Project SHALL never be synced to, or created on, any provider, and SHALL carry
+  no `project_field` rows — there is no provider board those fields could have been read from.
 
 ## Non-functional requirements
 
@@ -111,14 +127,14 @@ table because it exists, not because someone pressed a button.
 ## States & rules
 
 - A Project belongs to exactly one Integration, because its fields are that provider's fields.
-- An item is an Issue that GateControl has imported. An item with no issue behind it (Projects
+- An item is an Issue that SoloW has imported. An item with no issue behind it (Projects
   v2's "draft") is out of scope for a first version.
 - The mirror is a cache and never the authority: on a conflict the provider's value wins, and the
   local row is corrected on the next poll.
-- A field GateControl cannot map is still listed, read-only, named as the provider names it.
+- A field SoloW cannot map is still listed, read-only, named as the provider names it.
   Hiding it would make the table's column set a lie about what the project holds.
 - Epic membership comes from the provider's own hierarchy — sub-issues on GitHub, epics or
-  parent links on GitLab. GateControl does not invent a hierarchy of its own, and offers no way
+  parent links on GitLab. SoloW does not invent a hierarchy of its own, and offers no way
   to create a parent a provider cannot store: that edge would be invisible everywhere else the
   team works. The edge is mirrored onto the child Issue as the provider's own parent id, which is
   what lets a parent that has not been imported yet still be recognised when it arrives.
@@ -126,8 +142,8 @@ table because it exists, not because someone pressed a button.
   never when a Status field reads "Done". A status column is a team's convention — renamable,
   reorderable, and left behind by whoever closed the issue on GitHub instead. Closed is a fact.
 - A linked pull or merge request on a row is the **provider's** link, mirrored and read-only.
-  GateControl does not open, review, approve or merge one from this table — that is issue #71's,
-  behind the review gate — and it is not the branch a GateControl Task produced either
+  SoloW does not open, review, approve or merge one from this table — that is issue #71's,
+  behind the review gate — and it is not the branch a SoloW Task produced either
   ([Decision 0006](../decisions/0006-kanban-scoped-to-issues.md)'s execution layer, recorded on
   the Task). Two different facts, two different columns: one says what the provider knows, the
   other what an agent did here, and merging them would answer neither question.
@@ -176,8 +192,8 @@ table because it exists, not because someone pressed a button.
 - **A row whose external id belongs to two repositories** — GitLab's `iid` restarts at 1 per
   project, so a row is resolved against *its own* repository first. Joining on the id alone would
   point a row at another repository's issue, which is worse than the empty table it replaced.
-- **An issue deleted on the provider** — the row disappears on the next poll; anything GateControl
-  attached to it (Tasks, review history) survives, because that is GateControl's own.
+- **An issue deleted on the provider** — the row disappears on the next poll; anything SoloW
+  attached to it (Tasks, review history) survives, because that is SoloW's own.
 - **An item with no start or target date, under the roadmap** — listed beside the timeline, never
   dropped: "not scheduled" is the answer a roadmap is most often asked for. An item holding one of
   the two dates is drawn as a point on the day it knows, marked as having one date only —
@@ -203,7 +219,7 @@ table because it exists, not because someone pressed a button.
 
 ## Out of scope
 
-- **Creating or deleting a project on the provider.** GateControl mirrors one that exists.
+- **Creating or deleting a project on the provider.** SoloW mirrors one that exists.
 - **Draft items** — a Projects v2 item with no issue behind it. Every row here is an Issue. They
   are **counted and reported**, never silently dropped: a table shorter than the same project on
   the provider, with nothing to explain the difference, is indistinguishable from a broken import.

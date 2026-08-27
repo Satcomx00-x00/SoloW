@@ -22,7 +22,7 @@ function Mark() {
       aria-hidden
     >
       <svg viewBox="0 0 20 20" className="size-4" fill="none">
-        <title>GateControl</title>
+        <title>SoloW</title>
         {/* The post, and the arm lifted to let one thing through. */}
         <path d="M5 3.5v13" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" />
         <path
@@ -95,7 +95,7 @@ function RailLink({
             <Badge
               aria-hidden
               variant="outline"
-              className="-top-1 -right-1 absolute h-3 min-w-0 rounded-full border-none bg-amber-500 px-1 py-0 font-semibold text-[7px] text-white leading-none dark:bg-amber-400 dark:text-amber-950"
+              className="badge-soft -top-1 -right-1 absolute h-3 min-w-0 rounded-full px-1 py-0 font-semibold text-[7px] leading-none [--badge-color:var(--state-review)]"
             >
               WIP
             </Badge>

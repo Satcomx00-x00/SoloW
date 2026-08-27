@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { afterEach, describe, expect, it } from "bun:test";
-import type { ProjectFieldDto, ProjectItemDto } from "@gatecontrol/contracts";
+import type { ProjectFieldDto, ProjectItemDto } from "@solow/contracts";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { ProjectRoadmap, pickRoadmapDateFields, planRoadmap } from "./project-roadmap";
 import type { ProjectRow } from "./project-table";
@@ -49,7 +49,9 @@ const row = (id: string, title: string, values: ProjectItemDto["values"] = {}): 
   issueNumber: 7,
   issueUrl: null,
   linkedChangeRequests: [],
+  priority: null,
   labels: [],
+  tasks: null,
 });
 
 const scheduled = row("r1", "Ship the mirror", {

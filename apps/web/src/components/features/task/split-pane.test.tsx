@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { afterEach, describe, expect, it } from "bun:test";
-import { TASK_PANE_MAX_WIDTH, TASK_PANE_MIN_WIDTH } from "@gatecontrol/contracts";
+import { TASK_PANE_MAX_WIDTH, TASK_PANE_MIN_WIDTH } from "@solow/contracts";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { SplitPane } from "./split-pane";
 

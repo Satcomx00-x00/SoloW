@@ -1,6 +1,6 @@
 "use client";
 
-import type { AdoptProjectResultDto } from "@gatecontrol/contracts";
+import type { AdoptProjectResultDto } from "@solow/contracts";
 import { Loader2, Plus, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -42,7 +42,7 @@ export function matches(
 /**
  * Adopting a project (issue #126).
  *
- * GateControl never creates a project on its provider — it mirrors one that already exists
+ * SoloW never creates a project on its provider — it mirrors one that already exists
  * (Decision 0018, Out of scope). So this dialog is the whole of setup: what can your token see,
  * and which of those do you want to follow.
  *
@@ -95,8 +95,8 @@ export function AdoptProjectDialog({ onAdopted }: { onAdopted: (projectId: strin
         <DialogHeader>
           <DialogTitle>Adopt a project</DialogTitle>
           <DialogDescription>
-            Projects your connected tokens can see. GateControl mirrors one that already exists —
-            create a new one in your provider&apos;s own interface.
+            Projects your connected tokens can see. SoloW mirrors one that already exists — create a
+            new one in your provider&apos;s own interface.
           </DialogDescription>
         </DialogHeader>
 

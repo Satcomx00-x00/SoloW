@@ -1,17 +1,19 @@
 import "server-only";
 import {
   CommonErrorCode,
+  type CreateIssueCommentInput,
   err,
   IntegrationErrorCode,
+  type IssueCommentListDto,
   type IssueDetailDto,
   type IssueField,
   ok,
   type Result,
   type UpdateExternalIssueInput,
-} from "@gatecontrol/contracts";
-import { issue, repository } from "@gatecontrol/db";
-import type { IssuePatch } from "@gatecontrol/scm";
-import { providerManifest } from "@gatecontrol/scm";
+} from "@solow/contracts";
+import { issue, repository } from "@solow/db";
+import type { IssuePatch } from "@solow/scm";
+import { providerManifest } from "@solow/scm";
 import { and, eq } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
 import { driverWith, loadCredential } from "./integration.js";
@@ -76,7 +78,7 @@ async function loadImportedIssue(
  * editor renders as disabled controls carrying a sentence, rather than as controls that fail on
  * save.
  */
-const NO_WRITES_REASON = "This provider does not support editing issues from GateControl.";
+const NO_WRITES_REASON = "This provider does not support editing issues from SoloW.";
 
 function writeSupport(provider: string): { writes: IssueField[]; cannot: Record<string, string> } {
   const manifest = providerManifest(provider);
@@ -146,6 +148,39 @@ export async function readIssueDetail(
   await mirror(ctx, loaded.data.row.id, current);
   const support = writeSupport(provider);
 
+  /*
+   * The children, read from the mirror rather than from the provider.
+   *
+   * The parent edge is already synced onto every Issue (`external_parent_id`), so asking the
+   * provider again would be a second round trip for an answer we hold — and one that could
+   * disagree with the hierarchy the table beside this panel is drawing from the same column.
+   *
+   * Scoped by repository as well as by parent id: GitLab's `iid` restarts at 1 per project, so a
+   * bare parent id can name two different issues, and nesting a row under a stranger's epic is
+   * worse than showing none.
+   */
+  const children = loaded.data.row.externalId
+    ? await ctx.db
+        .select({
+          id: issue.id,
+          externalNumber: issue.externalNumber,
+          title: issue.title,
+          externalUrl: issue.externalUrl,
+          externalState: issue.externalState,
+        })
+        .from(issue)
+        .where(
+          and(
+            eq(issue.workspaceId, ctx.workspaceId),
+            eq(issue.externalParentId, loaded.data.row.externalId),
+            ...(loaded.data.row.repositoryId
+              ? [eq(issue.repositoryId, loaded.data.row.repositoryId)]
+              : []),
+          ),
+        )
+        .orderBy(issue.externalNumber)
+    : [];
+
   return ok({
     issueId: loaded.data.row.id,
     externalNumber: current.number,
@@ -161,6 +196,13 @@ export async function readIssueDetail(
     availableMilestones: milestones,
     writes: support.writes,
     cannot: support.cannot,
+    subIssues: children.map((child) => ({
+      issueId: child.id,
+      number: child.externalNumber,
+      title: child.title,
+      url: child.externalUrl,
+      closed: child.externalState === "closed",
+    })),
   });
 }
 
@@ -250,4 +292,76 @@ async function mirror(
       updatedAt: new Date().toISOString(),
     })
     .where(and(eq(issue.workspaceId, ctx.workspaceId), eq(issue.id, issueId)));
+}
+
+/**
+ * The discussion on one issue, read live.
+ *
+ * Not mirrored, and deliberately: a comment thread is the one part of an issue that changes
+ * without anything here doing it, and a stale copy of a conversation is worse than no copy —
+ * it looks like the whole of it.
+ */
+export async function listIssueComments(
+  ctx: RequestContext,
+  input: { issueId: string },
+): Promise<Result<IssueCommentListDto, typeof CommonErrorCode.NotFound | IntegrationErrorCode>> {
+  const loaded = await loadImportedIssue(ctx, input.issueId);
+  if (!loaded.ok) return loaded;
+
+  const credential = await loadCredential(ctx, loaded.data.integrationId);
+  if (!credential.ok) return err(CommonErrorCode.NotFound);
+  const provider = credential.data.row.provider;
+
+  const issues = driverWith(provider, "issues");
+  if (!issues.ok) return err(issues.error);
+
+  const comments = await issues.data.listComments(
+    credential.data.credential,
+    loaded.data.repoFullName,
+    loaded.data.issueNumber,
+  );
+
+  return ok({
+    comments: comments.map((comment) => ({
+      externalId: comment.externalId,
+      author: comment.author,
+      body: comment.body,
+      createdAt: comment.createdAt,
+      updatedAt: comment.updatedAt,
+      url: comment.url,
+    })),
+    // The composer is shown only where posting can actually work — a provider that reads and
+    // does not write shows the thread with no box, rather than a box that fails on submit.
+    canComment: driverWith(provider, "issueWrites").ok,
+  });
+}
+
+/** Post a comment, and answer with the thread as it now stands. */
+export async function createIssueComment(
+  ctx: RequestContext,
+  input: CreateIssueCommentInput,
+): Promise<Result<IssueCommentListDto, typeof CommonErrorCode.NotFound | IntegrationErrorCode>> {
+  const loaded = await loadImportedIssue(ctx, input.issueId);
+  if (!loaded.ok) return loaded;
+
+  const credential = await loadCredential(ctx, loaded.data.integrationId);
+  if (!credential.ok) return err(CommonErrorCode.NotFound);
+  const writes = driverWith(credential.data.row.provider, "issueWrites");
+  if (!writes.ok) return err(writes.error);
+
+  await writes.data.createComment(
+    credential.data.credential,
+    loaded.data.repoFullName,
+    loaded.data.issueNumber,
+    input.body,
+  );
+
+  /*
+   * Re-read rather than appending the write's answer to a list held on the client.
+   *
+   * Two reasons, and the second decides it: a provider may render or normalise what was posted,
+   * and someone else may have commented while this one was being written. Answering with the
+   * whole thread is the only response that cannot be missing a message.
+   */
+  return listIssueComments(ctx, { issueId: input.issueId });
 }

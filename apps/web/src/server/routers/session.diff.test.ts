@@ -13,8 +13,8 @@ import {
   taskRepository,
   task as taskTable,
   workspace,
-} from "@gatecontrol/db";
-import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
+} from "@solow/db";
+import { createTestDb, type TestDb } from "@solow/db/testing";
 import type { BaseContext } from "../trpc.js";
 import { appRouter } from "./index.js";
 
@@ -91,7 +91,7 @@ async function fixture(db: TestDb) {
       workspaceId: ws.id,
       taskId: task.id,
       repositoryId: repoA.id,
-      checkoutBranch: `gatecontrol/task-${task.id}`,
+      checkoutBranch: `solow/task-${task.id}`,
       position: 0,
     },
     {
@@ -142,7 +142,7 @@ describe("session.get — the diff a reviewer is shown", () => {
   it("returns one entry per Repository, in attachment order", async () => {
     const fx = await fixture(db);
     await appendDiff(db, fx, 0, {
-      diffRef: "gatecontrol/task-1",
+      diffRef: "solow/task-1",
       repositoryId: fx.repoA,
       repositoryName: "api",
       ...change("src/api.ts"),
@@ -167,13 +167,13 @@ describe("session.get — the diff a reviewer is shown", () => {
     // show a reviewer the same repository twice, once stale.
     const fx = await fixture(db);
     await appendDiff(db, fx, 0, {
-      diffRef: "gatecontrol/task-1",
+      diffRef: "solow/task-1",
       repositoryId: fx.repoA,
       repositoryName: "api",
       ...change("src/first-round.ts"),
     });
     await appendDiff(db, fx, 1, {
-      diffRef: "gatecontrol/task-1",
+      diffRef: "solow/task-1",
       repositoryId: fx.repoA,
       repositoryName: "api",
       ...change("src/second-round.ts"),
@@ -189,7 +189,7 @@ describe("session.get — the diff a reviewer is shown", () => {
     // The payload column is untyped JSON and the log is append-only, so an event written by an
     // older build has to keep parsing — otherwise every finished Task's Changes tab goes blank.
     const fx = await fixture(db);
-    await appendDiff(db, fx, 0, { diffRef: "gatecontrol/task-1", ...change("src/legacy.ts") });
+    await appendDiff(db, fx, 0, { diffRef: "solow/task-1", ...change("src/legacy.ts") });
 
     const detail = await caller(db, fx.workspaceId).session.get({ sessionId: fx.sessionId });
 
@@ -211,7 +211,7 @@ describe("session.get — the diff a reviewer is shown", () => {
       ...change("src/lib.ts"),
     });
     await appendDiff(db, fx, 1, {
-      diffRef: "gatecontrol/task-1",
+      diffRef: "solow/task-1",
       repositoryId: fx.repoA,
       repositoryName: "api",
       ...change("src/api.ts"),
@@ -229,9 +229,9 @@ describe("session.get — the diff a reviewer is shown", () => {
     // single-Repository Task a second, superseded "Unnamed repository" group — and `diff`, taken
     // from the head of the list, would be the stale one.
     const fx = await fixture(db);
-    await appendDiff(db, fx, 0, { diffRef: "gatecontrol/task-1", ...change("src/old-stale.ts") });
+    await appendDiff(db, fx, 0, { diffRef: "solow/task-1", ...change("src/old-stale.ts") });
     await appendDiff(db, fx, 1, {
-      diffRef: "gatecontrol/task-1",
+      diffRef: "solow/task-1",
       repositoryId: fx.repoA,
       repositoryName: "api",
       ...change("src/current.ts"),

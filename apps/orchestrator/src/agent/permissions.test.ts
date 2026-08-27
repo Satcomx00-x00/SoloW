@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import type { AcpPermissionRequest } from "@gatecontrol/acp";
+import type { AcpPermissionRequest } from "@solow/acp";
 import { headlessFallbackPolicy, PermissionInbox } from "./permissions.js";
 
 /**

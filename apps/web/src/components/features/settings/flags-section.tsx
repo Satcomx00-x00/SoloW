@@ -1,6 +1,6 @@
 "use client";
 
-import type { FlagDto } from "@gatecontrol/contracts";
+import type { FlagDto } from "@solow/contracts";
 import { useState } from "react";
 import { ConfirmDialog } from "@/components/features/confirm-action";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,7 +12,7 @@ import { trpc } from "@/trpc/react";
  * Feature flags, toggleable from Settings (issue #21).
  *
  * Every registered flag is listed here, not just the ones already turned on — that is what
- * makes this the discovery surface for what GateControl can do beyond the core loop, the same
+ * makes this the discovery surface for what SoloW can do beyond the core loop, the same
  * way status-bar-section.tsx lists every registered status item rather than only the visible
  * ones. Reuses the Checkbox + Label row idiom from that section rather than introducing a new
  * Switch primitive: none exists in `components/ui` yet, and issue #76 is the tracked owner of

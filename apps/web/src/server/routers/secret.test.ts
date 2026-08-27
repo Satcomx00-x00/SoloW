@@ -1,9 +1,9 @@
 /// <reference types="bun-types" />
 
 import { beforeAll, beforeEach, describe, expect, it } from "bun:test";
-import { CREDENTIAL_EXPIRED_REASON } from "@gatecontrol/core";
-import { ensureDefaultAgentCatalog, issue as issueTable, workspace } from "@gatecontrol/db";
-import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
+import { CREDENTIAL_EXPIRED_REASON } from "@solow/core";
+import { ensureDefaultAgentCatalog, issue as issueTable, workspace } from "@solow/db";
+import { createTestDb, type TestDb } from "@solow/db/testing";
 import { updateTaskState } from "../dal/task.js";
 import { resetRateLimits } from "../rate-limit.js";
 import type { BaseContext } from "../trpc.js";
@@ -75,14 +75,14 @@ describe("secret.set — resuming Tasks after a credential is replaced", () => {
   let db: TestDb;
 
   beforeAll(() => {
-    process.env.GATECONTROL_SECRET_KEY ??= Buffer.alloc(32, 6).toString("base64");
-    process.env.GATECONTROL_STREAM_SECRET ??= "test-stream-secret";
-    process.env.GATECONTROL_AUTH_SECRET ??= "test-auth-secret";
+    process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 6).toString("base64");
+    process.env.SOLOW_STREAM_SECRET ??= "test-stream-secret";
+    process.env.SOLOW_AUTH_SECRET ??= "test-auth-secret";
     // Without an orchestrator wired, `enqueueTaskRun` throws unless dev-owner mode is on — and a
     // resume that throws is exactly what the router's per-Task try/catch swallows, so the count
     // this whole file asserts on would silently read 0 without this (task.dependency.test.ts /
     // workflow.test.ts hit the same thing).
-    process.env.GATECONTROL_DEV_OWNER ??= "on";
+    process.env.SOLOW_DEV_OWNER ??= "on";
   });
 
   beforeEach(() => {
@@ -151,10 +151,10 @@ describe("secret.set — resuming Tasks after a credential is replaced", () => {
     });
     // A second Task under the same Agent Profile, so it spends the same Secret.
     const agents = await c.profile.agent.list({});
-    const agent = agents.find((a) => a.secretId === secretId);
+    const agent = agents.items.find((a) => a.secretId === secretId);
     if (!agent) throw new Error("seed failed");
-    const executors = await c.profile.executor.list({});
-    const repos = await c.repository.list({});
+    const executors = (await c.profile.executor.list({})).items;
+    const repos = (await c.repository.list({})).items;
     const [issue] = await db
       .insert(issueTable)
       .values({ workspaceId: wsId, title: "Also stuck" })

@@ -9,7 +9,7 @@
 
 **Input**: User description: "create the core program"
 
-Scope note: "the core program" is the **thin end-to-end vertical slice** that makes GateControl
+Scope note: "the core program" is the **thin end-to-end vertical slice** that makes SoloW
 work — not the full F01–F18 surface. It is the single-Task loop on a local, single-user
 deployment: create an Issue, break it into a Task on a Kanban board, run one agent in an
 isolated working copy, watch it live, review the proposed changes, and approve. Breadth
@@ -25,7 +25,7 @@ notifications, guided onboarding) is deliberately deferred.
 - Q: How many agent tools must the core slice support in v1? → A: One agent — Claude Code —
   driven through the standard agent protocol; other agents are added later by configuration.
 - Q: How is a Repository provided to a Task in v1? → A: Both — an existing local clone (a path
-  on the machine) or a remote URL that GateControl clones.
+  on the machine) or a remote URL that SoloW clones.
 - Q: On approval, what happens to the accepted changes? → A: Commit them onto a new local
   branch (no push, no pull request).
 - Q: What is the default subscription concurrency cap (per Agent Profile)? → A: 3.
@@ -211,7 +211,7 @@ in local single-user mode (one Workspace).
   API Key) and concurrency cap.
 - **Executor Profile**: Reusable runtime configuration; v1 supports the local type only.
 - **Repository**: A connected Git repository a Task operates on, provided either as an
-  existing local clone (a path on the machine) or as a remote URL that GateControl clones.
+  existing local clone (a path on the machine) or as a remote URL that SoloW clones.
 - **Worktree**: The isolated working copy created for a Task.
 - **Session**: One run of an agent against a Task; records the conversation, events, and the
   proposed diff.
@@ -263,7 +263,7 @@ Written in EARS syntax:
 - **FR-020**: THE SYSTEM SHALL scope every Issue, Task, Profile, Session, and Secret to its
   Workspace and filter every read by the Workspace.
 - **FR-021**: THE SYSTEM SHALL let the Owner connect a Repository either as an existing local
-  clone path or as a remote URL that GateControl clones, and SHALL create the Task's isolated
+  clone path or as a remote URL that SoloW clones, and SHALL create the Task's isolated
   working copy from it.
 - **FR-022**: THE SYSTEM SHALL support running the Claude Code agent through the standard agent
   protocol in v1, with the design allowing other protocol-compliant agents to be added later by
@@ -303,7 +303,7 @@ Flag OFF restores prior behavior without a deployment.
 |---|---|---|
 | Local database rows | + a small, bounded set (Task, Session, events, review) | Local storage only |
 | Working copies | + one isolated copy per Task, cleaned up on completion/discard | Local disk |
-| Agent model usage | Charged to the Owner's subscription or API key | External to GateControl; bounded by concurrency cap |
+| Agent model usage | Charged to the Owner's subscription or API key | External to SoloW; bounded by concurrency cap |
 | External services | None required | Local-first, no telemetry |
 
 ---
@@ -327,7 +327,7 @@ all of the above. No third-party personal data is processed.
 
 - Local, single-user deployment; one Workspace (default — confirm before implementation).
 - One Repository per Task (provided as an existing local clone path or a remote URL that
-  GateControl clones); the local Executor only (default — confirm before implementation).
+  SoloW clones); the local Executor only (default — confirm before implementation).
 - v1 supports a single agent, Claude Code, driven through the standard agent protocol; the
   agent tool is installed and available locally, and the Owner has provided either a
   subscription credential or an API key (clarified 2026-08-17).

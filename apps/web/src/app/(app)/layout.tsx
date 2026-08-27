@@ -1,4 +1,4 @@
-import { createDb, SEED_WORKSPACE_A } from "@gatecontrol/db";
+import { createDb, SEED_WORKSPACE_A } from "@solow/db";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";

@@ -1,10 +1,18 @@
 import {
+  Blocks,
+  Bot,
   Columns3,
+  FlaskConical,
   FolderGit2,
   Inbox,
+  KeyRound,
   type LucideIcon,
+  PanelBottom,
+  PlugZap,
+  Server,
   Settings,
   Table2,
+  UserRound,
   Workflow,
 } from "lucide-react";
 
@@ -144,3 +152,139 @@ export function sectionFor(pathname: string): Section | null {
  * half — the workspace destinations — and the palette adds one entry per Project itself.
  */
 export const SECTIONS = WORKSPACE_SECTIONS;
+
+/**
+ * The sections of Settings, grouped — the second half of "the shape of the app, in one file".
+ *
+ * This list used to exist twice and agree nowhere: nine `<Card id="…">` stacked into a single
+ * 3,000-line column by `settings.tsx`, and a hard-coded four of them in the sidebar. So five
+ * sections — including the two the command palette links straight to — had no entry in the
+ * navigation at all, and reaching Feature flags meant scrolling past every MCP token and executor
+ * form in the Workspace. One registry, read by both, is what stops the two drifting again.
+ *
+ * The **group** is what turns the page from a pile into a page. A person arrives knowing the kind
+ * of thing they came to change — "where the work comes from", "what runs it" — not the name of the
+ * card that holds it, and a group is small enough to read in one screen. It is also the unit the
+ * page renders: one group at a time, so no section is behind a scroll of unrelated forms.
+ *
+ * The order inside a group is the order things are set up in, and that is deliberate: a Secret,
+ * then the Agent Profile that spends it, then somewhere to execute it.
+ */
+export interface SettingsSection {
+  /** Also the `id` of the card it renders, so an in-page anchor points at the right form. */
+  id: string;
+  label: string;
+  /** One line for the picker: what this section decides. */
+  caption: string;
+  group: SettingsGroup;
+  icon: LucideIcon;
+}
+
+export type SettingsGroup = "Connections" | "Agents" | "Extensions" | "Interface";
+
+/** The groups in the order they are listed, each with the sentence its pane opens on. */
+export const SETTINGS_GROUPS: readonly { name: SettingsGroup; caption: string }[] = [
+  {
+    name: "Connections",
+    caption: "Where the work comes from, and where an agent is allowed to write.",
+  },
+  {
+    name: "Agents",
+    caption: "A credential, the agent that spends it, and the machine it runs on.",
+  },
+  { name: "Extensions", caption: "What can reach SoloW from outside." },
+  { name: "Interface", caption: "How this app looks, and what it lets you try early." },
+];
+
+export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
+  {
+    id: "integrations",
+    label: "Integrations",
+    caption: "The GitHub, GitLab and Gitea accounts this Workspace reads work from",
+    group: "Connections",
+    icon: PlugZap,
+  },
+  {
+    id: "repositories",
+    label: "Repositories",
+    caption: "The checkouts an agent is allowed to work in",
+    group: "Connections",
+    icon: FolderGit2,
+  },
+  {
+    id: "provider-identity",
+    label: "Your provider logins",
+    caption: "Which account is you on each provider — what @me resolves to",
+    group: "Connections",
+    icon: UserRound,
+  },
+  {
+    id: "secrets",
+    label: "Secrets",
+    caption: "Write-only credentials, never shown again after they are set",
+    group: "Agents",
+    icon: KeyRound,
+  },
+  {
+    id: "agent-profiles",
+    label: "Agent profiles",
+    caption: "Which agent runs, how it authenticates, how many at once",
+    group: "Agents",
+    icon: Bot,
+  },
+  {
+    id: "executor-profiles",
+    label: "Executors",
+    caption: "Where an agent's commands actually run",
+    group: "Agents",
+    icon: Server,
+  },
+  {
+    id: "mcp",
+    label: "MCP",
+    caption: "Tokens that let an outside agent drive this Workspace",
+    group: "Extensions",
+    icon: Blocks,
+  },
+  {
+    id: "status-bar",
+    label: "Status bar",
+    caption: "What the bar along the bottom shows, and in what order",
+    group: "Interface",
+    icon: PanelBottom,
+  },
+  {
+    id: "flags",
+    label: "Feature flags",
+    caption: "Unfinished work, switchable on for this Workspace",
+    group: "Interface",
+    icon: FlaskConical,
+  },
+];
+
+/**
+ * The section an id names, falling back to the first one.
+ *
+ * A fallback rather than a null: `/settings` with no parameter is an address people type, and it
+ * has to open on something. An unknown id falls back too — a stale bookmark should land on a
+ * settings page, not on an error.
+ */
+export function settingsSectionFor(id: string | null | undefined): SettingsSection {
+  const first = SETTINGS_SECTIONS[0];
+  if (!first) throw new Error("SETTINGS_SECTIONS is empty");
+  if (!id) return first;
+  // Tolerates a leading `#`: `/settings#secrets` was the address for months and is still in
+  // people's history and in older docs.
+  const wanted = id.replace(/^#/, "");
+  return SETTINGS_SECTIONS.find((s) => s.id === wanted) ?? first;
+}
+
+/** The sections of one group, in setup order. */
+export function settingsSectionsIn(group: SettingsGroup): SettingsSection[] {
+  return SETTINGS_SECTIONS.filter((s) => s.group === group);
+}
+
+/** The address of one settings section. */
+export function settingsHref(id: string): string {
+  return `/settings?section=${id}`;
+}

@@ -1,9 +1,5 @@
-import {
-  type ClaudeSession,
-  type ClaudeUpdate,
-  startClaudeSession,
-} from "@gatecontrol/claude-code";
-import { detectFailureSignal, type FailureSignal } from "@gatecontrol/core";
+import { type ClaudeSession, type ClaudeUpdate, startClaudeSession } from "@solow/claude-code";
+import { detectFailureSignal, type FailureSignal } from "@solow/core";
 import type { Executor } from "../executor/types.js";
 import type {
   AgentHandle,
@@ -14,7 +10,7 @@ import type {
 } from "./runner.js";
 
 /**
- * Claude Code as GateControl's agent (task TASK-014) — now one adapter among N (issue #58).
+ * Claude Code as SoloW's agent (task TASK-014) — now one adapter among N (issue #58).
  *
  * ACP is the uniform boundary Decision 0003 chose, and `AcpRunner` implements it; this runner
  * stays a peer behind the same `AgentRunner` interface rather than being routed through ACP,
@@ -29,7 +25,7 @@ import type {
  * Runs the CLI in its headless stream-JSON mode and **always with `--worktree`**. That flag is
  * the concurrency story: several Tasks run against one repository at a time, and two agents
  * editing a single working tree would overwrite each other (Principle II). Because Claude Code
- * creates the worktree, GateControl does not — it adopts the path the session reports, and the
+ * creates the worktree, SoloW does not — it adopts the path the session reports, and the
  * rest of the lifecycle (diff, commit on approve, discard on reject, cleanup) targets that.
  *
  * Turn model. The session stays open, so operator input from the review terminal is written
@@ -53,13 +49,15 @@ export const DEFAULT_PERMISSION_MODE = "acceptEdits";
 
 /** The worktree name Claude Code is asked to create, traceable back to the Task. */
 export function worktreeNameForTask(taskId: string): string {
-  return `gatecontrol-task-${taskId}`;
+  return `solow-task-${taskId}`;
 }
 
 export interface ClaudeCodeRunnerOptions {
   /** Where the CLI process actually runs — issue #1's `Executor`. */
   executor: Executor;
   permissionMode?: string;
+  /** The model the Agent Profile pinned, or absent to let the CLI choose (issue #94). */
+  model?: string;
   /** Diagnostics sink for the CLI's stderr. Never receives protocol traffic. */
   onStderr?: (text: string) => void;
 }
@@ -83,6 +81,7 @@ export class ClaudeCodeRunner implements AgentRunner {
           spawn: (cmd, spawnOpts) => this.options.executor.spawn(cmd, spawnOpts),
           worktreeName: opts.worktreeName,
           permissionMode: this.options.permissionMode ?? DEFAULT_PERMISSION_MODE,
+          ...(this.options.model ? { model: this.options.model } : {}),
           onUpdate: (update) => {
             const event = mapUpdate(update);
             if (event) opts.onEvent(event);

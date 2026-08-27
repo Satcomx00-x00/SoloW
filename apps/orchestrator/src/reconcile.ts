@@ -1,7 +1,7 @@
-import type { TaskCompletionOutcome } from "@gatecontrol/contracts";
-import { parseSessionEventPayload } from "@gatecontrol/contracts";
-import { INTERRUPTED_REASON, STRANDED_REVIEW_REASON } from "@gatecontrol/core";
-import { type Db, review, session, sessionEvent, task } from "@gatecontrol/db";
+import type { TaskCompletionOutcome } from "@solow/contracts";
+import { parseSessionEventPayload } from "@solow/contracts";
+import { INTERRUPTED_REASON, STRANDED_REVIEW_REASON } from "@solow/core";
+import { type Db, review, session, sessionEvent, task } from "@solow/db";
 import { and, desc, eq, isNull, ne } from "drizzle-orm";
 import type { AgentRegistry } from "./agent/registry.js";
 import {

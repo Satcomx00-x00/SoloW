@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
  * still legible, and clearly not counted.
  *
  * Neutral by decision: the reference paints these `#8256D0`, and every colour in this build now
- * belongs to provider data rather than to chrome. Progress is GateControl's own arithmetic over
+ * belongs to provider data rather than to chrome. Progress is SoloW's own arithmetic over
  * `closed` flags, so it is chrome, and it renders in the foreground tone.
  *
  * The count and the percentage both, because they answer different questions — "how much is

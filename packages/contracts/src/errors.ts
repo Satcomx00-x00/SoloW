@@ -82,6 +82,18 @@ export const IntegrationErrorCode = {
 } as const;
 export type IntegrationErrorCode = (typeof IntegrationErrorCode)[keyof typeof IntegrationErrorCode];
 
+export const ProjectErrorCode = {
+  /**
+   * A Repository attach/detach was asked of a **mirrored** Project. Refused: a mirrored
+   * Project's membership is the provider's own board, walked by a sync — this table has no say
+   * in it (spec F23, Decision 0018, user request 2026-08-27).
+   */
+  NotLocal: "PROJECT_NOT_LOCAL",
+  /** The pair already exists — attaching twice is a no-op the caller should read as success. */
+  RepositoryAlreadyAttached: "PROJECT_REPOSITORY_ALREADY_ATTACHED",
+} as const;
+export type ProjectErrorCode = (typeof ProjectErrorCode)[keyof typeof ProjectErrorCode];
+
 export const IssueErrorCode = {
   /**
    * Deleting an Issue is blocked while it has Tasks (spec F01 States & Rules) — `task.issue_id`

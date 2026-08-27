@@ -1,5 +1,5 @@
-import type { SessionEventDto, TaskEvent, Widget } from "@gatecontrol/contracts";
-import { WIDGET_ANSWER_PREFIX } from "@gatecontrol/contracts";
+import type { SessionEventDto, TaskEvent, Widget } from "@solow/contracts";
+import { WIDGET_ANSWER_PREFIX } from "@solow/contracts";
 
 /**
  * The transcript model: one ordered list of rows, built once from every source the Task page has.

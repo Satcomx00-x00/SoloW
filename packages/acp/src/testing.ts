@@ -9,7 +9,7 @@ import type { ChildProcessHandle } from "./session.js";
  *
  * It speaks the real protocol: real JSON-RPC framing, a real `initialize` handshake, real
  * `session/update` notifications, and real client-bound requests for permissions. A test
- * therefore exercises GateControl's actual negotiation, framing, permission and kill paths
+ * therefore exercises SoloW's actual negotiation, framing, permission and kill paths
  * rather than stubs of them — which is the only way a conformance test is worth writing.
  *
  * Two levels, the same pair `packages/claude-code/src/testing.ts` already establishes:
@@ -31,12 +31,12 @@ export interface AcpScriptTurn {
   permission?: {
     title: string;
     kind?: string;
-    /** Deliberately raw: a real agent's tool call carries this, and GateControl must drop it. */
+    /** Deliberately raw: a real agent's tool call carries this, and SoloW must drop it. */
     rawInput?: unknown;
     options: Array<{ optionId: string; name: string; kind: string }>;
   };
   /**
-   * Call a client method GateControl advertises as unavailable (`fs/read_text_file`, …). The
+   * Call a client method SoloW advertises as unavailable (`fs/read_text_file`, …). The
    * refusal is echoed back as agent text so a test can see the run carried on regardless.
    */
   callsClientMethod?: string;
@@ -56,6 +56,8 @@ export interface AcpScript {
   agentCapabilities?: Record<string, unknown>;
   /** Modes offered by `session/new`. */
   modes?: { currentModeId?: string; availableModes: Array<{ id: string; name: string }> };
+  /** What `session/new` advertises as selectable models, when the script wants to say any. */
+  models?: { currentModelId?: string; availableModels: Array<{ modelId: string }> };
   turns?: AcpScriptTurn[];
   /** Refuse `initialize` with this message. */
   failInitialize?: string;
@@ -158,6 +160,7 @@ class ScriptedAgent {
         return {
           sessionId: "acp-session-1",
           ...(this.script.modes ? { modes: this.script.modes } : {}),
+          ...(this.script.models ? { models: this.script.models } : {}),
         };
       }
       case AcpMethod.SessionLoad:

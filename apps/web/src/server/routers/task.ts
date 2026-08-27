@@ -20,7 +20,7 @@ import {
   taskDependencyListDto,
   taskDto,
   taskListDto,
-} from "@gatecontrol/contracts";
+} from "@solow/contracts";
 import {
   buildCreateTaskPayload,
   canTransitionTask,
@@ -28,7 +28,7 @@ import {
   isLaunchable,
   unsatisfiedDependencies,
   withinConcurrencyCap,
-} from "@gatecontrol/core";
+} from "@solow/core";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import type { RequestContext } from "../dal/context.js";

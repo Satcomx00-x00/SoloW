@@ -1,6 +1,6 @@
 "use client";
 
-import type { presentFilesWidget } from "@gatecontrol/contracts";
+import type { presentFilesWidget } from "@solow/contracts";
 import type { z } from "zod";
 import { cn } from "@/lib/utils";
 import type { WidgetRendererProps } from "./registry";

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { TaskDependencyErrorCode, TaskErrorCode, type TaskState } from "@gatecontrol/contracts";
+import { TaskDependencyErrorCode, TaskErrorCode, type TaskState } from "@solow/contracts";
 import {
   buildCreateTaskPayload,
   buildDependencyGraph,
@@ -137,7 +137,7 @@ describe("buildCreateTaskPayload", () => {
  */
 describe("taskCheckoutBranch", () => {
   it("derives the branch a Task's worktree sits on from the Task id alone", () => {
-    expect(taskCheckoutBranch("abc")).toBe("gatecontrol/task-abc");
+    expect(taskCheckoutBranch("abc")).toBe("solow/task-abc");
   });
 
   it("is deterministic, which is what makes provisioning idempotent across relaunches", () => {

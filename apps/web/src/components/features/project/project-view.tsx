@@ -1,19 +1,35 @@
 "use client";
 
-import type { ProjectFieldDto, ProjectFilter, ProjectViewConfig } from "@gatecontrol/contracts";
-import { DEFAULT_PROJECT_VIEW_CONFIG, PROJECT_TITLE_KEY } from "@gatecontrol/contracts";
-import { FILTER_ME, formatProjectFilter, parseProjectFilter } from "@gatecontrol/core";
+import type {
+  ProjectFieldDto,
+  ProjectFieldValue,
+  ProjectFilter,
+  ProjectViewConfig,
+} from "@solow/contracts";
+import { DEFAULT_PROJECT_VIEW_CONFIG, PROJECT_TITLE_KEY } from "@solow/contracts";
+import {
+  FILTER_ME,
+  formatProjectFilter,
+  isPriorityFieldName,
+  normaliseFilterKey,
+  parseProjectFilter,
+  priorityFromLabel,
+  priorityFromLabels,
+  withPriorityLabel,
+} from "@solow/core";
 import {
   ArrowDownAZ,
   ArrowUpAZ,
   CalendarRange,
   Columns3,
+  FolderGit2,
   FolderSync,
   Loader2,
   RefreshCw,
   Save,
   Search,
   Table2,
+  Tags,
   UserX,
 } from "lucide-react";
 import Link from "next/link";
@@ -21,16 +37,24 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { openCreateDialog } from "@/components/features/board/create-dialog-bus";
 import { AdoptProjectDialog } from "@/components/features/project/adopt-project-dialog";
+import { IssueLabel } from "@/components/features/project/issue-label";
 import { IssuePanel } from "@/components/features/project/issue-panel";
+import type { PriorityChoice } from "@/components/features/project/project-cell";
+import { ProjectRepositoriesDialog } from "@/components/features/project/project-repositories-dialog";
 import { ProjectRoadmap } from "@/components/features/project/project-roadmap";
 import { type ProjectRow, ProjectTable } from "@/components/features/project/project-table";
 import {
   applyProjectView,
-  hiddenFieldIdsFor,
+  cycleSort,
+  effectiveHiddenFieldIds,
   type ProjectViewItem,
+  sortProjectRows,
 } from "@/components/features/project/project-view-model";
 import { ProjectViewTabs } from "@/components/features/project/project-view-tabs";
+import { useRowRefresh } from "@/components/features/project/row-refresh";
+import { summariseRowTasks, tasksByIssue } from "@/components/features/project/row-tasks";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -46,6 +70,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { WHOLE_PAGE } from "@/lib/paged";
 import { trpc } from "@/trpc/react";
 
 /**
@@ -67,6 +92,52 @@ import { trpc } from "@/trpc/react";
  * Moving a row to "In progress" does not launch an agent. The Kanban stays what Decision 0006
  * made it — the runtime of agent work — and this decides what to do, not how it runs.
  */
+
+/**
+ * The labels this project's rows actually carry, and which of them the filter is narrowed to.
+ *
+ * Read off the rows rather than off the whole workspace vocabulary: a menu offering four hundred
+ * labels from repositories this project never touches is a menu nobody scrolls, and every one of
+ * those extra entries would filter to nothing.
+ */
+export function labelsInRows(rows: readonly ProjectViewItem[]): string[] {
+  const seen = new Set<string>();
+  for (const entry of rows) for (const label of entry.row.labels) seen.add(label);
+  return [...seen].sort((a, b) => a.localeCompare(b));
+}
+
+/** The labels a filter is currently narrowed to — the positive `label:` clause, if there is one. */
+export function selectedLabels(filter: ProjectFilter): string[] {
+  return filter.terms.flatMap((term) =>
+    term.kind === "field" && !term.negated && normaliseFilterKey(term.field) === "label"
+      ? term.values
+      : [],
+  );
+}
+
+/**
+ * The same filter, narrowed to a different set of labels.
+ *
+ * Written back into the **filter language** rather than kept beside it as a second piece of state:
+ * the filter box is the one place a narrowing is written down, it is what the URL carries and what
+ * a saved view stores, and a menu with its own hidden selection would disagree with the text the
+ * moment somebody edited either one.
+ *
+ * An empty selection removes the clause instead of writing `label:` with nothing in it — a clause
+ * with no values matches no rows, which is the opposite of "no longer filtering by label".
+ */
+export function withLabels(filter: ProjectFilter, labels: readonly string[]): ProjectFilter {
+  const others = filter.terms.filter(
+    (term) =>
+      !(term.kind === "field" && !term.negated && normaliseFilterKey(term.field) === "label"),
+  );
+  return {
+    terms:
+      labels.length === 0
+        ? others
+        : [...others, { kind: "field", negated: false, field: "label", values: [...labels] }],
+  };
+}
 
 /**
  * Does this filter ask who the reader is?
@@ -126,12 +197,35 @@ export function ProjectView({ projectId }: { projectId: string }) {
     { projectId: projectId ?? "" },
     { enabled: projectId !== null },
   );
-  const issues = trpc.issue.list.useQuery({});
+  /**
+   * The Issues this table's rows project — scoped to the Project, like everything else on this
+   * screen.
+   *
+   * It used to read the whole Workspace and index it by id, which worked only because a superset
+   * contains what you need. Once the list is bounded (issue #82 AC-4) a superset is exactly the
+   * wrong thing to ask for: the page would fill with Issues from other projects and the rows here
+   * would fall back to "Untitled" for the ones that did not fit.
+   */
+  const issues = trpc.issue.list.useQuery(
+    { ...WHOLE_PAGE, projectId: projectId ?? "" },
+    { enabled: projectId !== null },
+  );
+  /**
+   * The agent runs on this project's Issues (F23 FR-14).
+   *
+   * Scoped to the project, like everything else on this screen: an unscoped read would put the
+   * whole Workspace's Tasks behind a project's rows, and a row would claim a run that belongs to
+   * another project's issue.
+   */
+  const tasks = trpc.task.list.useQuery(
+    { ...WHOLE_PAGE, projectId: projectId ?? "" },
+    { enabled: projectId !== null },
+  );
   /**
    * Who `@me` is *on this project's provider*.
    *
    * Resolved server-side, per project, because a project belongs to exactly one Integration and
-   * that Integration is what decides which login means "me". The GateControl account name that
+   * that Integration is what decides which login means "me". The SoloW account name that
    * used to be passed here is a different name for the same person — they agree by coincidence
    * or not at all, which made the `My items` tab a tab that matched nothing.
    */
@@ -152,13 +246,39 @@ export function ProjectView({ projectId }: { projectId: string }) {
 
   /** The user's column arrangement, shared across projects — see `surfaceKeySchema`. */
   const layout = trpc.preference.getSurfaceLayout.useQuery({ surface: "project-table" });
+  /**
+   * The providers' label vocabulary, indexed by name.
+   *
+   * One query for the whole table rather than a colour looked up per row: the vocabulary is a
+   * property of the repositories, not of any issue, and it changes far less often than the rows.
+   */
+  const labelVocabulary = trpc.issue.labelColors.useQuery({});
+  const labelColours = useMemo(
+    () => Object.fromEntries((labelVocabulary.data ?? []).map((l) => [l.name, l.color])),
+    [labelVocabulary.data],
+  );
+  /**
+   * The priority labels these repositories define, most urgent first.
+   *
+   * Read off the same vocabulary the colours come from, so the menu offers exactly the labels that
+   * exist — never a scale invented here that would write a label nobody has defined.
+   */
+  const priorityChoices: PriorityChoice[] = useMemo(() => {
+    const found = (labelVocabulary.data ?? []).flatMap((entry) => {
+      const priority = priorityFromLabel(entry.name);
+      return priority ? [{ ...priority, color: entry.color }] : [];
+    });
+    return found.sort((a, b) => a.rank - b.rank || a.label.localeCompare(b.label));
+  }, [labelVocabulary.data]);
+
+  const refreshRows = useRowRefresh();
   const saveLayout = trpc.preference.setSurfaceLayout.useMutation({
     onSuccess: () => void utils.preference.getSurfaceLayout.invalidate(),
   });
 
   const onSynced = () => {
     void utils.project.get.invalidate();
-    void utils.project.items.invalidate();
+    refreshRows();
     // Connecting a repository shows up in Settings and in every repository picker, so the lists
     // that hold it have to be told — a rescan that silently changes another screen is worse than
     // one that changes none.
@@ -177,14 +297,58 @@ export function ProjectView({ projectId }: { projectId: string }) {
    */
   const [panelIssueId, setPanelIssueId] = useState<string | null>(null);
   const [pending, setPending] = useState<string[]>([]);
+  /**
+   * Change a priority by rewriting the **label** that carries it.
+   *
+   * Read-modify-write over the Issue's labels because that is the shape the write takes: the
+   * provider replaces a label set, it does not patch one entry. Every non-priority label is
+   * carried through untouched, so setting a priority cannot drop `area/web` on the way past.
+   *
+   * The answer is re-read rather than patched in: `updateExternalIssue` returns what the provider
+   * stored, and that is the only version worth rendering (F23 NFR-7). The Issue list is what the
+   * table reads its labels from, so that is what gets invalidated — not the project items, whose
+   * field values this write never touched.
+   */
+  const setPriority = trpc.issue.updateExternal.useMutation({
+    onSettled: () => void utils.issue.list.invalidate(),
+  });
+
   const setValue = trpc.project.setValue.useMutation({
     onSettled: (_data, _error, variables) => {
       setPending((p) => p.filter((k) => k !== `${variables.itemId}:${variables.fieldId}`));
       // Re-read rather than patching a local copy: what the provider stored is the only value
       // worth rendering, and it may not be what was sent (F23 NFR-7).
-      void utils.project.items.invalidate();
+      refreshRows();
     },
   });
+
+  /*
+   * The row handlers, held still across renders.
+   *
+   * The table memoizes each row on its props (issue #126 AC-6), and a handler written inline in
+   * the JSX below is a different function on every render — which is every frame of a scroll. The
+   * memo would compare four props that always differ and re-render every row on screen anyway,
+   * so the windowing above would buy a shorter list and nothing else.
+   */
+  const editCell = useCallback(
+    (row: ProjectRow, field: ProjectFieldDto, value: ProjectFieldValue | null) => {
+      if (!projectId) return;
+      setPending((p) => [...p, `${row.item.id}:${field.id}`]);
+      setValue.mutate({ projectId, itemId: row.item.id, fieldId: field.id, value });
+    },
+    [projectId, setValue.mutate],
+  );
+  const openRow = useCallback((row: ProjectRow) => setPanelIssueId(row.item.issueId), []);
+  // Right-click → "Start a task on this issue". The dialog opens with the issue already chosen;
+  // everything else about the task is still the operator's to fill in.
+  const startTask = useCallback(
+    (row: ProjectRow) =>
+      openCreateDialog("task", {
+        issueId: row.item.issueId,
+        ...(row.item.repositoryId ? { repositoryId: row.item.repositoryId } : {}),
+      }),
+    [],
+  );
 
   const activeView =
     (views.data ?? []).find((v) => v.id === params.get("view")) ?? views.data?.[0] ?? null;
@@ -232,6 +396,7 @@ export function ProjectView({ projectId }: { projectId: string }) {
       sort: drafted.sort === undefined ? saved.sort : drafted.sort,
       visibleFieldIds:
         drafted.visibleFieldIds === undefined ? saved.visibleFieldIds : drafted.visibleFieldIds,
+      hideClosed: drafted.hideClosed ?? saved.hideClosed,
     }),
     [drafted, saved, filterText],
   );
@@ -267,7 +432,10 @@ export function ProjectView({ projectId }: { projectId: string }) {
    * names a fact about the Issue, not a column of the project.
    */
   const allRows: ProjectViewItem[] = useMemo(() => {
-    const byId = new Map((issues.data ?? []).map((i) => [i.id, i]));
+    const byId = new Map((issues.data?.items ?? []).map((i) => [i.id, i]));
+    // The Tasks running under this project's Issues, indexed once for the whole table rather than
+    // searched per row — a linear scan per row is quadratic at a thousand rows (F23 NFR-1).
+    const runsByIssue = tasksByIssue(tasks.data?.items ?? []);
     return (items.data?.items ?? []).map((item) => {
       const issue = byId.get(item.issueId);
       const row: ProjectRow = {
@@ -283,12 +451,39 @@ export function ProjectView({ projectId }: { projectId: string }) {
         // GitHub reports that field as read-only and empty, so a table that only rendered the
         // field showed a lock and a dash over issues that are in fact labelled.
         labels: issue?.labels ?? [],
+        // The priority those labels state, for the projects whose Priority field was never
+        // filled in. Read here, beside the labels it comes from, so there is one reading of it
+        // for the column, the filter and the sort rather than three.
+        priority: priorityFromLabels(issue?.labels ?? []),
+        tasks: summariseRowTasks(runsByIssue.get(item.issueId) ?? []),
       };
       return { row };
     });
-  }, [items.data, issues.data]);
+    // `tasks.data` among them: without it the Agent runs column is computed once and never again,
+    // so a run that starts, finishes or fails leaves the badge showing what was true on first
+    // paint — a stale answer that looks like a current one.
+  }, [items.data, issues.data, tasks.data]);
 
   const fields = useMemo(() => project.data?.fields ?? [], [project.data]);
+  /**
+   * The complete row set, in the view's order — what the table builds its hierarchy from.
+   *
+   * Complete, because an epic's rollup counts the children a filter hid; **sorted**, because
+   * sibling order in that tree is the order this array arrives in, and the table draws from the
+   * tree. Handing it the raw mirror order was why clicking a column header moved the arrow and
+   * nothing else: the sort was applied to `rows`, which the table uses only to decide what is
+   * visible, never what order it sits in.
+   */
+  const hierarchyRows = useMemo(
+    () =>
+      sortProjectRows(
+        allRows.map((entry) => entry.row),
+        fields,
+        config.sort,
+      ),
+    [allRows, fields, config.sort],
+  );
+
   const rows: ProjectRow[] = useMemo(
     () =>
       applyProjectView(allRows, fields, config, {
@@ -324,14 +519,22 @@ export function ProjectView({ projectId }: { projectId: string }) {
    * into one stored set would make one person's narrow screen everybody's column set.
    */
   const hiddenFieldIds = useMemo(
-    () => [
-      ...new Set([
-        ...hiddenFieldIdsFor(fields, config.visibleFieldIds),
-        ...(layout.data?.layout.hidden ?? []),
-      ]),
-    ],
-    [fields, config.visibleFieldIds, layout.data],
+    () =>
+      effectiveHiddenFieldIds({
+        fields,
+        // Judged over the *complete* row set, not the filtered one: a column is not noise for
+        // being empty on the rows a filter happened to leave.
+        rows: allRows.map((entry) => entry.row),
+        visibleFieldIds: config.visibleFieldIds,
+        hidden: layout.data?.layout.hidden ?? [],
+        shown: layout.data?.layout.shown ?? [],
+      }),
+    [fields, allRows, config.visibleFieldIds, layout.data],
   );
+
+  /** The labels these rows carry, and the ones the filter currently names. */
+  const projectLabels = useMemo(() => labelsInRows(allRows), [allRows]);
+  const chosenLabels = useMemo(() => selectedLabels(config.filter), [config.filter]);
 
   const dirty = JSON.stringify(config) !== JSON.stringify(saved);
 
@@ -362,27 +565,43 @@ export function ProjectView({ projectId }: { projectId: string }) {
               ? `${items.data?.total ?? 0} items`
               : `${rows.length} of ${items.data?.total ?? 0} items`}
           </span>
-          <Button
-            size="xs"
-            variant="ghost"
-            disabled={refresh.isPending || rescan.isPending || !projectId}
-            onClick={() => projectId && refresh.mutate({ projectId })}
-          >
-            <RefreshCw className={refresh.isPending ? "animate-spin" : undefined} /> Refresh
-          </Button>
-          <Button
-            size="xs"
-            variant="ghost"
-            disabled={refresh.isPending || rescan.isPending || !projectId}
-            onClick={() => projectId && rescan.mutate({ projectId })}
-            // The repair, kept distinct from the poll: a project mirrored before its repositories
-            // could be connected holds a finished sync and no rows, and no number of one-page
-            // refreshes reaches the pages that were already walked.
-            title="Re-read every page, connecting the repositories these rows need"
-          >
-            <FolderSync className={rescan.isPending ? "animate-spin" : undefined} /> Rescan
-          </Button>
-          <AdoptProjectDialog onAdopted={(id) => go({ project: id, view: null, q: null })} />
+          {project.data?.source === "local" ? (
+            // A local Project has no provider to poll — Refresh and Rescan exist to reconcile
+            // with one, and there is none here. Its rows come from which Repositories are
+            // registered under it, which is what this dialog decides.
+            <ProjectRepositoriesDialog
+              projectId={projectId}
+              trigger={
+                <Button size="xs" variant="ghost">
+                  <FolderGit2 aria-hidden /> Repositories
+                </Button>
+              }
+            />
+          ) : (
+            <>
+              <Button
+                size="xs"
+                variant="ghost"
+                disabled={refresh.isPending || rescan.isPending || !projectId}
+                onClick={() => projectId && refresh.mutate({ projectId })}
+              >
+                <RefreshCw className={refresh.isPending ? "animate-spin" : undefined} /> Refresh
+              </Button>
+              <Button
+                size="xs"
+                variant="ghost"
+                disabled={refresh.isPending || rescan.isPending || !projectId}
+                onClick={() => projectId && rescan.mutate({ projectId })}
+                // The repair, kept distinct from the poll: a project mirrored before its
+                // repositories could be connected holds a finished sync and no rows, and no
+                // number of one-page refreshes reaches the pages that were already walked.
+                title="Re-read every page, connecting the repositories these rows need"
+              >
+                <FolderSync className={rescan.isPending ? "animate-spin" : undefined} /> Rescan
+              </Button>
+              <AdoptProjectDialog onAdopted={(id) => go({ project: id, view: null, q: null })} />
+            </>
+          )}
         </span>
       </div>
 
@@ -449,51 +668,147 @@ export function ProjectView({ projectId }: { projectId: string }) {
           </SelectContent>
         </Select>
 
-        <Select
-          value={config.sort?.field ?? "none"}
-          onValueChange={(v) =>
-            patchDraft({
-              sort: v === "none" ? null : { field: v, direction: config.sort?.direction ?? "asc" },
-            })
-          }
-        >
-          <SelectTrigger className="h-7 w-40 text-xs">
-            <SelectValue placeholder="Sort by" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="none">No sort</SelectItem>
-            <SelectItem value={PROJECT_TITLE_KEY}>Sort by title</SelectItem>
-            {fields.map((f) => (
-              <SelectItem key={f.id} value={f.id}>
-                Sort by {f.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {/*
+          Sorting is done by clicking a column header, which is where the columns are.
 
-        {config.sort && (
-          <Button
-            size="icon-xs"
-            variant="ghost"
-            aria-label={config.sort.direction === "asc" ? "Sort ascending" : "Sort descending"}
-            onClick={() =>
-              patchDraft({
-                sort: config.sort
-                  ? {
-                      field: config.sort.field,
-                      direction: config.sort.direction === "asc" ? "desc" : "asc",
-                    }
-                  : null,
-              })
-            }
-          >
-            {config.sort.direction === "asc" ? (
-              <ArrowUpAZ aria-hidden />
-            ) : (
-              <ArrowDownAZ aria-hidden />
+          This used to be a `Sort by` dropdown listing every field beside a direction toggle — two
+          controls, in a toolbar, naming columns that were already on screen a few pixels below.
+          Choosing `Sort by Target date` from a menu when the header reading *Target date* is
+          right there is indirection for its own sake, and it is not what a planning table is
+          expected to do.
+
+          It survives for the **roadmap**, and only there: a roadmap has no column headers to
+          click, so removing the control outright would take sorting away from that layout rather
+          than move it. A control that exists exactly where the direct manipulation cannot is not
+          a duplicate of it.
+        */}
+        {config.layout === "roadmap" && (
+          <>
+            <Select
+              value={config.sort?.field ?? "none"}
+              onValueChange={(v) =>
+                patchDraft({
+                  sort:
+                    v === "none" ? null : { field: v, direction: config.sort?.direction ?? "asc" },
+                })
+              }
+            >
+              <SelectTrigger className="h-7 w-40 text-xs">
+                <SelectValue placeholder="Sort by" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">No sort</SelectItem>
+                <SelectItem value={PROJECT_TITLE_KEY}>Sort by title</SelectItem>
+                {fields.map((f) => (
+                  <SelectItem key={f.id} value={f.id}>
+                    Sort by {f.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            {config.sort && (
+              <Button
+                size="icon-xs"
+                variant="ghost"
+                aria-label={config.sort.direction === "asc" ? "Sort ascending" : "Sort descending"}
+                onClick={() =>
+                  patchDraft({
+                    sort: config.sort
+                      ? {
+                          field: config.sort.field,
+                          direction: config.sort.direction === "asc" ? "desc" : "asc",
+                        }
+                      : null,
+                  })
+                }
+              >
+                {config.sort.direction === "asc" ? (
+                  <ArrowUpAZ aria-hidden />
+                ) : (
+                  <ArrowDownAZ aria-hidden />
+                )}
+              </Button>
             )}
-          </Button>
+          </>
         )}
+
+        {/*
+          Narrowing by label, from a menu rather than from remembering how to spell one.
+
+          The menu writes into the filter box — `label:type/feat,prio/p1` — so there is exactly one
+          place a narrowing lives, and it is the place the URL carries and a view saves. An epic
+          whose child matched stays drawn (see `ProjectTable`), so filtering by a label shows the
+          matching issues *and* the epics they sit under rather than a flat list of orphans.
+        */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button size="xs" variant={chosenLabels.length > 0 ? "secondary" : "ghost"}>
+              <Tags aria-hidden /> Labels
+              {chosenLabels.length > 0 && (
+                <span className="font-mono text-2xs tabular-nums">{chosenLabels.length}</span>
+              )}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="max-h-96 w-64 overflow-auto">
+            <DropdownMenuLabel className="text-2xs">Labels on these items</DropdownMenuLabel>
+            {projectLabels.length === 0 && (
+              <p className="px-2 py-1.5 text-2xs text-muted-foreground">
+                None of these items carry a label.
+              </p>
+            )}
+            {projectLabels.map((name) => (
+              <DropdownMenuCheckboxItem
+                key={name}
+                checked={chosenLabels.includes(name)}
+                onCheckedChange={(checked) =>
+                  go({
+                    q: formatProjectFilter(
+                      withLabels(
+                        config.filter,
+                        checked ? [...chosenLabels, name] : chosenLabels.filter((l) => l !== name),
+                      ),
+                    ),
+                  })
+                }
+              >
+                <IssueLabel name={name} color={labelColours[name]} />
+              </DropdownMenuCheckboxItem>
+            ))}
+            {chosenLabels.length > 0 && (
+              <button
+                type="button"
+                className="mt-1 w-full border-t px-2 py-1.5 text-left text-2xs text-muted-foreground hover:text-foreground"
+                onClick={() => go({ q: formatProjectFilter(withLabels(config.filter, [])) })}
+              >
+                Clear label filter
+              </button>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        {/*
+          Finished work, in or out.
+
+          A checkbox rather than a filter clause: `-status:Done` is a statement about a *field*
+          this project happens to have, and closing an issue is a fact the provider reports on
+          every project whether it has a Status column or not. It rides on the view config, so a
+          `Backlog` tab can be saved with it on while `Recently shipped` keeps it off.
+
+          Closed rows leave the table; they do not leave the arithmetic. An epic still reads
+          `5/8` with its finished children hidden — see `applyProjectView`.
+        */}
+        <label
+          htmlFor="project-hide-closed"
+          className="flex shrink-0 cursor-pointer select-none items-center gap-1.5 whitespace-nowrap text-muted-foreground text-xs hover:text-foreground"
+        >
+          <Checkbox
+            id="project-hide-closed"
+            checked={config.hideClosed}
+            onCheckedChange={(checked) => patchDraft({ hideClosed: checked === true })}
+          />
+          Hide closed
+        </label>
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -587,10 +902,10 @@ export function ProjectView({ projectId }: { projectId: string }) {
               filter is left exactly as typed — resolving @me to nothing is the honest answer
               until somebody states who they are. */}
           <span>
-            <code className="font-mono">@me</code> matches nothing here: GateControl does not know
-            your login on this project&apos;s provider.
+            <code className="font-mono">@me</code> matches nothing here: SoloW does not know your
+            login on this project&apos;s provider.
           </span>
-          <Link className="underline underline-offset-2" href="/settings#provider-identity">
+          <Link className="underline underline-offset-2" href="/settings?section=provider-identity">
             Say who you are
           </Link>
         </p>
@@ -610,36 +925,71 @@ export function ProjectView({ projectId }: { projectId: string }) {
           <ProjectTable
             project={project.data}
             rows={rows}
-            hierarchyRows={allRows.map((entry) => entry.row)}
+            hierarchyRows={hierarchyRows}
             groupByFieldId={config.groupByFieldId}
             hiddenFieldIds={hiddenFieldIds}
-            pendingCells={pending}
-            onEdit={(row, field, value) => {
-              if (!projectId) return;
-              setPending((p) => [...p, `${row.item.id}:${field.id}`]);
-              setValue.mutate({ projectId, itemId: row.item.id, fieldId: field.id, value });
+            widths={layout.data?.layout.widths}
+            columnOrder={layout.data?.layout.order}
+            labelColours={labelColours}
+            priorityChoices={priorityChoices}
+            onSetPriority={(row, label) => {
+              const field = fields.find((f) => isPriorityFieldName(f.name));
+              if (!field) return;
+              const key = `${row.item.id}:${field.id}`;
+              setPending((p) => [...p, key]);
+              setPriority.mutate(
+                {
+                  issueId: row.item.issueId,
+                  // Every label that is not a priority survives untouched — a provider takes a
+                  // whole label set, so this is the one write that could silently drop `area/web`.
+                  labels: withPriorityLabel(row.labels, label),
+                },
+                { onSettled: () => setPending((p) => p.filter((k) => k !== key)) },
+              );
             }}
-            onOpenRow={(row) => setPanelIssueId(row.item.issueId)}
-            // Right-click → "Start a task on this issue". The dialog opens with the issue already
-            // chosen; everything else about the task is still the operator's to fill in.
-            onStartTask={(row) =>
-              openCreateDialog("task", {
-                issueId: row.item.issueId,
-                ...(row.item.repositoryId ? { repositoryId: row.item.repositoryId } : {}),
+            /*
+             * A width is stored per column, and `null` means "fit the content" — which is stored
+             * as *absence* rather than as a number, so the column goes on tracking its content
+             * instead of freezing at whatever it happened to measure once.
+             */
+            onResize={(fieldId, width) => {
+              const next = { ...(layout.data?.layout.widths ?? {}) };
+              if (width === null) delete next[fieldId];
+              else next[fieldId] = width;
+              saveLayout.mutate({
+                surface: "project-table",
+                layout: {
+                  order: [...(layout.data?.layout.order ?? [])],
+                  hidden: [...(layout.data?.layout.hidden ?? [])],
+                  shown: [...(layout.data?.layout.shown ?? [])],
+                  widths: next,
+                },
+              });
+            }}
+            onReorder={(fieldIds) =>
+              saveLayout.mutate({
+                surface: "project-table",
+                layout: {
+                  order: fieldIds,
+                  hidden: [...(layout.data?.layout.hidden ?? [])],
+                  shown: [...(layout.data?.layout.shown ?? [])],
+                  widths: { ...(layout.data?.layout.widths ?? {}) },
+                },
               })
             }
+            pendingCells={pending}
+            onEdit={editCell}
+            onOpenRow={openRow}
+            onStartTask={startTask}
             sort={config.sort}
-            // Clicking the sorted column flips it; clicking another takes the sort over at
-            // ascending. The toolbar's own control still owns "no sort", which is why there is no
-            // third click that clears it here.
-            onSort={(field) =>
-              patchDraft({
-                sort:
-                  config.sort?.field === field
-                    ? { field, direction: config.sort.direction === "asc" ? "desc" : "asc" }
-                    : { field, direction: "asc" },
-              })
-            }
+            /*
+             * Ascending → descending → none, on the header itself (`cycleSort`).
+             *
+             * The third click is the part that is new. It used to be missing because the
+             * toolbar's `Sort by` menu owned "no sort"; with that menu gone from this layout, a
+             * sort applied on a header and only clearable somewhere else would be a one-way door.
+             */
+            onSort={(field) => patchDraft({ sort: cycleSort(config.sort, field) })}
           />
         )
       ) : (
@@ -659,21 +1009,31 @@ export function ProjectView({ projectId }: { projectId: string }) {
           <summary className="cursor-pointer text-2xs text-muted-foreground">My columns</summary>
           <div className="flex flex-wrap gap-3 pt-2">
             {fields.map((field) => {
-              const hidden = (layout.data?.layout.hidden ?? []).includes(field.id);
+              // The effective answer, so a column hidden by the table's own default shows as
+              // unticked rather than as ticked-but-absent.
+              const hidden = hiddenFieldIds.includes(field.id);
               return (
                 <label key={field.id} className="flex items-center gap-1.5 text-2xs">
                   <input
                     type="checkbox"
                     checked={!hidden}
                     onChange={() => {
-                      const current = [...(layout.data?.layout.hidden ?? [])];
+                      /*
+                       * Both lists, because visibility is a three-state (see `surfaceLayoutSchema`).
+                       * Turning a column on has to be *recorded* in `shown`, or the table's own
+                       * default — hide a read-only field the provider fills in for no row — would
+                       * put it straight back on the next load, and the tick would look broken.
+                       */
                       saveLayout.mutate({
                         surface: "project-table",
                         layout: {
                           order: [...(layout.data?.layout.order ?? [])],
                           hidden: hidden
-                            ? current.filter((id) => id !== field.id)
-                            : [...current, field.id],
+                            ? (layout.data?.layout.hidden ?? []).filter((id) => id !== field.id)
+                            : [...(layout.data?.layout.hidden ?? []), field.id],
+                          shown: hidden
+                            ? [...(layout.data?.layout.shown ?? []), field.id]
+                            : (layout.data?.layout.shown ?? []).filter((id) => id !== field.id),
                         },
                       });
                     }}

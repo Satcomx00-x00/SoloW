@@ -10,7 +10,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
  * claims, never from a client-supplied parameter, so a client cannot subscribe to another
  * Workspace's stream by editing the query string (Principle V).
  *
- * Exported from `@gatecontrol/core/stream` rather than the package barrel: it imports
+ * Exported from `@solow/core/stream` rather than the package barrel: it imports
  * `node:crypto` and must never be pulled into the browser bundle.
  */
 

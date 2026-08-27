@@ -1,4 +1,4 @@
-import type { AgentPermissionMode, AgentProtocol } from "@gatecontrol/contracts";
+import type { AgentPermissionMode, AgentProtocol } from "@solow/contracts";
 import type { Executor } from "../executor/types.js";
 import { AcpRunner } from "./acp-runner.js";
 import { ClaudeCodeRunner } from "./claude-code-runner.js";
@@ -37,13 +37,37 @@ export interface AgentRunnerDeps {
    * posture below, which refuses unless a deployment named otherwise.
    */
   permissionMode?: AgentPermissionMode;
+  /**
+   * The model and mode the Profile pinned, or absent for "whatever the agent chooses"
+   * (issue #94).
+   *
+   * Both travel to the protocol that can express them and nowhere else: stream-json takes a
+   * model as `--model`, ACP selects a mode through `session/set_mode`, and neither speaks the
+   * other's. A setting a protocol cannot carry is reported rather than dropped — see
+   * `unsupportedLaunchSettings`.
+   */
+  model?: string;
+  modeId?: string;
   /** How long an operator has to answer an ACP permission before the policy decides (AC-4). */
   permissionDeadlineMs?: number;
   /**
    * What an unanswered ACP permission decays to. Absent means refusal: the permissive posture
-   * is reachable only by a deployment naming it (`GATECONTROL_ACP_UNATTENDED_PERMISSION`).
+   * is reachable only by a deployment naming it (`SOLOW_ACP_UNATTENDED_PERMISSION`).
    */
   unattendedPermissionPosture?: UnattendedPermissionPosture;
+}
+
+/**
+ * What an Agent Profile asked its agent to be launched with (issue #94).
+ *
+ * One object rather than a widening parameter list, because these travel together and are
+ * chosen together: a Profile is the thing that says "Opus, in plan mode, never asking".
+ */
+export interface AgentLaunchSettings {
+  permissionMode: AgentPermissionMode;
+  /** Absent means "whatever the agent chooses" — never a default written down here. */
+  model?: string;
+  modeId?: string;
 }
 
 export function createAgentRunner(
@@ -55,6 +79,7 @@ export function createAgentRunner(
       return new ClaudeCodeRunner({
         executor: deps.executor,
         ...(deps.permissionMode === undefined ? {} : { permissionMode: deps.permissionMode }),
+        ...(deps.model === undefined ? {} : { model: deps.model }),
       });
     case "acp": {
       // A Profile that never asks answers immediately: a deadline is how long a *person* gets,
@@ -63,6 +88,9 @@ export function createAgentRunner(
       const bypassing = deps.permissionMode === "bypassPermissions";
       return new AcpRunner({
         executor: deps.executor,
+        // Only ever an id the agent itself advertised — the client checks the list before
+        // sending `session/set_mode` rather than sending a guess and reading the error.
+        ...(deps.modeId === undefined ? {} : { modeId: deps.modeId }),
         ...(bypassing
           ? { permissionDeadlineMs: 0, unattendedPermissionPosture: "allow_once" as const }
           : {
@@ -82,4 +110,31 @@ export function createAgentRunner(
     case "cli_passthrough":
       return null;
   }
+}
+
+/**
+ * The launch settings this protocol cannot carry, named.
+ *
+ * A Profile can pin a model and a mode; a protocol speaks one, the other, or neither. Dropping
+ * the ones it cannot express would be the silent substitution AC-3 exists to forbid — a run that
+ * quietly used a different model than the Profile asked for, with nothing on screen to say so.
+ * So the lifecycle asks this and says what it could not honour.
+ */
+export function unsupportedLaunchSettings(
+  protocol: AgentProtocol,
+  settings: { model?: string | null; modeId?: string | null },
+): string[] {
+  const unsupported: string[] = [];
+  // stream-json launches a CLI with `--model` and has no notion of a session mode.
+  if (protocol === "claude_code_stream_json" && settings.modeId) {
+    unsupported.push(`mode "${settings.modeId}"`);
+  }
+  /*
+   * ACP advertises models at handshake but this build's vocabulary has no `session/select_model`
+   * — `AcpMethod` carries `session/set_mode` and nothing for a model. Pinning one is therefore
+   * a request SoloW cannot make, and saying so is the only honest answer; inventing a
+   * method name and hoping is how a run fails in the middle instead of at the start.
+   */
+  if (protocol === "acp" && settings.model) unsupported.push(`model "${settings.model}"`);
+  return unsupported;
 }

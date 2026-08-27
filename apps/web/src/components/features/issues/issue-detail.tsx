@@ -1,10 +1,11 @@
 "use client";
 
-import type { TaskDependencyDto } from "@gatecontrol/contracts";
-import { ArrowLeft, ExternalLink, Pencil, Trash2, TriangleAlert } from "lucide-react";
+import type { TaskDependencyDto } from "@solow/contracts";
+import { ArrowLeft, ExternalLink, Pencil, Plus, Trash2, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback } from "react";
+import { openCreateDialog } from "@/components/features/board/create-dialog-bus";
 import { TaskCard } from "@/components/features/board/task-card";
 import { TaskStateBadge } from "@/components/features/board/task-state-badge";
 import { useBackToProject } from "@/components/features/shared/back-to-project";
@@ -13,8 +14,10 @@ import { useEventStream } from "@/components/hooks/use-task-stream";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { issueSourceLabel } from "@/lib/issue-status";
+import { WHOLE_PAGE } from "@/lib/paged";
 import { trpc } from "@/trpc/react";
 import { DeleteIssueAction } from "./delete-issue-action";
+import { IssueBody } from "./issue-body";
 import { IssueFormDialog } from "./issue-form-dialog";
 import { IssueStatusControl } from "./issue-status-control";
 
@@ -33,7 +36,7 @@ export function IssueDetail({ issueId }: { issueId: string }) {
   // Back goes to the Project this Issue belongs to — the route is flat, so the destination has
   // to be asked for rather than read off the address.
   const back = useBackToProject(issueId, "/issues");
-  const tasks = trpc.task.list.useQuery({ issueId }, { enabled: issue.isSuccess });
+  const tasks = trpc.task.list.useQuery({ ...WHOLE_PAGE, issueId }, { enabled: issue.isSuccess });
   // The Workspace's `blocked_by` edges (issue #6), so a blocked Task reads as blocked here too
   // rather than only on the board. Waited on rather than defaulted to empty: a card drawn before
   // the edges land would say "ready to run" about work that cannot run (AC-4).
@@ -83,7 +86,7 @@ export function IssueDetail({ issueId }: { issueId: string }) {
   }
 
   const data = issue.data;
-  const rows = tasks.data ?? [];
+  const rows = tasks.data?.items ?? [];
   const blockersByTask = new Map<string, TaskDependencyDto[]>();
   for (const edge of dependencies.data ?? []) {
     const existing = blockersByTask.get(edge.taskId);
@@ -105,7 +108,7 @@ export function IssueDetail({ issueId }: { issueId: string }) {
             <h1 className="font-semibold text-base leading-snug">{data.title}</h1>
             <IssueStatusControl issue={data} />
           </div>
-          {/* Where an imported Issue actually lives (spec F01 FR-4). GateControl owns its Tasks
+          {/* Where an imported Issue actually lives (spec F01 FR-4). SoloW owns its Tasks
               and its status; the title and description on this page are a copy of the
               provider's, and this is the link back to the original. */}
           {data.externalUrl && (
@@ -127,11 +130,7 @@ export function IssueDetail({ issueId }: { issueId: string }) {
               )}
             </a>
           )}
-          {data.description && (
-            <p className="mt-2 max-w-prose whitespace-pre-wrap text-muted-foreground text-sm leading-relaxed">
-              {data.description}
-            </p>
-          )}
+          <IssueBody issue={data} />
           {data.labels.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1.5">
               {data.labels.map((label) => (
@@ -177,6 +176,29 @@ export function IssueDetail({ issueId }: { issueId: string }) {
           <span className="font-mono text-muted-foreground text-xs tabular-nums">
             {rows.length}
           </span>
+          {/*
+            Cutting a Task from the Issue you are reading, with the Issue already chosen.
+            
+            The header's own "New task" opens the same dialog with an empty picker — which is
+            right there, but makes you name the Issue whose page you are standing on. The
+            project table's right-click already passes the row's Issue through; this is the
+            same hand-off from the other surface that knows one.
+          */}
+          <Button
+            type="button"
+            size="xs"
+            variant="ghost"
+            className="ml-auto text-muted-foreground"
+            onClick={() =>
+              openCreateDialog("task", {
+                issueId: data.id,
+                ...(data.repositoryId ? { repositoryId: data.repositoryId } : {}),
+              })
+            }
+          >
+            <Plus aria-hidden />
+            New task
+          </Button>
         </div>
 
         {(tasks.isLoading || dependencies.isLoading) && (
@@ -199,8 +221,14 @@ export function IssueDetail({ issueId }: { issueId: string }) {
           dependencies.isSuccess &&
           (rows.length === 0 ? (
             <p className="max-w-md text-muted-foreground text-sm leading-relaxed">
-              Nothing has been cut from this issue yet. Create a task on the board to hand a slice
-              of it to an agent.
+              {/*
+                Not "on the board". An Issue in no Project has no board to go to, and this is
+                exactly the Issue most likely to be read here — the one just created against a
+                repository nothing tracks yet. Sending someone to a screen that does not exist
+                for their case is worse than saying nothing.
+              */}
+              Nothing has been cut from this issue yet. Create a task to hand a slice of it to an
+              agent.
             </p>
           ) : (
             <ul className="space-y-2">

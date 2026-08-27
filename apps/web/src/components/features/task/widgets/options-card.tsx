@@ -1,6 +1,6 @@
 "use client";
 
-import type { optionsCardWidget } from "@gatecontrol/contracts";
+import type { optionsCardWidget } from "@solow/contracts";
 import type { z } from "zod";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";

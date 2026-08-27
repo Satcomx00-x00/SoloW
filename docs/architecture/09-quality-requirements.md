@@ -2,7 +2,7 @@
 
 **Status:** Draft · **Owner:** Architecture · **Last reviewed:** 2026-08-17
 
-This section states the quality attributes GateControl is judged by and how each is assessed.
+This section states the quality attributes SoloW is judged by and how each is assessed.
 It complements the product-wide non-functional requirements in
 [Product Requirements](../product/03-product-requirements.md).
 

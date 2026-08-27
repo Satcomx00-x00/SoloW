@@ -1,6 +1,6 @@
 /// <reference types="bun-types" />
-import type { TaskEvent } from "@gatecontrol/contracts";
-import { streamChannel } from "@gatecontrol/core/stream";
+import type { TaskEvent } from "@solow/contracts";
+import { streamChannel } from "@solow/core/stream";
 
 /**
  * WebSocket hub (spec F09 / task TASK-018). In-memory pub/sub the workflow publishes to and
@@ -29,7 +29,7 @@ export class EventHub {
   }
 
   /**
-   * Channel names come from `@gatecontrol/core/stream` so the name a ticket authorizes and
+   * Channel names come from `@solow/core/stream` so the name a ticket authorizes and
    * the name the workflow publishes to can never drift apart.
    */
   taskChannel(workspaceId: string, taskId: string): string {

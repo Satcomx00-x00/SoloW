@@ -4,6 +4,7 @@ import {
   AgentCatalogErrorCode,
   type AgentProfileDto,
   AgentProfileErrorCode,
+  type AgentProfileListDto,
   type AgentProfileUsageDto,
   CommonErrorCode,
   type CreateAgentCatalogEntryInput,
@@ -11,12 +12,14 @@ import {
   type CreateExecutorProfileInput,
   type DeleteAgentProfileInput,
   type ExecutorProfileDto,
+  type ExecutorProfileListDto,
   err,
+  type ListProfilesInput,
   ok,
   type Result,
   type UpdateAgentProfileInput,
   type UpdateExecutorProfileInput,
-} from "@gatecontrol/contracts";
+} from "@solow/contracts";
 import {
   agentCatalog,
   agentProfile,
@@ -24,9 +27,10 @@ import {
   sessionUsage,
   task,
   workflowStep,
-} from "@gatecontrol/db";
+} from "@solow/db";
 import { and, desc, eq } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
+import { pageAfter, pageLimit, pageOrder, pageProbe, toPage } from "./page.js";
 
 export async function listAgentCatalog(
   ctx: RequestContext,
@@ -112,6 +116,8 @@ export async function createAgentProfile(
       secretId: input.secretId,
       concurrencyCap: input.concurrencyCap,
       permissionMode: input.permissionMode,
+      model: input.model,
+      modeId: input.modeId,
     })
     .returning();
   // A Profile just created cannot be referenced by anything yet — nothing existed a statement
@@ -167,16 +173,28 @@ async function loadAgentProfileUsage(
   return usage;
 }
 
-export async function listAgentProfiles(ctx: RequestContext): Promise<Result<AgentProfileDto[]>> {
+export async function listAgentProfiles(
+  ctx: RequestContext,
+  input: ListProfilesInput,
+): Promise<Result<AgentProfileListDto>> {
+  const after = pageAfter(input.cursor, agentProfile.createdAt, agentProfile.id);
   const [rows, usage] = await Promise.all([
     ctx.db
       .select()
       .from(agentProfile)
-      .where(eq(agentProfile.workspaceId, ctx.workspaceId))
-      .orderBy(desc(agentProfile.createdAt)),
+      .where(and(eq(agentProfile.workspaceId, ctx.workspaceId), ...(after ? [after] : [])))
+      .orderBy(...pageOrder(agentProfile.createdAt, agentProfile.id))
+      .limit(pageProbe(pageLimit(input.limit))),
     loadAgentProfileUsage(ctx),
   ]);
-  return ok(rows.map((row) => ({ ...row, usage: usage.get(row.id) ?? EMPTY_USAGE })));
+  const page = toPage(rows, pageLimit(input.limit), (row) => ({
+    createdAt: row.createdAt,
+    id: row.id,
+  }));
+  return ok({
+    items: page.items.map((row) => ({ ...row, usage: usage.get(row.id) ?? EMPTY_USAGE })),
+    nextCursor: page.nextCursor,
+  });
 }
 
 export async function getAgentProfile(
@@ -222,6 +240,9 @@ export async function updateAgentProfile(
       ...(input.name !== undefined ? { name: input.name } : {}),
       ...(input.concurrencyCap !== undefined ? { concurrencyCap: input.concurrencyCap } : {}),
       ...(input.permissionMode !== undefined ? { permissionMode: input.permissionMode } : {}),
+      // Absent leaves the pin alone; null clears it back to "whatever the agent chooses".
+      ...(input.model !== undefined ? { model: input.model } : {}),
+      ...(input.modeId !== undefined ? { modeId: input.modeId } : {}),
       updatedAt: new Date().toISOString(),
     })
     .where(and(eq(agentProfile.workspaceId, ctx.workspaceId), eq(agentProfile.id, input.id)))
@@ -295,13 +316,20 @@ export async function updateExecutorProfile(
 
 export async function listExecutorProfiles(
   ctx: RequestContext,
-): Promise<Result<ExecutorProfileDto[]>> {
+  input: ListProfilesInput,
+): Promise<Result<ExecutorProfileListDto>> {
+  const after = pageAfter(input.cursor, executorProfile.createdAt, executorProfile.id);
   const rows = await ctx.db
     .select()
     .from(executorProfile)
-    .where(eq(executorProfile.workspaceId, ctx.workspaceId))
-    .orderBy(desc(executorProfile.createdAt));
-  return ok(rows);
+    .where(and(eq(executorProfile.workspaceId, ctx.workspaceId), ...(after ? [after] : [])))
+    .orderBy(...pageOrder(executorProfile.createdAt, executorProfile.id))
+    .limit(pageProbe(pageLimit(input.limit)));
+  const page = toPage(rows, pageLimit(input.limit), (row) => ({
+    createdAt: row.createdAt,
+    id: row.id,
+  }));
+  return ok({ items: page.items, nextCursor: page.nextCursor });
 }
 
 export async function getExecutorProfile(

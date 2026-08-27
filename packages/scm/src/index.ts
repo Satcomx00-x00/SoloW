@@ -1,6 +1,6 @@
-import type { IntegrationCapability, ProviderManifestDto } from "@gatecontrol/contracts";
-import { ISSUE_FIELDS, PROJECT_FIELD_TYPES } from "@gatecontrol/contracts";
-import { ProviderRegistry, toManifest } from "@gatecontrol/core";
+import type { IntegrationCapability, ProviderManifestDto } from "@solow/contracts";
+import { ISSUE_FIELDS, PROJECT_FIELD_TYPES } from "@solow/contracts";
+import { ProviderRegistry, toManifest } from "@solow/core";
 import { GiteaProvider } from "./gitea.js";
 import { GithubProvider } from "./github.js";
 import { GitlabProvider } from "./gitlab.js";
@@ -9,6 +9,7 @@ import type {
   ChangeRequestsCapability,
   IssuesCapability,
   IssueWritesCapability,
+  LabelWritesCapability,
   ProjectsCapability,
   ProviderDriver,
   RepositoriesCapability,
@@ -17,6 +18,7 @@ import type {
 export { GiteaProvider } from "./gitea.js";
 export { GithubProvider } from "./github.js";
 export { GitlabProvider } from "./gitlab.js";
+export { DEFAULT_LABEL_TAXONOMY } from "./label-taxonomy.js";
 // The paging bound a caller needs to tell a complete listing from a truncated one (issue #125).
 export { ISSUE_PAGE_CAP, ISSUE_PAGE_SIZE } from "./http.js";
 export * from "./types.js";
@@ -70,7 +72,14 @@ const baseUrlField = (help: string, placeholder: string, required: boolean) =>
 registry.register({
   id: "github",
   name: "GitHub",
-  capabilities: ["issues", "issueWrites", "repositories", "changeRequests", "projects"],
+  capabilities: [
+    "issues",
+    "issueWrites",
+    "repositories",
+    "changeRequests",
+    "projects",
+    "labelWrites",
+  ],
   /**
    * Projects v2 expresses every type in the union — which is precisely why it must not be the
    * only driver declaring this. A contract shaped around a provider that can do everything never
@@ -93,7 +102,14 @@ registry.register({
 registry.register({
   id: "gitlab",
   name: "GitLab",
-  capabilities: ["issues", "issueWrites", "repositories", "changeRequests", "projects"],
+  capabilities: [
+    "issues",
+    "issueWrites",
+    "repositories",
+    "changeRequests",
+    "projects",
+    "labelWrites",
+  ],
   /**
    * The declaration that keeps GitLab a first-class provider rather than a degraded GitHub: what
    * a scoped label can carry, and the sentence a person reads where the rest would have been.
@@ -162,7 +178,7 @@ export function providerFor(provider: string): ProviderDriver | null {
  *
  * The mapping lives here rather than in the registry because these interfaces name
  * `ExternalIssue`, `ExternalBranch` and the rest — the driver boundary's vocabulary, which
- * `@gatecontrol/core` deliberately does not import. The registry guarantees the *fact*; this
+ * `@solow/core` deliberately does not import. The registry guarantees the *fact*; this
  * states what that fact means in types.
  *
  * It is what replaces "call it and hope" for anything that is not a full source host: ask for
@@ -177,7 +193,9 @@ export type DriverWith<C extends IntegrationCapability> = ProviderDriver &
         ? RepositoriesCapability
         : C extends "projects"
           ? ProjectsCapability
-          : ChangeRequestsCapability);
+          : C extends "labelWrites"
+            ? LabelWritesCapability
+            : ChangeRequestsCapability);
 
 export function providerWith<C extends IntegrationCapability>(
   provider: string,

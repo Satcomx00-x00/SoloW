@@ -64,7 +64,7 @@ describe("provisionWorktree lifecycle (local_path)", () => {
     });
 
     expect(wt.path).toBe(join(worktreeRoot, "task-77"));
-    expect(wt.branch).toBe("gatecontrol/task-task-77");
+    expect(wt.branch).toBe("solow/task-task-77");
     expect(wt.repoPath).toBe(repoDir);
     expect(existsSync(wt.path)).toBe(true);
     // Inherited README from HEAD is committed, so a fresh worktree has no diff.
@@ -180,7 +180,7 @@ describe("diffWorktree", () => {
     writeFileSync(join(wt.path, "added-by-agent.ts"), "export const x = 1;\n");
     await diffWorktree(executor, wt.path);
 
-    await commitWorktree(executor, wt.path, "GateControl: diff test");
+    await commitWorktree(executor, wt.path, "SoloW: diff test");
     expect(await hasChanges(executor, wt.path)).toBe(false);
     const shown = await $`git -C ${wt.path} show --name-only --format=`.quiet().text();
     expect(shown).toContain("added-by-agent.ts");
@@ -190,7 +190,7 @@ describe("diffWorktree", () => {
 /**
  * Adopting the worktree the agent created (task TASK-014).
  *
- * `claude --worktree` makes the directory, so GateControl no longer picks it — it confirms with
+ * `claude --worktree` makes the directory, so SoloW no longer picks it — it confirms with
  * git that the path the agent reported really is a worktree of this repository, and refuses
  * anything else. That refusal is the isolation guarantee (Principle II): committing from a
  * directory we could not verify would be worse than failing the Task.
@@ -226,13 +226,13 @@ describe("prepareRepository and adoptWorktree", () => {
   });
 
   it("adopts a worktree the agent created, reading its branch from git", async () => {
-    // Stands in for what `claude --worktree gatecontrol-task-9` does.
-    const agentPath = join(worktreeRoot, "gatecontrol-task-9");
-    await $`git -C ${repoDir} worktree add -b gatecontrol-task-9 ${agentPath}`.quiet();
+    // Stands in for what `claude --worktree solow-task-9` does.
+    const agentPath = join(worktreeRoot, "solow-task-9");
+    await $`git -C ${repoDir} worktree add -b solow-task-9 ${agentPath}`.quiet();
 
     const adopted = await adoptWorktree(executor, repoDir, agentPath);
     expect(adopted.path).toBe(agentPath);
-    expect(adopted.branch).toBe("gatecontrol-task-9");
+    expect(adopted.branch).toBe("solow-task-9");
     expect(adopted.repoPath).toBe(repoDir);
 
     await cleanupWorktree(executor, repoDir, agentPath);
@@ -254,10 +254,10 @@ describe("prepareRepository and adoptWorktree", () => {
 
   it("lists concurrent worktrees separately, which is what makes parallel Tasks safe", async () => {
     // Two Tasks, one repository: each agent gets its own directory and its own branch.
-    const a = join(worktreeRoot, "gatecontrol-task-a");
-    const b = join(worktreeRoot, "gatecontrol-task-b");
-    await $`git -C ${repoDir} worktree add -b gatecontrol-task-a ${a}`.quiet();
-    await $`git -C ${repoDir} worktree add -b gatecontrol-task-b ${b}`.quiet();
+    const a = join(worktreeRoot, "solow-task-a");
+    const b = join(worktreeRoot, "solow-task-b");
+    await $`git -C ${repoDir} worktree add -b solow-task-a ${a}`.quiet();
+    await $`git -C ${repoDir} worktree add -b solow-task-b ${b}`.quiet();
 
     const adoptedA = await adoptWorktree(executor, repoDir, a);
     const adoptedB = await adoptWorktree(executor, repoDir, b);
@@ -276,7 +276,7 @@ describe("prepareRepository and adoptWorktree", () => {
  * Provisioning the same Task twice (issue #58).
  *
  * The branch name and the directory are both pure functions of the Task id, and nothing ever
- * deletes the branch — `cleanupWorktree` removes the directory and leaves `gatecontrol/task-<id>`
+ * deletes the branch — `cleanupWorktree` removes the directory and leaves `solow/task-<id>`
  * behind. So the second launch of an ACP Task is not a hypothetical: it is what a relaunch after
  * a review rejection, a `task.retry` after a failure, and an Inngest step retry all look like
  * from git's side. Against real git, because what was wrong is what git does with `-b`.
@@ -295,9 +295,7 @@ describe("provisionWorktree is idempotent for the same Task", () => {
     // threw outside any try, leaving the Task in `running` with nothing recorded.
     const first = await provisionWorktree(executor, params("relaunch-1"));
     await cleanupWorktree(executor, first.repoPath, first.path);
-    const branches = await $`git -C ${repoDir} branch --list gatecontrol/task-relaunch-1`
-      .quiet()
-      .text();
+    const branches = await $`git -C ${repoDir} branch --list solow/task-relaunch-1`.quiet().text();
     expect(branches.trim()).not.toBe("");
 
     const second = await provisionWorktree(executor, params("relaunch-1"));
@@ -364,14 +362,14 @@ describe("one Task, two Repository attachments", () => {
     const primary = await provisionWorktree(executor, {
       taskId: "task-multi",
       repository: { source: "local_path", location: repoDir },
-      checkoutBranch: "gatecontrol/task-task-multi",
+      checkoutBranch: "solow/task-task-multi",
       worktreeRoot,
       repoCacheRoot,
     });
     const secondary = await provisionWorktree(executor, {
       taskId: "task-multi",
       repository: { source: "local_path", location: secondRepoDir },
-      checkoutBranch: "gatecontrol/task-task-multi",
+      checkoutBranch: "solow/task-task-multi",
       attachmentId: "attach-2",
       worktreeRoot,
       repoCacheRoot,
@@ -385,8 +383,8 @@ describe("one Task, two Repository attachments", () => {
 
     // Two repositories can hold the same branch name without colliding — the branch lives in
     // its own repository, which is exactly why the key is (repository, branch).
-    expect(primary.branch).toBe("gatecontrol/task-task-multi");
-    expect(secondary.branch).toBe("gatecontrol/task-task-multi");
+    expect(primary.branch).toBe("solow/task-task-multi");
+    expect(secondary.branch).toBe("solow/task-task-multi");
 
     writeFileSync(join(primary.path, "PRIMARY_ONLY.txt"), "primary\n");
     writeFileSync(join(secondary.path, "SECONDARY_ONLY.txt"), "secondary\n");
@@ -416,22 +414,22 @@ describe("one Task, two Repository attachments", () => {
     const first = await provisionWorktree(executor, {
       taskId: "task-two-branches",
       repository: { source: "local_path", location: repoDir },
-      checkoutBranch: "gatecontrol/task-two-branches-a",
+      checkoutBranch: "solow/task-two-branches-a",
       worktreeRoot,
       repoCacheRoot,
     });
     const second = await provisionWorktree(executor, {
       taskId: "task-two-branches",
       repository: { source: "local_path", location: repoDir },
-      checkoutBranch: "gatecontrol/task-two-branches-b",
+      checkoutBranch: "solow/task-two-branches-b",
       attachmentId: "attach-b",
       worktreeRoot,
       repoCacheRoot,
     });
 
     expect(first.path).not.toBe(second.path);
-    expect(first.branch).toBe("gatecontrol/task-two-branches-a");
-    expect(second.branch).toBe("gatecontrol/task-two-branches-b");
+    expect(first.branch).toBe("solow/task-two-branches-a");
+    expect(second.branch).toBe("solow/task-two-branches-b");
     const known = await listWorktrees(executor, repoDir);
     expect(known.filter((w) => w.path === first.path || w.path === second.path)).toHaveLength(2);
 

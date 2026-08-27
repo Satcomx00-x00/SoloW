@@ -14,7 +14,7 @@ import { type AcpScript, scriptedAcpPeer } from "./testing.js";
 /**
  * ACP protocol conformance, against the scripted peer rather than a live agent (Principle VI).
  *
- * The peer speaks the real wire protocol, so what is exercised here is GateControl's own
+ * The peer speaks the real wire protocol, so what is exercised here is SoloW's own
  * framing, handshake, permission and cancellation paths — not a stub standing in for them.
  */
 
@@ -219,6 +219,31 @@ describe("startAcpSession — capability refusal (AC-2)", () => {
     );
     await session.outcome;
     expect(peer.methods).toContain("session/set_mode");
+  });
+
+  it("reports what the agent advertised, as ids, before anything is chosen from it", async () => {
+    // Issue #94 AC-2: this update is the only moment the lists exist — `session/new` is where
+    // ACP advertises them — so it is what a cache has to read. Ids, because an id is what a
+    // Profile's pin and `session/set_mode` actually take.
+    const { session, updates } = drive({
+      modes: { availableModes: [{ id: "plan", name: "Plan" }] },
+      models: { availableModels: [{ modelId: "claude-opus-4" }, { modelId: "claude-sonnet-4" }] },
+    });
+    await session.outcome;
+
+    const advertised = updates.filter((u) => u.kind === "capabilities");
+    expect(advertised).toEqual([
+      { kind: "capabilities", models: ["claude-opus-4", "claude-sonnet-4"], modes: ["plan"] },
+    ]);
+  });
+
+  it("says nothing when the agent advertised nothing — silence is not the empty list", async () => {
+    // A consumer caching these must be able to tell "said nothing" from "offers nothing", or
+    // one silent agent would blank a cache another run filled.
+    const { session, updates } = drive({});
+    await session.outcome;
+
+    expect(updates.filter((u) => u.kind === "capabilities")).toEqual([]);
   });
 
   it("fails the run when the agent speaks a protocol version this client cannot drive", async () => {

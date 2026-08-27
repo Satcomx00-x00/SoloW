@@ -1,10 +1,10 @@
 /// <reference types="bun-types" />
 
 import { beforeAll, beforeEach, describe, expect, it } from "bun:test";
-import { taskCheckoutBranch } from "@gatecontrol/core";
-import { verifyStreamTicket } from "@gatecontrol/core/stream";
-import { ensureDefaultAgentCatalog, issue as issueTable, workspace } from "@gatecontrol/db";
-import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
+import { taskCheckoutBranch } from "@solow/core";
+import { verifyStreamTicket } from "@solow/core/stream";
+import { ensureDefaultAgentCatalog, issue as issueTable, workspace } from "@solow/db";
+import { createTestDb, type TestDb } from "@solow/db/testing";
 import { RATE_LIMITS, resetRateLimits } from "../rate-limit.js";
 import type { BaseContext } from "../trpc.js";
 import { appRouter } from "./index.js";
@@ -87,9 +87,9 @@ describe("tRPC router integration", () => {
   let db: TestDb;
 
   beforeAll(() => {
-    process.env.GATECONTROL_SECRET_KEY ??= Buffer.alloc(32, 5).toString("base64");
-    process.env.GATECONTROL_STREAM_SECRET ??= "test-stream-secret";
-    process.env.GATECONTROL_AUTH_SECRET ??= "test-auth-secret";
+    process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 5).toString("base64");
+    process.env.SOLOW_STREAM_SECRET ??= "test-stream-secret";
+    process.env.SOLOW_AUTH_SECRET ??= "test-auth-secret";
   });
 
   beforeEach(() => {
@@ -191,7 +191,7 @@ describe("tRPC router integration", () => {
     const { url, expiresAt } = await c.stream.ticket({});
 
     const ticket = new URL(url).searchParams.get("ticket") ?? "";
-    const verified = verifyStreamTicket(ticket, process.env["GATECONTROL_STREAM_SECRET"] ?? "", 0);
+    const verified = verifyStreamTicket(ticket, process.env["SOLOW_STREAM_SECRET"] ?? "", 0);
     expect(verified.ok).toBe(true);
     if (!verified.ok) return;
     expect(verified.claims.workspaceId).toBe(wsId);
@@ -286,7 +286,7 @@ describe("tRPC router integration", () => {
           }),
         ),
       ).toBe("NOT_FOUND");
-      expect(await b.c.task.list({})).toEqual([]);
+      expect((await b.c.task.list({})).items).toEqual([]);
     });
 
     it("replaces the whole set on a Task that has not started", async () => {

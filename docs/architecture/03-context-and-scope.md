@@ -2,13 +2,13 @@
 
 **Status:** Draft · **Owner:** Architecture · **Last reviewed:** 2026-08-17
 
-This section defines GateControl's boundary and its neighbours. It corresponds to the
-**C4 System Context** level: GateControl as a single system, the people who use it, and the
+This section defines SoloW's boundary and its neighbours. It corresponds to the
+**C4 System Context** level: SoloW as a single system, the people who use it, and the
 external systems it talks to.
 
 ## The system in its context
 
-GateControl sits between the people who direct agent work and the external tools and
+SoloW sits between the people who direct agent work and the external tools and
 environments that work happens in and against.
 
 **People (actors):**
@@ -17,7 +17,7 @@ environments that work happens in and against.
 - **Operator** — configures and runs a hosted instance.
 
 **External systems (neighbours):**
-- **AI coding agents** — external command-line agent tools that GateControl drives to do the
+- **AI coding agents** — external command-line agent tools that SoloW drives to do the
   work.
 - **Git repositories & source hosts** — where code lives and where accepted changes are
   integrated (branches, pull requests).
@@ -33,7 +33,7 @@ environments that work happens in and against.
 
 > User / Reviewer / Operator
 >   ↓ direct and review work
-> **GateControl** (the system)
+> **SoloW** (the system)
 >   ↔ drives → AI coding agents
 >   ↔ isolates work in → Git repositories, integrates via → source hosts
 >   ↔ synchronises → issue trackers
@@ -41,7 +41,7 @@ environments that work happens in and against.
 >   ↔ runs agents in → execution environments
 >   ↔ agents call → model providers (subscription or API key)
 
-## In scope for GateControl
+## In scope for SoloW
 
 - Orchestrating agents, isolating their work, and supervising their runs.
 - Organising work as Issues and Tasks and administering it on Boards.

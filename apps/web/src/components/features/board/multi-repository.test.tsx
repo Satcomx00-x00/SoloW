@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { afterEach, describe, expect, it } from "bun:test";
-import type { TaskDto, TaskRepositoryDto } from "@gatecontrol/contracts";
+import type { TaskDto, TaskRepositoryDto } from "@solow/contracts";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderWithTrpc } from "@/test/trpc-harness";
 import { CreateTaskDialog } from "./create-task-dialog";
@@ -20,7 +20,7 @@ function attachment(over: Partial<TaskRepositoryDto> = {}): TaskRepositoryDto {
     id: "attach-1",
     repositoryId: "repo-1",
     baseRef: null,
-    checkoutBranch: "gatecontrol/task-1",
+    checkoutBranch: "solow/task-1",
     resultBranch: null,
     position: 0,
     ...over,
@@ -52,7 +52,7 @@ describe("TaskCard with several Repositories", () => {
     renderWithTrpc(
       <TaskCard
         task={task([
-          attachment({ resultBranch: "gatecontrol/task-1" }),
+          attachment({ resultBranch: "solow/task-1" }),
           attachment({ id: "attach-2", repositoryId: "repo-2", position: 1 }),
         ])}
       />,
@@ -74,39 +74,47 @@ describe("TaskCard with several Repositories", () => {
       <TaskCard
         task={task([
           attachment({ id: "attach-2", repositoryId: "repo-2", position: 1, resultBranch: "lib" }),
-          attachment({ resultBranch: "gatecontrol/task-1", position: 0 }),
+          attachment({ resultBranch: "solow/task-1", position: 0 }),
         ])}
       />,
     );
 
-    expect(await screen.findByText("gatecontrol/task-1")).toBeDefined();
+    expect(await screen.findByText("solow/task-1")).toBeDefined();
     expect(screen.queryByText("lib")).toBeNull();
   });
 });
 
 describe("creating a Task across several Repositories", () => {
   const handlers = {
-    "issue.list": () => [
-      {
-        id: "issue-1",
-        title: "Ship it",
-        description: "The upload endpoint rejects files over 2 MB.",
-        status: "open",
-        taskCount: 0,
-        labels: ["bug"],
-        source: "github",
-        externalNumber: 42,
-        externalUrl: "https://github.com/acme/api/issues/42",
-      },
-    ],
-    "profile.agent.list": () => [{ id: "agent-1", name: "Claude" }],
-    "profile.executor.list": () => [{ id: "exec-1", name: "Local" }],
-    "repository.list": () => [
-      { id: "repo-1", name: "api", source: "local_path", location: "/srv/api" },
-      { id: "repo-2", name: "shared-lib", source: "local_path", location: "/srv/lib" },
-    ],
+    "issue.list": () => ({
+      items: [
+        {
+          id: "issue-1",
+          title: "Ship it",
+          description: "The upload endpoint rejects files over 2 MB.",
+          status: "open",
+          taskCount: 0,
+          labels: ["bug"],
+          source: "github",
+          externalNumber: 42,
+          externalUrl: "https://github.com/acme/api/issues/42",
+          externalId: null,
+          externalParentId: null,
+        },
+      ],
+      nextCursor: null,
+    }),
+    "profile.agent.list": () => ({ items: [{ id: "agent-1", name: "Claude" }], nextCursor: null }),
+    "profile.executor.list": () => ({ items: [{ id: "exec-1", name: "Local" }], nextCursor: null }),
+    "repository.list": () => ({
+      items: [
+        { id: "repo-1", name: "api", source: "local_path", location: "/srv/api" },
+        { id: "repo-2", name: "shared-lib", source: "local_path", location: "/srv/lib" },
+      ],
+      nextCursor: null,
+    }),
     "task.create": () => task([attachment()]),
-    "task.list": () => [],
+    "task.list": () => ({ items: [], nextCursor: null }),
   };
 
   /** Pick an option out of one of the dialog's Selects, the way the e2e suite does. */

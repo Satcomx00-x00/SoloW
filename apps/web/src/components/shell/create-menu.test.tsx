@@ -18,11 +18,11 @@ import { CreateMenu } from "./create-menu";
 afterEach(cleanup);
 
 const handlers = {
-  "issue.list": () => [],
-  "repository.list": () => [],
+  "issue.list": () => ({ items: [], nextCursor: null }),
+  "repository.list": () => ({ items: [], nextCursor: null }),
   "secret.list": () => [],
-  "profile.agent.list": () => [],
-  "profile.executor.list": () => [],
+  "profile.agent.list": () => ({ items: [], nextCursor: null }),
+  "profile.executor.list": () => ({ items: [], nextCursor: null }),
 };
 
 /**

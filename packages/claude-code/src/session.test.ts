@@ -53,7 +53,7 @@ afterEach(async () => {
 });
 
 async function run(script: FakeClaudeScript = {}, prompt = "fix the latch") {
-  workdir = await mkdtemp(join(tmpdir(), "gatecontrol-claude-"));
+  workdir = await mkdtemp(join(tmpdir(), "solow-claude-"));
   const updates: ClaudeUpdate[] = [];
   const command = await writeFakeClaudeBin(workdir, { cwd: workdir, ...script });
   session = startClaudeSession(
@@ -64,7 +64,7 @@ async function run(script: FakeClaudeScript = {}, prompt = "fix the latch") {
       // could see (Principle IV).
       env: { PATH: process.env["PATH"] ?? "", CLAUDE_CODE_OAUTH_TOKEN: "the-credential" },
       spawn: bunSpawn,
-      worktreeName: "gatecontrol-task-1",
+      worktreeName: "solow-task-1",
       permissionMode: "acceptEdits",
       onUpdate: (u) => updates.push(u),
     },
@@ -77,10 +77,10 @@ describe("buildArgs", () => {
   it("always passes --worktree, so no call site can run two agents in one working tree", () => {
     // This is the isolation guarantee the whole review model rests on (Principle II): the flag
     // is added here rather than by the caller precisely so it cannot be forgotten.
-    const args = buildArgs({ worktreeName: "gatecontrol-task-7", permissionMode: "acceptEdits" });
+    const args = buildArgs({ worktreeName: "solow-task-7", permissionMode: "acceptEdits" });
     const at = args.indexOf("--worktree");
     expect(at).toBeGreaterThanOrEqual(0);
-    expect(args[at + 1]).toBe("gatecontrol-task-7");
+    expect(args[at + 1]).toBe("solow-task-7");
   });
 
   it("asks for the streaming protocol in both directions", () => {
@@ -104,7 +104,7 @@ describe("buildArgs", () => {
     }
   });
 
-  it("puts configured extras after the arguments GateControl requires", () => {
+  it("puts configured extras after the arguments SoloW requires", () => {
     const args = buildArgs({
       worktreeName: "w",
       permissionMode: "auto",
@@ -132,7 +132,7 @@ describe("startClaudeSession", () => {
   });
 
   it("reports the worktree the session is working in", async () => {
-    // With `--worktree` the CLI makes the directory, so its init event is how GateControl finds
+    // With `--worktree` the CLI makes the directory, so its init event is how SoloW finds
     // out where the agent went — no guessing at a naming convention.
     const { session: s, workdir: dir } = await run();
     expect(await s.workspacePath).toBe(dir as string);
@@ -178,7 +178,7 @@ describe("startClaudeSession", () => {
   });
 
   it("gives the agent process only the environment it was handed", async () => {
-    process.env["GATECONTROL_CLAUDE_LEAK_CHECK"] = "must-not-reach-the-agent";
+    process.env["SOLOW_CLAUDE_LEAK_CHECK"] = "must-not-reach-the-agent";
     try {
       const { session: s, workdir: dir } = await run({
         turns: [{ writes: [{ path: "env.json", content: "" }] }],
@@ -187,7 +187,7 @@ describe("startClaudeSession", () => {
       // The fake wrote into the cwd it was told about, proving the child ran where we said.
       expect(await readFile(join(dir as string, "env.json"), "utf8")).toBe("");
     } finally {
-      delete process.env["GATECONTROL_CLAUDE_LEAK_CHECK"];
+      delete process.env["SOLOW_CLAUDE_LEAK_CHECK"];
     }
   });
 });

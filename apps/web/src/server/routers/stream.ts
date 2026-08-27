@@ -1,6 +1,6 @@
 import "server-only";
-import { streamTicketDto, streamTicketInput } from "@gatecontrol/contracts";
-import { STREAM_TICKET_TTL_MS, signStreamTicket } from "@gatecontrol/core/stream";
+import { streamTicketDto, streamTicketInput } from "@solow/contracts";
+import { STREAM_TICKET_TTL_MS, signStreamTicket } from "@solow/core/stream";
 import { getTaskById } from "../dal/task.js";
 import { webEnv } from "../env.js";
 import { ownerProcedure, router, unwrap } from "../trpc.js";
@@ -24,10 +24,10 @@ export const streamRouter = router({
       const now = Date.now();
       const ticket = signStreamTicket(
         { workspaceId: ctx.rctx.workspaceId, taskId: input.taskId ?? null },
-        webEnv().GATECONTROL_STREAM_SECRET,
+        webEnv().SOLOW_STREAM_SECRET,
         now,
       );
-      const url = new URL(webEnv().GATECONTROL_WS_URL);
+      const url = new URL(webEnv().SOLOW_WS_URL);
       url.searchParams.set("ticket", ticket);
       return {
         url: url.toString(),

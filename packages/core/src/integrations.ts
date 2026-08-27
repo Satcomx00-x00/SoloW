@@ -10,13 +10,13 @@ import {
   type ProviderManifestDto,
   providerIdSchema,
   type Result,
-} from "@gatecontrol/contracts";
+} from "@solow/contracts";
 
 /**
  * The integration provider registry (F21, Decision 0016).
  *
  * `registry.ts` next door does this for the command palette, the status bar and notification
- * channels; this is the same idea for the things GateControl connects to. It is a separate type
+ * channels; this is the same idea for the things SoloW connects to. It is a separate type
  * rather than a `Registry<ProviderDescriptor>` because the two differ in the one place that
  * matters: a contribution is ordered and arranged by the user, and a provider is not — it is
  * *resolved*, by id or by what it can do, and a user never sorts the list. Sharing the type
@@ -27,7 +27,7 @@ import {
  * the two we had. Now a provider is registered, and the eight ask the registry.
  *
  * Nothing here imports infrastructure. `Driver` is whatever the caller's boundary needs — in
- * practice `@gatecontrol/scm`'s driver interface — so the ordering, the capability rules and the
+ * practice `@solow/scm`'s driver interface — so the ordering, the capability rules and the
  * duplicate-id refusal are testable without a network call, and the registry itself does not
  * know that a provider talks HTTP.
  */
@@ -86,11 +86,12 @@ const RESERVED_IDS: ReadonlySet<string> = new Set(["local"]);
  * a driver bug look like a provider outage.
  */
 const REQUIRED_METHODS: Record<IntegrationCapability, readonly string[]> = {
-  issues: ["listIssues", "getIssue", "listLabels"],
-  issueWrites: ["updateIssue", "listAssignableUsers", "listMilestones"],
+  issues: ["listIssues", "getIssue", "listLabels", "listComments"],
+  issueWrites: ["updateIssue", "listAssignableUsers", "listMilestones", "createComment"],
   repositories: ["listRepositories", "getRepository", "listBranches"],
   changeRequests: ["listChangeRequests"],
   projects: ["listProjects", "readProjectFields", "readProjectItems", "writeProjectFieldValue"],
+  labelWrites: ["createLabels"],
 };
 
 export class ProviderRegistry<Driver extends object> {
@@ -158,8 +159,8 @@ export class ProviderRegistry<Driver extends object> {
    *
    * It deliberately does *not* try to narrow the driver's type. What "having the issues
    * capability" means in types is `IssuesCapability`, and that interface names `ExternalIssue`,
-   * which is the driver boundary's vocabulary — `@gatecontrol/core` has no business knowing it.
-   * So the boundary does the narrowing (see `providerWith` in `@gatecontrol/scm`), and what this
+   * which is the driver boundary's vocabulary — `@solow/core` has no business knowing it.
+   * So the boundary does the narrowing (see `providerWith` in `@solow/scm`), and what this
    * guarantees is the fact the narrowing rests on: registration refused any manifest whose driver
    * was missing the methods, so a descriptor returned here provably has them.
    */

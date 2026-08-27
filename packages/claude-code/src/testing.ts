@@ -103,7 +103,7 @@ export const FAKE_CLAUDE_MAIN = new URL("./fixtures/claude-main.ts", import.meta
 /**
  * Write an executable that stands in for the `claude` binary at `dir/claude`.
  *
- * GateControl puts its own flags first (`--print`, `--worktree`, …), so the fake cannot simply
+ * SoloW puts its own flags first (`--print`, `--worktree`, …), so the fake cannot simply
  * be `bun run fixture.ts` — bun would try to interpret those as its own. A tiny shim swallows
  * the argument list and forwards it to the fixture, which picks out the JSON script and ignores
  * everything else. Returns the path to use as the agent command.

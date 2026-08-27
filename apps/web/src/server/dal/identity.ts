@@ -9,8 +9,8 @@ import {
   type ProviderIdentityDto,
   type Result,
   type SetProviderIdentityInput,
-} from "@gatecontrol/contracts";
-import { integration, project, providerIdentity } from "@gatecontrol/db";
+} from "@solow/contracts";
+import { integration, project, providerIdentity } from "@solow/db";
 import { and, eq } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
 
@@ -18,7 +18,7 @@ import type { RequestContext } from "./context.js";
  * Who the signed-in user is on each connected provider (spec F23 FR-11).
  *
  * This exists to answer one question honestly: **who is `@me`?** The planning table filters
- * `assignee:@me` against the logins the provider mirrored onto each row, and a GateControl
+ * `assignee:@me` against the logins the provider mirrored onto each row, and a SoloW
  * account name is not one of those. Before this, `@me` compared the two and matched when they
  * happened to agree — a `My items` tab that is empty for almost everyone.
  *
@@ -161,6 +161,12 @@ export async function providerIdentityForProject(
     .where(and(eq(project.workspaceId, ctx.workspaceId), eq(project.id, input.projectId)))
     .limit(1);
   if (!row) return err(CommonErrorCode.NotFound);
+  // A local Project has no Integration to have an identity on — `@me` there resolves to nothing,
+  // the same honest "matches nothing" answer an unmapped mirrored Project already gives, for the
+  // same reason: an empty result set must not look identical to "everything is assigned to you".
+  if (!row.integrationId) {
+    return ok({ projectId: input.projectId, integrationId: null, login: null });
+  }
 
   const [mapping] = await ctx.db
     .select({ login: providerIdentity.login })

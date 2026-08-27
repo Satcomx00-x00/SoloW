@@ -4,7 +4,7 @@ import {
   secretRefDto,
   setSecretInput,
   setSecretResultDto,
-} from "@gatecontrol/contracts";
+} from "@solow/contracts";
 import { z } from "zod";
 import { deleteSecret, listSecretRefs, setSecret } from "../dal/secret.js";
 import { taskIdsBlockedByCredential } from "../dal/task.js";

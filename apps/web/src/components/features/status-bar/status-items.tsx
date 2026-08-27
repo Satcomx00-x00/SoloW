@@ -3,6 +3,7 @@
 import { CircleUser, FlaskConical, GitBranch } from "lucide-react";
 import { useAppContext } from "@/lib/app-context";
 import { contribute, statusItemRegistry } from "@/lib/contributions";
+import { countLabel, pageRows, WHOLE_PAGE } from "@/lib/paged";
 import { STATE_STYLE } from "@/lib/task-states";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
@@ -54,32 +55,40 @@ function DevOwnerItem() {
 }
 
 function TaskCountItem() {
-  const tasks = trpc.task.list.useQuery({});
-  const rows = tasks.data ?? [];
-  return <span>{rows.length === 1 ? "1 task" : `${rows.length} tasks`}</span>;
+  const tasks = trpc.task.list.useQuery({ ...WHOLE_PAGE });
+  // `500+ tasks` rather than `500 tasks` past the page bound. A status bar is exactly where a
+  // number gets believed without being checked, so it has to be one this read can support.
+  const { rows, truncated } = pageRows(tasks.data);
+  return (
+    <span>
+      {rows.length === 1 && !truncated ? "1 task" : `${countLabel(rows.length, truncated)} tasks`}
+    </span>
+  );
 }
 
 function RunningTasksItem() {
-  const tasks = trpc.task.list.useQuery({});
-  const running = (tasks.data ?? []).filter((t) => t.state === "running").length;
+  const tasks = trpc.task.list.useQuery({ ...WHOLE_PAGE });
+  const { rows, truncated } = pageRows(tasks.data);
+  const running = rows.filter((t) => t.state === "running").length;
   if (running === 0) return null;
   return (
     <span className={cn("flex items-center gap-1.5", STATE_STYLE.running.textClassName)}>
       <span className="size-1.5 rounded-full bg-current" aria-hidden />
-      {running} running
+      {countLabel(running, truncated)} running
     </span>
   );
 }
 
 /** The only thing on this bar a person has to act on, so it is the only thing lit. */
 function AwaitingReviewItem() {
-  const tasks = trpc.task.list.useQuery({});
-  const review = (tasks.data ?? []).filter((t) => t.state === "review").length;
+  const tasks = trpc.task.list.useQuery({ ...WHOLE_PAGE });
+  const { rows, truncated } = pageRows(tasks.data);
+  const review = rows.filter((t) => t.state === "review").length;
   if (review === 0) return null;
   return (
     <span className={cn("flex items-center gap-1.5", STATE_STYLE.review.textClassName)}>
       <span className="size-1.5 rounded-full bg-current" aria-hidden />
-      {review} awaiting review
+      {countLabel(review, truncated)} awaiting review
     </span>
   );
 }

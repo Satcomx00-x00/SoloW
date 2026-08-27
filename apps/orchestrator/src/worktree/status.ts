@@ -1,4 +1,4 @@
-import type { ScmBranchDto, ScmChangeKind, ScmFileDto, ScmGroup } from "@gatecontrol/contracts";
+import type { ScmBranchDto, ScmChangeKind, ScmFileDto, ScmGroup } from "@solow/contracts";
 import type { Executor } from "../executor/types.js";
 import { setupFileExclusions } from "./setup-files.js";
 

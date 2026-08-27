@@ -1,4 +1,4 @@
-import type { ExecutorKind } from "@gatecontrol/contracts";
+import type { ExecutorKind } from "@solow/contracts";
 
 /**
  * Which Executor kinds actually have a driver behind them (issue #73).
@@ -22,5 +22,5 @@ export function hasDriver(kind: ExecutorKind): boolean {
 
 /** A failure reason legible on the board, not a stack trace. */
 export function missingDriverReason(kind: ExecutorKind): string {
-  return `no executor driver for kind "${kind}" — this GateControl build can only run ${AVAILABLE_EXECUTOR_KINDS.join(", ")}`;
+  return `no executor driver for kind "${kind}" — this SoloW build can only run ${AVAILABLE_EXECUTOR_KINDS.join(", ")}`;
 }

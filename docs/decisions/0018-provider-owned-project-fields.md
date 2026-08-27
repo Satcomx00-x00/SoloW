@@ -19,7 +19,7 @@ the provider.
 
 ## Decision
 
-**The provider owns the field values. GateControl mirrors them, and declares per provider which
+**The provider owns the field values. SoloW mirrors them, and declares per provider which
 field types that provider can express.**
 
 For GitHub, the mirror is direct: Projects v2 fields and their values, read and written through
@@ -49,7 +49,7 @@ provider and the value is re-read from the answer.
   everyone's boards already filter on. The cost is two models to hold, and a ceiling set by the
   weaker provider.
 
-- **GateControl owns the project model, providers supply only issues.** One model, identical on
+- **SoloW owns the project model, providers supply only issues.** One model, identical on
   every provider, working with no external service at all — the closest fit to Principle VII, and
   rejected here deliberately: the planning would be invisible from GitHub and GitLab, so a team
   whose project managers live in GitHub Projects would be keeping two boards. Recorded because it
@@ -64,7 +64,7 @@ provider and the value is re-read from the answer.
 
 ## Consequences
 
-- Positive: nothing is trapped in GateControl. Uninstall it and the planning is still in GitHub
+- Positive: nothing is trapped in SoloW. Uninstall it and the planning is still in GitHub
   Projects and in GitLab's labels, which is the same promise Principle VII makes about data.
 - Positive: 0016's registry gains its second real consumer, and the "ask for a capability, never
   for a provider" rule is tested by a case that genuinely differs per provider rather than by two
@@ -76,7 +76,7 @@ provider and the value is re-read from the answer.
   that rate-limits, which the local cache hides for reads and cannot hide for writes.
 - Negative: a scoped-label convention is a convention. A team that names theirs `Status::Doing`
   rather than `status::in-progress` has to be able to say so, so the mapping is configuration.
-- Negative: GateControl now writes to the provider's issues, where before it only read them
+- Negative: SoloW now writes to the provider's issues, where before it only read them
   (0014 established read-only PAT usage). The token scope required grows, and that has to be
   stated at connection time rather than discovered on the first failed write.
 
@@ -84,7 +84,7 @@ provider and the value is re-read from the answer.
 
 - **Conflict resolution.** Last write wins, and the value is re-read from the provider's answer.
   Two people editing one field between two polls is a real case and not one this decision solves.
-- **Creating projects on the provider.** GateControl mirrors a project that already exists; the
+- **Creating projects on the provider.** SoloW mirrors a project that already exists; the
   provider's own UI is where one is created.
 - **Writing back anything but field values** — titles, descriptions and comments stay the
   provider's, exactly as [F01](../features/F01-issue-management.md) already requires.

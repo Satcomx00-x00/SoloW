@@ -1,10 +1,20 @@
 /// <reference types="bun-types" />
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
-import { encryptSecret, integration, issue, repository, secret, workspace } from "@gatecontrol/db";
-import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
-import type { ExternalIssue, ListIssuesOptions } from "@gatecontrol/scm";
-import { testing } from "@gatecontrol/scm";
+import {
+  encryptSecret,
+  integration,
+  issue,
+  project,
+  projectItem,
+  projectRepository,
+  repository,
+  secret,
+  workspace,
+} from "@solow/db";
+import { createTestDb, type TestDb } from "@solow/db/testing";
+import type { ExternalIssue, ListIssuesOptions } from "@solow/scm";
+import { testing } from "@solow/scm";
 import { eq } from "drizzle-orm";
 import { isBackoffWorthy, linkedRepositories, syncRepositoryIssues } from "./issues.js";
 
@@ -25,7 +35,7 @@ let nextIssues: ExternalIssue[] = [];
 let nextError: Error | null = null;
 
 beforeAll(() => {
-  process.env.GATECONTROL_SECRET_KEY ??= Buffer.alloc(32, 3).toString("base64");
+  process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 3).toString("base64");
   testing.register({
     id: FIXTURE,
     name: "Fixture Tracker",
@@ -44,6 +54,7 @@ beforeAll(() => {
         return nextIssues;
       },
       getIssue: async () => ({}) as never,
+      listComments: async () => [],
       listLabels: async () => [],
     },
   });
@@ -77,6 +88,17 @@ async function seed(): Promise<{ repositoryId: string }> {
     })
     .returning();
   return { repositoryId: repo?.id ?? "" };
+}
+
+/** A local Project (no integration, no provider project id) with `repositoryId` registered under it. */
+async function seedLocalProject(repositoryId: string): Promise<{ projectId: string }> {
+  const [proj] = await db
+    .insert(project)
+    .values({ workspaceId: WS, title: "Local board" })
+    .returning();
+  const projectId = proj?.id ?? "";
+  await db.insert(projectRepository).values({ workspaceId: WS, projectId, repositoryId });
+  return { projectId };
 }
 
 const external = (over: Record<string, unknown> = {}) => ({
@@ -126,6 +148,44 @@ describe("syncRepositoryIssues", () => {
     const rows = await db.select().from(issue).where(eq(issue.repositoryId, repositoryId));
     expect(rows).toHaveLength(1);
     expect(rows[0]?.title).toBe("Cap the upload size (revised)");
+  });
+
+  describe("local Project membership (#125 / F23)", () => {
+    it("attaches a newly-synced issue to every local Project its repository feeds", async () => {
+      const { repositoryId } = await seed();
+      const { projectId } = await seedLocalProject(repositoryId);
+      nextIssues = [external()];
+      const [row] = await linkedRepositories(db);
+
+      await syncRepositoryIssues(db, row as never);
+
+      const [storedIssue] = await db
+        .select()
+        .from(issue)
+        .where(eq(issue.repositoryId, repositoryId));
+      const items = await db.select().from(projectItem).where(eq(projectItem.projectId, projectId));
+      expect(items).toHaveLength(1);
+      expect(items[0]?.issueId).toBe(storedIssue?.id ?? "");
+    });
+
+    it("does not attach or duplicate anything for an issue that only updated", async () => {
+      // The update branch must stay untouched in effect, not just in code: an issue that already
+      // existed already got its project_item rows (or was never eligible) when it was first
+      // inserted, so a second pass over the same issue must not add another.
+      const { repositoryId } = await seed();
+      const { projectId } = await seedLocalProject(repositoryId);
+      nextIssues = [external()];
+      let [row] = await linkedRepositories(db);
+      await syncRepositoryIssues(db, row as never);
+
+      nextIssues = [external({ title: "Cap the upload size (revised)" })];
+      [row] = await linkedRepositories(db);
+      const second = await syncRepositoryIssues(db, row as never);
+
+      expect(second.updated).toBe(1);
+      const items = await db.select().from(projectItem).where(eq(projectItem.projectId, projectId));
+      expect(items).toHaveLength(1);
+    });
   });
 
   describe("linked change requests (issue #128)", () => {

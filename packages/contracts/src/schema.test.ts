@@ -252,7 +252,7 @@ describe("setTaskRepositoriesInput", () => {
 describe("connectRepositoryInput superRefine", () => {
   it("rejects a remote_url whose location is not a git URL", () => {
     const res = connectRepositoryInput.safeParse({
-      name: "gatecontrol",
+      name: "solow",
       source: "remote_url",
       location: "/home/user/not-a-url",
     });
@@ -265,18 +265,18 @@ describe("connectRepositoryInput superRefine", () => {
 
   it("accepts a remote_url with an https git URL", () => {
     const res = connectRepositoryInput.safeParse({
-      name: "gatecontrol",
+      name: "solow",
       source: "remote_url",
-      location: "https://github.com/acme/gatecontrol.git",
+      location: "https://github.com/acme/solow.git",
     });
     expect(res.success).toBe(true);
   });
 
   it("accepts a remote_url with an scp-style git@ URL", () => {
     const res = connectRepositoryInput.safeParse({
-      name: "gatecontrol",
+      name: "solow",
       source: "remote_url",
-      location: "git@github.com:acme/gatecontrol.git",
+      location: "git@github.com:acme/solow.git",
     });
     expect(res.success).toBe(true);
   });
@@ -285,7 +285,7 @@ describe("connectRepositoryInput superRefine", () => {
     const res = connectRepositoryInput.safeParse({
       name: "local repo",
       source: "local_path",
-      location: "/home/user/dev/gatecontrol",
+      location: "/home/user/dev/solow",
     });
     expect(res.success).toBe(true);
   });

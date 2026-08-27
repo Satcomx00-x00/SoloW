@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
-import { IntegrationErrorCode } from "@gatecontrol/contracts";
-import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
+import { IntegrationErrorCode } from "@solow/contracts";
+import { createTestDb, type TestDb } from "@solow/db/testing";
 import {
   getRepository,
   listRepositories,
@@ -50,10 +50,10 @@ describe("repository setup files", () => {
   it("starts empty — nothing is copied until an operator says so", async () => {
     const { workspaceId } = await seedWorkspaceGraph(db, "alpha");
 
-    const listed = await listRepositories(ctxFor(db, workspaceId));
+    const listed = await listRepositories(ctxFor(db, workspaceId), {});
 
     expect(listed.ok).toBe(true);
-    if (listed.ok) expect(listed.data[0]?.setupFilePatterns).toEqual([]);
+    if (listed.ok) expect(listed.data.items[0]?.setupFilePatterns).toEqual([]);
   });
 
   it("replaces the list wholesale", async () => {

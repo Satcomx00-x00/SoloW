@@ -1,8 +1,8 @@
 /// <reference types="bun-types" />
 
 import { beforeAll, beforeEach, describe, expect, it } from "bun:test";
-import { agentCatalog, authSchema, workspace } from "@gatecontrol/db";
-import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
+import { agentCatalog, authSchema, workspace } from "@solow/db";
+import { createTestDb, type TestDb } from "@solow/db/testing";
 import { eq } from "drizzle-orm";
 import { createAuth, ownerExists, workspaceForUser } from "./auth.js";
 import { resolveSession } from "./session.js";
@@ -14,12 +14,12 @@ import { resolveSession } from "./session.js";
  * moment the Owner does, and a `workspaceId` that only ever comes from the signed session.
  */
 
-const OWNER = { email: "owner@gatecontrol.test", password: "correct-horse-battery", name: "Owner" };
+const OWNER = { email: "owner@solow.test", password: "correct-horse-battery", name: "Owner" };
 
 beforeAll(() => {
-  process.env["GATECONTROL_AUTH_SECRET"] ??= "test-auth-secret-at-least-32-characters";
-  process.env["GATECONTROL_STREAM_SECRET"] ??= "test-stream-secret";
-  process.env["GATECONTROL_WEB_URL"] ??= "http://localhost:5000";
+  process.env["SOLOW_AUTH_SECRET"] ??= "test-auth-secret-at-least-32-characters";
+  process.env["SOLOW_STREAM_SECRET"] ??= "test-stream-secret";
+  process.env["SOLOW_WEB_URL"] ??= "http://localhost:5000";
 });
 
 let db: TestDb;

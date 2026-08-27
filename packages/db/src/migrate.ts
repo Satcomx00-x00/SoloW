@@ -14,7 +14,7 @@ import { dbEnv } from "./env.js";
  */
 export function runMigrations(): void {
   const env = dbEnv();
-  const sqlite = new Database(env.GATECONTROL_SQLITE_PATH, { create: true });
+  const sqlite = new Database(env.SOLOW_SQLITE_PATH, { create: true });
   // Foreign keys stay OFF for the duration of the migration: drizzle-kit rewrites a changed
   // table by building `__new_<table>`, copying rows, dropping the original and renaming — and
   // the DROP trips enforcement on any database that already holds referencing rows (a fresh

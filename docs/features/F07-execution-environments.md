@@ -4,13 +4,13 @@
 
 ## Summary
 
-An Executor is where an Agent actually runs. GateControl supports several execution
+An Executor is where an Agent actually runs. SoloW supports several execution
 environments so users can run agents locally for convenience or offload heavy work to
 containers, remote machines, or the cloud — all managed from the same control plane.
 
 ## The `Executor` interface (issue #1)
 
-Before a second Executor kind exists, GateControl adopted one interface every kind implements —
+Before a second Executor kind exists, SoloW adopted one interface every kind implements —
 `apps/orchestrator/src/executor/types.ts`:
 
 ```ts
@@ -107,7 +107,7 @@ schema declares, then the shared prepare script and environment repeater.
 
 ## Functional requirements
 
-- **FR-1** GateControl supports these Executor types: **Local** (a process on the host),
+- **FR-1** SoloW supports these Executor types: **Local** (a process on the host),
   **Container** (an isolated container), **Remote** (an SSH-connected host), and **Cloud**
   (a cloud runner).
 - **FR-2** A user configures an Executor as an Executor Profile (see [F05](./F05-agent-executor-profiles.md))
@@ -117,7 +117,7 @@ schema declares, then the shared prepare script and environment repeater.
 - **FR-4** Subscription and API-key credentials are made available to Agents in every
   Executor type without exposing them to Agent-run code (see [F06](./F06-authentication-billing.md),
   [F17](./F17-security-secrets.md)).
-- **FR-5** GateControl reports Executor health and availability, and prevents launching a
+- **FR-5** SoloW reports Executor health and availability, and prevents launching a
   Task on an unavailable Executor with a clear reason.
 - **FR-6** A Worktree is provisioned inside the chosen Executor so file isolation holds
   regardless of environment (see [F08](./F08-workspaces-repositories.md)).

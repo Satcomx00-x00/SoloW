@@ -81,9 +81,9 @@ Follow-up TODOs:
     F12 that no ADR is owed.
 -->
 
-# GateControl Constitution
+# SoloW Constitution
 
-GateControl is an open-source, self-hostable control plane for orchestrating many AI
+SoloW is an open-source, self-hostable control plane for orchestrating many AI
 coding-agent CLIs in parallel under human review. This constitution defines the
 non-negotiable principles and governance that every feature, plan, and change MUST honour.
 It supersedes convenience and local preference. Where a principle and an expedient conflict,

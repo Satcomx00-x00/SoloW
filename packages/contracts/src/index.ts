@@ -10,6 +10,7 @@ export * from "./integration-provider.js";
 export * from "./issue.js";
 export * from "./issue-write.js";
 export * from "./mcp.js";
+export * from "./page.js";
 export * from "./profile.js";
 export * from "./project.js";
 export * from "./project-view.js";

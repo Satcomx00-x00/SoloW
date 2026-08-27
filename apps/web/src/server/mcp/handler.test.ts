@@ -1,8 +1,8 @@
 /// <reference types="bun-types" />
 
 import { beforeAll, beforeEach, describe, expect, it } from "bun:test";
-import { generateMcpToken, issue as issueTable, mcpToken, workspace } from "@gatecontrol/db";
-import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
+import { generateMcpToken, issue as issueTable, mcpToken, workspace } from "@solow/db";
+import { createTestDb, type TestDb } from "@solow/db/testing";
 import { resetRateLimits } from "../rate-limit.js";
 import { handleMcpRequest } from "./handler.js";
 import { JsonRpcError, SUPPORTED_PROTOCOL_VERSION } from "./protocol.js";
@@ -20,7 +20,7 @@ import { listMcpTools } from "./tools.js";
 let db: TestDb;
 
 beforeAll(() => {
-  process.env.GATECONTROL_SECRET_KEY ??= Buffer.alloc(32, 7).toString("base64");
+  process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 7).toString("base64");
 });
 
 beforeEach(() => {
@@ -116,7 +116,7 @@ describe("MCP transport — protocol", () => {
     const { json } = await call({ jsonrpc: "2.0", id: 1, method: "initialize" }, value);
     expect(json.result.protocolVersion).toBe(SUPPORTED_PROTOCOL_VERSION);
     expect(json.result.capabilities.tools).toBeDefined();
-    expect(json.result.serverInfo.name).toBe("gatecontrol");
+    expect(json.result.serverInfo.name).toBe("solow");
   });
 
   it("answers a notification with 202 and no body (JSON-RPC gives notifications no reply)", async () => {

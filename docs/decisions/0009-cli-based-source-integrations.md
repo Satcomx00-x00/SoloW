@@ -6,17 +6,17 @@
 > [0014](./0014-direct-api-source-integrations.md) — a direct REST API client authenticated by
 > a stored Secret, not the `gh`/`glab` CLIs. The reasoning below is kept for the record; see
 > 0014 for why it changed. This record's pattern (drive the official CLI) may still be the
-> right call for a future integration whose credential model doesn't already fit GateControl's
+> right call for a future integration whose credential model doesn't already fit SoloW's
 > Secret store — it just turned out not to fit GitHub/GitLab once issue #15 was built out.
 
 ## Context
 
-GateControl integrates with GitHub and GitLab to synchronise Issues and to create branches,
+SoloW integrates with GitHub and GitLab to synchronise Issues and to create branches,
 pull requests (GitHub), and merge requests (GitLab) from accepted Task changes. Each of these
 platforms offers an official command-line tool — **`gh`** for GitHub and **`glab`** for
 GitLab — that already handles authentication (including device-flow login, credential
 storage, and enterprise/self-managed instances), stays current with the platform, and
-exposes the operations GateControl needs. This mirrors GateControl's existing pattern of
+exposes the operations SoloW needs. This mirrors SoloW's existing pattern of
 driving official command-line tools rather than reimplementing their behaviour: agents are
 driven through their CLIs, and Claude subscription authentication is inherited from the agent
 CLI's login.
@@ -24,7 +24,7 @@ CLI's login.
 ## Decision
 
 Implement **GitHub integration through the `gh` CLI** and **GitLab integration through the
-`glab` CLI**. GateControl drives these tools for authentication, Issue synchronisation, and
+`glab` CLI**. SoloW drives these tools for authentication, Issue synchronisation, and
 branch and pull/merge request creation. Authentication can be inherited from an existing
 `gh` / `glab` login, or established during onboarding (see
 [F18](../features/F18-onboarding-setup-workflow.md)), the same way subscription authentication

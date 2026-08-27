@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { idSchema, taskStateSchema, timestampsSchema } from "./common.js";
+import { pageInputSchema, pageOf } from "./page.js";
 import { gitRefNameSchema } from "./repository.js";
 import { taskCompletionOutcomeSchema } from "./widget.js";
 
@@ -38,11 +39,11 @@ export type TaskRepositoryInput = z.infer<typeof taskRepositoryInput>;
  * It lives in the contract rather than beside the worktree manager because the contract is the
  * first thing that needs it: `setTaskRepositoriesInput` cannot tell an Owner that two of its
  * entries are the same attachment without deriving the name the omitted half will be given.
- * `@gatecontrol/core` re-exports it, so the DAL, the manager and the migration still read one
+ * `@solow/core` re-exports it, so the DAL, the manager and the migration still read one
  * template rather than three copies of it.
  */
 export function taskCheckoutBranch(taskId: string): string {
-  return `gatecontrol/task-${taskId}`;
+  return `solow/task-${taskId}`;
 }
 
 /**
@@ -180,7 +181,7 @@ export type TaskDeletionImpactInput = z.infer<typeof taskDeletionImpactInput>;
 
 /**
  * What deleting this Task would destroy, for the confirmation to state. `worktreeCount` counts
- * `worktree` rows still marked active: deleting them drops GateControl's record of those working
+ * `worktree` rows still marked active: deleting them drops SoloW's record of those working
  * trees, not the directories, which is why the dialog warns rather than promises.
  */
 export const taskDeletionImpactDto = z.object({
@@ -193,21 +194,23 @@ export const taskDeletionImpactDto = z.object({
 });
 export type TaskDeletionImpactDto = z.infer<typeof taskDeletionImpactDto>;
 
-export const listTasksInput = z.object({
-  issueId: idSchema.optional(),
-  state: taskStateSchema.optional(),
-  query: z.string().max(200).optional(),
-  /**
-   * Only the Tasks whose Issue this Project holds.
-   *
-   * The board lives inside a Project (F23), so it has to be *read* inside one too — a
-   * project-scoped board fed by an unscoped query would show the whole Workspace under a
-   * project's name, which is the one thing a scoped screen must never do.
-   */
-  projectId: idSchema.optional(),
-  /** Only the Tasks whose Issue belongs to no Project — the counterpart escape hatch. */
-  unassigned: z.boolean().optional(),
-});
+export const listTasksInput = z
+  .object({
+    issueId: idSchema.optional(),
+    state: taskStateSchema.optional(),
+    query: z.string().max(200).optional(),
+    /**
+     * Only the Tasks whose Issue this Project holds.
+     *
+     * The board lives inside a Project (F23), so it has to be *read* inside one too — a
+     * project-scoped board fed by an unscoped query would show the whole Workspace under a
+     * project's name, which is the one thing a scoped screen must never do.
+     */
+    projectId: idSchema.optional(),
+    /** Only the Tasks whose Issue belongs to no Project — the counterpart escape hatch. */
+    unassigned: z.boolean().optional(),
+  })
+  .merge(pageInputSchema);
 export type ListTasksInput = z.infer<typeof listTasksInput>;
 
 export const getTaskInput = z.object({ id: idSchema });
@@ -260,7 +263,11 @@ export const taskDto = z
   .merge(timestampsSchema);
 export type TaskDto = z.infer<typeof taskDto>;
 
-export const taskListDto = z.array(taskDto);
+/**
+ * A page of Tasks. Paged because this procedure is also an MCP tool, and an unbounded one hands
+ * an agent every Task in the Workspace to answer a question about one — see `page.ts`.
+ */
+export const taskListDto = pageOf(taskDto);
 export type TaskListDto = z.infer<typeof taskListDto>;
 
 /**

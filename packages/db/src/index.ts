@@ -11,12 +11,12 @@ import { allTables } from "./tables.js";
  */
 export function createDb() {
   const env = dbEnv();
-  if (env.GATECONTROL_DB_DRIVER === "postgres") {
+  if (env.SOLOW_DB_DRIVER === "postgres") {
     throw new Error(
-      "Postgres driver is not wired in v1 — set GATECONTROL_DB_DRIVER=sqlite (Decision 0008 follow-up).",
+      "Postgres driver is not wired in v1 — set SOLOW_DB_DRIVER=sqlite (Decision 0008 follow-up).",
     );
   }
-  const sqlite = new Database(env.GATECONTROL_SQLITE_PATH, { create: true });
+  const sqlite = new Database(env.SOLOW_SQLITE_PATH, { create: true });
   sqlite.exec("PRAGMA journal_mode = WAL;");
   sqlite.exec("PRAGMA foreign_keys = ON;");
   return drizzle(sqlite, { schema: allTables });
@@ -43,6 +43,11 @@ export {
   hashMcpToken,
   mcpTokenHashEquals,
 } from "./mcp-token-store.js";
+export {
+  addIssueToProject,
+  attachIssueToLocalProjects,
+  backfillProjectFromRepository,
+} from "./project-membership.js";
 export * from "./schema.js";
 export { schema } from "./schema.js";
 export { decryptForAgentRun, decryptForScmSync, encryptSecret } from "./secret-store.js";

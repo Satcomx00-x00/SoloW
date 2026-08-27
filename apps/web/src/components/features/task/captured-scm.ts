@@ -1,4 +1,4 @@
-import type { ScmFileDto, ScmWorktreeDto, TaskDiffDto } from "@gatecontrol/contracts";
+import type { ScmFileDto, ScmWorktreeDto, TaskDiffDto } from "@solow/contracts";
 
 /**
  * The source-control panel over a *captured* diff (spec F22, "the worktree is gone").

@@ -26,17 +26,20 @@ describe("AgentProfilesSection", () => {
     const deleted: unknown[] = [];
     renderWithTrpc(<AgentProfilesSection />, {
       ...baseHandlers,
-      "profile.agent.list": () => [
-        {
-          id: "p1",
-          name: "Claude Code (subscription)",
-          agentCatalogId: "cat-1",
-          authMode: "subscription",
-          secretId: "secret-1",
-          concurrencyCap: 3,
-          usage: NO_USAGE,
-        },
-      ],
+      "profile.agent.list": () => ({
+        items: [
+          {
+            id: "p1",
+            name: "Claude Code (subscription)",
+            agentCatalogId: "cat-1",
+            authMode: "subscription",
+            secretId: "secret-1",
+            concurrencyCap: 3,
+            usage: NO_USAGE,
+          },
+        ],
+        nextCursor: null,
+      }),
       "profile.agent.delete": (input) => {
         deleted.push(input);
         return {
@@ -69,17 +72,20 @@ describe("AgentProfilesSection", () => {
   it("refuses to offer deletion for a Profile a Task still holds, and says what holds it", async () => {
     renderWithTrpc(<AgentProfilesSection />, {
       ...baseHandlers,
-      "profile.agent.list": () => [
-        {
-          id: "p1",
-          name: "Busy profile",
-          agentCatalogId: "cat-1",
-          authMode: "api_key",
-          secretId: "secret-1",
-          concurrencyCap: 3,
-          usage: { taskCount: 3, workflowStepCount: 0, sessionUsageCount: 0 },
-        },
-      ],
+      "profile.agent.list": () => ({
+        items: [
+          {
+            id: "p1",
+            name: "Busy profile",
+            agentCatalogId: "cat-1",
+            authMode: "api_key",
+            secretId: "secret-1",
+            concurrencyCap: 3,
+            usage: { taskCount: 3, workflowStepCount: 0, sessionUsageCount: 0 },
+          },
+        ],
+        nextCursor: null,
+      }),
     });
 
     const trigger = await screen.findByRole("button", {
@@ -93,17 +99,20 @@ describe("AgentProfilesSection", () => {
   it("names every kind of holder together, singular where the count is one", async () => {
     renderWithTrpc(<AgentProfilesSection />, {
       ...baseHandlers,
-      "profile.agent.list": () => [
-        {
-          id: "p1",
-          name: "Fully wired profile",
-          agentCatalogId: "cat-1",
-          authMode: "api_key",
-          secretId: "secret-1",
-          concurrencyCap: 3,
-          usage: { taskCount: 1, workflowStepCount: 2, sessionUsageCount: 5 },
-        },
-      ],
+      "profile.agent.list": () => ({
+        items: [
+          {
+            id: "p1",
+            name: "Fully wired profile",
+            agentCatalogId: "cat-1",
+            authMode: "api_key",
+            secretId: "secret-1",
+            concurrencyCap: 3,
+            usage: { taskCount: 1, workflowStepCount: 2, sessionUsageCount: 5 },
+          },
+        ],
+        nextCursor: null,
+      }),
     });
 
     expect(
@@ -114,17 +123,20 @@ describe("AgentProfilesSection", () => {
   it("offers deletion freely for a Profile nothing references", async () => {
     renderWithTrpc(<AgentProfilesSection />, {
       ...baseHandlers,
-      "profile.agent.list": () => [
-        {
-          id: "p1",
-          name: "Unused profile",
-          agentCatalogId: "cat-1",
-          authMode: "api_key",
-          secretId: "secret-1",
-          concurrencyCap: 3,
-          usage: NO_USAGE,
-        },
-      ],
+      "profile.agent.list": () => ({
+        items: [
+          {
+            id: "p1",
+            name: "Unused profile",
+            agentCatalogId: "cat-1",
+            authMode: "api_key",
+            secretId: "secret-1",
+            concurrencyCap: 3,
+            usage: NO_USAGE,
+          },
+        ],
+        nextCursor: null,
+      }),
     });
 
     const trigger = await screen.findByRole("button", {
@@ -137,17 +149,20 @@ describe("AgentProfilesSection", () => {
   it("surfaces a delete failure to the Owner instead of failing silently", async () => {
     renderWithTrpc(<AgentProfilesSection />, {
       ...baseHandlers,
-      "profile.agent.list": () => [
-        {
-          id: "p1",
-          name: "Raced profile",
-          agentCatalogId: "cat-1",
-          authMode: "api_key",
-          secretId: "secret-1",
-          concurrencyCap: 3,
-          usage: NO_USAGE,
-        },
-      ],
+      "profile.agent.list": () => ({
+        items: [
+          {
+            id: "p1",
+            name: "Raced profile",
+            agentCatalogId: "cat-1",
+            authMode: "api_key",
+            secretId: "secret-1",
+            concurrencyCap: 3,
+            usage: NO_USAGE,
+          },
+        ],
+        nextCursor: null,
+      }),
       "profile.agent.delete": () => {
         throw new Error("AGENT_PROFILE_IN_USE");
       },
@@ -175,7 +190,7 @@ describe("AgentProfilesSection — agent catalog", () => {
   it("is collapsed by default — most Owners never need it", async () => {
     renderWithTrpc(<AgentProfilesSection />, {
       ...baseHandlers,
-      "profile.agent.list": () => [],
+      "profile.agent.list": () => ({ items: [], nextCursor: null }),
     });
 
     await screen.findByText("Add a custom agent");
@@ -186,7 +201,7 @@ describe("AgentProfilesSection — agent catalog", () => {
     let sent: unknown = null;
     renderWithTrpc(<AgentProfilesSection />, {
       ...baseHandlers,
-      "profile.agent.list": () => [],
+      "profile.agent.list": () => ({ items: [], nextCursor: null }),
       "profile.agentCatalog.create": (input) => {
         sent = input;
         return { id: "cat-2", ...(input as object) };
@@ -235,7 +250,7 @@ describe("AgentProfilesSection — agent catalog", () => {
         },
       ],
       "secret.list": () => [],
-      "profile.agent.list": () => [],
+      "profile.agent.list": () => ({ items: [], nextCursor: null }),
     });
 
     fireEvent.click(await screen.findByText("Add a custom agent"));
@@ -246,7 +261,7 @@ describe("AgentProfilesSection — agent catalog", () => {
   it("surfaces a duplicate-key refusal instead of failing silently", async () => {
     renderWithTrpc(<AgentProfilesSection />, {
       ...baseHandlers,
-      "profile.agent.list": () => [],
+      "profile.agent.list": () => ({ items: [], nextCursor: null }),
       "profile.agentCatalog.create": () => {
         throw new Error("AGENT_CATALOG_KEY_TAKEN");
       },
@@ -267,5 +282,159 @@ describe("AgentProfilesSection — agent catalog", () => {
     await waitFor(() => {
       expect(screen.getByRole("alert").textContent).toContain("AGENT_CATALOG_KEY_TAKEN");
     });
+  });
+});
+
+/**
+ * Pinning a model and a mode on a Profile (issue #94, AC-1).
+ *
+ * Both used to be unexpressible: every run took whatever the CLI defaulted to. The field is free
+ * text rather than a dropdown on purpose — what an agent offers comes from its handshake, so
+ * there is nothing to populate a menu with before a Profile has ever run, and a hardcoded list
+ * would offer choices that fail at launch the first time a provider retires one.
+ */
+describe("model and mode on an Agent Profile", () => {
+  /** The form refuses to submit without a Secret, so both cases have to pick one. */
+  const chooseSecret = async () => {
+    fireEvent.click(screen.getByRole("combobox", { name: /secret/i }));
+    fireEvent.click(await screen.findByRole("option", { name: /anthropic-key/ }));
+  };
+
+  it("sends null for a pin left empty, so the agent keeps the choice", async () => {
+    const { log } = renderWithTrpc(<AgentProfilesSection />, {
+      ...baseHandlers,
+      "profile.agent.list": () => ({ items: [], nextCursor: null }),
+      "profile.agent.create": (input) => input,
+    });
+
+    await screen.findByLabelText("Model");
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Plain" } });
+    await chooseSecret();
+    fireEvent.click(screen.getByRole("button", { name: "Add profile" }));
+
+    await waitFor(() =>
+      expect(log.calls.some((c) => c.path === "profile.agent.create")).toBe(true),
+    );
+    const input = log.calls.find((c) => c.path === "profile.agent.create")?.input as {
+      model: unknown;
+      modeId: unknown;
+    };
+    // Null, not "": an empty pin is the absence of one, and a blank string would make "no model"
+    // and "a model named nothing" the same row.
+    expect(input.model).toBeNull();
+    expect(input.modeId).toBeNull();
+  });
+
+  it("sends what was typed, trimmed", async () => {
+    const { log } = renderWithTrpc(<AgentProfilesSection />, {
+      ...baseHandlers,
+      "profile.agent.list": () => ({ items: [], nextCursor: null }),
+      "profile.agent.create": (input) => input,
+    });
+
+    await screen.findByLabelText("Model");
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Opus planner" } });
+    fireEvent.change(screen.getByLabelText("Model"), { target: { value: "  claude-opus-4  " } });
+    fireEvent.change(screen.getByLabelText("Mode"), { target: { value: "plan" } });
+    await chooseSecret();
+    fireEvent.click(screen.getByRole("button", { name: "Add profile" }));
+
+    await waitFor(() =>
+      expect(log.calls.some((c) => c.path === "profile.agent.create")).toBe(true),
+    );
+    expect(log.calls.find((c) => c.path === "profile.agent.create")?.input).toMatchObject({
+      model: "claude-opus-4",
+      modeId: "plan",
+    });
+  });
+});
+
+/**
+ * The pin fields suggest what the agent advertised, and a pin it no longer advertises is said
+ * (issue #94, AC-2 / AC-3).
+ *
+ * The suggestions come from `agent_catalog.capabilities` — a cache the orchestrator writes from
+ * each run's handshake. Before a first run it is empty, which is why the fields are datalists
+ * over free text rather than closed dropdowns: a menu would offer nothing at all on a fresh
+ * install and claim the list is complete everywhere else.
+ */
+describe("advertised capabilities in the Profile form", () => {
+  const CAPS = { models: ["claude-opus-4", "claude-sonnet-4"], modes: ["plan"] };
+  const catalogWithCaps = () => [{ id: "cat-1", displayName: "Claude Code", capabilities: CAPS }];
+
+  it("offers the cached models and modes as suggestions", async () => {
+    renderWithTrpc(<AgentProfilesSection />, {
+      ...baseHandlers,
+      "profile.agentCatalog.list": catalogWithCaps,
+      "profile.agent.list": () => ({ items: [], nextCursor: null }),
+    });
+
+    await screen.findByLabelText("Model");
+    // The datalist is the suggestion surface; its options are what the agent last advertised.
+    const modelOptions = [...document.querySelectorAll("#agent-model-options option")].map(
+      (o) => (o as HTMLOptionElement).value,
+    );
+    const modeOptions = [...document.querySelectorAll("#agent-mode-options option")].map(
+      (o) => (o as HTMLOptionElement).value,
+    );
+    expect(modelOptions).toEqual(["claude-opus-4", "claude-sonnet-4"]);
+    expect(modeOptions).toEqual(["plan"]);
+  });
+
+  it("marks a Profile whose pin the agent no longer advertises", async () => {
+    renderWithTrpc(<AgentProfilesSection />, {
+      ...baseHandlers,
+      "profile.agentCatalog.list": catalogWithCaps,
+      "profile.agent.list": () => ({
+        items: [
+          {
+            id: "p1",
+            name: "Old pin",
+            agentCatalogId: "cat-1",
+            authMode: "api_key",
+            secretId: "secret-1",
+            concurrencyCap: 3,
+            permissionMode: "bypassPermissions",
+            model: "claude-opus-3",
+            modeId: null,
+            usage: NO_USAGE,
+          },
+        ],
+        nextCursor: null,
+      }),
+    });
+
+    // AC-3's surface: the run never substitutes silently, and this is where somebody fixes the
+    // pin *before* the launch that would have to say so.
+    expect(await screen.findByText(/claude-opus-3 no longer advertised/)).toBeDefined();
+  });
+
+  it("does not warn when the cache is empty — unknown is not retired", async () => {
+    renderWithTrpc(<AgentProfilesSection />, {
+      ...baseHandlers,
+      "profile.agentCatalog.list": () => [
+        { id: "cat-1", displayName: "Claude Code", capabilities: { models: [], modes: [] } },
+      ],
+      "profile.agent.list": () => ({
+        items: [
+          {
+            id: "p1",
+            name: "Pinned before any run",
+            agentCatalogId: "cat-1",
+            authMode: "api_key",
+            secretId: "secret-1",
+            concurrencyCap: 3,
+            permissionMode: "bypassPermissions",
+            model: "claude-opus-4",
+            modeId: null,
+            usage: NO_USAGE,
+          },
+        ],
+        nextCursor: null,
+      }),
+    });
+
+    await screen.findByText(/Pinned before any run/);
+    expect(screen.queryByText(/no longer advertised/)).toBeNull();
   });
 });

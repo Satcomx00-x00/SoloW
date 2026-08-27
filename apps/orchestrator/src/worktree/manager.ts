@@ -1,6 +1,6 @@
 import { join } from "node:path";
-import type { RepositorySource } from "@gatecontrol/contracts";
-import { taskCheckoutBranch } from "@gatecontrol/core";
+import type { RepositorySource } from "@solow/contracts";
+import { taskCheckoutBranch } from "@solow/core";
 import type { Executor } from "../executor/types.js";
 import { setupFileExclusions } from "./setup-files.js";
 
@@ -30,7 +30,7 @@ async function run(
 /**
  * Deterministic, collision-free branch name for a Task's worktree.
  *
- * Delegated to `@gatecontrol/core` rather than spelled out here: the DAL derives the same name
+ * Delegated to `@solow/core` rather than spelled out here: the DAL derives the same name
  * when an attachment omits a branch, and the migration that backfilled existing Tasks wrote it.
  * Three places, one template — a second copy is a silent divergence waiting to happen.
  */
@@ -87,7 +87,7 @@ export interface CloneCredential {
 }
 
 /** Environment variable the credential helper below reads the token from. */
-const TOKEN_VAR = "GATECONTROL_SCM_TOKEN";
+const TOKEN_VAR = "SOLOW_SCM_TOKEN";
 
 /**
  * `git clone` arguments that authenticate without ever writing the token somewhere it persists.
@@ -142,7 +142,7 @@ async function resolveRepoPath(executor: Executor, params: ProvisionParams): Pro
  *
  * Idempotent, because the branch name and the directory are both pure functions of the Task id
  * and nothing ever deletes the branch: `cleanupWorktree` removes the directory and leaves
- * `gatecontrol/task-<id>` behind. A second launch of the same Task — a relaunch after a review
+ * `solow/task-<id>` behind. A second launch of the same Task — a relaunch after a review
  * rejection, a `task.retry` after a failure, or an Inngest step retry inside one run
  * (Principle III) — would otherwise meet `fatal: a branch named '…' already exists` and fail
  * before the lifecycle could report anything.
@@ -212,7 +212,7 @@ export function isRepositoryUnusable(cause: unknown): boolean {
  * Make the repository ready for an agent to run in, without creating the Task's worktree.
  *
  * Claude Code creates that itself (`--worktree`), which is what lets several Tasks share one
- * repository at a time. GateControl still has to resolve *which* repository — a local path is
+ * repository at a time. SoloW still has to resolve *which* repository — a local path is
  * used as-is, a remote URL is cloned into the cache once — and to fail here, before any agent
  * starts, when the repository is unusable (TASK-015: an invalid location fails the Task rather
  * than producing a confusing agent error later).

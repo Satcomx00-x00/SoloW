@@ -1,5 +1,5 @@
-import { type AcpSession, type AcpUpdate, startAcpSession } from "@gatecontrol/acp";
-import { detectFailureSignal, type FailureSignal } from "@gatecontrol/core";
+import { type AcpSession, type AcpUpdate, startAcpSession } from "@solow/acp";
+import { detectFailureSignal, type FailureSignal } from "@solow/core";
 import type { Executor } from "../executor/types.js";
 import {
   DEFAULT_UNATTENDED_POSTURE,
@@ -16,14 +16,14 @@ import type {
 } from "./runner.js";
 
 /**
- * The Agent Client Protocol as GateControl's agent transport (Decision 0003 / issue #58).
+ * The Agent Client Protocol as SoloW's agent transport (Decision 0003 / issue #58).
  *
  * The mirror of `ClaudeCodeRunner`, and deliberately the same shape: bind the protocol driver to
  * `Executor.spawn`, map the protocol's updates onto `AgentStreamEvent`, classify a failure from
  * what the agent said and then from its stderr. Two things differ, and both are the protocol's
  * doing rather than a design choice here:
  *
- * - **The worktree is GateControl's.** ACP has no `--worktree`; the lifecycle creates the
+ * - **The worktree is SoloW's.** ACP has no `--worktree`; the lifecycle creates the
  *   directory and this runner is pointed at it. So `workspacePath` is known before the agent
  *   says anything, and is reported even when the run fails — the agent was isolated whether or
  *   not it got as far as working. Reporting `null` on a failed handshake would make the
@@ -39,6 +39,12 @@ export interface AcpRunnerOptions {
   executor: Executor;
   /** Diagnostics sink for the agent's stderr. Never receives protocol traffic. */
   onStderr?: (text: string) => void;
+  /**
+   * The session mode the Agent Profile pinned (issue #94), or absent to leave the agent on its
+   * own default. Only ever sent when the agent advertised it — `startAcpSession` checks the
+   * list from the handshake rather than sending a guess.
+   */
+  modeId?: string;
   /** How long an operator has to answer a permission before the policy decides (AC-4). */
   permissionDeadlineMs?: number;
   /**
@@ -66,6 +72,7 @@ export class AcpRunner implements AgentRunner {
           ...(opts.args.length > 0 ? { extraArgs: opts.args } : {}),
           cwd: opts.cwd,
           env: opts.env,
+          ...(this.options.modeId ? { modeId: this.options.modeId } : {}),
           spawn: (cmd, spawnOpts) => this.options.executor.spawn(cmd, spawnOpts),
           onUpdate: (update) => {
             const event = toStreamEvent(update);
@@ -82,7 +89,7 @@ export class AcpRunner implements AgentRunner {
               toolKind: request.kind,
               // An option with no id is dropped rather than offered. The protocol admits one —
               // its schema asks only for a string — but selecting it is impossible: the answer
-              // GateControl sends back names the option by id, and an empty name resolves to a
+              // SoloW sends back names the option by id, and an empty name resolves to a
               // cancellation whatever the operator clicked. Showing a choice that cannot be
               // made is worse than showing one fewer, and the record of the request is what the
               // session log has to keep either way (issue #58, AC-4).
@@ -214,6 +221,9 @@ export function toStreamEvent(update: AcpUpdate): AgentStreamEvent | null {
       return { kind: "stdout", channel: update.channel, text: update.text };
     case "mode":
       return { kind: "stdout", channel: "system", text: `\nmode: ${update.modeId}\n` };
+    // Passed through as-is: the lifecycle is what holds a database to cache them in.
+    case "capabilities":
+      return { kind: "capabilities", models: update.models, modes: update.modes };
     // The session preamble is plumbing, and the result's text lives in the stop reason rather
     // than in prose — neither is terminal output.
     case "session":

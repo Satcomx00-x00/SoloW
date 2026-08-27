@@ -1,8 +1,4 @@
-import {
-  EMPTY_PROJECT_FILTER,
-  type ProjectFilter,
-  type ProjectFilterTerm,
-} from "@gatecontrol/contracts";
+import { EMPTY_PROJECT_FILTER, type ProjectFilter, type ProjectFilterTerm } from "@solow/contracts";
 
 /**
  * The filter language saved views are written in (spec F23 FR-11, issue #129).

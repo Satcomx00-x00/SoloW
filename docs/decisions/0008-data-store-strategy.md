@@ -4,7 +4,7 @@
 
 ## Context
 
-GateControl must run both as a local single-user tool and as a hosted multi-user service
+SoloW must run both as a local single-user tool and as a hosted multi-user service
 (see [0002](./0002-technology-stack.md)). Local use favours a zero-setup embedded store;
 hosted use requires a shared database that supports many users and Workspaces. Maintaining
 two separate data models would risk divergence and double the work.

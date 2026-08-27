@@ -5,7 +5,7 @@ import {
   type TaskInput,
   type TaskInputAck,
   taskStreamFrameSchema,
-} from "@gatecontrol/contracts";
+} from "@solow/contracts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { trpc } from "@/trpc/react";
 

@@ -1,9 +1,9 @@
 "use client";
 
-import type { IssueStatus, TaskState } from "@gatecontrol/contracts";
+import type { IssueStatus, TaskState } from "@solow/contracts";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import type { ReactNode } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { type ReactNode, Suspense } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
@@ -18,8 +18,13 @@ import {
   projectIdFromPath,
   projectSectionFor,
   projectSectionHref,
+  SETTINGS_GROUPS,
   sectionFor,
+  settingsHref,
+  settingsSectionFor,
+  settingsSectionsIn,
 } from "@/lib/navigation";
+import { WHOLE_PAGE } from "@/lib/paged";
 import { BOARD_COLUMNS, STATE_LABELS, STATE_STYLE } from "@/lib/task-states";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
@@ -114,8 +119,8 @@ function CountRow({
 
 /** Board context: live per-state task counts, for the Project the board is inside. */
 function BoardNav({ projectId }: { projectId?: string | undefined }) {
-  const tasks = trpc.task.list.useQuery(projectId ? { projectId } : {});
-  const rows = tasks.data ?? [];
+  const tasks = trpc.task.list.useQuery(projectId ? { ...WHOLE_PAGE, projectId } : WHOLE_PAGE);
+  const rows = tasks.data?.items ?? [];
   const counts = rows.reduce<Record<string, number>>((acc, t) => {
     acc[t.state] = (acc[t.state] ?? 0) + 1;
     return acc;
@@ -157,10 +162,11 @@ function IssuesNav({
   unassigned?: boolean | undefined;
 }) {
   const issues = trpc.issue.list.useQuery({
+    ...WHOLE_PAGE,
     ...(projectId ? { projectId } : {}),
     ...(unassigned ? { unassigned: true } : {}),
   });
-  const rows = issues.data ?? [];
+  const rows = issues.data?.items ?? [];
   const counts = rows.reduce<Record<string, number>>((acc, i) => {
     acc[i.status] = (acc[i.status] ?? 0) + 1;
     return acc;
@@ -225,30 +231,51 @@ function AllIcon({ className, strokeWidth }: { className?: string; strokeWidth?:
   );
 }
 
-const SETTINGS_SECTIONS = [
-  { id: "secrets", label: "Secrets" },
-  { id: "agent-profiles", label: "Agent profiles" },
-  { id: "executor-profiles", label: "Executor profiles" },
-  { id: "repositories", label: "Repositories" },
-];
-
-/** Settings context: anchors to the configuration sections. */
+/**
+ * Settings context: every configuration section, grouped, with the current one marked.
+ *
+ * It used to be four hard-coded anchors — a second, shorter opinion about what Settings contains
+ * than the page itself held. Five sections had no entry at all, including the two the command
+ * palette links straight to, so the only way to reach Feature flags or MCP was to know they were
+ * somewhere down the scroll. The list is `SETTINGS_SECTIONS` now, which is the same list the page
+ * renders from, and the two cannot disagree again.
+ *
+ * Marking the current row is the other half. The page shows one group at a time, so without it
+ * the sidebar would be the only thing on screen that could say where you are, and it did not.
+ */
 function SettingsNav() {
+  const params = useSearchParams();
+  const active = settingsSectionFor(params.get("section"));
+
   return (
     <nav className="pb-3" aria-label="Settings sections">
-      <SectionLabel>Configuration</SectionLabel>
-      <ul className="space-y-px px-2">
-        {SETTINGS_SECTIONS.map((s) => (
-          <li key={s.id}>
-            <a
-              href={`#${s.id}`}
-              className="block rounded-md px-2 py-1.5 text-muted-foreground text-sm transition-colors hover:bg-sidebar-accent/60 hover:text-foreground"
-            >
-              {s.label}
-            </a>
-          </li>
-        ))}
-      </ul>
+      {SETTINGS_GROUPS.map(({ name }) => (
+        <div key={name}>
+          <SectionLabel>{name}</SectionLabel>
+          <ul className="space-y-px px-2">
+            {settingsSectionsIn(name).map((s) => {
+              const current = s.id === active.id;
+              return (
+                <li key={s.id}>
+                  <Link
+                    href={settingsHref(s.id)}
+                    aria-current={current ? "page" : undefined}
+                    className={cn(
+                      "flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors",
+                      current
+                        ? "bg-sidebar-accent font-medium text-foreground"
+                        : "text-foreground/75 hover:bg-sidebar-accent/50 hover:text-foreground",
+                    )}
+                  >
+                    <s.icon aria-hidden strokeWidth={2} className="size-3.5 shrink-0" />
+                    <span className="min-w-0 flex-1 truncate">{s.label}</span>
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ))}
     </nav>
   );
 }
@@ -369,7 +396,11 @@ export function Navigator({ workspaceName }: { workspaceName: string }) {
             {projectSection?.path === "/issues" && <IssuesNav projectId={projectId} />}
           </>
         ) : isSettings ? (
-          <SettingsNav />
+          // `useSearchParams` inside `SettingsNav` needs a boundary above it, and this is the
+          // narrowest place to put one — the rest of the shell stays statically renderable.
+          <Suspense fallback={null}>
+            <SettingsNav />
+          </Suspense>
         ) : isUnassigned ? (
           <IssuesNav unassigned />
         ) : null}

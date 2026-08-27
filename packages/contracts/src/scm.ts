@@ -9,7 +9,7 @@ import { providerIdSchema } from "./integration-provider.js";
  *
  * The domain speaks of a **change request**, never a "pull request" or "merge request" — each
  * driver translates its provider's own noun onto this shape at the boundary in
- * `@gatecontrol/scm`, so the domain never has to know which provider it is talking to.
+ * `@solow/scm`, so the domain never has to know which provider it is talking to.
  *
  * Which providers exist is no longer stated here. It was, as a closed `z.enum`, and that enum
  * was one of eight places a third provider had to be added to (F21, Decision 0016). It is now a
@@ -30,7 +30,7 @@ export const scmProviderSchema = providerIdSchema;
 export type ScmProvider = z.infer<typeof scmProviderSchema>;
 
 /**
- * Where an Issue came from. `local` is the one reserved value — an Issue typed into GateControl,
+ * Where an Issue came from. `local` is the one reserved value — an Issue typed into SoloW,
  * belonging to no provider — and everything else is a provider id. Rows predating integrations
  * read as `local`.
  *
@@ -103,7 +103,7 @@ export const connectIntegrationResultDto = z.object({
 export type ConnectIntegrationResultDto = z.infer<typeof connectIntegrationResultDto>;
 
 /**
- * Import a repository from an Integration: pick one the token can see, and GateControl creates
+ * Import a repository from an Integration: pick one the token can see, and SoloW creates
  * the Repository for it, already bound to the provider.
  *
  * This replaced a two-step "connect a local clone, then link it to a provider repo" flow. The
@@ -167,7 +167,7 @@ export const listExternalIssuesInput = z.object({
 export type ListExternalIssuesInput = z.infer<typeof listExternalIssuesInput>;
 
 /**
- * Import selected external issues as GateControl Issues (AC-2). Idempotent on
+ * Import selected external issues as SoloW Issues (AC-2). Idempotent on
  * `(workspaceId, integrationId, externalId)` — importing an id already imported is a no-op that
  * still returns the existing Issue, so a second import is visibly not a duplicate.
  */
@@ -215,7 +215,7 @@ export type RepositoryBranchDto = z.infer<typeof repositoryBranchDto>;
  * Deliberately not a full cascade. Branches and change requests are a cache of the provider's
  * state — once the credential is gone they can never be refreshed again, so keeping them would
  * leave the UI showing data it can no longer verify. Imported Issues are the opposite: they are
- * GateControl work items that Tasks point at (`task.issue_id` is NOT NULL), so they are kept and
+ * SoloW work items that Tasks point at (`task.issue_id` is NOT NULL), so they are kept and
  * detached rather than deleted, and the Repositories are unlinked rather than removed.
  */
 export const deleteIntegrationInput = z.object({ id: idSchema });

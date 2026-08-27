@@ -11,7 +11,7 @@ import type {
   SecretUsageDto,
   TaskDto,
   TaskRepositoryDto,
-} from "@gatecontrol/contracts";
+} from "@solow/contracts";
 import type {
   changeRequest,
   integration,
@@ -22,7 +22,7 @@ import type {
   secret,
   task,
   taskRepository,
-} from "@gatecontrol/db";
+} from "@solow/db";
 
 type IssueRow = typeof issue.$inferSelect;
 type TaskRow = typeof task.$inferSelect;
@@ -41,7 +41,7 @@ type McpTokenRow = typeof mcpToken.$inferSelect;
  */
 
 /**
- * What an Issue's Tasks add up to. Computed by the DAL (`@gatecontrol/core`'s
+ * What an Issue's Tasks add up to. Computed by the DAL (`@solow/core`'s
  * `deriveIssueStatus`/`activeTaskCount`) and handed here, so this file stays pure row → DTO
  * mapping with no rules of its own.
  */
@@ -72,6 +72,8 @@ export function issueToDto(row: IssueRow, rollup: IssueRollup): IssueDto {
     repositoryId: row.repositoryId,
     externalNumber: row.externalNumber,
     externalUrl: row.externalUrl,
+    externalId: row.externalId,
+    externalParentId: row.externalParentId,
     syncedAt: row.syncedAt,
     labels: row.labels,
     // The provider's own links, mirrored and never authored here (F23 FR-8, issue #128).
@@ -121,7 +123,26 @@ export function taskToDto(row: TaskRow, attachments: readonly TaskRepositoryRow[
   };
 }
 
-export function repositoryToDto(row: RepositoryRow): RepositoryDto {
+/**
+ * What only a caller who already joined `integration` (and counted `issue`) can supply — this
+ * module maps rows, not joins (user request 2026-08-27, see `repositoryDto`'s own comment on why
+ * a picker needs to tell same-provider Integrations apart).
+ *
+ * Defaulted to "unknown" (`null`/`0`) rather than required, so every existing call site that has
+ * no reason to pay for the join keeps working unchanged.
+ */
+export interface RepositoryEnrichment {
+  provider: string | null;
+  integrationBaseUrl: string | null;
+  issueCount: number;
+}
+
+const NO_ENRICHMENT: RepositoryEnrichment = { provider: null, integrationBaseUrl: null, issueCount: 0 };
+
+export function repositoryToDto(
+  row: RepositoryRow,
+  enrichment: RepositoryEnrichment = NO_ENRICHMENT,
+): RepositoryDto {
   return {
     id: row.id,
     name: row.name,
@@ -129,6 +150,9 @@ export function repositoryToDto(row: RepositoryRow): RepositoryDto {
     location: row.location,
     integrationId: row.integrationId,
     externalFullName: row.externalFullName,
+    provider: enrichment.provider,
+    integrationBaseUrl: enrichment.integrationBaseUrl,
+    issueCount: enrichment.issueCount,
     // Coalesced because the column was added to a populated table (issue #52): a row written
     // before the migration reads back as null, and the DTO promises a list.
     setupFilePatterns: row.setupFilePatterns ?? [],

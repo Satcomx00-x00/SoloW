@@ -23,10 +23,10 @@ without users having to watch the board constantly.
 
 ## Functional requirements
 
-- **FR-1** GateControl notifies users of events that need attention: a Task entering Review,
+- **FR-1** SoloW notifies users of events that need attention: a Task entering Review,
   a Workflow reaching a Gate, a Task failing, a Task being Parked, and a subscription
   credential expiring.
-- **FR-2** GateControl notifies users of completion events: a Task reaching Done and a
+- **FR-2** SoloW notifies users of completion events: a Task reaching Done and a
   Workflow Run completing.
 - **FR-3** Notifications are delivered through *channels*. A channel is a contribution to the
   notification registry (see [F19](./F19-extension-contributions.md)), not a feature of its

@@ -1,6 +1,6 @@
 "use client";
 
-import type { SecretKind, SecretRefDto } from "@gatecontrol/contracts";
+import type { SecretKind, SecretRefDto } from "@solow/contracts";
 import { Trash2 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";

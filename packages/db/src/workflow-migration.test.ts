@@ -80,7 +80,7 @@ function seedPopulated(db: Database): void {
     ).run(id as string, state as string);
   }
   db.exec(
-    "INSERT INTO task_repository (id, workspace_id, task_id, repository_id, checkout_branch) VALUES ('tr-1', 'ws-1', 'task-open', 'repo-1', 'gatecontrol/task-task-open')",
+    "INSERT INTO task_repository (id, workspace_id, task_id, repository_id, checkout_branch) VALUES ('tr-1', 'ws-1', 'task-open', 'repo-1', 'solow/task-task-open')",
   );
 }
 

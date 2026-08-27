@@ -4,7 +4,7 @@
 
 ## Summary
 
-GateControl handles sensitive credentials — subscription tokens, API keys, and integration
+SoloW handles sensitive credentials — subscription tokens, API keys, and integration
 credentials — and runs untrusted agent activity. This feature defines how those secrets are
 protected and how the boundary between agents and credentials is kept safe.
 
@@ -30,7 +30,7 @@ protected and how the boundary between agents and credentials is kept safe.
 - **FR-3** Secrets are scoped to a Workspace and reused only within it.
 - **FR-4** Credentials are supplied to Agents without being exposed to the code an Agent runs
   (product [NFR-7](../product/03-product-requirements.md)).
-- **FR-5** For Subscription-mode Agents, GateControl removes any conflicting credential from
+- **FR-5** For Subscription-mode Agents, SoloW removes any conflicting credential from
   the Agent's run environment so billing cannot be diverted (see [F06](./F06-authentication-billing.md)).
 - **FR-6** Destructive actions on secrets (rotation, deletion) require confirmation and are
   recorded.

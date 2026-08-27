@@ -1,6 +1,6 @@
 "use client";
 
-import type { Widget, WidgetKind } from "@gatecontrol/contracts";
+import type { Widget, WidgetKind } from "@solow/contracts";
 import type { ComponentType } from "react";
 import { AskUserInput } from "./ask-user-input";
 import { OptionsCard } from "./options-card";
@@ -14,7 +14,7 @@ import { UnsupportedWidget } from "./unsupported";
  * Which component draws which widget.
  *
  * A registry rather than a switch in the transcript, for the reason the catalogue in
- * `@gatecontrol/contracts/widget.ts` exists: the agreed set is long and this build implements a
+ * `@solow/contracts/widget.ts` exists: the agreed set is long and this build implements a
  * slice of it. Adding `weather` should be a schema variant and a file — one line here — and never
  * an edit to the transcript, the row component, or the stream.
  *

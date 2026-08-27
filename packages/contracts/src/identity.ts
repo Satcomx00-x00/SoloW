@@ -5,11 +5,11 @@ import { providerIdSchema } from "./integration-provider.js";
 /**
  * Who the signed-in user is **on a provider** (spec F23 FR-11, `assignee:@me`).
  *
- * A GateControl account name and a provider login are two different names for one person, and
+ * A SoloW account name and a provider login are two different names for one person, and
  * nothing makes them agree: `satcom` here is `satcomx00` on the host, and an account created
  * from an email address shares no characters with either. The planning table's `My items` tab
  * filters on the login the provider mirrored onto the row, so without a stated mapping `@me`
- * compares a GateControl name against a provider login and matches on coincidence alone.
+ * compares a SoloW name against a provider login and matches on coincidence alone.
  *
  * The mapping is per **Integration**, not per provider id: the same person is a different login
  * on a company GitHub Enterprise host than on github.com, and both can be connected at once.
@@ -60,8 +60,13 @@ export type ProjectIdentityInput = z.infer<typeof projectIdentityInput>;
  */
 export const projectIdentityDto = z.object({
   projectId: idSchema,
-  /** The Integration the Project belongs to; the mapping to state, when there is none. */
-  integrationId: idSchema,
+  /**
+   * The Integration the Project belongs to; the mapping to state, when there is none. Null for a
+   * local Project (user request 2026-08-27) — there is no provider to have an identity on, and
+   * `@me` there resolves to nothing (`login: null`) for exactly the same reason an unmapped
+   * mirrored Project does: matching nothing is the honest answer, not everything.
+   */
+  integrationId: idSchema.nullable(),
   login: z.string().nullable(),
 });
 export type ProjectIdentityDto = z.infer<typeof projectIdentityDto>;

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import { CommonErrorCode, IssueErrorCode, type TaskState } from "@gatecontrol/contracts";
+import { CommonErrorCode, IssueErrorCode, type TaskState } from "@solow/contracts";
 import {
   issue as issueTable,
   session,
@@ -7,8 +7,8 @@ import {
   task as taskTable,
   workspace,
   worktree,
-} from "@gatecontrol/db";
-import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
+} from "@solow/db";
+import { createTestDb, type TestDb } from "@solow/db/testing";
 import { eq } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
 import {
@@ -89,10 +89,10 @@ describe("issue DAL", () => {
     const res = await listIssues(ctxFor(db, wsId), {});
     expect(res.ok).toBe(true);
     if (!res.ok) return;
-    expect(res.data.length).toBe(2);
-    const titles = res.data.map((i) => i.title).sort();
+    expect(res.data.items.length).toBe(2);
+    const titles = res.data.items.map((i) => i.title).sort();
     expect(titles).toEqual(["First", "Second"]);
-    for (const dto of res.data) expect(dto.taskCount).toBe(0);
+    for (const dto of res.data.items) expect(dto.taskCount).toBe(0);
   });
 
   it("listIssues filters by title query", async () => {
@@ -103,8 +103,8 @@ describe("issue DAL", () => {
     const res = await listIssues(ctxFor(db, wsId), { query: "motor" });
     expect(res.ok).toBe(true);
     if (!res.ok) return;
-    expect(res.data.length).toBe(1);
-    expect(res.data[0]?.title).toBe("Gate motor whines");
+    expect(res.data.items.length).toBe(1);
+    expect(res.data.items[0]?.title).toBe("Gate motor whines");
   });
 
   // Cross-workspace isolation (constitution Principle V): a ctx scoped to workspace A
@@ -136,12 +136,12 @@ describe("issue DAL", () => {
     const listA = await listIssues(ctxFor(db, wsA), {});
     expect(listA.ok).toBe(true);
     if (!listA.ok) return;
-    expect(listA.data.map((i) => i.title)).toEqual(["A only"]);
+    expect(listA.data.items.map((i) => i.title)).toEqual(["A only"]);
 
     const listB = await listIssues(ctxFor(db, wsB), {});
     expect(listB.ok).toBe(true);
     if (!listB.ok) return;
-    expect(listB.data.length).toBe(2);
+    expect(listB.data.items.length).toBe(2);
   });
 });
 
@@ -203,13 +203,13 @@ describe("issue status is derived from its Tasks (FR-006)", () => {
     });
 
     const listed = await listIssues(ctx, {});
-    expect(listed.ok && listed.data[0]?.status).toBe("in_progress");
+    expect(listed.ok && listed.data.items[0]?.status).toBe("in_progress");
 
     // And the status filter matches on what the caller is actually shown, not on the column.
     const inProgress = await listIssues(ctx, { status: "in_progress" });
-    expect(inProgress.ok && inProgress.data.length).toBe(1);
+    expect(inProgress.ok && inProgress.data.items.length).toBe(1);
     const open = await listIssues(ctx, { status: "open" });
-    expect(open.ok && open.data.length).toBe(0);
+    expect(open.ok && open.data.items.length).toBe(0);
   });
 });
 
@@ -237,7 +237,7 @@ describe("createIssue (issue #15 reversal)", () => {
     expect(created.data.repositoryId).toBe(g.repositoryId);
 
     const listed = await listIssues(ctx, {});
-    expect(listed.ok && listed.data[0]?.labels).toEqual(["hardware", "weather"]);
+    expect(listed.ok && listed.data.items[0]?.labels).toEqual(["hardware", "weather"]);
   });
 
   it("refuses a repositoryId that belongs to another Workspace (Principle V)", async () => {
@@ -293,7 +293,7 @@ describe("updateIssue (issue #15 reversal)", () => {
       repositoryId: g.repositoryId,
     });
 
-    const attempt = await updateIssue(ctx, { id: imported.id, title: "GateControl's title" });
+    const attempt = await updateIssue(ctx, { id: imported.id, title: "SoloW's title" });
 
     expect(attempt).toEqual({ ok: false, error: IssueErrorCode.SourceOwned });
     const reread = await getIssueById(ctx, imported.id);
@@ -457,8 +457,8 @@ describe("deleteIssue (issue #15 reversal)", () => {
       workspaceId: g.workspaceId,
       taskId,
       repositoryId: g.repositoryId,
-      path: ".gatecontrol/worktrees/x",
-      branch: "gatecontrol/x",
+      path: ".solow/worktrees/x",
+      branch: "solow/x",
       status: "active",
     });
 
@@ -594,8 +594,8 @@ describe("deleteIssue (issue #15 reversal)", () => {
       workspaceId: g.workspaceId,
       taskId: made.data.id,
       repositoryId: g.repositoryId,
-      path: ".gatecontrol/worktrees/live",
-      branch: "gatecontrol/live",
+      path: ".solow/worktrees/live",
+      branch: "solow/live",
       status: "active",
     });
     // A `removed` worktree has no directory left, so it must not be counted in the warning.
@@ -603,8 +603,8 @@ describe("deleteIssue (issue #15 reversal)", () => {
       workspaceId: g.workspaceId,
       taskId: made.data.id,
       repositoryId: g.repositoryId,
-      path: ".gatecontrol/worktrees/old",
-      branch: "gatecontrol/old",
+      path: ".solow/worktrees/old",
+      branch: "solow/old",
       status: "removed",
     });
 
@@ -648,7 +648,7 @@ describe("listIssues filters (spec F01 FR-2)", () => {
   }
 
   const titles = (r: Awaited<ReturnType<typeof listIssues>>) =>
-    r.ok ? r.data.map((i) => i.title).sort() : ["<error>"];
+    r.ok ? r.data.items.map((i) => i.title).sort() : ["<error>"];
 
   it("matches the query against the title", async () => {
     const ctx = await seedThree("q-title");
@@ -823,5 +823,119 @@ describe("setIssueStatus (spec F01 FR-7 / FR-9)", () => {
       force: true,
     });
     expect(!stranger.ok && stranger.error).toBe(CommonErrorCode.NotFound);
+  });
+});
+
+/**
+ * Paging, against the real database (issue #82 AC-4).
+ *
+ * `issue.list` is an MCP tool, so its bound is the difference between a discovery call and one
+ * that spends an agent's whole context. These tests hold the three things that make the bound
+ * usable rather than merely present: it applies when nobody asked for it, walking the cursor
+ * reaches every row exactly once, and the Workspace scope survives paging — a cursor is a value a
+ * caller hands back, and a cursor is exactly the sort of thing a tenancy check gets forgotten on.
+ */
+describe("issue DAL — paging", () => {
+  let db: TestDb;
+
+  beforeEach(() => {
+    db = createTestDb();
+  });
+
+  /** `n` issues in one Workspace, oldest first, so the newest-first order is checkable. */
+  async function seedMany(name: string, n: number): Promise<string> {
+    const workspaceId = await seedWorkspace(db, name);
+    for (let i = 0; i < n; i += 1) {
+      await db.insert(issueTable).values({
+        workspaceId,
+        title: `Issue ${String(i).padStart(3, "0")}`,
+        // The same timestamp for every row on purpose: a sync writes a batch in one millisecond,
+        // and it is exactly there that a cursor ordered on time alone starts skipping rows.
+        createdAt: "2026-08-27T09:00:00.000Z",
+      });
+    }
+    return workspaceId;
+  }
+
+  it("bounds a caller that asked for no size", async () => {
+    // The claim the whole feature rests on. A tool call sends `{}`.
+    const workspaceId = await seedMany("bounded", 120);
+
+    const page = await listIssues(ctxFor(db, workspaceId), {});
+
+    expect(page.ok && page.data.items.length).toBe(100);
+    expect(page.ok && page.data.nextCursor).not.toBeNull();
+  });
+
+  it("walks every row exactly once, even when they share a timestamp", async () => {
+    // The reason the cursor carries the id as well as the time: 25 rows written in one
+    // millisecond have no order until something breaks the tie, and a page boundary landing
+    // inside them would repeat some and skip others.
+    const workspaceId = await seedMany("walk", 25);
+    const ctx = ctxFor(db, workspaceId);
+
+    const seen: string[] = [];
+    let cursor: string | undefined;
+    for (let guard = 0; guard < 20; guard += 1) {
+      const page = await listIssues(ctx, { limit: 7, ...(cursor ? { cursor } : {}) });
+      if (!page.ok) throw new Error("list failed");
+      seen.push(...page.data.items.map((i) => i.title));
+      if (!page.data.nextCursor) break;
+      cursor = page.data.nextCursor;
+    }
+
+    // Every row, once. Which order they come back in is the id's to decide here — that is the
+    // point of the tie-break, and asserting a particular one would be asserting the shape of a
+    // uuid.
+    expect(seen).toHaveLength(25);
+    expect(new Set(seen).size).toBe(25);
+  });
+
+  it("returns the newest first when the timestamps do differ", async () => {
+    const workspaceId = await seedWorkspace(db, "ordered");
+    for (const [i, createdAt] of ["2026-08-25", "2026-08-26", "2026-08-27"].entries()) {
+      await db.insert(issueTable).values({
+        workspaceId,
+        title: `Issue ${i}`,
+        createdAt: `${createdAt}T09:00:00.000Z`,
+      });
+    }
+
+    const page = await listIssues(ctxFor(db, workspaceId), {});
+
+    expect(page.ok && page.data.items.map((i) => i.title)).toEqual([
+      "Issue 2",
+      "Issue 1",
+      "Issue 0",
+    ]);
+  });
+
+  it("keeps the Workspace scope on a paged read, cursor and all (Principle V)", async () => {
+    // A cursor is a value the caller hands back, which makes it the natural place for a tenancy
+    // check to be forgotten. It must not be able to walk out of its own Workspace.
+    const mine = await seedMany("mine", 12);
+    const theirs = await seedMany("theirs", 12);
+
+    const first = await listIssues(ctxFor(db, mine), { limit: 5 });
+    if (!first.ok || !first.data.nextCursor) throw new Error("expected a second page");
+    const next = await listIssues(ctxFor(db, theirs), { limit: 5, cursor: first.data.nextCursor });
+
+    expect(next.ok && next.data.items.every((i) => i.id !== undefined)).toBe(true);
+    // Every row the other Workspace gets back is its own, whatever cursor it was handed.
+    const ours = await listIssues(ctxFor(db, mine), { limit: 500 });
+    const ourIds = new Set(ours.ok ? ours.data.items.map((i) => i.id) : []);
+    expect(next.ok && next.data.items.some((i) => ourIds.has(i.id))).toBe(false);
+  });
+
+  it("pages a filter it can only apply after reading, without shortening the page", async () => {
+    // `status` is derived from an Issue's Tasks, so it cannot be a `WHERE` clause — the read
+    // loops until it has a full page. A page cut short by the filter would be a page that lies
+    // about how much is left.
+    const workspaceId = await seedMany("filtered", 30);
+
+    const page = await listIssues(ctxFor(db, workspaceId), { limit: 10, status: "open" });
+
+    expect(page.ok && page.data.items).toHaveLength(10);
+    expect(page.ok && page.data.items.every((i) => i.status === "open")).toBe(true);
   });
 });

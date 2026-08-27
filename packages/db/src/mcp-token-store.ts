@@ -9,7 +9,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
  * never be one — a lost token is reissued, not recovered.
  */
 
-/** Distinguishes a GateControl token at a glance, and gives secret scanners something to match. */
+/** Distinguishes a SoloW token at a glance, and gives secret scanners something to match. */
 const PREFIX = "gcmcp_";
 
 /** Characters of the value kept in the clear, so a token list is legible without being reversible. */

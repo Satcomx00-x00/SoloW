@@ -7,6 +7,7 @@ import {
   type IssueDeletionImpactDto,
   type IssueDto,
   IssueErrorCode,
+  type IssueLabelColorListDto,
   type IssueLabelListDto,
   type IssueListDto,
   type ListIssuesInput,
@@ -15,9 +16,10 @@ import {
   type SetIssueStatusInput,
   type TaskState,
   type UpdateIssueInput,
-} from "@gatecontrol/contracts";
-import { activeTaskCount, deriveIssueStatus } from "@gatecontrol/core";
+} from "@solow/contracts";
+import { activeTaskCount, deriveIssueStatus } from "@solow/core";
 import {
+  attachIssueToLocalProjects,
   issue,
   projectItem,
   projectValue,
@@ -25,10 +27,12 @@ import {
   session,
   task,
   worktree,
-} from "@gatecontrol/db";
-import { and, desc, eq, inArray, like, notInArray, or } from "drizzle-orm";
+} from "@solow/db";
+import { and, eq, inArray, like, notInArray, or } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
+import { driverWith, loadCredential } from "./integration.js";
 import { type IssueRollup, issueToDto, NO_TASKS } from "./mappers.js";
+import { encodeCursor, pageAfter, pageLimit, pageOrder, pageProbe, toPage } from "./page.js";
 import { cascadeDeleteTasks } from "./task-cascade.js";
 
 /**
@@ -140,33 +144,79 @@ export async function listIssues(
     );
   }
 
-  const rows = await ctx.db
-    .select()
-    .from(issue)
-    .where(and(...conditions))
-    .orderBy(desc(issue.createdAt));
-
-  const states = await taskStatesByIssue(
-    ctx,
-    rows.map((r) => r.id),
-  );
-  const dtos = rows.map((r) => issueToDto(r, rollupOf(states.get(r.id) ?? [])));
-
-  // Both remaining filters run after mapping rather than in SQL, for the same reason in two
-  // shapes: `status` is derived (a `where status = …` would match a value the caller never
-  // sees), and `labels` is a JSON array column, where SQL matching means substring-matching the
-  // serialized text — "api" would match the label "api-gateway". Neither is a scan worth
-  // avoiding at a Workspace's number of Issues (NFR-2 is about the list staying responsive, and
-  // the rows are already in memory for the roll-up).
+  /*
+   * Paged in a loop rather than in one read, because two of this list's filters cannot be
+   * expressed in SQL.
+   *
+   * `status` is derived from the Issue's Tasks (a `where status = …` would match a column no
+   * caller ever sees), and `labels` is a JSON array, where SQL matching means substring-matching
+   * the serialized text — `api` would match `api-gateway`. Both therefore run after mapping, and
+   * a page that filtered afterwards would be a page shorter than it claimed, handing back a
+   * cursor whose next page might also be empty. So the read walks until it has a full page or the
+   * table is exhausted, and the cursor it returns names a row that really is the boundary.
+   *
+   * The ceiling is the same honesty device `PROJECT_ITEM_CEILING` is: a filter that matches
+   * almost nothing must not turn one list call into a full-table scan, and stopping early while
+   * still returning a cursor is a shorter page, not a wrong one.
+   */
   const wanted = input.labels;
-  return ok(
-    dtos.filter(
-      (d) =>
-        (!input.status || d.status === input.status) &&
-        (!wanted?.length || wanted.every((label) => d.labels.includes(label))),
-    ),
-  );
+  const keep = (dto: IssueDto) =>
+    (!input.status || dto.status === input.status) &&
+    (!wanted?.length || wanted.every((label) => dto.labels.includes(label)));
+
+  const collected: IssueDto[] = [];
+  let cursor = input.cursor;
+  let scanned = 0;
+  let nextCursor: string | null = null;
+
+  const limit = pageLimit(input.limit);
+  while (collected.length < limit && scanned < ISSUE_SCAN_CEILING) {
+    const after = pageAfter(cursor, issue.createdAt, issue.id);
+    const rows = await ctx.db
+      .select()
+      .from(issue)
+      .where(and(...conditions, ...(after ? [after] : [])))
+      .orderBy(...pageOrder(issue.createdAt, issue.id))
+      .limit(pageProbe(limit));
+    if (rows.length === 0) break;
+    scanned += rows.length;
+
+    const states = await taskStatesByIssue(
+      ctx,
+      rows.map((r) => r.id),
+    );
+    const page = toPage(rows, limit, (r) => ({ createdAt: r.createdAt, id: r.id }));
+    for (const row of page.items) {
+      const dto = issueToDto(row, rollupOf(states.get(row.id) ?? []));
+      if (keep(dto)) collected.push(dto);
+    }
+    nextCursor = page.nextCursor;
+    if (!page.nextCursor) break;
+    cursor = page.nextCursor;
+  }
+
+  // Trimmed rather than allowed to overshoot: a round of the loop admits a whole SQL page, and
+  // the last one can carry the page past `limit`. The cursor is re-derived from the row that
+  // ends up last, so the next page starts exactly where this one stopped.
+  if (collected.length > limit) {
+    const kept = collected.slice(0, limit);
+    const last = kept.at(-1);
+    return ok({
+      items: kept,
+      nextCursor: last ? encodeCursor({ createdAt: last.createdAt, id: last.id }) : null,
+    });
+  }
+  return ok({ items: collected, nextCursor });
 }
+
+/**
+ * How many rows one filtered read will walk before it stops and answers with what it has.
+ *
+ * A ceiling rather than a promise: `status` and `labels` are matched in memory, so a filter that
+ * admits almost nothing would otherwise turn one list call into a full-table scan. The cursor
+ * still comes back, so a caller that wants the rest can ask for it.
+ */
+const ISSUE_SCAN_CEILING = 2000;
 
 /**
  * Every label in use in the Workspace, sorted, for the list filter to offer.
@@ -184,6 +234,56 @@ export async function listIssueLabels(ctx: RequestContext): Promise<Result<Issue
   const seen = new Set<string>();
   for (const row of rows) for (const label of row.labels) seen.add(label);
   return ok([...seen].sort((a, b) => a.localeCompare(b)));
+}
+
+/**
+ * Every label the Workspace's linked Repositories define, with the colour its provider gives it.
+ *
+ * Asked of the providers rather than read from the mirror: `issue.labels` stores names only, so a
+ * table that wanted to paint a label had nowhere to get the colour from and drew every one of
+ * them grey.
+ *
+ * One repository failing costs its own vocabulary and nothing else — a token that expired on one
+ * connection must not blank the labels of every other. Later definitions win on a name collision,
+ * which is arbitrary and harmless: two repositories that both define `bug` in different colours
+ * disagree at the source, and no answer here is more correct than the other.
+ */
+export async function listIssueLabelColors(
+  ctx: RequestContext,
+): Promise<Result<IssueLabelColorListDto>> {
+  const repositories = await ctx.db
+    .select({
+      id: repository.id,
+      integrationId: repository.integrationId,
+      externalFullName: repository.externalFullName,
+    })
+    .from(repository)
+    .where(eq(repository.workspaceId, ctx.workspaceId));
+
+  const byName = new Map<string, string | null>();
+  for (const repo of repositories) {
+    if (!repo.integrationId || !repo.externalFullName) continue;
+    try {
+      const credential = await loadCredential(ctx, repo.integrationId);
+      if (!credential.ok) continue;
+      const driver = driverWith(credential.data.row.provider, "issues");
+      if (!driver.ok) continue;
+      for (const label of await driver.data.listLabels(
+        credential.data.credential,
+        repo.externalFullName,
+      )) {
+        byName.set(label.name, label.color ?? null);
+      }
+    } catch {
+      // See the note above: one repository's failure is its own.
+    }
+  }
+
+  return ok(
+    [...byName.entries()]
+      .map(([name, color]) => ({ name, color }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+  );
 }
 
 /**
@@ -259,7 +359,16 @@ export async function createIssue(
       // source defaults to "local" at the column — this is exactly the case that value means.
     })
     .returning();
-  return row ? ok(issueToDto(row, NO_TASKS)) : err(CommonErrorCode.NotFound);
+  if (!row) return err(CommonErrorCode.NotFound);
+
+  // A local Project registered under this Repository must gain this Issue immediately — F23's
+  // "nothing is imported by hand", applied to the local case (user request 2026-08-27).
+  await attachIssueToLocalProjects(ctx.db, ctx.workspaceId, {
+    issueId: row.id,
+    repositoryId: input.repositoryId,
+  });
+
+  return ok(issueToDto(row, NO_TASKS));
 }
 
 /**

@@ -1,9 +1,9 @@
 /// <reference types="bun-types" />
 
 import { beforeEach, describe, expect, it } from "bun:test";
-import { matchesProjectFilter, parseProjectFilter } from "@gatecontrol/core";
-import { integration, project } from "@gatecontrol/db";
-import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
+import { matchesProjectFilter, parseProjectFilter } from "@solow/core";
+import { integration, project } from "@solow/db";
+import { createTestDb, type TestDb } from "@solow/db/testing";
 import type { RequestContext } from "./context.js";
 import {
   clearProviderIdentity,
@@ -16,7 +16,7 @@ import { seedWorkspaceGraph } from "./test-fixtures.js";
 /**
  * Who `@me` is (spec F23 FR-11).
  *
- * The bug these tests exist for: `@me` used to be the GateControl account name, compared against
+ * The bug these tests exist for: `@me` used to be the SoloW account name, compared against
  * a provider login. Two different names for one person, agreeing by coincidence — so the tab the
  * whole saved-views feature is named after matched nothing in practice, and there was no way for
  * anyone to correct it.
@@ -238,7 +238,7 @@ describe("what the resolved login does to the filter", () => {
     expect(matchesProjectFilter(parseProjectFilter("assignee:@me"), row, { me })).toBe(false);
   });
 
-  it("does not match a GateControl account name that only looks like the login", async () => {
+  it("does not match a SoloW account name that only looks like the login", async () => {
     // The original defect, stated as a test: the account is `ada`, the provider login is
     // `ada-on-the-host`, and passing the first as `@me` matches none of that person's rows.
     expect(matchesProjectFilter(parseProjectFilter("assignee:@me"), row, { me: "ada" })).toBe(

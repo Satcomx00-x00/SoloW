@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { afterEach, describe, expect, it } from "bun:test";
-import type { SessionEventPayload, SessionSummaryDto } from "@gatecontrol/contracts";
+import type { SessionEventPayload, SessionSummaryDto } from "@solow/contracts";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { SessionLog } from "./session-log";
 

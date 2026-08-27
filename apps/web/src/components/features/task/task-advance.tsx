@@ -1,7 +1,7 @@
 "use client";
 
-import type { TaskState } from "@gatecontrol/contracts";
-import { nextTaskState, previousTaskState } from "@gatecontrol/core";
+import type { TaskState } from "@solow/contracts";
+import { nextTaskState, previousTaskState } from "@solow/core";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -20,7 +20,7 @@ import { STATE_LABELS } from "@/lib/task-states";
  * second place for those three to be got wrong. It also means this file is testable by rendering
  * it, with no query client and no harness.
  *
- * Where a direction may go is asked of `@gatecontrol/core`, which derives it from the same
+ * Where a direction may go is asked of `@solow/core`, which derives it from the same
  * transition table the server validates against, so an arrow can never offer a move the server
  * then refuses.
  */

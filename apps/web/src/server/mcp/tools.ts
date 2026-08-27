@@ -18,7 +18,7 @@ import { appRouter } from "../routers/index.js";
  *
  * This is a narrowing of *which* contracts are exposed, not a redefinition of any of them:
  *
- * - `secret` — an MCP token is held by software running outside GateControl, and Principle IV
+ * - `secret` — an MCP token is held by software running outside SoloW, and Principle IV
  *   keeps credentials on a narrower path than ordinary data. A read_write token is a grant to
  *   manage work, not a grant to plant a credential the orchestrator will later inject into an
  *   agent process. Secrets stay a first-party, signed-in action.
@@ -118,7 +118,7 @@ function describe(procedurePath: string, type: string, meta: ProcedureDef["_def"
   const openapi = meta?.meta?.openapi;
   const written = openapi?.summary ?? openapi?.description;
   const verb = type === "query" ? "Read" : "Write";
-  return written ?? `${verb} operation \`${procedurePath}\` on GateControl.`;
+  return written ?? `${verb} operation \`${procedurePath}\` on SoloW.`;
 }
 
 /** Every procedure the MCP surface exposes, in stable path order. */

@@ -1,9 +1,9 @@
 /// <reference types="bun-types" />
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { IssueErrorCode } from "@gatecontrol/contracts";
-import { session as sessionTable, task as taskTable, worktree } from "@gatecontrol/db";
-import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
+import { IssueErrorCode } from "@solow/contracts";
+import { session as sessionTable, task as taskTable, worktree } from "@solow/db";
+import { createTestDb, type TestDb } from "@solow/db/testing";
 import { eq } from "drizzle-orm";
 import { createTaskRecord } from "../dal/task.js";
 import { ctxFor, seedWorkspaceGraph } from "../dal/test-fixtures.js";
@@ -34,25 +34,25 @@ function caller(db: TestDb, workspaceId: string) {
 describe("issue.delete force", () => {
   let db: TestDb;
   // Both `devOwnerMode()` and `orchestratorUrl()` read `process.env` on every call, and other
-  // router suites set GATECONTROL_DEV_OWNER process-wide. Pinning both here is what keeps the
+  // router suites set SOLOW_DEV_OWNER process-wide. Pinning both here is what keeps the
   // two stop-failure branches below from swapping places depending on file order.
-  const savedDevOwner = process.env.GATECONTROL_DEV_OWNER;
-  const savedUrl = process.env.GATECONTROL_ORCHESTRATOR_URL;
+  const savedDevOwner = process.env.SOLOW_DEV_OWNER;
+  const savedUrl = process.env.SOLOW_ORCHESTRATOR_URL;
 
   beforeEach(() => {
     db = createTestDb();
-    delete process.env.GATECONTROL_ORCHESTRATOR_URL;
+    delete process.env.SOLOW_ORCHESTRATOR_URL;
   });
 
   afterEach(() => {
-    if (savedDevOwner === undefined) delete process.env.GATECONTROL_DEV_OWNER;
-    else process.env.GATECONTROL_DEV_OWNER = savedDevOwner;
-    if (savedUrl === undefined) delete process.env.GATECONTROL_ORCHESTRATOR_URL;
-    else process.env.GATECONTROL_ORCHESTRATOR_URL = savedUrl;
+    if (savedDevOwner === undefined) delete process.env.SOLOW_DEV_OWNER;
+    else process.env.SOLOW_DEV_OWNER = savedDevOwner;
+    if (savedUrl === undefined) delete process.env.SOLOW_ORCHESTRATOR_URL;
+    else process.env.SOLOW_ORCHESTRATOR_URL = savedUrl;
   });
 
   it("deletes the Issue and its Tasks when nothing is running", async () => {
-    process.env.GATECONTROL_DEV_OWNER = "off";
+    process.env.SOLOW_DEV_OWNER = "off";
     const g = await seedWorkspaceGraph(db, "router-force");
     const api = caller(db, g.workspaceId);
     const created = await api.issue.create({
@@ -80,7 +80,7 @@ describe("issue.delete force", () => {
   });
 
   it("deletes nothing when the running Tasks could not be stopped", async () => {
-    process.env.GATECONTROL_DEV_OWNER = "off";
+    process.env.SOLOW_DEV_OWNER = "off";
     const g = await seedWorkspaceGraph(db, "router-force-running");
     const api = caller(db, g.workspaceId);
     const created = await api.issue.create({
@@ -101,7 +101,7 @@ describe("issue.delete force", () => {
       .insert(sessionTable)
       .values({ workspaceId: g.workspaceId, taskId: made.data.id, state: "active" });
 
-    // No GATECONTROL_ORCHESTRATOR_URL in the test env, so the stop hand-off fails outright.
+    // No SOLOW_ORCHESTRATOR_URL in the test env, so the stop hand-off fails outright.
     // That must abort the whole delete: cascading anyway would drop the `task` row while its
     // agent kept running, with nothing left able to stop it. (The other half of this guard — a
     // stop that was accepted but has not taken effect yet — is the DAL's own re-check, covered
@@ -115,7 +115,7 @@ describe("issue.delete force", () => {
   });
 
   it("reports the impact the confirmation dialog states, counting only worktrees still on disk", async () => {
-    process.env.GATECONTROL_DEV_OWNER = "off";
+    process.env.SOLOW_DEV_OWNER = "off";
     const g = await seedWorkspaceGraph(db, "router-force-impact");
     const api = caller(db, g.workspaceId);
     const created = await api.issue.create({
@@ -140,8 +140,8 @@ describe("issue.delete force", () => {
         workspaceId: g.workspaceId,
         taskId: made.data.id,
         repositoryId: g.repositoryId,
-        path: `.gatecontrol/worktrees/${status}`,
-        branch: `gatecontrol/${status}`,
+        path: `.solow/worktrees/${status}`,
+        branch: `solow/${status}`,
         status,
       });
     }
@@ -159,7 +159,7 @@ describe("issue.delete force", () => {
     // so the router proceeds — and the DAL's in-transaction re-check is then the only thing
     // preventing a cascade over a live agent. This is the branch the previous test cannot
     // reach, because there the stop never succeeds in the first place.
-    process.env.GATECONTROL_DEV_OWNER = "on";
+    process.env.SOLOW_DEV_OWNER = "on";
     const g = await seedWorkspaceGraph(db, "router-force-noop-stop");
     const api = caller(db, g.workspaceId);
     const created = await api.issue.create({

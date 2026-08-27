@@ -1,4 +1,4 @@
-import type { IssueStatus, TaskState } from "@gatecontrol/contracts";
+import type { IssueStatus, TaskState } from "@solow/contracts";
 
 /**
  * Derive an Issue's status from its Tasks (spec FR-006). Pure.

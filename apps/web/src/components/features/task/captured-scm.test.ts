@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { describe, expect, it } from "bun:test";
-import type { TaskDiffDto } from "@gatecontrol/contracts";
+import type { TaskDiffDto } from "@solow/contracts";
 import { scmFromCapturedDiff, splitPatchByFile } from "./captured-scm";
 
 /**
@@ -19,7 +19,7 @@ index b94897d..19f5aff 100644
  statistics`;
 
 const diff = (over: Partial<TaskDiffDto> = {}): TaskDiffDto => ({
-  diffRef: "worktree-gatecontrol-task-83b3a0d4",
+  diffRef: "worktree-solow-task-83b3a0d4",
   files: [{ path: "requierements.txt", status: "modified", additions: 5, deletions: 5 }],
   patch: REAL_PATCH,
   truncated: false,
@@ -41,7 +41,7 @@ describe("scmFromCapturedDiff", () => {
         binary: false,
       },
     ]);
-    expect(worktree.branch.name).toBe("worktree-gatecontrol-task-83b3a0d4");
+    expect(worktree.branch.name).toBe("worktree-solow-task-83b3a0d4");
   });
 
   it("is never writable, because there is no working tree behind it", () => {

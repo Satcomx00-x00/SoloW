@@ -3,6 +3,14 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { PATHS, SEED_WORKSPACE_A } from "../support/fixture.js";
+import {
+  connectRepository,
+  createTask,
+  launchTask,
+  launchToReview,
+  openReview,
+  openTask,
+} from "../support/flows.js";
 import { seedIssue } from "../support/seed.js";
 
 /**
@@ -10,6 +18,11 @@ import { seedIssue } from "../support/seed.js";
  * change on a new local branch — the loop the whole product exists to serve. The agent is the
  * deterministic fixture runner, but every other layer (SPA → tRPC → DAL → orchestrator →
  * worktree → git) is production code.
+ *
+ * The journey is today's: there is no flat `/board` (boards live inside Projects, and the
+ * fixture repository belongs to none), so a Task is created from the header's Create menu,
+ * opened from its Issue's page, launched with the Task page's own lifecycle arrows, and reviewed
+ * behind the gate the operator opens. See `support/flows.ts` for why that vocabulary is shared.
  *
  * Waits are selector-based only; nothing in this file sleeps for a fixed duration.
  */
@@ -19,74 +32,9 @@ const REPO_NAME = "e2e-fixture-repo";
 const git = (args: string[]) =>
   execFileSync("git", args, { cwd: PATHS.repo, encoding: "utf8" }).trim();
 
-/** Connect the fixture git repository through Settings (once per suite run). */
 async function ensureRepository(page: import("@playwright/test").Page): Promise<void> {
-  await page.goto("/settings");
-  // Wait for the list to actually resolve before deciding. Reading visibility straight after
-  // navigating would answer "not there yet" while the query is still in flight, and every test
-  // that did so would connect another copy of the same repository.
-  await expect(page.getByLabel("Connected repositories")).toBeVisible();
-  const badge = page.getByText(`${REPO_NAME} · local_path`);
-  if (await badge.isVisible()) return;
-  await page.getByLabel("Name").last().fill(REPO_NAME);
-  await page.getByLabel("Location").fill(PATHS.repo);
-  await page.getByRole("button", { name: "Connect repository" }).click();
-  await expect(badge).toBeVisible();
-}
-
-async function pickOption(
-  page: import("@playwright/test").Page,
-  label: string,
-  option: string,
-): Promise<void> {
-  await page.getByRole("combobox", { name: label }).click();
-  await page.getByRole("option", { name: option }).click();
-}
-
-async function createTask(
-  page: import("@playwright/test").Page,
-  opts: { title: string; issue: string },
-): Promise<void> {
-  await page.getByRole("button", { name: "New task" }).click();
-  const dialog = page.getByRole("dialog", { name: "New task" });
-  await dialog.getByLabel("Title").fill(opts.title);
-  // Repository before Issue: the Issue picker now narrows to the chosen Repository (issue #15),
-  // and picking a Repository resets any already-picked Issue — so Repository has to go first.
-  await pickOption(page, "Repository", REPO_NAME);
-  await pickOption(page, "Issue", opts.issue);
-  await pickOption(page, "Agent profile", "Claude Code (subscription)");
-  await pickOption(page, "Executor", "Local executor");
-  await dialog.getByRole("button", { name: "Create task" }).click();
-  await expect(dialog).toBeHidden();
-}
-
-/** The board column a Task card currently sits in. */
-function cardIn(page: import("@playwright/test").Page, column: string, title: string) {
-  return page.getByLabel(`${column} column`).getByText(title, { exact: true });
-}
-
-/** Drive a Task from Backlog to Review; returns its id (read from the task page URL). */
-async function launchToReview(
-  page: import("@playwright/test").Page,
-  title: string,
-): Promise<string> {
-  const card = page.getByLabel("Backlog column").locator("li", { hasText: title });
-  await card.getByRole("button", { name: "Ready" }).click();
-  await expect(cardIn(page, "Ready", title)).toBeVisible();
-
-  await page
-    .getByLabel("Ready column")
-    .locator("li", { hasText: title })
-    .getByRole("button", { name: "Launch" })
-    .click();
-
-  // The orchestrator runs the agent and parks the Task at the review gate; the board learns
-  // about it over the live channel, with no reload.
-  await expect(cardIn(page, "Review", title)).toBeVisible();
-
-  await cardIn(page, "Review", title).click();
-  await expect(page).toHaveURL(/\/task\/[0-9a-f-]+$/);
-  return new URL(page.url()).pathname.split("/").pop() as string;
+  await page.goto("/settings?section=repositories");
+  await connectRepository(page, REPO_NAME, PATHS.repo);
 }
 
 test.describe("steering a running agent", () => {
@@ -99,22 +47,10 @@ test.describe("steering a running agent", () => {
     const taskTitle = `Warm the latch housing ${stamp} [steerable]`;
 
     await ensureRepository(page);
-    await page.goto("/board");
-    seedIssue(SEED_WORKSPACE_A, issueTitle);
-    await createTask(page, { title: taskTitle, issue: issueTitle });
-
-    const card = page.getByLabel("Backlog column").locator("li", { hasText: taskTitle });
-    await card.getByRole("button", { name: "Ready" }).click();
-    await page
-      .getByLabel("Ready column")
-      .locator("li", { hasText: taskTitle })
-      .getByRole("button", { name: "Launch" })
-      .click();
-
-    // The Task stays Running because its agent is waiting for us.
-    await expect(cardIn(page, "Running", taskTitle)).toBeVisible();
-    await cardIn(page, "Running", taskTitle).click();
-    await expect(page).toHaveURL(/\/task\/[0-9a-f-]+$/);
+    const issue = seedIssue(SEED_WORKSPACE_A, issueTitle, REPO_NAME);
+    await createTask(page, { title: taskTitle, issue: issueTitle, repository: REPO_NAME });
+    await openTask(page, issue.id, taskTitle);
+    await launchTask(page);
 
     const box = page.getByLabel("Message the agent");
     await expect(box).toBeEnabled();
@@ -123,8 +59,9 @@ test.describe("steering a running agent", () => {
 
     // SPA → hub → registry → the agent for *this* Task → back down the stream (TASK-022).
     await expect(page.getByText("agent received: check the heater fuse too")).toBeVisible();
-    // Having taken the instruction the agent finishes, so the review gate opens.
-    await expect(page.locator('[data-task-state="review"]')).toBeVisible();
+    // Having taken the instruction the agent finishes and declares — the gate is the operator's
+    // to open, so the page offers it rather than moving on its own.
+    await openReview(page);
   });
 });
 
@@ -137,34 +74,31 @@ test.describe("core program happy path", () => {
     const taskTitle = `Investigate servo draw ${stamp}`;
 
     await ensureRepository(page);
-    await page.goto("/board");
-    seedIssue(SEED_WORKSPACE_A, issueTitle);
-    await createTask(page, { title: taskTitle, issue: issueTitle });
-    await expect(cardIn(page, "Backlog", taskTitle)).toBeVisible();
+    const issue = seedIssue(SEED_WORKSPACE_A, issueTitle, REPO_NAME);
+    await createTask(page, { title: taskTitle, issue: issueTitle, repository: REPO_NAME });
 
-    const taskId = await launchToReview(page, taskTitle);
+    const taskId = await openTask(page, issue.id, taskTitle);
+    await launchToReview(page);
 
     // The agent's output is on screen — streamed live and replayed from the session log.
     await expect(page.getByText(/agent edited/)).toBeVisible();
 
-    // And the change itself is reviewable in the app: the files the agent actually wrote, with
-    // their line counts, not just the name of a branch (TASK-022).
-    await page.getByRole("tab", { name: "Changes" }).click();
-    // Scoped to the file list: each path also appears several times inside the patch below it.
-    const changed = page.getByLabel("Changed files");
-    await expect(changed.getByText(`marker-gatecontrol-task-${taskId}.txt`)).toBeVisible();
-    await expect(changed.getByText("visible.txt")).toBeVisible();
-    // …and the patch body carries the line the agent actually wrote.
-    await expect(page.getByText(/^\+edited by the agent/)).toBeVisible();
+    // And the change itself is reviewable in the app: the files the agent actually wrote, in
+    // the captured source-control panel, with the written line in the diff beside them. No tab
+    // to click any more — the Changes column sits beside the terminal in the split pane, on
+    // screen the whole time the review is.
+    const changed = page.getByRole("list", { name: "Changes" });
+    await expect(changed.getByTitle(`marker-solow-task-${taskId}.txt`)).toBeVisible();
+    await expect(changed.getByTitle("visible.txt")).toBeVisible();
+    // …and the diff body carries the line the agent actually wrote.
+    await expect(page.getByText(/edited by the agent in/).first()).toBeVisible();
 
     await page.getByRole("button", { name: "Approve" }).click();
 
     // The workflow committed the change and moved the Task to Done. The state is read from the
-    // header badge specifically — the lifecycle labels also appear in the shell navigator.
-    await expect(page.locator('[data-task-state="done"]')).toBeVisible();
-    const branch = `gatecontrol-task-${taskId}`;
-    // Shown twice now, in the task header and at the top of the diff, so take the first: the
-    // assertion is that the result branch is surfaced at all, not where.
+    // badge's own attribute — the lifecycle labels also appear as plain words elsewhere.
+    await expect(page.locator('[data-task-state="done"]').first()).toBeVisible();
+    const branch = `solow-task-${taskId}`;
     await expect(page.getByText(branch).first()).toBeVisible();
 
     // …and the branch really exists in the repository, with the agent's file on it. Polled:
@@ -172,8 +106,8 @@ test.describe("core program happy path", () => {
     expect(git(["branch", "--list", branch])).toContain(branch);
     await expect
       .poll(() => git(["show", "--name-only", "--format=", branch]))
-      .toContain(`marker-gatecontrol-task-${taskId}.txt`);
-    expect(git(["show", `${branch}:marker-gatecontrol-task-${taskId}.txt`])).toContain(
+      .toContain(`marker-solow-task-${taskId}.txt`);
+    expect(git(["show", `${branch}:marker-solow-task-${taskId}.txt`])).toContain(
       "edited by the agent",
     );
     // No push, no PR: the change lives only on the local branch (spec FR-009).
@@ -186,11 +120,12 @@ test.describe("core program happy path", () => {
     const taskTitle = `Debounce the backlight ${stamp}`;
 
     await ensureRepository(page);
-    await page.goto("/board");
-    seedIssue(SEED_WORKSPACE_A, issueTitle);
-    await createTask(page, { title: taskTitle, issue: issueTitle });
+    const issue = seedIssue(SEED_WORKSPACE_A, issueTitle, REPO_NAME);
+    await createTask(page, { title: taskTitle, issue: issueTitle, repository: REPO_NAME });
 
-    const taskId = await launchToReview(page, taskTitle);
+    const taskId = await openTask(page, issue.id, taskTitle);
+    await launchToReview(page);
+
     await page.getByRole("button", { name: "Reject" }).click();
     // Rejecting discards the agent's work, so it is confirmed rather than done on one click.
     await page
@@ -199,11 +134,9 @@ test.describe("core program happy path", () => {
       .click();
 
     // The Task returns to Ready and the worktree is torn down — nothing was committed.
-    await expect(page.locator('[data-task-state="ready"]')).toBeVisible();
-    const branch = `gatecontrol-task-${taskId}`;
-    await expect
-      .poll(() => existsSync(join(PATHS.worktrees, `gatecontrol-task-${taskId}`)))
-      .toBe(false);
-    expect(git(["log", "--oneline", branch, "--"])).not.toContain("GateControl");
+    await expect(page.locator('[data-task-state="ready"]').first()).toBeVisible();
+    const branch = `solow-task-${taskId}`;
+    await expect.poll(() => existsSync(join(PATHS.worktrees, `solow-task-${taskId}`))).toBe(false);
+    expect(git(["log", "--oneline", branch, "--"])).not.toContain("SoloW");
   });
 });

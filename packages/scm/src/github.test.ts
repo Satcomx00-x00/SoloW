@@ -348,6 +348,37 @@ beforeAll(() => {
           updated_at: "2026-08-20T00:00:00Z",
         });
       }
+      if (url.pathname === "/api/v3/repos/acme/gate/issues/10/comments") {
+        if (req.method === "POST") {
+          const body = (await req.json()) as { body: string };
+          return Response.json({
+            id: 99,
+            body: `${body.body} (normalised)`,
+            html_url: "u/c/99",
+            created_at: "2026-08-26T10:00:00Z",
+            updated_at: "2026-08-26T10:00:00Z",
+            user: { login: "ada", name: "Ada", avatar_url: "a.png" },
+          });
+        }
+        return Response.json([
+          {
+            id: 1,
+            body: "First",
+            html_url: "u/c/1",
+            created_at: "2026-08-20T00:00:00Z",
+            updated_at: "2026-08-20T00:00:00Z",
+            user: { login: "ada", name: "Ada", avatar_url: null },
+          },
+          {
+            id: 2,
+            body: "Edited later",
+            html_url: "u/c/2",
+            created_at: "2026-08-21T00:00:00Z",
+            updated_at: "2026-08-22T00:00:00Z",
+            user: null,
+          },
+        ]);
+      }
       if (url.pathname === "/api/v3/repos/acme/gate/assignees") {
         return Response.json([
           { login: "ada", name: "Ada Lovelace", avatar_url: "a.png" },
@@ -546,7 +577,7 @@ describe("GithubProvider", () => {
     });
 
     it("omits the parent, rather than reporting none, where the provider cannot answer", async () => {
-      // An Enterprise Server with no sub-issues. Reporting `null` would be GateControl asserting
+      // An Enterprise Server with no sub-issues. Reporting `null` would be SoloW asserting
       // the issue has no parent, and the mirror would erase an edge on every poll.
       const issues = await new GithubProvider().listIssues(credential(), "acme/legacy");
 
@@ -578,6 +609,25 @@ describe("GithubProvider", () => {
       { name: "bug", color: "#d73a4a", description: "Something isn't working" },
       { name: "no-description", color: null, description: null },
     ]);
+  });
+
+  it("createLabels skips what's already there, POSTs only what's missing, un-prefixed", async () => {
+    receivedWrites = [];
+    const result = await new GithubProvider().createLabels(credential(), "acme/gate", [
+      { name: "bug", color: "#ff0000", description: "would collide" },
+      { name: "type/feat", color: "#0e8a16", description: "A new feature" },
+    ]);
+
+    expect(result.existing).toEqual(["bug"]);
+    expect(result.created).toEqual(["type/feat"]);
+    expect(receivedWrites).toHaveLength(1);
+    expect(receivedWrites[0]?.method).toBe("POST");
+    expect(receivedWrites[0]?.body).toEqual({
+      name: "type/feat",
+      // GitHub takes color un-prefixed, unlike the #RRGGBB listLabels normalizes it to.
+      color: "0e8a16",
+      description: "A new feature",
+    });
   });
 
   it("lists the repositories the token can see, keyed on full_name", async () => {
@@ -719,5 +769,43 @@ describe("writing an issue back to the provider", () => {
 
     expect(milestones.map((m) => m.title)).toEqual(["v1", "v2"]);
     expect(receivedPaths.at(-1)).toContain("state=all");
+  });
+});
+
+describe("issue comments", () => {
+  const github = () => new GithubProvider();
+
+  it("reads the thread, oldest first", async () => {
+    const comments = await github().listComments(credential(), "acme/gate", 10);
+
+    expect(comments.map((c) => c.body)).toEqual(["First", "Edited later"]);
+    expect(comments[0]?.author?.login).toBe("ada");
+  });
+
+  it("reports an edit only when there was one", async () => {
+    // GitHub sets `updated_at` to `created_at` on a comment nobody touched; passing that straight
+    // through would put "edited" on every comment in the thread.
+    const comments = await github().listComments(credential(), "acme/gate", 10);
+
+    expect(comments[0]?.updatedAt).toBeNull();
+    expect(comments[1]?.updatedAt).toBe("2026-08-22T00:00:00Z");
+  });
+
+  it("survives an author the provider will not name", async () => {
+    // A deleted account comes back as a null user. A comment by nobody is still a comment.
+    const comments = await github().listComments(credential(), "acme/gate", 10);
+
+    expect(comments[1]?.author).toBeNull();
+  });
+
+  it("posts with a POST, and answers with what the provider stored", async () => {
+    receivedWrites = [];
+
+    const posted = await github().createComment(credential(), "acme/gate", 10, "Looks right");
+
+    expect(receivedWrites[0]?.method).toBe("POST");
+    expect(receivedWrites[0]?.body).toEqual({ body: "Looks right" });
+    // Never the text that was sent — the same rule every write here follows.
+    expect(posted.body).toBe("Looks right (normalised)");
   });
 });

@@ -71,6 +71,8 @@ describe("resolveContributions", () => {
     const resolved = resolveContributions([item("a", 10), item("b", 20)], SIGNED_IN, {
       order: ["b", "a"],
       hidden: [],
+      shown: [],
+      widths: {},
     });
     expect(ids(resolved)).toEqual(["b", "a"]);
   });
@@ -79,7 +81,7 @@ describe("resolveContributions", () => {
     const resolved = resolveContributions(
       [item("added-later", 1), item("a", 10), item("b", 20)],
       SIGNED_IN,
-      { order: ["b", "a"], hidden: [] },
+      { order: ["b", "a"], hidden: [], shown: [], widths: {} },
     );
     expect(ids(resolved)).toEqual(["b", "a", "added-later"]);
   });
@@ -88,6 +90,8 @@ describe("resolveContributions", () => {
     const resolved = resolveContributions([item("a", 10)], SIGNED_IN, {
       order: ["gone", "a"],
       hidden: [],
+      shown: [],
+      widths: {},
     });
     expect(ids(resolved)).toEqual(["a"]);
   });
@@ -96,6 +100,8 @@ describe("resolveContributions", () => {
     const resolved = resolveContributions([item("a", 10), item("b", 20)], SIGNED_IN, {
       order: [],
       hidden: ["a"],
+      shown: [],
+      widths: {},
     });
     expect(ids(resolved)).toEqual(["b"]);
   });
@@ -104,6 +110,8 @@ describe("resolveContributions", () => {
     const resolved = resolveContributions([item("a", 10), item("b", 20)], SIGNED_IN, {
       order: ["a", "b"],
       hidden: ["a"],
+      shown: [],
+      widths: {},
     });
     expect(ids(resolved)).toEqual(["b"]);
   });
@@ -131,6 +139,8 @@ describe("arrangeContributions", () => {
     const arranged = arrangeContributions([item("a", 10), item("b", 20)], {
       order: ["b", "a"],
       hidden: ["a"],
+      shown: [],
+      widths: {},
     });
     expect(ids(arranged)).toEqual(["b", "a"]);
   });
@@ -163,21 +173,43 @@ describe("moveInOrder", () => {
 
 describe("withVisibility", () => {
   it("adds an id to hidden without disturbing the saved order", () => {
-    expect(withVisibility({ order: ["a", "b"], hidden: [] }, "a", false)).toEqual({
+    expect(
+      withVisibility({ order: ["a", "b"], hidden: [], shown: [], widths: {} }, "a", false),
+    ).toEqual({
       order: ["a", "b"],
       hidden: ["a"],
+      shown: [],
+      widths: {},
     });
   });
 
-  it("removes an id from hidden when it is shown again", () => {
-    expect(withVisibility({ order: [], hidden: ["a", "b"] }, "a", true)).toEqual({
+  it("removes an id from hidden when it is shown again, and records that it was", () => {
+    // `shown` is not decoration: a surface may hide something by default, and without a record
+    // that the user turned it back on, the default re-hides it on the next load — the user ticks
+    // a column on and watches it vanish.
+    expect(
+      withVisibility({ order: [], hidden: ["a", "b"], shown: [], widths: {} }, "a", true),
+    ).toEqual({
       order: [],
       hidden: ["b"],
+      shown: ["a"],
+      widths: {},
+    });
+  });
+
+  it("clears the explicit show when the same id is hidden again", () => {
+    // Otherwise a stale `shown` outlives the hide and the item comes straight back.
+    const shownFirst = withVisibility({ order: [], hidden: [], shown: [], widths: {} }, "a", true);
+    expect(withVisibility(shownFirst, "a", false)).toEqual({
+      order: [],
+      hidden: ["a"],
+      shown: [],
+      widths: {},
     });
   });
 
   it("does not list an id twice when it is hidden again", () => {
-    const once = withVisibility({ order: [], hidden: [] }, "a", false);
+    const once = withVisibility({ order: [], hidden: [], shown: [], widths: {} }, "a", false);
     expect(withVisibility(once, "a", false).hidden).toEqual(["a"]);
   });
 });
@@ -249,6 +281,8 @@ describe("createRegistry", () => {
     registry.register(item("a", 10));
     registry.register(item("b", 20));
     registry.register(item("c", 30));
-    expect(ids(registry.resolve(SIGNED_IN, { order: ["c"], hidden: ["a"] }))).toEqual(["c", "b"]);
+    expect(
+      ids(registry.resolve(SIGNED_IN, { order: ["c"], hidden: ["a"], shown: [], widths: {} })),
+    ).toEqual(["c", "b"]);
   });
 });

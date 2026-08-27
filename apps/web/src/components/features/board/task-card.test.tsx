@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { afterEach, describe, expect, it, mock } from "bun:test";
-import type { IssueDto, TaskDto } from "@gatecontrol/contracts";
+import type { IssueDto, TaskDto } from "@solow/contracts";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderWithTrpc } from "@/test/trpc-harness";
 import { type BoardReferences, BoardReferencesProvider } from "./board-references";
@@ -28,7 +28,7 @@ const task: TaskDto = {
       id: "attach-1",
       repositoryId: "repo-1",
       baseRef: null,
-      checkoutBranch: "gatecontrol/task-1",
+      checkoutBranch: "solow/task-1",
       resultBranch: null,
       position: 0,
     },
@@ -55,6 +55,8 @@ const issue: IssueDto = {
   repositoryId: "repo-1",
   externalNumber: 42,
   externalUrl: "https://github.com/acme/api/issues/42",
+  externalId: null,
+  externalParentId: null,
   syncedAt: null,
   labels: ["bug"],
   linkedChangeRequests: [],
@@ -105,21 +107,21 @@ describe("TaskCard references", () => {
   it("names the repository and the branch the work is on", () => {
     show();
     expect(screen.getByText("api")).toBeDefined();
-    expect(screen.getByText("gatecontrol/task-1")).toBeDefined();
+    expect(screen.getByText("solow/task-1")).toBeDefined();
   });
 
   it("prefers the result branch once a run has produced one", () => {
     show({
-      repositories: [{ ...task.repositories[0]!, resultBranch: "gatecontrol/task-1-final" }],
+      repositories: [{ ...task.repositories[0]!, resultBranch: "solow/task-1-final" }],
     });
-    expect(screen.getByText("gatecontrol/task-1-final")).toBeDefined();
+    expect(screen.getByText("solow/task-1-final")).toBeDefined();
   });
 
   it("still renders with no references above it", () => {
     // The card is used bare in the drag overlay; a missing provider must cost it a line, not a
     // render.
     renderWithTrpc(<TaskCard task={task} />);
-    expect(screen.getByText("gatecontrol/task-1")).toBeDefined();
+    expect(screen.getByText("solow/task-1")).toBeDefined();
     expect(screen.queryByText("api")).toBeNull();
   });
 });
@@ -158,6 +160,8 @@ describe("TaskCard issue menu", () => {
       source: "local",
       externalNumber: null,
       externalUrl: null,
+      externalId: null,
+      externalParentId: null,
     };
     show({}, { ...references, issue: () => local });
     openMenu(`Issue: ${local.title}. Edit this issue`);

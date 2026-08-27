@@ -3,7 +3,7 @@ import type {
   ProjectFieldType,
   ProjectFieldValue,
   ProjectIteration,
-} from "@gatecontrol/contracts";
+} from "@solow/contracts";
 
 /**
  * The provider driver boundary (issue #15, split by capability in F21).
@@ -52,7 +52,7 @@ export interface ExternalIssue {
   /**
    * Everything below is a **read-only mirror** (spec F23 FR-8, issue #122 AC-2).
    *
-   * None of it is GateControl's to author: assignees, labels and hierarchy belong to the
+   * None of it is SoloW's to author: assignees, labels and hierarchy belong to the
    * provider, and a planning table that let you edit them here would be editing a copy. They are
    * carried because a row that cannot show who holds an issue is not a planning row — and
    * because fetching them per row, on render, is what a mirror exists to avoid.
@@ -96,6 +96,26 @@ export interface ExternalUser {
   login: string;
   name: string | null;
   avatarUrl: string | null;
+}
+
+/**
+ * One comment on an issue.
+ *
+ * Deliberately not "one timeline entry". GitLab returns *notes*, and most of them are the system
+ * recording that somebody changed a label or moved a milestone; GitHub keeps that in a separate
+ * timeline entirely. A driver filters its provider's activity out, so this type means the same
+ * thing on both: something a person wrote.
+ */
+export interface ExternalComment {
+  externalId: string;
+  /** Who wrote it. Null where the provider reports an author it will not name (a bot, a ghost). */
+  author: ExternalUser | null;
+  /** The raw Markdown, rendered by the client — never HTML from the provider. */
+  body: string;
+  createdAt: string;
+  /** Set only when the comment was edited after posting; null otherwise. */
+  updatedAt: string | null;
+  url: string;
 }
 
 export interface ExternalMilestone {
@@ -228,6 +248,18 @@ export interface IssuesCapability {
    * poll happened to store.
    */
   getIssue(credential: ScmCredential, repo: RepoRef, issueNumber: number): Promise<ExternalIssue>;
+  /**
+   * The comments on one issue, oldest first.
+   *
+   * Reading, so it lives with `issues` rather than with `issueWrites`: a read-only mirror of a
+   * tracker should still be able to show the discussion, and a token that cannot post is not a
+   * token that cannot read.
+   */
+  listComments(
+    credential: ScmCredential,
+    repo: RepoRef,
+    issueNumber: number,
+  ): Promise<ExternalComment[]>;
   /** The container's own labels, for the Issue label picker (issue #15 reversal). */
   listLabels(credential: ScmCredential, repo: RepoRef): Promise<ExternalLabel[]>;
 }
@@ -276,6 +308,53 @@ export interface IssueWritesCapability {
    */
   listAssignableUsers(credential: ScmCredential, repo: RepoRef): Promise<ExternalUser[]>;
   listMilestones(credential: ScmCredential, repo: RepoRef): Promise<ExternalMilestone[]>;
+  /**
+   * Post a comment, and answer with **what the provider stored** — never the text that was sent.
+   *
+   * The same rule every write here follows: a provider may normalise the body, and rendering back
+   * what was typed would show the operator their own input as though it were saved.
+   */
+  createComment(
+    credential: ScmCredential,
+    repo: RepoRef,
+    issueNumber: number,
+    body: string,
+  ): Promise<ExternalComment>;
+}
+
+/** One label to create, in the shape every provider here takes it. */
+export interface LabelSeed {
+  name: string;
+  /** `#RRGGBB` — the same normalized shape `ExternalLabel.color` reads back (issue #15 reversal). */
+  color: string;
+  description?: string;
+}
+
+/**
+ * The `labelWrites` capability: create the labels a repository does not have yet (user request
+ * 2026-08-27).
+ *
+ * Its own capability rather than folded into `issueWrites` — a provider can write an issue's
+ * fields without being able to create new vocabulary for them, and the manifest should be able to
+ * say so. GitHub and GitLab both declare it; a tracker with no label-creation endpoint at all
+ * simply does not.
+ */
+export interface LabelWritesCapability {
+  /**
+   * Create every label in `labels` the repository does not already have, leaving existing ones —
+   * whatever their colour or description — exactly as they are. Matching is case-insensitive,
+   * the same rule GitLab's own scoped-label provisioning already follows, because two labels
+   * differing only in case is not a distinction any of these providers themselves make.
+   *
+   * Answers with what it created and what was already there, the same
+   * `ProjectStructureProvisioned` shape `provisionProjectStructure` reports back with — one
+   * report shape for "here is the structure I made sure exists" everywhere this codebase does it.
+   */
+  createLabels(
+    credential: ScmCredential,
+    repo: RepoRef,
+    labels: LabelSeed[],
+  ): Promise<ProjectStructureProvisioned>;
 }
 
 /** The `repositories` capability: what can be cloned, and what branches it has. */
@@ -460,7 +539,7 @@ export interface ExternalProjectItemPage {
   /**
    * Rows that exist on the provider but are not issues, counted rather than discarded.
    *
-   * Every row in GateControl is an Issue (F23, Out of scope), so a Projects v2 draft card and a
+   * Every row in SoloW is an Issue (F23, Out of scope), so a Projects v2 draft card and a
    * pull-request row both have to go. Silently is the one way they must not go: a table shorter
    * than the same project on GitHub, with nothing to explain the difference, is indistinguishable
    * from a broken import. Counting them lets the mirror say "12 rows, 3 drafts not shown".
@@ -498,7 +577,8 @@ export interface ProviderDriver
         IssueWritesCapability &
         RepositoriesCapability &
         ChangeRequestsCapability &
-        ProjectsCapability
+        ProjectsCapability &
+        LabelWritesCapability
     > {}
 
 /**

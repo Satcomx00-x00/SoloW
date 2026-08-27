@@ -5,8 +5,8 @@ import type {
   AgentProfileDto,
   AgentProtocol,
   AuthMode,
-} from "@gatecontrol/contracts";
-import { DEFAULT_AGENT_PERMISSION_MODE } from "@gatecontrol/contracts";
+} from "@solow/contracts";
+import { DEFAULT_AGENT_PERMISSION_MODE } from "@solow/contracts";
 import { ChevronRight, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ConfirmAction } from "@/components/features/confirm-action";
@@ -22,6 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { WHOLE_PAGE } from "@/lib/paged";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
 
@@ -68,7 +69,7 @@ function describeAgentProfileUsage(usage: AgentProfileDto["usage"]): string {
  *
  * `bypassPermissions` is described by what it grants, not by how safe it sounds, because that is
  * the choice being made: an agent that never asks is an agent with the shell and the network
- * inside its worktree. The reason it exists at all is that GateControl runs agents headless —
+ * inside its worktree. The reason it exists at all is that SoloW runs agents headless —
  * under the default mode there is nobody for a prompt to reach, so a Task needing either simply
  * fails partway through, which is a worse outcome badly disguised as a safer one.
  */
@@ -93,7 +94,7 @@ const PERMISSION_MODES: Array<{
     value: "bypassPermissions",
     label: "Never ask",
     description:
-      "The agent runs commands and fetches URLs without asking. It stays inside the worktree GateControl gave it, and every change still stops at the review gate before it reaches a branch — but within that worktree it has your shell.",
+      "The agent runs commands and fetches URLs without asking. It stays inside the worktree SoloW gave it, and every change still stops at the review gate before it reaches a branch — but within that worktree it has your shell.",
   },
 ];
 
@@ -101,9 +102,30 @@ const PERMISSION_MODES: Array<{
  * Create Agent Profiles: which agent (issue #10), auth mode + concurrency cap, permission mode,
  * bound to a stored Secret.
  */
+/**
+ * The pinned model or mode this agent's last handshake no longer lists, or null.
+ *
+ * Null when the cache is empty — an agent that has never run has advertised nothing, and
+ * "unknown" must not read as "retired".
+ */
+function stalePinOn(
+  profile: { agentCatalogId: string; model: string | null; modeId: string | null },
+  catalog: readonly { id: string; capabilities: { models: string[]; modes: string[] } }[],
+): string | null {
+  const advertised = catalog.find((c) => c.id === profile.agentCatalogId)?.capabilities;
+  if (!advertised) return null;
+  if (profile.model && advertised.models.length > 0 && !advertised.models.includes(profile.model)) {
+    return profile.model;
+  }
+  if (profile.modeId && advertised.modes.length > 0 && !advertised.modes.includes(profile.modeId)) {
+    return profile.modeId;
+  }
+  return null;
+}
+
 export function AgentProfilesSection() {
   const utils = trpc.useUtils();
-  const profiles = trpc.profile.agent.list.useQuery({});
+  const profiles = trpc.profile.agent.list.useQuery({ ...WHOLE_PAGE });
   const catalog = trpc.profile.agentCatalog.list.useQuery({});
   const secrets = trpc.secret.list.useQuery({});
   const [name, setName] = useState("");
@@ -111,11 +133,32 @@ export function AgentProfilesSection() {
   const [authMode, setAuthMode] = useState<AuthMode>("subscription");
   const [secretId, setSecretId] = useState("");
   const [cap, setCap] = useState(3);
+  /**
+   * The model and mode this Profile launches with (issue #94).
+   *
+   * Free text, not a picker, and that is the honest shape today: the list an agent advertises
+   * comes from its handshake, which happens when a run starts — there is nothing to populate a
+   * dropdown with before a Profile has ever been used. A `Select` over a hardcoded list would be
+   * the guaranteed-to-rot menu the issue rules out in as many words, offering choices that fail
+   * at launch. Empty means "whatever the agent chooses", which is what every Profile did before
+   * this existed.
+   */
+  const [model, setModel] = useState("");
+  const [modeId, setModeId] = useState("");
   const [permissionMode, setPermissionMode] = useState<AgentPermissionMode>(
     DEFAULT_AGENT_PERMISSION_MODE,
   );
 
   const catalogOptions = catalog.data ?? [];
+  /**
+   * What the chosen agent last advertised (issue #94 AC-2) — the suggestions under the two pin
+   * fields. Empty until that agent has run once: the cache is written from the handshake, and
+   * before a first run there is honestly nothing to suggest.
+   */
+  const advertised = catalogOptions.find((c) => c.id === agentCatalogId)?.capabilities ?? {
+    models: [],
+    modes: [],
+  };
   // A Workspace ships with exactly one catalog entry today (Claude Code) — pick it once it
   // loads, so a self-hoster with more than one configured still sees an explicit choice.
   useEffect(() => {
@@ -185,6 +228,11 @@ export function AgentProfilesSection() {
               secretId,
               concurrencyCap: cap,
               permissionMode,
+              // Trimmed to null rather than sent as "": an empty pin is the absence of one, and
+              // storing a blank string would make "no model" and "a model named nothing" the
+              // same row.
+              model: model.trim() === "" ? null : model.trim(),
+              modeId: modeId.trim() === "" ? null : modeId.trim(),
             });
           }}
         >
@@ -258,6 +306,54 @@ export function AgentProfilesSection() {
               </p>
             )}
           </div>
+          <div className="grid grid-cols-2 gap-3">
+            {/*
+              `datalist`, not `Select` — the shape the data honestly has. The suggestions are a
+              cache of what this agent advertised at its last handshake: present after a first
+              run, empty before one, and never guaranteed complete. A dropdown would claim the
+              list is closed and offer nothing at all on a fresh install; a datalist suggests
+              what is known and still accepts what is not, which is exactly the contract.
+            */}
+            <div className="grid gap-2">
+              <Label htmlFor="agent-model">Model</Label>
+              <Input
+                id="agent-model"
+                list="agent-model-options"
+                value={model}
+                onChange={(event) => setModel(event.target.value)}
+                placeholder="the agent's own choice"
+              />
+              <datalist id="agent-model-options">
+                {advertised.models.map((id) => (
+                  <option key={id} value={id} />
+                ))}
+              </datalist>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="agent-mode">Mode</Label>
+              <Input
+                id="agent-mode"
+                list="agent-mode-options"
+                value={modeId}
+                onChange={(event) => setModeId(event.target.value)}
+                placeholder="the agent's own default"
+              />
+              <datalist id="agent-mode-options">
+                {advertised.modes.map((id) => (
+                  <option key={id} value={id} />
+                ))}
+              </datalist>
+            </div>
+          </div>
+          {/*
+            Said once, under both: which of the two an agent can actually be told is a property
+            of its protocol, and a Profile that pins the one its protocol cannot select would
+            otherwise look like it had taken effect.
+          */}
+          <p className="text-muted-foreground text-xs leading-relaxed">
+            Left empty, the agent chooses. A pin the agent's protocol cannot select is reported in
+            the run's log rather than silently ignored.
+          </p>
           <div className="grid gap-2">
             <Label htmlFor="agent-permission">Permission mode</Label>
             <Select
@@ -456,9 +552,9 @@ export function AgentProfilesSection() {
           </div>
         </details>
 
-        {(profiles.data?.length ?? 0) > 0 && (
+        {(profiles.data?.items.length ?? 0) > 0 && (
           <ul className="divide-y border-t">
-            {(profiles.data ?? []).map((p) => {
+            {(profiles.data?.items ?? []).map((p) => {
               const inUse = describeAgentProfileUsage(p.usage);
               return (
                 <li key={p.id} className="flex items-center gap-3 py-2">
@@ -467,6 +563,32 @@ export function AgentProfilesSection() {
                       <Badge variant="secondary">
                         {p.name} · {p.authMode} · cap {p.concurrencyCap}
                       </Badge>
+                      {/* A pin is worth showing because it is the exception: most Profiles let
+                          the agent choose, and a row that names a model is one whose runs will
+                          differ from its neighbours'. */}
+                      {(p.model || p.modeId) && (
+                        <Badge variant="outline" className="font-mono text-2xs">
+                          {[p.model, p.modeId].filter(Boolean).join(" · ")}
+                        </Badge>
+                      )}
+                      {/*
+                        A pin the agent no longer advertises (issue #94 AC-3).
+
+                        Judged against the cache only when the cache says anything: an agent that
+                        has never run has an empty cache, and warning about every pin on a fresh
+                        install would train people to ignore the one warning that matters. The
+                        run itself never substitutes — this is the surface that lets somebody
+                        fix the pin *before* the launch that would have to say so.
+                      */}
+                      {stalePinOn(p, catalogOptions) && (
+                        <Badge
+                          variant="outline"
+                          className="border-state-failed/40 text-2xs text-state-failed"
+                          title="This agent's last handshake did not advertise it. The run will say so and use the agent's own choice — edit the pin here to fix it."
+                        >
+                          {stalePinOn(p, catalogOptions)} no longer advertised
+                        </Badge>
+                      )}
                       {/* Badged for the *exception*, which is now the Profile that still asks:
                           marking every row with the ordinary case would say nothing at all, and
                           a Profile that stalls on a prompt nobody can answer is the one worth

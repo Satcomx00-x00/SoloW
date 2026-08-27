@@ -1,9 +1,9 @@
 /// <reference types="bun-types" />
 
 import { beforeEach, describe, expect, it } from "bun:test";
-import { CommonErrorCode, TaskErrorCode } from "@gatecontrol/contracts";
-import { session, taskDependency, task as taskTable, worktree } from "@gatecontrol/db";
-import { createTestDb, type TestDb } from "@gatecontrol/db/testing";
+import { CommonErrorCode, TaskErrorCode } from "@solow/contracts";
+import { session, taskDependency, task as taskTable, worktree } from "@solow/db";
+import { createTestDb, type TestDb } from "@solow/db/testing";
 import { eq } from "drizzle-orm";
 import { getIssueById } from "./issue.js";
 import {
@@ -54,8 +54,8 @@ describe("deleteTask", () => {
       workspaceId: g.workspaceId,
       taskId: t.id,
       repositoryId: g.repositoryId,
-      path: ".gatecontrol/worktrees/x",
-      branch: "gatecontrol/x",
+      path: ".solow/worktrees/x",
+      branch: "solow/x",
       status: "active",
     });
 
@@ -174,8 +174,8 @@ describe("deleteTask", () => {
         workspaceId: g.workspaceId,
         taskId: blocker.id,
         repositoryId: g.repositoryId,
-        path: `.gatecontrol/worktrees/${status}`,
-        branch: `gatecontrol/${status}`,
+        path: `.solow/worktrees/${status}`,
+        branch: `solow/${status}`,
         status,
       });
     }

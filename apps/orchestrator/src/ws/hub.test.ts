@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import type { TaskEvent } from "@gatecontrol/contracts";
+import type { TaskEvent } from "@solow/contracts";
 import { EventHub } from "./hub.js";
 
 describe("EventHub", () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import type { SessionEventPayload } from "@gatecontrol/contracts";
+import type { SessionEventPayload } from "@solow/contracts";
 import {
   canonicalJson,
   hashSessionLog,
