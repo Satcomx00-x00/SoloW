@@ -1,6 +1,6 @@
 {
   "name": "solow",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Solo Workflow \u2014 a self-hostable control plane for orchestrating AI coding agents in parallel under human review. Run it with `npx solow`.",
   "license": "AGPL-3.0-only",
   "type": "module",
