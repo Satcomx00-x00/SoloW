@@ -168,12 +168,30 @@ async function callTool(
     const result = await callProcedure(caller, tool.procedurePath, parsed.arguments ?? {});
     return ok(id, {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-      structuredContent: result,
+      /*
+       * Only when it is an object. `structuredContent` is specified as a JSON *object*, and a
+       * strict client rejects the whole response when it is anything else — which broke every
+       * procedure returning a top-level array (26 of them: `project.list`, `secret.list`,
+       * `flag.list`, `profile.agentCatalog.list`…) with a schema-validation error rather than a
+       * result, while the object-returning ones worked fine and hid it.
+       *
+       * Omitted rather than wrapped in `{ items: … }`: these tools advertise an `inputSchema`
+       * and no `outputSchema`, so there is no declared shape a wrapper would be honouring — it
+       * would just be a second shape for callers to learn. The data is unchanged and complete in
+       * `content[0].text`, which is where a client without structured-output support reads it
+       * anyway.
+       */
+      ...(isPlainObject(result) ? { structuredContent: result } : {}),
       isError: false,
     });
   } catch (cause) {
     return fromTrpcError(id, cause);
   }
+}
+
+/** A JSON object — not an array, not a primitive, not null. What `structuredContent` requires. */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /**

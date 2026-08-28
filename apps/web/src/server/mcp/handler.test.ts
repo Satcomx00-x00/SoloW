@@ -377,3 +377,52 @@ function eqId(id: string) {
   const { eq } = require("drizzle-orm") as typeof import("drizzle-orm");
   return eq(mcpToken.id, id);
 }
+
+/**
+ * `structuredContent` must be a JSON object (2026-08-28).
+ *
+ * Found by pointing a real MCP client at a running instance: every tool whose procedure returns
+ * a top-level array came back as "malformed result that failed schema validation … expected
+ * record, received array", never as data. Twenty-six of them — `project.list`, `secret.list`,
+ * `flag.list`, `profile.agentCatalog.list` and the rest — while the object-returning majority
+ * worked and hid it. Nothing here caught it because these tests assert on `json.result`, which
+ * the server built happily; it is the client that refuses.
+ */
+describe("MCP transport — structured content", () => {
+  it("omits structuredContent for a procedure that returns an array", async () => {
+    const { value } = await seedWorkspaceWithToken("acme", { scope: "read" });
+
+    const { json } = await call(
+      {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name: "flag_list", arguments: {} },
+      },
+      value,
+    );
+
+    expect(json.error).toBeUndefined();
+    expect(json.result.isError).toBe(false);
+    expect("structuredContent" in json.result).toBe(false);
+    // The data is not lost — it is where a client without structured output reads it anyway.
+    expect(Array.isArray(JSON.parse(json.result.content[0].text))).toBe(true);
+  });
+
+  it("still sends structuredContent for a procedure that returns an object", async () => {
+    const { value } = await seedWorkspaceWithToken("acme", { scope: "read" });
+
+    const { json } = await call(
+      {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name: "workspace_get", arguments: {} },
+      },
+      value,
+    );
+
+    expect(json.error).toBeUndefined();
+    expect(json.result.structuredContent).toMatchObject({ name: "acme" });
+  });
+});
