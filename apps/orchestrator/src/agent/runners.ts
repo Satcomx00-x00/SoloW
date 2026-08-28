@@ -1,4 +1,8 @@
-import type { AgentPermissionMode, AgentProtocol } from "@solow/contracts";
+import {
+  AGENT_PROTOCOL_PINS,
+  type AgentPermissionMode,
+  type AgentProtocol,
+} from "@solow/contracts";
 import type { Executor } from "../executor/types.js";
 import { AcpRunner } from "./acp-runner.js";
 import { ClaudeCodeRunner } from "./claude-code-runner.js";
@@ -124,17 +128,16 @@ export function unsupportedLaunchSettings(
   protocol: AgentProtocol,
   settings: { model?: string | null; modeId?: string | null },
 ): string[] {
-  const unsupported: string[] = [];
-  // stream-json launches a CLI with `--model` and has no notion of a session mode.
-  if (protocol === "claude_code_stream_json" && settings.modeId) {
-    unsupported.push(`mode "${settings.modeId}"`);
-  }
   /*
-   * ACP advertises models at handshake but this build's vocabulary has no `session/select_model`
-   * — `AcpMethod` carries `session/set_mode` and nothing for a model. Pinning one is therefore
-   * a request SoloW cannot make, and saying so is the only honest answer; inventing a
-   * method name and hoping is how a run fails in the middle instead of at the start.
+   * Read from the contracts rather than restated here: the Agent Profile form has to make the
+   * same judgement when the Owner is choosing, and a second copy of this rule would drift into a
+   * form that accepts a pin the runner then ignores. `AGENT_PROTOCOL_PINS` carries the reasoning
+   * for each protocol — in short, stream-json launches a CLI with `--model` and has no session
+   * mode, and this build's ACP vocabulary has `session/set_mode` and nothing for a model.
    */
-  if (protocol === "acp" && settings.model) unsupported.push(`model "${settings.model}"`);
+  const pins = AGENT_PROTOCOL_PINS[protocol];
+  const unsupported: string[] = [];
+  if (!pins.mode && settings.modeId) unsupported.push(`mode "${settings.modeId}"`);
+  if (!pins.model && settings.model) unsupported.push(`model "${settings.model}"`);
   return unsupported;
 }

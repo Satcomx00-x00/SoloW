@@ -438,3 +438,80 @@ describe("advertised capabilities in the Profile form", () => {
     expect(screen.queryByText(/no longer advertised/)).toBeNull();
   });
 });
+
+/**
+ * Managing more than one agent (2026-08-28). A Workspace now ships with Claude Code and
+ * opencode, and they differ on exactly the axis this form exposes: stream-JSON takes a model and
+ * has no session mode, ACP has a mode and no way to select a model. The form has to refuse the
+ * pin the chosen agent cannot be told — offering it would store a setting every run then reports
+ * it could not honour, which is the silent substitution the rule exists to prevent.
+ */
+describe("AgentProfilesSection — two agents with different protocols", () => {
+  const twoAgents = {
+    ...baseHandlers,
+    "profile.agentCatalog.list": () => [
+      { id: "cat-1", displayName: "Claude Code", protocol: "claude_code_stream_json" },
+      { id: "cat-2", displayName: "opencode", protocol: "acp" },
+    ],
+    "profile.agent.list": () => ({ items: [], nextCursor: null }),
+  };
+
+  /** No jest-dom here, so disabled is read off the DOM the way the rest of this suite does. */
+  const isDisabled = (label: string) => screen.getByLabelText(label).hasAttribute("disabled");
+
+  /** Radix drives its own events, so pick the way the rest of the suite does: open, then click. */
+  const chooseAgent = async (displayName: string) => {
+    fireEvent.click(await screen.findByRole("combobox", { name: "Agent" }));
+    fireEvent.click(await screen.findByRole("option", { name: displayName }));
+  };
+
+  it("disables Mode for the stream-JSON agent, which has no notion of one", async () => {
+    renderWithTrpc(<AgentProfilesSection />, twoAgents);
+
+    // cat-1 is preselected, so this is what an Owner sees before touching anything.
+    await waitFor(() => expect(isDisabled("Mode")).toBe(true));
+    expect(isDisabled("Model")).toBe(false);
+  });
+
+  it("disables Model for the ACP agent, and says which protocol it is", async () => {
+    renderWithTrpc(<AgentProfilesSection />, twoAgents);
+    await waitFor(() => expect(isDisabled("Model")).toBe(false));
+
+    await chooseAgent("opencode");
+
+    await waitFor(() => expect(isDisabled("Model")).toBe(true));
+    expect(isDisabled("Mode")).toBe(false);
+    // The consequence of the choice, said where the choice is made. Scoped to this form: the
+    // custom-agent form below carries the same hints for its own protocol picker.
+    const form = screen.getByRole("button", { name: "Add profile" }).closest("form");
+    expect(within(form as HTMLElement).getByText(/Agent Client Protocol/)).toBeDefined();
+  });
+
+  it("never submits a pin the chosen agent's protocol would ignore", async () => {
+    // The trap this guards: type a model against Claude Code, switch to opencode, submit. The
+    // field is disabled by then, but its value is still in state.
+    const created: unknown[] = [];
+    renderWithTrpc(<AgentProfilesSection />, {
+      ...twoAgents,
+      "profile.agent.create": (input) => {
+        created.push(input);
+        return { id: "p9", name: "n", agentCatalogId: "cat-2", usage: NO_USAGE };
+      },
+    });
+
+    await waitFor(() => expect(isDisabled("Model")).toBe(false));
+    fireEvent.change(screen.getByLabelText("Model"), { target: { value: "opus" } });
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "mine" } });
+    // The form refuses to submit without a credential, so choose one before the pin matters.
+    fireEvent.click(screen.getByRole("combobox", { name: "Secret" }));
+    fireEvent.click(await screen.findByRole("option", { name: /anthropic-key/ }));
+
+    await chooseAgent("opencode");
+    await waitFor(() => expect(isDisabled("Model")).toBe(true));
+
+    fireEvent.click(screen.getByRole("button", { name: "Add profile" }));
+
+    await waitFor(() => expect(created).toHaveLength(1));
+    expect(created[0]).toMatchObject({ agentCatalogId: "cat-2", model: null });
+  });
+});

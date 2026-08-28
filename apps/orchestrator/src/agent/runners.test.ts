@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { agentProtocolSchema } from "@solow/contracts";
+import { AGENT_PROTOCOL_PINS, agentProtocolSchema } from "@solow/contracts";
 import type { Executor } from "../executor/types.js";
 import { AcpRunner } from "./acp-runner.js";
 import { ClaudeCodeRunner } from "./claude-code-runner.js";
@@ -109,5 +109,20 @@ describe("unsupportedLaunchSettings", () => {
   it("says nothing when a Profile pinned nothing at all", () => {
     // The ordinary case: null everywhere means "whatever the agent chooses".
     expect(unsupportedLaunchSettings("acp", { model: null, modeId: null })).toEqual([]);
+  });
+
+  it("reports exactly what AGENT_PROTOCOL_PINS says, for every protocol", () => {
+    /*
+     * The drift guard for the *other* consumer of this rule. The Agent Profile form disables the
+     * pin a protocol cannot be told, and it reads `AGENT_PROTOCOL_PINS` to decide — so if this
+     * function and that constant ever disagreed, the form would accept a setting the run then
+     * reports it could not honour, which is the silent substitution both exist to prevent.
+     */
+    for (const protocol of agentProtocolSchema.options) {
+      const pins = AGENT_PROTOCOL_PINS[protocol];
+      const reported = unsupportedLaunchSettings(protocol, { model: "m", modeId: "d" });
+      expect(reported.some((r) => r.startsWith("model"))).toBe(!pins.model);
+      expect(reported.some((r) => r.startsWith("mode "))).toBe(!pins.mode);
+    }
   });
 });

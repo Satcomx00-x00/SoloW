@@ -6,7 +6,7 @@ import type {
   AgentProtocol,
   AuthMode,
 } from "@solow/contracts";
-import { DEFAULT_AGENT_PERMISSION_MODE } from "@solow/contracts";
+import { AGENT_PROTOCOL_PINS, DEFAULT_AGENT_PERMISSION_MODE } from "@solow/contracts";
 import { ChevronRight, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ConfirmAction } from "@/components/features/confirm-action";
@@ -159,8 +159,18 @@ export function AgentProfilesSection() {
     models: [],
     modes: [],
   };
-  // A Workspace ships with exactly one catalog entry today (Claude Code) — pick it once it
-  // loads, so a self-hoster with more than one configured still sees an explicit choice.
+  /**
+   * Which pins the chosen agent's protocol can actually be told — read from the contracts, the
+   * same rule the runner reports against, so this form cannot accept a setting the run will
+   * ignore (see `AGENT_PROTOCOL_PINS`). Defaults to allowing both until an agent is chosen,
+   * because disabling a field before there is a protocol to justify it explains nothing.
+   */
+  const chosenProtocol = catalogOptions.find((c) => c.id === agentCatalogId)?.protocol;
+  const pins = chosenProtocol ? AGENT_PROTOCOL_PINS[chosenProtocol] : { model: true, mode: true };
+
+  // Preselect once the list loads. A Workspace now ships with two entries (Claude Code and
+  // opencode), so this picks the first rather than "the only one" — the Owner still chooses, and
+  // the protocol line under the picker is what tells them the two differ.
   useEffect(() => {
     if (!agentCatalogId && catalogOptions[0]) setAgentCatalogId(catalogOptions[0].id);
   }, [agentCatalogId, catalogOptions]);
@@ -231,8 +241,13 @@ export function AgentProfilesSection() {
               // Trimmed to null rather than sent as "": an empty pin is the absence of one, and
               // storing a blank string would make "no model" and "a model named nothing" the
               // same row.
-              model: model.trim() === "" ? null : model.trim(),
-              modeId: modeId.trim() === "" ? null : modeId.trim(),
+              //
+              // Dropped entirely when the chosen protocol cannot be told it: the field is
+              // disabled, but a value typed against one agent and then left behind by switching
+              // to another would still be in state, and storing it would put a pin on the
+              // Profile that every run reports it could not honour.
+              model: pins.model && model.trim() !== "" ? model.trim() : null,
+              modeId: pins.mode && modeId.trim() !== "" ? modeId.trim() : null,
             });
           }}
         >
@@ -260,6 +275,17 @@ export function AgentProfilesSection() {
                 ))}
               </SelectContent>
             </Select>
+            {/*
+              The protocol, said where the choice is made rather than only where a catalog entry
+              is created. With more than one agent seeded it stops being a constant: Claude Code
+              and opencode differ on whether they can be asked for permission mid-run, and on
+              which of the two pins below does anything — and neither is visible from a name.
+            */}
+            {chosenProtocol && (
+              <p className="text-muted-foreground text-xs leading-relaxed">
+                {PROTOCOL_HINT[chosenProtocol]}
+              </p>
+            )}
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="grid gap-2">
@@ -321,7 +347,10 @@ export function AgentProfilesSection() {
                 list="agent-model-options"
                 value={model}
                 onChange={(event) => setModel(event.target.value)}
-                placeholder="the agent's own choice"
+                disabled={!pins.model}
+                placeholder={
+                  pins.model ? "the agent's own choice" : "this agent's protocol cannot be told"
+                }
               />
               <datalist id="agent-model-options">
                 {advertised.models.map((id) => (
@@ -336,7 +365,10 @@ export function AgentProfilesSection() {
                 list="agent-mode-options"
                 value={modeId}
                 onChange={(event) => setModeId(event.target.value)}
-                placeholder="the agent's own default"
+                disabled={!pins.mode}
+                placeholder={
+                  pins.mode ? "the agent's own default" : "this agent's protocol cannot be told"
+                }
               />
               <datalist id="agent-mode-options">
                 {advertised.modes.map((id) => (

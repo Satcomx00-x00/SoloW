@@ -26,6 +26,30 @@ export const agentProtocolSchema = z.enum([
 export type AgentProtocol = z.infer<typeof agentProtocolSchema>;
 
 /**
+ * Which of a Profile's two pins a protocol can actually be told (issue #94; generalised
+ * 2026-08-28 when opencode made the difference visible).
+ *
+ * A Profile can pin a model and a mode, and the two agents SoloW seeds differ on exactly this
+ * axis and in opposite directions: Claude Code's stream-JSON CLI takes `--model` and has no
+ * notion of a session mode, while ACP has `session/set_mode` and no way to select a model. So a
+ * pin is meaningful for one and inert for the other, and which is which is a property of the
+ * protocol, not of the agent.
+ *
+ * It lives here, in the contracts both sides already import, because the alternative is stating
+ * it twice — once where a run reports what it could not honour
+ * (`unsupportedLaunchSettings`), once where the Owner is choosing (the Agent Profile form) — and
+ * two copies of a rule like this drift into a form that accepts a setting the runner then
+ * ignores. That is the silent substitution this rule exists to prevent, so it must not be the
+ * shape of its own implementation.
+ */
+export const AGENT_PROTOCOL_PINS: Record<AgentProtocol, { model: boolean; mode: boolean }> = {
+  claude_code_stream_json: { model: true, mode: false },
+  acp: { model: false, mode: true },
+  // Arguments and stdout: it is told neither, and there is no runner for it yet regardless.
+  cli_passthrough: { model: false, mode: false },
+};
+
+/**
  * A cache of what the agent last advertised, not the truth. Once #58 lands, models and modes
  * come from the ACP handshake; this is the fallback shown before an agent has ever run.
  */
