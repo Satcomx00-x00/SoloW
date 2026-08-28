@@ -1,6 +1,12 @@
 /// <reference types="bun-types" />
 
 import { beforeEach, describe, expect, it } from "bun:test";
+
+// `seedProject` encrypts a PAT, and the secret store reads SOLOW_SECRET_KEY lazily through the
+// validated env module — so it has to be set before the first `encryptSecret` call, here rather
+// than relied on from whichever other test file happened to run first (see project.test.ts).
+process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 13).toString("base64");
+
 import type { ProjectViewConfig } from "@solow/contracts";
 import { DEFAULT_PROJECT_VIEW_CONFIG } from "@solow/contracts";
 import { formatProjectFilter, parseProjectFilter } from "@solow/core";

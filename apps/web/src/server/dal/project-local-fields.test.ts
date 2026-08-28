@@ -9,9 +9,13 @@ import { deriveLocalProjectFields, type LocalFieldIssue } from "./project-local-
 function issueWith(over: Partial<LocalFieldIssue> = {}): LocalFieldIssue {
   return {
     id: "issue-1",
+    title: "Fixture issue",
+    externalId: null,
+    externalParentId: null,
     labels: [],
     assignees: [],
     milestone: null,
+    linkedChangeRequests: [],
     repositoryName: null,
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-02T00:00:00.000Z",
@@ -20,35 +24,63 @@ function issueWith(over: Partial<LocalFieldIssue> = {}): LocalFieldIssue {
   };
 }
 
+/**
+ * GitHub Projects v2's own column set, in its own order, as a real mirrored Project reports it.
+ * A local Project must declare exactly this — a GitLab-backed board that showed fewer columns is
+ * the defect this list exists to catch (user request 2026-08-28).
+ */
+const GITHUB_COLUMNS = [
+  "Title",
+  "Assignees",
+  "Status",
+  "Labels",
+  "Linked pull requests",
+  "Milestone",
+  "Repository",
+  "Reviewers",
+  "Parent issue",
+  "Sub-issues progress",
+  "Created",
+  "Updated",
+  "Closed",
+  "Priority",
+  "Size",
+  "Estimate",
+  "Iteration",
+  "Start date",
+  "Target date",
+];
+
 describe("deriveLocalProjectFields", () => {
-  it("declares every column even with no Issues, single-selects just carrying no options yet", () => {
+  it("declares GitHub's exact column set, in order, even with no Issues at all", () => {
     const { fields } = deriveLocalProjectFields([]);
 
-    expect(fields.map((f) => f.name)).toEqual([
-      "Assignees",
-      "Status",
-      "Priority",
-      "Size",
-      "Milestone",
-      "Repository",
-      "Created",
-      "Updated",
-      "Closed",
-      "Estimate",
-      "Iteration",
-      "Start date",
-      "Target date",
-    ]);
+    expect(fields.map((f) => f.name)).toEqual(GITHUB_COLUMNS);
     expect(fields.every((f) => f.readOnly)).toBe(true);
     expect(fields.find((f) => f.name === "Status")?.options).toEqual([]);
   });
 
-  it("declares Estimate/Iteration/Start date/Target date unavailable, with a reason", () => {
+  it("keeps every column when the Issues fill almost none of them", () => {
+    // The whole point of the parity: a column with nothing behind it still exists, so the two
+    // tables stay comparable rather than one silently shrinking.
+    const { fields, valuesByIssueId } = deriveLocalProjectFields([issueWith()]);
+
+    expect(fields.map((f) => f.name)).toEqual(GITHUB_COLUMNS);
+    const values = valuesByIssueId.get("issue-1") ?? {};
+    // Only Title, Created and Updated are things every Issue has.
+    expect(Object.keys(values).sort()).toEqual(["local:created", "local:title", "local:updated"]);
+  });
+
+  it("declares the columns it genuinely cannot fill read-only, each with its own reason", () => {
     const { fields } = deriveLocalProjectFields([]);
-    for (const name of ["Estimate", "Iteration", "Start date", "Target date"]) {
-      const field = fields.find((f) => f.name === name);
-      expect(field?.readOnlyReason).toBeTruthy();
+    for (const name of ["Estimate", "Iteration", "Start date", "Target date", "Reviewers"]) {
+      expect(fields.find((f) => f.name === name)?.readOnlyReason).toBeTruthy();
     }
+    // Reviewers is unavailable for a different reason than the board-shaped ones — an issue has
+    // no reviewers on any provider — so it must not read as "this Project is local".
+    expect(fields.find((f) => f.name === "Reviewers")?.readOnlyReason).not.toBe(
+      fields.find((f) => f.name === "Estimate")?.readOnlyReason,
+    );
     expect(fields.find((f) => f.name === "Status")?.readOnlyReason).toBeNull();
   });
 
@@ -152,5 +184,66 @@ describe("deriveLocalProjectFields", () => {
     expect(valuesByIssueId.get("open")?.["local:closed"]).toEqual({ type: "text", text: "No" });
     expect(valuesByIssueId.get("closed")?.["local:closed"]).toEqual({ type: "text", text: "Yes" });
     expect(valuesByIssueId.get("unknown")).not.toHaveProperty("local:closed");
+  });
+
+  it("fills Title, Labels and Linked pull requests from the Issue itself", () => {
+    const issue = issueWith({
+      title: "Cap the upload size",
+      labels: ["bug", "status::doing"],
+      linkedChangeRequests: [
+        {
+          externalId: "1",
+          number: 12,
+          title: "Fix it",
+          state: "open",
+          url: "u/12",
+          mergedAt: null,
+        },
+        {
+          externalId: "2",
+          number: 14,
+          title: "And again",
+          state: "merged",
+          url: "u/14",
+          mergedAt: "x",
+        },
+      ],
+    });
+
+    const { valuesByIssueId } = deriveLocalProjectFields([issue]);
+
+    expect(valuesByIssueId.get("issue-1")).toMatchObject({
+      "local:title": { type: "text", text: "Cap the upload size" },
+      "local:labels": { type: "text", text: "bug, status::doing" },
+      "local:linked_change_requests": { type: "text", text: "#12, #14" },
+    });
+  });
+
+  it("rolls sub-issues up onto their parent, and names the parent on each child", () => {
+    const parent = issueWith({ id: "epic", externalId: "100" });
+    const doneChild = issueWith({ id: "a", externalParentId: "100", externalState: "closed" });
+    const openChild = issueWith({ id: "b", externalParentId: "100", externalState: "open" });
+
+    const { valuesByIssueId } = deriveLocalProjectFields([parent, doneChild, openChild]);
+
+    expect(valuesByIssueId.get("epic")?.["local:sub_issues"]).toEqual({
+      type: "text",
+      text: "1/2",
+    });
+    expect(valuesByIssueId.get("a")?.["local:parent_issue"]).toEqual({
+      type: "text",
+      text: "#100",
+    });
+    // A leaf has no roll-up of its own — an empty cell, not "0/0", which would read as an epic
+    // whose children are all unfinished.
+    expect(valuesByIssueId.get("a")).not.toHaveProperty("local:sub_issues");
+  });
+
+  it("never fills Reviewers — the column exists, the value cannot", () => {
+    const { valuesByIssueId } = deriveLocalProjectFields([
+      issueWith({ assignees: [{ login: "ada", name: "Ada", avatarUrl: null }] }),
+    ]);
+
+    expect(valuesByIssueId.get("issue-1")).not.toHaveProperty("local:reviewers");
   });
 });

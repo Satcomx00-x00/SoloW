@@ -1,6 +1,14 @@
 /// <reference types="bun-types" />
 
 import { beforeEach, describe, expect, it } from "bun:test";
+
+// `seedProject` encrypts a PAT, and the secret store reads SOLOW_SECRET_KEY lazily through the
+// validated env module — so it has to be set before the first `encryptSecret` call. Set here
+// rather than relied on from another test file's own setup: bun runs one process for the whole
+// suite, file order is not guaranteed, and this file passing only when some other file happened
+// to run first is precisely the bug that broke a release's CI run (see index.test.ts).
+process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 12).toString("base64");
+
 import {
   encryptSecret,
   integration,
@@ -141,6 +149,10 @@ describe("getProject", () => {
       expect(result.data.fields.map((f) => f.name)).toContain("Status");
       const status = result.data.fields.find((f) => f.name === "Status");
       expect(status?.options.map((o) => o.name)).toEqual(["doing"]);
+      // The parity itself, through the real query path: nineteen columns, the same nineteen a
+      // mirrored GitHub Project reports (user request 2026-08-28 — see
+      // `project-local-fields.test.ts` for the name-by-name list this count stands for).
+      expect(result.data.fields).toHaveLength(19);
       // Still true after this — this is what FR-21 actually promises.
       expect(
         await db.select().from(projectField).where(eq(projectField.projectId, projectId)),

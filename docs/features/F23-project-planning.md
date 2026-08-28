@@ -110,14 +110,21 @@ table because it exists, not because someone pressed a button.
   SoloW's own database (its saved views, fields, values and items) without deleting its Issues,
   which are kept and become unassigned, and without deleting or otherwise touching anything on the
   provider a mirrored Project came from.
-- **FR-23** THE SYSTEM SHALL derive Status, Priority, Size, Assignees, Milestone, Repository,
-  Created, Updated and Closed columns for a local Project from the Issues registered under it —
-  the single-select ones grouped from scoped labels (`status::doing`, `status/todo`; GitLab's own
-  convention and SoloW's seeded taxonomy read the same way), the rest read straight off the
-  Issue — computed at read time and never persisted as `project_field` rows, so FR-21 stays true.
-  Estimate, Iteration, Start date and Target date SHALL be declared unexpressible with a reason,
-  the same rule FR-16 already states for a mirrored GitLab Project: a local Project has no
-  provider board at all, so there is nowhere such a value could have been read from.
+- **FR-23** THE SYSTEM SHALL give a local Project **the same column set a mirrored GitHub Project
+  has** — Title, Assignees, Status, Labels, Linked pull requests, Milestone, Repository,
+  Reviewers, Parent issue, Sub-issues progress, Created, Updated, Closed, Priority, Size,
+  Estimate, Iteration, Start date, Target date — in that order, derived at read time from the
+  Issues registered under it and never persisted as `project_field` rows, so FR-21 stays true.
+  The single-select columns SHALL be grouped from scoped labels (`status::doing`, `status/todo`;
+  GitLab's own convention and SoloW's seeded taxonomy read the same way); the rest SHALL be read
+  straight off the Issue.
+- **FR-23a** A column SHALL be declared whether or not anything fills it. A table whose columns
+  appear and disappear with the provider behind it is a table two people cannot compare, so a
+  column with no value renders empty rather than being dropped. WHERE a column cannot be filled
+  at all — Reviewers, which belongs to a change request and not to an issue on any provider; and
+  Estimate, Iteration, Start date and Target date, which need a provider board a local Project by
+  definition does not have — THE SYSTEM SHALL declare it read-only and state that specific
+  reason, the same rule FR-5 and FR-16 already apply to a mirrored GitLab Project.
 - **FR-24** THE SYSTEM SHALL populate an Issue's assignees and milestone during automatic
   ingestion (#125), not only when the Issue is read one at a time, and SHALL record the provider's
   own last-changed time for an Issue when the provider reports one, rather than only the time of

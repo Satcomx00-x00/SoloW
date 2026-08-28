@@ -65,9 +65,13 @@ async function localFieldIssuesFor(
   const rows = await ctx.db
     .select({
       issueId: issue.id,
+      title: issue.title,
+      externalId: issue.externalId,
+      externalParentId: issue.externalParentId,
       labels: issue.labels,
       assignees: issue.assignees,
       milestone: issue.milestone,
+      linkedChangeRequests: issue.linkedChangeRequests,
       repositoryName: repository.name,
       createdAt: issue.createdAt,
       updatedAt: issue.updatedAt,
@@ -87,9 +91,13 @@ async function localFieldIssuesFor(
 
   return rows.map((r) => ({
     id: r.issueId,
+    title: r.title,
+    externalId: r.externalId,
+    externalParentId: r.externalParentId,
     labels: r.labels,
     assignees: r.assignees,
     milestone: r.milestone,
+    linkedChangeRequests: r.linkedChangeRequests,
     repositoryName: r.repositoryName,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
@@ -239,9 +247,11 @@ export async function listProjectItems(
       externalState: issue.externalState,
       // Only read for a local Project (below), but cheap to carry on the same joined row rather
       // than a second query — everything here already comes off `issue`, already joined.
+      issueTitle: issue.title,
       labels: issue.labels,
       assignees: issue.assignees,
       milestone: issue.milestone,
+      linkedChangeRequests: issue.linkedChangeRequests,
       repositoryName: repository.name,
       issueCreatedAt: issue.createdAt,
       issueUpdatedAt: issue.updatedAt,
@@ -295,9 +305,13 @@ export async function listProjectItems(
     const { valuesByIssueId } = deriveLocalProjectFields(
       rows.map((r) => ({
         id: r.item.issueId,
+        title: r.issueTitle,
+        externalId: r.issueExternalId,
+        externalParentId: r.parentExternalId,
         labels: r.labels,
         assignees: r.assignees,
         milestone: r.milestone,
+        linkedChangeRequests: r.linkedChangeRequests,
         repositoryName: r.repositoryName,
         createdAt: r.issueCreatedAt,
         updatedAt: r.issueUpdatedAt,
