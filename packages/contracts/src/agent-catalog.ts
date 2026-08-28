@@ -26,28 +26,116 @@ export const agentProtocolSchema = z.enum([
 export type AgentProtocol = z.infer<typeof agentProtocolSchema>;
 
 /**
- * Which of a Profile's two pins a protocol can actually be told (issue #94; generalised
- * 2026-08-28 when opencode made the difference visible).
+ * Everything the product needs to know about a protocol, in one place (refactored 2026-08-28).
  *
- * A Profile can pin a model and a mode, and the two agents SoloW seeds differ on exactly this
- * axis and in opposite directions: Claude Code's stream-JSON CLI takes `--model` and has no
- * notion of a session mode, while ACP has `session/set_mode` and no way to select a model. So a
- * pin is meaningful for one and inert for the other, and which is which is a property of the
- * protocol, not of the agent.
+ * It used to be four: the pins here, the driven-protocol list and the worktree question in the
+ * orchestrator, and the explanatory hints in the Agent Profile form. Three of those four were
+ * plain arrays and `===` comparisons, so adding a protocol compiled cleanly and then failed at
+ * run time — a Task refused for a protocol that had a driver, or a form offering a setting the
+ * runner ignores. A `Record<AgentProtocol, …>` cannot be added to without the compiler naming
+ * every field the new member is missing, which is the property that was wanted all along.
  *
- * It lives here, in the contracts both sides already import, because the alternative is stating
- * it twice — once where a run reports what it could not honour
- * (`unsupportedLaunchSettings`), once where the Owner is choosing (the Agent Profile form) — and
- * two copies of a rule like this drift into a form that accepts a setting the runner then
- * ignores. That is the silent substitution this rule exists to prevent, so it must not be the
- * shape of its own implementation.
+ * What is *not* here is how to build a runner: that needs the runner classes, so the switch
+ * stays in the orchestrator. `driven` is this file's claim about whether one exists, and a test
+ * asserts the switch agrees — the two halves of one question, kept honest by a drift guard
+ * rather than by hoping.
  */
-export const AGENT_PROTOCOL_PINS: Record<AgentProtocol, { model: boolean; mode: boolean }> = {
-  claude_code_stream_json: { model: true, mode: false },
-  acp: { model: false, mode: true },
-  // Arguments and stdout: it is told neither, and there is no runner for it yet regardless.
-  cli_passthrough: { model: false, mode: false },
+export interface AgentProtocolDescriptor {
+  /** How it reads where an Owner is choosing one. */
+  label: string;
+  /** The consequence of choosing it, in the Owner's terms — not a restatement of the enum. */
+  hint: string;
+  /**
+   * Which of a Profile's two pins this protocol can actually be told (issue #94).
+   *
+   * The two agents SoloW seeds differ here in opposite directions: Claude Code's stream-JSON CLI
+   * takes `--model` and has no notion of a session mode, while ACP has `session/set_mode` and no
+   * way to select a model. A pin is meaningful for one and inert for the other, and which is
+   * which is a property of the protocol, not of the agent.
+   */
+  pins: { model: boolean; mode: boolean };
+  /**
+   * Whether the agent makes the Task's worktree itself, or SoloW has to.
+   *
+   * Claude Code does, via `--worktree`, and SoloW adopts whatever path it reports. The others
+   * work in the `cwd` they are given, so the lifecycle provisions it first. The isolation
+   * guarantee (Principle II) is the same either way — only who creates the directory changes.
+   */
+  createsOwnWorktree: boolean;
+  /** Whether it can ask the operator mid-run, which only a real request channel allows. */
+  canRequestPermission: boolean;
+  /** Whether this build has a runner for it. The orchestrator's switch must agree. */
+  driven: boolean;
+}
+
+export const AGENT_PROTOCOLS: Record<AgentProtocol, AgentProtocolDescriptor> = {
+  claude_code_stream_json: {
+    label: "Claude Code (stream-JSON)",
+    hint: "Claude Code's own headless CLI. No permission channel — the CLI decides for itself.",
+    pins: { model: true, mode: false },
+    createsOwnWorktree: true,
+    canRequestPermission: false,
+    driven: true,
+  },
+  acp: {
+    label: "Agent Client Protocol",
+    hint: "Agent Client Protocol. Can ask for permission mid-run — this is what the inline elicitation card needs.",
+    pins: { model: false, mode: true },
+    createsOwnWorktree: false,
+    canRequestPermission: true,
+    driven: true,
+  },
+  cli_passthrough: {
+    label: "Plain CLI",
+    hint: "A plain CLI given the brief as an argument. Its output is the transcript; it has no tools, no permission channel, and nothing to pin.",
+    pins: { model: false, mode: false },
+    createsOwnWorktree: false,
+    canRequestPermission: false,
+    driven: true,
+  },
 };
+
+/**
+ * What a protocol this build has never heard of is treated as.
+ *
+ * Reachable, and not hypothetically: `agent_catalog.protocol` is a plain text column with no
+ * CHECK constraint, so a Workspace written by a build that shipped a fourth protocol still opens
+ * in one that did not — the same orphan degradation F21 describes for provider ids. The type
+ * says `AgentProtocol`; the database does not.
+ *
+ * Undriven and pinnable-by-nothing, so every derived question answers the safe way: the Task is
+ * refused before an agent starts, with the protocol named, and nothing claims a capability for
+ * something it cannot even identify. Learned the hard way — the first cut of this record was
+ * indexed directly, which turned that clean refusal into a `TypeError` deep inside the
+ * lifecycle.
+ */
+const UNKNOWN_PROTOCOL: AgentProtocolDescriptor = {
+  label: "Unknown protocol",
+  hint: "This build does not know this protocol. A Task using it is refused before an agent starts.",
+  pins: { model: false, mode: false },
+  createsOwnWorktree: false,
+  canRequestPermission: false,
+  driven: false,
+};
+
+/**
+ * The descriptor for a stored protocol value, whatever it turns out to be.
+ *
+ * Every consumer goes through this rather than indexing `AGENT_PROTOCOLS` — the record is
+ * exhaustive over the enum, and the enum is not exhaustive over the column.
+ */
+export function agentProtocolDescriptor(protocol: string): AgentProtocolDescriptor {
+  return AGENT_PROTOCOLS[protocol as AgentProtocol] ?? UNKNOWN_PROTOCOL;
+}
+
+/**
+ * Kept as its own export because it is what both the runner and the Profile form ask for, and
+ * `AGENT_PROTOCOLS[p].pins` at every call site reads worse than the question being asked.
+ */
+export const AGENT_PROTOCOL_PINS: Record<AgentProtocol, { model: boolean; mode: boolean }> =
+  Object.fromEntries(
+    Object.entries(AGENT_PROTOCOLS).map(([protocol, d]) => [protocol, d.pins]),
+  ) as Record<AgentProtocol, { model: boolean; mode: boolean }>;
 
 /**
  * A cache of what the agent last advertised, not the truth. Once #58 lands, models and modes

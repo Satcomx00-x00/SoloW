@@ -1726,10 +1726,19 @@ describe("the worktree a Task runs in", () => {
   describe("agent catalog (issue #10)", () => {
     it("fails a Task whose Agent catalog protocol has no runner, rather than crashing inside one", async () => {
       const ids = freshIds();
-      // `cli_passthrough` (#21) names a real member of AgentProtocol but has no driver behind
-      // it yet — this must fail cleanly before an agent is ever started. (`acp` used to be the
-      // subject of this case; issue #58 is the work that made it drivable.)
-      await seedRun(db, ids, { agentProtocol: "cli_passthrough" });
+      /*
+       * Every protocol the enum names now has a driver (#21's passthrough was the last, 2026-08-28),
+       * so the case this guards is no longer a protocol named ahead of its driver — it is a
+       * catalog row naming a protocol this build has never heard of. That is reachable: the
+       * `protocol` column is plain text with no CHECK constraint, so a Workspace written by a
+       * build that shipped a fourth protocol still opens in one that did not, exactly the orphan
+       * degradation F21 describes for provider ids.
+       *
+       * The guarantee is unchanged and is the whole point: fail before an agent is started, with
+       * the protocol named, rather than crashing inside a runner or falling through to whichever
+       * one the switch happened to reach.
+       */
+      await seedRun(db, ids, { agentProtocol: "protocol_from_a_newer_build" as AgentProtocol });
       const runner = new ScriptedRunner([{ kind: "completed" }]);
       const { deps, spies } = makeDeps(db, runner, nullStream());
 
@@ -1743,7 +1752,7 @@ describe("the worktree a Task runs in", () => {
       expect(runner.starts).toBe(0);
       expect(spies.commit).toBe(0);
       const [row] = await db.select().from(task).where(eq(task.id, ids.taskId)).limit(1);
-      expect(row?.failureReason).toContain("cli_passthrough");
+      expect(row?.failureReason).toContain("protocol_from_a_newer_build");
     });
 
     it("launches the agent with the command the catalog row declares, not a global env var", async () => {

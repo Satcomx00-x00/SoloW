@@ -6,7 +6,12 @@ import type {
   AgentProtocol,
   AuthMode,
 } from "@solow/contracts";
-import { AGENT_PROTOCOL_PINS, DEFAULT_AGENT_PERMISSION_MODE } from "@solow/contracts";
+import {
+  AGENT_PROTOCOL_PINS,
+  AGENT_PROTOCOLS,
+  agentProtocolSchema,
+  DEFAULT_AGENT_PERMISSION_MODE,
+} from "@solow/contracts";
 import { ChevronRight, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ConfirmAction } from "@/components/features/confirm-action";
@@ -34,12 +39,9 @@ import { trpc } from "@/trpc/react";
  * `session/request_permission` round trip), so it is the one to pick for an agent that should
  * ever ask before doing something rather than deciding on its own.
  */
-const PROTOCOL_HINT: Record<AgentProtocol, string> = {
-  claude_code_stream_json:
-    "Claude Code's own headless CLI. No permission channel — the CLI decides for itself.",
-  acp: "Agent Client Protocol. Can ask for permission mid-run — this is what the inline elicitation card needs.",
-  cli_passthrough: "A plain CLI driven by arguments and stdout. No permission channel.",
-};
+const PROTOCOL_HINT: Record<AgentProtocol, string> = Object.fromEntries(
+  Object.entries(AGENT_PROTOCOLS).map(([protocol, d]) => [protocol, d.hint]),
+) as Record<AgentProtocol, string>;
 
 /**
  * How a Profile's usage reads in the confirmation and the disabled-button title. Named parts
@@ -509,12 +511,16 @@ export function AgentProfilesSection() {
                   <SelectTrigger id="catalog-protocol" className="w-full">
                     <SelectValue />
                   </SelectTrigger>
+                  {/*
+                    Derived from the enum, not listed by hand: this was the one place adding a
+                    protocol broke silently in JSX, where no compiler was ever going to say so.
+                  */}
                   <SelectContent>
-                    <SelectItem value="acp">ACP</SelectItem>
-                    <SelectItem value="claude_code_stream_json">
-                      Claude Code (stream-json)
-                    </SelectItem>
-                    <SelectItem value="cli_passthrough">CLI passthrough</SelectItem>
+                    {agentProtocolSchema.options.map((protocol) => (
+                      <SelectItem key={protocol} value={protocol}>
+                        {AGENT_PROTOCOLS[protocol].label}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
                 <p

@@ -1,47 +1,42 @@
-import type { AgentProtocol } from "@solow/contracts";
+import {
+  AGENT_PROTOCOLS,
+  type AgentProtocol,
+  agentProtocolDescriptor,
+  agentProtocolSchema,
+} from "@solow/contracts";
 
 /**
- * Which agent protocols this orchestrator can actually drive (issues #10 and #58).
+ * Which agent protocols this orchestrator can actually drive (issues #10, #58, #21).
  *
  * The catalog can describe an agent by any protocol in `AgentProtocol` — that is what makes
  * adding an agent a data row instead of a code change. But describing a protocol is not
- * implementing one. Two now have a driver behind them: `acp`, the standard boundary Decision
- * 0003 chose, and `claude_code_stream_json`, which survives as a first-class adapter rather
- * than being forced through ACP because subscription billing works through the vendor CLI's own
- * authentication (Decision 0005) and Claude Code's ACP bridge is a separate binary. Only
- * `cli_passthrough` (#21) is still named ahead of its driver, the same way #73 named the
- * `docker`/`ssh`/`cloud` Executor kinds before those drivers existed.
+ * implementing one, so the lifecycle asks here before it starts anything: an Agent Profile
+ * pointing at an undriven protocol would otherwise crash deep inside a runner or, worse, fall
+ * through to whatever the runner happens to do by default. Failing the Task before an agent
+ * starts, with the reason named, is the honest answer.
  *
- * Without this check, an Agent Profile pointing at an undriven protocol would either crash
- * deep inside the runner or — worse — silently fall through to whatever the runner happens to
- * do by default. Failing the Task before an agent starts, with the reason named, is the honest
- * answer.
+ * **Derived, not restated** (refactored 2026-08-28). This was a hand-written array beside a
+ * hand-written `===`, and both compiled cleanly when a protocol was added — the failure only
+ * appeared at run time, as a Task refused for a protocol that had a driver. Everything here now
+ * reads `AGENT_PROTOCOLS`, whose `Record<AgentProtocol, …>` the compiler will not let anyone
+ * extend the enum without filling in.
  *
- * This list and `createAgentRunner`'s switch answer two halves of one question, so a test
- * asserts they agree for every member of the enum; they cannot drift apart unnoticed.
+ * `driven` is the contracts' claim; `createAgentRunner`'s switch is the fact. A test asserts they
+ * agree for every member of the enum, so the two cannot drift apart unnoticed.
  */
-export const AVAILABLE_AGENT_PROTOCOLS: readonly AgentProtocol[] = [
-  "claude_code_stream_json",
-  "acp",
-];
+export const AVAILABLE_AGENT_PROTOCOLS: readonly AgentProtocol[] = agentProtocolSchema.options
+  .filter((protocol) => AGENT_PROTOCOLS[protocol].driven)
+  // Frozen so a caller cannot quietly widen what this build claims to drive.
+  .slice();
 
 export function hasAgentRunner(protocol: AgentProtocol): boolean {
-  return AVAILABLE_AGENT_PROTOCOLS.includes(protocol);
+  return agentProtocolDescriptor(protocol).driven;
 }
 
 export function missingAgentRunnerReason(protocol: AgentProtocol): string {
   return `no agent runner for protocol "${protocol}" — this SoloW build can only drive ${AVAILABLE_AGENT_PROTOCOLS.join(", ")}`;
 }
 
-/**
- * Whether the agent makes the Task's worktree itself, or SoloW has to.
- *
- * Claude Code does, via `--worktree`, and SoloW adopts whatever path it reports. ACP has
- * no equivalent: an ACP agent works in the `cwd` it is given, so the lifecycle must provision
- * the worktree first and point the agent at it. The isolation guarantee (Principle II) is the
- * same either way — only who creates the directory changes — which is why this is a one-line
- * question here rather than two lifecycles.
- */
 export function agentCreatesOwnWorktree(protocol: AgentProtocol): boolean {
-  return protocol === "claude_code_stream_json";
+  return agentProtocolDescriptor(protocol).createsOwnWorktree;
 }

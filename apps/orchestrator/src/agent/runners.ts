@@ -1,11 +1,12 @@
 import {
-  AGENT_PROTOCOL_PINS,
   type AgentPermissionMode,
   type AgentProtocol,
+  agentProtocolDescriptor,
 } from "@solow/contracts";
 import type { Executor } from "../executor/types.js";
 import { AcpRunner } from "./acp-runner.js";
 import { ClaudeCodeRunner } from "./claude-code-runner.js";
+import { CliPassthroughRunner } from "./cli-passthrough-runner.js";
 import type { UnattendedPermissionPosture } from "./permissions.js";
 import type { AgentRunner } from "./runner.js";
 
@@ -107,11 +108,25 @@ export function createAgentRunner(
             }),
       });
     }
-    // #21's passthrough: named in the enum ahead of its driver, the same way #73 named the
-    // Docker/SSH/cloud Executor kinds. Null, not a default runner — a Task pointed at a
-    // protocol nothing speaks must fail with the reason named, never fall through to whatever
-    // the last case happened to do.
+    /*
+     * #21's passthrough, driven since 2026-08-28. It takes none of the settings above: a plain
+     * CLI has no permission channel to configure and nothing to pin, which
+     * `AGENT_PROTOCOLS.cli_passthrough` states and `unsupportedLaunchSettings` reports on.
+     *
+     * This case returning a runner rather than null is what makes "any agent, as a data row"
+     * true for an agent that speaks neither protocol — the long tail the catalog is data for.
+     */
     case "cli_passthrough":
+      return new CliPassthroughRunner({ executor: deps.executor });
+    /*
+     * Unreachable by the type, reachable by the database. `agent_catalog.protocol` is plain text
+     * with no CHECK constraint, so a row can name a protocol this build has never heard of — and
+     * without this the switch would fall through every case and return `undefined`, which the
+     * signature promises it does not. Null is the same answer an undriven protocol gets, so the
+     * lifecycle refuses the Task with the protocol named instead of starting nothing and
+     * reporting success.
+     */
+    default:
       return null;
   }
 }
@@ -135,7 +150,7 @@ export function unsupportedLaunchSettings(
    * for each protocol — in short, stream-json launches a CLI with `--model` and has no session
    * mode, and this build's ACP vocabulary has `session/set_mode` and nothing for a model.
    */
-  const pins = AGENT_PROTOCOL_PINS[protocol];
+  const pins = agentProtocolDescriptor(protocol).pins;
   const unsupported: string[] = [];
   if (!pins.mode && settings.modeId) unsupported.push(`mode "${settings.modeId}"`);
   if (!pins.model && settings.model) unsupported.push(`model "${settings.model}"`);

@@ -3,6 +3,7 @@ import { AGENT_PROTOCOL_PINS, agentProtocolSchema } from "@solow/contracts";
 import type { Executor } from "../executor/types.js";
 import { AcpRunner } from "./acp-runner.js";
 import { ClaudeCodeRunner } from "./claude-code-runner.js";
+import { CliPassthroughRunner } from "./cli-passthrough-runner.js";
 import { AVAILABLE_AGENT_PROTOCOLS, hasAgentRunner } from "./protocols.js";
 import { createAgentRunner, unsupportedLaunchSettings } from "./runners.js";
 
@@ -73,10 +74,20 @@ describe("createAgentRunner", () => {
     expect(options["permissionDeadlineMs"]).toBeUndefined();
   });
 
-  it("returns nothing for a protocol named ahead of its driver", () => {
-    // A default runner here would silently run a passthrough Task as something else entirely.
-    expect(createAgentRunner("cli_passthrough", { executor })).toBeNull();
-    expect(AVAILABLE_AGENT_PROTOCOLS).not.toContain("cli_passthrough");
+  it("drives a plain CLI, so an agent that speaks neither protocol is still a data row", () => {
+    // #21's passthrough, driven since 2026-08-28. Until then this protocol was named in the
+    // enum with nothing behind it, and "adding an agent is a data row" was true only for agents
+    // that already spoke one of the other two.
+    expect(createAgentRunner("cli_passthrough", { executor })).toBeInstanceOf(CliPassthroughRunner);
+    expect(AVAILABLE_AGENT_PROTOCOLS).toContain("cli_passthrough");
+  });
+
+  it("has a driver for every protocol the enum names", () => {
+    // True today, and the assertion that will fail first the next time a protocol is named
+    // ahead of its driver — which is the moment `hasAgentRunner`'s refusal path matters again.
+    for (const protocol of agentProtocolSchema.options) {
+      expect(createAgentRunner(protocol, { executor })).not.toBeNull();
+    }
   });
 });
 

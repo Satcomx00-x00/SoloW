@@ -183,3 +183,35 @@ shapes (`opencode auth login` writes to disk). The seeded row names `OPENCODE_AP
 subscription mode and `ANTHROPIC_API_KEY` for the metered one, which is what the guard sets and
 strips — but a Workspace whose opencode is authenticated on disk rather than by environment is
 authenticated by something SoloW did not give it, which Decision 0005 does not currently cover.
+
+## Three protocols, one description (2026-08-28)
+
+Adding opencode exposed how a protocol was actually described: in four places. The enum and the
+model/mode pins in the contracts; the driven-protocol list and the worktree question in the
+orchestrator; the explanatory hints and a hand-written `<SelectItem>` list in the Agent Profile
+form. **Three of the four were plain arrays and `===` comparisons**, so adding a protocol
+compiled cleanly and failed later — a Task refused for a protocol that had a driver, or a form
+offering a setting the runner ignores.
+
+They are now one `Record<AgentProtocol, AgentProtocolDescriptor>` in the contracts, which the
+compiler will not let anyone extend the enum without filling in, and everything else derives from
+it. What stayed behind is the runner switch, because building a runner needs the runner classes;
+the descriptor's `driven` flag is the contracts' claim about it and a test asserts the switch
+agrees.
+
+**`cli_passthrough` now has a driver.** It was named in the enum ahead of one since #21, which
+meant "adding an agent is a data row" was true only for agents already speaking one of the other
+two protocols. `CliPassthroughRunner` hands the brief to the command as its last argument, streams
+stdout as the transcript, and reports the exit status — no tools, no permissions, no usage,
+because inventing structure from an arbitrary CLI's stdout would be guessing, and a transcript
+claiming a tool ran when the runner merely saw a line that looked like one is worse than a plain
+one. That is stated in the protocol's own hint, where the Owner chooses it.
+
+One thing this refactor got wrong first, worth recording because the type system actively misled
+here: every derived question indexed the record directly, and `agent_catalog.protocol` is a plain
+`text` column with no CHECK constraint. The type says `AgentProtocol`; the database does not. A row
+naming a protocol this build has never heard of — written by a newer build, or edited by hand —
+turned a clean "no runner for this protocol" refusal into a `TypeError` deep inside the lifecycle.
+The existing test for that refusal is what caught it. Lookups now go through
+`agentProtocolDescriptor`, which answers an undriven descriptor for anything unrecognised, and the
+switch has a `default` for the same reason.
