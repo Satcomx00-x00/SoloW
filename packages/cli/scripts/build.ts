@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 /**
- * Assemble the publishable `solow` package.
+ * Assemble the publishable `@satcomx00-x00/solow` package.
  *
  * The repo is a Bun workspace monorepo; npm installs a single flat tarball. This bridges the
  * two by producing a `dist/` that carries everything the launcher needs and nothing it does
@@ -9,7 +9,7 @@
  * self-contained bundles, and the migration SQL.
  *
  * Run from CI before `npm publish` (see .github/workflows/publish.yml), or by hand with
- * `bun run --filter solow build`.
+ * `bun run --filter '@satcomx00-x00/solow' build`.
  */
 
 import { existsSync } from "node:fs";

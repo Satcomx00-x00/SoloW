@@ -1,7 +1,7 @@
 {
-  "name": "solow",
-  "version": "0.1.3",
-  "description": "Solo Workflow \u2014 a self-hostable control plane for orchestrating AI coding agents in parallel under human review. Run it with `npx solow`.",
+  "name": "@satcomx00-x00/solow",
+  "version": "0.1.4",
+  "description": "Solo Workflow \u2014 a self-hostable control plane for orchestrating AI coding agents in parallel under human review. Run it with `npx @satcomx00-x00/solow`.",
   "license": "AGPL-3.0-only",
   "type": "module",
   "homepage": "https://github.com/Satcomx00-x00/SoloW#readme",

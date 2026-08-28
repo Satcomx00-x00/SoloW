@@ -1,6 +1,8 @@
 name: Publish
 
-# Publishes the `solow` package to npm, which is what makes `npx solow` work.
+# Publishes the `@satcomx00-x00/solow` package to npm, which is what makes
+# `npx @satcomx00-x00/solow` work. (The unscoped `solow` name is blocked by npm's own
+# anti-typosquatting policy — too close to `solc`/`color` — hence the scope.)
 #
 # Releases are cut by tag: push `v0.2.0` and this builds and publishes 0.2.0. The tag is the
 # trigger *and* the source of truth for the version — the guard below refuses to publish if
@@ -92,7 +94,7 @@ jobs:
       # Produces packages/cli/dist: the traced standalone web build, the orchestrator and the
       # database entry points as self-contained bundles, and the migration SQL.
       - name: Build the package
-        run: bun run --filter solow build
+        run: bun run --filter '@satcomx00-x00/solow' build
 
       - name: Inspect the tarball
         working-directory: packages/cli

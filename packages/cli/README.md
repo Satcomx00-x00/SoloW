@@ -4,7 +4,7 @@
 parallel, under human review.
 
 ```sh
-npx solow
+npx @satcomx00-x00/solow
 ```
 
 That is the whole install. It brings up the stack on <http://localhost:5000> and opens it.
@@ -36,7 +36,7 @@ encrypted at rest, and nothing is sent anywhere you did not configure.
 ## Usage
 
 ```
-npx solow [options]
+npx @satcomx00-x00/solow [options]
 
   -p, --port <n>          Port for the web UI            (default 5000)
       --ws-port <n>       Port for the orchestrator      (default 5001)
@@ -68,7 +68,7 @@ To start completely fresh, stop SoloW and delete the directory.
 ## Upgrading
 
 ```sh
-npx solow@latest
+npx @satcomx00-x00/solow@latest
 ```
 
 Migrations run on every start, so an existing database is brought up to date automatically.

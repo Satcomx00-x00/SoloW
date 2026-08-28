@@ -18,7 +18,7 @@
     "dev:web": "cd apps/web && bun --bun run dev",
     "dev:orchestrator": "bun --hot run apps/orchestrator/src/main.ts",
     "start": "sh scripts/start.sh",
-    "build:cli": "bun run --filter solow build",
+    "build:cli": "bun run --filter '@satcomx00-x00/solow' build",
     "typecheck": "bun run --filter '*' typecheck",
     "test": "bun run --filter '*' test",
     "lint": "biome check .",
