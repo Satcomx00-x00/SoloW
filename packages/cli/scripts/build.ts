@@ -13,7 +13,7 @@
  */
 
 import { existsSync } from "node:fs";
-import { cp, mkdir, rm } from "node:fs/promises";
+import { cp, lstat, mkdir, readdir, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -41,6 +41,86 @@ async function bundle(entry: string, outfile: string) {
   await run(["bun", "build", entry, "--target=bun", "--outfile", outfile], ROOT);
 }
 
+/**
+ * Rewrite Bun's isolated `node_modules` into the flat one npm ships.
+ *
+ * **This is what makes the published package runnable at all**, and the bug it fixes was
+ * invisible until someone ran it (reported 2026-08-28: "Cannot find package 'next'").
+ *
+ * Bun installs isolated: every real package lives at `node_modules/.bun/<name>@<version>/
+ * node_modules/<name>`, and what makes it *resolvable* is a symlink — `apps/web/node_modules/next`
+ * pointing into `.bun`, and, inside each package's own directory, more symlinks to its
+ * dependencies. Next's standalone tracer reproduces that shape faithfully.
+ *
+ * `npm pack` drops every symlink; a published tarball contains none. So the real files shipped
+ * and nothing could find them. It worked in the monorepo only by accident — Node walks up from
+ * `.next/standalone/...` and finds the repository's own `node_modules` a few levels above, which
+ * is exactly the parent a tarball does not have.
+ *
+ * Dereferencing the copy is not enough: it fixes the two entry symlinks and leaves each package's
+ * *siblings* unresolvable (`next` then fails on `styled-jsx` instead). What a tarball needs is
+ * the layout npm itself uses — one flat directory of real packages — so that is what this builds:
+ * every real package hoisted to `node_modules/<name>`, `.bun` removed, and the now-redundant
+ * `apps/web/node_modules` removed with it so resolution walks straight up to the flat set.
+ *
+ * Safe to flatten because this tree is a *traced* dependency set: every package appears at
+ * exactly one version (asserted below — a second version would make hoisting silently pick a
+ * winner, which is the one way this could go wrong quietly).
+ */
+async function flattenNodeModules(webDist: string) {
+  const modules = join(webDist, "node_modules");
+  const isolated = join(modules, ".bun");
+  if (!existsSync(isolated)) return;
+
+  /** Every real (non-symlink) package directory, as `name` → absolute path. */
+  const packages = new Map<string, string>();
+  const record = async (name: string, path: string) => {
+    const existing = packages.get(name);
+    if (existing && existing !== path) {
+      throw new Error(
+        `${name} appears at two versions in the traced tree (${existing} and ${path}) — ` +
+          "hoisting them into one flat node_modules would silently pick one. Resolve the " +
+          "duplicate before publishing.",
+      );
+    }
+    packages.set(name, path);
+  };
+
+  for (const pkgId of await readdir(isolated)) {
+    // `.bun/node_modules` is Bun's own hoist directory: symlinks only, no package of its own.
+    if (pkgId === "node_modules") continue;
+    const inner = join(isolated, pkgId, "node_modules");
+    if (!existsSync(inner)) continue;
+
+    for (const entry of await readdir(inner, { withFileTypes: true })) {
+      // A symlink here is a cross-link to another package's real directory — that package is
+      // recorded when its own `.bun` entry is walked, so following it would only duplicate.
+      if (entry.isSymbolicLink()) continue;
+      if (entry.name.startsWith("@")) {
+        const scope = join(inner, entry.name);
+        for (const scoped of await readdir(scope, { withFileTypes: true })) {
+          if (scoped.isSymbolicLink()) continue;
+          await record(`${entry.name}/${scoped.name}`, join(scope, scoped.name));
+        }
+        continue;
+      }
+      await record(entry.name, join(inner, entry.name));
+    }
+  }
+
+  for (const [name, from] of packages) {
+    // `dereference`, because a package's own directory still holds symlinks to its dependencies
+    // — the very thing npm would drop. Each target is itself hoisted above, so this duplicates
+    // a package's dependency trees into it; that is the cost of a layout npm can actually ship.
+    await cp(from, join(modules, name), { recursive: true, dereference: true });
+  }
+
+  await rm(isolated, { recursive: true, force: true });
+  // Its entries were symlinks into `.bun`, now dangling — and redundant, since every package is
+  // resolvable from the flat directory above.
+  await rm(join(webDist, "apps", "web", "node_modules"), { recursive: true, force: true });
+}
+
 console.log("solow: building package");
 
 await rm(DIST, { recursive: true, force: true });
@@ -58,6 +138,7 @@ if (!existsSync(standalone)) {
   );
 }
 await cp(standalone, join(DIST, "web"), { recursive: true });
+await flattenNodeModules(join(DIST, "web"));
 
 // Next deliberately leaves these two out of the traced tree: `static/` is served by the server
 // but never imported by it, and `public/` is not code at all. Standalone deployments are
@@ -86,5 +167,26 @@ console.log("\n[4/4] migrations");
 // `migrate.js` resolves this as `../migrations` from its own location, so the layout here is
 // load-bearing: dist/db/migrate.js alongside dist/migrations/.
 await cp(join(ROOT, "packages", "db", "migrations"), join(DIST, "migrations"), { recursive: true });
+
+/*
+ * The tarball has to be able to *resolve* what it ships, not merely contain it.
+ *
+ * Checked here rather than trusted, because the failure this catches is invisible everywhere
+ * else: the files were present, `npm pack --dry-run` listed them, the build printed success, and
+ * the package still could not start — the one missing piece was a symlink npm had dropped, and
+ * nothing in the pipeline looked for it. `lstat` rather than `existsSync`: a surviving symlink
+ * would satisfy "exists" and then be dropped by `npm pack` all over again, which is precisely
+ * the bug.
+ */
+for (const dep of ["next", "react", "react-dom", "styled-jsx"]) {
+  const entry = join(DIST, "web", "node_modules", dep);
+  const stats = await lstat(entry).catch(() => null);
+  if (!stats?.isDirectory()) {
+    throw new Error(
+      `${entry} is not a real directory (${stats === null ? "missing" : "a symlink"}) — ` +
+        "npm pack drops symlinks, so the published package would fail to resolve it at runtime.",
+    );
+  }
+}
 
 console.log(`\nsolow: dist ready at ${DIST}`);
