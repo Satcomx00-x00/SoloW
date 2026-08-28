@@ -5,7 +5,7 @@ SHELL := bash
 .DEFAULT_GOAL := help
 .PHONY: help install clean build lint format typecheck test smoke smoke-tarball e2e e2e-critical \
 	audit audit-executor-boundary secretscan verify dev dev-web flags \
-	dev-orchestrator update db-generate db-migrate db-seed openapi openapi-check
+	dev-orchestrator update db-generate db-migrate db-bootstrap openapi openapi-check
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -84,8 +84,8 @@ db-generate: ## Generate the SQLite migration from the Drizzle schema
 db-migrate: ## Apply migrations to the local SQLite database
 	bun run db:migrate
 
-db-seed: ## Seed the local database with the two-Workspace fixture
-	bun run db:seed
+db-bootstrap: ## Create the local Workspace and its agent catalog (idempotent)
+	bun run db:bootstrap
 
 flags: ## List feature flags per Workspace (enable: bun run flag enable ff-core-program)
 	bun run flag list

@@ -1,6 +1,7 @@
 import {
   Blocks,
   Bot,
+  Building2,
   Columns3,
   FlaskConical,
   FolderGit2,
@@ -180,10 +181,14 @@ export interface SettingsSection {
   icon: LucideIcon;
 }
 
-export type SettingsGroup = "Connections" | "Agents" | "Extensions" | "Interface";
+export type SettingsGroup = "Workspace" | "Connections" | "Agents" | "Extensions" | "Interface";
 
 /** The groups in the order they are listed, each with the sentence its pane opens on. */
 export const SETTINGS_GROUPS: readonly { name: SettingsGroup; caption: string }[] = [
+  {
+    name: "Workspace",
+    caption: "The tenant everything else here belongs to.",
+  },
   {
     name: "Connections",
     caption: "Where the work comes from, and where an agent is allowed to write.",
@@ -197,6 +202,13 @@ export const SETTINGS_GROUPS: readonly { name: SettingsGroup; caption: string }[
 ];
 
 export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
+  {
+    id: "workspace",
+    label: "Workspace",
+    caption: "Its name, and what it still needs before it can run anything",
+    group: "Workspace",
+    icon: Building2,
+  },
   {
     id: "integrations",
     label: "Integrations",

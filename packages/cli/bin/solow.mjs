@@ -118,7 +118,7 @@ function usage() {
                           binaries when your npm skipped their install hooks. Off by
                           default: starting the app never fetches anything on its own.
 
-  On first run this creates the database, applies migrations, seeds a workspace and
+  On first run this creates the database, applies migrations, creates your workspace and
   generates the encryption keys — all under the data directory. Nothing leaves the machine.
 `);
 }
@@ -378,7 +378,7 @@ function buildEnv(opts) {
     SOLOW_ORCHESTRATOR_URL: `http://localhost:${opts.wsPort}`,
     SOLOW_INNGEST_PORT: String(opts.inngestPort),
     // Single-user local install: there is one person at this machine and they own it, so the
-    // stack binds them to the seeded workspace instead of asking them to invent an account.
+    // stack binds them to the local Workspace instead of asking them to invent an account.
     SOLOW_DEV_OWNER: process.env.SOLOW_DEV_OWNER ?? "on",
     SOLOW_AGENT_COMMAND: process.env.SOLOW_AGENT_COMMAND ?? "claude",
     // Inngest's own variable: a URL points the SDK at the local Dev Server below rather than
@@ -489,10 +489,14 @@ async function main() {
 
   const migrated = spawnSync(bun, [join(DIST, "db", "migrate.js")], { env, stdio: "inherit" });
   if (migrated.status !== 0) fail("migrations failed — see the output above.");
-  if (fresh) {
-    const seeded = spawnSync(bun, [join(DIST, "db", "seed.js")], { env, stdio: "inherit" });
-    if (seeded.status !== 0) fail("seeding failed — see the output above.");
-  }
+  // Every start, not only the first: this creates the Workspace and its agent catalog and
+  // nothing else, so it is a no-op once they exist — and an install upgraded from a build that
+  // never had a catalog gets one rather than a Settings page with an empty agent picker.
+  const bootstrapped = spawnSync(bun, [join(DIST, "db", "bootstrap.js")], {
+    env,
+    stdio: "inherit",
+  });
+  if (bootstrapped.status !== 0) fail("workspace bootstrap failed — see the output above.");
 
   process.on("SIGINT", () => shutdown(0));
   process.on("SIGTERM", () => shutdown(0));

@@ -1,4 +1,4 @@
-import { createDb, SEED_WORKSPACE_A } from "@solow/db";
+import { createDb, LOCAL_WORKSPACE_ID } from "@solow/db";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
@@ -24,7 +24,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   const dev = devOwnerMode();
 
   const session = dev
-    ? { workspaceId: SEED_WORKSPACE_A, userId: "local-owner" }
+    ? { workspaceId: LOCAL_WORKSPACE_ID, userId: "local-owner" }
     : await resolveSession(requestHeaders);
   if (!session) redirect("/sign-in");
 

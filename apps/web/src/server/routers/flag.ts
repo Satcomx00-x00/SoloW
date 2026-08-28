@@ -1,10 +1,8 @@
 import "server-only";
-import { CommonErrorCode, flagDto, setFlagInput } from "@solow/contracts";
-import { TRPCError } from "@trpc/server";
+import { flagDto, setFlagInput } from "@solow/contracts";
 import { z } from "zod";
-import type { RequestContext } from "../dal/context.js";
 import { listFlags, setFlag } from "../dal/flag.js";
-import { publicProcedure, router, unwrap } from "../trpc.js";
+import { router, sessionProcedure, unwrap } from "../trpc.js";
 
 /**
  * List and toggle feature flags for the caller's own Workspace (issue #21).
@@ -14,21 +12,10 @@ import { publicProcedure, router, unwrap } from "../trpc.js";
  * `ff-core-program` itself ships OFF on a fresh Workspace. Gating flag.set the same way would
  * make it impossible to ever turn the core loop on from this Settings UI — the only way in
  * would stay `scripts/flag.ts` on the machine running the instance, which is exactly the
- * chicken-and-egg problem this router exists to close. `sessionProcedure` below requires an
+ * chicken-and-egg problem this router exists to close. `sessionProcedure` requires an
  * authenticated session (Principle V's tenancy still applies — every DAL call is scoped to
  * `ctx.rctx.workspaceId`) but chains no flag guard.
  */
-const sessionProcedure = publicProcedure.use(({ ctx, next }) => {
-  if (!ctx.session) {
-    throw new TRPCError({ code: "UNAUTHORIZED", message: CommonErrorCode.Unauthorized });
-  }
-  const rctx: RequestContext = {
-    db: ctx.db,
-    workspaceId: ctx.session.workspaceId,
-    userId: ctx.session.userId,
-  };
-  return next({ ctx: { ...ctx, rctx } });
-});
 
 export const flagRouter = router({
   /** Every known flag, with the value currently in effect for the caller's own Workspace. */

@@ -26,6 +26,7 @@ export type Db = ReturnType<typeof createDb>;
 
 export { ensureDefaultAgentCatalog } from "./agent-catalog-defaults.js";
 export * from "./auth-schema.js";
+export { bootstrapWorkspace, LOCAL_WORKSPACE_ID } from "./bootstrap.js";
 export { dbEnv } from "./env.js";
 export {
   FLAGS,
@@ -51,5 +52,4 @@ export {
 export * from "./schema.js";
 export { schema } from "./schema.js";
 export { decryptForAgentRun, decryptForScmSync, encryptSecret } from "./secret-store.js";
-export { SEED_WORKSPACE_A, SEED_WORKSPACE_B, seed } from "./seed.js";
 export { allTables } from "./tables.js";

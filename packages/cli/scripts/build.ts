@@ -161,7 +161,7 @@ await bundle(
 
 console.log("\n[3/4] database entry points");
 await bundle(join(ROOT, "packages", "db", "src", "migrate.ts"), join(DIST, "db", "migrate.js"));
-await bundle(join(ROOT, "packages", "db", "src", "seed.ts"), join(DIST, "db", "seed.js"));
+await bundle(join(ROOT, "packages", "db", "src", "bootstrap.ts"), join(DIST, "db", "bootstrap.js"));
 
 console.log("\n[4/4] migrations");
 // `migrate.js` resolves this as `../migrations` from its own location, so the layout here is

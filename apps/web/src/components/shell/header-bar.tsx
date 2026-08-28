@@ -63,7 +63,16 @@ export function HeaderBar({ workspaceName }: { workspaceName: string }) {
   return (
     <header className="flex h-11 shrink-0 items-center gap-2 border-b px-3">
       <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1 text-sm">
-        <span className="shrink-0 truncate text-muted-foreground">{workspaceName}</span>
+        {/* The trail's root, and now a place you can actually go: the Workspace owns everything
+            downstream of it in this crumb, and it was the one link in the chain that led
+            nowhere. */}
+        <Link
+          href="/settings?section=workspace"
+          className="shrink-0 truncate text-muted-foreground transition-colors hover:text-foreground"
+          title={`Workspace: ${workspaceName}`}
+        >
+          {workspaceName}
+        </Link>
 
         {projectId ? (
           <>

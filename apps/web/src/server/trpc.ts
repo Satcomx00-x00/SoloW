@@ -56,6 +56,17 @@ function requireFlag(flag: FlagKey) {
   });
 }
 
+/**
+ * An authenticated caller, with no flag guard.
+ *
+ * For the handful of endpoints that must stay reachable while the core loop is OFF — reading a
+ * Workspace's setup state, and turning `ff-core-program` on. Gating those behind
+ * `ownerProcedure` would be a deadlock: the flag ships off, and the only way to set it would be
+ * a script on the host. Tenancy is unaffected — every DAL call below is still scoped to
+ * `ctx.rctx.workspaceId` (Principle V).
+ */
+export const sessionProcedure = publicProcedure.use(requireSession);
+
 /** The procedure every core-program endpoint uses. */
 export const ownerProcedure = publicProcedure
   .use(requireSession)

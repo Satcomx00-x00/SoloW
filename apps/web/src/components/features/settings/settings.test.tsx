@@ -76,9 +76,12 @@ describe("the settings registry", () => {
 
   it("falls back to a real section for no parameter and for a stale one", () => {
     // `/settings` is an address people type, and an old bookmark should land on a settings page
-    // rather than on nothing.
-    expect(settingsSectionFor(null).id).toBe("integrations");
-    expect(settingsSectionFor("no-such-section").id).toBe("integrations");
+    // rather than on nothing. Asserted against whichever section is listed first rather than a
+    // literal id — the claim is "somewhere real", and pinning the name here made adding a
+    // section ahead of it read as a regression.
+    const first = SETTINGS_SECTIONS[0]?.id;
+    expect(settingsSectionFor(null).id).toBe(first as string);
+    expect(settingsSectionFor("no-such-section").id).toBe(first as string);
     expect(settingsSectionFor("flags").id).toBe("flags");
   });
 
@@ -112,8 +115,13 @@ describe("the settings page", () => {
   it("opens on the first group when the address names no section", async () => {
     renderWithTrpc(<Settings />, HANDLERS);
 
-    expect(await screen.findByRole("heading", { name: "Connections", level: 1 })).toBeDefined();
-    expect(document.getElementById("integrations")).not.toBeNull();
+    const first = SETTINGS_SECTIONS[0];
+    expect(
+      await screen.findByRole("heading", { name: first?.group as string, level: 1 }),
+    ).toBeDefined();
+    expect(document.getElementById(first?.id as string)).not.toBeNull();
+    // Only the addressed group is rendered — a page listing every section at once was the thing
+    // the group picker replaced.
     expect(document.getElementById("flags")).toBeNull();
   });
 

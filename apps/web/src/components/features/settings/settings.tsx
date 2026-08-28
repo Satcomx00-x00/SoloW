@@ -28,6 +28,7 @@ import { ProviderIdentitySection } from "./provider-identity-section";
 import { RepositoriesSection } from "./repositories-section";
 import { SecretsSection } from "./secrets-section";
 import { StatusBarSection } from "./status-bar-section";
+import { WorkspaceSection } from "./workspace-section";
 
 /**
  * Settings: **one group at a time**, chosen from the address.
@@ -146,6 +147,7 @@ function captionFor(group: SettingsGroup): string {
  * page that draws a sidebar.
  */
 const SECTION_COMPONENTS: Record<string, () => React.ReactNode> = {
+  workspace: () => <WorkspaceSection />,
   integrations: () => <IntegrationsSection />,
   repositories: () => <RepositoriesSection />,
   "provider-identity": () => <ProviderIdentitySection />,

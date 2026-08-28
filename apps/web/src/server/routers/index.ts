@@ -15,6 +15,7 @@ import { sessionRouter } from "./session.js";
 import { streamRouter } from "./stream.js";
 import { taskRouter } from "./task.js";
 import { workflowRouter } from "./workflow.js";
+import { workspaceRouter } from "./workspace.js";
 
 /** The core-program API surface (Decision 0011). openapi.json is generated from this. */
 export const appRouter = router({
@@ -33,6 +34,7 @@ export const appRouter = router({
   session: sessionRouter,
   stream: streamRouter,
   workflow: workflowRouter,
+  workspace: workspaceRouter,
 });
 
 export type AppRouter = typeof appRouter;

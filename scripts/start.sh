@@ -68,14 +68,14 @@ export INNGEST_DEV="${INNGEST_DEV:-http://localhost:$SOLOW_INNGEST_PORT}"
 
 # Database setup. Migrations run on every start, not just the first: drizzle skips the ones
 # already recorded, so this is cheap, and without it an existing database silently drifts behind
-# main and the API 500s on tables that do not exist yet. Seeding stays first-run only.
+# main and the API 500s on tables that do not exist yet.
 if [ ! -f "$SOLOW_SQLITE_PATH" ]; then
     echo "[start] initializing database at $SOLOW_SQLITE_PATH"
-    bun run db:migrate
-    bun run db:seed
-else
-    bun run db:migrate
 fi
+bun run db:migrate
+# Every start, not only the first: this creates the Workspace and its agent catalog and nothing
+# else, so it is a no-op once they exist.
+bun run db:bootstrap
 
 # Built once, up front, rather than left to `next dev`'s per-route compile-on-request — that
 # first-hit latency (and the orchestrator's --hot file-watcher) is exactly what this script trades

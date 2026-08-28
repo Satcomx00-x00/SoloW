@@ -23,3 +23,4 @@ export * from "./source-control.js";
 export * from "./task.js";
 export * from "./widget.js";
 export * from "./workflow.js";
+export * from "./workspace.js";

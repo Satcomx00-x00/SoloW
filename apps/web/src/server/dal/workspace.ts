@@ -1,6 +1,27 @@
 import "server-only";
-import { type Db, FLAGS, type FlagKey, workspace } from "@solow/db";
-import { eq } from "drizzle-orm";
+import {
+  CommonErrorCode,
+  err,
+  ok,
+  type RenameWorkspaceInput,
+  type Result,
+  type SetupStepDto,
+  type WorkspaceDto,
+  type WorkspaceSetupDto,
+} from "@solow/contracts";
+import {
+  agentCatalog,
+  agentProfile,
+  type Db,
+  executorProfile,
+  FLAGS,
+  type FlagKey,
+  repository,
+  secret,
+  workspace,
+} from "@solow/db";
+import { count, eq } from "drizzle-orm";
+import type { RequestContext } from "./context.js";
 
 /**
  * Workspace-level reads used before a `RequestContext` exists — the flag overrides are needed to
@@ -44,4 +65,125 @@ export async function getWorkspaceName(db: Db, workspaceId: string): Promise<str
     .where(eq(workspace.id, workspaceId))
     .limit(1);
   return row?.name ?? null;
+}
+
+/** The Workspace itself, for the header control and the Settings section. */
+export async function getWorkspace(ctx: RequestContext): Promise<Result<WorkspaceDto>> {
+  const [row] = await ctx.db
+    .select({ id: workspace.id, name: workspace.name, createdAt: workspace.createdAt })
+    .from(workspace)
+    .where(eq(workspace.id, ctx.workspaceId))
+    .limit(1);
+  if (!row) return err(CommonErrorCode.NotFound);
+  return ok({ id: row.id, name: row.name, createdAt: row.createdAt });
+}
+
+/** Rename it. The id is never taken from the caller — it is the session's own (Principle V). */
+export async function renameWorkspace(
+  ctx: RequestContext,
+  input: RenameWorkspaceInput,
+): Promise<Result<WorkspaceDto>> {
+  const updated = await ctx.db
+    .update(workspace)
+    .set({ name: input.name, updatedAt: new Date().toISOString() })
+    .where(eq(workspace.id, ctx.workspaceId))
+    .returning({ id: workspace.id, name: workspace.name, createdAt: workspace.createdAt });
+
+  const row = updated[0];
+  if (!row) return err(CommonErrorCode.NotFound);
+  return ok({ id: row.id, name: row.name, createdAt: row.createdAt });
+}
+
+/** How many rows of one kind this Workspace has. */
+async function tally(
+  ctx: RequestContext,
+  table: typeof secret | typeof agentProfile | typeof executorProfile | typeof repository,
+): Promise<number> {
+  const [row] = await ctx.db
+    .select({ n: count() })
+    .from(table)
+    .where(eq(table.workspaceId, ctx.workspaceId));
+  return row?.n ?? 0;
+}
+
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+/**
+ * What this Workspace still needs, read from what it actually has (2026-08-28).
+ *
+ * This replaced a fixture. A local install used to arrive with two invented companies, each
+ * already holding a credential, an Agent Profile, an Executor and a repository — so the product
+ * looked configured on first launch and the real gap stayed invisible: a Workspace made by a
+ * genuine sign-up has none of those, and its feature flags are off, so the core loop is
+ * disabled. The honest version is to ask the database.
+ *
+ * Derived on every read rather than stored. A checklist that recorded "completed" would go on
+ * saying so after the Secret it counted was deleted, which is precisely the moment it should say
+ * otherwise — so this doubles as a standing health view instead of a one-time ceremony.
+ */
+export async function getWorkspaceSetup(ctx: RequestContext): Promise<Result<WorkspaceSetupDto>> {
+  const found = await getWorkspace(ctx);
+  if (!found.ok) return found;
+
+  const [catalog] = await ctx.db
+    .select({ n: count() })
+    .from(agentCatalog)
+    .where(eq(agentCatalog.workspaceId, ctx.workspaceId));
+  const agents = catalog?.n ?? 0;
+
+  const [secrets, profiles, executors, repositories] = await Promise.all([
+    tally(ctx, secret),
+    tally(ctx, agentProfile),
+    tally(ctx, executorProfile),
+    tally(ctx, repository),
+  ]);
+
+  const flags = await getWorkspaceFlags(ctx.db, ctx.workspaceId);
+  const coreLoop = flags["ff-core-program"] ?? FLAGS["ff-core-program"].default;
+
+  const steps: SetupStepDto[] = [
+    // Always done by the time anyone can read this — but listed, because a checklist that only
+    // shows what is missing gives no sense of how much of the whole it represents.
+    { key: "workspace", done: true, detail: found.data.name, blockedBy: null },
+    {
+      key: "agents",
+      done: agents > 0,
+      detail: agents > 0 ? plural(agents, "agent") : "",
+      blockedBy: null,
+    },
+    {
+      key: "secret",
+      done: secrets > 0,
+      detail: secrets > 0 ? plural(secrets, "secret") : "",
+      blockedBy: null,
+    },
+    {
+      key: "agent-profile",
+      done: profiles > 0,
+      detail: profiles > 0 ? plural(profiles, "profile") : "",
+      // A Profile binds an agent to a credential, so offering the form before one exists would
+      // open it on an empty picker — a worse answer than naming what is missing.
+      blockedBy: profiles === 0 && secrets === 0 ? "secret" : null,
+    },
+    {
+      key: "executor",
+      done: executors > 0,
+      detail: executors > 0 ? plural(executors, "executor") : "",
+      blockedBy: null,
+    },
+    {
+      key: "repository",
+      done: repositories > 0,
+      detail: repositories > 0 ? plural(repositories, "repository", "repositories") : "",
+      blockedBy: null,
+    },
+    {
+      key: "core-loop",
+      done: coreLoop,
+      detail: coreLoop ? "on" : "",
+      blockedBy: null,
+    },
+  ];
+
+  return ok({ workspace: found.data, steps, ready: steps.every((step) => step.done) });
 }
