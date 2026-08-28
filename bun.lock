@@ -121,7 +121,7 @@
     },
     "packages/cli": {
       "name": "@satcomx00-x00/solow",
-      "version": "0.4.0",
+      "version": "0.4.1",
       "bin": {
         "solow": "bin/solow.mjs",
       },
