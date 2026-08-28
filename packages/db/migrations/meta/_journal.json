@@ -218,6 +218,13 @@
       "when": 1787868159272,
       "tag": "0030_watery_vapor",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "6",
+      "when": 1787915626530,
+      "tag": "0031_opencode_catalog",
+      "breakpoints": true
     }
   ]
 }

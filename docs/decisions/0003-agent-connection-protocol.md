@@ -155,3 +155,31 @@ a string rather than an enum.
   agent handle (`agent/registry.ts` says so); making a permission prompt durable is separate work.
 - **Token usage.** ACP v1 defines no usage field, so each completed turn is recorded with
   `reported: false` and zero counts — visible as a gap rather than as a turn that cost nothing.
+
+## What it bought (2026-08-28): opencode
+
+This decision's claim was that a second agent should be *configuration* rather than engineering.
+opencode is the first agent to test that claim, and it holds: `opencode acp` is an Agent Client
+Protocol server negotiating protocol version 1 — the version `@solow/acp` implements — so the
+integration is a single `agent_catalog` row. No package, no runner, no `AgentProtocol` member, and
+none of the six protocol call sites a new protocol would have forced.
+
+Verified by driving the real `AcpRunner` against a real `opencode acp` process, not a fixture: it
+created a file in a git repository and the run completed, with tool calls arriving as `tool_use`
+events through the ordinary mapping. Two observations worth recording, both pre-existing ACP
+properties rather than opencode's doing:
+
+- **No `tool_result`.** ACP reports a tool's progress as `tool_call_update`, which the runner maps
+  to `tool_use` with a status. So an ACP agent's tool *output* never becomes a `tool_result` event
+  the way a stream-json agent's does — the transcript shows that a tool ran and finished, not what
+  it returned.
+- **`tool_use.name` carries the tool's title.** ACP's `title` is free text, and opencode puts the
+  command line in it, so the event reads `printf 'PONG' > PONG.txt` rather than `bash`. Honest, but
+  a different shape from the stream-json side, and worth knowing before anything parses that field.
+
+The authentication gap above still stands and now has a concrete instance: opencode advertises an
+`opencode-login` auth method, and its credential lives outside the environment the billing guard
+shapes (`opencode auth login` writes to disk). The seeded row names `OPENCODE_API_KEY` for the
+subscription mode and `ANTHROPIC_API_KEY` for the metered one, which is what the guard sets and
+strips — but a Workspace whose opencode is authenticated on disk rather than by environment is
+authenticated by something SoloW did not give it, which Decision 0005 does not currently cover.
