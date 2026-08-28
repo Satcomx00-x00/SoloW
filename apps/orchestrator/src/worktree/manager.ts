@@ -357,13 +357,37 @@ export async function discardWorktreeChanges(executor: Executor, path: string): 
   await run(executor, ["git", "-C", path, "clean", "-fd"]);
 }
 
-/** Remove the worktree when the Task completes or is discarded. */
+/**
+ * Remove the worktree when the Task completes or is discarded.
+ *
+ * `--force` twice, which is git's documented way to remove a *locked* worktree — and the
+ * agent's worktree is routinely locked. Claude Code creates its own under `.claude/worktrees`
+ * and locks it with its session pid, then does not unlock it when it exits, so by the time a
+ * finished Task gets here the lock is held by a process that no longer exists. A single
+ * `--force` covers uncommitted changes but refuses a lock outright, which failed the teardown
+ * of every run the agent had worktreed for itself.
+ *
+ * Blanket rather than escalating on failure, because the alternative is reading git's error
+ * text to decide — and that text is localized (the report this came from said "impossible de
+ * supprimer un arbre de travail verrouillé"). A cleanup that worked only in English would be a
+ * worse bug than the one it replaced. The lock is never load-bearing here: SoloW only ever
+ * removes a worktree it provisioned or adopted for a Task that is over.
+ */
 export async function cleanupWorktree(
   executor: Executor,
   repoPath: string,
   worktree: string,
 ): Promise<void> {
-  await run(executor, ["git", "-C", repoPath, "worktree", "remove", "--force", worktree]);
+  await run(executor, [
+    "git",
+    "-C",
+    repoPath,
+    "worktree",
+    "remove",
+    "--force",
+    "--force",
+    worktree,
+  ]);
 }
 
 /**

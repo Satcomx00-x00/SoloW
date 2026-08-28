@@ -238,6 +238,27 @@ describe("prepareRepository and adoptWorktree", () => {
     await cleanupWorktree(executor, repoDir, agentPath);
   });
 
+  it("removes a worktree the agent locked and never unlocked", async () => {
+    /*
+     * What Claude Code actually leaves behind. It creates its own worktree and locks it with
+     * its session pid, then exits without unlocking — so teardown meets a lock held by a dead
+     * process. `git worktree remove --force` refuses a locked worktree outright, which failed
+     * the cleanup step of every run the agent had worktreed for itself, after the Task had
+     * already been marked done.
+     */
+    const agentPath = join(worktreeRoot, "solow-task-locked");
+    await $`git -C ${repoDir} worktree add -b solow-task-locked ${agentPath}`.quiet();
+    await $`git -C ${repoDir} worktree lock --reason ${"claude session solow-task-locked (pid 999999)"} ${agentPath}`.quiet();
+
+    await cleanupWorktree(executor, repoDir, agentPath);
+
+    expect(existsSync(agentPath)).toBe(false);
+    // Gone from git's own bookkeeping too, not merely deleted from disk — a worktree removed
+    // behind git's back leaves a stale entry that breaks the next `worktree add` on that name.
+    const listed = await $`git -C ${repoDir} worktree list`.quiet();
+    expect(listed.stdout.toString()).not.toContain("solow-task-locked");
+  });
+
   it("refuses a path that is not a worktree of this repository", async () => {
     // An agent working somewhere unverified has not been isolated; committing from there could
     // mix another Task's changes into this one's branch.
