@@ -40,7 +40,8 @@ jobs:
   publish:
     name: Build and publish to npm
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Room for the tarball smoke below: it installs a ~100MB vendored binary and boots the stack.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
 
@@ -112,6 +113,22 @@ jobs:
         run: bun run packages/cli/scripts/build-inngest-packages.ts --publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # The gate every other one in this file cannot be: it installs the tarball into an empty
+      # directory and boots the whole stack. `npm pack --dry-run` above lists what is inside;
+      # this is the only step that asks whether what is inside runs.
+      #
+      # Both npm releases that shipped broken passed every check above. `npm pack` strips
+      # symlinks, so the traced Next.js build arrived without its dependencies ("Cannot find
+      # package 'next'"); and the Inngest binary arrived as a Node stub rather than an
+      # executable ("inngest cli binary not found"). Neither is visible from the source tree.
+      #
+      # Placed after the Inngest packages are published because the CLI declares them as
+      # optionalDependencies and the install below resolves them from npm. They are versioned on
+      # Inngest rather than on SoloW, so on a dry run that does not move the Inngest version the
+      # already-published ones resolve fine.
+      - name: Install and run the packed tarball
+        run: make smoke-tarball
 
       - name: Publish
         if: ${{ github.event_name == 'push' || inputs.dry_run == false }}

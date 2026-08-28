@@ -3,7 +3,7 @@
 
 SHELL := bash
 .DEFAULT_GOAL := help
-.PHONY: help install clean build lint format typecheck test smoke e2e e2e-critical \
+.PHONY: help install clean build lint format typecheck test smoke smoke-tarball e2e e2e-critical \
 	audit audit-executor-boundary secretscan verify dev dev-web flags \
 	dev-orchestrator update db-generate db-migrate db-seed openapi openapi-check
 
@@ -39,6 +39,9 @@ test: ## Run all unit tests (per-package, picks up each bunfig preload)
 
 smoke: ## Run the end-to-end smoke test (in-memory DB, fake agent, temp git repo)
 	bun run scripts/smoke.ts
+
+smoke-tarball: ## Pack the CLI, install the tarball into a clean dir, and boot it (needs a build first)
+	./scripts/smoke-tarball.sh
 
 e2e: ## Run the Playwright E2E suite (boots the SPA + an orchestrator harness)
 	bunx playwright test
