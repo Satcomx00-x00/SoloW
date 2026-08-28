@@ -15,7 +15,15 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readSync,
+  writeFileSync,
+} from "node:fs";
 import { createRequire } from "node:module";
 import { createConnection } from "node:net";
 import { homedir } from "node:os";
@@ -114,6 +122,70 @@ function fail(message) {
   process.exit(1);
 }
 
+// ------------------------------------------------------------------- vendored binaries
+
+/**
+ * Is this a real native executable, or the placeholder its package ships instead?
+ *
+ * `bun` and `inngest-cli` both publish a small text placeholder at the binary's path and
+ * download the real, platform-specific executable in a postinstall hook. npm 11.19 and newer
+ * **block install scripts by default**, so on a current npm both placeholders survive the
+ * install and the first thing a user sees is the placeholder's own error — "Inngest CLI binary
+ * not found" (reported 2026-08-28).
+ *
+ * Checked by magic number rather than by size or name: a real executable is ELF (Linux), Mach-O
+ * (macOS, including the universal wrapper) or PE (Windows), and every placeholder here is a text
+ * script. `existsSync` cannot tell them apart, which is exactly why the launcher used to spawn a
+ * placeholder and let it fail.
+ */
+function isNativeExecutable(path) {
+  let handle;
+  try {
+    handle = openSync(path, "r");
+    const head = Buffer.alloc(4);
+    if (readSync(handle, head, 0, 4, 0) < 4) return false;
+    const magic = head.readUInt32BE(0);
+    return (
+      magic === 0x7f454c46 || // ELF
+      magic === 0xfeedface || // Mach-O 32, big endian
+      magic === 0xcefaedfe || //          32, little endian
+      magic === 0xfeedfacf || //          64, big endian
+      magic === 0xcffaedfe || //          64, little endian
+      magic === 0xcafebabe || //          universal ("fat")
+      head.readUInt16BE(0) === 0x4d5a // PE ("MZ")
+    );
+  } catch {
+    return false;
+  } finally {
+    if (handle !== undefined) closeSync(handle);
+  }
+}
+
+/**
+ * Make sure a dependency's real binary is on disk, running that package's own postinstall if the
+ * install skipped it.
+ *
+ * Doing it here rather than telling the user to reinstall with a flag: the package they ran is
+ * the one that knows it needs these, the download is the dependency's own published script, and
+ * "npx it and it works" is the whole promise of shipping this as a CLI. It runs at most once —
+ * the script writes the real executable into `node_modules`, where the next start finds it.
+ */
+function ensureNativeBinary({ binary, packageDir, script, label }) {
+  if (existsSync(binary) && isNativeExecutable(binary)) return binary;
+
+  const installer = join(packageDir, script);
+  if (!existsSync(installer)) return null;
+
+  console.log(`solow: fetching the ${label} binary (its install step was skipped)…`);
+  const result = spawnSync(process.execPath, [installer], {
+    cwd: packageDir,
+    stdio: "inherit",
+    shell: false,
+  });
+  if (result.status !== 0) return null;
+  return existsSync(binary) && isNativeExecutable(binary) ? binary : null;
+}
+
 // ---------------------------------------------------------------------------- bun
 
 /**
@@ -125,32 +197,40 @@ function resolveBun() {
   const onPath = spawnSync("bun", ["--version"], { stdio: "ignore", shell: false });
   if (onPath.status === 0) return "bun";
   try {
-    const bunPkg = require.resolve("bun/package.json");
-    const bin = join(dirname(bunPkg), "bin", "bun.exe");
-    if (existsSync(bin)) return bin;
+    const packageDir = dirname(require.resolve("bun/package.json"));
+    const bin = ensureNativeBinary({
+      binary: join(packageDir, "bin", "bun.exe"),
+      packageDir,
+      script: "install.js",
+      label: "Bun",
+    });
+    if (bin) return bin;
   } catch {
     // fall through to the error below
   }
   fail(
     "could not find a Bun runtime.\n" +
-      "  The `bun` package should have been installed alongside this one; if the install was\n" +
-      "  run with --no-optional or --ignore-scripts, install Bun yourself and retry:\n" +
+      "  The `bun` package installs one, but its download step did not run and could not be\n" +
+      "  re-run here. Install Bun yourself and retry:\n" +
       "    curl -fsSL https://bun.sh/install | bash",
   );
 }
 
 /** The Inngest Dev Server binary, named `.exe` only on Windows. */
 function resolveInngest() {
-  const pkgJson = require.resolve("inngest-cli/package.json");
-  const bin = join(
-    dirname(pkgJson),
-    "bin",
-    process.platform === "win32" ? "inngest.exe" : "inngest",
-  );
-  if (!existsSync(bin)) {
+  const packageDir = dirname(require.resolve("inngest-cli/package.json"));
+  const bin = ensureNativeBinary({
+    binary: join(packageDir, "bin", process.platform === "win32" ? "inngest.exe" : "inngest"),
+    packageDir,
+    script: "postinstall.js",
+    label: "Inngest Dev Server",
+  });
+  if (!bin) {
     fail(
-      "the Inngest Dev Server binary is missing.\n" +
-        "  `inngest-cli` downloads it in a postinstall hook; reinstall without --ignore-scripts.",
+      "the Inngest Dev Server binary is missing, and downloading it here did not work.\n" +
+        "  `inngest-cli` fetches it in a postinstall hook, which recent npm versions skip by\n" +
+        "  default. Re-run the install allowing that hook:\n" +
+        "    npm rebuild --ignore-scripts=false inngest-cli",
     );
   }
   return bin;
