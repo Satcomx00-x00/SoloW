@@ -385,6 +385,48 @@ export async function unsatisfiedDependencyIds(
 }
 
 /**
+ * Everything needed to probe one Agent Profile: what to launch, and the credential to launch it
+ * with (2026-08-28).
+ *
+ * Deliberately not `loadTaskRunContext`: a probe has no Task, no Issue and no Repository, and
+ * requiring them would mean an Owner could not check an agent until they had already committed
+ * work to it — which is the ordering the probe exists to fix. Every lookup is scoped to the
+ * Workspace, so a Profile id from another tenant reads as absent rather than as someone else's
+ * agent (Principle V).
+ */
+export async function loadAgentProbeContext(
+  db: Db,
+  workspaceId: string,
+  agentProfileId: string,
+): Promise<{
+  agentProfile: typeof agentProfile.$inferSelect;
+  agentCatalog: typeof agentCatalog.$inferSelect;
+  secretCiphertext: string | null;
+} | null> {
+  const [ap] = await db
+    .select()
+    .from(agentProfile)
+    .where(and(eq(agentProfile.workspaceId, workspaceId), eq(agentProfile.id, agentProfileId)))
+    .limit(1);
+  if (!ap) return null;
+
+  const [cat] = await db
+    .select()
+    .from(agentCatalog)
+    .where(and(eq(agentCatalog.workspaceId, workspaceId), eq(agentCatalog.id, ap.agentCatalogId)))
+    .limit(1);
+  if (!cat) return null;
+
+  const [sec] = await db
+    .select({ ciphertext: secret.ciphertext })
+    .from(secret)
+    .where(and(eq(secret.workspaceId, workspaceId), eq(secret.id, ap.secretId)))
+    .limit(1);
+
+  return { agentProfile: ap, agentCatalog: cat, secretCiphertext: sec?.ciphertext ?? null };
+}
+
+/**
  * Refresh the catalog row's capability cache from what an agent just advertised (issue #94 AC-2).
  *
  * The cache is a fallback, not the truth — the truth is the handshake, and it only exists while

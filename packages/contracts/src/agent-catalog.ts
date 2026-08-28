@@ -80,7 +80,10 @@ export const AGENT_PROTOCOLS: Record<AgentProtocol, AgentProtocolDescriptor> = {
   acp: {
     label: "Agent Client Protocol",
     hint: "Agent Client Protocol. Can ask for permission mid-run — this is what the inline elicitation card needs.",
-    pins: { model: false, mode: true },
+    // Both pins go through the list the agent advertised in `session/new`: `session/set_mode`
+    // and `session/set_model`. Verified against opencode 1.18, which offers 362 models and 3
+    // modes; an agent that advertises neither is simply never sent either.
+    pins: { model: true, mode: true },
     createsOwnWorktree: false,
     canRequestPermission: true,
     driven: true,
@@ -203,3 +206,39 @@ export type AgentCatalogEntryDto = z.infer<typeof agentCatalogEntryDto>;
 
 /** The row every Workspace is seeded with (`packages/db/src/seed.ts`, migration 0004). */
 export const CLAUDE_CODE_CATALOG_KEY = "claude_code";
+
+/**
+ * The body of the orchestrator's `POST /probe-agent` — "does this Agent Profile actually work?",
+ * asked before a Task is queued rather than discovered by one failing (2026-08-28).
+ *
+ * No `workspaceId`, for the same reason `announceRequest` omits one: it comes from the ticket's
+ * signed claims, so a caller cannot probe into another tenant (Principle V). The Profile is
+ * named because the credential is the Profile's — probing the catalog row alone would answer
+ * "is the binary there" while leaving the half that usually breaks untested.
+ */
+export const agentProbeRequest = z.object({
+  ticket: z.string().min(1),
+  agentProfileId: z.string().min(1),
+});
+export type AgentProbeRequest = z.infer<typeof agentProbeRequest>;
+
+/**
+ * What the probe found. `ok: false` is a finished answer, not an error — the whole point is to
+ * turn "it does not work" into something an Owner can read and act on.
+ */
+export const agentProbeReport = z.object({
+  ok: z.boolean(),
+  /** Why it failed, in terms an Owner can act on. Null when it worked. */
+  reason: z.string().nullable(),
+  /** The negotiated ACP version. Null for a protocol with no handshake to negotiate in. */
+  protocolVersion: z.number().nullable(),
+  /**
+   * Authentication the agent offers. Non-empty is not a failure — it is how an agent says it
+   * signs in its own way (opencode answers `["opencode-login"]`), which is worth showing next
+   * to a green result rather than hiding behind one.
+   */
+  authMethods: z.array(z.string()),
+  /** What it advertised, which is also what gets cached for the Profile form's pickers. */
+  capabilities: z.object({ models: z.array(z.string()), modes: z.array(z.string()) }),
+});
+export type AgentProbeReport = z.infer<typeof agentProbeReport>;

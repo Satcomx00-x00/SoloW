@@ -10,6 +10,7 @@ import {
   AcpMethod,
   type AcpPermissionOption,
   type AcpUpdate,
+  advertisedOptions,
   permissionRequestSchema,
   promptResultSchema,
   sessionNewResultSchema,
@@ -120,6 +121,8 @@ export interface AcpSessionOptions {
   resumeSessionId?: string;
   /** Session mode to select. Only sent when the agent listed it in `session/new` (AC-2). */
   modeId?: string;
+  /** Model to select. Only sent when the agent listed it in `session/new`, same rule as the mode. */
+  modelId?: string;
   /**
    * Distinguishes this run's permission ids from every other run of the same Task. Defaults to
    * a fresh random tag; a caller with a durable id of its own (a session id, a round number)
@@ -349,29 +352,25 @@ export function startAcpSession(options: AcpSessionOptions, prompt: string): Acp
         /*
          * Report what the agent advertised, before anything is chosen from it (issue #94 AC-2).
          *
-         * This is the only moment the lists exist: ACP advertises models and modes in the
+         * This is the only moment the lists exist: an ACP agent says what it offers in the
          * `session/new` result and nowhere else, so a consumer that wants to cache them for a
-         * picker has exactly this update to read. Ids, not display names — an id is what
-         * `session/set_mode` and a Profile's pin actually take, and a name is what rots when a
-         * provider rebrands.
+         * picker has exactly this update to read. Which key it says it in is the agent's business
+         * — `advertisedOptions` reads both shapes.
          */
-        const advertisedModels = (created.models?.availableModels ?? []).map((m) => m.modelId);
-        const advertisedModes = (created.modes?.availableModes ?? []).map((m) => m.id);
-        if (advertisedModels.length > 0 || advertisedModes.length > 0) {
-          options.onUpdate({
-            kind: "capabilities",
-            models: advertisedModels,
-            modes: advertisedModes,
-          });
+        const advertised = advertisedOptions(created);
+        if (advertised.models.length > 0 || advertised.modes.length > 0) {
+          options.onUpdate({ kind: "capabilities", ...advertised });
         }
-        // A mode is only ever selected from the list the agent itself offered — SoloW
-        // never invents a mode id and hopes (AC-2).
-        const available = created.modes?.availableModes ?? [];
-        if (options.modeId && available.some((m) => m.id === options.modeId)) {
-          await peer.request(AcpMethod.SessionSetMode, {
-            sessionId,
-            modeId: options.modeId,
-          });
+        /*
+         * A pin is only ever sent for an id the agent itself offered — SoloW never invents one
+         * and hopes (AC-2). That guard is also what makes `session/set_model` safe to send at
+         * all: an agent that advertises no models is an agent this never speaks it to.
+         */
+        if (options.modeId && advertised.modes.includes(options.modeId)) {
+          await peer.request(AcpMethod.SessionSetMode, { sessionId, modeId: options.modeId });
+        }
+        if (options.modelId && advertised.models.includes(options.modelId)) {
+          await peer.request(AcpMethod.SessionSetModel, { sessionId, modelId: options.modelId });
         }
       }
 

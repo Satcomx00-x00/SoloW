@@ -1,6 +1,7 @@
 import "server-only";
 import {
   agentCatalogEntryDto,
+  agentProbeReport,
   agentProfileDto,
   agentProfileListDto,
   createAgentCatalogEntryInput,
@@ -25,6 +26,7 @@ import {
   updateAgentProfile,
   updateExecutorProfile,
 } from "../dal/profile.js";
+import { orchestrator } from "../orchestrator-client.js";
 import { ownerProcedure, router, unwrap } from "../trpc.js";
 
 export const profileRouter = router({
@@ -85,6 +87,31 @@ export const profileRouter = router({
       .input(deleteAgentProfileInput)
       .output(agentProfileDto)
       .mutation(async ({ ctx, input }) => unwrap(await deleteAgentProfile(ctx.rctx, input))),
+    /**
+     * Start this Profile's agent, ask it what it is, and stop it — before a Task depends on it.
+     *
+     * A mutation rather than a query despite reading nothing: it spawns a process and refreshes
+     * the catalog's capability cache, so it must never be retried or cached on a client's whim.
+     */
+    probe: ownerProcedure
+      .meta({
+        openapi: {
+          method: "POST",
+          path: "/profile.agent.probe",
+          tags: ["profile"],
+          protect: true,
+          summary:
+            "Test an Agent Profile: launch its agent with its credential, complete the protocol handshake, and report whether it works and what models and modes it advertises.",
+        },
+      })
+      .input(z.object({ agentProfileId: z.string().min(1) }))
+      .output(agentProbeReport)
+      .mutation(async ({ ctx, input }) =>
+        orchestrator.probeAgentProfile({
+          workspaceId: ctx.rctx.workspaceId,
+          agentProfileId: input.agentProfileId,
+        }),
+      ),
   }),
   /**
    * The agent catalog (issue #10) — every Workspace starts with one seeded row

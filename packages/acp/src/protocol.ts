@@ -22,6 +22,7 @@ export const AcpMethod = {
   SessionPrompt: "session/prompt",
   SessionCancel: "session/cancel",
   SessionSetMode: "session/set_mode",
+  SessionSetModel: "session/set_model",
   SessionUpdate: "session/update",
   SessionRequestPermission: "session/request_permission",
   FsReadTextFile: "fs/read_text_file",
@@ -50,8 +51,62 @@ export const sessionNewResultSchema = z
       })
       .passthrough()
       .optional(),
+    /*
+     * The other place an agent lists what it offers. opencode 1.18 answers `session/new` with
+     * `configOptions` and no `models`/`modes` at all — 362 models and 3 modes that SoloW read as
+     * "advertises nothing" until we looked at the wire. Reading only the spec-shaped keys meant
+     * the capability cache stayed empty for it forever, so a Profile had nothing to suggest.
+     */
+    configOptions: z
+      .array(
+        z
+          .object({
+            id: z.string(),
+            category: z.string().optional(),
+            currentValue: z.unknown().optional(),
+            options: z.array(z.object({ value: z.string() }).passthrough()).optional(),
+          })
+          .passthrough(),
+      )
+      .optional(),
   })
   .passthrough();
+
+export type SessionNewResult = z.infer<typeof sessionNewResultSchema>;
+
+/**
+ * What the agent said it offers, from whichever shape it said it in.
+ *
+ * Ids, not display names — an id is what `session/set_mode`, `session/set_model` and a Profile's
+ * pin actually take, and a name is what rots when a provider rebrands. Both shapes are merged
+ * rather than one preferred, because an agent may grow the spec-shaped keys in a later release
+ * while still sending the other, and a probe that changed its answer on that would be reporting
+ * the wire format instead of the agent.
+ */
+export function advertisedOptions(created: SessionNewResult): {
+  models: string[];
+  modes: string[];
+} {
+  const byCategory = (category: string) =>
+    (created.configOptions ?? [])
+      .filter((o) => (o.category ?? o.id) === category)
+      .flatMap((o) => (o.options ?? []).map((c) => c.value));
+
+  return {
+    models: [
+      ...new Set([
+        ...(created.models?.availableModels ?? []).map((m) => m.modelId),
+        ...byCategory("model"),
+      ]),
+    ],
+    modes: [
+      ...new Set([
+        ...(created.modes?.availableModes ?? []).map((m) => m.id),
+        ...byCategory("mode"),
+      ]),
+    ],
+  };
+}
 
 export const promptResultSchema = z.object({ stopReason: z.string().optional() }).passthrough();
 

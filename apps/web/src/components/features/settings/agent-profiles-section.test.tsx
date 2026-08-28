@@ -440,11 +440,12 @@ describe("advertised capabilities in the Profile form", () => {
 });
 
 /**
- * Managing more than one agent (2026-08-28). A Workspace now ships with Claude Code and
- * opencode, and they differ on exactly the axis this form exposes: stream-JSON takes a model and
- * has no session mode, ACP has a mode and no way to select a model. The form has to refuse the
- * pin the chosen agent cannot be told — offering it would store a setting every run then reports
- * it could not honour, which is the silent substitution the rule exists to prevent.
+ * Managing more than one agent (2026-08-28). A Workspace ships with Claude Code and opencode,
+ * and they differ on exactly the axis this form exposes: stream-JSON takes a model and has no
+ * session mode, ACP expresses both through the ids the agent advertised, and a passthrough CLI
+ * is handed the brief and nothing else. The form has to refuse the pin the chosen agent cannot
+ * be told — offering it would store a setting every run then reports it could not honour, which
+ * is the silent substitution the rule exists to prevent.
  */
 describe("AgentProfilesSection — two agents with different protocols", () => {
   const twoAgents = {
@@ -452,6 +453,7 @@ describe("AgentProfilesSection — two agents with different protocols", () => {
     "profile.agentCatalog.list": () => [
       { id: "cat-1", displayName: "Claude Code", protocol: "claude_code_stream_json" },
       { id: "cat-2", displayName: "opencode", protocol: "acp" },
+      { id: "cat-3", displayName: "my-script", protocol: "cli_passthrough" },
     ],
     "profile.agent.list": () => ({ items: [], nextCursor: null }),
   };
@@ -473,29 +475,42 @@ describe("AgentProfilesSection — two agents with different protocols", () => {
     expect(isDisabled("Model")).toBe(false);
   });
 
-  it("disables Model for the ACP agent, and says which protocol it is", async () => {
+  it("offers both pins to the ACP agent, which can express either", async () => {
     renderWithTrpc(<AgentProfilesSection />, twoAgents);
     await waitFor(() => expect(isDisabled("Model")).toBe(false));
 
     await chooseAgent("opencode");
 
-    await waitFor(() => expect(isDisabled("Model")).toBe(true));
-    expect(isDisabled("Mode")).toBe(false);
+    // `session/set_mode` and `session/set_model`, both guarded by the advertised list.
+    await waitFor(() => expect(isDisabled("Mode")).toBe(false));
+    expect(isDisabled("Model")).toBe(false);
     // The consequence of the choice, said where the choice is made. Scoped to this form: the
     // custom-agent form below carries the same hints for its own protocol picker.
     const form = screen.getByRole("button", { name: "Add profile" }).closest("form");
     expect(within(form as HTMLElement).getByText(/Agent Client Protocol/)).toBeDefined();
   });
 
+  it("disables both pins for a passthrough CLI, which has nowhere to put either", async () => {
+    renderWithTrpc(<AgentProfilesSection />, twoAgents);
+    await waitFor(() => expect(isDisabled("Model")).toBe(false));
+
+    await chooseAgent("my-script");
+
+    await waitFor(() => expect(isDisabled("Model")).toBe(true));
+    expect(isDisabled("Mode")).toBe(true);
+    const form = screen.getByRole("button", { name: "Add profile" }).closest("form");
+    expect(within(form as HTMLElement).getByText(/nothing to pin/)).toBeDefined();
+  });
+
   it("never submits a pin the chosen agent's protocol would ignore", async () => {
-    // The trap this guards: type a model against Claude Code, switch to opencode, submit. The
-    // field is disabled by then, but its value is still in state.
+    // The trap this guards: type a model against Claude Code, switch to a passthrough CLI,
+    // submit. The field is disabled by then, but its value is still in state.
     const created: unknown[] = [];
     renderWithTrpc(<AgentProfilesSection />, {
       ...twoAgents,
       "profile.agent.create": (input) => {
         created.push(input);
-        return { id: "p9", name: "n", agentCatalogId: "cat-2", usage: NO_USAGE };
+        return { id: "p9", name: "n", agentCatalogId: "cat-3", usage: NO_USAGE };
       },
     });
 
@@ -506,12 +521,92 @@ describe("AgentProfilesSection — two agents with different protocols", () => {
     fireEvent.click(screen.getByRole("combobox", { name: "Secret" }));
     fireEvent.click(await screen.findByRole("option", { name: /anthropic-key/ }));
 
-    await chooseAgent("opencode");
+    await chooseAgent("my-script");
     await waitFor(() => expect(isDisabled("Model")).toBe(true));
 
     fireEvent.click(screen.getByRole("button", { name: "Add profile" }));
 
     await waitFor(() => expect(created).toHaveLength(1));
-    expect(created[0]).toMatchObject({ agentCatalogId: "cat-2", model: null });
+    expect(created[0]).toMatchObject({ agentCatalogId: "cat-3", model: null });
+  });
+});
+
+/**
+ * Testing a Profile before a Task depends on it (2026-08-28).
+ *
+ * Nothing verified an Agent Profile until a run failed on it: a misspelled command, an agent
+ * that was never installed and a Secret pointing at a revoked key all looked exactly like a
+ * working Profile until a Task had been queued, worktreed, briefed and then lost. What these
+ * assert is that the answer arrives *here*, in terms the person who can fix it can read.
+ */
+describe("AgentProfilesSection — testing a profile", () => {
+  const oneProfile = {
+    ...baseHandlers,
+    "profile.agent.list": () => ({
+      items: [
+        {
+          id: "p1",
+          name: "opencode",
+          agentCatalogId: "cat-1",
+          authMode: "subscription",
+          secretId: "secret-1",
+          concurrencyCap: 3,
+          usage: NO_USAGE,
+        },
+      ],
+      nextCursor: null,
+    }),
+  };
+
+  const report = (over: Record<string, unknown> = {}) => ({
+    ok: true,
+    reason: null,
+    protocolVersion: 1,
+    authMethods: [],
+    capabilities: { models: [], modes: [] },
+    ...over,
+  });
+
+  it("says what a working agent offers, not merely that it worked", async () => {
+    renderWithTrpc(<AgentProfilesSection />, {
+      ...oneProfile,
+      "profile.agent.probe": () =>
+        report({ capabilities: { models: ["a", "b"], modes: ["plan"] } }),
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Test the agent profile opencode" }));
+
+    // The counts are the point: they are what the pin pickers now have to offer, filled without
+    // a run having happened.
+    expect(await screen.findByText(/2 models · 1 modes/)).toBeDefined();
+  });
+
+  it("shows the agent's own sign-in next to a green result", async () => {
+    // opencode answers `["opencode-login"]`. The handshake genuinely worked, so hiding this
+    // behind "works" would let an Owner walk away from a Profile that still cannot run.
+    renderWithTrpc(<AgentProfilesSection />, {
+      ...oneProfile,
+      "profile.agent.probe": () => report({ authMethods: ["opencode-login"] }),
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Test the agent profile opencode" }));
+
+    expect(await screen.findByText(/sign-in: opencode-login/)).toBeDefined();
+  });
+
+  it("puts the reason on screen when the agent does not work", async () => {
+    renderWithTrpc(<AgentProfilesSection />, {
+      ...oneProfile,
+      "profile.agent.probe": () =>
+        report({
+          ok: false,
+          reason: '"opencode" could not be started — is it installed and on PATH?',
+          protocolVersion: null,
+        }),
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Test the agent profile opencode" }));
+
+    expect(await screen.findByText(/is it installed and on PATH/)).toBeDefined();
   });
 });

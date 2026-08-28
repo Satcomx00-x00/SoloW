@@ -2,6 +2,7 @@
 
 import type {
   AgentPermissionMode,
+  AgentProbeReport,
   AgentProfileDto,
   AgentProtocol,
   AuthMode,
@@ -12,7 +13,7 @@ import {
   agentProtocolSchema,
   DEFAULT_AGENT_PERMISSION_MODE,
 } from "@solow/contracts";
-import { ChevronRight, Trash2 } from "lucide-react";
+import { ChevronRight, Stethoscope, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ConfirmAction } from "@/components/features/confirm-action";
 import { Badge } from "@/components/ui/badge";
@@ -104,6 +105,23 @@ const PERMISSION_MODES: Array<{
  * Create Agent Profiles: which agent (issue #10), auth mode + concurrency cap, permission mode,
  * bound to a stored Secret.
  */
+/**
+ * A probe report in one line, because it sits in a badge beside the Profile.
+ *
+ * A green result still says what it learned: an agent offering its own sign-in (opencode answers
+ * `opencode-login`) has *worked* — the handshake completed — but an Owner reading only "works"
+ * would not know a separate login is what stands between this and a real run.
+ */
+function probeSummary(report: AgentProbeReport): string {
+  if (!report.ok) return report.reason ?? "did not respond";
+  const { models, modes } = report.capabilities;
+  const parts: string[] = [];
+  if (models.length > 0) parts.push(`${models.length} models`);
+  if (modes.length > 0) parts.push(`${modes.length} modes`);
+  if (report.authMethods.length > 0) parts.push(`sign-in: ${report.authMethods.join(", ")}`);
+  return parts.length > 0 ? `works · ${parts.join(" · ")}` : "works";
+}
+
 /**
  * The pinned model or mode this agent's last handshake no longer lists, or null.
  *
@@ -211,6 +229,23 @@ export function AgentProfilesSection() {
 
   const deleteProfile = trpc.profile.agent.delete.useMutation({
     onSuccess: () => utils.profile.agent.list.invalidate(),
+  });
+
+  /**
+   * "Does this actually work?", asked before a Task depends on the answer.
+   *
+   * Nothing verified a Profile until a run failed on it — a misspelled command, an agent that
+   * was never installed, a Secret pointing at a revoked key all looked identical to a working
+   * Profile until a Task was queued, worktreed, briefed and then lost. The catalog list is
+   * invalidated on success because a successful probe also fills the capability cache the pin
+   * pickers read, so the model and mode lists can go from empty to populated without a run.
+   */
+  const [probed, setProbed] = useState<Record<string, AgentProbeReport>>({});
+  const probeProfile = trpc.profile.agent.probe.useMutation({
+    onSuccess: (report, variables) => {
+      setProbed((prev) => ({ ...prev, [variables.agentProfileId]: report }));
+      utils.profile.agentCatalog.list.invalidate();
+    },
   });
 
   // Editable in place rather than through a form: the reason an Owner comes to this page is
@@ -627,6 +662,25 @@ export function AgentProfilesSection() {
                           {stalePinOn(p, catalogOptions)} no longer advertised
                         </Badge>
                       )}
+                      {/*
+                        What the last probe found, kept beside the Profile it is about rather
+                        than in a toast that outlives its context. A failure carries its reason
+                        in the badge itself: "it did not work" without the why would send an
+                        Owner back to guessing, which is the state this replaced.
+                      */}
+                      {probed[p.id] && (
+                        <Badge
+                          variant="outline"
+                          className={
+                            probed[p.id]?.ok
+                              ? "border-state-ready/40 text-2xs text-state-ready"
+                              : "border-state-failed/40 text-2xs text-state-failed"
+                          }
+                          title={probeSummary(probed[p.id] as AgentProbeReport)}
+                        >
+                          {probeSummary(probed[p.id] as AgentProbeReport)}
+                        </Badge>
+                      )}
                       {/* Badged for the *exception*, which is now the Profile that still asks:
                           marking every row with the ordinary case would say nothing at all, and
                           a Profile that stalls on a prompt nobody can answer is the one worth
@@ -665,6 +719,22 @@ export function AgentProfilesSection() {
                       ))}
                     </SelectContent>
                   </Select>
+                  {/*
+                    Deliberately never disabled — a Profile that is in use is the one it is most
+                    urgent to be able to test, and "in use" is not evidence that it still works.
+                  */}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    aria-label={`Test the agent profile ${p.name}`}
+                    loading={
+                      probeProfile.isPending && probeProfile.variables?.agentProfileId === p.id
+                    }
+                    onClick={() => probeProfile.mutate({ agentProfileId: p.id })}
+                  >
+                    <Stethoscope />
+                  </Button>
                   {/*
                     A Profile in use is not deletable at all — the server refuses it, and a
                     button that only ever produces an error is worse than one that explains

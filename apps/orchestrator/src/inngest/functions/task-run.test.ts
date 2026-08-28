@@ -3092,8 +3092,10 @@ describe("an Agent Profile's launch settings", () => {
 
   it("says so in the log when the protocol cannot select what was pinned (AC-3)", async () => {
     // Not a refusal — the work can still be done — but never a silent substitution either.
+    // A passthrough CLI is the example now that ACP can express both pins: it is handed the
+    // brief and nothing else, so a model pin is a request it has nowhere to put.
     const ids = freshIds();
-    await seedRun(db, ids, { agentProtocol: "acp" });
+    await seedRun(db, ids, { agentProtocol: "cli_passthrough" });
     await db
       .update(agentProfile)
       .set({ model: "claude-opus-4" })

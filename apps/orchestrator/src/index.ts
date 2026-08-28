@@ -1,14 +1,21 @@
 /// <reference types="bun-types" />
-import { announceRequest, taskInputSchema } from "@solow/contracts";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { agentProbeRequest, announceRequest, taskInputSchema } from "@solow/contracts";
 import { type StreamTicketClaims, streamChannel, verifyStreamTicket } from "@solow/core/stream";
 import { createDb, type Db } from "@solow/db";
+import { probeAgent } from "./agent/probe.js";
 import {
   type AgentRegistry,
   agentRegistry,
   type PermissionAnswerResult,
   type WidgetAnswerResult,
 } from "./agent/registry.js";
+import { prepareAgentEnv } from "./billing/guard.js";
+import { loadAgentProbeContext, updateAgentCatalogCapabilities } from "./data.js";
 import { orchestratorEnv } from "./env.js";
+import { createLocalExecutor } from "./executor/local.js";
 import { inngest } from "./inngest/client.js";
 import { handleEventPost } from "./inngest/events.js";
 import { INNGEST_FUNCTIONS, inngestServeHandler } from "./inngest/serve.js";
@@ -116,6 +123,99 @@ export async function handleAnnouncePost(
   hub.publish(hub.boardChannel(workspaceId), message);
   hub.publish(hub.taskChannel(workspaceId, taskId), message);
   return new Response(null, { status: 202 });
+}
+
+/**
+ * `POST /probe-agent` — start the agent an Agent Profile names, ask it what it is, and stop it.
+ *
+ * Why this lives here rather than in the web API: the API is forbidden to reach the execution
+ * host at all (`scripts/audit-executor-boundary.ts`), and a probe is by definition a spawn. Why
+ * it is authenticated by a signed ticket rather than left open like `/events`: it starts a binary
+ * an Owner chose, with that Owner's credential in its environment, so an unauthenticated route
+ * here would be a remote command execution with a stolen wallet attached.
+ *
+ * The Workspace comes from the ticket's claims, never the body. A *board-scoped* ticket (no
+ * `taskId`) is exactly right and is what the API mints: a probe belongs to Settings, before any
+ * Task exists to scope it to.
+ */
+export async function handleProbePost(
+  req: Request,
+  deps: Pick<WsServerDeps, "db" | "now" | "streamSecret">,
+): Promise<Response> {
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return new Response("invalid_json", { status: 400 });
+  }
+  const parsed = agentProbeRequest.safeParse(body);
+  if (!parsed.success) return new Response("invalid_request", { status: 400 });
+
+  const verified = verifyStreamTicket(parsed.data.ticket, deps.streamSecret, deps.now());
+  if (!verified.ok) return new Response(verified.error, { status: 401 });
+  const { workspaceId } = verified.claims;
+
+  const ctx = await loadAgentProbeContext(deps.db, workspaceId, parsed.data.agentProfileId);
+  if (!ctx) return new Response("agent_profile_not_found", { status: 404 });
+
+  /*
+   * The same environment a real run would get, from the same billing guard — because "works with
+   * my credential" is most of what the question means, and a probe that shaped its own env would
+   * be testing a configuration no run will ever use.
+   */
+  const shaped = prepareAgentEnv({
+    authMode: ctx.agentProfile.authMode,
+    secretCiphertext: ctx.secretCiphertext,
+    baseEnv: process.env,
+    subscriptionEnvVar: ctx.agentCatalog.subscriptionEnvVar,
+    meteredEnvVar: ctx.agentCatalog.meteredEnvVar,
+  });
+  if (!shaped.ok) {
+    return Response.json({
+      ok: false,
+      reason: "this Profile has no usable credential — check the Secret it points at",
+      protocolVersion: null,
+      authMethods: [],
+      capabilities: { models: [], modes: [] },
+    });
+  }
+
+  /*
+   * A scratch directory, not a worktree. An ACP agent is handed a `cwd` it may read, and giving
+   * it a real Repository to answer "are you installed" would put a probe's blast radius above
+   * its purpose. Removed either way — a probe must not leave anything behind.
+   */
+  const cwd = await mkdtemp(join(tmpdir(), "solow-probe-"));
+  try {
+    const report = await probeAgent(createLocalExecutor(cwd), {
+      command: ctx.agentCatalog.command,
+      args: ctx.agentCatalog.argsTemplate ?? [],
+      env: shaped.data,
+      cwd,
+      protocol: ctx.agentCatalog.protocol,
+    });
+
+    /*
+     * Fill the cache the Profile form reads (issue #94 AC-2). Until now only a completed run
+     * ever wrote it, so every picker was empty until after the first Task — the ordering this
+     * whole feature exists to invert. Written on the same fire-and-forget footing the run uses:
+     * the probe's answer must not fail because its bookkeeping did.
+     */
+    if (
+      report.ok &&
+      (report.capabilities.models.length > 0 || report.capabilities.modes.length > 0)
+    ) {
+      await updateAgentCatalogCapabilities(
+        deps.db,
+        workspaceId,
+        ctx.agentCatalog.id,
+        report.capabilities,
+      ).catch(() => {});
+    }
+    return Response.json(report);
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
 }
 
 /**
@@ -298,6 +398,7 @@ export function startWebSocketServer(
       if (pathname === "/events" && req.method === "POST") return handleEventPost(req);
       if (pathname === "/api/inngest") return inngestServeHandler(req);
       if (pathname === "/announce" && req.method === "POST") return handleAnnouncePost(req, deps);
+      if (pathname === "/probe-agent" && req.method === "POST") return handleProbePost(req, deps);
 
       const auth = authorizeUpgrade(req.url, deps);
       if (!auth.ok) return new Response(auth.error, { status: auth.status });

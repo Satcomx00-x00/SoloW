@@ -45,6 +45,8 @@ export interface AcpRunnerOptions {
    * list from the handshake rather than sending a guess.
    */
   modeId?: string;
+  /** The model the Agent Profile pinned, under the same advertised-only rule as `modeId`. */
+  modelId?: string;
   /** How long an operator has to answer a permission before the policy decides (AC-4). */
   permissionDeadlineMs?: number;
   /**
@@ -73,6 +75,7 @@ export class AcpRunner implements AgentRunner {
           cwd: opts.cwd,
           env: opts.env,
           ...(this.options.modeId ? { modeId: this.options.modeId } : {}),
+          ...(this.options.modelId ? { modelId: this.options.modelId } : {}),
           spawn: (cmd, spawnOpts) => this.options.executor.spawn(cmd, spawnOpts),
           onUpdate: (update) => {
             const event = toStreamEvent(update);

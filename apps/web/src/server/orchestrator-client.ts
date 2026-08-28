@@ -1,5 +1,10 @@
 import "server-only";
-import type { ReviewDecision, TaskState } from "@solow/contracts";
+import {
+  type AgentProbeReport,
+  agentProbeReport,
+  type ReviewDecision,
+  type TaskState,
+} from "@solow/contracts";
 import { signStreamTicket } from "@solow/core/stream";
 import { devOwnerMode, orchestratorUrl, webEnv } from "./env.js";
 
@@ -43,6 +48,17 @@ export interface OrchestratorClient {
    * must not turn a completed action into an error. The worst case is the old behaviour.
    */
   announceTask(input: { workspaceId: string; taskId: string; state: TaskState }): Promise<void>;
+  /**
+   * Ask the orchestrator whether an Agent Profile actually works, before a Task depends on it.
+   *
+   * Unlike the fire-and-forget calls above this one *answers*: the report is the whole point, so
+   * a failure to reach the orchestrator is thrown rather than swallowed. An Owner who pressed
+   * "Test" and got a green tick that meant "we could not ask" would be worse off than before.
+   */
+  probeAgentProfile(input: {
+    workspaceId: string;
+    agentProfileId: string;
+  }): Promise<AgentProbeReport>;
 }
 
 const UNWIRED = "orchestrator not configured (SOLOW_ORCHESTRATOR_URL unset)";
@@ -111,5 +127,27 @@ export const orchestrator: OrchestratorClient = {
       // Swallowed on purpose. The state change is already written and answered; this is the
       // notification, and a hub that is down costs a stale board rather than a failed action.
     }
+  },
+
+  async probeAgentProfile(input) {
+    const base = orchestratorUrl();
+    if (!base) throw new Error(`${UNWIRED}: agent probe unavailable`);
+    // Board-scoped: no `taskId`, because a probe happens in Settings before any Task exists.
+    const ticket = signStreamTicket(
+      { workspaceId: input.workspaceId, taskId: null },
+      webEnv().SOLOW_STREAM_SECRET,
+      Date.now(),
+    );
+    const res = await fetch(new URL("/probe-agent", base), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ticket, agentProfileId: input.agentProfileId }),
+    });
+    if (!res.ok) {
+      throw new Error(`orchestrator rejected probe: ${res.status} ${await res.text()}`);
+    }
+    // Parsed, not cast: this crosses a service boundary, and a shape drift should read as a
+    // failed probe rather than as an undefined field rendered into the form.
+    return agentProbeReport.parse(await res.json());
   },
 };

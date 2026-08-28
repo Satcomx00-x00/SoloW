@@ -33,6 +33,9 @@ export {
   AcpMethod,
   type AcpPermissionOption,
   type AcpUpdate,
+  advertisedOptions,
+  type SessionNewResult,
+  sessionNewResultSchema,
   textPrompt,
   toUpdates,
 } from "./protocol.js";

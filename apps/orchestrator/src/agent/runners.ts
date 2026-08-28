@@ -93,9 +93,10 @@ export function createAgentRunner(
       const bypassing = deps.permissionMode === "bypassPermissions";
       return new AcpRunner({
         executor: deps.executor,
-        // Only ever an id the agent itself advertised — the client checks the list before
-        // sending `session/set_mode` rather than sending a guess and reading the error.
+        // Only ever an id the agent itself advertised — the client checks the list from the
+        // handshake before sending either pin, rather than sending a guess and reading the error.
         ...(deps.modeId === undefined ? {} : { modeId: deps.modeId }),
+        ...(deps.model === undefined || deps.model === null ? {} : { modelId: deps.model }),
         ...(bypassing
           ? { permissionDeadlineMs: 0, unattendedPermissionPosture: "allow_once" as const }
           : {

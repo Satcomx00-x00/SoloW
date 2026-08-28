@@ -99,11 +99,10 @@ describe("createAgentRunner", () => {
  * though the pin held, is the silent substitution the criterion forbids by name.
  */
 describe("unsupportedLaunchSettings", () => {
-  it("names a model ACP has no way to select", () => {
-    // `AcpMethod` carries `session/set_mode` and nothing for a model, so pinning one is a
-    // request SoloW cannot make. Inventing a method name and hoping is how a run fails in
-    // the middle instead of at the start.
-    expect(unsupportedLaunchSettings("acp", { model: "opus" })).toEqual(['model "opus"']);
+  it("says nothing about either pin for ACP, which can express both", () => {
+    // `session/set_mode` and `session/set_model`, both sent only for an id the agent advertised
+    // in `session/new` — so neither is a guess, and neither is silently dropped.
+    expect(unsupportedLaunchSettings("acp", { model: "opus", modeId: "plan" })).toEqual([]);
   });
 
   it("names a mode the stream-json CLI has no notion of", () => {
