@@ -209,12 +209,54 @@ function onPath(command) {
 // ---------------------------------------------------------------------------- bun
 
 /**
+ * Where Bun's real binary actually comes from: `@oven/bun-<platform>`, an optional dependency of
+ * the `bun` package that ships the executable **inside the npm tarball**.
+ *
+ * This is the one that matters for a restricted or airgapped install: nothing is downloaded, the
+ * binary arrives from the registry like any other package, and `bun`'s own postinstall only
+ * copies it into place — so skipping that hook costs nothing as long as we look here instead of
+ * at the placeholder it would have overwritten.
+ *
+ * npm installs only the entry matching the host, so the list is candidates, not a guess: on Linux
+ * the glibc and musl builds are both plausible and whichever was installed is the right one.
+ */
+function ovenBunPackages() {
+  const cpu = process.arch === "arm64" ? "aarch64" : process.arch;
+  switch (process.platform) {
+    case "linux":
+      return [`@oven/bun-linux-${cpu}`, `@oven/bun-linux-${cpu}-musl`];
+    case "darwin":
+      return [`@oven/bun-darwin-${cpu}`];
+    case "win32":
+      return [`@oven/bun-windows-${cpu}`];
+    case "freebsd":
+      return [`@oven/bun-freebsd-${cpu}`];
+    default:
+      return [];
+  }
+}
+
+/**
  * The `bun` npm package is a real dependency, so in the normal `npx` case this resolves inside
  * our own node_modules and the user needs nothing preinstalled. A Bun already on PATH is
  * preferred when present: it is the one the user maintains, and reusing it skips a second copy.
  */
 function resolveBun() {
   if (onPath("bun")) return "bun";
+
+  // Straight from the registry, before anything that might want to download (see above).
+  for (const name of ovenBunPackages()) {
+    try {
+      const dir = dirname(require.resolve(`${name}/package.json`));
+      for (const file of ["bun", "bun.exe"]) {
+        const candidate = join(dir, "bin", file);
+        if (existsSync(candidate) && isNativeExecutable(candidate)) return candidate;
+      }
+    } catch {
+      // not the platform npm installed — try the next candidate
+    }
+  }
+
   try {
     const packageDir = dirname(require.resolve("bun/package.json"));
     const bin = vendoredBinary({
