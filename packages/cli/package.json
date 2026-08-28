@@ -1,6 +1,6 @@
 {
   "name": "@satcomx00-x00/solow",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Solo Workflow \u2014 a self-hostable control plane for orchestrating AI coding agents in parallel under human review. Run it with `npx @satcomx00-x00/solow`.",
   "license": "AGPL-3.0-only",
   "type": "module",
@@ -38,8 +38,17 @@
     "bun": "^1.4.0",
     "inngest-cli": "^1.44.0"
   },
+  "optionalDependencies": {
+    "@satcomx00-x00/solow-inngest-linux-x64": "1.44.0",
+    "@satcomx00-x00/solow-inngest-linux-arm64": "1.44.0",
+    "@satcomx00-x00/solow-inngest-darwin-x64": "1.44.0",
+    "@satcomx00-x00/solow-inngest-darwin-arm64": "1.44.0",
+    "@satcomx00-x00/solow-inngest-windows-x64": "1.44.0",
+    "@satcomx00-x00/solow-inngest-windows-arm64": "1.44.0"
+  },
   "scripts": {
     "build": "bun run scripts/build.ts",
+    "build:inngest": "bun run scripts/build-inngest-packages.ts",
     "typecheck": "tsc --noEmit",
     "lint": "biome check ."
   },

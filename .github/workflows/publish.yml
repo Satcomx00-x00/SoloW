@@ -100,6 +100,19 @@ jobs:
         working-directory: packages/cli
         run: npm pack --dry-run
 
+      # Must run *before* the CLI is published: the CLI declares these as optionalDependencies,
+      # and an install would find nothing if the CLI landed on npm first.
+      #
+      # They carry the Inngest Dev Server binary inside the tarball, one package per platform,
+      # so the CLI installs from npm alone — no postinstall, no download, works airgapped.
+      # Versioned on Inngest rather than on SoloW, so this is a no-op on every release that does
+      # not move the Inngest version (the script checks npm and skips what is already there).
+      - name: Publish the Inngest binaries
+        if: ${{ github.event_name == 'push' || inputs.dry_run == false }}
+        run: bun run packages/cli/scripts/build-inngest-packages.ts --publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
       - name: Publish
         if: ${{ github.event_name == 'push' || inputs.dry_run == false }}
         working-directory: packages/cli

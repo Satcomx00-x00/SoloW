@@ -279,15 +279,45 @@ function resolveBun() {
 }
 
 /**
+ * Where the Inngest Dev Server binary comes from here: `@satcomx00-x00/solow-inngest-<platform>`,
+ * an optional dependency that carries the executable **inside its npm tarball**.
+ *
+ * Upstream's `inngest-cli` ships a placeholder and downloads the real binary from
+ * `cli.inngest.com` (GitHub as fallback) in a postinstall hook, and no per-platform package
+ * exists on npm — not from Inngest, not from anyone. That makes it unusable on an npm that
+ * blocks install scripts, and impossible in an airgapped or npm-only environment. So SoloW
+ * republishes it, one package per platform, the same way Bun distributes `@oven/bun-*`
+ * (user decision, 2026-08-28). npm installs only the one matching the host, from the registry,
+ * with no script and no network beyond npm itself.
+ *
+ * See `scripts/build-inngest-packages.ts` for how they are produced, and for the licensing note.
+ */
+function vendoredInngestPackage() {
+  const os = process.platform === "win32" ? "windows" : process.platform;
+  return `@satcomx00-x00/solow-inngest-${os}-${process.arch}`;
+}
+
+/**
  * The Inngest Dev Server binary — an `inngest` already on PATH first.
  *
  * PATH takes precedence for the same reason it does for Bun: it is the copy the user installed
- * and maintains, and `npm i -g inngest-cli` is the way to get one without this command reaching
- * out to a third party on its own. Note the package name — `inngest` on npm is the JavaScript
- * SDK and ships no executable at all; the Dev Server lives only in `inngest-cli`.
+ * and maintains. Note the package name — `inngest` on npm is the JavaScript SDK and ships no
+ * executable at all; the Dev Server lives only in `inngest-cli`.
  */
 function resolveInngest() {
   if (onPath("inngest")) return "inngest";
+
+  // From the registry, before anything that might want to download (see above).
+  try {
+    const dir = dirname(require.resolve(`${vendoredInngestPackage()}/package.json`));
+    for (const file of ["inngest", "inngest.exe"]) {
+      const candidate = join(dir, "bin", file);
+      if (existsSync(candidate) && isNativeExecutable(candidate)) return candidate;
+    }
+  } catch {
+    // no package for this platform — fall through
+  }
+
   try {
     const packageDir = dirname(require.resolve("inngest-cli/package.json"));
     const bin = vendoredBinary({
@@ -302,11 +332,12 @@ function resolveInngest() {
   }
   fail(
     "could not find the Inngest Dev Server.\n" +
-      "  The bundled `inngest-cli` ships a placeholder and downloads the real binary in an\n" +
-      "  install hook your npm skipped. Install it once, then re-run:\n" +
-      "    npm i -g inngest-cli\n" +
-      "  (`inngest` is the SDK and has no binary — the Dev Server is `inngest-cli`.)\n" +
-      "  Or let this command fetch it for you:  SOLOW_FETCH_BINARIES=1",
+      `  It normally arrives with \`${vendoredInngestPackage()}\`, installed from npm\n` +
+      "  alongside this package. If your install skipped optional dependencies, or there is no\n" +
+      "  build for this platform, install one yourself and re-run:\n" +
+      `    npm i ${vendoredInngestPackage()}\n` +
+      "    npm i -g inngest-cli    (downloads from cli.inngest.com — not for an airgap)\n" +
+      "  (`inngest` is the SDK and has no binary — the Dev Server is `inngest-cli`.)",
   );
 }
 

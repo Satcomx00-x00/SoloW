@@ -121,7 +121,7 @@
     },
     "packages/cli": {
       "name": "@satcomx00-x00/solow",
-      "version": "0.3.1",
+      "version": "0.4.0",
       "bin": {
         "solow": "bin/solow.mjs",
       },
@@ -132,6 +132,14 @@
       "devDependencies": {
         "bun-types": "^1.1.0",
         "typescript": "^5.6.0",
+      },
+      "optionalDependencies": {
+        "@satcomx00-x00/solow-inngest-darwin-arm64": "1.44.0",
+        "@satcomx00-x00/solow-inngest-darwin-x64": "1.44.0",
+        "@satcomx00-x00/solow-inngest-linux-arm64": "1.44.0",
+        "@satcomx00-x00/solow-inngest-linux-x64": "1.44.0",
+        "@satcomx00-x00/solow-inngest-windows-arm64": "1.44.0",
+        "@satcomx00-x00/solow-inngest-windows-x64": "1.44.0",
       },
     },
     "packages/contracts": {

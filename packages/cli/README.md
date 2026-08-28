@@ -32,24 +32,30 @@ encrypted at rest, and nothing is sent anywhere you did not configure.
 - To actually run agents you will want the [Claude Code](https://claude.com/claude-code) CLI on
   your `PATH`; SoloW launches it per task.
 
-### If your npm skips install scripts
+## Airgapped and npm-only installs
 
-Two dependencies — the Bun runtime and the Inngest Dev Server — publish a placeholder and
-download the real binary in a postinstall hook. npm 12 blocks those hooks by default, and then
-neither binary is there. **SoloW will not download them for you**: starting a program should not
-fetch from a third party on its own. It stops and tells you what to install.
+**Everything SoloW runs comes from npm. Nothing is downloaded when you start it.**
 
-Install either one once and SoloW picks it up from your `PATH`:
+The two native binaries it needs — the Bun runtime and the Inngest Dev Server — both arrive
+inside npm packages, selected by platform:
 
-```sh
-npm i -g inngest-cli                    # the Dev Server
-curl -fsSL https://bun.sh/install | bash  # the Bun runtime
-```
+| Binary | Package | Published by |
+| ------ | ------- | ------------ |
+| Bun | `@oven/bun-<platform>` | Bun |
+| Inngest Dev Server | `@satcomx00-x00/solow-inngest-<platform>` | this project |
 
-Note the package name: `inngest` on npm is the JavaScript SDK and ships no executable — the Dev
-Server is `inngest-cli`.
+Each is an optional dependency constrained by `os`/`cpu`, so npm installs exactly one — yours —
+and skips the rest. There is no postinstall hook to run and nothing is fetched from GitHub or any
+CDN, which is what makes this work behind an airgap or against an internal registry mirror.
 
-If you would rather SoloW fetch them itself, opt in explicitly:
+The Inngest packages exist because `inngest-cli` itself ships only a placeholder and downloads
+the real binary in a postinstall hook — unusable when install scripts are blocked (npm 12 blocks
+them by default) or when there is no route to the internet. The binary is Inngest's, redistributed
+unmodified under the Server Side Public License; see `LICENSE.md` inside those packages.
+
+If a binary is somehow absent, SoloW says so and stops rather than downloading anything. An
+`inngest` or `bun` already on your `PATH` is preferred over the bundled copy. To let SoloW fetch
+a missing binary itself, opt in explicitly:
 
 ```sh
 SOLOW_FETCH_BINARIES=1 npx @satcomx00-x00/solow
