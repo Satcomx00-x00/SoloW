@@ -26,7 +26,7 @@
     "check": "biome check --write .",
     "db:generate": "bun run --filter @solow/db db:generate",
     "db:migrate": "bun run --filter @solow/db db:migrate",
-    "db:seed": "bun run --filter @solow/db db:seed",
+    "db:bootstrap": "bun run --filter @solow/db db:bootstrap",
     "openapi:gen": "bun run --filter @solow/web openapi:gen",
     "openapi:check": "bun run --filter @solow/web openapi:check",
     "e2e": "playwright test",

@@ -32,8 +32,9 @@ export const PATHS = {
 export const PORTS = { web: 5050, orchestrator: 5051, ws: 5052 } as const;
 
 /**
- * Spelled out rather than imported from `@solow/db` — the Playwright runner is Node, and
- * that package pulls in `bun:sqlite`. Kept in step with `packages/db/src/seed.ts`.
+ * Spelled out rather than imported from `@solow/db` — the Playwright runner is Node, and that
+ * package pulls in `bun:sqlite`. Kept in step with `e2e/support/seed-cli.ts`, which creates them.
+ * `A` is the id a real local install bootstraps to, so the suite starts where an install does.
  */
 export const SEED_WORKSPACE_A = "11111111-1111-4111-8111-111111111111";
 export const SEED_WORKSPACE_B = "22222222-2222-4222-8222-222222222222";
@@ -68,7 +69,7 @@ function initRepo(dir: string, file: string, contents: string): void {
 }
 
 /**
- * Rebuild the scratch root from scratch: fresh git fixture, fresh database, seeded tenants.
+ * Rebuild the scratch root from scratch: fresh git fixture, fresh database, both tenants.
  * Starting clean matters — a stale Task left Running by an earlier run would make the happy
  * path assert against the wrong row.
  */
@@ -86,5 +87,11 @@ export function prepareFixture(): void {
 
   const env = { ...process.env, ...E2E_ENV };
   execFileSync("bun", ["run", "db:migrate"], { cwd: ROOT, env, stdio: "pipe" });
-  execFileSync("bun", ["run", "db:seed"], { cwd: ROOT, env, stdio: "pipe" });
+  // The suite's own tenants, not the product's: SoloW ships with one empty Workspace now,
+  // and the second one exists purely so the isolation suite has a boundary to test across.
+  execFileSync("bun", ["run", "e2e/support/seed-cli.ts", "tenants"], {
+    cwd: ROOT,
+    env,
+    stdio: "pipe",
+  });
 }

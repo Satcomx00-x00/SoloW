@@ -8,6 +8,9 @@
  * page already solves this by shelling out to a `bun run` subprocess (`prepareFixture`'s
  * `db:migrate`/`db:seed`); this is the same pattern for the two things a spec needs mid-run:
  *
+ *   bun run e2e/support/seed-cli.ts tenants
+ *     → creates the two Workspaces this suite runs against, each with its agent catalog.
+ *
  *   bun run e2e/support/seed-cli.ts issue <workspaceId> <title>
  *     → inserts one Issue into an existing Workspace, prints its id.
  *
@@ -22,6 +25,7 @@
 
 import {
   agentProfile,
+  bootstrapWorkspace,
   createDb,
   encryptSecret,
   ensureDefaultAgentCatalog,
@@ -31,6 +35,7 @@ import {
   secret,
   task,
   taskRepository,
+  workspace,
 } from "@solow/db";
 
 async function seedIssue(workspaceId: string, repoName: string, title: string): Promise<void> {
@@ -126,19 +131,58 @@ async function seedTask(workspaceId: string, title: string): Promise<void> {
   console.log(JSON.stringify({ id: row.id, title: row.title }));
 }
 
+/**
+ * The two Workspaces every spec here assumes.
+ *
+ * This used to be `db:seed`, back when the product shipped a two-company fixture and the E2E
+ * suite borrowed it. That fixture is gone — a real install now starts with one empty Workspace —
+ * so the second tenant, which exists purely so the isolation suite can prove a Task cannot reach
+ * across a Workspace boundary (Principle V), belongs to the tests that need it rather than to
+ * the thing users install.
+ *
+ * The repositories are deliberately not created here: every spec connects its own through the
+ * UI, which is part of what it is testing.
+ */
+async function seedTenants(): Promise<void> {
+  const db = createDb();
+  // The first one is the product's own bootstrap, at the id dev-owner mode binds to — so the
+  // suite exercises the same starting state a real local install has.
+  await bootstrapWorkspace(db, { name: "E2E workspace", ownerUserId: "local-owner" });
+
+  await db
+    .insert(workspace)
+    .values({ id: OTHER_WORKSPACE, name: "E2E other tenant", ownerUserId: "other-owner" })
+    .onConflictDoNothing();
+  await ensureDefaultAgentCatalog(db, OTHER_WORKSPACE);
+  console.log(JSON.stringify({ tenants: [LOCAL_WORKSPACE, OTHER_WORKSPACE] }));
+}
+
+/** Kept in step with `e2e/support/fixture.ts`, which cannot import `@solow/db` (Node runner). */
+const LOCAL_WORKSPACE = "11111111-1111-4111-8111-111111111111";
+const OTHER_WORKSPACE = "22222222-2222-4222-8222-222222222222";
+
 const [, , kind, workspaceId, ...rest] = process.argv;
-if (!workspaceId || rest.length === 0) {
-  console.error("usage: seed-cli.ts issue <workspaceId> <repoName|-> <title…>");
+if (kind !== "tenants" && (!workspaceId || rest.length === 0)) {
+  console.error("usage: seed-cli.ts tenants");
+  console.error("       seed-cli.ts issue <workspaceId> <repoName|-> <title…>");
   console.error("       seed-cli.ts task <workspaceId> <title…>");
   process.exit(1);
 }
 // The repository name rides ahead of the title because the title may hold spaces: everything
 // after the fixed positions is the title, and nothing has to be quoted twice.
-if (kind === "issue") {
+if (kind === "tenants") {
+  await seedTenants();
+} else if (!workspaceId) {
+  // Narrowed here rather than in the guard above: `tenants` takes no Workspace, so the guard
+  // cannot demand one for every command.
+  console.error("seed-cli: a workspaceId is required for this command");
+  process.exit(1);
+} else if (kind === "issue") {
   const [repoName, ...titleParts] = rest;
   await seedIssue(workspaceId, repoName ?? "-", titleParts.join(" "));
-} else if (kind === "task") await seedTask(workspaceId, rest.join(" "));
-else {
+} else if (kind === "task") {
+  await seedTask(workspaceId, rest.join(" "));
+} else {
   console.error(`unknown kind: ${kind}`);
   process.exit(1);
 }
