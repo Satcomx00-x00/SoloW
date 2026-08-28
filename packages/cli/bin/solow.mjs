@@ -112,6 +112,12 @@ function usage() {
     -h, --help            Show this message
     -v, --version         Print the version
 
+  Environment
+    SOLOW_HOME            Same as --data-dir
+    SOLOW_FETCH_BINARIES  Set to 1 to let this command download the Bun and Inngest
+                          binaries when your npm skipped their install hooks. Off by
+                          default: starting the app never fetches anything on its own.
+
   On first run this creates the database, applies migrations, seeds a workspace and
   generates the encryption keys — all under the data directory. Nothing leaves the machine.
 `);
@@ -162,21 +168,30 @@ function isNativeExecutable(path) {
 }
 
 /**
- * Make sure a dependency's real binary is on disk, running that package's own postinstall if the
- * install skipped it.
+ * Whether the launcher may fetch a missing binary itself. **Off unless asked for.**
  *
- * Doing it here rather than telling the user to reinstall with a flag: the package they ran is
- * the one that knows it needs these, the download is the dependency's own published script, and
- * "npx it and it works" is the whole promise of shipping this as a CLI. It runs at most once —
- * the script writes the real executable into `node_modules`, where the next start finds it.
+ * `bun` and `inngest-cli` both download their real executable from a third party
+ * (`cli.inngest.com`, `github.com/inngest/inngest/releases`) in a postinstall hook. When npm
+ * skips that hook the binary is a placeholder, and this launcher briefly did the download itself
+ * at startup — which meant `npx` reached out to GitHub without being asked. Starting a program
+ * should not fetch a hundred megabytes from a third party as a side effect, so the default is now
+ * to stop and say what to install; set `SOLOW_FETCH_BINARIES=1` to opt back in.
  */
-function ensureNativeBinary({ binary, packageDir, script, label }) {
+const MAY_FETCH_BINARIES = process.env.SOLOW_FETCH_BINARIES === "1";
+
+/**
+ * The real binary for a vendored dependency, or null when only its placeholder is on disk.
+ *
+ * Both packages publish a small text placeholder where the executable goes, so `existsSync` says
+ * yes to something that is not a binary — the check has to be what the file *is*.
+ */
+function vendoredBinary({ binary, packageDir, script, label }) {
   if (existsSync(binary) && isNativeExecutable(binary)) return binary;
 
   const installer = join(packageDir, script);
-  if (!existsSync(installer)) return null;
+  if (!existsSync(installer) || !MAY_FETCH_BINARIES) return null;
 
-  console.log(`solow: fetching the ${label} binary (its install step was skipped)…`);
+  console.log(`solow: fetching the ${label} binary (SOLOW_FETCH_BINARIES=1)…`);
   const result = spawnSync(process.execPath, [installer], {
     cwd: packageDir,
     stdio: "inherit",
@@ -184,6 +199,11 @@ function ensureNativeBinary({ binary, packageDir, script, label }) {
   });
   if (result.status !== 0) return null;
   return existsSync(binary) && isNativeExecutable(binary) ? binary : null;
+}
+
+/** Is this command on PATH and runnable? */
+function onPath(command) {
+  return spawnSync(command, ["--version"], { stdio: "ignore", shell: false }).status === 0;
 }
 
 // ---------------------------------------------------------------------------- bun
@@ -194,11 +214,10 @@ function ensureNativeBinary({ binary, packageDir, script, label }) {
  * preferred when present: it is the one the user maintains, and reusing it skips a second copy.
  */
 function resolveBun() {
-  const onPath = spawnSync("bun", ["--version"], { stdio: "ignore", shell: false });
-  if (onPath.status === 0) return "bun";
+  if (onPath("bun")) return "bun";
   try {
     const packageDir = dirname(require.resolve("bun/package.json"));
-    const bin = ensureNativeBinary({
+    const bin = vendoredBinary({
       binary: join(packageDir, "bin", "bun.exe"),
       packageDir,
       script: "install.js",
@@ -210,30 +229,43 @@ function resolveBun() {
   }
   fail(
     "could not find a Bun runtime.\n" +
-      "  The `bun` package installs one, but its download step did not run and could not be\n" +
-      "  re-run here. Install Bun yourself and retry:\n" +
-      "    curl -fsSL https://bun.sh/install | bash",
+      "  The bundled `bun` package ships a placeholder and downloads the real binary in an\n" +
+      "  install hook your npm skipped. Install Bun once, then re-run:\n" +
+      "    curl -fsSL https://bun.sh/install | bash\n" +
+      "  Or let this command fetch it for you:  SOLOW_FETCH_BINARIES=1",
   );
 }
 
-/** The Inngest Dev Server binary, named `.exe` only on Windows. */
+/**
+ * The Inngest Dev Server binary — an `inngest` already on PATH first.
+ *
+ * PATH takes precedence for the same reason it does for Bun: it is the copy the user installed
+ * and maintains, and `npm i -g inngest-cli` is the way to get one without this command reaching
+ * out to a third party on its own. Note the package name — `inngest` on npm is the JavaScript
+ * SDK and ships no executable at all; the Dev Server lives only in `inngest-cli`.
+ */
 function resolveInngest() {
-  const packageDir = dirname(require.resolve("inngest-cli/package.json"));
-  const bin = ensureNativeBinary({
-    binary: join(packageDir, "bin", process.platform === "win32" ? "inngest.exe" : "inngest"),
-    packageDir,
-    script: "postinstall.js",
-    label: "Inngest Dev Server",
-  });
-  if (!bin) {
-    fail(
-      "the Inngest Dev Server binary is missing, and downloading it here did not work.\n" +
-        "  `inngest-cli` fetches it in a postinstall hook, which recent npm versions skip by\n" +
-        "  default. Re-run the install allowing that hook:\n" +
-        "    npm rebuild --ignore-scripts=false inngest-cli",
-    );
+  if (onPath("inngest")) return "inngest";
+  try {
+    const packageDir = dirname(require.resolve("inngest-cli/package.json"));
+    const bin = vendoredBinary({
+      binary: join(packageDir, "bin", process.platform === "win32" ? "inngest.exe" : "inngest"),
+      packageDir,
+      script: "postinstall.js",
+      label: "Inngest Dev Server",
+    });
+    if (bin) return bin;
+  } catch {
+    // fall through to the error below
   }
-  return bin;
+  fail(
+    "could not find the Inngest Dev Server.\n" +
+      "  The bundled `inngest-cli` ships a placeholder and downloads the real binary in an\n" +
+      "  install hook your npm skipped. Install it once, then re-run:\n" +
+      "    npm i -g inngest-cli\n" +
+      "  (`inngest` is the SDK and has no binary — the Dev Server is `inngest-cli`.)\n" +
+      "  Or let this command fetch it for you:  SOLOW_FETCH_BINARIES=1",
+  );
 }
 
 // ---------------------------------------------------------------------------- state

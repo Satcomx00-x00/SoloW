@@ -29,9 +29,31 @@ encrypted at rest, and nothing is sent anywhere you did not configure.
 ## Requirements
 
 - **Node.js 20+** — to run `npx`.
-- Nothing else. The Bun runtime the services need is installed as a dependency.
 - To actually run agents you will want the [Claude Code](https://claude.com/claude-code) CLI on
   your `PATH`; SoloW launches it per task.
+
+### If your npm skips install scripts
+
+Two dependencies — the Bun runtime and the Inngest Dev Server — publish a placeholder and
+download the real binary in a postinstall hook. npm 12 blocks those hooks by default, and then
+neither binary is there. **SoloW will not download them for you**: starting a program should not
+fetch from a third party on its own. It stops and tells you what to install.
+
+Install either one once and SoloW picks it up from your `PATH`:
+
+```sh
+npm i -g inngest-cli                    # the Dev Server
+curl -fsSL https://bun.sh/install | bash  # the Bun runtime
+```
+
+Note the package name: `inngest` on npm is the JavaScript SDK and ships no executable — the Dev
+Server is `inngest-cli`.
+
+If you would rather SoloW fetch them itself, opt in explicitly:
+
+```sh
+SOLOW_FETCH_BINARIES=1 npx @satcomx00-x00/solow
+```
 
 ## Usage
 
