@@ -20,9 +20,11 @@ import type {
  * GitLab's own scoped-label convention (`status::doing`) or SoloW's own seeded taxonomy
  * (`status/todo`, see `label-taxonomy.ts`) either way — and none of it reached the table.
  *
- * **The column set is GitHub Projects v2's own, exactly** — same nineteen columns, same names, in
- * the same order (user request 2026-08-28: a GitLab-backed Project must not look like a poorer
- * one). A column with nothing behind it on this side is still declared, and renders empty: a
+ * **The column set is GitHub Projects v2's own** — same names, in the same order (user request
+ * 2026-08-28: a GitLab-backed Project must not look like a poorer one), less `Title`: the table
+ * renders that one itself, so declaring it here put the same string on screen twice under two
+ * headings (user request 2026-08-30, and see `fieldSpecs`). A column with nothing behind it on
+ * this side is still declared, and renders empty: a
  * table that grows and shrinks its columns depending on which provider filled it is a table two
  * people cannot talk about. Where a column genuinely cannot be filled at all — GitLab has no
  * reviewers on an issue, and a local Project has no board to hold a number or a date — it is
@@ -114,7 +116,13 @@ interface FieldSpec {
  */
 function fieldSpecs(allLabels: string[]): FieldSpec[] {
   return [
-    { id: "local:title", name: "Title", type: "text" },
+    // No `Title` column here, deliberately. GitHub Projects v2 ships one, and a *mirrored* GitHub
+    // Project still gets it — there, the project's own Title field can hold a value that is not
+    // the issue's, so the table shows both and suffixes the provider's "(project)" to tell them
+    // apart. On this derived path there is nothing to tell apart: the value was `issue.title`, the
+    // very string the table's own built-in Title column already renders, so the column was the
+    // same text twice under two headings (user request 2026-08-30). The built-in one stays; it is
+    // the one that carries the hierarchy chevron and opens the panel.
     { id: "local:assignees", name: "Assignees", type: "user" },
     {
       id: "local:status",
@@ -199,7 +207,6 @@ export function deriveLocalProjectFields(issues: readonly LocalFieldIssue[]): {
   for (const issue of issues) {
     const values: Record<string, ProjectFieldValue> = {};
 
-    values["local:title"] = { type: "text", text: issue.title };
     if (issue.assignees.length > 0) {
       values["local:assignees"] = { type: "user", users: issue.assignees };
     }

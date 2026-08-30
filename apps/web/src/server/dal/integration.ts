@@ -35,6 +35,7 @@ import {
 } from "@solow/db";
 import {
   type DriverWith,
+  type ExternalIssue,
   type ExternalRepository,
   isProviderInstalled,
   providerFor,
@@ -588,6 +589,56 @@ export async function listExternalIssues(
 }
 
 /**
+ * Write what a provider says about a set of issues into the local `issue` table.
+ *
+ * The one place an `ExternalIssue` becomes a row. Extracted from `importIssues` when a second
+ * caller appeared that needs exactly this and nothing else — `issue-create.ts`, mirroring the
+ * single issue the provider just created (spec F23a Flow A, Action 4). A second hand-rolled
+ * insert there would be a second answer to "what does an imported Issue look like", and the
+ * first thing to drift out of it would be a column added to one path and not the other.
+ *
+ * Idempotent on `(repositoryId, externalId)` and deliberately **do-nothing** on conflict: this is
+ * the *arrival* path, and an Issue already here has a fuller record than a listing carries (the
+ * project sync's `materialiseIssues` is the path that updates, because its GraphQL read is the
+ * richer one). Every optional field follows the rule the driver boundary states: absent means the
+ * provider did not say, which must never be written as an empty answer.
+ */
+export async function mirrorExternalIssues(
+  ctx: RequestContext,
+  target: { provider: string; integrationId: string; repositoryId: string },
+  external: readonly ExternalIssue[],
+  syncedAt: string = new Date().toISOString(),
+): Promise<void> {
+  if (external.length === 0) return;
+  await ctx.db
+    .insert(issue)
+    .values(
+      external.map((i) => ({
+        workspaceId: ctx.workspaceId,
+        title: i.title,
+        description: i.description,
+        source: target.provider,
+        integrationId: target.integrationId,
+        repositoryId: target.repositoryId,
+        externalId: i.externalId,
+        externalNumber: i.number,
+        externalUrl: i.url,
+        // The provider's own state and hierarchy, mirrored from the first read (issue #127).
+        // An Issue imported without them would sit in a project as a row that is neither open
+        // nor closed and belongs to no epic, until the next poll happened to touch it.
+        externalState: i.state,
+        ...(i.labels ? { labels: i.labels } : {}),
+        ...(i.assignees ? { assignees: i.assignees } : {}),
+        ...(i.milestone === undefined ? {} : { milestone: i.milestone }),
+        ...(i.linkedChangeRequests ? { linkedChangeRequests: i.linkedChangeRequests } : {}),
+        ...(i.parentExternalId === undefined ? {} : { externalParentId: i.parentExternalId }),
+        syncedAt,
+      })),
+    )
+    .onConflictDoNothing();
+}
+
+/**
  * Import selected external issues as SoloW Issues (AC-2). Idempotent on
  * `(repositoryId, externalId)` — an id already imported *for this Repository* is skipped on
  * insert and its existing row is returned, so a second import of the same selection is visibly
@@ -612,30 +663,16 @@ export async function importIssues(
   const toImport = external.filter((i) => selected.has(i.externalId));
   const syncedAt = new Date().toISOString();
 
-  if (toImport.length > 0) {
-    await ctx.db
-      .insert(issue)
-      .values(
-        toImport.map((i) => ({
-          workspaceId: ctx.workspaceId,
-          title: i.title,
-          description: i.description,
-          source: cred.data.row.provider,
-          integrationId: repo.data.integrationId,
-          repositoryId: repo.data.id,
-          externalId: i.externalId,
-          externalNumber: i.number,
-          externalUrl: i.url,
-          // The provider's own state and hierarchy, mirrored from the first read (issue #127).
-          // An Issue imported without them would sit in a project as a row that is neither open
-          // nor closed and belongs to no epic, until the next poll happened to touch it.
-          externalState: i.state,
-          externalParentId: i.parentExternalId ?? null,
-          syncedAt,
-        })),
-      )
-      .onConflictDoNothing();
-  }
+  await mirrorExternalIssues(
+    ctx,
+    {
+      provider: cred.data.row.provider,
+      integrationId: repo.data.integrationId,
+      repositoryId: repo.data.id,
+    },
+    toImport,
+    syncedAt,
+  );
 
   const rows = await ctx.db
     .select()

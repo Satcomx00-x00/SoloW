@@ -1,5 +1,6 @@
 import type { ProjectFieldOption, ProjectFieldType, ProjectFieldValue } from "@solow/contracts";
 import { scmFetch, scmSend } from "./http.js";
+import { DEFAULT_LABEL_TAXONOMY } from "./label-taxonomy.js";
 import type {
   ExternalProject,
   ExternalProjectField,
@@ -7,6 +8,7 @@ import type {
   ExternalProjectItemIssue,
   ExternalProjectItemPage,
   ExternalProjectValue,
+  LabelSeed,
   ProjectFieldWrite,
   ProjectStructureProvisioned,
   ScmCredential,
@@ -69,11 +71,61 @@ interface GitlabLabel {
 }
 
 /**
- * Turn a repository's scoped labels into single-select fields.
+ * F23 FR-1's three single-selects, in canonical order. A fixed list rather than
+ * `Object.keys(mapping.scopedLabels)` — the entire point of this change is that the column set no
+ * longer depends on what the mapping happens to contain. FR-12 promises the Owner can rename the
+ * scoped-label prefix underneath a column; it never promised they could make the column
+ * disappear by omitting it from a hand-edited mapping (#124 AC-2, F23a Part 2).
+ */
+const CANONICAL_SINGLE_SELECTS = ["Status", "Priority", "Size"] as const;
+
+/**
+ * The scoped-label prefix that carries `fieldName`: the Owner's mapping when it names one, else
+ * the field's own lowercase name — the same fallback `DEFAULT_GITLAB_MAPPING` already encodes.
+ * This is what lets `fieldsFromLabels` guarantee Status/Priority/Size exist even when a custom
+ * `GitlabFieldMapping` forgot one of them, without ever inventing a prefix the mapping didn't ask
+ * for once it *does* name one.
+ */
+function canonicalPrefix(mapping: GitlabFieldMapping, fieldName: string): string {
+  return mapping.scopedLabels[fieldName] ?? fieldName.toLowerCase();
+}
+
+function singleSelectField(
+  name: string,
+  prefix: string,
+  labels: GitlabLabel[],
+  position: number,
+): ExternalProjectField {
+  const marker = `${prefix}::`;
+  const options: ProjectFieldOption[] = labels
+    .filter((l) => l.name.toLowerCase().startsWith(marker.toLowerCase()))
+    .map((l) => ({
+      id: l.name,
+      name: l.name.slice(marker.length),
+      ...(l.color ? { color: l.color } : {}),
+    }));
+  return {
+    externalId: `label:${prefix}`,
+    name,
+    type: "single_select",
+    options,
+    iterations: [],
+    position,
+    readOnly: false,
+    readOnlyReason: null,
+  };
+}
+
+/**
+ * Turn a repository's scoped labels into the seven F23 FR-1 columns, always, in canonical order —
+ * Status, Priority, Size, Estimate, Iteration, Start date, Target date — so a GitLab Project is
+ * the same shape as a GitHub one on the day it is connected, before a single scoped label exists
+ * (F23a Part 2, #124 AC-3).
  *
  * `status::in-progress` and `status::done` are two options of one field, not two labels. Grouping
  * them is the entire trick that makes GitLab look like a project — and the reason the prefix has
- * to be configuration: the grouping key *is* the field.
+ * to be configuration: the grouping key *is* the field. An empty options array is not a missing
+ * field, just a fresh one: the column still renders, waiting for its first scoped label.
  */
 export function fieldsFromLabels(
   labels: GitlabLabel[],
@@ -82,41 +134,40 @@ export function fieldsFromLabels(
   const fields: ExternalProjectField[] = [];
   let position = 0;
 
+  for (const fieldName of CANONICAL_SINGLE_SELECTS) {
+    fields.push(
+      singleSelectField(fieldName, canonicalPrefix(mapping, fieldName), labels, position++),
+    );
+  }
+
+  // A mapping may still name further scoped-label fields beyond the canonical three — FR-12 puts
+  // no ceiling on the Owner's own vocabulary. They get a column too, appended after the canonical
+  // set so "the first seven columns are always these seven" stays true regardless.
   for (const [fieldName, prefix] of Object.entries(mapping.scopedLabels)) {
-    const marker = `${prefix}::`;
-    const options: ProjectFieldOption[] = labels
-      .filter((l) => l.name.toLowerCase().startsWith(marker.toLowerCase()))
-      .map((l) => ({
-        id: l.name,
-        name: l.name.slice(marker.length),
-        ...(l.color ? { color: l.color } : {}),
-      }));
-    fields.push({
-      externalId: `label:${prefix}`,
-      name: fieldName,
-      type: "single_select",
-      options,
-      iterations: [],
-      position: position++,
-      readOnly: false,
-      readOnlyReason: null,
-    });
+    if ((CANONICAL_SINGLE_SELECTS as readonly string[]).includes(fieldName)) continue;
+    fields.push(singleSelectField(fieldName, prefix, labels, position++));
   }
 
-  // The fields this instance cannot hold are still listed, read-only, with the reason — because
-  // a column set that hides what it cannot do is a column set that lies about the project
-  // (F23 FR-5, #124 AC-3, AC-6).
-  const unavailable: Array<[string, ProjectFieldType, string]> = [];
-  if (!mapping.hasWeights) {
-    unavailable.push(["Estimate", "number", GITLAB_FIELD_SUPPORT.cannot.number ?? ""]);
-  }
-  if (!mapping.hasIterations) {
-    unavailable.push(["Iteration", "iteration", GITLAB_FIELD_SUPPORT.cannot.iteration ?? ""]);
-  }
-  unavailable.push(["Start date", "date", GITLAB_FIELD_SUPPORT.cannot.date ?? ""]);
-  unavailable.push(["Target date", "date", GITLAB_FIELD_SUPPORT.cannot.date ?? ""]);
-
-  for (const [name, type, reason] of unavailable) {
+  // Estimate, Iteration, Start date, Target date — always present, in this order, because F23
+  // FR-1 promises the same seven columns as GitHub regardless of what this instance can actually
+  // hold (Decision 0018). Whether one is editable is a tier fact, not a presence fact (F23 FR-5):
+  // Estimate/Iteration flip to editable on a tier that provides weights/iterations, while the two
+  // dates stay read-only on every tier — GitLab has no per-issue date field at all. `externalId`
+  // keeps its `unavailable:` scheme even once a field turns editable, so a stored view/column
+  // preference built against the old always-read-only shape keeps pointing at the same column.
+  const typed: Array<[name: string, type: ProjectFieldType, expressible: boolean, reason: string]> =
+    [
+      ["Estimate", "number", mapping.hasWeights, GITLAB_FIELD_SUPPORT.cannot.number ?? ""],
+      [
+        "Iteration",
+        "iteration",
+        mapping.hasIterations,
+        GITLAB_FIELD_SUPPORT.cannot.iteration ?? "",
+      ],
+      ["Start date", "date", false, GITLAB_FIELD_SUPPORT.cannot.date ?? ""],
+      ["Target date", "date", false, GITLAB_FIELD_SUPPORT.cannot.date ?? ""],
+    ];
+  for (const [name, type, expressible, reason] of typed) {
     fields.push({
       externalId: `unavailable:${name.toLowerCase().replace(/\s+/g, "-")}`,
       name,
@@ -124,8 +175,8 @@ export function fieldsFromLabels(
       options: [],
       iterations: [],
       position: position++,
-      readOnly: true,
-      readOnlyReason: reason,
+      readOnly: !expressible,
+      readOnlyReason: expressible ? null : reason,
     });
   }
   return fields;
@@ -189,7 +240,16 @@ export function valuesFromIssue(
   mapping: GitlabFieldMapping,
 ): ExternalProjectValue[] {
   const values: ExternalProjectValue[] = [];
-  for (const prefix of Object.values(mapping.scopedLabels)) {
+  // The same prefixes `fieldsFromLabels` resolves for the columns it always shows — the
+  // canonical three (falling back the same way when the mapping omits one) plus whatever else
+  // the mapping names — so a column that always exists always has somewhere to read its value
+  // from. A `Set` because the canonical fallback and an explicit mapping entry can name the same
+  // prefix, and a value should not be reported twice for one field.
+  const prefixes = new Set<string>(Object.values(mapping.scopedLabels));
+  for (const fieldName of CANONICAL_SINGLE_SELECTS) {
+    prefixes.add(canonicalPrefix(mapping, fieldName));
+  }
+  for (const prefix of prefixes) {
     const marker = `${prefix}::`;
     const found = issue.labels.find((l) => l.toLowerCase().startsWith(marker.toLowerCase()));
     values.push({
@@ -216,24 +276,46 @@ export function valuesFromIssue(
 }
 
 /**
- * The scoped-label structure a GitLab project needs to behave like a project.
+ * Which of `DEFAULT_LABEL_TAXONOMY`'s families (`label-taxonomy.ts`) seed a Project single-select,
+ * and which field they seed it for.
  *
- * A template, not a schema: a team is free to use another vocabulary, and one already using
- * `Status::Doing` keeps it — this only ever *adds* what is absent (see `provisionProjectStructure`).
- * The values are the ones GitLab teams converge on, and the order is the order they read in.
+ * The taxonomy is reused rather than duplicated — one place owns "what a fresh status/priority/
+ * size vocabulary looks like" for every provider — but it is not copied verbatim, because it
+ * wasn't written for GitLab's scoped-label syntax: its separator is `/` (`status/todo`, a plain
+ * label, the shape `createLabels`/`labelWrites` seeds on GitHub) where a GitLab scoped label needs
+ * `::` (`status::todo`), and its priority family is spelled `prio` while the field it seeds is
+ * `Priority`, mapped through whatever prefix this instance's `GitlabFieldMapping` actually uses
+ * for it (FR-12) rather than the taxonomy's own word for it. `gitlabLabelSeeds` below does that
+ * translation once. `type/*` and `area/*` are not Project columns — GitHub Projects has no such
+ * fields either — so they are left alone here and stay `createLabels`'s job.
  */
-export const GITLAB_LABEL_TEMPLATE: Record<string, string[]> = {
-  status: ["todo", "doing", "done"],
-  priority: ["high", "medium", "low"],
-  size: ["XS", "S", "M", "L", "XL"],
+const TAXONOMY_FAMILY_TO_FIELD: Record<string, string> = {
+  status: "Status",
+  prio: "Priority",
+  size: "Size",
 };
 
-/** A muted palette, so a freshly provisioned board is not a wall of primary colours. */
-const TEMPLATE_COLOR: Record<string, string> = {
-  status: "#6b7280",
-  priority: "#b45309",
-  size: "#4338ca",
-};
+/**
+ * The starter scoped-label seeds a fresh GitLab project is provisioned with: one per
+ * `DEFAULT_LABEL_TAXONOMY` value whose family maps onto a Project single-select, translated into
+ * this mapping's own `prefix::value` spelling.
+ *
+ * A template, not a schema: a team already using `Status::Doing` keeps it — this only ever *adds*
+ * what is absent (see `provisionProjectStructure`). Exported so this file's own tests can compute
+ * "what would a fresh project be seeded with" without re-deriving the translation.
+ */
+export function gitlabLabelSeeds(mapping: GitlabFieldMapping): LabelSeed[] {
+  const seeds: LabelSeed[] = [];
+  for (const seed of DEFAULT_LABEL_TAXONOMY) {
+    const slash = seed.name.indexOf("/");
+    const family = seed.name.slice(0, slash);
+    const fieldName = TAXONOMY_FAMILY_TO_FIELD[family];
+    if (!fieldName) continue;
+    const value = seed.name.slice(slash + 1);
+    seeds.push({ name: `${canonicalPrefix(mapping, fieldName)}::${value}`, color: seed.color });
+  }
+  return seeds;
+}
 
 export class GitlabProjects {
   constructor(private readonly mapping: GitlabFieldMapping = DEFAULT_GITLAB_MAPPING) {}
@@ -280,31 +362,31 @@ export class GitlabProjects {
 
     const created: string[] = [];
     const existing: string[] = [];
-    for (const [prefix, values] of Object.entries(GITLAB_LABEL_TEMPLATE)) {
-      for (const value of values) {
-        const name = `${prefix}::${value}`;
-        if (already.has(name.toLowerCase())) {
-          existing.push(name);
-          continue;
-        }
-        const url = new URL(root);
-        url.searchParams.set("name", name);
-        url.searchParams.set("color", TEMPLATE_COLOR[prefix] ?? "#6b7280");
-        /*
-         * POST, not GET — the same class of bug `writeProjectFieldValue` documents below.
-         *
-         * `scmFetch` issues a GET. GitLab answers a GET on `/labels` with the existing label
-         * list, ignoring `name`/`color` entirely: 200, a plausible array, and no label created.
-         * `already` was then computed correctly on the *next* run, so this looked idempotent —
-         * every run just re-attempted the same creation and silently did nothing, forever. The
-         * fixture test never caught it because it answers any verb with the same canned body and
-         * never asserted which one arrived.
-         */
-        await scmSend(PROVIDER, url.toString(), this.headers(credential), "POST");
-        // One at a time, sequentially: GitLab rate-limits bursty writes from one token, and a
-        // half-created label set is easier to reason about than a half-failed parallel batch.
-        created.push(name);
+    // `this.mapping`, not a hardcoded prefix: a workspace that renamed Priority's prefix in its
+    // own `GitlabFieldMapping` gets that prefix seeded, not a stray `priority::*` label the Owner
+    // never configured.
+    for (const { name, color } of gitlabLabelSeeds(this.mapping)) {
+      if (already.has(name.toLowerCase())) {
+        existing.push(name);
+        continue;
       }
+      const url = new URL(root);
+      url.searchParams.set("name", name);
+      url.searchParams.set("color", color);
+      /*
+       * POST, not GET — the same class of bug `writeProjectFieldValue` documents below.
+       *
+       * `scmFetch` issues a GET. GitLab answers a GET on `/labels` with the existing label
+       * list, ignoring `name`/`color` entirely: 200, a plausible array, and no label created.
+       * `already` was then computed correctly on the *next* run, so this looked idempotent —
+       * every run just re-attempted the same creation and silently did nothing, forever. The
+       * fixture test never caught it because it answers any verb with the same canned body and
+       * never asserted which one arrived.
+       */
+      await scmSend(PROVIDER, url.toString(), this.headers(credential), "POST");
+      // One at a time, sequentially: GitLab rate-limits bursty writes from one token, and a
+      // half-created label set is easier to reason about than a half-failed parallel batch.
+      created.push(name);
     }
     return { created, existing };
   }

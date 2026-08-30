@@ -4,10 +4,16 @@ import {
   adoptProjectResultDto,
   attachProjectRepositoryInput,
   availableProjectDto,
+  createdEpicDto,
+  createEpicInput,
   createLocalProjectInput,
   createProjectViewInput,
   detachProjectRepositoryInput,
+  externalEpicDto,
+  externalGroupDto,
   idSchema,
+  listEpicsInput,
+  listGroupsInput,
   listProjectItemsInput,
   listProjectViewsInput,
   projectDto,
@@ -26,6 +32,7 @@ import {
   updateProjectViewInput,
 } from "@solow/contracts";
 import { z } from "zod";
+import { createEpic, listCreatableGroups, listGroupEpics } from "../dal/issue-create.js";
 import {
   deleteProject,
   getProject,
@@ -380,6 +387,61 @@ export const projectRouter = router({
     .input(projectViewIdInput)
     .output(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => unwrap(await deleteProjectView(ctx.rctx, input.viewId))),
+
+  /**
+   * Create an Epic on the provider (spec F23a Flow B).
+   *
+   * On this router rather than `issue` because an epic is a *group* object with no local Issue
+   * behind it — nothing is mirrored into the `issue` table, and nothing is written to `project`
+   * either: the epic surfaces as a parent row on the next sync, which is the pass that can see
+   * which issues the provider now nests under it (F23's "nothing is imported by hand").
+   */
+  createEpic: ownerProcedure
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/project.createEpic",
+        tags: ["project"],
+        protect: true,
+        summary:
+          "Create an Epic in a group on the connected provider. Refused with a stated reason on a provider that has no epics; the answer is the epic the provider stored, never what was sent.",
+      },
+    })
+    .input(createEpicInput)
+    .output(createdEpicDto)
+    .mutation(async ({ ctx, input }) => unwrap(await createEpic(ctx.rctx, input))),
+
+  /** The groups the connection may create an epic in — the "Where" modal's picker. */
+  listGroups: ownerProcedure
+    .meta({
+      openapi: {
+        method: "GET",
+        path: "/project.listGroups",
+        tags: ["project"],
+        protect: true,
+        summary:
+          "The groups this connection can create an epic in — a pick rather than a typed guess. Empty on a provider without epics is not the answer; it is refused with the reason.",
+      },
+    })
+    .input(listGroupsInput)
+    .output(z.array(externalGroupDto))
+    .query(async ({ ctx, input }) => unwrap(await listCreatableGroups(ctx.rctx, input))),
+
+  /** The epics already in a group — the "parent epic" picker on the issue compose form. */
+  listEpics: ownerProcedure
+    .meta({
+      openapi: {
+        method: "GET",
+        path: "/project.listEpics",
+        tags: ["project"],
+        protect: true,
+        summary:
+          "The epics already in a group, read live from the provider — what an Issue can be created under.",
+      },
+    })
+    .input(listEpicsInput)
+    .output(z.array(externalEpicDto))
+    .query(async ({ ctx, input }) => unwrap(await listGroupEpics(ctx.rctx, input))),
 
   delete: ownerProcedure
     .meta({

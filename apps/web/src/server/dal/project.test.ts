@@ -149,10 +149,10 @@ describe("getProject", () => {
       expect(result.data.fields.map((f) => f.name)).toContain("Status");
       const status = result.data.fields.find((f) => f.name === "Status");
       expect(status?.options.map((o) => o.name)).toEqual(["doing"]);
-      // The parity itself, through the real query path: nineteen columns, the same nineteen a
-      // mirrored GitHub Project reports (user request 2026-08-28 — see
-      // `project-local-fields.test.ts` for the name-by-name list this count stands for).
-      expect(result.data.fields).toHaveLength(19);
+      // The parity itself, through the real query path: GitHub's column set less `Title`, which
+      // the table renders itself rather than deriving a second copy of (user request 2026-08-30 —
+      // see `project-local-fields.test.ts` for the name-by-name list this count stands for).
+      expect(result.data.fields).toHaveLength(18);
       // Still true after this — this is what FR-21 actually promises.
       expect(
         await db.select().from(projectField).where(eq(projectField.projectId, projectId)),

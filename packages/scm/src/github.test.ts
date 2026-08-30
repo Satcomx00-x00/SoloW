@@ -109,6 +109,22 @@ beforeAll(() => {
         ]);
       }
       if (url.pathname === "/api/v3/repos/acme/gate/issues") {
+        if (req.method === "POST") {
+          const body = (await req.json()) as Record<string, unknown>;
+          return Response.json({
+            id: 900,
+            number: 42,
+            title: body.title,
+            body: body.body ?? null,
+            state: "open",
+            html_url: "u/issues/42",
+            labels: ((body.labels as string[]) ?? []).map((name) => ({ name })),
+            assignees: ((body.assignees as string[]) ?? []).map((login) => ({ login })),
+            milestone: body.milestone
+              ? { number: body.milestone, title: "v1", due_on: null }
+              : null,
+          });
+        }
         return Response.json([
           {
             id: 1,
@@ -819,5 +835,68 @@ describe("issue comments", () => {
     expect(receivedWrites[0]?.body).toEqual({ body: "Looks right" });
     // Never the text that was sent — the same rule every write here follows.
     expect(posted.body).toBe("Looks right (normalised)");
+  });
+});
+
+describe("creating an Issue on GitHub (spec F23a)", () => {
+  const github = () => new GithubProvider();
+
+  it("POSTs a new issue and reads back what GitHub stored", async () => {
+    receivedWrites = [];
+
+    const created = await github().createIssue(credential(), "acme/gate", {
+      title: "New porch light",
+      description: "flickers at dusk",
+      assignees: ["octocat"],
+      labels: ["bug"],
+      milestone: "5",
+    });
+
+    expect(receivedWrites).toHaveLength(1);
+    expect(receivedWrites[0]?.method).toBe("POST");
+    expect(receivedWrites[0]?.body).toEqual({
+      title: "New porch light",
+      body: "flickers at dusk",
+      assignees: ["octocat"],
+      labels: ["bug"],
+      milestone: 5,
+    });
+    // What GitHub now holds, from its own answer — never the value that was typed.
+    expect(created).toEqual({
+      externalId: "900",
+      number: 42,
+      title: "New porch light",
+      description: "flickers at dusk",
+      state: "open",
+      url: "u/issues/42",
+      labels: ["bug"],
+      assignees: [{ login: "octocat", name: null, avatarUrl: null }],
+      milestone: { externalId: "5", title: "v1", startDate: null, dueDate: null },
+    });
+  });
+
+  it("never sends parentEpicId — GitHub's create endpoint has no such field", async () => {
+    receivedWrites = [];
+
+    await github().createIssue(credential(), "acme/gate", {
+      title: "Ignored parent",
+      parentEpicId: "77",
+    });
+
+    expect(receivedWrites[0]?.body).toEqual({ title: "Ignored parent" });
+  });
+
+  it("throws a descriptive ScmProviderError for createEpic — GitHub has no epics", async () => {
+    await expect(
+      github().createEpic(credential(), "acme", { title: "Would-be epic" }),
+    ).rejects.toThrow(/epic/i);
+    await expect(
+      github().createEpic(credential(), "acme", { title: "Would-be epic" }),
+    ).rejects.toBeInstanceOf(ScmProviderError);
+  });
+
+  it("throws for listGroups and listEpics too — there is no group to ask about", async () => {
+    await expect(github().listGroups(credential())).rejects.toBeInstanceOf(ScmProviderError);
+    await expect(github().listEpics(credential(), "acme")).rejects.toBeInstanceOf(ScmProviderError);
   });
 });

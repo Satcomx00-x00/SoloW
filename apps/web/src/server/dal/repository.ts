@@ -6,9 +6,11 @@ import {
   IntegrationErrorCode,
   type ListRepositoriesInput,
   ok,
+  type RepositoryAssigneeDto,
   type RepositoryDto,
   type RepositoryLabelDto,
   type RepositoryListDto,
+  type RepositoryMilestoneDto,
   type Result,
   type SeedDefaultLabelsResult,
   type UpdateRepositorySetupInput,
@@ -226,6 +228,67 @@ export async function listRepositoryLabels(
   }
   const labels = await driver.listLabels(resolved.data.credential, resolved.data.externalFullName);
   return ok(labels);
+}
+
+/**
+ * The users a provider Issue can be assigned to on this Repository, for the Compose modal's
+ * assignee picker (F23a Flow A). Same three refusals and the same `"issues"`-capability driver
+ * lookup as `listRepositoryLabels` — an assignee picker and a label picker are the same kind of
+ * read against the same connection, differing only in which driver method answers.
+ */
+export async function listRepositoryAssignees(
+  ctx: RequestContext,
+  repositoryId: string,
+): Promise<
+  Result<RepositoryAssigneeDto[], typeof CommonErrorCode.NotFound | IntegrationErrorCode>
+> {
+  const resolved = await loadRepositoryCredential(ctx, repositoryId);
+  if (!resolved.ok) return resolved;
+
+  // `issueWrites`, not `issues`: the provider defines the assignable-users list on its *write*
+  // capability, because a picker that offers an assignee the token cannot set would lie (the
+  // reasoning `IssueWritesCapability.listAssignableUsers` states).
+  const driver = providerWith(resolved.data.provider, "issueWrites");
+  if (!driver) {
+    return err(
+      isProviderInstalled(resolved.data.provider)
+        ? IntegrationErrorCode.CapabilityUnavailable
+        : IntegrationErrorCode.ProviderUnavailable,
+    );
+  }
+  const users = await driver.listAssignableUsers(
+    resolved.data.credential,
+    resolved.data.externalFullName,
+  );
+  return ok(users);
+}
+
+/**
+ * The milestones a provider Issue can be filed under on this Repository, for the Compose modal's
+ * milestone picker (F23a Flow A). Twin of `listRepositoryAssignees` above.
+ */
+export async function listRepositoryMilestones(
+  ctx: RequestContext,
+  repositoryId: string,
+): Promise<
+  Result<RepositoryMilestoneDto[], typeof CommonErrorCode.NotFound | IntegrationErrorCode>
+> {
+  const resolved = await loadRepositoryCredential(ctx, repositoryId);
+  if (!resolved.ok) return resolved;
+
+  const driver = providerWith(resolved.data.provider, "issueWrites");
+  if (!driver) {
+    return err(
+      isProviderInstalled(resolved.data.provider)
+        ? IntegrationErrorCode.CapabilityUnavailable
+        : IntegrationErrorCode.ProviderUnavailable,
+    );
+  }
+  const milestones = await driver.listMilestones(
+    resolved.data.credential,
+    resolved.data.externalFullName,
+  );
+  return ok(milestones);
 }
 
 /**

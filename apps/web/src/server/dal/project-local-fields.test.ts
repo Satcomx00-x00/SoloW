@@ -28,9 +28,11 @@ function issueWith(over: Partial<LocalFieldIssue> = {}): LocalFieldIssue {
  * GitHub Projects v2's own column set, in its own order, as a real mirrored Project reports it.
  * A local Project must declare exactly this — a GitLab-backed board that showed fewer columns is
  * the defect this list exists to catch (user request 2026-08-28).
+ *
+ * `Title` is the one deliberate omission: the table renders its own Title column, so deriving a
+ * second one put the same string on screen twice (user request 2026-08-30).
  */
 const GITHUB_COLUMNS = [
-  "Title",
   "Assignees",
   "Status",
   "Labels",
@@ -67,8 +69,9 @@ describe("deriveLocalProjectFields", () => {
 
     expect(fields.map((f) => f.name)).toEqual(GITHUB_COLUMNS);
     const values = valuesByIssueId.get("issue-1") ?? {};
-    // Only Title, Created and Updated are things every Issue has.
-    expect(Object.keys(values).sort()).toEqual(["local:created", "local:title", "local:updated"]);
+    // Created and Updated are the only things every Issue has (the title is the table's own
+    // column now, not a derived one — see GITHUB_COLUMNS).
+    expect(Object.keys(values).sort()).toEqual(["local:created", "local:updated"]);
   });
 
   it("declares the columns it genuinely cannot fill read-only, each with its own reason", () => {
@@ -186,7 +189,7 @@ describe("deriveLocalProjectFields", () => {
     expect(valuesByIssueId.get("unknown")).not.toHaveProperty("local:closed");
   });
 
-  it("fills Title, Labels and Linked pull requests from the Issue itself", () => {
+  it("fills Labels and Linked pull requests from the Issue itself", () => {
     const issue = issueWith({
       title: "Cap the upload size",
       labels: ["bug", "status::doing"],
@@ -213,7 +216,6 @@ describe("deriveLocalProjectFields", () => {
     const { valuesByIssueId } = deriveLocalProjectFields([issue]);
 
     expect(valuesByIssueId.get("issue-1")).toMatchObject({
-      "local:title": { type: "text", text: "Cap the upload size" },
       "local:labels": { type: "text", text: "bug, status::doing" },
       "local:linked_change_requests": { type: "text", text: "#12, #14" },
     });

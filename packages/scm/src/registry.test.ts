@@ -94,6 +94,38 @@ describe("the providers this build ships", () => {
     });
   });
 
+  describe("who can create an Issue or Epic on the provider (spec F23a)", () => {
+    it("GitHub and GitLab both declare issueCreates; Gitea declares neither", () => {
+      expect(providerManifest("github")?.capabilities).toContain("issueCreates");
+      expect(providerManifest("gitlab")?.capabilities).toContain("issueCreates");
+      expect(providerManifest("gitea")?.capabilities).not.toContain("issueCreates");
+    });
+
+    it("GitLab can create an epic; GitHub cannot, and says so rather than leaving it unanswered", () => {
+      // The "New epic" menu entry reads this to show itself disabled with the reason instead of
+      // hiding (Decision 0016: a capability difference is stated, never hidden).
+      expect(providerManifest("gitlab")?.issueCreates?.epics).toBe(true);
+      expect(providerManifest("github")?.issueCreates?.epics).toBe(false);
+    });
+
+    it("GitLab declares the four extra issue fields and links; GitHub declares none of them", () => {
+      // What the compose form gates each control on (user request 2026-08-30) — asked of the
+      // manifest, never of the provider's name.
+      const gitlab = providerManifest("gitlab")?.issueCreates;
+      const github = providerManifest("github")?.issueCreates;
+      for (const flag of ["dueDate", "weight", "confidential", "timeEstimate", "links"] as const) {
+        expect(gitlab?.[flag]).toBe(true);
+        // Explicitly false, not merely absent: "we checked and it has none" and "nobody has said"
+        // must not look the same in a manifest.
+        expect(github?.[flag]).toBe(false);
+      }
+    });
+
+    it("a provider without the capability declares nothing about issue creation", () => {
+      expect(providerManifest("gitea")?.issueCreates).toBeUndefined();
+    });
+  });
+
   it("keeps each provider's own noun out of the domain and in its manifest", () => {
     expect(providerManifest("github")?.changeRequestNoun).toBe("pull request");
     expect(providerManifest("gitlab")?.changeRequestNoun).toBe("merge request");

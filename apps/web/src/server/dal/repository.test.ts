@@ -6,7 +6,9 @@ import { createTestDb, type TestDb } from "@solow/db/testing";
 import {
   getRepository,
   listRepositories,
+  listRepositoryAssignees,
   listRepositoryLabels,
+  listRepositoryMilestones,
   updateRepositorySetup,
 } from "./repository.js";
 import { ctxFor, seedWorkspaceGraph } from "./test-fixtures.js";
@@ -116,5 +118,42 @@ describe("listRepositoryLabels — non-network cases", () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error).toBe("NOT_FOUND");
+  });
+});
+
+// The assignee and milestone pickers (F23a) share `loadRepositoryCredential` with the label
+// picker, so they refuse the same two non-network shapes for the same reasons — asserted here so
+// a future change to that shared guard cannot silently exempt one of them.
+describe("listRepositoryAssignees / listRepositoryMilestones — non-network cases", () => {
+  let db: TestDb;
+
+  beforeEach(() => {
+    db = createTestDb();
+  });
+
+  it("both return NOT_LINKED for a local-path Repository with no Integration", async () => {
+    const { workspaceId, repositoryId } = await seedWorkspaceGraph(db, "no-integration");
+    const ctx = ctxFor(db, workspaceId);
+
+    expect(await listRepositoryAssignees(ctx, repositoryId)).toEqual({
+      ok: false,
+      error: IntegrationErrorCode.NotLinked,
+    });
+    expect(await listRepositoryMilestones(ctx, repositoryId)).toEqual({
+      ok: false,
+      error: IntegrationErrorCode.NotLinked,
+    });
+  });
+
+  it("both return NOT_FOUND for a Repository from another Workspace (Principle V)", async () => {
+    const owner = await seedWorkspaceGraph(db, "members-owner");
+    const intruder = await seedWorkspaceGraph(db, "members-intruder");
+    const ctx = ctxFor(db, intruder.workspaceId);
+
+    const assignees = await listRepositoryAssignees(ctx, owner.repositoryId);
+    const milestones = await listRepositoryMilestones(ctx, owner.repositoryId);
+
+    expect(assignees).toEqual({ ok: false, error: "NOT_FOUND" });
+    expect(milestones).toEqual({ ok: false, error: "NOT_FOUND" });
   });
 });

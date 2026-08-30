@@ -9,16 +9,21 @@ import {
 } from "./http.js";
 import type {
   ChangeProvider,
+  EpicSeed,
   ExternalBranch,
   ExternalChangeRequest,
   ExternalComment,
+  ExternalEpic,
+  ExternalGroup,
   ExternalIssue,
   ExternalLabel,
   ExternalLinkedChange,
   ExternalMilestone,
   ExternalRepository,
   ExternalUser,
+  IssueCreatesCapability,
   IssuePatch,
+  IssueSeed,
   LabelSeed,
   ListIssuesOptions,
   ProjectFieldWrite,
@@ -46,6 +51,14 @@ interface GitlabIssueDetail extends GitlabIssue {
     due_date: string | null;
   } | null;
   updated_at?: string;
+  due_date?: string | null;
+  weight?: number | null;
+  confidential?: boolean;
+  /**
+   * GitLab reports time tracking as seconds plus a pre-rendered human string. The human one is
+   * what an editor shows and re-sends, because seconds are not the grammar the API accepts back.
+   */
+  time_stats?: { time_estimate?: number; human_time_estimate?: string | null };
 }
 
 /** GitLab reports assignees the same shape on every read that carries them at all. */
@@ -83,6 +96,14 @@ function toDetailedIssue(r: GitlabIssueDetail): ExternalIssue {
     assignees: mapGitlabAssignees(r.assignees),
     labels: r.labels ?? [],
     milestone: mapGitlabMilestone(r.milestone),
+    // Present-when-answered, absent when GitLab did not carry the key at all — the rule
+    // `ExternalIssue` states for every optional mirror field.
+    ...(r.due_date !== undefined ? { dueDate: r.due_date } : {}),
+    ...(r.weight !== undefined ? { weight: r.weight } : {}),
+    ...(r.confidential !== undefined ? { confidential: r.confidential } : {}),
+    ...(r.time_stats !== undefined
+      ? { timeEstimate: r.time_stats.human_time_estimate ?? null }
+      : {}),
     ...(r.updated_at ? { updatedAt: r.updated_at } : {}),
   };
 }
@@ -191,6 +212,49 @@ interface GitlabLabel {
   description: string | null;
 }
 
+interface GitlabGroup {
+  id: number;
+  full_path: string;
+  name: string;
+  web_url: string;
+}
+
+function toExternalGroup(g: GitlabGroup): ExternalGroup {
+  return { externalId: String(g.id), fullPath: g.full_path, name: g.name, url: g.web_url };
+}
+
+/**
+ * An epic, as GitLab's own API answers for one (both the create response and the group listing).
+ *
+ * `start_date`/`due_date` are the *effective* dates GitLab reports — computed from the epic's
+ * milestones unless a fixed date was set — which is why `toExternalEpic` reads these two rather
+ * than the `_fixed` fields `createEpic`'s body writes: the golden rule here is "what the provider
+ * now holds", and what it holds is whichever of the two it decided to compute.
+ */
+interface GitlabEpic {
+  id: number;
+  iid: number;
+  group_id: number;
+  title: string;
+  state: "opened" | "closed";
+  web_url: string;
+  start_date: string | null;
+  due_date: string | null;
+}
+
+function toExternalEpic(e: GitlabEpic, groupRef: string): ExternalEpic {
+  return {
+    externalId: String(e.id),
+    iid: e.iid,
+    title: e.title,
+    url: e.web_url,
+    state: e.state === "opened" ? "open" : "closed",
+    startDate: e.start_date,
+    dueDate: e.due_date,
+    groupRef,
+  };
+}
+
 /**
  * How many issues' related merge requests are read at once. Bounded for the same reason GitHub's
  * is: a poll that trips a rate limit stops syncing the repository, where a slower poll costs
@@ -209,6 +273,11 @@ function authHeaders(credential: ScmCredential): Record<string, string> {
 /** GitLab addresses a project by numeric id or by its URL-encoded "namespace/path". */
 function projectPath(repo: RepoRef): string {
   return encodeURIComponent(repo);
+}
+
+/** A group is addressed the same way a project is — numeric id or URL-encoded full path. */
+function groupPath(groupRef: string): string {
+  return encodeURIComponent(groupRef);
 }
 
 /**
@@ -245,7 +314,7 @@ function mapState(state: GitlabMergeRequest["state"]): ExternalChangeRequest["st
   return "open";
 }
 
-export class GitlabProvider implements ChangeProvider, ProjectsCapability {
+export class GitlabProvider implements ChangeProvider, ProjectsCapability, IssueCreatesCapability {
   /**
    * Planning lives in its own module because it is a different *idea*, not a different endpoint:
    * scoped labels standing in for a field store (Decision 0018). Keeping it beside `listIssues`
@@ -393,6 +462,11 @@ export class GitlabProvider implements ChangeProvider, ProjectsCapability {
       const ids = await this.userIdsFor(credential, repo, patch.assignees);
       body.assignee_ids = ids;
     }
+    // GitLab clears a due date with an empty string and a weight with null; neither takes the
+    // other's sentinel, which is why this is two lines rather than one shared one.
+    if (patch.dueDate !== undefined) body.due_date = patch.dueDate ?? "";
+    if (patch.weight !== undefined) body.weight = patch.weight;
+    if (patch.confidential !== undefined) body.confidential = patch.confidential;
 
     const row = (await scmSend(
       "gitlab",
@@ -401,7 +475,162 @@ export class GitlabProvider implements ChangeProvider, ProjectsCapability {
       "PUT",
       body,
     )) as GitlabIssueDetail;
+
+    // Time tracking is its own endpoint on GitLab — the PUT above ignores it. Unlike the create
+    // path, a failure here is *not* swallowed: this is an edit of an issue that already existed,
+    // so reporting it lets the editor show the provider's own refusal with the form intact, which
+    // is what the panel does with every other rejected save.
+    if (patch.timeEstimate !== undefined) {
+      const base = `${apiRoot(credential.baseUrl)}/projects/${encodeURIComponent(repo)}/issues/${issueNumber}`;
+      await scmSend(
+        "gitlab",
+        patch.timeEstimate === null ? `${base}/reset_time_estimate` : `${base}/time_estimate`,
+        authHeaders(credential),
+        "POST",
+        patch.timeEstimate === null ? {} : { duration: patch.timeEstimate },
+      );
+      // Re-read so the answer carries the new estimate: unlike the create path, `timeEstimate` is
+      // a field this response is expected to show back, and the PUT above predates the POST.
+      return this.getIssue(credential, repo, issueNumber);
+    }
     return toDetailedIssue(row);
+  }
+
+  /**
+   * POST a new issue and read back what GitLab stored (spec F23a Flow A). The body-building
+   * mirrors `updateIssue`'s: logins resolved through `userIdsFor` because GitLab will not assign
+   * by username, labels joined into the comma-separated string the create endpoint takes exactly
+   * like the update one does, and a milestone/epic sent by their provider-native numeric ids.
+   */
+  async createIssue(
+    credential: ScmCredential,
+    repo: RepoRef,
+    seed: IssueSeed,
+  ): Promise<ExternalIssue> {
+    const body: Record<string, unknown> = { title: seed.title };
+    if (seed.description !== undefined) body.description = seed.description;
+    if (seed.labels !== undefined) body.labels = seed.labels.join(",");
+    if (seed.milestone !== undefined) body.milestone_id = Number(seed.milestone);
+    // GitLab's create endpoint associates an epic the same way its issue link does — a numeric
+    // epic id, which is the un-prefixed half of the `epic-<id>` `parentExternalId` this driver
+    // reads on the way out (see `epicParentId`).
+    if (seed.parentEpicId !== undefined) body.epic_id = Number(seed.parentEpicId);
+    if (seed.assignees !== undefined) {
+      body.assignee_ids = await this.userIdsFor(credential, repo, seed.assignees);
+    }
+    // Straight onto the create call — GitLab takes all three in the POST body.
+    if (seed.dueDate !== undefined) body.due_date = seed.dueDate;
+    if (seed.weight !== undefined) body.weight = seed.weight;
+    if (seed.confidential !== undefined) body.confidential = seed.confidential;
+
+    const row = (await scmSend(
+      "gitlab",
+      `${apiRoot(credential.baseUrl)}/projects/${encodeURIComponent(repo)}/issues`,
+      authHeaders(credential),
+      "POST",
+      body,
+    )) as GitlabIssueDetail;
+
+    // The two that GitLab's create endpoint does not take, applied to the issue it just returned.
+    // Each is best-effort *in the sense that the issue already exists*: it has been created, and
+    // throwing here would report a failure for a write that plainly succeeded, leaving the caller
+    // to create it a second time. So a refusal is swallowed and the issue is returned as it
+    // stands — the F23 NFR-7 rule that what comes back is what the provider holds, applied to the
+    // case where the provider held only part of what was asked.
+    const iid = row.iid;
+    if (seed.timeEstimate !== undefined) {
+      await this.trySideEffect(
+        credential,
+        `${apiRoot(credential.baseUrl)}/projects/${encodeURIComponent(repo)}/issues/${iid}/time_estimate`,
+        { duration: seed.timeEstimate },
+      );
+    }
+    for (const link of seed.links ?? []) {
+      await this.trySideEffect(
+        credential,
+        `${apiRoot(credential.baseUrl)}/projects/${encodeURIComponent(repo)}/issues/${iid}/links`,
+        {
+          target_project_id: repo,
+          target_issue_iid: link.issueNumber,
+          link_type: link.type === "is_blocked_by" ? "is_blocked_by" : link.type,
+        },
+      );
+    }
+
+    // No re-read after the two side effects, deliberately: `ExternalIssue` carries neither a time
+    // estimate nor issue links, so a second GET would cost a call to return the same observable
+    // fields this response already holds. The create's own answer is what the provider stored.
+    return toDetailedIssue(row);
+  }
+
+  /**
+   * A POST whose failure must not undo the issue it decorates — see `createIssue`. Returns whether
+   * it landed, which the caller currently only needs in order to decide nothing.
+   */
+  private async trySideEffect(
+    credential: ScmCredential,
+    url: string,
+    body: Record<string, unknown>,
+  ): Promise<boolean> {
+    try {
+      await scmSend("gitlab", url, authHeaders(credential), "POST", body);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * POST a new epic in a group (spec F23a Flow B). GitLab computes an epic's dates from its
+   * milestones unless told to fix them, which is what `start_date_is_fixed`/`due_date_is_fixed`
+   * are for: sending a bare `start_date` is accepted and silently ignored on an epic with
+   * milestones, the exact "write that reports success and changes nothing" shape `updateIssue`'s
+   * own comment warns about for GitLab's `state` field. So a date in `EpicSeed` sets both the
+   * fixed flag and the fixed value; `null` clears a previously fixed date the same way; `undefined`
+   * sends neither key and leaves GitLab's default (computed) behaviour alone.
+   */
+  async createEpic(
+    credential: ScmCredential,
+    groupRef: string,
+    seed: EpicSeed,
+  ): Promise<ExternalEpic> {
+    const body: Record<string, unknown> = { title: seed.title };
+    if (seed.description !== undefined) body.description = seed.description;
+    if (seed.labels !== undefined) body.labels = seed.labels.join(",");
+    if (seed.startDate !== undefined) {
+      body.start_date_is_fixed = seed.startDate !== null;
+      if (seed.startDate !== null) body.start_date_fixed = seed.startDate;
+    }
+    if (seed.dueDate !== undefined) {
+      body.due_date_is_fixed = seed.dueDate !== null;
+      if (seed.dueDate !== null) body.due_date_fixed = seed.dueDate;
+    }
+
+    const row = (await scmSend(
+      "gitlab",
+      `${apiRoot(credential.baseUrl)}/groups/${groupPath(groupRef)}/epics`,
+      authHeaders(credential),
+      "POST",
+      body,
+    )) as GitlabEpic;
+    return toExternalEpic(row, groupRef);
+  }
+
+  /**
+   * Groups the token can create an epic in — `min_access_level=30` is Developer, GitLab's floor
+   * for creating an epic. Listing every group the token can merely *read* would offer a "Where"
+   * picker full of choices that fail the moment Create is pressed.
+   */
+  async listGroups(credential: ScmCredential): Promise<ExternalGroup[]> {
+    const url = `${apiRoot(credential.baseUrl)}/groups?min_access_level=30&per_page=100`;
+    const rows = (await scmFetch("gitlab", url, authHeaders(credential))) as GitlabGroup[];
+    return rows.map(toExternalGroup);
+  }
+
+  async listEpics(credential: ScmCredential, groupRef: string): Promise<ExternalEpic[]> {
+    const url = `${apiRoot(credential.baseUrl)}/groups/${groupPath(groupRef)}/epics?per_page=100`;
+    const rows = (await scmFetch("gitlab", url, authHeaders(credential))) as GitlabEpic[];
+    return rows.map((r) => toExternalEpic(r, groupRef));
   }
 
   async listAssignableUsers(credential: ScmCredential, repo: RepoRef): Promise<ExternalUser[]> {

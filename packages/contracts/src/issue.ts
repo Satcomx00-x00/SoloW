@@ -290,3 +290,36 @@ export const listRepositoryLabelsInput = z.object({
   repositoryId: idSchema,
 });
 export type ListRepositoryLabelsInput = z.infer<typeof listRepositoryLabelsInput>;
+
+/**
+ * A user the provider says can be assigned to an Issue in this Repository, for the Compose
+ * modal's assignee picker (F23a Flow A). Mirrors `ExternalUser` from `@solow/scm` — a login the
+ * driver resolves on write, a display name, and an avatar for the chip. Lives here beside
+ * `repositoryLabelDto` for the same reason: it exists only to serve a create-flow picker.
+ */
+export const repositoryAssigneeDto = z.object({
+  login: z.string(),
+  name: z.string().nullable(),
+  avatarUrl: z.string().nullable(),
+});
+export type RepositoryAssigneeDto = z.infer<typeof repositoryAssigneeDto>;
+
+/**
+ * A milestone the Issue can be filed under. Mirrors `ExternalMilestone`; `externalId` is the very
+ * value `createProviderIssueInput.milestone` carries back to the provider.
+ */
+export const repositoryMilestoneDto = z.object({
+  externalId: z.string(),
+  title: z.string(),
+  /** GitLab milestones carry a start date; GitHub's do not. Null where absent. */
+  startDate: z.string().nullable(),
+  dueDate: z.string().nullable(),
+});
+export type RepositoryMilestoneDto = z.infer<typeof repositoryMilestoneDto>;
+
+/**
+ * Both pickers resolve the same way `listRepositoryLabelsInput` does — from the Repository's
+ * `(provider, RepoRef)`, one id in. A single input shape rather than three identical ones.
+ */
+export const listRepositoryMembersInput = listRepositoryLabelsInput;
+export type ListRepositoryMembersInput = z.infer<typeof listRepositoryMembersInput>;

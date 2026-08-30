@@ -9,25 +9,31 @@ import {
   scmGraphql,
   scmSend,
 } from "./http.js";
-import type {
-  ChangeProvider,
-  ExternalBranch,
-  ExternalChangeRequest,
-  ExternalComment,
-  ExternalIssue,
-  ExternalLabel,
-  ExternalLinkedChange,
-  ExternalMilestone,
-  ExternalRepository,
-  ExternalUser,
-  IssuePatch,
-  LabelSeed,
-  ListIssuesOptions,
-  ProjectFieldWrite,
-  ProjectStructureProvisioned,
-  ProjectsCapability,
-  RepoRef,
-  ScmCredential,
+import {
+  type ChangeProvider,
+  type EpicSeed,
+  type ExternalBranch,
+  type ExternalChangeRequest,
+  type ExternalComment,
+  type ExternalEpic,
+  type ExternalGroup,
+  type ExternalIssue,
+  type ExternalLabel,
+  type ExternalLinkedChange,
+  type ExternalMilestone,
+  type ExternalRepository,
+  type ExternalUser,
+  type IssueCreatesCapability,
+  type IssuePatch,
+  type IssueSeed,
+  type LabelSeed,
+  type ListIssuesOptions,
+  type ProjectFieldWrite,
+  type ProjectStructureProvisioned,
+  type ProjectsCapability,
+  type RepoRef,
+  type ScmCredential,
+  ScmProviderError,
 } from "./types.js";
 
 /**
@@ -252,7 +258,7 @@ function authHeaders(credential: ScmCredential): Record<string, string> {
   };
 }
 
-export class GithubProvider implements ChangeProvider, ProjectsCapability {
+export class GithubProvider implements ChangeProvider, ProjectsCapability, IssueCreatesCapability {
   /**
    * Projects v2 lives in its own module: it is GraphQL where everything else here is REST, and
    * mixing the two transports into one file would hide which calls cost API points per query
@@ -402,6 +408,67 @@ export class GithubProvider implements ChangeProvider, ProjectsCapability {
     )) as GithubIssueDetail;
     // What GitHub now holds, from its own answer to the write — never what was sent.
     return toDetailedIssue(row);
+  }
+
+  /**
+   * POST a new issue and read back what GitHub stored (spec F23a Flow A). REST, not GraphQL,
+   * matching `updateIssue` right above it: GitHub takes assignees by login and labels by name on
+   * this endpoint directly, so there is no per-provider id resolution to do here the way GitLab's
+   * `createIssue` needs `userIdsFor` for. `parentEpicId` is accepted by the seed shape but never
+   * sent — GitHub has no epics, and its parity concept (sub-issues) is out of scope for this
+   * capability (spec F23a Part 1).
+   */
+  async createIssue(
+    credential: ScmCredential,
+    repo: RepoRef,
+    seed: IssueSeed,
+  ): Promise<ExternalIssue> {
+    const body: Record<string, unknown> = { title: seed.title };
+    if (seed.description !== undefined) body.body = seed.description;
+    if (seed.assignees !== undefined) body.assignees = seed.assignees;
+    if (seed.labels !== undefined) body.labels = seed.labels;
+    if (seed.milestone !== undefined) body.milestone = Number(seed.milestone);
+
+    const row = (await scmSend(
+      "github",
+      `${apiRoot(credential.baseUrl)}/repos/${repo}/issues`,
+      authHeaders(credential),
+      "POST",
+      body,
+    )) as GithubIssueDetail;
+    return toDetailedIssue(row);
+  }
+
+  /**
+   * GitHub has no epics (spec F23a Part 1) — the manifest declares `issueCreates.epics: false`
+   * (see `packages/scm/src/index.ts`) precisely so a caller never reaches this method through the
+   * "New epic" menu entry, which the UI disables rather than hides for exactly this provider. This
+   * throws rather than silently returning nothing so a caller that skipped the manifest check
+   * still gets a message that explains itself instead of a confusing runtime shape mismatch.
+   */
+  async createEpic(
+    _credential: ScmCredential,
+    _groupRef: string,
+    _seed: EpicSeed,
+  ): Promise<ExternalEpic> {
+    throw new ScmProviderError(
+      "github",
+      "GitHub has no epics; its parity concept is the sub-issue, tracked separately from this capability.",
+    );
+  }
+
+  async listGroups(_credential: ScmCredential): Promise<ExternalGroup[]> {
+    throw new ScmProviderError(
+      "github",
+      "GitHub has no epics, and therefore no groups to create one in.",
+    );
+  }
+
+  async listEpics(_credential: ScmCredential, _groupRef: string): Promise<ExternalEpic[]> {
+    throw new ScmProviderError(
+      "github",
+      "GitHub has no epics; there is no group to list them from.",
+    );
   }
 
   async listAssignableUsers(credential: ScmCredential, repo: RepoRef): Promise<ExternalUser[]> {

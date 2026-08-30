@@ -48,6 +48,19 @@ export const integrationCapabilitySchema = z.enum([
    * caller deciding whether "initialize default labels" is worth offering at all.
    */
   "labelWrites",
+  /**
+   * Creating a brand-new Issue, and — where the provider has the concept — a brand-new Epic
+   * (spec F23a).
+   *
+   * Separate from `issueWrites` on purpose, the same reasoning `labelWrites` above already
+   * states for the same shape of question: a provider can accept a patch to an issue it did not
+   * originate without offering the endpoint that originates one, and "update" and "create" are
+   * different permissions on every provider here. Folding this into `issueWrites` would also
+   * make it unexpressible that GitHub can create Issues but has no group object to create an
+   * Epic in at all — see `issueCreateSupportSchema`, which is what states that difference in
+   * fact rather than in a provider's name.
+   */
+  "issueCreates",
 ]);
 export type IntegrationCapability = z.infer<typeof integrationCapabilitySchema>;
 
@@ -128,6 +141,22 @@ export const issueFieldSchema = z.enum([
   "assignees",
   "labels",
   "milestone",
+  /**
+   * The four below exist on GitLab's issues and on neither GitHub's nor Gitea's (user request
+   * 2026-08-30). They are listed here — in the *closed* set every provider must answer for —
+   * rather than kept in a separate optional bag, precisely so a provider that lacks one has to
+   * say so with a sentence: the exhaustiveness refinement below turns "GitHub has no weight" from
+   * something a reader infers from silence into something the manifest states. That is the same
+   * reasoning `projectFieldSupport` follows for a column type, applied to an issue field.
+   *
+   * They mirror `IssueCreateSupport`'s flags of the same names, and deliberately so: what can be
+   * set when an Issue is created and what can be changed afterwards are different questions, and
+   * a provider may well answer them differently.
+   */
+  "dueDate",
+  "weight",
+  "confidential",
+  "timeEstimate",
 ]);
 export type IssueField = z.infer<typeof issueFieldSchema>;
 export const ISSUE_FIELDS = issueFieldSchema.options;
@@ -172,6 +201,57 @@ export const projectFieldSupportSchema = z
   );
 export type ProjectFieldSupport = z.infer<typeof projectFieldSupportSchema>;
 
+/**
+ * What a provider declaring `issueCreates` can actually originate.
+ *
+ * `createIssue` is universal to every provider that declares the capability at all — there is no
+ * provider here that creates issues but cannot say so plainly. Epics are the one part that is
+ * not: GitLab has them, GitHub does not, and a boolean rather than a second capability is enough
+ * to say so because there is nothing else about *how* an epic is created that varies by provider
+ * the way a project field's type does. This is what lets the "New epic" menu entry (spec F23a
+ * Part 1) show itself disabled with the reason instead of hiding — Decision 0016's rule that a
+ * capability difference is stated, never hidden.
+ */
+export const issueCreateSupportSchema = z.object({
+  epics: z.boolean(),
+  /**
+   * The optional fields a new Issue may carry beyond title/description/assignees/labels/milestone,
+   * which every provider declaring the capability takes. Each defaults to `false`, so a provider
+   * written before these existed keeps declaring exactly what it did — and, more importantly, a
+   * compose form asks *this* rather than the provider's name (Decision 0016) before rendering a
+   * control. A field absent here is a control the form never draws, not one it draws and the
+   * provider then refuses.
+   *
+   * Deliberately flat booleans rather than a richer descriptor: unlike a project field, whose
+   * *type* varies by provider and so needs one, there is nothing about a due date that differs
+   * between two providers that have one. Where a provider's own tier decides it — GitLab's weight
+   * is paid-tier — that is the driver's business to report, the same way `hasWeights` already
+   * decides whether the Estimate column is editable rather than whether it exists.
+   */
+  /** A per-issue due date. GitLab has one; note it has no per-issue *start* date (Decision 0018). */
+  dueDate: z.boolean().optional(),
+  /** A numeric weight/estimate stored on the issue itself. */
+  weight: z.boolean().optional(),
+  /** The issue can be created visible only to members ("confidential" on GitLab). */
+  confidential: z.boolean().optional(),
+  /** An up-front time estimate, written in the provider's own duration grammar ("2h", "3d"). */
+  timeEstimate: z.boolean().optional(),
+  /** The new Issue can be linked to existing ones (blocks / is blocked by / relates to). */
+  links: z.boolean().optional(),
+});
+export type IssueCreateSupport = z.infer<typeof issueCreateSupportSchema>;
+
+/**
+ * How one new Issue relates to an existing one (F23a, user request 2026-08-30).
+ *
+ * GitLab's three `link_type` values, kept as the neutral vocabulary because they are the three
+ * every tracker that has the concept at all agrees on. A provider that expresses only some of
+ * them still declares `links`; the driver is what maps a type it cannot express onto the nearest
+ * one it can, or refuses it — the same translation `parentEpicId` already does at that boundary.
+ */
+export const issueLinkTypeSchema = z.enum(["relates_to", "blocks", "is_blocked_by"]);
+export type IssueLinkType = z.infer<typeof issueLinkTypeSchema>;
+
 export const providerManifestDto = z.object({
   id: providerIdSchema,
   /** How the provider is spelled where a person reads it: "GitHub", "GitLab", "Gitea". */
@@ -200,6 +280,8 @@ export const providerManifestDto = z.object({
   projectFields: projectFieldSupportSchema.optional(),
   /** Present exactly when the provider declares `issueWrites`. */
   issueWrites: issueWriteSupportSchema.optional(),
+  /** Present exactly when the provider declares `issueCreates`. */
+  issueCreates: issueCreateSupportSchema.optional(),
 });
 export type ProviderManifestDto = z.infer<typeof providerManifestDto>;
 

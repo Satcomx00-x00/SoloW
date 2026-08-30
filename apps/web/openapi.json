@@ -2846,6 +2846,21 @@
                         "dueDate"
                       ]
                     },
+                    "dueDate": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "weight": {
+                      "type": "number",
+                      "nullable": true
+                    },
+                    "confidential": {
+                      "type": "boolean"
+                    },
+                    "timeEstimate": {
+                      "type": "string",
+                      "nullable": true
+                    },
                     "availableLabels": {
                       "type": "array",
                       "items": {
@@ -2960,7 +2975,11 @@
                           "state",
                           "assignees",
                           "labels",
-                          "milestone"
+                          "milestone",
+                          "dueDate",
+                          "weight",
+                          "confidential",
+                          "timeEstimate"
                         ]
                       }
                     },
@@ -2984,6 +3003,18 @@
                         },
                         "milestone": {
                           "type": "string"
+                        },
+                        "dueDate": {
+                          "type": "string"
+                        },
+                        "weight": {
+                          "type": "string"
+                        },
+                        "confidential": {
+                          "type": "string"
+                        },
+                        "timeEstimate": {
+                          "type": "string"
                         }
                       },
                       "additionalProperties": false
@@ -2999,6 +3030,10 @@
                     "assignees",
                     "labels",
                     "milestone",
+                    "dueDate",
+                    "weight",
+                    "confidential",
+                    "timeEstimate",
                     "availableLabels",
                     "availableAssignees",
                     "availableMilestones",
@@ -3120,6 +3155,26 @@
                   "milestone": {
                     "type": "string",
                     "nullable": true
+                  },
+                  "dueDate": {
+                    "type": "string",
+                    "nullable": true,
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                  },
+                  "weight": {
+                    "type": "integer",
+                    "nullable": true,
+                    "minimum": 0,
+                    "maximum": 10000
+                  },
+                  "confidential": {
+                    "type": "boolean"
+                  },
+                  "timeEstimate": {
+                    "type": "string",
+                    "nullable": true,
+                    "pattern": "^(\\d+(\\.\\d+)?(mo|w|d|h|m)\\s*)+$",
+                    "maxLength": 40
                   }
                 },
                 "required": [
@@ -3216,6 +3271,21 @@
                         "startDate",
                         "dueDate"
                       ]
+                    },
+                    "dueDate": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "weight": {
+                      "type": "number",
+                      "nullable": true
+                    },
+                    "confidential": {
+                      "type": "boolean"
+                    },
+                    "timeEstimate": {
+                      "type": "string",
+                      "nullable": true
                     },
                     "availableLabels": {
                       "type": "array",
@@ -3331,7 +3401,11 @@
                           "state",
                           "assignees",
                           "labels",
-                          "milestone"
+                          "milestone",
+                          "dueDate",
+                          "weight",
+                          "confidential",
+                          "timeEstimate"
                         ]
                       }
                     },
@@ -3355,6 +3429,18 @@
                         },
                         "milestone": {
                           "type": "string"
+                        },
+                        "dueDate": {
+                          "type": "string"
+                        },
+                        "weight": {
+                          "type": "string"
+                        },
+                        "confidential": {
+                          "type": "string"
+                        },
+                        "timeEstimate": {
+                          "type": "string"
                         }
                       },
                       "additionalProperties": false
@@ -3370,12 +3456,201 @@
                     "assignees",
                     "labels",
                     "milestone",
+                    "dueDate",
+                    "weight",
+                    "confidential",
+                    "timeEstimate",
                     "availableLabels",
                     "availableAssignees",
                     "availableMilestones",
                     "subIssues",
                     "writes",
                     "cannot"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/issue.createOnProvider": {
+      "post": {
+        "operationId": "issue-createOnProvider",
+        "summary": "Create an Issue on the connected provider (GitHub/GitLab) and mirror it back.",
+        "tags": [
+          "issue"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "repositoryId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "projectId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 300
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 65536
+                  },
+                  "assignees": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "maxItems": 50
+                  },
+                  "labels": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 50
+                    },
+                    "maxItems": 20
+                  },
+                  "milestone": {
+                    "type": "string"
+                  },
+                  "parentEpicId": {
+                    "type": "string"
+                  },
+                  "dueDate": {
+                    "type": "string",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                  },
+                  "weight": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 10000
+                  },
+                  "confidential": {
+                    "type": "boolean"
+                  },
+                  "timeEstimate": {
+                    "type": "string",
+                    "pattern": "^(\\d+(\\.\\d+)?(mo|w|d|h|m)\\s*)+$",
+                    "maxLength": 40
+                  },
+                  "links": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "issueNumber": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "exclusiveMinimum": true
+                        },
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "relates_to",
+                            "blocks",
+                            "is_blocked_by"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "issueNumber",
+                        "type"
+                      ]
+                    },
+                    "maxItems": 20
+                  }
+                },
+                "required": [
+                  "repositoryId",
+                  "title"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "issueId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "externalNumber": {
+                      "type": "integer"
+                    },
+                    "externalUrl": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "issueId",
+                    "externalNumber",
+                    "externalUrl",
+                    "title"
                   ]
                 }
               }
@@ -3752,7 +4027,8 @@
                 "repositories",
                 "changeRequests",
                 "projects",
-                "labelWrites"
+                "labelWrites",
+                "issueCreates"
               ]
             }
           }
@@ -3788,7 +4064,8 @@
                             "repositories",
                             "changeRequests",
                             "projects",
-                            "labelWrites"
+                            "labelWrites",
+                            "issueCreates"
                           ]
                         },
                         "minItems": 1
@@ -3917,7 +4194,11 @@
                                 "state",
                                 "assignees",
                                 "labels",
-                                "milestone"
+                                "milestone",
+                                "dueDate",
+                                "weight",
+                                "confidential",
+                                "timeEstimate"
                               ]
                             }
                           },
@@ -3953,6 +4234,26 @@
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 200
+                              },
+                              "dueDate": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "weight": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "confidential": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "timeEstimate": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
                               }
                             },
                             "additionalProperties": false
@@ -3961,6 +4262,32 @@
                         "required": [
                           "writes",
                           "cannot"
+                        ]
+                      },
+                      "issueCreates": {
+                        "type": "object",
+                        "properties": {
+                          "epics": {
+                            "type": "boolean"
+                          },
+                          "dueDate": {
+                            "type": "boolean"
+                          },
+                          "weight": {
+                            "type": "boolean"
+                          },
+                          "confidential": {
+                            "type": "boolean"
+                          },
+                          "timeEstimate": {
+                            "type": "boolean"
+                          },
+                          "links": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "epics"
                         ]
                       }
                     },
@@ -15711,6 +16038,425 @@
         }
       }
     },
+    "/project.createEpic": {
+      "post": {
+        "operationId": "project-createEpic",
+        "summary": "Create an Epic in a group on the connected provider. Refused with a stated reason on a provider that has no epics; the answer is the epic the provider stored, never what was sent.",
+        "tags": [
+          "project"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "integrationId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "groupRef": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "projectId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 300
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 65536
+                  },
+                  "labels": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 50
+                    },
+                    "maxItems": 20
+                  },
+                  "startDate": {
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "dueDate": {
+                    "type": "string",
+                    "nullable": true
+                  }
+                },
+                "required": [
+                  "integrationId",
+                  "groupRef",
+                  "title"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "externalId": {
+                      "type": "string"
+                    },
+                    "iid": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "open",
+                        "closed"
+                      ]
+                    },
+                    "startDate": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "dueDate": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "groupRef": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "externalId",
+                    "iid",
+                    "title",
+                    "url",
+                    "state",
+                    "startDate",
+                    "dueDate",
+                    "groupRef"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/project.listGroups": {
+      "get": {
+        "operationId": "project-listGroups",
+        "summary": "The groups this connection can create an epic in — a pick rather than a typed guess. Empty on a provider without epics is not the answer; it is refused with the reason.",
+        "tags": [
+          "project"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "integrationId",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "integrationId": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "externalId": {
+                        "type": "string"
+                      },
+                      "fullPath": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "url": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "integrationId",
+                      "externalId",
+                      "fullPath",
+                      "name",
+                      "url"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.NOT_FOUND"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/project.listEpics": {
+      "get": {
+        "operationId": "project-listEpics",
+        "summary": "The epics already in a group, read live from the provider — what an Issue can be created under.",
+        "tags": [
+          "project"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "integrationId",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true
+          },
+          {
+            "in": "query",
+            "name": "groupRef",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "externalId": {
+                        "type": "string"
+                      },
+                      "iid": {
+                        "type": "integer"
+                      },
+                      "title": {
+                        "type": "string"
+                      },
+                      "url": {
+                        "type": "string"
+                      },
+                      "state": {
+                        "type": "string",
+                        "enum": [
+                          "open",
+                          "closed"
+                        ]
+                      },
+                      "startDate": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "dueDate": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "groupRef": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "externalId",
+                      "iid",
+                      "title",
+                      "url",
+                      "state",
+                      "startDate",
+                      "dueDate",
+                      "groupRef"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.NOT_FOUND"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/project.delete": {
       "post": {
         "operationId": "project-delete",
@@ -16362,6 +17108,226 @@
                       "name",
                       "color",
                       "description"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.NOT_FOUND"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/repository.listAssignableUsers": {
+      "get": {
+        "operationId": "repository-listAssignableUsers",
+        "summary": "Fetch the users a linked Repository's GitHub/GitLab Integration can assign an Issue to, for the assignee picker.",
+        "tags": [
+          "repository"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "repositoryId",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "login": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "avatarUrl": {
+                        "type": "string",
+                        "nullable": true
+                      }
+                    },
+                    "required": [
+                      "login",
+                      "name",
+                      "avatarUrl"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.NOT_FOUND"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/repository.listMilestones": {
+      "get": {
+        "operationId": "repository-listMilestones",
+        "summary": "Fetch a linked Repository's milestones from its GitHub/GitLab Integration, for the Issue milestone picker.",
+        "tags": [
+          "repository"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "repositoryId",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "externalId": {
+                        "type": "string"
+                      },
+                      "title": {
+                        "type": "string"
+                      },
+                      "startDate": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "dueDate": {
+                        "type": "string",
+                        "nullable": true
+                      }
+                    },
+                    "required": [
+                      "externalId",
+                      "title",
+                      "startDate",
+                      "dueDate"
                     ]
                   }
                 }

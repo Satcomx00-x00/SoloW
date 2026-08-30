@@ -1,7 +1,9 @@
 import "server-only";
 import {
+  createdProviderIssueDto,
   createIssueCommentInput,
   createIssueInput,
+  createProviderIssueInput,
   deleteIssueInput,
   getIssueInput,
   IssueErrorCode,
@@ -33,6 +35,7 @@ import {
   setIssueStatus,
   updateIssue,
 } from "../dal/issue.js";
+import { createProviderIssue } from "../dal/issue-create.js";
 import {
   createIssueComment,
   listIssueComments,
@@ -258,6 +261,29 @@ export const issueRouter = router({
     .input(updateExternalIssueInput)
     .output(issueDetailDto)
     .mutation(async ({ ctx, input }) => unwrap(await updateExternalIssue(ctx.rctx, input))),
+
+  /**
+   * Originate an Issue **on the provider** (spec F23a Flow A).
+   *
+   * The third `create` on this router, and the three are genuinely different acts: `create` makes
+   * a local Issue that will never have a provider, `integration.importIssues` adopts one that
+   * already exists, and this one brings a new issue into being on GitHub or GitLab and then
+   * mirrors it back. The answer is the provider's — its number, its URL, its title — with the id
+   * of the row that mirror produced, so the table can select and scroll to it (Action 5).
+   */
+  createOnProvider: ownerProcedure
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/issue.createOnProvider",
+        tags: ["issue"],
+        protect: true,
+        summary: "Create an Issue on the connected provider (GitHub/GitLab) and mirror it back.",
+      },
+    })
+    .input(createProviderIssueInput)
+    .output(createdProviderIssueDto)
+    .mutation(async ({ ctx, input }) => unwrap(await createProviderIssue(ctx.rctx, input))),
 
   /** The discussion on one imported Issue, read live from its provider. */
   comments: ownerProcedure

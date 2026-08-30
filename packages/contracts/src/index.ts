@@ -8,6 +8,7 @@ export * from "./flag.js";
 export * from "./identity.js";
 export * from "./integration-provider.js";
 export * from "./issue.js";
+export * from "./issue-create.js";
 export * from "./issue-write.js";
 export * from "./mcp.js";
 export * from "./page.js";

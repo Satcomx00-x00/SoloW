@@ -58,6 +58,15 @@ export const issueDetailDto = z.object({
   assignees: z.array(issueUserDto),
   labels: z.array(z.string()),
   milestone: issueMilestoneDto.nullable(),
+  /**
+   * The four GitLab-only fields, as the provider currently holds them (user request 2026-08-30).
+   * `null` is a real answer ("no due date"); the editor still renders the control, because
+   * whether it may be *edited* is `writes`/`cannot`'s answer, not this one's.
+   */
+  dueDate: z.string().nullable(),
+  weight: z.number().nullable(),
+  confidential: z.boolean(),
+  timeEstimate: z.string().nullable(),
   /** The provider's own label vocabulary for this repository — the picker's options. */
   availableLabels: z.array(z.object({ name: z.string(), color: z.string().nullable() })),
   availableAssignees: z.array(issueUserDto),
@@ -100,6 +109,24 @@ export const updateExternalIssueInput = z.object({
   assignees: z.array(z.string()).max(50).optional(),
   labels: z.array(z.string()).max(100).optional(),
   milestone: z.string().nullable().optional(),
+  /**
+   * The four GitLab-only fields (user request 2026-08-30). `null` clears, absent leaves alone —
+   * the same three-state rule every key above follows, and the reason none of them collapses to a
+   * bare `.optional()`.
+   */
+  dueDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Use an ISO date, YYYY-MM-DD.")
+    .nullable()
+    .optional(),
+  weight: z.number().int().min(0).max(10_000).nullable().optional(),
+  confidential: z.boolean().optional(),
+  timeEstimate: z
+    .string()
+    .max(40)
+    .regex(/^(\d+(\.\d+)?(mo|w|d|h|m)\s*)+$/, "Use a duration like 2h, 3d or 1w 2d.")
+    .nullable()
+    .optional(),
 });
 export type UpdateExternalIssueInput = z.infer<typeof updateExternalIssueInput>;
 

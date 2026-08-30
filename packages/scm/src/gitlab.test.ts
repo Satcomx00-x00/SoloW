@@ -17,7 +17,10 @@ const LINKED = "acme/linked";
 const PREMIUM = "acme/premium";
 /** A project whose related-MR calls are throttled — the enrichment failure that matters. */
 const BUSY = "acme/busy";
+/** A group on a tier that has epics — the create/list-epic fixtures (spec F23a). */
+const GROUP = "acme/platform";
 const project = (path: string) => `/api/v4/projects/${encodeURIComponent(path)}`;
+const group = (path: string) => `/api/v4/groups/${encodeURIComponent(path)}`;
 
 beforeAll(() => {
   server = Bun.serve({
@@ -41,6 +44,23 @@ beforeAll(() => {
         return Response.json({ username: "glab" });
       }
       if (url.pathname === `/api/v4/projects/${encodeURIComponent(PROJECT)}/issues`) {
+        if (req.method === "POST") {
+          const body = (await req.json()) as Record<string, unknown>;
+          return Response.json({
+            iid: 20,
+            title: body.title,
+            description: body.description ?? null,
+            state: "opened",
+            web_url: "u/issues/20",
+            labels: body.labels === undefined ? [] : String(body.labels).split(",").filter(Boolean),
+            assignees: ((body.assignee_ids as number[]) ?? []).map((id) => ({
+              username: id === 7 ? "ada" : `user-${id}`,
+            })),
+            milestone: body.milestone_id
+              ? { id: body.milestone_id, title: "v1", start_date: null, due_date: null }
+              : null,
+          });
+        }
         return Response.json([
           {
             iid: 3,
@@ -103,6 +123,48 @@ beforeAll(() => {
             name: "feat",
             default: false,
             commit: { id: "sha2", committed_date: "2026-01-02T00:00:00Z" },
+          },
+        ]);
+      }
+      if (url.pathname === "/api/v4/groups") {
+        // Echo the query back so a test can assert the access-level floor was actually requested.
+        return Response.json([
+          {
+            id: 55,
+            full_path: "acme/platform",
+            name: "Platform",
+            web_url: "u/acme/platform",
+            _query: url.search,
+          },
+          { id: 56, full_path: "acme/design", name: "Design", web_url: "u/acme/design" },
+        ]);
+      }
+      if (url.pathname === `${group(GROUP)}/epics`) {
+        if (req.method === "POST") {
+          const body = (await req.json()) as Record<string, unknown>;
+          return Response.json({
+            id: 900,
+            iid: 12,
+            group_id: 55,
+            title: body.title,
+            state: "opened",
+            web_url: "u/epics/12",
+            // GitLab computes these from milestones unless the _fixed flags were set — the
+            // fixture stands in for that by echoing the fixed value only when it was sent.
+            start_date: body.start_date_is_fixed ? (body.start_date_fixed ?? null) : null,
+            due_date: body.due_date_is_fixed ? (body.due_date_fixed ?? null) : null,
+          });
+        }
+        return Response.json([
+          {
+            id: 901,
+            iid: 13,
+            group_id: 55,
+            title: "Existing epic",
+            state: "opened",
+            web_url: "u/epics/13",
+            start_date: "2026-08-01",
+            due_date: "2026-09-01",
           },
         ]);
       }
@@ -664,5 +726,189 @@ describe("issue comments on GitLab", () => {
     expect(receivedWrites[0]?.method).toBe("POST");
     expect(posted.body).toBe("Agreed");
     expect(posted.author?.login).toBe("ada");
+  });
+});
+
+describe("creating an Issue or Epic on GitLab (spec F23a)", () => {
+  const gitlab = () => new GitlabProvider();
+
+  it("POSTs a new issue and reads back what GitLab stored", async () => {
+    receivedWrites = [];
+
+    const created = await gitlab().createIssue(credential(), PROJECT, {
+      title: "New backlight controller",
+      description: "for the porch",
+      assignees: ["ada"],
+      labels: ["bug", "status::todo"],
+      milestone: "90",
+      parentEpicId: "77",
+    });
+
+    expect(receivedWrites).toHaveLength(1);
+    expect(receivedWrites[0]?.method).toBe("POST");
+    expect(receivedWrites[0]?.body).toEqual({
+      title: "New backlight controller",
+      description: "for the porch",
+      labels: "bug,status::todo",
+      milestone_id: 90,
+      epic_id: 77,
+      assignee_ids: [7],
+    });
+    // What GitLab stored, from its own answer — never the value that was typed.
+    expect(created).toEqual({
+      externalId: "20",
+      number: 20,
+      title: "New backlight controller",
+      description: "for the porch",
+      state: "open",
+      url: "u/issues/20",
+      labels: ["bug", "status::todo"],
+      assignees: [{ login: "ada", name: null, avatarUrl: null }],
+      milestone: { externalId: "90", title: "v1", startDate: null, dueDate: null },
+    });
+  });
+
+  it("omits a key entirely when the seed did not carry it, the same absent-vs-empty rule updateIssue follows", async () => {
+    receivedWrites = [];
+
+    await gitlab().createIssue(credential(), PROJECT, { title: "Bare minimum" });
+
+    expect(receivedWrites[0]?.body).toEqual({ title: "Bare minimum" });
+  });
+
+  it("puts due date, weight and confidential in the update body, with GitLab's own clear sentinels", async () => {
+    // Clearing differs per field on GitLab: a due date clears with "" and a weight with null.
+    receivedWrites = [];
+
+    await gitlab().updateIssue(credential(), PROJECT, 3, {
+      dueDate: null,
+      weight: 5,
+      confidential: true,
+    });
+
+    expect(receivedWrites[0]?.method).toBe("PUT");
+    expect(receivedWrites[0]?.body).toEqual({ due_date: "", weight: 5, confidential: true });
+  });
+
+  it("puts due date, weight and confidential in the create body itself", async () => {
+    // The three GitLab's POST /issues takes directly (user request 2026-08-30) — no follow-up call.
+    receivedWrites = [];
+
+    await gitlab().createIssue(credential(), PROJECT, {
+      title: "Cold weather stall",
+      dueDate: "2026-09-30",
+      weight: 3,
+      confidential: true,
+    });
+
+    expect(receivedWrites).toHaveLength(1);
+    expect(receivedWrites[0]?.body).toEqual({
+      title: "Cold weather stall",
+      due_date: "2026-09-30",
+      weight: 3,
+      confidential: true,
+    });
+  });
+
+  it("applies the time estimate and links after the issue exists, since create takes neither", async () => {
+    receivedWrites = [];
+
+    await gitlab().createIssue(credential(), PROJECT, {
+      title: "Needs an estimate",
+      timeEstimate: "2h",
+      links: [{ issueNumber: 41, type: "blocks" }],
+    });
+
+    // The create itself carries neither key...
+    expect(receivedWrites[0]?.body).toEqual({ title: "Needs an estimate" });
+    // ...they are separate POSTs against the issue GitLab just returned.
+    const paths = receivedWrites.map((w) => w.path);
+    expect(paths.some((u) => u.includes("/issues/20/time_estimate"))).toBe(true);
+    expect(paths.some((u) => u.includes("/issues/20/links"))).toBe(true);
+    expect(receivedWrites.find((w) => w.path.includes("/time_estimate"))?.body).toEqual({
+      duration: "2h",
+    });
+    expect(receivedWrites.find((w) => w.path.includes("/links"))?.body).toMatchObject({
+      target_issue_iid: 41,
+      link_type: "blocks",
+    });
+  });
+
+  it("creates an epic with a fixed start/due date, the flag GitLab needs or it computes its own", async () => {
+    // Sending a bare `start_date` is accepted and silently ignored on an epic with milestones —
+    // the same "write that reports success and changes nothing" shape `updateIssue`'s own
+    // comment documents for GitLab's `state` field.
+    receivedWrites = [];
+
+    const created = await gitlab().createEpic(credential(), GROUP, {
+      title: "Q3 roadmap",
+      description: "the big rocks",
+      labels: ["priority::high"],
+      startDate: "2026-07-01",
+      dueDate: "2026-09-30",
+    });
+
+    expect(receivedWrites[0]?.method).toBe("POST");
+    expect(receivedWrites[0]?.body).toEqual({
+      title: "Q3 roadmap",
+      description: "the big rocks",
+      labels: "priority::high",
+      start_date_is_fixed: true,
+      start_date_fixed: "2026-07-01",
+      due_date_is_fixed: true,
+      due_date_fixed: "2026-09-30",
+    });
+    expect(created).toEqual({
+      externalId: "900",
+      iid: 12,
+      title: "Q3 roadmap",
+      url: "u/epics/12",
+      state: "open",
+      startDate: "2026-07-01",
+      dueDate: "2026-09-30",
+      groupRef: GROUP,
+    });
+  });
+
+  it("clears a fixed date with null, and leaves GitLab's default alone when the seed omits it", async () => {
+    receivedWrites = [];
+
+    await gitlab().createEpic(credential(), GROUP, { title: "No dates", startDate: null });
+
+    expect(receivedWrites[0]?.body).toEqual({
+      title: "No dates",
+      start_date_is_fixed: false,
+    });
+  });
+
+  it("lists groups the token can create an epic in, scoped to Developer access or higher", async () => {
+    receivedPaths = [];
+
+    const groups = await gitlab().listGroups(credential());
+
+    expect(groups).toEqual([
+      { externalId: "55", fullPath: "acme/platform", name: "Platform", url: "u/acme/platform" },
+      { externalId: "56", fullPath: "acme/design", name: "Design", url: "u/acme/design" },
+    ]);
+    // Developer access (30) is the floor GitLab requires to create an epic — listing every group
+    // the token can merely read would offer a picker whose choices fail on Create.
+    expect(receivedPaths.at(-1)).toContain("min_access_level=30");
+  });
+
+  it("lists a group's existing epics, for the parent-epic picker", async () => {
+    const epics = await gitlab().listEpics(credential(), GROUP);
+
+    expect(epics).toEqual([
+      {
+        externalId: "901",
+        iid: 13,
+        title: "Existing epic",
+        url: "u/epics/13",
+        state: "open",
+        startDate: "2026-08-01",
+        dueDate: "2026-09-01",
+        groupRef: GROUP,
+      },
+    ]);
   });
 });

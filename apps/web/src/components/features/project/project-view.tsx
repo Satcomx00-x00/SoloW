@@ -42,6 +42,7 @@ import { AdoptProjectDialog } from "@/components/features/project/adopt-project-
 import { IssueLabel } from "@/components/features/project/issue-label";
 import { IssuePanel } from "@/components/features/project/issue-panel";
 import type { PriorityChoice } from "@/components/features/project/project-cell";
+import { ProjectCreateMenu } from "@/components/features/project/project-create-menu";
 import { ProjectRepositoriesDialog } from "@/components/features/project/project-repositories-dialog";
 import { ProjectRoadmap } from "@/components/features/project/project-roadmap";
 import { type ProjectRow, ProjectTable } from "@/components/features/project/project-table";
@@ -581,6 +582,9 @@ export function ProjectView({ projectId }: { projectId: string }) {
               ? `${items.data?.total ?? 0} items`
               : `${rows.length} of ${items.data?.total ?? 0} items`}
           </span>
+          {/* The one authoring action the toolbar has (F23a): sits immediately left of the
+              source-branched controls, its two entries each stating why when they cannot run. */}
+          {project.data && <ProjectCreateMenu project={project.data} />}
           {project.data?.source === "local" ? (
             // A local Project has no provider to poll — Refresh and Rescan exist to reconcile
             // with one, and there is none here. Its rows come from which Repositories are

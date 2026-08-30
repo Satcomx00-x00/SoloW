@@ -1,4 +1,5 @@
 import type {
+  IssueLinkType,
   ProjectFieldOption,
   ProjectFieldType,
   ProjectFieldValue,
@@ -64,6 +65,17 @@ export interface ExternalIssue {
   assignees?: ExternalUser[];
   labels?: string[];
   milestone?: ExternalMilestone | null;
+  /**
+   * The four GitLab-only fields, read back so an editor opens on what the provider actually holds
+   * rather than on a blank control (user request 2026-08-30). Optional under the same rule as
+   * everything else here: a driver that cannot answer omits the key, so "no due date" stays
+   * distinguishable from "this provider does not have due dates".
+   */
+  dueDate?: string | null;
+  weight?: number | null;
+  confidential?: boolean;
+  /** The provider's own rendering of the estimate ("2h"), not a second of raw seconds. */
+  timeEstimate?: string | null;
   /**
    * The parent issue or epic, for the hierarchy the table nests by.
    *
@@ -282,6 +294,20 @@ export interface IssuePatch {
   labels?: string[];
   /** The provider's own milestone id, or null to clear it. */
   milestone?: string | null;
+  /**
+   * The four GitLab-only fields (user request 2026-08-30). Each follows this file's absent-vs-null
+   * rule exactly as the ones above do: absent leaves it alone, `null` clears it, a value sets it.
+   * A caller decides whether to send one by reading the provider's `issueWrites` manifest, never
+   * its name — and on GitHub and Gitea the manifest's `cannot` map is what the editor renders
+   * instead of a control.
+   */
+  /** ISO `YYYY-MM-DD`, or null to clear the due date. */
+  dueDate?: string | null;
+  /** A whole number, or null to clear the weight. */
+  weight?: number | null;
+  confidential?: boolean;
+  /** A duration in the provider's own grammar ("2h"), or null to clear the estimate. */
+  timeEstimate?: string | null;
 }
 
 /**
@@ -355,6 +381,131 @@ export interface LabelWritesCapability {
     repo: RepoRef,
     labels: LabelSeed[],
   ): Promise<ProjectStructureProvisioned>;
+}
+
+/** One issue to create, in the shape every provider here takes it. */
+export interface IssueSeed {
+  title: string;
+  description?: string;
+  /** Provider logins. Resolved to whatever the provider assigns by internally (GitLab's numeric ids). */
+  assignees?: string[];
+  labels?: string[];
+  /** The provider's own milestone id — the same value `ExternalMilestone.externalId` carries. */
+  milestone?: string;
+  /**
+   * The epic this issue is created under — GitLab only. A GitHub caller simply never sends it,
+   * the same "ask the manifest, never the provider's name" rule that keeps `epicParentId` out of
+   * the domain vocabulary on the read side (Decision 0016).
+   */
+  parentEpicId?: string;
+  /**
+   * The optional fields below are each gated by a flag on the provider's `issueCreates` manifest
+   * (`IssueCreateSupport`), so a caller decides whether to send one by asking what the provider
+   * declares, never by branching on its name (Decision 0016). Absent means "the provider decides",
+   * exactly as it does for the fields above.
+   */
+  /** ISO `YYYY-MM-DD`. A due date only — an issue has no start date on GitLab (Decision 0018). */
+  dueDate?: string;
+  /** A whole number; what it means is the provider's business (GitLab: issue weight). */
+  weight?: number;
+  /** Visible only to members. Absent leaves the provider's default, which is public. */
+  confidential?: boolean;
+  /**
+   * An up-front estimate in the provider's own duration grammar (`"2h"`, `"3d"`), passed through
+   * verbatim rather than parsed to seconds here: the grammar is the provider's, and every one of
+   * them rejects a duration it cannot read with a better message than this layer could invent.
+   */
+  timeEstimate?: string;
+  /** Existing issues to link the new one to, by the provider's own issue reference. */
+  links?: IssueSeedLink[];
+}
+
+/** One link to create alongside a new Issue — see `IssueSeed.links`. */
+export interface IssueSeedLink {
+  /** The other issue's number within its container — GitHub's `number`, GitLab's `iid`. */
+  issueNumber: number;
+  type: IssueLinkType;
+}
+
+/** One epic to create, in the shape every provider that has them takes it. */
+export interface EpicSeed {
+  title: string;
+  description?: string;
+  labels?: string[];
+  /**
+   * `undefined` leaves the provider's default (GitLab computes an epic's dates from its
+   * milestones unless told otherwise); `null` clears a date that was set; a string fixes it.
+   * Three states for the same reason `IssuePatch` distinguishes absent from null throughout this
+   * file: a caller that always sent both dates would pin every epic to a fixed date it never
+   * meant to set.
+   */
+  startDate?: string | null;
+  dueDate?: string | null;
+}
+
+/**
+ * A GitLab epic, mirrored (F23a). The neutral domain calls this "a parent planning item" —
+ * GitLab is the only provider with the noun, the same way GitHub is the only one with "pull
+ * request" — but the *type* stays named for what it is at the driver boundary, where the
+ * translation actually happens; `ExternalIssue.parentExternalId` is where a caller sees the
+ * neutral shape.
+ */
+export interface ExternalEpic {
+  externalId: string;
+  /** The epic's number within its group — GitLab's `iid`, the same distinction `ExternalIssue.number` draws. */
+  iid: number;
+  title: string;
+  url: string;
+  state: "open" | "closed";
+  startDate: string | null;
+  dueDate: string | null;
+  /** The group this epic lives in, in the same space `listGroups` and `createEpic` take. */
+  groupRef: string;
+}
+
+/**
+ * A GitLab group the connected token can create an epic in — what makes the epic "Where" modal
+ * a *pick* rather than a typed guess, the same reason `ExternalRepository` exists for repositories.
+ */
+export interface ExternalGroup {
+  externalId: string;
+  /** URL-encoded the same way `RepoRef` is — a nested group ("acme/platform") is one path. */
+  fullPath: string;
+  name: string;
+  url: string;
+}
+
+/**
+ * The `issueCreates` capability: posting a brand-new Issue, and — where the provider has the
+ * concept — a brand-new Epic (spec F23a).
+ *
+ * Its own capability rather than folded into `issueWrites`, for the same reason `LabelWritesCapability`
+ * is separate from `issueWrites`: a provider can edit an issue it did not create without being able
+ * to originate one — the endpoints are different permissions on every provider here, and a token
+ * scoped to "update issues" is a real, common case this must not silently promise more than.
+ * Folding it in would also make the epic methods unexpressible for GitHub, which can write an
+ * issue's fields but has no group object to create one in at all.
+ *
+ * `createIssue`/`createEpic` answer with **what the provider now holds**, never an
+ * acknowledgement — the same rule every write in this file follows (F23 NFR-7): a provider may
+ * normalise a title, silently drop an assignee with no access, or reject a label that does not
+ * exist, and rendering back what was typed would show the operator their own input as though it
+ * were stored.
+ */
+export interface IssueCreatesCapability {
+  /** POST a new issue, and answer with what the provider stored. */
+  createIssue(credential: ScmCredential, repo: RepoRef, seed: IssueSeed): Promise<ExternalIssue>;
+  /**
+   * Create an epic in a group. Not every provider that creates issues can create epics — GitHub
+   * has none — which is exactly what the manifest's `issueCreates.epics` flag exists to say
+   * before a caller ever reaches this method (spec F23a Part 1, "GitHub declares
+   * `issueCreates.epics = false`").
+   */
+  createEpic(credential: ScmCredential, groupRef: string, seed: EpicSeed): Promise<ExternalEpic>;
+  /** Groups the token can create an epic in — the epic "Where" modal's picker. */
+  listGroups(credential: ScmCredential): Promise<ExternalGroup[]>;
+  /** Existing epics in a group, for the "parent epic" picker on the issue-create form. */
+  listEpics(credential: ScmCredential, groupRef: string): Promise<ExternalEpic[]>;
 }
 
 /** The `repositories` capability: what can be cloned, and what branches it has. */
@@ -578,7 +729,8 @@ export interface ProviderDriver
         RepositoriesCapability &
         ChangeRequestsCapability &
         ProjectsCapability &
-        LabelWritesCapability
+        LabelWritesCapability &
+        IssueCreatesCapability
     > {}
 
 /**

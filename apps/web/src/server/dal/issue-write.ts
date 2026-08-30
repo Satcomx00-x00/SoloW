@@ -93,6 +93,10 @@ function writeSupport(provider: string): { writes: IssueField[]; cannot: Record<
         assignees: NO_WRITES_REASON,
         labels: NO_WRITES_REASON,
         milestone: NO_WRITES_REASON,
+        dueDate: NO_WRITES_REASON,
+        weight: NO_WRITES_REASON,
+        confidential: NO_WRITES_REASON,
+        timeEstimate: NO_WRITES_REASON,
       },
     };
   }
@@ -191,6 +195,13 @@ export async function readIssueDetail(
     assignees: current.assignees ?? [],
     labels: current.labels ?? [],
     milestone: current.milestone ?? null,
+    // `?? null` / `?? false`: a driver omits the key when its provider cannot answer at all, and
+    // the editor shows that as "unset" rather than as a missing control — which control it shows
+    // is `writes`/`cannot`'s decision, made from the manifest.
+    dueDate: current.dueDate ?? null,
+    weight: current.weight ?? null,
+    confidential: current.confidential ?? false,
+    timeEstimate: current.timeEstimate ?? null,
     availableLabels: labels.map((l) => ({ name: l.name, color: l.color ?? null })),
     availableAssignees: assignable,
     availableMilestones: milestones,
@@ -238,6 +249,13 @@ export async function updateExternalIssue(
   if (input.assignees !== undefined) patch.assignees = input.assignees;
   if (input.labels !== undefined) patch.labels = input.labels;
   if (input.milestone !== undefined) patch.milestone = input.milestone;
+  // The four GitLab-only fields. No provider check here on purpose: the `support.writes` guard
+  // below is what refuses a field this provider cannot hold, and it does so for every key
+  // uniformly — a second, field-specific check would be a rule stated twice and drifting.
+  if (input.dueDate !== undefined) patch.dueDate = input.dueDate;
+  if (input.weight !== undefined) patch.weight = input.weight;
+  if (input.confidential !== undefined) patch.confidential = input.confidential;
+  if (input.timeEstimate !== undefined) patch.timeEstimate = input.timeEstimate;
 
   const support = writeSupport(provider);
   const touched = Object.keys(patch) as IssueField[];

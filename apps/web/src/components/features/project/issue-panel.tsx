@@ -2,18 +2,22 @@
 
 import type { IssueDetailDto, IssueField } from "@solow/contracts";
 import {
+  CalendarDays,
   Check,
   CircleCheck,
   CircleDot,
   ExternalLink,
+  EyeOff,
   ListTree,
   Loader2,
   Lock,
   Pencil,
   Plus,
   Tag,
+  Timer,
   Trash2,
   Users,
+  Weight,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { DeleteIssueAction } from "@/components/features/issues/delete-issue-action";
@@ -21,6 +25,7 @@ import { AgentMarkdown } from "@/components/features/task/markdown";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Command,
   CommandEmpty,
@@ -41,9 +46,9 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { trpc } from "@/trpc/react";
+import { groupLabelsByCategory, MarkdownField } from "./issue-authoring";
 import { IssueComments } from "./issue-comments";
 import { IssueLabel } from "./issue-label";
 import { SubIssueProgress } from "./project-progress";
@@ -200,6 +205,73 @@ export function IssuePanel({
                     <span className="font-mono">#{data.externalNumber}</span>
                     <span aria-hidden>·</span>
                     <span className="capitalize">{data.state}</span>
+                    {/* The four GitLab-only fields (user request 2026-08-30). Each renders exactly when
+                    the provider's manifest says it can be written, and otherwise shows the
+                    provider's own sentence — the same `writes`/`cannot` rule every field above
+                    follows, so GitHub's drawer states "GitHub issues have no weight" rather than
+                    quietly showing one fewer control. */}
+                    <ScalarField
+                      icon={<CalendarDays aria-hidden className="size-3.5" />}
+                      label="Due date"
+                      type="date"
+                      value={data.dueDate}
+                      display={data.dueDate ?? null}
+                      reason={reasonFor(data, "dueDate")}
+                      editable={canWrite(data, "dueDate")}
+                      pending={update.isPending}
+                      onCommit={(next) => save({ dueDate: next })}
+                    />
+                    <ScalarField
+                      icon={<Timer aria-hidden className="size-3.5" />}
+                      label="Estimate"
+                      value={data.timeEstimate}
+                      display={data.timeEstimate ?? null}
+                      placeholder="e.g. 2h, 3d"
+                      reason={reasonFor(data, "timeEstimate")}
+                      editable={canWrite(data, "timeEstimate")}
+                      pending={update.isPending}
+                      onCommit={(next) => save({ timeEstimate: next })}
+                    />
+                    <ScalarField
+                      icon={<Weight aria-hidden className="size-3.5" />}
+                      label="Weight"
+                      type="number"
+                      value={data.weight === null ? "" : String(data.weight)}
+                      display={data.weight === null ? null : String(data.weight)}
+                      reason={reasonFor(data, "weight")}
+                      editable={canWrite(data, "weight")}
+                      pending={update.isPending}
+                      // An emptied box clears the weight; anything else is a number the schema bounds.
+                      onCommit={(next) => save({ weight: next === null ? null : Number(next) })}
+                    />
+                    {canWrite(data, "confidential") ? (
+                      <label
+                        htmlFor="issue-confidential"
+                        className="flex items-center gap-2 px-1.5 text-xs"
+                      >
+                        <Checkbox
+                          id="issue-confidential"
+                          checked={data.confidential}
+                          disabled={update.isPending}
+                          onCheckedChange={(next) => save({ confidential: next === true })}
+                        />
+                        <EyeOff aria-hidden className="size-3.5 text-muted-foreground" />
+                        Confidential
+                      </label>
+                    ) : (
+                      reasonFor(data, "confidential") && (
+                        <div className="space-y-1">
+                          <span className="flex items-center gap-1.5 text-2xs text-muted-foreground">
+                            <EyeOff aria-hidden className="size-3.5" />
+                            Confidential
+                          </span>
+                          <div className="px-1.5">
+                            <Unavailable reason={reasonFor(data, "confidential") as string} />
+                          </div>
+                        </div>
+                      )
+                    )}
+
                     {data.subIssues.length > 0 && (
                       <>
                         <span aria-hidden>·</span>
@@ -331,12 +403,14 @@ export function IssuePanel({
                     )}
                   </div>
                   {editingBody && canWrite(data, "description") ? (
-                    <Textarea
-                      id="issue-body"
-                      rows={16}
+                    // The same editor the create dialog uses — a formatting toolbar and a Preview
+                    // tab rendered by the very renderer the read view below uses, so what is
+                    // previewed while editing is what appears on saving.
+                    <MarkdownField
                       value={description}
-                      onChange={(event) => setDescription(event.target.value)}
-                      className="font-mono text-xs"
+                      onChange={setDescription}
+                      label="Description"
+                      disabled={update.isPending}
                     />
                   ) : data.description ? (
                     <div className="rounded-lg border bg-card/40 px-4 py-3">
@@ -426,6 +500,20 @@ export function IssuePanel({
                     selected: data.labels.includes(l.name),
                     node: <IssueLabel name={l.name} color={l.color} />,
                   }))}
+                  // Split into Area/Priority/Status/... groups when the repository actually uses
+                  // scoped labels, and left as one flat list when it does not — the same rule, and
+                  // the same function, the create dialog's picker follows.
+                  groupBy={(options) =>
+                    groupLabelsByCategory(
+                      options.map((o) => ({ name: o.key, color: null, description: null })),
+                    ).map((g) => ({
+                      key: g.key,
+                      heading: g.heading,
+                      items: g.items
+                        .map((i) => options.find((o) => o.key === i.name))
+                        .filter((o) => o !== undefined),
+                    }))
+                  }
                   emptyText="This repository has no labels."
                   onToggle={(name) => save({ labels: toggle(data.labels, name) })}
                   pending={update.isPending}
@@ -554,6 +642,93 @@ export function IssuePanel({
 }
 
 /** A labelled row whose value is either a picker or a sentence saying why it is not. */
+/**
+ * A single typed value the provider owns — a date, a number, a duration (user request
+ * 2026-08-30).
+ *
+ * Not a `Field`: that one is a *pick* from the provider's own vocabulary, and these four have no
+ * vocabulary to pick from. What they share with it is the rule that matters — a field the provider
+ * cannot hold is the provider's sentence, never a disabled box (F23 FR-5).
+ *
+ * Commits on blur and on Enter, and only when the value actually changed, so opening the drawer
+ * and clicking through it writes nothing. An emptied box commits `null`, which is how every one of
+ * these is cleared; `Escape` puts the provider's value back and gives up the edit.
+ */
+function ScalarField({
+  icon,
+  label,
+  type = "text",
+  value,
+  display,
+  placeholder,
+  reason,
+  editable,
+  pending,
+  onCommit,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  type?: "text" | "date" | "number";
+  /** The provider's current value, as the input should show it. */
+  value: string | null;
+  /** The same value as the read-only view renders it, or null for "unset". */
+  display: string | null;
+  placeholder?: string;
+  reason: string | null;
+  editable: boolean;
+  pending: boolean;
+  onCommit: (next: string | null) => void;
+}) {
+  const [draft, setDraft] = useState(value ?? "");
+  // Re-seed when the provider's answer changes — a save re-reads the issue, and the box must show
+  // what came back rather than what was typed (F23 NFR-7).
+  useEffect(() => setDraft(value ?? ""), [value]);
+
+  const commit = () => {
+    const next = draft.trim() === "" ? null : draft.trim();
+    if (next === (value ?? null)) return;
+    onCommit(next);
+  };
+
+  return (
+    <div className="space-y-1.5">
+      <span className="flex items-center gap-1.5 text-2xs text-muted-foreground">
+        {icon}
+        {label}
+      </span>
+      {editable ? (
+        <Input
+          type={type}
+          aria-label={label}
+          value={draft}
+          disabled={pending}
+          placeholder={placeholder ?? "—"}
+          className="h-7 text-xs"
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.currentTarget.blur();
+            } else if (e.key === "Escape") {
+              setDraft(value ?? "");
+              e.currentTarget.blur();
+            }
+          }}
+        />
+      ) : (
+        <div className="space-y-1 px-1.5 py-1">
+          {display ? (
+            <span className="text-xs">{display}</span>
+          ) : (
+            <span className="text-2xs text-muted-foreground/60">Unset</span>
+          )}
+          {reason && <Unavailable reason={reason} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Field({
   icon,
   label,
@@ -561,6 +736,7 @@ function Field({
   editable,
   trigger,
   options,
+  groupBy,
   emptyText,
   onToggle,
   pending,
@@ -571,6 +747,18 @@ function Field({
   editable: boolean;
   trigger: React.ReactNode;
   options: Array<{ key: string; label: string; selected: boolean; node: React.ReactNode }>;
+  /**
+   * How to split `options` into headed groups. When absent — or when it yields nothing — the whole
+   * list renders as one unheaded group, exactly as it always did. Only Labels passes it (user
+   * request 2026-08-30: split by category *when there are categories*, one list otherwise).
+   */
+  groupBy?: (
+    options: Array<{ key: string; label: string; selected: boolean; node: React.ReactNode }>,
+  ) => Array<{
+    key: string;
+    heading: string | null;
+    items: Array<{ key: string; label: string; selected: boolean; node: React.ReactNode }>;
+  }>;
   emptyText: string;
   onToggle: (key: string) => void;
   pending: boolean;
@@ -599,21 +787,25 @@ function Field({
               <CommandInput placeholder={`Search ${label.toLowerCase()}…`} className="h-8" />
               <CommandList>
                 <CommandEmpty>{emptyText}</CommandEmpty>
-                <CommandGroup>
-                  {options.map((o) => (
-                    <CommandItem
-                      key={o.key || "__none"}
-                      value={o.label}
-                      onSelect={() => {
-                        setOpen(false);
-                        onToggle(o.key);
-                      }}
-                    >
-                      {o.node}
-                      {o.selected && <span className="ml-auto text-2xs">✓</span>}
-                    </CommandItem>
-                  ))}
-                </CommandGroup>
+                {(groupBy?.(options) ?? [{ key: "__all", heading: null, items: options }]).map(
+                  (group) => (
+                    <CommandGroup key={group.key} heading={group.heading ?? undefined}>
+                      {group.items.map((o) => (
+                        <CommandItem
+                          key={o.key || "__none"}
+                          value={o.label}
+                          onSelect={() => {
+                            setOpen(false);
+                            onToggle(o.key);
+                          }}
+                        >
+                          {o.node}
+                          {o.selected && <span className="ml-auto text-2xs">✓</span>}
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  ),
+                )}
               </CommandList>
             </Command>
           </PopoverContent>

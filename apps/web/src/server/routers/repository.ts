@@ -3,9 +3,12 @@ import {
   connectRepositoryInput,
   listRepositoriesInput,
   listRepositoryLabelsInput,
+  listRepositoryMembersInput,
+  repositoryAssigneeDto,
   repositoryDto,
   repositoryLabelDto,
   repositoryListDto,
+  repositoryMilestoneDto,
   seedDefaultLabelsInput,
   seedDefaultLabelsResult,
   updateRepositorySetupInput,
@@ -14,7 +17,9 @@ import { z } from "zod";
 import {
   connectRepository,
   listRepositories,
+  listRepositoryAssignees,
   listRepositoryLabels,
+  listRepositoryMilestones,
   seedDefaultLabels,
   updateRepositorySetup,
 } from "../dal/repository.js";
@@ -80,6 +85,40 @@ export const repositoryRouter = router({
     .output(z.array(repositoryLabelDto))
     .query(async ({ ctx, input }) =>
       unwrap(await listRepositoryLabels(ctx.rctx, input.repositoryId)),
+    ),
+  // Twins of `listLabels`: same `integrationsProcedure`, same provider round-trip, feeding the
+  // Compose modal's assignee and milestone pickers (F23a Flow A).
+  listAssignableUsers: integrationsProcedure
+    .meta({
+      openapi: {
+        method: "GET",
+        path: "/repository.listAssignableUsers",
+        tags: ["repository"],
+        protect: true,
+        summary:
+          "Fetch the users a linked Repository's GitHub/GitLab Integration can assign an Issue to, for the assignee picker.",
+      },
+    })
+    .input(listRepositoryMembersInput)
+    .output(z.array(repositoryAssigneeDto))
+    .query(async ({ ctx, input }) =>
+      unwrap(await listRepositoryAssignees(ctx.rctx, input.repositoryId)),
+    ),
+  listMilestones: integrationsProcedure
+    .meta({
+      openapi: {
+        method: "GET",
+        path: "/repository.listMilestones",
+        tags: ["repository"],
+        protect: true,
+        summary:
+          "Fetch a linked Repository's milestones from its GitHub/GitLab Integration, for the Issue milestone picker.",
+      },
+    })
+    .input(listRepositoryMembersInput)
+    .output(z.array(repositoryMilestoneDto))
+    .query(async ({ ctx, input }) =>
+      unwrap(await listRepositoryMilestones(ctx.rctx, input.repositoryId)),
     ),
   // `integrationsProcedure`, same reasoning as `listLabels` just above: this writes to whichever
   // provider the Repository is linked to.

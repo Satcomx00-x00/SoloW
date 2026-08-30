@@ -2,6 +2,7 @@ import {
   err,
   INTEGRATION_CAPABILITIES,
   type IntegrationCapability,
+  type IssueCreateSupport,
   type IssueWriteSupport,
   ok,
   type ProjectFieldSupport,
@@ -59,6 +60,13 @@ export interface ProviderDescriptor<Driver> {
    * to render at all — never the provider's name.
    */
   readonly issueWrites?: IssueWriteSupport;
+  /**
+   * Whether this provider can create an Epic, for a provider declaring `issueCreates` (spec
+   * F23a). Stands to `issueCreates` as `issueWrites` stands to `issueWrites` above: the
+   * capability says a new Issue can be posted, this says whether a new Epic can be too — GitHub
+   * cannot, GitLab can, and a caller asks this rather than the provider's name (Decision 0016).
+   */
+  readonly issueCreates?: IssueCreateSupport;
   readonly driver: Driver;
 }
 
@@ -92,6 +100,7 @@ const REQUIRED_METHODS: Record<IntegrationCapability, readonly string[]> = {
   changeRequests: ["listChangeRequests"],
   projects: ["listProjects", "readProjectFields", "readProjectItems", "writeProjectFieldValue"],
   labelWrites: ["createLabels"],
+  issueCreates: ["createIssue", "createEpic", "listGroups", "listEpics"],
 };
 
 export class ProviderRegistry<Driver extends object> {
@@ -188,5 +197,8 @@ export function toManifest<Driver>(descriptor: ProviderDescriptor<Driver>): Prov
     // Same reason: which controls an issue editor may draw is a question about the provider's
     // abilities, asked on every render, and answering it from an id is what Decision 0016 forbids.
     ...(descriptor.issueWrites ? { issueWrites: descriptor.issueWrites } : {}),
+    // Same reason again: whether the "New epic" menu entry is offered or shown disabled with a
+    // reason is a question about this provider's abilities, not about its name (spec F23a).
+    ...(descriptor.issueCreates ? { issueCreates: descriptor.issueCreates } : {}),
   };
 }

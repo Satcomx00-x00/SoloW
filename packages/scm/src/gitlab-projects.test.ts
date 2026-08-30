@@ -3,10 +3,21 @@ import {
   DEFAULT_GITLAB_MAPPING,
   fieldsFromLabels,
   GITLAB_FIELD_SUPPORT,
-  GITLAB_LABEL_TEMPLATE,
   GitlabProjects,
+  gitlabLabelSeeds,
   valuesFromIssue,
 } from "./gitlab-projects.js";
+
+/** F23 FR-1's column set, in canonical order — the shape every fixture below is measured against. */
+const CANONICAL_COLUMNS = [
+  "Status",
+  "Priority",
+  "Size",
+  "Estimate",
+  "Iteration",
+  "Start date",
+  "Target date",
+];
 
 /**
  * GitLab planning against fixtures for **both a Free and a Premium instance** (#124 DoD).
@@ -67,19 +78,68 @@ describe("fieldsFromLabels", () => {
     expect(fields.find((f) => f.name === "Status")?.options.map((o) => o.name)).toEqual(["Doing"]);
   });
 
+  it("guarantees Status/Priority/Size even when a custom mapping forgets one", () => {
+    // F23a Part 2: FR-12 lets the Owner rename the prefix under a column, not delete the column.
+    // A mapping that only ever mentions Status must not cost the project its Priority and Size
+    // columns — they fall back to the field's own lowercase name, same as
+    // `DEFAULT_GITLAB_MAPPING` already spells it.
+    const fields = fieldsFromLabels(LABELS, {
+      ...DEFAULT_GITLAB_MAPPING,
+      scopedLabels: { Status: "status" },
+    });
+
+    expect(fields.filter((f) => f.type === "single_select").map((f) => f.name)).toEqual([
+      "Status",
+      "Priority",
+      "Size",
+    ]);
+    // Priority still reads its options from whatever `priority::*` labels exist, exactly as if
+    // the mapping had named it explicitly.
+    expect(fields.find((f) => f.name === "Priority")?.options.map((o) => o.name)).toEqual(["high"]);
+  });
+
+  it("on a project with zero scoped labels, still shows all seven columns in canonical order", () => {
+    // F23a Part 2: the column set never depends on which labels happen to exist. A fresh
+    // project reads exactly like a fresh GitHub Project — same seven headers, no data yet.
+    const fields = fieldsFromLabels([], DEFAULT_GITLAB_MAPPING);
+
+    expect(fields.map((f) => f.name)).toEqual(CANONICAL_COLUMNS);
+    expect(fields.map((f) => f.position)).toEqual([0, 1, 2, 3, 4, 5, 6]);
+
+    const singleSelects = fields.slice(0, 3);
+    for (const field of singleSelects) {
+      expect(field.type).toBe("single_select");
+      expect(field.readOnly).toBe(false);
+      expect(field.readOnlyReason).toBeNull();
+      // A fresh project has no scoped labels yet — an empty options array, not a missing column.
+      expect(field.options).toEqual([]);
+    }
+
+    const readOnly = fields.slice(3);
+    for (const field of readOnly) {
+      expect(field.readOnly).toBe(true);
+      expect(field.readOnlyReason).toBeTruthy();
+    }
+  });
+
   describe("on a Free instance", () => {
     it("lists what it cannot hold, read-only, with the reason naming the tier", () => {
       // #124 AC-3 and AC-6: usable on Free, with the unavailable fields named rather than hidden.
       const fields = fieldsFromLabels(LABELS, DEFAULT_GITLAB_MAPPING);
       const estimate = fields.find((f) => f.name === "Estimate");
       const iteration = fields.find((f) => f.name === "Iteration");
+      const start = fields.find((f) => f.name === "Start date");
+      const target = fields.find((f) => f.name === "Target date");
 
       expect(estimate).toMatchObject({ type: "number", readOnly: true });
       expect(estimate?.readOnlyReason).toMatch(/paid tier/i);
       expect(iteration).toMatchObject({ type: "iteration", readOnly: true });
+      expect(iteration?.readOnlyReason).toBeTruthy();
+      expect(start?.readOnlyReason).toBeTruthy();
+      expect(target?.readOnlyReason).toBeTruthy();
     });
 
-    it("still offers every scoped-label field as editable", () => {
+    it("still offers every scoped-label field as editable, and the read-only four besides", () => {
       const fields = fieldsFromLabels(LABELS, DEFAULT_GITLAB_MAPPING);
 
       expect(fields.filter((f) => !f.readOnly).map((f) => f.name)).toEqual([
@@ -87,19 +147,31 @@ describe("fieldsFromLabels", () => {
         "Priority",
         "Size",
       ]);
+      // Read-only, not absent — the whole point of F23a Part 2.
+      expect(fields.map((f) => f.name)).toEqual(CANONICAL_COLUMNS);
     });
   });
 
   describe("on a Premium instance", () => {
-    it("stops refusing the fields the tier provides", () => {
+    it("flips Estimate and Iteration to editable, without dropping or reordering the columns", () => {
       const fields = fieldsFromLabels(LABELS, {
         ...DEFAULT_GITLAB_MAPPING,
         hasIterations: true,
         hasWeights: true,
       });
 
-      expect(fields.some((f) => f.name === "Estimate")).toBe(false);
-      expect(fields.some((f) => f.name === "Iteration")).toBe(false);
+      expect(fields.map((f) => f.name)).toEqual(CANONICAL_COLUMNS);
+      expect(fields.find((f) => f.name === "Estimate")).toMatchObject({
+        readOnly: false,
+        readOnlyReason: null,
+      });
+      expect(fields.find((f) => f.name === "Iteration")).toMatchObject({
+        readOnly: false,
+        readOnlyReason: null,
+      });
+      // externalId is unchanged by the flip — a stored column preference keeps pointing at the
+      // same column whether this workspace is Free or Premium today.
+      expect(fields.find((f) => f.name === "Estimate")?.externalId).toBe("unavailable:estimate");
     });
 
     it("still refuses per-issue dates, which no tier provides", () => {
@@ -110,6 +182,7 @@ describe("fieldsFromLabels", () => {
       });
 
       expect(fields.find((f) => f.name === "Start date")?.readOnly).toBe(true);
+      expect(fields.find((f) => f.name === "Target date")?.readOnly).toBe(true);
     });
   });
 });
@@ -233,9 +306,41 @@ describe("provisionProjectStructure", () => {
 
     expect(result.existing).toContain("status::todo");
     expect(result.created).not.toContain("status::todo");
+    // Seeded from `DEFAULT_LABEL_TAXONOMY` (F23a Part 2), not a hand-kept duplicate list — one
+    // of each family's values is enough to prove all three are reached.
     expect(result.created).toContain("status::done");
-    expect(result.created).toContain("priority::high");
-    expect(result.created).toContain("size::XL");
+    expect(result.created).toContain("priority::p0");
+    expect(result.created).toContain("size::xl");
+  });
+
+  it("covers all three canonical single-selects, and only those", async () => {
+    // #124: the columns this seeds line up with `fieldsFromLabels`' canonical three — no more,
+    // no less. `type/*` and `area/*` are `createLabels`' vocabulary, not a Project column, and
+    // stay untouched here.
+    paths = [];
+    response = [];
+    const projects = new GitlabProjects();
+
+    const result = await projects.provisionProjectStructure(credential(), "42");
+    const prefixes = new Set(result.created.map((name) => name.split("::")[0]));
+
+    expect(prefixes).toEqual(new Set(["status", "priority", "size"]));
+  });
+
+  it("seeds a mapping's own custom prefix, not a hardcoded one", async () => {
+    // A workspace that renamed Priority's prefix in its `GitlabFieldMapping` gets that prefix
+    // seeded — provisioning is mapping-aware, the same as `fieldsFromLabels` reads it.
+    paths = [];
+    response = [];
+    const projects = new GitlabProjects({
+      ...DEFAULT_GITLAB_MAPPING,
+      scopedLabels: { ...DEFAULT_GITLAB_MAPPING.scopedLabels, Priority: "prio" },
+    });
+
+    const result = await projects.provisionProjectStructure(credential(), "42");
+
+    expect(result.created.some((name) => name.startsWith("prio::"))).toBe(true);
+    expect(result.created.some((name) => name.startsWith("priority::"))).toBe(false);
   });
 
   it("creates a label with POST, not GET — a GET silently does nothing on real GitLab", async () => {
@@ -287,10 +392,14 @@ describe("provisionProjectStructure", () => {
   });
 
   it("creates nothing on a repository that already has the whole template", async () => {
+    // Idempotent by construction: seed the fixture with exactly what `gitlabLabelSeeds` would
+    // create, and a second provisioning run must create nothing at all.
     paths = [];
-    response = Object.entries(GITLAB_LABEL_TEMPLATE).flatMap(([prefix, values]) =>
-      values.map((v, i) => ({ id: i, name: `${prefix}::${v}`, color: null })),
-    );
+    response = gitlabLabelSeeds(DEFAULT_GITLAB_MAPPING).map((seed, i) => ({
+      id: i,
+      name: seed.name,
+      color: seed.color,
+    }));
     const projects = new GitlabProjects();
 
     const result = await projects.provisionProjectStructure(credential(), "42");

@@ -7,6 +7,7 @@ import { GitlabProvider } from "./gitlab.js";
 import { GITLAB_FIELD_SUPPORT } from "./gitlab-projects.js";
 import type {
   ChangeRequestsCapability,
+  IssueCreatesCapability,
   IssuesCapability,
   IssueWritesCapability,
   LabelWritesCapability,
@@ -58,12 +59,38 @@ const patField = {
 /**
  * What a full source host can be asked to change on an issue.
  *
- * All three drivers here can write every field, which makes the `cannot` map empty and the
- * declaration look ceremonial. It is not: the shape is what lets a *tracker* — a read-only mirror,
- * a provider whose milestones are a paid tier — say so in a sentence instead of failing at the
- * first save. A contract written only for providers that can do everything never finds out that
- * one cannot, which is the mistake Decision 0018 was written about.
+ * This used to be every driver's declaration with an empty `cannot`, and the comment here said
+ * the shape was not ceremonial even so. It stopped being hypothetical the moment GitLab's four
+ * extra issue fields joined `ISSUE_FIELDS` (user request 2026-08-30): GitHub and Gitea have none
+ * of them, and now say so in a sentence apiece rather than failing at the first save. A contract
+ * written only for providers that can do everything never finds out that one cannot, which is the
+ * mistake Decision 0018 was written about — and this is that discovery, on the issue side.
  */
+const GITLAB_ONLY_ISSUE_FIELDS = ["dueDate", "weight", "confidential", "timeEstimate"] as const;
+
+/** Every field this build knows, less the four only GitLab holds. */
+const COMMON_ISSUE_FIELDS = ISSUE_FIELDS.filter(
+  (f) => !(GITLAB_ONLY_ISSUE_FIELDS as readonly string[]).includes(f),
+);
+
+/**
+ * The sentence shown where each of the four would have had a control. Written per provider rather
+ * than shared, because "GitHub issues have no weight" and "Gitea issues have no weight" are the
+ * same shape of fact about two different products, and a reader is owed the name of the one they
+ * are actually looking at (F23 FR-5).
+ */
+const noSuchField = (product: string) =>
+  ({
+    dueDate: `${product} issues have no due date.`,
+    weight: `${product} issues have no weight — it is a GitLab field.`,
+    confidential: `${product} issues have no confidential flag.`,
+    timeEstimate: `${product} issues carry no time estimate.`,
+  }) as const;
+
+const ISSUE_WRITES_WITHOUT_GITLAB_EXTRAS = (product: string) =>
+  ({ writes: COMMON_ISSUE_FIELDS, cannot: noSuchField(product) }) as const;
+
+/** GitLab alone writes all of them. */
 const FULL_ISSUE_WRITES = { writes: ISSUE_FIELDS, cannot: {} } as const;
 
 const baseUrlField = (help: string, placeholder: string, required: boolean) =>
@@ -79,6 +106,7 @@ registry.register({
     "changeRequests",
     "projects",
     "labelWrites",
+    "issueCreates",
   ],
   /**
    * Projects v2 expresses every type in the union — which is precisely why it must not be the
@@ -86,7 +114,27 @@ registry.register({
    * discovers that another cannot (Decision 0018); GitLab, below, is that discovery.
    */
   projectFields: { expresses: PROJECT_FIELD_TYPES, cannot: {} },
-  issueWrites: FULL_ISSUE_WRITES,
+  issueWrites: ISSUE_WRITES_WITHOUT_GITLAB_EXTRAS("GitHub"),
+  /**
+   * GitHub can create an Issue and has no epics — its own parity concept is the sub-issue,
+   * tracked separately (spec F23a Part 1). `createEpic`/`listGroups`/`listEpics` still exist on
+   * `GithubProvider` (the registry's `CapabilityNotImplemented` check requires it), and each
+   * throws a descriptive `ScmProviderError` a caller should never actually reach because this
+   * flag is what disables the "New epic" menu entry before it gets the chance.
+   */
+  issueCreates: {
+    epics: false,
+    // GitHub's issues carry none of these five as a field of their own: no due date, no weight,
+    // no confidential flag, no time estimate, and its issue relationships are sub-issues rather
+    // than the blocks/relates-to links GitLab models (user request 2026-08-30). Declared `false`
+    // explicitly rather than left to the schema default, because "we checked and it has none" and
+    // "nobody has said" should not look the same in a manifest.
+    dueDate: false,
+    weight: false,
+    confidential: false,
+    timeEstimate: false,
+    links: false,
+  },
   changeRequestNoun: "pull request",
   fields: [
     patField,
@@ -109,6 +157,7 @@ registry.register({
     "changeRequests",
     "projects",
     "labelWrites",
+    "issueCreates",
   ],
   /**
    * The declaration that keeps GitLab a first-class provider rather than a degraded GitHub: what
@@ -116,6 +165,21 @@ registry.register({
    */
   projectFields: GITLAB_FIELD_SUPPORT,
   issueWrites: FULL_ISSUE_WRITES,
+  /**
+   * GitLab groups are epics (spec F23a Part 1) — the one provider here that has the concept — and
+   * a GitLab issue carries four more fields than the universal set plus real issue links (user
+   * request 2026-08-30). `weight` is declared here because the *field* exists on every tier; that
+   * a free tier ignores it is a tier fact, reported the way `hasWeights` already reports it for
+   * the Estimate column rather than by pretending the field is absent.
+   */
+  issueCreates: {
+    epics: true,
+    dueDate: true,
+    weight: true,
+    confidential: true,
+    timeEstimate: true,
+    links: true,
+  },
   changeRequestNoun: "merge request",
   fields: [
     patField,
@@ -132,7 +196,7 @@ registry.register({
   id: "gitea",
   name: "Gitea",
   capabilities: ["issues", "issueWrites", "repositories", "changeRequests"],
-  issueWrites: FULL_ISSUE_WRITES,
+  issueWrites: ISSUE_WRITES_WITHOUT_GITLAB_EXTRAS("Gitea"),
   changeRequestNoun: "pull request",
   fields: [
     patField,
@@ -195,7 +259,9 @@ export type DriverWith<C extends IntegrationCapability> = ProviderDriver &
           ? ProjectsCapability
           : C extends "labelWrites"
             ? LabelWritesCapability
-            : ChangeRequestsCapability);
+            : C extends "issueCreates"
+              ? IssueCreatesCapability
+              : ChangeRequestsCapability);
 
 export function providerWith<C extends IntegrationCapability>(
   provider: string,
