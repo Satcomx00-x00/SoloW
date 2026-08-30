@@ -58,9 +58,17 @@ beforeAll(() => {
     name: "Writable",
     capabilities: ["issues", "issueWrites"],
     fields: [],
+    // The GitHub shape: writes the six every provider has, explains the four only GitLab holds.
+    // Exhaustive on purpose — a field in neither list is the silent gap F23 FR-5 forbids, and
+    // `registry.test.ts` now asserts no shipped manifest has one.
     issueWrites: {
       writes: ["title", "description", "state", "assignees", "labels", "milestone"],
-      cannot: {},
+      cannot: {
+        dueDate: "Fixture issues have no due date.",
+        weight: "Fixture issues have no weight.",
+        confidential: "Fixture issues have no confidential flag.",
+        timeEstimate: "Fixture issues carry no time estimate.",
+      },
     },
     driver: {
       provider: FIXTURE,
@@ -255,6 +263,36 @@ describe("updateExternalIssue", () => {
     const issueId = await seed(READONLY);
 
     const result = await updateExternalIssue(ctxFor(db, acme), { issueId, title: "Renamed" });
+
+    expect(result.ok).toBe(false);
+    expect(received).toHaveLength(0);
+  });
+
+  it("refuses one unwritable field even when the provider writes every other one", async () => {
+    // The case the READONLY test above cannot reach: a provider that genuinely writes most of an
+    // issue and holds none of GitLab's four. The guard is per *field*, not per provider, so the
+    // network must not be touched at all — a partial write that dropped the offending key would
+    // report success for a change nobody made.
+    const issueId = await seed(FIXTURE);
+    received = [];
+
+    const result = await updateExternalIssue(ctxFor(db, acme), { issueId, dueDate: "2026-09-30" });
+
+    expect(result.ok).toBe(false);
+    expect(received).toHaveLength(0);
+  });
+
+  it("refuses the whole patch when one field is unwritable, never just the writable half", async () => {
+    const issueId = await seed(FIXTURE);
+    received = [];
+
+    // Title alone would be accepted; paired with a field the provider cannot hold it must not be
+    // half-applied, or the editor shows a saved title beside a due date that never landed.
+    const result = await updateExternalIssue(ctxFor(db, acme), {
+      issueId,
+      title: "Renamed",
+      weight: 3,
+    });
 
     expect(result.ok).toBe(false);
     expect(received).toHaveLength(0);

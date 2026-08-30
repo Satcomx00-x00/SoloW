@@ -324,6 +324,28 @@ beforeAll(() => {
           milestone: { id: 90, title: "v1", start_date: null, due_date: "2026-09-01" },
         });
       }
+      if (url.pathname === `${project(PROJECT)}/issues/5`) {
+        return Response.json({
+          iid: 5,
+          title: "Fully described",
+          description: null,
+          state: "opened",
+          web_url: "u/issues/5",
+          labels: [],
+          // The four GitLab answers for, including a null one — which is a real answer ("no due
+          // date") and must not be confused with the key being absent, as it is on issue 3.
+          due_date: null,
+          weight: 8,
+          confidential: true,
+          time_stats: { time_estimate: 7200, human_time_estimate: "2h" },
+        });
+      }
+      if (url.pathname === `${project(PROJECT)}/issues/3/time_estimate`) {
+        return Response.json({ human_time_estimate: "2h" });
+      }
+      if (url.pathname === `${project(PROJECT)}/issues/3/reset_time_estimate`) {
+        return Response.json({ human_time_estimate: null });
+      }
       if (url.pathname === `${project(PROJECT)}/issues/3/notes`) {
         if (req.method === "POST") {
           const body = (await req.json()) as { body: string };
@@ -774,6 +796,46 @@ describe("creating an Issue or Epic on GitLab (spec F23a)", () => {
     await gitlab().createIssue(credential(), PROJECT, { title: "Bare minimum" });
 
     expect(receivedWrites[0]?.body).toEqual({ title: "Bare minimum" });
+  });
+
+  it("reads the four GitLab-only fields back, keeping absent distinct from null", async () => {
+    // The distinction `ExternalIssue` is explicit about: a driver omits a key its provider did not
+    // answer for, so "this instance has no weights" never reads as "this issue has no weight".
+    const answered = await gitlab().getIssue(credential(), PROJECT, 5);
+    expect(answered.weight).toBe(8);
+    expect(answered.confidential).toBe(true);
+    expect(answered.timeEstimate).toBe("2h");
+    // Present *and* null — GitLab answered, and the answer is "none".
+    expect(answered.dueDate).toBeNull();
+    expect("dueDate" in answered).toBe(true);
+
+    // Issue 3's payload carries none of the four keys at all, so none of them appear.
+    const silent = await gitlab().getIssue(credential(), PROJECT, 3);
+    for (const key of ["dueDate", "weight", "confidential", "timeEstimate"]) {
+      expect(key in silent).toBe(false);
+    }
+  });
+
+  it("sets a time estimate through its own endpoint, then re-reads so the answer carries it", async () => {
+    // GitLab's PUT ignores time tracking entirely, and unlike the create path this one is expected
+    // to show the new value back — hence the re-read.
+    receivedWrites = [];
+
+    await gitlab().updateIssue(credential(), PROJECT, 3, { timeEstimate: "2h" });
+
+    const posted = receivedWrites.find((w) => w.path.endsWith("/time_estimate"));
+    expect(posted?.method).toBe("POST");
+    expect(posted?.body).toEqual({ duration: "2h" });
+  });
+
+  it("clears a time estimate through reset_time_estimate, not by sending an empty duration", async () => {
+    receivedWrites = [];
+
+    await gitlab().updateIssue(credential(), PROJECT, 3, { timeEstimate: null });
+
+    expect(receivedWrites.some((w) => w.path.endsWith("/reset_time_estimate"))).toBe(true);
+    // The setter must not also fire — GitLab would read "" as a malformed duration.
+    expect(receivedWrites.some((w) => w.path.endsWith("/time_estimate"))).toBe(false);
   });
 
   it("puts due date, weight and confidential in the update body, with GitLab's own clear sentinels", async () => {

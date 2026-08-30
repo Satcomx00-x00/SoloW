@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { PROJECT_FIELD_TYPES } from "@solow/contracts";
+import {
+  ISSUE_FIELDS,
+  issueCreateSupportSchema,
+  issueWriteSupportSchema,
+  PROJECT_FIELD_TYPES,
+  projectFieldSupportSchema,
+} from "@solow/contracts";
 import {
   cloneUsernameFor,
   isProviderInstalled,
@@ -147,6 +153,72 @@ describe("the providers this build ships", () => {
     // A provider nothing registers still clones: every host here authenticates on the token and
     // ignores the username, so the conventional one is a better answer than a crash.
     expect(cloneUsernameFor("bitbucket")).toBe("git");
+  });
+});
+
+/**
+ * The manifests every shipped provider declares, checked against the schemas that describe them.
+ *
+ * This exists because the registry validates a provider's **id** and nothing else (see
+ * `registerProvider`): `issueWriteSupportSchema`'s "every field is writable or explained"
+ * refinement is not run at registration, and TypeScript cannot catch a missing entry either —
+ * `writes` is an array and `cannot` a partial record, so a manifest that simply forgets a field
+ * type-checks and registers happily.
+ *
+ * Which made the refinement decorative. It is the guarantee the issue drawer leans on — a field
+ * in neither list renders no control *and* no reason, the silent gap F23 FR-5 exists to prevent —
+ * so it is asserted here, where CI runs it, rather than trusted.
+ */
+describe("every shipped manifest satisfies the schema that describes it", () => {
+  for (const id of ["github", "gitlab", "gitea"]) {
+    it(`${id} declares a complete, non-contradictory issueWrites`, () => {
+      const manifest = providerManifest(id);
+      expect(manifest).not.toBeNull();
+      const declared = manifest?.issueWrites;
+      expect(declared).toBeDefined();
+      // Throws on either refinement: a field in both lists, or a field in neither.
+      expect(() => issueWriteSupportSchema.parse(declared)).not.toThrow();
+      // Said twice on purpose — the parse above would pass a manifest that named a field this
+      // build does not have, and the drawer iterates the build's list, not the manifest's.
+      for (const field of ISSUE_FIELDS) {
+        const answered =
+          (declared?.writes.includes(field) ?? false) || field in (declared?.cannot ?? {});
+        expect(answered).toBe(true);
+      }
+    });
+  }
+
+  it("would actually catch an incomplete manifest — the negative control", () => {
+    // Without this, the three assertions above could be vacuous: if the schema accepted anything,
+    // "does not throw" would prove nothing. A manifest missing one field must be rejected...
+    expect(() =>
+      issueWriteSupportSchema.parse({ writes: ["title"], cannot: { description: "no" } }),
+    ).toThrow();
+    // ...and so must one that claims a field is both writable and refused.
+    expect(() =>
+      issueWriteSupportSchema.parse({
+        writes: [...ISSUE_FIELDS],
+        cannot: { title: "contradiction" },
+      }),
+    ).toThrow();
+  });
+
+  it("gitlab and github declare a valid issueCreates; gitea declares none at all", () => {
+    expect(() =>
+      issueCreateSupportSchema.parse(providerManifest("gitlab")?.issueCreates),
+    ).not.toThrow();
+    expect(() =>
+      issueCreateSupportSchema.parse(providerManifest("github")?.issueCreates),
+    ).not.toThrow();
+    expect(providerManifest("gitea")?.issueCreates).toBeUndefined();
+  });
+
+  it("gitlab and github declare a complete projectFields; both refinements hold", () => {
+    for (const id of ["github", "gitlab"]) {
+      expect(() =>
+        projectFieldSupportSchema.parse(providerManifest(id)?.projectFields),
+      ).not.toThrow();
+    }
   });
 });
 
