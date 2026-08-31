@@ -40,3 +40,7 @@ Thumbs.db
 # Test artifacts
 playwright-report/
 test-results/
+
+# Local-only agent + dev-server state (never part of the project)
+.claude/settings.local.json
+.inngest/

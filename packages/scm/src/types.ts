@@ -418,6 +418,42 @@ export interface IssueSeed {
   timeEstimate?: string;
   /** Existing issues to link the new one to, by the provider's own issue reference. */
   links?: IssueSeedLink[];
+  /**
+   * The three below are the same arrangement seen from the other provider: fields GitHub's issues
+   * carry and GitLab's do not, each gated by its own `issueCreates` flag. Nothing about them is
+   * GitHub-shaped at this boundary — a tracker with issue types and a parent issue would fill
+   * them in exactly the same way.
+   */
+  /**
+   * The provider's own name for an issue type ("Bug", "Feature", "Task"), passed through verbatim.
+   * The name rather than an id because that is what the create endpoint reads, and because a name
+   * is the thing the picker showed the person who chose it.
+   */
+  issueType?: string;
+  /**
+   * Nest the new issue under this existing one, by its number within the same repository — the
+   * `number`/`iid` distinction `IssueSeedLink` already draws. Separate from `parentEpicId`: an
+   * epic is another object in another container, this is an ordinary issue in this one.
+   */
+  parentIssueNumber?: number;
+  /** Put the new issue on this provider project board — the id `ExternalProject.externalId` carries. */
+  providerProjectId?: string;
+}
+
+/**
+ * One type a provider lets an issue be given — GitHub's organisation-defined issue types.
+ *
+ * Not every provider has the concept, and on GitHub not every repository does either: types are
+ * configured on an organisation, so a user-owned repository has none. Both cases answer with an
+ * empty list rather than an error, because "this repository offers no types" is a fact about the
+ * repository and not a failure to read it.
+ */
+export interface ExternalIssueType {
+  externalId: string;
+  /** What `IssueSeed.issueType` carries back — the provider takes the type by name. */
+  name: string;
+  description: string | null;
+  color: string | null;
 }
 
 /** One link to create alongside a new Issue — see `IssueSeed.links`. */
@@ -427,7 +463,14 @@ export interface IssueSeedLink {
   type: IssueLinkType;
 }
 
-/** One epic to create, in the shape every provider that has them takes it. */
+/**
+ * One epic to create, in the shape every provider that has them takes it.
+ *
+ * Specific to the *group* container: an epic has dates of its own, which is what distinguishes it
+ * from the other shape a parent planning item comes in. Where a provider's parent item lives in a
+ * repository it is an ordinary issue and is seeded with an `IssueSeed` — see
+ * `IssueCreatesCapability.createParentPlanningItem`.
+ */
 export interface EpicSeed {
   title: string;
   description?: string;
@@ -449,6 +492,10 @@ export interface EpicSeed {
  * request" — but the *type* stays named for what it is at the driver boundary, where the
  * translation actually happens; `ExternalIssue.parentExternalId` is where a caller sees the
  * neutral shape.
+ *
+ * Which is not to say a parent planning item is always one of these: on a provider whose parent
+ * lives in a repository it is an `ExternalIssue` and nothing else (`createParentPlanningItem`).
+ * This type is what the group container answers with, not what "parent" means.
  */
 export interface ExternalEpic {
   externalId: string;
@@ -476,8 +523,16 @@ export interface ExternalGroup {
 }
 
 /**
- * The `issueCreates` capability: posting a brand-new Issue, and — where the provider has the
- * concept — a brand-new Epic (spec F23a).
+ * The `issueCreates` capability: posting a brand-new Issue, a brand-new Epic where the provider
+ * has the concept, and — on every provider that can originate one at all — the parent planning
+ * item other work items nest under (spec F23a).
+ *
+ * Those last two are two methods rather than one because they are two objects in two kinds of
+ * container: an epic lives in a *group* and has dates of its own, a repository-container parent is
+ * an ordinary issue whose parent-ness is entirely the edges its children draw to it. Which of them
+ * a caller may reach is the manifest's answer — `issueCreates.epics` for the first,
+ * `issueCreates.parentPlanningItem.container` for the second — and a provider may declare either,
+ * both or neither.
  *
  * Its own capability rather than folded into `issueWrites`, for the same reason `LabelWritesCapability`
  * is separate from `issueWrites`: a provider can edit an issue it did not create without being able
@@ -502,10 +557,42 @@ export interface IssueCreatesCapability {
    * `issueCreates.epics = false`").
    */
   createEpic(credential: ScmCredential, groupRef: string, seed: EpicSeed): Promise<ExternalEpic>;
+  /**
+   * Originate, **in a repository**, the item other work items nest under — for a provider whose
+   * manifest declares `parentPlanningItem.container === "repository"` (user request 2026-08-31).
+   *
+   * It answers with an `ExternalIssue`, and takes an `IssueSeed`, because on such a provider the
+   * parent genuinely *is* an issue in a container: it has a number, a URL and a state, and the
+   * only thing that makes it a parent is that other issues name it (GitHub's sub-issues, written
+   * by `IssueSeed.parentIssueNumber` and read back as `ExternalIssue.parentExternalId`). Inventing
+   * a third object type here would give the domain a second hierarchy to reconcile against the one
+   * it already has.
+   *
+   * A provider whose container is `"group"` still implements this — the registry checks every
+   * method a declared capability names — and answers the way `createEpic` does on GitHub: with a
+   * sentence. Silently creating a plain issue instead would be a write that reports success and
+   * produces the wrong object.
+   */
+  createParentPlanningItem(
+    credential: ScmCredential,
+    repo: RepoRef,
+    seed: IssueSeed,
+  ): Promise<ExternalIssue>;
   /** Groups the token can create an epic in — the epic "Where" modal's picker. */
   listGroups(credential: ScmCredential): Promise<ExternalGroup[]>;
   /** Existing epics in a group, for the "parent epic" picker on the issue-create form. */
   listEpics(credential: ScmCredential, groupRef: string): Promise<ExternalEpic[]>;
+  /**
+   * The issue types this repository offers, for the type picker on the compose form.
+   *
+   * Empty, never an error, where the repository has none — a GitHub repository owned by a person
+   * rather than an organisation is the ordinary case, not a broken one. A provider whose manifest
+   * declares `issueCreates.issueTypes: false` is never asked; it still implements this (the
+   * registry checks every method a manifest's capability names exists) and answers the way
+   * `createEpic` does on a provider without epics, with a sentence rather than a silent empty
+   * list that would read as "this repository happens to have none".
+   */
+  listIssueTypes(credential: ScmCredential, repo: RepoRef): Promise<ExternalIssueType[]>;
 }
 
 /** The `repositories` capability: what can be cloned, and what branches it has. */

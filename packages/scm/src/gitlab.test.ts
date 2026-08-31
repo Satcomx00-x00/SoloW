@@ -957,6 +957,32 @@ describe("creating an Issue or Epic on GitLab (spec F23a)", () => {
     expect(receivedPaths.at(-1)).toContain("min_access_level=30");
   });
 
+  it("refuses listIssueTypes with a sentence, not an empty list", async () => {
+    // GitLab's `issue_type` is a fixed product set, not a vocabulary a group configures, and its
+    // manifest declares `issueCreates.issueTypes: false`. Answering `[]` would read as "this
+    // project happens to define none", which is a different and untrue statement — the same
+    // reason GitHub's `createEpic` throws rather than returning nothing.
+    await expect(gitlab().listIssueTypes(credential(), PROJECT)).rejects.toBeInstanceOf(
+      ScmProviderError,
+    );
+    await expect(gitlab().listIssueTypes(credential(), PROJECT)).rejects.toThrow(/issue.type/i);
+  });
+
+  it("refuses createParentPlanningItem with a sentence about the group", async () => {
+    // GitLab's parent item is the epic, and an epic lives in a group. Quietly creating a plain
+    // project issue instead would be a create that reports success and hands back the wrong
+    // object — the one failure mode worse than refusing.
+    receivedWrites = [];
+
+    await expect(
+      gitlab().createParentPlanningItem(credential(), PROJECT, { title: "Would-be parent" }),
+    ).rejects.toBeInstanceOf(ScmProviderError);
+    await expect(
+      gitlab().createParentPlanningItem(credential(), PROJECT, { title: "Would-be parent" }),
+    ).rejects.toThrow(/group/i);
+    expect(receivedWrites).toHaveLength(0);
+  });
+
   it("lists a group's existing epics, for the parent-epic picker", async () => {
     const epics = await gitlab().listEpics(credential(), GROUP);
 

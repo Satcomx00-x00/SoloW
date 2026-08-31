@@ -36,7 +36,7 @@ import {
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { openCreateDialog } from "@/components/features/board/create-dialog-bus";
+import { CreateTaskDialog, type TaskPreset } from "@/components/features/board/create-task-dialog";
 import { ConfirmAction } from "@/components/features/confirm-action";
 import { AdoptProjectDialog } from "@/components/features/project/adopt-project-dialog";
 import { IssueLabel } from "@/components/features/project/issue-label";
@@ -313,6 +313,17 @@ export function ProjectView({ projectId }: { projectId: string }) {
    * disagreement renders as an empty panel with no explanation.
    */
   const [panelIssueId, setPanelIssueId] = useState<string | null>(null);
+  /**
+   * The row a Task is being started on, or null for "no dialog" — one value doing both jobs, for
+   * the same reason `panelIssueId` is one: an `open` flag beside a preset can disagree with it,
+   * and the disagreement renders as a dialog opened on the wrong Issue.
+   *
+   * Held in state rather than built inline where the dialog is rendered: `CreateTaskDialog`
+   * re-applies its preset whenever the object's identity changes, and this page re-renders every
+   * time one of its eight queries settles — a fresh object each render would stamp the row's
+   * Issue back over one the operator had since changed in the form.
+   */
+  const [taskPreset, setTaskPreset] = useState<TaskPreset | null>(null);
   const [pending, setPending] = useState<string[]>([]);
   /**
    * Change a priority by rewriting the **label** that carries it.
@@ -357,10 +368,14 @@ export function ProjectView({ projectId }: { projectId: string }) {
   );
   const openRow = useCallback((row: ProjectRow) => setPanelIssueId(row.item.issueId), []);
   // Right-click → "Start a task on this issue". The dialog opens with the issue already chosen;
-  // everything else about the task is still the operator's to fill in.
+  // everything else about the task is still the operator's to fill in. This page mounts that
+  // dialog itself (below `IssuePanel`), so the menu item cannot dispatch at nothing — which is
+  // what it would have become when the shell-wide create bus it used to send on was deleted.
+  // Still a `useCallback` with no dependencies, for the row memo above: `setTaskPreset` is
+  // stable, so this handler is held still across renders exactly as before.
   const startTask = useCallback(
     (row: ProjectRow) =>
-      openCreateDialog("task", {
+      setTaskPreset({
         issueId: row.item.issueId,
         ...(row.item.repositoryId ? { repositoryId: row.item.repositoryId } : {}),
       }),
@@ -1039,6 +1054,20 @@ export function ProjectView({ projectId }: { projectId: string }) {
           that owns them (Decision 0019). The panel is the only surface large enough for a
           description, and the cells above stay for the columns the project itself defines. */}
       <IssuePanel issueId={panelIssueId} onOpenChange={(open) => !open && setPanelIssueId(null)} />
+
+      {/* The row menu's "Start a task on this issue", rendered here so every row-triggered
+          overlay sits in one place. Mounted only while open: the form starts empty each time
+          without a reset path, and the dialog's four lookups stay off a page that is already
+          holding eight queries. Cleared on close, or a second right-click would open on the row
+          somebody clicked before it. */}
+      {taskPreset && (
+        <CreateTaskDialog
+          trigger={null}
+          open
+          preset={taskPreset}
+          onOpenChange={(next) => !next && setTaskPreset(null)}
+        />
+      )}
 
       {/* Column visibility for *this person*, saved through F19's preference boundary so it
           survives a device change — the same seam the status bar uses. It rides on top of the

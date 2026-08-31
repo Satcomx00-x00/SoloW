@@ -6,6 +6,7 @@ import {
   listRepositoryMembersInput,
   repositoryAssigneeDto,
   repositoryDto,
+  repositoryIssueTypeDto,
   repositoryLabelDto,
   repositoryListDto,
   repositoryMilestoneDto,
@@ -18,6 +19,7 @@ import {
   connectRepository,
   listRepositories,
   listRepositoryAssignees,
+  listRepositoryIssueTypes,
   listRepositoryLabels,
   listRepositoryMilestones,
   seedDefaultLabels,
@@ -119,6 +121,22 @@ export const repositoryRouter = router({
     .output(z.array(repositoryMilestoneDto))
     .query(async ({ ctx, input }) =>
       unwrap(await listRepositoryMilestones(ctx.rctx, input.repositoryId)),
+    ),
+  listIssueTypes: integrationsProcedure
+    .meta({
+      openapi: {
+        method: "GET",
+        path: "/repository.listIssueTypes",
+        tags: ["repository"],
+        protect: true,
+        summary:
+          "Fetch the issue types a linked Repository's provider offers, for the Issue type picker. Empty where the provider has no such vocabulary.",
+      },
+    })
+    .input(listRepositoryMembersInput)
+    .output(z.array(repositoryIssueTypeDto))
+    .query(async ({ ctx, input }) =>
+      unwrap(await listRepositoryIssueTypes(ctx.rctx, input.repositoryId)),
     ),
   // `integrationsProcedure`, same reasoning as `listLabels` just above: this writes to whichever
   // provider the Repository is linked to.

@@ -2,7 +2,7 @@
 
 import { afterEach, describe, expect, it, mock } from "bun:test";
 import type { IssueDto, TaskDependencyDto, TaskDto, TaskState } from "@solow/contracts";
-import { cleanup, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { renderWithTrpc } from "@/test/trpc-harness";
 
 /**
@@ -136,6 +136,77 @@ describe("IssueDetail", () => {
 
     expect((await screen.findByRole("alert")).textContent).toContain("edges unavailable");
     expect(screen.queryByText("Wire the latch")).toBeNull();
+  });
+});
+
+/**
+ * "New task", from the page whose Issue it is about.
+ *
+ * This button used to dispatch on a document-level create bus that the shell header's Create menu
+ * subscribed to. That menu was removed on request, and with it the bus — so the failure these
+ * tests exist for is the silent one: a button left shouting at a listener that no longer exists,
+ * opening nothing, with no error anywhere to say so. The page owns the dialog now, which is what
+ * makes that unrepresentable.
+ */
+describe("IssueDetail — starting a Task on this Issue", () => {
+  /** The dialog's own four lookups, which only exist once it is mounted. */
+  const dialogHandlers = {
+    "repository.list": () => ({
+      items: [{ id: "repo-1", name: "api", source: "local_path", location: "/srv/api" }],
+      nextCursor: null,
+    }),
+    "profile.agent.list": () => ({ items: [{ id: "agent-1", name: "Claude" }], nextCursor: null }),
+    "profile.executor.list": () => ({ items: [{ id: "exec-1", name: "Local" }], nextCursor: null }),
+    "issue.list": () => ({ items: [{ ...issue, repositoryId: "repo-1" }], nextCursor: null }),
+  };
+
+  const handlers = {
+    "issue.get": () => ({ ...issue, repositoryId: "repo-1" }),
+    "task.list": () => ({ items: [], nextCursor: null }),
+    "task.dependencies": () => [],
+  };
+
+  it("the Issue page's New task opens on the Issue you are standing on", async () => {
+    renderWithTrpc(<IssueDetail issueId={issue.id} />, { ...handlers, ...dialogHandlers });
+
+    fireEvent.click(
+      await within(await screen.findByRole("region", { name: "Tasks for this issue" })).findByRole(
+        "button",
+        { name: "New task" },
+      ),
+    );
+
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog.textContent).toContain("New task");
+    /*
+     * Read off the Issue combobox, not off the dialog's whole text: the Select renders its option
+     * list into the same subtree, so this Issue's title is in there whatever the form holds, and
+     * an assertion over `dialog.textContent` would pass with the picker sitting empty on its
+     * placeholder. What is under test is the picker being *set*, which also means the Repository
+     * half of the preset landed first — the picker is disabled on "Select a repository first"
+     * until it does.
+     */
+    await waitFor(() =>
+      expect(within(dialog).getByRole("combobox", { name: "Issue" }).textContent).toBe(issue.title),
+    );
+  });
+
+  it("does not mount the task dialog, or make its four queries, until it is asked for", async () => {
+    // The dialog is mounted on demand rather than rendered always and toggled. Rendered always,
+    // every visit to an Issue page would cost four extra round-trips nobody standing here asked
+    // for, and the form state of an abandoned attempt would survive a close.
+    const { log } = renderWithTrpc(<IssueDetail issueId={issue.id} />, {
+      ...handlers,
+      "task.list": () => ({ items: [makeTask("a", "ready", "Wire the latch")], nextCursor: null }),
+    });
+
+    await screen.findByText("Wire the latch");
+
+    expect(screen.queryByRole("dialog")).toBeNull();
+    const asked = log.calls.map((c) => c.path);
+    expect(asked).not.toContain("repository.list");
+    expect(asked).not.toContain("profile.agent.list");
+    expect(asked).not.toContain("profile.executor.list");
   });
 });
 

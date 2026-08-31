@@ -80,7 +80,9 @@ const ITEMS = {
       },
       issueExternalId: "1",
       parentExternalId: null,
-      repositoryId: null,
+      // Carried on the row so the right-click hand-off has a Repository to preset alongside the
+      // Issue — without it the Task dialog's Issue picker stays disabled and shows nothing.
+      repositoryId: "repo-1",
       closed: false,
     },
     {
@@ -97,7 +99,7 @@ const ITEMS = {
       },
       issueExternalId: "2",
       parentExternalId: null,
-      repositoryId: null,
+      repositoryId: "repo-1",
       closed: false,
     },
   ],
@@ -505,6 +507,86 @@ describe("sorting from the column headers", () => {
  * the same two-step `ConfirmAction` interaction `project-repositories-dialog.test.tsx` already
  * proves for detaching a Repository.
  */
+/**
+ * "Start a task on this issue", from a row's right-click.
+ *
+ * This handler used to dispatch on a document-level create bus that the shell header's Create
+ * menu subscribed to and owned the dialog for. That menu was removed on request and the bus with
+ * it, so the failure guarded here is the silent one: a menu item calling a function that opens
+ * nothing. This page mounts the dialog itself now.
+ */
+describe("starting a task from a row", () => {
+  /** The Task dialog's own four lookups, which only exist once something mounts it. */
+  const taskDialogHandlers = {
+    "repository.list": () => ({
+      items: [{ id: "repo-1", name: "api", source: "local_path", location: "/srv/api" }],
+      nextCursor: null,
+    }),
+    "profile.agent.list": () => ({ items: [{ id: "agent-1", name: "Claude" }], nextCursor: null }),
+    "profile.executor.list": () => ({ items: [{ id: "exec-1", name: "Local" }], nextCursor: null }),
+  };
+
+  /** Every row on screen — the `@me` tab would hide the second one, and both are the point. */
+  const allRowsHandlers = () => ({
+    ...handlers("ada-on-the-host"),
+    ...taskDialogHandlers,
+    "project.views": () => [{ ...MY_ITEMS, name: "All", config: DEFAULT_PROJECT_VIEW_CONFIG }],
+  });
+
+  /**
+   * Right-click a row and choose the menu item.
+   *
+   * Fired on the `tr` itself: `ContextMenuTrigger` is `asChild` around the `TableRow`, so the row
+   * element *is* the trigger and there is no wrapper to aim at.
+   */
+  async function startTaskOn(title: string): Promise<void> {
+    const row = (await screen.findByText(title)).closest("tr");
+    if (!row) throw new Error(`no row for "${title}"`);
+    fireEvent.contextMenu(row);
+    fireEvent.click(await screen.findByText("Start a task on this issue"));
+  }
+
+  /**
+   * What the dialog's Issue picker is *set to*.
+   *
+   * Read off the combobox rather than off the dialog's whole text: the Select renders its option
+   * list into the same subtree, so every row's title is in there whatever the form holds — an
+   * assertion over `dialog.textContent` would pass with the picker sitting empty on its
+   * placeholder.
+   */
+  const chosenIssue = async (): Promise<string> =>
+    (await within(await screen.findByRole("dialog")).findByRole("combobox", { name: "Issue" }))
+      .textContent ?? "";
+
+  it("opens the task dialog on the issue of the row that was right-clicked", async () => {
+    renderWithTrpc(<ProjectView projectId="prj-1" />, allRowsHandlers());
+
+    await startTaskOn("Cap the upload size");
+
+    await waitFor(async () => expect(await chosenIssue()).toBe("Cap the upload size"));
+  });
+
+  it("opens on the row you actually clicked the second time, not the first", async () => {
+    /*
+     * The invariant `CreateMenu.close()` used to hold by resetting its preset to undefined, now
+     * held by clearing this page's own state on close. A preset kept in a ref, or never cleared,
+     * would silently start a Task against the *previously* clicked Issue — a wrong write with
+     * nothing on screen to show it went wrong.
+     */
+    renderWithTrpc(<ProjectView projectId="prj-1" />, allRowsHandlers());
+
+    await startTaskOn("Cap the upload size");
+    await waitFor(async () => expect(await chosenIssue()).toBe("Cap the upload size"));
+
+    fireEvent.keyDown(await screen.findByRole("dialog"), { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+    await startTaskOn("Rotate the keys");
+
+    await waitFor(async () => expect(await chosenIssue()).toBe("Rotate the keys"));
+  });
+});
+
 describe("deleting a project", () => {
   it("asks for confirmation before the mutation fires", async () => {
     const calls: unknown[] = [];

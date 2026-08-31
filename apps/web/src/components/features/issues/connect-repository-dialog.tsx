@@ -30,13 +30,22 @@ import { trpc } from "@/trpc/react";
  * redirect: a user picking a Repository for a new Issue should not have to leave the board to
  * add one. The field shape mirrors Settings' form (name/source/location); Settings keeps its own
  * copy, per the instructions, rather than this importing from it.
+ *
+ * That Backlog button, and the shell header's Create menu that later replaced it, are both gone —
+ * so "second entry point" describes what this is for rather than where it is reached from today.
+ * See the `trigger` prop.
  */
 export function ConnectRepositoryDialog({
   trigger,
   open: controlledOpen,
   onOpenChange,
 }: {
-  /** Omitted when the caller opens the dialog itself — the header's Create menu does. */
+  /**
+   * Omitted when the caller opens the dialog itself. Nothing does at the moment: the shell
+   * header's Create menu was its last caller and was removed, so this component ships with no
+   * entry point in the UI. Kept rather than deleted — Settings' own inline connect form still
+   * works, and re-homing this is a button whereas rebuilding it is not.
+   */
   trigger?: ReactNode;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;

@@ -114,12 +114,12 @@ describe("the providers this build ships", () => {
       expect(providerManifest("github")?.issueCreates?.epics).toBe(false);
     });
 
-    it("GitLab declares the four extra issue fields and links; GitHub declares none of them", () => {
+    it("GitLab declares the four extra issue fields; GitHub declares none of them", () => {
       // What the compose form gates each control on (user request 2026-08-30) — asked of the
       // manifest, never of the provider's name.
       const gitlab = providerManifest("gitlab")?.issueCreates;
       const github = providerManifest("github")?.issueCreates;
-      for (const flag of ["dueDate", "weight", "confidential", "timeEstimate", "links"] as const) {
+      for (const flag of ["dueDate", "weight", "confidential", "timeEstimate"] as const) {
         expect(gitlab?.[flag]).toBe(true);
         // Explicitly false, not merely absent: "we checked and it has none" and "nobody has said"
         // must not look the same in a manifest.
@@ -127,7 +127,61 @@ describe("the providers this build ships", () => {
       }
     });
 
+    it("GitHub declares the three fields of its own, and GitLab declares none of them", () => {
+      // The other direction of the same rule (user request 2026-08-31). The point worth holding:
+      // there is no "standard" set with a GitLab annexe — each provider declares what it holds.
+      const gitlab = providerManifest("gitlab")?.issueCreates;
+      const github = providerManifest("github")?.issueCreates;
+      for (const flag of ["issueTypes", "parentIssue", "providerProject"] as const) {
+        expect(github?.[flag]).toBe(true);
+        expect(gitlab?.[flag]).toBe(false);
+      }
+    });
+
+    it("both declare links, and GitHub narrows them to the two relations it expresses", () => {
+      // GitHub's issue dependencies are blocking in both directions and nothing else. Narrowing
+      // the set is what keeps the form from offering a "relates to" the driver would then drop.
+      expect(providerManifest("gitlab")?.issueCreates?.links).toBe(true);
+      expect(providerManifest("github")?.issueCreates?.links).toBe(true);
+      expect(providerManifest("gitlab")?.issueCreates?.linkTypes).toEqual([
+        "relates_to",
+        "blocks",
+        "is_blocked_by",
+      ]);
+      expect(providerManifest("github")?.issueCreates?.linkTypes).toEqual([
+        "blocks",
+        "is_blocked_by",
+      ]);
+    });
+
+    it("both answer where a parent planning item is created, and answer differently", () => {
+      // The container is what the "Where" step collects. Leaving GitHub unanswered would disable
+      // the menu entry for ever; copying GitLab's "group" would ask GitHub for a group it has none
+      // of, and show an empty first modal.
+      expect(providerManifest("gitlab")?.issueCreates?.parentPlanningItem?.container).toBe("group");
+      expect(providerManifest("github")?.issueCreates?.parentPlanningItem?.container).toBe(
+        "repository",
+      );
+      // And each names the thing in its own word, because "New epic" is untrue on GitHub.
+      expect(providerManifest("gitlab")?.issueCreates?.parentPlanningItem?.noun).toBe("epic");
+      expect(providerManifest("github")?.issueCreates?.parentPlanningItem?.noun).toBe(
+        "parent issue",
+      );
+    });
+
+    it("keeps `epics` and `parentPlanningItem` independent — GitHub declares one and not the other", () => {
+      // The change the user explicitly rejected was flipping `epics` to true for GitHub, which
+      // would have made the manifest claim a group object GitHub does not have. This is the
+      // assertion that catches it, and any gate that folds either flag into the other.
+      expect(providerManifest("github")?.issueCreates?.epics).toBe(false);
+      expect(providerManifest("github")?.issueCreates?.parentPlanningItem).toBeDefined();
+      expect(providerManifest("gitlab")?.issueCreates?.epics).toBe(true);
+      expect(providerManifest("gitlab")?.issueCreates?.parentPlanningItem).toBeDefined();
+    });
+
     it("a provider without the capability declares nothing about issue creation", () => {
+      // Gitea declares no `issueCreates` at all, so it declares neither flag — the correct answer
+      // for a provider that never claimed the capability, rather than a default inventing one.
       expect(providerManifest("gitea")?.issueCreates).toBeUndefined();
     });
   });

@@ -7,30 +7,32 @@ import {
   scmFetchPaged,
   scmSend,
 } from "./http.js";
-import type {
-  ChangeProvider,
-  EpicSeed,
-  ExternalBranch,
-  ExternalChangeRequest,
-  ExternalComment,
-  ExternalEpic,
-  ExternalGroup,
-  ExternalIssue,
-  ExternalLabel,
-  ExternalLinkedChange,
-  ExternalMilestone,
-  ExternalRepository,
-  ExternalUser,
-  IssueCreatesCapability,
-  IssuePatch,
-  IssueSeed,
-  LabelSeed,
-  ListIssuesOptions,
-  ProjectFieldWrite,
-  ProjectStructureProvisioned,
-  ProjectsCapability,
-  RepoRef,
-  ScmCredential,
+import {
+  type ChangeProvider,
+  type EpicSeed,
+  type ExternalBranch,
+  type ExternalChangeRequest,
+  type ExternalComment,
+  type ExternalEpic,
+  type ExternalGroup,
+  type ExternalIssue,
+  type ExternalIssueType,
+  type ExternalLabel,
+  type ExternalLinkedChange,
+  type ExternalMilestone,
+  type ExternalRepository,
+  type ExternalUser,
+  type IssueCreatesCapability,
+  type IssuePatch,
+  type IssueSeed,
+  type LabelSeed,
+  type ListIssuesOptions,
+  type ProjectFieldWrite,
+  type ProjectStructureProvisioned,
+  type ProjectsCapability,
+  type RepoRef,
+  type ScmCredential,
+  ScmProviderError,
 } from "./types.js";
 
 /**
@@ -581,6 +583,24 @@ export class GitlabProvider implements ChangeProvider, ProjectsCapability, Issue
   }
 
   /**
+   * GitLab has no picker-shaped issue-type vocabulary to offer (spec F23a, user request
+   * 2026-08-31).
+   *
+   * It does have an `issue_type` — issue, incident, test case, task — but that is a fixed set
+   * built into the product, not a list an organisation configures and a repository inherits the
+   * way GitHub's issue types are, and this build does not offer it on the compose form. So the
+   * manifest declares `issueCreates.issueTypes: false` and this throws rather than answering with
+   * an empty list, for the reason `createEpic` throws on GitHub: an empty list would read as
+   * "this project happens to define none", which is a different and untrue statement.
+   */
+  async listIssueTypes(_credential: ScmCredential, _repo: RepoRef): Promise<ExternalIssueType[]> {
+    throw new ScmProviderError(
+      "gitlab",
+      "GitLab has no configurable issue-type vocabulary; its issue types are a fixed product set, not offered here.",
+    );
+  }
+
+  /**
    * POST a new epic in a group (spec F23a Flow B). GitLab computes an epic's dates from its
    * milestones unless told to fix them, which is what `start_date_is_fixed`/`due_date_is_fixed`
    * are for: sending a bare `start_date` is accepted and silently ignored on an epic with
@@ -614,6 +634,27 @@ export class GitlabProvider implements ChangeProvider, ProjectsCapability, Issue
       body,
     )) as GitlabEpic;
     return toExternalEpic(row, groupRef);
+  }
+
+  /**
+   * GitLab's parent planning item is the epic above, and an epic lives in a **group** — which is
+   * what its manifest declares as `parentPlanningItem.container: "group"`, and why no caller
+   * should ever arrive here (user request 2026-08-31, F23a Part 3).
+   *
+   * It throws for the same reason `GithubProvider.createEpic` does, and the alternative is worse
+   * here than anywhere else in this file: creating a plain project issue instead would be a write
+   * that reports success and hands the operator the wrong object — an issue where they asked for
+   * an epic, in a container the rest of the flow does not expect it in.
+   */
+  async createParentPlanningItem(
+    _credential: ScmCredential,
+    _repo: RepoRef,
+    _seed: IssueSeed,
+  ): Promise<ExternalIssue> {
+    throw new ScmProviderError(
+      "gitlab",
+      "GitLab's parent planning item is an epic, and an epic lives in a group, not in a repository — create it with createEpic.",
+    );
   }
 
   /**

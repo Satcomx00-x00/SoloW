@@ -518,3 +518,35 @@ describe("listProjects", () => {
     });
   });
 });
+
+/**
+ * Putting an issue on a board at creation (F23a Flow A, user request 2026-08-31).
+ *
+ * The mutation `GithubProvider.createIssue` reaches for once the REST create has answered. Tested
+ * here rather than only through that call because the id *space* is the thing that goes wrong:
+ * Projects v2 takes GraphQL node ids, and the create returns both a node id and a database id, so
+ * sending the wrong one is a mutation that fails against a real board and passes against any
+ * fixture that does not look.
+ */
+describe("addIssueToProject", () => {
+  it("sends the board and the issue by node id, and answers with the item", async () => {
+    bodies = [];
+    nextResponse = { data: { addProjectV2ItemById: { item: { id: "PVTI_9" } } } };
+
+    const item = await projects.addIssueToProject(credential(), "PVT_board", "I_900");
+
+    expect(item).toBe("PVTI_9");
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]?.variables).toEqual({ project: "PVT_board", content: "I_900" });
+    // Node ids, not the database id the REST create also returns — `900` would be a silent no-op.
+    expect(bodies[0]?.query).toContain("addProjectV2ItemById");
+  });
+
+  it("answers null when the board reports no item rather than inventing one", async () => {
+    // A caller decides nothing on this value today; what matters is that a shape GitHub did not
+    // send is never fabricated into one it did.
+    nextResponse = { data: { addProjectV2ItemById: {} } };
+
+    expect(await projects.addIssueToProject(credential(), "PVT_board", "I_900")).toBeNull();
+  });
+});

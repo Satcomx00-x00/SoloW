@@ -98,6 +98,47 @@ describe("CreateTaskDialog — Issue picker filtered by Repository", () => {
 });
 
 /**
+ * A caller's starting point, applied to the form.
+ *
+ * The `preset` prop is the *only* path in now: this dialog used to subscribe to a document-level
+ * create bus as well, and both went when the shell header's Create menu that dispatched on it was
+ * removed. The two surfaces left — an Issue's own page and a project row's right-click — mount
+ * this dialog themselves and hand the preset down.
+ */
+describe("CreateTaskDialog — a caller's preset", () => {
+  it("applies a caller's preset, repository first, so the Issue it names is actually reachable", async () => {
+    /*
+     * Repository *before* Issue is the whole property. The Issue picker is narrowed by the chosen
+     * Repository and sits disabled on "Select a repository first" until one is set, so an
+     * implementation that wrote `issueId` alone would leave a value in the form that nothing on
+     * screen could show — a preset that looks like it did nothing, which is exactly how this bug
+     * presented the first time.
+     *
+     * It also catches the other half of the removal: deleting the bus subscription *and* the
+     * `open && preset` effect together would leave both remaining callers opening an empty form
+     * with nothing to say it had been asked for a particular Issue.
+     */
+    renderWithTrpc(
+      <CreateTaskDialog
+        trigger={null}
+        open
+        preset={{ repositoryId: "repo-1", issueId: "issue-1" }}
+      />,
+      handlers,
+    );
+
+    expect((await screen.findByRole("combobox", { name: "Repository" })).textContent).toContain(
+      "api",
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Issue" }).textContent).toContain("Ship it"),
+    );
+    // The picker resolved the id to a real Issue, rather than holding an id it could not draw.
+    expect(await screen.findByRole("region", { name: "Selected issue" })).toBeDefined();
+  });
+});
+
+/**
  * What the Owner can see of the Issue they are launching an agent against.
  *
  * The picker is a Select, so it showed one truncated line and nothing else: the brief for a run

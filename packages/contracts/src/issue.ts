@@ -318,8 +318,26 @@ export const repositoryMilestoneDto = z.object({
 export type RepositoryMilestoneDto = z.infer<typeof repositoryMilestoneDto>;
 
 /**
- * Both pickers resolve the same way `listRepositoryLabelsInput` does — from the Repository's
- * `(provider, RepoRef)`, one id in. A single input shape rather than three identical ones.
+ * An issue type the provider defines for this Repository — GitHub's "Bug"/"Feature"/"Task", which
+ * an organisation configures and a repository inherits.
+ *
+ * `name` is the key, not `externalId`: GitHub's create endpoint takes the type by name, so the
+ * id is carried only to key the list. Empty for a provider that has no such vocabulary, and for a
+ * user-owned GitHub repository, where issue types do not exist at all — the picker then has
+ * nothing to offer and does not draw itself.
+ */
+export const repositoryIssueTypeDto = z.object({
+  externalId: z.string(),
+  name: z.string(),
+  description: z.string().nullable(),
+  /** The provider's own colour name for the chip, or null where it reports none. */
+  color: z.string().nullable(),
+});
+export type RepositoryIssueTypeDto = z.infer<typeof repositoryIssueTypeDto>;
+
+/**
+ * All these pickers resolve the same way `listRepositoryLabelsInput` does — from the Repository's
+ * `(provider, RepoRef)`, one id in. A single input shape rather than four identical ones.
  */
 export const listRepositoryMembersInput = listRepositoryLabelsInput;
 export type ListRepositoryMembersInput = z.infer<typeof listRepositoryMembersInput>;

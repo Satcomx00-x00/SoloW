@@ -61,10 +61,13 @@ export interface ProviderDescriptor<Driver> {
    */
   readonly issueWrites?: IssueWriteSupport;
   /**
-   * Whether this provider can create an Epic, for a provider declaring `issueCreates` (spec
-   * F23a). Stands to `issueCreates` as `issueWrites` stands to `issueWrites` above: the
-   * capability says a new Issue can be posted, this says whether a new Epic can be too — GitHub
-   * cannot, GitLab can, and a caller asks this rather than the provider's name (Decision 0016).
+   * What a provider declaring `issueCreates` can actually originate, and where (spec F23a).
+   * Stands to `issueCreates` as `issueWrites` stands to `issueWrites` above: the capability says
+   * a new Issue can be posted, this says whether a new Epic can be too — GitHub cannot, GitLab
+   * can — and, separately, whether a parent planning item can be originated at all and in which
+   * kind of container. The two are separate facts on purpose: GitHub has no epics and still
+   * originates a parent, in a repository rather than a group. A caller asks this rather than the
+   * provider's name (Decision 0016).
    */
   readonly issueCreates?: IssueCreateSupport;
   readonly driver: Driver;
@@ -100,7 +103,14 @@ const REQUIRED_METHODS: Record<IntegrationCapability, readonly string[]> = {
   changeRequests: ["listChangeRequests"],
   projects: ["listProjects", "readProjectFields", "readProjectItems", "writeProjectFieldValue"],
   labelWrites: ["createLabels"],
-  issueCreates: ["createIssue", "createEpic", "listGroups", "listEpics"],
+  issueCreates: [
+    "createIssue",
+    "createEpic",
+    "createParentPlanningItem",
+    "listGroups",
+    "listEpics",
+    "listIssueTypes",
+  ],
 };
 
 export class ProviderRegistry<Driver extends object> {

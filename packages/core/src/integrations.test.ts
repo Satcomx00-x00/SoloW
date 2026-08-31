@@ -22,6 +22,12 @@ interface FakeDriver {
   getRepository?(): Promise<string | null>;
   listBranches?(): Promise<string[]>;
   listChangeRequests?(): Promise<string[]>;
+  createIssue?(): Promise<string>;
+  createEpic?(): Promise<string>;
+  createParentPlanningItem?(): Promise<string>;
+  listGroups?(): Promise<string[]>;
+  listEpics?(): Promise<string[]>;
+  listIssueTypes?(): Promise<string[]>;
 }
 
 const forge = (over: Partial<FakeDriver> = {}): FakeDriver => ({
@@ -94,6 +100,31 @@ describe("register", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toBe(ProviderRegistryErrorCode.DuplicateId);
     expect(registry.get("gitea")?.name).toBe("First");
+  });
+
+  it("refuses an issueCreates driver missing createParentPlanningItem", () => {
+    // The same rule as the case below, on the method the parent-planning-item split added (F23a
+    // Part 3). Caught here it is a driver bug at start-up; caught at the call it is a 500 at the
+    // first press of ＋New, which reads to an Owner like the provider is down.
+    const registry = new ProviderRegistry<FakeDriver>();
+    const result = registry.register({
+      id: "forgetful",
+      name: "Forgetful",
+      capabilities: ["issueCreates"],
+      fields: [],
+      driver: {
+        authenticate: async () => ({ ok: true }),
+        createIssue: async () => "",
+        createEpic: async () => "",
+        listGroups: async () => [],
+        listEpics: async () => [],
+        listIssueTypes: async () => [],
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBe(ProviderRegistryErrorCode.CapabilityNotImplemented);
+    expect(registry.get("forgetful")).toBeNull();
   });
 
   it("refuses a manifest that promises a capability the driver has not implemented", () => {

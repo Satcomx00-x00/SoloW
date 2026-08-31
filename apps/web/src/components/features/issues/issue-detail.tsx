@@ -4,8 +4,8 @@ import type { TaskDependencyDto } from "@solow/contracts";
 import { ArrowLeft, ExternalLink, Pencil, Plus, Trash2, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback } from "react";
-import { openCreateDialog } from "@/components/features/board/create-dialog-bus";
+import { useCallback, useState } from "react";
+import { CreateTaskDialog, type TaskPreset } from "@/components/features/board/create-task-dialog";
 import { TaskCard } from "@/components/features/board/task-card";
 import { TaskStateBadge } from "@/components/features/board/task-state-badge";
 import { useBackToProject } from "@/components/features/shared/back-to-project";
@@ -58,6 +58,20 @@ export function IssueDetail({ issueId }: { issueId: string }) {
     utils.task.dependencies.invalidate();
   }, [utils, issueId]);
   useEventStream({ onEvent: onStatus });
+
+  /**
+   * The Task dialog this page opens, and what it opens on — one value doing both jobs, because
+   * non-null already means "open" and an `open` flag beside it could disagree with the preset.
+   *
+   * Held in state rather than built in the JSX below: the dialog re-applies its preset whenever
+   * the object's identity changes, and this page re-renders on every Workspace event it
+   * subscribes to — a fresh preset each render would stamp the Issue back over whatever the
+   * operator had since picked.
+   *
+   * Declared above the early returns, with the other hooks: the loading and loaded renders have
+   * to run the same hooks in the same order.
+   */
+  const [taskPreset, setTaskPreset] = useState<TaskPreset | null>(null);
 
   if (issue.isLoading) {
     return (
@@ -178,11 +192,12 @@ export function IssueDetail({ issueId }: { issueId: string }) {
           </span>
           {/*
             Cutting a Task from the Issue you are reading, with the Issue already chosen.
-            
-            The header's own "New task" opens the same dialog with an empty picker — which is
-            right there, but makes you name the Issue whose page you are standing on. The
-            project table's right-click already passes the row's Issue through; this is the
-            same hand-off from the other surface that knows one.
+
+            This page owns the dialog it opens (mounted below), so the button cannot ask for
+            something nothing is listening for — which is what it would have become when the
+            shell-wide create bus it used to dispatch on was deleted. The project table's
+            right-click passes the row's Issue through the same way; this is that hand-off from
+            the other surface that already knows one.
           */}
           <Button
             type="button"
@@ -190,7 +205,7 @@ export function IssueDetail({ issueId }: { issueId: string }) {
             variant="ghost"
             className="ml-auto text-muted-foreground"
             onClick={() =>
-              openCreateDialog("task", {
+              setTaskPreset({
                 issueId: data.id,
                 ...(data.repositoryId ? { repositoryId: data.repositoryId } : {}),
               })
@@ -244,6 +259,21 @@ export function IssueDetail({ issueId }: { issueId: string }) {
             </ul>
           ))}
       </section>
+
+      {/*
+        Mounted only while open. The form starts empty every visit without a reset path, and the
+        dialog's four lookups (issues, repositories, agent profiles, executors) stay off every
+        read of this page — four round-trips nobody standing here asked for. Clearing the preset
+        on close is what stops a second `New task` landing on the previous request.
+      */}
+      {taskPreset && (
+        <CreateTaskDialog
+          trigger={null}
+          open
+          preset={taskPreset}
+          onOpenChange={(next) => !next && setTaskPreset(null)}
+        />
+      )}
     </div>
   );
 }

@@ -18,6 +18,7 @@ import {
   type ExternalEpic,
   type ExternalGroup,
   type ExternalIssue,
+  type ExternalIssueType,
   type ExternalLabel,
   type ExternalLinkedChange,
   type ExternalMilestone,
@@ -414,9 +415,12 @@ export class GithubProvider implements ChangeProvider, ProjectsCapability, Issue
    * POST a new issue and read back what GitHub stored (spec F23a Flow A). REST, not GraphQL,
    * matching `updateIssue` right above it: GitHub takes assignees by login and labels by name on
    * this endpoint directly, so there is no per-provider id resolution to do here the way GitLab's
-   * `createIssue` needs `userIdsFor` for. `parentEpicId` is accepted by the seed shape but never
-   * sent — GitHub has no epics, and its parity concept (sub-issues) is out of scope for this
-   * capability (spec F23a Part 1).
+   * `createIssue` needs `userIdsFor` for.
+   *
+   * `parentEpicId` is accepted by the seed shape and never sent — GitHub has no epics. Its own
+   * parity concept, the sub-issue, arrives as `parentIssueNumber` instead: a separate field
+   * because it is a separate thing (an ordinary issue in this repository, not an object in a
+   * group), and the manifest declares the two independently for exactly that reason.
    */
   async createIssue(
     credential: ScmCredential,
@@ -428,6 +432,9 @@ export class GithubProvider implements ChangeProvider, ProjectsCapability, Issue
     if (seed.assignees !== undefined) body.assignees = seed.assignees;
     if (seed.labels !== undefined) body.labels = seed.labels;
     if (seed.milestone !== undefined) body.milestone = Number(seed.milestone);
+    // The one GitHub extra the create endpoint takes in the body. `type` is the type's *name*,
+    // which is what `listIssueTypes` offered the person who picked it.
+    if (seed.issueType !== undefined) body.type = seed.issueType;
 
     const row = (await scmSend(
       "github",
@@ -436,15 +443,177 @@ export class GithubProvider implements ChangeProvider, ProjectsCapability, Issue
       "POST",
       body,
     )) as GithubIssueDetail;
+
+    await this.applyCreateExtras(credential, repo, row, seed);
+    // No re-read after the side effects, for the same reason GitLab's create does not do one:
+    // `ExternalIssue` carries neither a parent it did not report on creation nor a board
+    // membership nor a dependency, so a second GET would cost a call to return these same fields.
     return toDetailedIssue(row);
   }
 
   /**
+   * The three GitHub extras its create endpoint does not take, applied to the issue it just
+   * returned (spec F23a Flow A, user request 2026-08-31).
+   *
+   * Each is best-effort **in the sense that the issue already exists** — the same rule
+   * `GitlabProvider.createIssue` states for its own two side calls. Throwing here would report a
+   * failure for a write that plainly succeeded and leave the caller to create the issue a second
+   * time, so a refusal is swallowed and the issue is returned as it stands. What comes back is
+   * therefore what GitHub holds, which is the F23 NFR-7 rule applied to the case where it held
+   * only part of what was asked.
+   */
+  private async applyCreateExtras(
+    credential: ScmCredential,
+    repo: RepoRef,
+    created: GithubIssueDetail,
+    seed: IssueSeed,
+  ): Promise<void> {
+    const root = apiRoot(credential.baseUrl);
+
+    // Nesting is expressed from the parent's side — the parent gains a sub-issue, by the child's
+    // database id — which is the same asymmetry `parentsOf` reads around on the way out.
+    if (seed.parentIssueNumber !== undefined) {
+      await this.trySideEffect(
+        credential,
+        `${root}/repos/${repo}/issues/${seed.parentIssueNumber}/sub_issues`,
+        { sub_issue_id: created.id },
+      );
+    }
+
+    for (const link of seed.links ?? []) {
+      // GitHub expresses blocking and nothing else, which is what its manifest's `linkTypes`
+      // says, so the form never offers "relates to" here. Skipped rather than mapped onto a
+      // blocking relation it does not mean: a wrong edge is worse than a missing one.
+      if (link.type === "relates_to") continue;
+      // One endpoint covers both directions — an issue is told what blocks it — so the pair only
+      // has to be ordered correctly. `blocks` means the issue that was picked is the blocked one.
+      const blockedNumber = link.type === "blocks" ? link.issueNumber : created.number;
+      const blockerNumber = link.type === "blocks" ? created.number : link.issueNumber;
+      const blockerId =
+        blockerNumber === created.number
+          ? created.id
+          : await this.issueIdFor(credential, repo, blockerNumber);
+      // GitHub names the blocking issue by database id, and a number is all the picker had. A
+      // number that resolves to nothing is a link that cannot be made, not a create that failed.
+      if (blockerId === null) continue;
+      await this.trySideEffect(
+        credential,
+        `${root}/repos/${repo}/issues/${blockedNumber}/dependencies/blocked_by`,
+        { issue_id: blockerId },
+      );
+    }
+
+    // Projects v2 is GraphQL and takes the issue's node id, which the REST create returns beside
+    // the database id. Absent `node_id` means an instance too old to answer with one, and a board
+    // that cannot be joined rather than an issue that was not created.
+    if (seed.providerProjectId !== undefined && created.node_id) {
+      try {
+        await this.projects.addIssueToProject(credential, seed.providerProjectId, created.node_id);
+      } catch {}
+    }
+  }
+
+  /** A POST whose failure must not undo the issue it decorates — see `applyCreateExtras`. */
+  private async trySideEffect(
+    credential: ScmCredential,
+    url: string,
+    body: Record<string, unknown>,
+  ): Promise<boolean> {
+    try {
+      await scmSend("github", url, authHeaders(credential), "POST", body);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** One issue's database id from its number, for the endpoints that will not take a number. */
+  private async issueIdFor(
+    credential: ScmCredential,
+    repo: RepoRef,
+    issueNumber: number,
+  ): Promise<number | null> {
+    try {
+      const row = (await scmFetch(
+        "github",
+        `${apiRoot(credential.baseUrl)}/repos/${repo}/issues/${issueNumber}`,
+        authHeaders(credential),
+      )) as GithubIssue;
+      return typeof row?.id === "number" ? row.id : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * The issue types this repository offers — GitHub's own vocabulary, configured on the
+   * *organisation* and inherited by its repositories.
+   *
+   * Which is why a 404 is an empty list rather than an error: a repository owned by a person has
+   * no organisation to define types on, and a GitHub Enterprise Server old enough to predate the
+   * feature answers the same way. Neither is a failure to read — both are "this repository offers
+   * no types", and the picker draws nothing. Any other refusal still surfaces, because a token
+   * that cannot see an organisation it should is a fault worth reporting.
+   */
+  async listIssueTypes(credential: ScmCredential, repo: RepoRef): Promise<ExternalIssueType[]> {
+    const owner = repo.split("/")[0];
+    if (!owner) return [];
+    try {
+      const rows = (await scmFetch(
+        "github",
+        `${apiRoot(credential.baseUrl)}/orgs/${owner}/issue-types`,
+        authHeaders(credential),
+      )) as Array<{ id: number; name: string; description?: string | null; color?: string | null }>;
+      if (!Array.isArray(rows)) return [];
+      return rows
+        .filter((r) => typeof r?.name === "string" && r.name.length > 0)
+        .map((r) => ({
+          externalId: String(r.id),
+          name: r.name,
+          description: r.description ?? null,
+          color: r.color ?? null,
+        }));
+    } catch (cause) {
+      if (isNotFound(cause)) return [];
+      throw cause;
+    }
+  }
+
+  /**
+   * The item other issues nest under, originated in a repository (user request 2026-08-31, F23a
+   * Part 3).
+   *
+   * GitHub has no epic object, and this does not invent one: what it creates is an **ordinary
+   * issue**, and the only thing that will ever make it a parent is that other issues name it
+   * through `sub_issues` — the edge `applyCreateExtras` writes for a child and `parentsOf` reads
+   * back as `ExternalIssue.parentExternalId`. That is why the manifest declares
+   * `parentPlanningItem: { container: "repository" }` beside an unchanged `epics: false`: what is
+   * claimed is the thing GitHub actually has.
+   *
+   * It delegates rather than repeating the POST so that there is exactly one create path on this
+   * driver: a field the endpoint learns to take, or a side effect `applyCreateExtras` grows,
+   * applies to both by construction instead of by somebody remembering the second copy.
+   *
+   * Nothing here writes a hierarchy edge. A parent that itself has a parent is a different
+   * request, made by sending `parentIssueNumber` on the seed; creating one draws no edge at all,
+   * because the children have not been written yet and they are the side that draws it.
+   */
+  async createParentPlanningItem(
+    credential: ScmCredential,
+    repo: RepoRef,
+    seed: IssueSeed,
+  ): Promise<ExternalIssue> {
+    return this.createIssue(credential, repo, seed);
+  }
+
+  /**
    * GitHub has no epics (spec F23a Part 1) — the manifest declares `issueCreates.epics: false`
-   * (see `packages/scm/src/index.ts`) precisely so a caller never reaches this method through the
-   * "New epic" menu entry, which the UI disables rather than hides for exactly this provider. This
-   * throws rather than silently returning nothing so a caller that skipped the manifest check
-   * still gets a message that explains itself instead of a confusing runtime shape mismatch.
+   * (see `packages/scm/src/index.ts`) precisely so a caller never reaches this method: the ＋New
+   * menu's parent-item entry routes to `createParentPlanningItem` above, because GitHub's declared
+   * container is a repository, and the compose form's Parent-epic picker is what `epics: false`
+   * withholds. This throws rather than silently returning nothing so a caller that skipped the
+   * manifest check still gets a message that explains itself instead of a confusing runtime shape
+   * mismatch.
    */
   async createEpic(
     _credential: ScmCredential,
@@ -453,14 +622,14 @@ export class GithubProvider implements ChangeProvider, ProjectsCapability, Issue
   ): Promise<ExternalEpic> {
     throw new ScmProviderError(
       "github",
-      "GitHub has no epics; its parity concept is the sub-issue, tracked separately from this capability.",
+      "GitHub has no epics; its parity concept is the sub-issue, created with createParentPlanningItem.",
     );
   }
 
   async listGroups(_credential: ScmCredential): Promise<ExternalGroup[]> {
     throw new ScmProviderError(
       "github",
-      "GitHub has no epics, and therefore no groups to create one in.",
+      "GitHub has no epics, and therefore no groups to create one in — its parent items live in a repository.",
     );
   }
 

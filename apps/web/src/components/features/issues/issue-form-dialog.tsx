@@ -49,7 +49,11 @@ export function IssueFormDialog({
   onOpenChange,
 }: {
   issue?: IssueDto;
-  /** Omitted when the caller opens the dialog itself — the header's Create menu does. */
+  /**
+   * Omitted when the caller opens the dialog itself — the board's issue menu does, controlled,
+   * passing an `issue` to edit; the Issue detail page passes a pencil button instead. Nothing
+   * opens it in *create* mode (no `issue`) since the shell header's Create menu was removed.
+   */
   trigger?: ReactNode;
   onSuccess?: () => void;
   open?: boolean;

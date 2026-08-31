@@ -22,6 +22,10 @@ let parentQueries: string[][] = [];
  * a failure — a no-op that looks exactly like a success. GitLab shipped precisely that.
  */
 let receivedWrites: Array<{ method: string; path: string; body: unknown }> = [];
+/** One entry per `addProjectV2ItemById` mutation — the board and the issue node it was given. */
+let addedProjectItems: Array<{ project: string; content: string }> = [];
+/** Paths the fixture is told to refuse, so a failing side effect can be scripted per test. */
+let refusePaths = new Set<string>();
 
 /**
  * What the fixture's GraphQL answers for a node id: the issue's database id, and its parent's.
@@ -55,7 +59,21 @@ beforeAll(() => {
 
       /** GitHub's GraphQL root, which is where the sub-issue hierarchy lives (issue #127). */
       if (url.pathname === "/api/graphql") {
-        const body = (await req.json()) as { variables?: { ids?: string[] } };
+        const body = (await req.json()) as {
+          variables?: { ids?: string[]; project?: string; content?: string };
+        };
+        // Putting a new issue on a Projects v2 board (F23a Flow A, GitHub extras). Answered before
+        // the parents query so it never lands in `parentQueries`, which counts a different call.
+        if (body.variables?.project) {
+          if (refusePaths.has("addProjectV2ItemById")) {
+            return new Response("Resource not accessible", { status: 403 });
+          }
+          addedProjectItems.push({
+            project: body.variables.project,
+            content: body.variables.content ?? "",
+          });
+          return Response.json({ data: { addProjectV2ItemById: { item: { id: "PVTI_1" } } } });
+        }
         const ids = body.variables?.ids ?? [];
         parentQueries.push(ids);
         // A GraphQL budget exhausted mid-listing, which must not be read as "no parents".
@@ -113,6 +131,9 @@ beforeAll(() => {
           const body = (await req.json()) as Record<string, unknown>;
           return Response.json({
             id: 900,
+            // The GraphQL global id REST returns beside the database id — the only route from a
+            // freshly created issue to a Projects v2 mutation.
+            node_id: "I_900",
             number: 42,
             title: body.title,
             body: body.body ?? null,
@@ -324,6 +345,36 @@ beforeAll(() => {
         ]);
       }
       if (url.pathname === "/api/v3/repos/acme/private/issues") {
+        return new Response("Not Found", { status: 404 });
+      }
+
+      /**
+       * The endpoints GitHub's create call does not cover: nesting, dependencies and the issue
+       * types an organisation defines (user request 2026-08-31). Matched by shape rather than by
+       * a fixed issue number, because the number under test is the one the create just minted.
+       */
+      const subIssues = url.pathname.match(
+        /^\/api\/v3\/repos\/acme\/gate\/issues\/(\d+)\/sub_issues$/,
+      );
+      if (subIssues && req.method === "POST") {
+        if (refusePaths.has(url.pathname)) return new Response("Forbidden", { status: 403 });
+        return Response.json({ id: 900, number: Number(subIssues[1]) });
+      }
+      const blockedBy = url.pathname.match(
+        /^\/api\/v3\/repos\/acme\/gate\/issues\/(\d+)\/dependencies\/blocked_by$/,
+      );
+      if (blockedBy && req.method === "POST") {
+        if (refusePaths.has(url.pathname)) return new Response("Forbidden", { status: 403 });
+        return Response.json({ id: Number(blockedBy[1]) });
+      }
+      if (url.pathname === "/api/v3/orgs/acme/issue-types") {
+        return Response.json([
+          { id: 1, name: "Bug", description: "Something is broken", color: "red" },
+          { id: 2, name: "Feature", description: null, color: null },
+        ]);
+      }
+      /** A repository owned by a person: there is no organisation, so there are no types. */
+      if (url.pathname === "/api/v3/orgs/solo/issue-types") {
         return new Response("Not Found", { status: 404 });
       }
 
@@ -884,6 +935,163 @@ describe("creating an Issue on GitHub (spec F23a)", () => {
     });
 
     expect(receivedWrites[0]?.body).toEqual({ title: "Ignored parent" });
+  });
+
+  it("sends the issue type in the create body — GitHub takes it by name", async () => {
+    receivedWrites = [];
+
+    await github().createIssue(credential(), "acme/gate", { title: "Typed", issueType: "Bug" });
+
+    expect(receivedWrites[0]?.body).toEqual({ title: "Typed", type: "Bug" });
+  });
+
+  it("nests under a parent from the parent's side, by the new issue's database id", async () => {
+    receivedWrites = [];
+
+    await github().createIssue(credential(), "acme/gate", {
+      title: "A child",
+      parentIssueNumber: 10,
+    });
+
+    // Two writes: the create, then the nesting. GitHub records a sub-issue on the *parent*, which
+    // is why the path names 10 and the body names 900 — the issue that was just created.
+    expect(receivedWrites.map((w) => w.path)).toEqual([
+      "/api/v3/repos/acme/gate/issues",
+      "/api/v3/repos/acme/gate/issues/10/sub_issues",
+    ]);
+    expect(receivedWrites[1]?.body).toEqual({ sub_issue_id: 900 });
+    // And never in the create body itself, which has no field for it.
+    expect(receivedWrites[0]?.body).toEqual({ title: "A child" });
+  });
+
+  it("orders a dependency by which issue is blocked, not by which was picked", async () => {
+    receivedWrites = [];
+
+    await github().createIssue(credential(), "acme/gate", {
+      title: "Blocks and is blocked",
+      links: [
+        // "blocks" means the picked issue (#10) is the blocked one, and the new issue blocks it.
+        { issueNumber: 10, type: "blocks" },
+        // "is blocked by" is the same endpoint with the pair the other way round.
+        { issueNumber: 10, type: "is_blocked_by" },
+      ],
+    });
+
+    const dependencies = receivedWrites.filter((w) => w.path.includes("/dependencies/"));
+    expect(dependencies.map((w) => w.path)).toEqual([
+      "/api/v3/repos/acme/gate/issues/10/dependencies/blocked_by",
+      "/api/v3/repos/acme/gate/issues/42/dependencies/blocked_by",
+    ]);
+    // The blocker is named by database id, so the second one cost a read of #10 to resolve it.
+    expect(dependencies[0]?.body).toEqual({ issue_id: 900 });
+    expect(dependencies[1]?.body).toEqual({ issue_id: 1 });
+  });
+
+  it("drops a relates-to link rather than mapping it onto a blocking one", async () => {
+    receivedWrites = [];
+
+    await github().createIssue(credential(), "acme/gate", {
+      title: "Merely related",
+      links: [{ issueNumber: 10, type: "relates_to" }],
+    });
+
+    // GitHub has no such relation — its manifest says so in `linkTypes`, so the form never offers
+    // one. A value that arrives anyway is skipped: a wrong edge is worse than a missing one.
+    expect(receivedWrites.filter((w) => w.path.includes("/dependencies/"))).toHaveLength(0);
+  });
+
+  it("skips a link whose issue number resolves to nothing, and still creates", async () => {
+    receivedWrites = [];
+
+    // #999 is not in the fixture, so the read that turns a number into the database id GitHub's
+    // dependency endpoint wants comes back 404. A number the picker offered that no longer
+    // resolves is a link that cannot be made — not a create that failed.
+    const created = await github().createIssue(credential(), "acme/gate", {
+      title: "Blocked by a ghost",
+      links: [{ issueNumber: 999, type: "is_blocked_by" }],
+    });
+
+    expect(created.number).toBe(42);
+    expect(receivedWrites.filter((w) => w.path.includes("/dependencies/"))).toHaveLength(0);
+  });
+
+  it("puts the new issue on a project board, by the node id the create returned", async () => {
+    addedProjectItems = [];
+
+    await github().createIssue(credential(), "acme/gate", {
+      title: "On the board",
+      providerProjectId: "PVT_board",
+    });
+
+    expect(addedProjectItems).toEqual([{ project: "PVT_board", content: "I_900" }]);
+  });
+
+  it("leaves the created issue standing when a side effect is refused", async () => {
+    refusePaths = new Set(["/api/v3/repos/acme/gate/issues/10/sub_issues", "addProjectV2ItemById"]);
+    try {
+      // The issue exists on GitHub the moment the POST returned. Throwing here would report a
+      // failure for a write that plainly succeeded, and the operator would create it twice.
+      const created = await github().createIssue(credential(), "acme/gate", {
+        title: "Decorated badly",
+        parentIssueNumber: 10,
+        providerProjectId: "PVT_board",
+      });
+
+      expect(created.number).toBe(42);
+      expect(created.externalId).toBe("900");
+    } finally {
+      refusePaths = new Set();
+    }
+  });
+
+  it("lists the organisation's issue types, by name", async () => {
+    const types = await github().listIssueTypes(credential(), "acme/gate");
+
+    expect(types).toEqual([
+      { externalId: "1", name: "Bug", description: "Something is broken", color: "red" },
+      { externalId: "2", name: "Feature", description: null, color: null },
+    ]);
+  });
+
+  it("answers with no issue types for a repository that has no organisation", async () => {
+    // A user-owned repository inherits none, and a GHES too old to know the endpoint answers the
+    // same way. Neither is a failure to read — both are "this repository offers no types".
+    expect(await github().listIssueTypes(credential(), "solo/gate")).toEqual([]);
+  });
+
+  it("creates a parent planning item through the ordinary issues endpoint", async () => {
+    receivedWrites = [];
+
+    const created = await github().createParentPlanningItem(credential(), "acme/gate", {
+      title: "Cold-weather reliability",
+      description: "the big rocks",
+    });
+
+    // One create path, not a bespoke second one: the same POST `createIssue` makes, so a field the
+    // endpoint learns to take applies to both by construction.
+    expect(receivedWrites).toHaveLength(1);
+    expect(receivedWrites[0]?.path).toBe("/api/v3/repos/acme/gate/issues");
+    expect(receivedWrites[0]?.body).toEqual({
+      title: "Cold-weather reliability",
+      body: "the big rocks",
+    });
+    // And it answers from GitHub's response, not from the seed: the number and the id are the
+    // provider's alone — nothing in the request could have produced either.
+    expect(created.number).toBe(42);
+    expect(created.externalId).toBe("900");
+    expect(created.url).toBe("u/issues/42");
+    expect(created.title).toBe("Cold-weather reliability");
+  });
+
+  it("draws no hierarchy edge when it creates one — the children draw it", async () => {
+    receivedWrites = [];
+
+    await github().createParentPlanningItem(credential(), "acme/gate", { title: "A parent" });
+
+    // A parent with a parent is a different request (`parentIssueNumber` on the seed). Creating
+    // one nests it under nothing, and invents no second hierarchy alongside sub-issues.
+    expect(receivedWrites.filter((w) => w.path.includes("/sub_issues"))).toHaveLength(0);
+    expect(receivedWrites.filter((w) => w.path.includes("/dependencies/"))).toHaveLength(0);
   });
 
   it("throws a descriptive ScmProviderError for createEpic — GitHub has no epics", async () => {

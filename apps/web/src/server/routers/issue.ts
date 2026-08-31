@@ -3,6 +3,7 @@ import {
   createdProviderIssueDto,
   createIssueCommentInput,
   createIssueInput,
+  createParentPlanningItemInput,
   createProviderIssueInput,
   deleteIssueInput,
   getIssueInput,
@@ -35,7 +36,7 @@ import {
   setIssueStatus,
   updateIssue,
 } from "../dal/issue.js";
-import { createProviderIssue } from "../dal/issue-create.js";
+import { createParentPlanningItem, createProviderIssue } from "../dal/issue-create.js";
 import {
   createIssueComment,
   listIssueComments,
@@ -284,6 +285,30 @@ export const issueRouter = router({
     .input(createProviderIssueInput)
     .output(createdProviderIssueDto)
     .mutation(async ({ ctx, input }) => unwrap(await createProviderIssue(ctx.rctx, input))),
+
+  /**
+   * Originate the item other issues nest under, on a provider whose parent planning item lives in
+   * a **repository** (F23a Part 3) — GitHub's sub-issue parent, which is an ordinary issue.
+   *
+   * Here rather than beside `project.createEpic`, and for the reason that procedure's own comment
+   * gives for being there: each create sits with the thing it produces. An epic is a group object
+   * with no local row, so it belongs to the project surface; this produces a mirrored `issue` row
+   * and shares its entire mirror-and-attach tail with `createOnProvider` directly above.
+   */
+  createParentOnProvider: ownerProcedure
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/issue.createParentOnProvider",
+        tags: ["issue"],
+        protect: true,
+        summary:
+          "Create the parent planning item other issues nest under, on a provider whose parent item lives in a repository. Refused with a stated reason on a provider whose parent item lives in a group; the answer is what the provider stored, never what was sent.",
+      },
+    })
+    .input(createParentPlanningItemInput)
+    .output(createdProviderIssueDto)
+    .mutation(async ({ ctx, input }) => unwrap(await createParentPlanningItem(ctx.rctx, input))),
 
   /** The discussion on one imported Issue, read live from its provider. */
   comments: ownerProcedure

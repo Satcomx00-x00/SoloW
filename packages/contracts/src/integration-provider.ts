@@ -202,6 +202,46 @@ export const projectFieldSupportSchema = z
 export type ProjectFieldSupport = z.infer<typeof projectFieldSupportSchema>;
 
 /**
+ * How one new Issue relates to an existing one (F23a, user request 2026-08-30).
+ *
+ * GitLab's three `link_type` values, kept as the neutral vocabulary because they are the three
+ * every tracker that has the concept at all agrees on. A provider that expresses only some of
+ * them says which in `issueCreateSupport.linkTypes` — GitHub's issue dependencies are
+ * blocks/is-blocked-by and nothing else — so the form offers a relation the provider can hold
+ * rather than one its driver would have to map onto the nearest thing or drop.
+ */
+export const issueLinkTypeSchema = z.enum(["relates_to", "blocks", "is_blocked_by"]);
+export type IssueLinkType = z.infer<typeof issueLinkTypeSchema>;
+export const ISSUE_LINK_TYPES = issueLinkTypeSchema.options;
+
+/**
+ * Where a provider's parent planning item is created — the container the "Where" step collects.
+ *
+ * A closed enum rather than a free string because a Where step has to *render a picker*, and a
+ * container shape nothing in the client knows how to collect is a dialog with an empty first
+ * modal. Adding a third container (a Jira project key, say) is a deliberate change here plus the
+ * picker that collects it — exactly the trade `integrationCapabilitySchema` above already makes.
+ */
+export const parentPlanningContainerSchema = z.enum(["group", "repository"]);
+export type ParentPlanningContainer = z.infer<typeof parentPlanningContainerSchema>;
+export const PARENT_PLANNING_CONTAINERS = parentPlanningContainerSchema.options;
+
+/**
+ * A provider's ability to **originate** the item other work items nest under, and where.
+ *
+ * `noun` is display-only, and exists for exactly the reason `changeRequestNoun` does: "New epic"
+ * is a lie on a provider whose parent item is an ordinary issue, and a label that names something
+ * the provider does not have is the per-provider vocabulary leaking the other way. The domain
+ * still says "parent planning item" everywhere it reasons about one.
+ */
+export const parentPlanningItemSchema = z.object({
+  container: parentPlanningContainerSchema,
+  /** The provider's own word, lowercase, as it reads in "New …" / "Create …": "epic", "parent issue". */
+  noun: z.string().min(1).max(40),
+});
+export type ParentPlanningItem = z.infer<typeof parentPlanningItemSchema>;
+
+/**
  * What a provider declaring `issueCreates` can actually originate.
  *
  * `createIssue` is universal to every provider that declares the capability at all — there is no
@@ -213,7 +253,26 @@ export type ProjectFieldSupport = z.infer<typeof projectFieldSupportSchema>;
  * capability difference is stated, never hidden.
  */
 export const issueCreateSupportSchema = z.object({
+  /** There are epic objects, living in groups, that can be listed and nested under. */
   epics: z.boolean(),
+  /**
+   * This provider can **originate** a parent planning item, and here is the container to ask for
+   * (user request 2026-08-31, F23a Part 3).
+   *
+   * Deliberately not the same fact as `epics`, and deliberately not derived from it. `epics`
+   * answers "are there epic objects to list and to nest issues under" — it is what gates
+   * `createEpic`/`listGroups`/`listEpics` and the compose form's Parent-epic picker. This answers
+   * "can the ＋New menu originate one, and what does the Where step have to collect". GitHub has
+   * no epic object at all and can still originate a parent — an ordinary issue that others nest
+   * under through sub-issues — and a provider could equally have epics it may list but not create.
+   * A provider may declare either, both or neither, so neither flag can answer for the other, and
+   * folding them into one would either lock GitHub out of a menu entry it can serve or make the
+   * manifest claim GitHub has epics, which is the false claim Decision 0016 exists to prevent.
+   *
+   * Absent means "this provider cannot originate one" — the same "nobody has said" reading every
+   * optional flag here carries, and the reason the menu entry states a refusal rather than hiding.
+   */
+  parentPlanningItem: parentPlanningItemSchema.optional(),
   /**
    * The optional fields a new Issue may carry beyond title/description/assignees/labels/milestone,
    * which every provider declaring the capability takes. Each defaults to `false`, so a provider
@@ -238,19 +297,37 @@ export const issueCreateSupportSchema = z.object({
   timeEstimate: z.boolean().optional(),
   /** The new Issue can be linked to existing ones (blocks / is blocked by / relates to). */
   links: z.boolean().optional(),
+  /**
+   * Which relations `links` actually covers. Absent means all three — the reading a provider
+   * written before GitHub declared `links` already had, and the one GitLab means. GitHub's issue
+   * dependencies express blocking in both directions and have no "relates to" at all, so it
+   * narrows the set rather than declaring `links: false` over one missing relation.
+   */
+  linkTypes: z.array(issueLinkTypeSchema).optional(),
+  /**
+   * The three below are GitHub's own extras, and they are here for exactly the reason the five
+   * above are: a provider has fields the universal set does not, and the compose form asks the
+   * manifest which rather than asking the provider's name (Decision 0016). That the first batch
+   * happened to be GitLab's is an accident of which provider was implemented first, not a shape
+   * this schema has.
+   */
+  /** The Issue can be given one of a set of types the provider itself defines (GitHub issue types). */
+  issueTypes: z.boolean().optional(),
+  /**
+   * The Issue can be created **under an existing Issue** — GitHub's sub-issues. Distinct from
+   * `epics`, and deliberately: an epic is a separate object in a separate container, where this
+   * nests an issue under an ordinary issue in the same repository. A provider may have either,
+   * both, or neither, so one flag cannot answer for the other.
+   */
+  parentIssue: z.boolean().optional(),
+  /**
+   * The Issue can be put on one of the provider's own project boards as it is created (GitHub
+   * Projects v2). GitLab has no project object at all (Decision 0018), which is the same reason
+   * it declares no `projects` capability.
+   */
+  providerProject: z.boolean().optional(),
 });
 export type IssueCreateSupport = z.infer<typeof issueCreateSupportSchema>;
-
-/**
- * How one new Issue relates to an existing one (F23a, user request 2026-08-30).
- *
- * GitLab's three `link_type` values, kept as the neutral vocabulary because they are the three
- * every tracker that has the concept at all agrees on. A provider that expresses only some of
- * them still declares `links`; the driver is what maps a type it cannot express onto the nearest
- * one it can, or refuses it — the same translation `parentEpicId` already does at that boundary.
- */
-export const issueLinkTypeSchema = z.enum(["relates_to", "blocks", "is_blocked_by"]);
-export type IssueLinkType = z.infer<typeof issueLinkTypeSchema>;
 
 export const providerManifestDto = z.object({
   id: providerIdSchema,

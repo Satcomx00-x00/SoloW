@@ -29,14 +29,17 @@ const HIDDEN_ID = "test.palette-hidden";
  * test file in the bun process, so a probe left behind would follow this file into the next one.
  */
 beforeAll(() => {
+  // Filed under "Go to": the "Create" heading was removed with the shell header's Create menu,
+  // and a probe in a group the vocabulary no longer has would be filtered out before any of these
+  // assertions could see it.
   commandRegistry.register({
     id: PROBE_ID,
     priority: 900,
     render: {
       title: "Probe a contributed command",
-      group: "Create",
+      group: "Go to",
       icon: NO_ICON,
-      run: (actions) => actions.create("task"),
+      run: (actions) => actions.navigate("/probe"),
     },
   });
   commandRegistry.register({
@@ -45,7 +48,7 @@ beforeAll(() => {
     when: (ctx) => ctx.identity !== null,
     render: {
       title: "Only for a signed-in owner",
-      group: "Create",
+      group: "Go to",
       icon: NO_ICON,
       run: () => {},
     },
@@ -57,10 +60,9 @@ afterAll(() => {
   commandRegistry.unregister(HIDDEN_ID);
 });
 
-const calls: { navigated: string[]; created: string[] } = { navigated: [], created: [] };
+const calls: { navigated: string[] } = { navigated: [] };
 const actions: CommandActions = {
   navigate: (href) => calls.navigated.push(href),
-  create: (kind) => calls.created.push(kind),
 };
 
 function renderPalette(
@@ -68,7 +70,6 @@ function renderPalette(
   layout?: SurfaceLayout,
 ) {
   calls.navigated = [];
-  calls.created = [];
   return render(
     <AppContextProvider value={{ identity }}>
       <Command shouldFilter={false}>
@@ -95,7 +96,27 @@ describe("the command palette's entries", () => {
     expect(offered).toContain("Projects");
     expect(offered).toContain("Unassigned");
     expect(offered).toContain("Settings");
-    expect(offered).toContain("New task");
+  });
+
+  it("offers no create command, because there is no create action left to run one", () => {
+    /*
+     * The absence the user chose, asserted rather than merely achieved.
+     *
+     * `CommandActions` no longer carries a `create` verb — the shell header's Create menu was the
+     * only thing that could answer it. So a create entry re-registered later would resolve, draw
+     * itself in ⌘K, and then throw on selection into the registry's own try/catch: a palette row
+     * that visibly does nothing. This is what stops that landing unnoticed.
+     */
+    renderPalette();
+
+    expect(screen.queryByText("New task")).toBeNull();
+    expect(screen.queryByText("New issue")).toBeNull();
+    expect(screen.queryByText("Import issues")).toBeNull();
+
+    // Settings' own "Connect a repository" is deliberately still here: it shares a title with one
+    // of the four that went, but it *navigates* to Settings → Repositories rather than opening a
+    // dialog, so it survives an action the palette can no longer supply.
+    expect(screen.getByText("Connect a repository")).toBeDefined();
   });
 
   /*
@@ -112,21 +133,23 @@ describe("the command palette's entries", () => {
   it("offers the commands in the order the saved arrangement puts them in", () => {
     // Within the group, not across the palette: `COMMAND_GROUPS` fixes the heading order, and an
     // arrangement rearranges the commands, not the vocabulary they are filed under.
-    const inCreateGroup = () =>
+    const inGoToGroup = () =>
       screen
         .getAllByRole("option")
         .map((option) => option.textContent)
-        .filter((title) => title === "Probe a contributed command" || title === "New task");
+        .filter((title) => title === "Probe a contributed command" || title === "Projects");
 
     renderPalette(null, { order: [], hidden: [], shown: [], widths: {} });
-    const before = inCreateGroup();
+    const before = inGoToGroup();
 
     cleanup();
     renderPalette(null, { order: [PROBE_ID], hidden: [], shown: [], widths: {} });
-    const after = inCreateGroup();
+    const after = inGoToGroup();
 
-    expect(before).toEqual(["New task", "Probe a contributed command"]);
-    expect(after).toEqual(["Probe a contributed command", "New task"]);
+    // Unarranged, priority decides: `Projects` is 10 and the probe is 900. Naming the probe in
+    // `order` puts it first regardless, which is the whole claim.
+    expect(before).toEqual(["Projects", "Probe a contributed command"]);
+    expect(after).toEqual(["Probe a contributed command", "Projects"]);
   });
 
   it("offers a command a feature module contributed, without importing that module", () => {
@@ -148,17 +171,20 @@ describe("the command palette's entries", () => {
     renderPalette();
 
     fireEvent.click(screen.getByText("Projects"));
-    fireEvent.click(screen.getByText("New task"));
+    fireEvent.click(screen.getByText("Probe a contributed command"));
 
-    expect(calls.navigated).toEqual(["/projects"]);
-    expect(calls.created).toEqual(["task"]);
+    // Both a registration the app ships and one a test contributed reach the same supplied
+    // action — which is the point of handing the actions in rather than letting a command import
+    // the router.
+    expect(calls.navigated).toEqual(["/projects", "/probe"]);
   });
 
   it("groups the entries under the headings the command vocabulary defines", () => {
     const { container } = renderPalette();
     const text = container.textContent ?? "";
 
-    expect(text.indexOf("Go to")).toBeLessThan(text.indexOf("Create"));
-    expect(text.indexOf("Create")).toBeLessThan(text.indexOf("Manage secrets"));
+    // "Manage secrets" stands in for the Settings group's contents: `Settings` is also a
+    // destination in "Go to", so its heading is not a string this can search for.
+    expect(text.indexOf("Go to")).toBeLessThan(text.indexOf("Manage secrets"));
   });
 });

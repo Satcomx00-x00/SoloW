@@ -6,8 +6,8 @@
 
 Issues are the organising unit of work in SoloW. Every Task exists to advance an
 Issue. An Issue reaches SoloW one of two ways: **imported** from a connected GitHub or
-GitLab repository (see [F12](./F12-integrations.md)), or **created directly** from the shell
-header's Create menu with a title, description, a Repository, and labels (reversing the 2026-08-19
+GitLab repository (see [F12](./F12-integrations.md)), or **created directly** with a title,
+description, a Repository, and labels (reversing the 2026-08-19
 product decision, issue #15 — user reports showed a Workspace with no connected tracker, or a
 user who wants to jot an Issue down before it exists upstream, had no way to use the board).
 Whichever way an Issue arrives, its Tasks and derived status are always SoloW's own; an
@@ -29,17 +29,26 @@ Whichever way an Issue arrives, its Tasks and derived status are always SoloW's 
 ## Functional requirements
 
 - **FR-1** A user can create an Issue directly with a title, description, a Repository, and
-  labels. Restored 2026-08-20 (reversing the 2026-08-19 removal, issue #15) — opened from the
-  shell header's **Create** menu via a dialog that also lets the user pick an existing
-  Repository or connect a new one. A locally created Issue's `source` reads `"local"`, the same
-  value pre-2026-08-19 rows already carried.
-- **FR-1a** Every way to create or import work is reached from one place: the **Create** menu in
-  the shell header, present on every route, offering New task, New issue, Import issues and
-  Connect a repository (with ⌘⇧T / ⌘⇧I for the first two, and the same four entries in the ⌘K
-  palette). Added 2026-08-21 after a user report that these were spread across the board header,
-  the Issues page header, two glyph buttons inside the board's Backlog column and Settings, so
-  which ones were reachable depended on the route. Settings → Integrations keeps its own
-  "Import a repository", which connects a *source* rather than creating one Issue.
+  labels. Restored 2026-08-20 (reversing the 2026-08-19 removal, issue #15) — a dialog that also
+  lets the user pick an existing Repository or connect a new one. A locally created Issue's
+  `source` reads `"local"`, the same value pre-2026-08-19 rows already carried. **Not currently
+  reachable:** that dialog was only ever opened from the Create menu removed on 2026-08-31 (see
+  FR-1a), so it still ships and is still mounted for *editing* an Issue, but nothing in the UI
+  opens it in create mode. Restoring the affordance is a button on whichever surface should own
+  it, not a rebuild.
+- **FR-1a** *Removed 2026-08-31, at the user's request ("the topbar create buttons … this is
+  useless right now").* It read: every way to create or import work is reached from one place —
+  the **Create** menu in the shell header, present on every route, offering New task, New issue,
+  Import issues and Connect a repository, with ⌘⇧T / ⌘⇧I for the first two and the same four
+  entries in the ⌘K palette. Added 2026-08-21 to consolidate affordances that were spread across
+  the board header, the Issues page header, two glyph buttons in the board's Backlog column and
+  Settings. The menu, both shortcuts and all four palette entries are gone. Creating work now
+  happens where the thing being created lives: a Project's **New** menu (issue, epic), **New
+  task** on an Issue's page and on a project row's right-click, and Settings → Repositories /
+  Integrations for sources. Settings → Integrations keeps its own "Import a repository", which
+  connects a *source* rather than creating one Issue; **importing individual Issues** from a
+  connected repository has no entry point at present either — that dialog is kept and still
+  covered by its own tests, so re-homing it is one button.
 - **FR-2** A user can view all Issues in a Workspace, filter them by status, label and
   source, and search them by text (title, description, or the provider's own issue number —
   "#42" and "42" both find it). Built 2026-08-22; every filter lives in the URL

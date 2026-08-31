@@ -40,7 +40,27 @@ import { ISSUE_STATUS_LABELS, ISSUE_STATUS_STYLE, issueSourceLabel } from "@/lib
 import { WHOLE_PAGE } from "@/lib/paged";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
-import { type CreateDialogPreset, onOpenCreateDialog } from "./create-dialog-bus";
+
+/**
+ * What the caller opening this dialog already knows, so the form does not ask for it again.
+ *
+ * It used to be the vocabulary of a document-level event bus shared by four dialogs; with that
+ * bus gone and this the only dialog still taking a preset, the type belongs to the component that
+ * reads it. Optional throughout, and a *starting point* rather than a lock — every field it fills
+ * stays editable, because a right-click is a shortcut and not a decision.
+ */
+export interface TaskPreset {
+  issueId?: string;
+  /**
+   * The Repository the Issue belongs to.
+   *
+   * Needed alongside `issueId`, not instead of it: the Issue picker below is narrowed by the
+   * chosen Repository and stays disabled ("Select a repository first") until one is picked.
+   * Presetting the issue alone therefore looked like it did nothing — the value was in the form
+   * and the control that would have shown it was still locked.
+   */
+  repositoryId?: string;
+}
 
 /**
  * The repository the agent is started in stays a single Select, and any others are ticked
@@ -137,12 +157,12 @@ function IssuePreview({ issue }: { issue: IssueDto }) {
 /**
  * Conventional create-Task form in a modal dialog (React Hook Form + Zod).
  *
- * Open state is controlled when the caller passes it — that is how the shell header's Create
- * menu drives this dialog from outside the board — and internal otherwise, so rendering it bare
- * still gives a working "New task" button.
+ * Open state is controlled when the caller passes it — that is how the Issue detail page and the
+ * project table's right-click drive this dialog from outside the board — and internal otherwise,
+ * so rendering it bare still gives a working "New task" button.
  */
 /**
- * Write a sender's starting point into the form.
+ * Write a caller's starting point into the form.
  *
  * **Repository first.** The Issue picker is narrowed by the chosen Repository and stays disabled
  * ("Select a repository first") until one is set, so writing the issue alone leaves a value that
@@ -151,10 +171,7 @@ function IssuePreview({ issue }: { issue: IssueDto }) {
  * `shouldDirty` on purpose: these are values the operator chose by right-clicking a row, so Reset
  * returns to an empty form rather than to their click.
  */
-function applyPreset(
-  form: UseFormReturn<TaskFormValues>,
-  preset: CreateDialogPreset | undefined,
-): void {
+function applyPreset(form: UseFormReturn<TaskFormValues>, preset: TaskPreset | undefined): void {
   if (!preset) return;
   if (preset.repositoryId) {
     form.setValue("repositoryId", preset.repositoryId, { shouldDirty: true });
@@ -173,19 +190,16 @@ export function CreateTaskDialog({
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   /**
-   * A starting point supplied by whoever asked for this dialog — a right-click on a project row
-   * knows the issue and its repository; the header's `New task` knows nothing.
+   * A starting point supplied by whoever asked for this dialog — a right-click on a project row,
+   * or `New task` on an Issue's own page, both of which already know the Issue and its
+   * Repository. Absent when the dialog opens from its own trigger, which knows nothing.
    */
-  preset?: CreateDialogPreset | undefined;
+  preset?: TaskPreset | undefined;
 } = {}) {
   const [internalOpen, setInternalOpen] = useState(false);
   const open = controlledOpen ?? internalOpen;
   const setOpen = onOpenChange ?? setInternalOpen;
   const utils = trpc.useUtils();
-  // Anything in the shell can ask for this dialog by name — the command palette, and the header's
-  // Create menu. Skipped when controlled: the owner is already listening on the bus itself, and
-  // both reacting would fight over one piece of state.
-  const uncontrolled = controlledOpen === undefined;
   // Unfiltered — used only to decide whether the Workspace has *any* Issue at all (the
   // "missingConfig" gate below). The picker itself reads from `issues` (filtered), so a
   // Repository with zero Issues narrows the picker to empty without hiding the whole form.
@@ -208,25 +222,17 @@ export function CreateTaskDialog({
   });
 
   /*
-   * Anything in the shell can ask for this dialog by name — the command palette, the header's
-   * Create menu, and a right-click on a project row. Declared *after* the form because the
-   * sender's preset is written into it.
+   * The only way a preset reaches the form. There used to be a second one — a subscription to a
+   * document-level bus that the shell header's Create menu dispatched on — and it went with that
+   * menu; the two callers left both render this dialog themselves, on the same page as the button
+   * that asked for it, so passing the value down is the whole of the hand-off.
    *
-   * Skipped when controlled: the owner is already listening on the bus itself, and both reacting
-   * would fight over one piece of state.
-   */
-  useEffect(() => {
-    if (!uncontrolled) return;
-    return onOpenCreateDialog("task", (sent) => {
-      applyPreset(form, sent);
-      setInternalOpen(true);
-    });
-  }, [uncontrolled, form]);
-
-  /*
-   * The controlled path's equivalent: the owner passes the preset down and it lands as the dialog
-   * opens. Both paths exist because both are real — the shell renders this dialog controlled, and
-   * a preset applied only in the subscription above would be dropped there without a trace.
+   * Keyed on `preset` by identity, so a *new* request re-applies even while the dialog is already
+   * open. That is precisely why both callers hold the preset in state rather than building the
+   * object inline in their JSX: a fresh object every render would stamp the preset back over a
+   * Repository or Issue the operator had since changed.
+   *
+   * Declared after the form because the preset is written into it.
    */
   useEffect(() => {
     if (open && preset) applyPreset(form, preset);
@@ -319,12 +325,17 @@ export function CreateTaskDialog({
         {missingConfig ? (
           <p className="text-muted-foreground text-sm">
             {(allIssues.data?.items.length ?? 0) === 0 ? (
+              /* This used to send people to the header's Create menu, which had both "New issue"
+                 and "Import issues" on it. That menu is gone, so the copy names the surface that
+                 exists — and deliberately does not promise an import, which currently has no
+                 entry point of its own. Sending an operator to a button that is not there is the
+                 failure this whole paragraph exists to prevent. */
               <>
-                Create or import an Issue first — the{" "}
-                <span className="font-medium text-foreground">Create</span> menu in the header has
-                both. Connect GitHub or GitLab in{" "}
-                <span className="font-medium text-foreground">Settings → Integrations</span> to
-                import instead of typing one in.
+                Create an Issue first — a Project&apos;s{" "}
+                <span className="font-medium text-foreground">New</span> menu creates one on the
+                provider that owns it. Connect GitHub or GitLab in{" "}
+                <span className="font-medium text-foreground">Settings → Integrations</span> if this
+                Workspace has no provider behind it yet.
               </>
             ) : (
               <>

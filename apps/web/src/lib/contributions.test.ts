@@ -70,7 +70,6 @@ describe("a feature module contributing commands", () => {
     const navigated: string[] = [];
     const actions: CommandActions = {
       navigate: (href) => navigated.push(href),
-      create: () => {},
     };
 
     command?.render.run(actions);
@@ -82,7 +81,22 @@ describe("a feature module contributing commands", () => {
   it("migrated the palette's own entries, so the destination list is a registration too", () => {
     const resolved = ids(commandRegistry.resolve(SIGNED_OUT));
     expect(resolved).toContain("goto.projects");
-    expect(resolved).toContain("task.create");
+    /*
+     * And the four create entries that used to sit beside them are gone from the *registry*, not
+     * merely hidden by the palette.
+     *
+     * They ran `actions.create(kind)`, a verb `CommandActions` no longer has. A half-removal that
+     * deleted the header menu and left these registered would put dead rows straight back into
+     * ⌘K — resolvable, drawn, and throwing into the registry's try/catch on selection.
+     *
+     * A saved arrangement may still name them in its `order` or `hidden` arrays. That is inert:
+     * `resolveContributions` only ever looks an id up, so an id that resolves to nothing is
+     * skipped rather than rendered as an empty row.
+     */
+    expect(resolved).not.toContain("task.create");
+    expect(resolved).not.toContain("issue.create");
+    expect(resolved).not.toContain("issue.import");
+    expect(resolved).not.toContain("repository.connect.create");
   });
 
   it("decides a command from the context alone, never by reading another registry", () => {
