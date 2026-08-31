@@ -1059,6 +1059,41 @@ describe("creating an Issue on GitHub (spec F23a)", () => {
     expect(await github().listIssueTypes(credential(), "solo/gate")).toEqual([]);
   });
 
+  it("creates a parent planning item through the ordinary issues endpoint", async () => {
+    receivedWrites = [];
+
+    const created = await github().createParentPlanningItem(credential(), "acme/gate", {
+      title: "Cold-weather reliability",
+      description: "the big rocks",
+    });
+
+    // One create path, not a bespoke second one: the same POST `createIssue` makes, so a field the
+    // endpoint learns to take applies to both by construction.
+    expect(receivedWrites).toHaveLength(1);
+    expect(receivedWrites[0]?.path).toBe("/api/v3/repos/acme/gate/issues");
+    expect(receivedWrites[0]?.body).toEqual({
+      title: "Cold-weather reliability",
+      body: "the big rocks",
+    });
+    // And it answers from GitHub's response, not from the seed: the number and the id are the
+    // provider's alone — nothing in the request could have produced either.
+    expect(created.number).toBe(42);
+    expect(created.externalId).toBe("900");
+    expect(created.url).toBe("u/issues/42");
+    expect(created.title).toBe("Cold-weather reliability");
+  });
+
+  it("draws no hierarchy edge when it creates one — the children draw it", async () => {
+    receivedWrites = [];
+
+    await github().createParentPlanningItem(credential(), "acme/gate", { title: "A parent" });
+
+    // A parent with a parent is a different request (`parentIssueNumber` on the seed). Creating
+    // one nests it under nothing, and invents no second hierarchy alongside sub-issues.
+    expect(receivedWrites.filter((w) => w.path.includes("/sub_issues"))).toHaveLength(0);
+    expect(receivedWrites.filter((w) => w.path.includes("/dependencies/"))).toHaveLength(0);
+  });
+
   it("throws a descriptive ScmProviderError for createEpic — GitHub has no epics", async () => {
     await expect(
       github().createEpic(credential(), "acme", { title: "Would-be epic" }),

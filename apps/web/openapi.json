@@ -3712,6 +3712,135 @@
         }
       }
     },
+    "/issue.createParentOnProvider": {
+      "post": {
+        "operationId": "issue-createParentOnProvider",
+        "summary": "Create the parent planning item other issues nest under, on a provider whose parent item lives in a repository. Refused with a stated reason on a provider whose parent item lives in a group; the answer is what the provider stored, never what was sent.",
+        "tags": [
+          "issue"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "repositoryId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "projectId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 300
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 65536
+                  },
+                  "labels": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 50
+                    },
+                    "maxItems": 20
+                  }
+                },
+                "required": [
+                  "repositoryId",
+                  "title"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "issueId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "externalNumber": {
+                      "type": "integer"
+                    },
+                    "externalUrl": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "issueId",
+                    "externalNumber",
+                    "externalUrl",
+                    "title"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/issue.comments": {
       "get": {
         "operationId": "issue-comments",
@@ -4282,6 +4411,27 @@
                         "properties": {
                           "epics": {
                             "type": "boolean"
+                          },
+                          "parentPlanningItem": {
+                            "type": "object",
+                            "properties": {
+                              "container": {
+                                "type": "string",
+                                "enum": [
+                                  "group",
+                                  "repository"
+                                ]
+                              },
+                              "noun": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 40
+                              }
+                            },
+                            "required": [
+                              "container",
+                              "noun"
+                            ]
                           },
                           "dueDate": {
                             "type": "boolean"

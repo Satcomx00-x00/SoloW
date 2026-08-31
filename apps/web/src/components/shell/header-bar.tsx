@@ -6,7 +6,6 @@ import { usePathname } from "next/navigation";
 import { projectIdFromPath, projectSectionFor, sectionFor } from "@/lib/navigation";
 import { trpc } from "@/trpc/react";
 import { CommandPaletteTrigger } from "./command-palette";
-import { CreateMenu } from "./create-menu";
 import { HeaderActionsOutlet } from "./header-actions";
 
 /**
@@ -20,9 +19,18 @@ import { HeaderActionsOutlet } from "./header-actions";
  * board was a thing the Workspace had. It is not; it is a thing a Project has, and the crumb now
  * says so on every screen and links back to the Project rather than to a flat list.
  *
- * `CreateMenu` is rendered here rather than contributed by a page, and that is the point: making
- * a Task or an Issue is not a property of the route you are on, so it is available on every one
- * of them. `HeaderActionsOutlet` stays for controls that genuinely do belong to one page.
+ * Nothing in this header creates anything any more. A global `Create` split-button used to sit
+ * here on the argument that making a Task or an Issue is not a property of the route you are on —
+ * true, but it bought a permanently visible button for actions that are reached from the place
+ * they belong to anyway, and a header control that is nearly never the next thing you want is
+ * cost with no matching use. It was removed on request, and the ⌘⇧T / ⌘⇧I shortcuts and the
+ * palette's four create commands went with it: they existed only to open the dialogs that menu
+ * owned, so keeping them would have left key bindings dispatching at nothing.
+ *
+ * Creating work now happens where the thing being created lives — a Project's own `New` menu,
+ * `New task` on an Issue's page — and each of those surfaces mounts its own dialog, so a button
+ * cannot ask for something nothing is listening for. `HeaderActionsOutlet` stays for controls
+ * that genuinely do belong to one page.
  */
 function Crumb({ href, children }: { href?: string | undefined; children: React.ReactNode }) {
   if (!href) return <span className="truncate px-1 font-medium">{children}</span>;
@@ -122,7 +130,6 @@ export function HeaderBar({ workspaceName }: { workspaceName: string }) {
 
       <div className="ml-auto flex items-center gap-2">
         <HeaderActionsOutlet />
-        <CreateMenu />
         <span className="h-4 w-px bg-border" aria-hidden />
         <CommandPaletteTrigger />
       </div>

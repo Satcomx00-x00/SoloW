@@ -25,6 +25,7 @@ import { appRouter } from "../routers/index.js";
 import type { BaseContext } from "../trpc.js";
 import {
   createEpic,
+  createParentPlanningItem,
   createProviderIssue,
   listCreatableGroups,
   listGroupEpics,
@@ -43,11 +44,23 @@ import { ctxFor, seedWorkspaceGraph } from "./test-fixtures.js";
 
 /** A provider that creates issues and has epics — GitLab's shape. */
 const EPICS = "fixture.creates";
-/** A provider that creates issues and has none — GitHub's shape, throws if reached. */
+/**
+ * A provider that creates issues, has no epics, and declares no parent planning item either —
+ * the "nobody has said" case, which both gates must read as a refusal rather than as permission.
+ */
 const NO_EPICS = "fixture.noepics";
+/**
+ * A provider with no epics that *can* originate a parent planning item, in a repository — GitHub's
+ * shape after the F23a Part 3 split. It exists so the new gate can be tested independently of
+ * `epics`, which is the property the whole change hangs on.
+ */
+const REPO_PARENT = "fixture.repoparent";
 
 /** The seed the fixture last received, so absent-vs-present can be asserted on the way out. */
 let lastSeed: IssueSeed | null = null;
+/** The same, for the repository-container parent path — a separate method, so a separate record. */
+let lastParentSeed: IssueSeed | null = null;
+let createParentCalls = 0;
 let lastEpicSeed: EpicSeed | null = null;
 /** How many times the provider was actually reached — a refusal must not have touched it. */
 let createIssueCalls = 0;
@@ -58,6 +71,16 @@ const STORED_TYPES: ExternalIssueType[] = [
   { externalId: "1", name: "Bug", description: "Something is broken", color: "red" },
   { externalId: "2", name: "Feature", description: null, color: null },
 ];
+
+/** What the parent-item fixture answers with — every field different from anything a test sends. */
+const STORED_PARENT: ExternalIssue = {
+  externalId: "ext-7007",
+  number: 77,
+  title: "Cold-weather reliability, as the provider stored it",
+  description: null,
+  state: "open",
+  url: "https://provider.test/acme/gate/issues/77",
+};
 
 const STORED_ISSUE: ExternalIssue = {
   externalId: "ext-9001",
@@ -107,10 +130,17 @@ beforeAll(() => {
     // Two capabilities in one fixture, deliberately: `epics` and `issueTypes` are declared
     // independently, and a DAL that gated one on the other would pass every epic test and still
     // be wrong. No real provider declares both today, which is exactly why the fixture does.
-    issueCreates: { epics: true, issueTypes: true },
+    issueCreates: {
+      epics: true,
+      parentPlanningItem: { container: "group", noun: "epic" },
+      issueTypes: true,
+    },
     driver: {
       provider: EPICS,
       authenticate: async () => ({ ok: true as const }),
+      // GitLab's answer: a parent item here is an epic in a group, so the repository-shaped method
+      // throws rather than quietly creating a plain issue and calling it a parent.
+      createParentPlanningItem: throwing("this provider's parent item lives in a group"),
       createIssue: async (_c: unknown, _repo: string, seed: IssueSeed) => {
         lastSeed = seed;
         createIssueCalls += 1;
@@ -140,6 +170,33 @@ beforeAll(() => {
       createIssue: async () => STORED_ISSUE,
       // Exactly what `GithubProvider` does — the throw the DAL must refuse before reaching.
       createEpic: throwing("this provider has no epics"),
+      createParentPlanningItem: throwing("this provider originates no parent item"),
+      listGroups: throwing("this provider has no groups"),
+      listEpics: throwing("this provider has no epics"),
+      listIssueTypes: throwing("this provider has no issue types"),
+    },
+  });
+  testing.register({
+    id: REPO_PARENT,
+    name: "Fixture Sub-issues",
+    capabilities: ["issueCreates"],
+    fields: [],
+    // The pairing the user's decision produced: no epics, and still a parent planning item — in a
+    // repository. A DAL that read one flag for the other would fail on this fixture and no other.
+    issueCreates: {
+      epics: false,
+      parentPlanningItem: { container: "repository", noun: "parent issue" },
+    },
+    driver: {
+      provider: REPO_PARENT,
+      authenticate: async () => ({ ok: true as const }),
+      createIssue: async () => STORED_ISSUE,
+      createParentPlanningItem: async (_c: unknown, _repo: string, seed: IssueSeed) => {
+        lastParentSeed = seed;
+        createParentCalls += 1;
+        return STORED_PARENT;
+      },
+      createEpic: throwing("this provider has no epics"),
       listGroups: throwing("this provider has no groups"),
       listEpics: throwing("this provider has no epics"),
       listIssueTypes: throwing("this provider has no issue types"),
@@ -149,6 +206,7 @@ beforeAll(() => {
 afterAll(() => {
   testing.unregister(EPICS);
   testing.unregister(NO_EPICS);
+  testing.unregister(REPO_PARENT);
 });
 
 let db: TestDb;
@@ -201,6 +259,8 @@ beforeEach(async () => {
   localRepositoryId = seeded.repositoryId;
   lastSeed = null;
   lastEpicSeed = null;
+  lastParentSeed = null;
+  createParentCalls = 0;
   createIssueCalls = 0;
   listIssueTypesCalls = 0;
 });
@@ -420,6 +480,147 @@ describe("createEpic", () => {
   });
 });
 
+/**
+ * The other shape of the same act (F23a Part 3): the parent planning item a provider without epics
+ * originates in a repository.
+ *
+ * The property this describe holds above all others is that it is gated on the *declared
+ * container* and not on `epics` — a provider declaring `epics: false` succeeds here, which is
+ * precisely the case the whole feature was asked for.
+ */
+describe("createParentPlanningItem", () => {
+  it("answers with the provider's values, never the ones that were sent (F23 NFR-7)", async () => {
+    const { repositoryId } = await seedLinkedRepository(acme, REPO_PARENT);
+
+    const result = await createParentPlanningItem(ctxFor(db, acme), {
+      repositoryId,
+      title: "Cold-weather reliability",
+      description: "Typed body",
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // All three differ from the input — an echo would answer "Cold-weather reliability" bare.
+    expect(result.data.title).toBe("Cold-weather reliability, as the provider stored it");
+    expect(result.data.externalNumber).toBe(77);
+    expect(result.data.externalUrl).toBe("https://provider.test/acme/gate/issues/77");
+  });
+
+  it("succeeds on a provider that declares epics: false — the gate is the container", async () => {
+    // The failure this catches is reusing `epicDriver` (or any `epics` check) on this path, which
+    // would lock out exactly the provider the feature exists for.
+    const { repositoryId } = await seedLinkedRepository(acme, REPO_PARENT);
+
+    const result = await createParentPlanningItem(ctxFor(db, acme), {
+      repositoryId,
+      title: "Cold-weather reliability",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(createParentCalls).toBe(1);
+  });
+
+  it("passes absent fields through as absent, so the provider keeps its own defaults", async () => {
+    const { repositoryId } = await seedLinkedRepository(acme, REPO_PARENT);
+
+    await createParentPlanningItem(ctxFor(db, acme), {
+      repositoryId,
+      title: "Cold-weather reliability",
+      labels: [],
+    });
+
+    expect(lastParentSeed).toEqual({ title: "Cold-weather reliability", labels: [] });
+  });
+
+  it("mirrors the created parent as a real Issue row, and attaches it to the Project", async () => {
+    // The judgement call this feature made, asserted: unlike a group epic, this item *is* an issue
+    // in a repository this Workspace mirrors, so it gets a row now rather than on the next poll —
+    // which is what stops the operator creating it a second time in the meantime.
+    const { integrationId, repositoryId } = await seedLinkedRepository(acme, REPO_PARENT);
+    const projectId = await seedProject(acme);
+
+    const result = await createParentPlanningItem(ctxFor(db, acme), {
+      repositoryId,
+      projectId,
+      title: "Cold-weather reliability",
+    });
+
+    expect(result.ok).toBe(true);
+    const rows = await db.select().from(issue).where(eq(issue.workspaceId, acme));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      id: result.ok ? result.data.issueId : "",
+      title: "Cold-weather reliability, as the provider stored it",
+      source: REPO_PARENT,
+      integrationId,
+      repositoryId,
+      externalId: "ext-7007",
+      externalNumber: 77,
+      externalState: "open",
+    });
+
+    const items = await db.select().from(projectItem).where(eq(projectItem.projectId, projectId));
+    expect(items).toHaveLength(1);
+    expect(items[0]?.issueId).toBe(result.ok ? result.data.issueId : "");
+  });
+
+  it("refuses a group-container provider with a typed error, without reaching the driver", async () => {
+    // GitLab's driver throws a sentence here on purpose; propagating it would reach the client as
+    // an opaque 500 where the honest answer is "this connection creates its parent elsewhere".
+    const { repositoryId } = await seedLinkedRepository(acme, EPICS);
+
+    const result = await createParentPlanningItem(ctxFor(db, acme), {
+      repositoryId,
+      title: "Cold-weather reliability",
+    });
+
+    expect(result).toEqual({ ok: false, error: "INTEGRATION_CAPABILITY_UNAVAILABLE" });
+    expect(createParentCalls).toBe(0);
+  });
+
+  it("refuses a provider that declares issueCreates but no parent planning item", async () => {
+    // Absent is "nobody has said", which must never read as permission.
+    const { repositoryId } = await seedLinkedRepository(acme, NO_EPICS);
+
+    const result = await createParentPlanningItem(ctxFor(db, acme), {
+      repositoryId,
+      title: "Cold-weather reliability",
+    });
+
+    expect(result).toEqual({ ok: false, error: "INTEGRATION_CAPABILITY_UNAVAILABLE" });
+  });
+
+  it("refuses a Repository from another Workspace before the provider is touched", async () => {
+    const other = (await seedWorkspaceGraph(db, "other")).workspaceId;
+    const foreign = await seedLinkedRepository(other, REPO_PARENT);
+
+    const result = await createParentPlanningItem(ctxFor(db, acme), {
+      repositoryId: foreign.repositoryId,
+      title: "Cold-weather reliability",
+    });
+
+    expect(result).toEqual({ ok: false, error: "NOT_FOUND" });
+    expect(createParentCalls).toBe(0);
+  });
+
+  it("refuses a foreign Project id before the provider is touched (Principle V)", async () => {
+    const { repositoryId } = await seedLinkedRepository(acme, REPO_PARENT);
+    const other = (await seedWorkspaceGraph(db, "other")).workspaceId;
+    const foreignProject = await seedProject(other, "Theirs");
+
+    const result = await createParentPlanningItem(ctxFor(db, acme), {
+      repositoryId,
+      projectId: foreignProject,
+      title: "Cold-weather reliability",
+    });
+
+    expect(result).toEqual({ ok: false, error: "NOT_FOUND" });
+    // A refused create must not have left a real issue on somebody's provider first.
+    expect(createParentCalls).toBe(0);
+    expect(await db.select().from(issue).where(eq(issue.workspaceId, acme))).toHaveLength(0);
+  });
+});
+
 describe("listCreatableGroups / listGroupEpics", () => {
   it("passes the provider's groups through, stamped with the Integration they came from", async () => {
     const { integrationId } = await seedLinkedRepository(acme, EPICS);
@@ -588,6 +789,32 @@ describe("router wiring", () => {
     // Not a thrown 500 for the provider that declares none — an empty list is the honest answer,
     // and it is what makes the client's picker hide itself rather than render an error.
     expect(await api.repository.listIssueTypes({ repositoryId: silent.repositoryId })).toEqual([]);
+  });
+
+  it("issue.createParentOnProvider answers with what the provider stored", async () => {
+    const { repositoryId } = await seedLinkedRepository(acme, REPO_PARENT);
+    const projectId = await seedProject(acme);
+    const api = caller(acme);
+
+    const created = await api.issue.createParentOnProvider({
+      repositoryId,
+      projectId,
+      title: "Cold-weather reliability",
+      labels: ["ops"],
+    });
+
+    expect(created.externalNumber).toBe(77);
+    expect(created.title).toBe("Cold-weather reliability, as the provider stored it");
+  });
+
+  it("rejects a group-container connection on that procedure with a stated reason", async () => {
+    // Not the driver's throw escaping as a 500 — the typed refusal the gate produced.
+    const { repositoryId } = await seedLinkedRepository(acme, EPICS);
+    const api = caller(acme);
+
+    await expect(
+      api.issue.createParentOnProvider({ repositoryId, title: "Cold-weather reliability" }),
+    ).rejects.toMatchObject({ message: "INTEGRATION_CAPABILITY_UNAVAILABLE" });
   });
 
   it("surfaces a provider without epics as a stated refusal rather than a 500", async () => {

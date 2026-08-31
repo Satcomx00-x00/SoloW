@@ -3,7 +3,6 @@
 import { type Contribution, createRegistry, type Registry } from "@solow/core";
 import type { LucideIcon } from "lucide-react";
 import type { ComponentType } from "react";
-import type { CreateKind } from "@/components/features/board/create-dialog-bus";
 
 /**
  * The app's three contribution registries (issue #3), and the types they are generic over.
@@ -62,23 +61,29 @@ export interface StatusItem {
  * The palette's headings, in the order it shows them. A closed list: an unbounded set of headings
  * is not a palette, and the order is here rather than in the palette because "where the Settings
  * group sits" is a fact about the command vocabulary, not about the component drawing it.
+ *
+ * `"Create"` was removed with the shell header's Create menu, rather than kept as an empty
+ * heading: with `create` gone from `CommandActions` a command filed there could only navigate,
+ * and every create affordance left in the app is a button on the surface that owns the thing
+ * being created. Re-adding it is this one line, and a saved arrangement stores command *ids*
+ * rather than group names, so nothing anyone saved depends on this list.
  */
-export const COMMAND_GROUPS = ["Go to", "Create", "Settings"] as const;
+export const COMMAND_GROUPS = ["Go to", "Settings"] as const;
 export type CommandGroup = (typeof COMMAND_GROUPS)[number];
 
 /**
  * What a command may do when chosen. Passing capabilities in rather than letting a command
  * import the router keeps a contributed command testable without a surface, and is the shape a
  * permission prompt eventually attaches to.
+ *
+ * `create(kind)` used to sit beside `navigate`. It existed only while the shell header owned the
+ * four create/import dialogs on every route — a command contributed the intent and the header
+ * decided what it opened. With that menu gone nothing can implement the verb, so the palette
+ * navigates and each surface opens its own dialog. That also took `@/lib`'s last import of a
+ * feature module with it, which is the direction this file's own rule says the dependency runs.
  */
 export interface CommandActions {
   navigate(href: string): void;
-  /**
-   * Open one of the shell's create/import dialogs. One verb rather than four, because the
-   * dialogs themselves are now one component's business (`CreateMenu`) — a command contributes
-   * the intent and the shell decides what that opens.
-   */
-  create(kind: CreateKind): void;
 }
 
 export interface CommandItem {

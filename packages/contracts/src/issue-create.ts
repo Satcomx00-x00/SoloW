@@ -18,6 +18,12 @@ import { issueLabelsSchema } from "./issue.js";
  * There is no local equivalent of an Epic at all — it is a GitLab group object with no domain
  * concept SoloW invents on its own, so unlike the Issue side there is nothing here to distinguish
  * this create path from.
+ *
+ * The Epic is not the only shape a *parent planning item* comes in, though, and this file carries
+ * both: on a provider whose manifest declares `parentPlanningItem.container === "repository"` the
+ * parent is an ordinary issue in a repository, seeded and answered exactly like one
+ * (`createParentPlanningItemInput` below). Which of the two a client sends is the manifest's
+ * answer, never the provider's name (Decision 0016).
  */
 
 export const createProviderIssueInput = z.object({
@@ -112,6 +118,32 @@ export const createdProviderIssueDto = z.object({
   title: z.string(),
 });
 export type CreatedProviderIssueDto = z.infer<typeof createdProviderIssueDto>;
+
+/**
+ * Originating a **parent planning item in a repository** — the other shape of the same act
+ * `createEpicInput` below covers for a group (user request 2026-08-31, F23a Part 3).
+ *
+ * Its shape is the Issue create's rather than the Epic create's, because that is what the object
+ * is: on a repository container the parent *is* an issue, so it is addressed by `repositoryId`
+ * (resolved by the DAL to the Repository's `(provider, RepoRef)`, the same as
+ * `createProviderIssueInput`) and answers with `createdProviderIssueDto` — the mirrored row's id
+ * plus the provider's own number, URL and title.
+ *
+ * No start/due dates here, and their absence is the manifest split showing through: those are epic
+ * fields, on a group object that has dates of its own. Whether an *issue* carries a due date is
+ * `issueCreates.dueDate`, which the provider behind this path declares false — so a control for
+ * one would collect something the provider cannot hold.
+ */
+export const createParentPlanningItemInput = z.object({
+  /** The repository the parent item is created in — see `createProviderIssueInput.repositoryId`. */
+  repositoryId: idSchema,
+  /** The Project row to attach the mirrored Issue to — see `createProviderIssueInput.projectId`. */
+  projectId: idSchema.optional(),
+  title: z.string().min(1).max(300),
+  description: z.string().max(65_536).optional(),
+  labels: issueLabelsSchema.optional(),
+});
+export type CreateParentPlanningItemInput = z.infer<typeof createParentPlanningItemInput>;
 
 /**
  * A GitLab group the connected token can create an epic in — what makes the epic "Where" modal's

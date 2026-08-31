@@ -154,7 +154,34 @@ describe("the providers this build ships", () => {
       ]);
     });
 
+    it("both answer where a parent planning item is created, and answer differently", () => {
+      // The container is what the "Where" step collects. Leaving GitHub unanswered would disable
+      // the menu entry for ever; copying GitLab's "group" would ask GitHub for a group it has none
+      // of, and show an empty first modal.
+      expect(providerManifest("gitlab")?.issueCreates?.parentPlanningItem?.container).toBe("group");
+      expect(providerManifest("github")?.issueCreates?.parentPlanningItem?.container).toBe(
+        "repository",
+      );
+      // And each names the thing in its own word, because "New epic" is untrue on GitHub.
+      expect(providerManifest("gitlab")?.issueCreates?.parentPlanningItem?.noun).toBe("epic");
+      expect(providerManifest("github")?.issueCreates?.parentPlanningItem?.noun).toBe(
+        "parent issue",
+      );
+    });
+
+    it("keeps `epics` and `parentPlanningItem` independent — GitHub declares one and not the other", () => {
+      // The change the user explicitly rejected was flipping `epics` to true for GitHub, which
+      // would have made the manifest claim a group object GitHub does not have. This is the
+      // assertion that catches it, and any gate that folds either flag into the other.
+      expect(providerManifest("github")?.issueCreates?.epics).toBe(false);
+      expect(providerManifest("github")?.issueCreates?.parentPlanningItem).toBeDefined();
+      expect(providerManifest("gitlab")?.issueCreates?.epics).toBe(true);
+      expect(providerManifest("gitlab")?.issueCreates?.parentPlanningItem).toBeDefined();
+    });
+
     it("a provider without the capability declares nothing about issue creation", () => {
+      // Gitea declares no `issueCreates` at all, so it declares neither flag — the correct answer
+      // for a provider that never claimed the capability, rather than a default inventing one.
       expect(providerManifest("gitea")?.issueCreates).toBeUndefined();
     });
   });

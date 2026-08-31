@@ -215,6 +215,33 @@ export type IssueLinkType = z.infer<typeof issueLinkTypeSchema>;
 export const ISSUE_LINK_TYPES = issueLinkTypeSchema.options;
 
 /**
+ * Where a provider's parent planning item is created — the container the "Where" step collects.
+ *
+ * A closed enum rather than a free string because a Where step has to *render a picker*, and a
+ * container shape nothing in the client knows how to collect is a dialog with an empty first
+ * modal. Adding a third container (a Jira project key, say) is a deliberate change here plus the
+ * picker that collects it — exactly the trade `integrationCapabilitySchema` above already makes.
+ */
+export const parentPlanningContainerSchema = z.enum(["group", "repository"]);
+export type ParentPlanningContainer = z.infer<typeof parentPlanningContainerSchema>;
+export const PARENT_PLANNING_CONTAINERS = parentPlanningContainerSchema.options;
+
+/**
+ * A provider's ability to **originate** the item other work items nest under, and where.
+ *
+ * `noun` is display-only, and exists for exactly the reason `changeRequestNoun` does: "New epic"
+ * is a lie on a provider whose parent item is an ordinary issue, and a label that names something
+ * the provider does not have is the per-provider vocabulary leaking the other way. The domain
+ * still says "parent planning item" everywhere it reasons about one.
+ */
+export const parentPlanningItemSchema = z.object({
+  container: parentPlanningContainerSchema,
+  /** The provider's own word, lowercase, as it reads in "New …" / "Create …": "epic", "parent issue". */
+  noun: z.string().min(1).max(40),
+});
+export type ParentPlanningItem = z.infer<typeof parentPlanningItemSchema>;
+
+/**
  * What a provider declaring `issueCreates` can actually originate.
  *
  * `createIssue` is universal to every provider that declares the capability at all — there is no
@@ -226,7 +253,26 @@ export const ISSUE_LINK_TYPES = issueLinkTypeSchema.options;
  * capability difference is stated, never hidden.
  */
 export const issueCreateSupportSchema = z.object({
+  /** There are epic objects, living in groups, that can be listed and nested under. */
   epics: z.boolean(),
+  /**
+   * This provider can **originate** a parent planning item, and here is the container to ask for
+   * (user request 2026-08-31, F23a Part 3).
+   *
+   * Deliberately not the same fact as `epics`, and deliberately not derived from it. `epics`
+   * answers "are there epic objects to list and to nest issues under" — it is what gates
+   * `createEpic`/`listGroups`/`listEpics` and the compose form's Parent-epic picker. This answers
+   * "can the ＋New menu originate one, and what does the Where step have to collect". GitHub has
+   * no epic object at all and can still originate a parent — an ordinary issue that others nest
+   * under through sub-issues — and a provider could equally have epics it may list but not create.
+   * A provider may declare either, both or neither, so neither flag can answer for the other, and
+   * folding them into one would either lock GitHub out of a menu entry it can serve or make the
+   * manifest claim GitHub has epics, which is the false claim Decision 0016 exists to prevent.
+   *
+   * Absent means "this provider cannot originate one" — the same "nobody has said" reading every
+   * optional flag here carries, and the reason the menu entry states a refusal rather than hiding.
+   */
+  parentPlanningItem: parentPlanningItemSchema.optional(),
   /**
    * The optional fields a new Issue may carry beyond title/description/assignees/labels/milestone,
    * which every provider declaring the capability takes. Each defaults to `false`, so a provider

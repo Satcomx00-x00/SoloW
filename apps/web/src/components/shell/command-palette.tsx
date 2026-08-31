@@ -4,7 +4,6 @@ import type { SurfaceLayout } from "@solow/core";
 import { CornerDownLeft, Inbox, Search } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
-import { type CreateKind, openCreateDialog } from "@/components/features/board/create-dialog-bus";
 import {
   CommandDialog,
   CommandEmpty,
@@ -28,7 +27,7 @@ import { trpc } from "@/trpc/react";
  * Command palette (⌘K) — the app's search surface, and a consumer of the command registry
  * (issue #3).
  *
- * The palette holds no list of commands. Destinations, "New task" and the Settings entries are
+ * The palette holds no list of commands. The destinations and the Settings entries are
  * registrations resolved against the shell's `AppContext`, so a feature — or later a plugin —
  * adds an entry without this file being edited, and whether an entry applies is its own `when`
  * predicate rather than a branch here (AC-2, AC-4).
@@ -111,21 +110,15 @@ export function CommandPalette() {
   );
 
   /**
-   * Ask the shell to open a create/import dialog. No navigation any more: the dialogs live in
-   * the header's `CreateMenu`, which is mounted on every route, so a palette command no longer
-   * has to bounce through `/board` to reach one.
-   */
-  const create = useCallback((kind: CreateKind) => {
-    setOpen(false);
-    openCreateDialog(kind);
-  }, []);
-
-  /**
    * What a command is allowed to do, handed in rather than imported: a contributed command that
    * reached for the router itself would be exactly the coupling the registry removes, and it is
    * this object that a plugin permission prompt (#93) eventually attaches to.
+   *
+   * Navigation is all of it now. A `create(kind)` verb sat here while the shell header owned the
+   * create/import dialogs on every route; with that menu gone there is nothing on any route for
+   * it to open, and a capability the surface cannot honour is worse than one it does not offer.
    */
-  const actions = useMemo<CommandActions>(() => ({ navigate: go, create }), [go, create]);
+  const actions = useMemo<CommandActions>(() => ({ navigate: go }), [go]);
 
   // Read here and passed down, so the resolved list is arranged the way the operator arranged it
   // while `ContributedCommands` itself stays free of a query client (issue #3 AC-3).

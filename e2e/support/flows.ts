@@ -10,9 +10,10 @@ import { expect, type Page } from "@playwright/test";
  * every spec, fails loudly in one place the next time the shape of the app moves.
  *
  * The journey they encode is today's real one, verified by hand in a live browser before it was
- * written down here: a Task is created from the header's Create menu, opened from its Issue's
- * page, advanced with the Task page's own lifecycle arrows, and reviewed behind the gate the
- * operator opens — there is no flat `/board` any more, and no Task enters review on its own.
+ * written down here: a Task is created from its Issue's own page, opened from that same page,
+ * advanced with the Task page's own lifecycle arrows, and reviewed behind the gate the operator
+ * opens — there is no flat `/board` any more, no shell-wide Create menu, and no Task enters
+ * review on its own.
  */
 
 /** Connect one local fixture repository through Settings, once — safe to call repeatedly. */
@@ -35,13 +36,20 @@ async function pickOption(page: Page, label: string, option: string): Promise<vo
 }
 
 /**
- * Create a Task through the header's Create menu — the one entry point that exists on every
- * page, which is what replaced the board's own "New task" button.
+ * Create a Task from the Issue it belongs to.
+ *
+ * The shell header's Create menu used to be the entry point, and it was removed: creating work
+ * now happens where the thing being created lives, so the Issue's own page is the surface that
+ * offers "New task". `issueId` is required rather than optional for exactly that reason — there
+ * is no route-independent way in, so a caller that cannot say which Issue has no journey to
+ * drive, and making it optional would let a call site silently keep the old assumption.
  */
 export async function createTask(
   page: Page,
   opts: {
     title: string;
+    /** The Issue whose page the Task is cut from — its id, since that is what the route takes. */
+    issueId: string;
     issue: string;
     repository: string;
     agentProfile?: string;
@@ -49,13 +57,15 @@ export async function createTask(
     alsoWorksIn?: readonly string[];
   },
 ): Promise<void> {
-  await page.getByRole("button", { name: "Create", exact: true }).click();
-  await page.getByRole("menuitem", { name: /New task/ }).click();
+  await page.goto(`/issues/${opts.issueId}`);
+  await page.getByLabel("Tasks for this issue").getByRole("button", { name: "New task" }).click();
 
   const dialog = page.getByRole("dialog", { name: "New task" });
   await dialog.getByLabel("Title").fill(opts.title);
-  // Repository before Issue: the Issue picker narrows to the chosen Repository (issue #15),
-  // and picking a Repository resets any already-picked Issue — so Repository has to go first.
+  // Repository before Issue, still explicitly, even though the page's own button presets both:
+  // the Issue picker narrows to the chosen Repository (issue #15) and picking a Repository
+  // clears any already-picked Issue, so the order has to hold whatever arrived preset — and the
+  // flow stays readable without the reader having to know what the preset does.
   await pickOption(page, "Repository", opts.repository);
   await pickOption(page, "Issue", opts.issue);
   await pickOption(page, "Agent profile", opts.agentProfile ?? "Claude Code (subscription)");

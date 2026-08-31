@@ -580,11 +580,40 @@ export class GithubProvider implements ChangeProvider, ProjectsCapability, Issue
   }
 
   /**
+   * The item other issues nest under, originated in a repository (user request 2026-08-31, F23a
+   * Part 3).
+   *
+   * GitHub has no epic object, and this does not invent one: what it creates is an **ordinary
+   * issue**, and the only thing that will ever make it a parent is that other issues name it
+   * through `sub_issues` — the edge `applyCreateExtras` writes for a child and `parentsOf` reads
+   * back as `ExternalIssue.parentExternalId`. That is why the manifest declares
+   * `parentPlanningItem: { container: "repository" }` beside an unchanged `epics: false`: what is
+   * claimed is the thing GitHub actually has.
+   *
+   * It delegates rather than repeating the POST so that there is exactly one create path on this
+   * driver: a field the endpoint learns to take, or a side effect `applyCreateExtras` grows,
+   * applies to both by construction instead of by somebody remembering the second copy.
+   *
+   * Nothing here writes a hierarchy edge. A parent that itself has a parent is a different
+   * request, made by sending `parentIssueNumber` on the seed; creating one draws no edge at all,
+   * because the children have not been written yet and they are the side that draws it.
+   */
+  async createParentPlanningItem(
+    credential: ScmCredential,
+    repo: RepoRef,
+    seed: IssueSeed,
+  ): Promise<ExternalIssue> {
+    return this.createIssue(credential, repo, seed);
+  }
+
+  /**
    * GitHub has no epics (spec F23a Part 1) — the manifest declares `issueCreates.epics: false`
-   * (see `packages/scm/src/index.ts`) precisely so a caller never reaches this method through the
-   * "New epic" menu entry, which the UI disables rather than hides for exactly this provider. This
-   * throws rather than silently returning nothing so a caller that skipped the manifest check
-   * still gets a message that explains itself instead of a confusing runtime shape mismatch.
+   * (see `packages/scm/src/index.ts`) precisely so a caller never reaches this method: the ＋New
+   * menu's parent-item entry routes to `createParentPlanningItem` above, because GitHub's declared
+   * container is a repository, and the compose form's Parent-epic picker is what `epics: false`
+   * withholds. This throws rather than silently returning nothing so a caller that skipped the
+   * manifest check still gets a message that explains itself instead of a confusing runtime shape
+   * mismatch.
    */
   async createEpic(
     _credential: ScmCredential,
@@ -593,14 +622,14 @@ export class GithubProvider implements ChangeProvider, ProjectsCapability, Issue
   ): Promise<ExternalEpic> {
     throw new ScmProviderError(
       "github",
-      "GitHub has no epics; its parity concept is the sub-issue, tracked separately from this capability.",
+      "GitHub has no epics; its parity concept is the sub-issue, created with createParentPlanningItem.",
     );
   }
 
   async listGroups(_credential: ScmCredential): Promise<ExternalGroup[]> {
     throw new ScmProviderError(
       "github",
-      "GitHub has no epics, and therefore no groups to create one in.",
+      "GitHub has no epics, and therefore no groups to create one in — its parent items live in a repository.",
     );
   }
 

@@ -663,6 +663,42 @@ describe("issueCreateSupportSchema (spec F23a)", () => {
     ).toBe(false);
   });
 
+  it("leaves `parentPlanningItem` optional — a provider may originate no parent at all", () => {
+    // Making the descriptor required would render every manifest written before it — and any
+    // third-party one — unregisterable, the same property the "requires only `epics`" case above
+    // protects. Absent is a real answer here: "this provider cannot originate one".
+    const res = issueCreateSupportSchema.safeParse({ epics: false });
+    expect(res.success).toBe(true);
+    if (res.success) expect(res.data.parentPlanningItem).toBeUndefined();
+  });
+
+  it("refuses a container shape no Where step could collect, and an empty noun", () => {
+    // A container outside the closed set is a dialog whose first modal has nothing to render; an
+    // empty noun is a menu entry reading "New ".
+    expect(
+      issueCreateSupportSchema.safeParse({
+        epics: false,
+        parentPlanningItem: { container: "organisation", noun: "initiative" },
+      }).success,
+    ).toBe(false);
+    expect(
+      issueCreateSupportSchema.safeParse({
+        epics: false,
+        parentPlanningItem: { container: "repository", noun: "" },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("takes `epics: false` beside a parent planning item — the two are not one fact", () => {
+    // GitHub's declaration exactly. A refinement tying the two together would refuse it, and with
+    // it the whole reason the descriptor exists.
+    const res = issueCreateSupportSchema.safeParse({
+      epics: false,
+      parentPlanningItem: { container: "repository", noun: "parent issue" },
+    });
+    expect(res.success).toBe(true);
+  });
+
   it("leaves `linkTypes` absent rather than defaulting it — absent means all three", () => {
     // A default here would be a second place that knows what the full vocabulary is, and the two
     // would drift. The reading lives at the one call site that needs it (`ProviderExtras`).

@@ -637,6 +637,27 @@ export class GitlabProvider implements ChangeProvider, ProjectsCapability, Issue
   }
 
   /**
+   * GitLab's parent planning item is the epic above, and an epic lives in a **group** — which is
+   * what its manifest declares as `parentPlanningItem.container: "group"`, and why no caller
+   * should ever arrive here (user request 2026-08-31, F23a Part 3).
+   *
+   * It throws for the same reason `GithubProvider.createEpic` does, and the alternative is worse
+   * here than anywhere else in this file: creating a plain project issue instead would be a write
+   * that reports success and hands the operator the wrong object — an issue where they asked for
+   * an epic, in a container the rest of the flow does not expect it in.
+   */
+  async createParentPlanningItem(
+    _credential: ScmCredential,
+    _repo: RepoRef,
+    _seed: IssueSeed,
+  ): Promise<ExternalIssue> {
+    throw new ScmProviderError(
+      "gitlab",
+      "GitLab's parent planning item is an epic, and an epic lives in a group, not in a repository — create it with createEpic.",
+    );
+  }
+
+  /**
    * Groups the token can create an epic in — `min_access_level=30` is Developer, GitLab's floor
    * for creating an epic. Listing every group the token can merely *read* would offer a "Where"
    * picker full of choices that fail the moment Create is pressed.

@@ -20,9 +20,10 @@ import { seedIssue } from "../support/seed.js";
  * worktree → git) is production code.
  *
  * The journey is today's: there is no flat `/board` (boards live inside Projects, and the
- * fixture repository belongs to none), so a Task is created from the header's Create menu,
- * opened from its Issue's page, launched with the Task page's own lifecycle arrows, and reviewed
- * behind the gate the operator opens. See `support/flows.ts` for why that vocabulary is shared.
+ * fixture repository belongs to none) and no shell-wide Create menu, so a Task is created and
+ * opened from its Issue's own page, launched with the Task page's own lifecycle arrows, and
+ * reviewed behind the gate the operator opens. See `support/flows.ts` for why that vocabulary is
+ * shared.
  *
  * Waits are selector-based only; nothing in this file sleeps for a fixed duration.
  */
@@ -48,7 +49,12 @@ test.describe("steering a running agent", () => {
 
     await ensureRepository(page);
     const issue = seedIssue(SEED_WORKSPACE_A, issueTitle, REPO_NAME);
-    await createTask(page, { title: taskTitle, issue: issueTitle, repository: REPO_NAME });
+    await createTask(page, {
+      title: taskTitle,
+      issueId: issue.id,
+      issue: issueTitle,
+      repository: REPO_NAME,
+    });
     await openTask(page, issue.id, taskTitle);
     await launchTask(page);
 
@@ -75,7 +81,12 @@ test.describe("core program happy path", () => {
 
     await ensureRepository(page);
     const issue = seedIssue(SEED_WORKSPACE_A, issueTitle, REPO_NAME);
-    await createTask(page, { title: taskTitle, issue: issueTitle, repository: REPO_NAME });
+    await createTask(page, {
+      title: taskTitle,
+      issueId: issue.id,
+      issue: issueTitle,
+      repository: REPO_NAME,
+    });
 
     const taskId = await openTask(page, issue.id, taskTitle);
     await launchToReview(page);
@@ -121,7 +132,12 @@ test.describe("core program happy path", () => {
 
     await ensureRepository(page);
     const issue = seedIssue(SEED_WORKSPACE_A, issueTitle, REPO_NAME);
-    await createTask(page, { title: taskTitle, issue: issueTitle, repository: REPO_NAME });
+    await createTask(page, {
+      title: taskTitle,
+      issueId: issue.id,
+      issue: issueTitle,
+      repository: REPO_NAME,
+    });
 
     const taskId = await openTask(page, issue.id, taskTitle);
     await launchToReview(page);

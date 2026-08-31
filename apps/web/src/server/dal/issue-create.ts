@@ -4,6 +4,7 @@ import {
   type CreatedEpicDto,
   type CreatedProviderIssueDto,
   type CreateEpicInput,
+  type CreateParentPlanningItemInput,
   type CreateProviderIssueInput,
   type ExternalEpicDto,
   type ExternalGroupDto,
@@ -12,6 +13,7 @@ import {
   type ListEpicsInput,
   type ListGroupsInput,
   ok,
+  type ParentPlanningContainer,
   type Result,
 } from "@solow/contracts";
 import {
@@ -21,14 +23,15 @@ import {
   project,
   repository,
 } from "@solow/db";
-import type { DriverWith, EpicSeed, IssueSeed, ScmCredential } from "@solow/scm";
+import type { DriverWith, EpicSeed, ExternalIssue, IssueSeed, ScmCredential } from "@solow/scm";
 import { providerManifest } from "@solow/scm";
 import { and, eq } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
 import { driverWith, loadCredential, mirrorExternalIssues } from "./integration.js";
 
 /**
- * Originating an Issue or an Epic **on the provider** (spec F23a Part 1).
+ * Originating an Issue, an Epic, or the parent planning item a provider without epics has instead
+ * **on the provider** (spec F23a Parts 1 and 3).
  *
  * The counterpart to `issue-write.ts`, and it keeps that file's one rule: the answer is built
  * from what the provider stored, never from what was typed (F23 NFR-7). A create is the case
@@ -123,6 +126,39 @@ async function epicDriver(
 }
 
 /**
+ * The same driver, refused unless the provider originates a parent planning item **in this kind of
+ * container** (user request 2026-08-31).
+ *
+ * Deliberately not `epicDriver`. Gating this path on `issueCreates.epics` would lock out precisely
+ * the provider it exists for — GitHub declares `epics: false` and still has a parent item — which
+ * is the whole reason the manifest carries the two facts separately rather than one standing in
+ * for the other.
+ *
+ * Keyed on the *declared container* rather than on the descriptor merely being present, because
+ * the two containers reach two different driver methods: a group-container connection routed into
+ * the repository-shaped one would meet a driver that throws a sentence, and an unhandled throw
+ * reaches the client as an opaque 500 where the honest answer is a typed refusal.
+ */
+async function parentPlanningDriver(
+  ctx: RequestContext,
+  integrationId: string,
+  container: ParentPlanningContainer,
+): Promise<
+  Result<
+    { provider: string; credential: ScmCredential; driver: DriverWith<"issueCreates"> },
+    typeof CommonErrorCode.NotFound | IntegrationErrorCode
+  >
+> {
+  const resolved = await issueCreatesDriver(ctx, integrationId);
+  if (!resolved.ok) return resolved;
+  const declared = providerManifest(resolved.data.provider)?.issueCreates?.parentPlanningItem;
+  if (declared?.container !== container) {
+    return err(IntegrationErrorCode.CapabilityUnavailable);
+  }
+  return resolved;
+}
+
+/**
  * Create an Issue on the provider, then mirror what it stored (spec F23a Flow A, Actions 3–4).
  *
  * The returned DTO is assembled from the `ExternalIssue` the driver answered with — the number,
@@ -185,20 +221,43 @@ export async function createProviderIssue(
     seed,
   );
 
-  await mirrorExternalIssues(
+  return mirrorCreatedIssue(
     ctx,
     {
       provider: resolved.data.provider,
       integrationId: repo.data.integrationId,
       repositoryId: repo.data.id,
     },
-    [created],
+    input.projectId,
+    created,
   );
+}
+
+/**
+ * The tail every create that produces a real issue shares: mirror what the provider answered,
+ * find the row that mirror made, and attach it where the operator was looking.
+ *
+ * Extracted rather than duplicated because both callers are the *same act* on two providers —
+ * an Issue on one, the parent item other issues nest under on the other — and a second copy is
+ * where the two would drift: an attach fixed in one and not the other is a row that lands in the
+ * table on GitLab and nowhere on GitHub, with nothing to explain the difference.
+ */
+async function mirrorCreatedIssue(
+  ctx: RequestContext,
+  target: { provider: string; integrationId: string; repositoryId: string },
+  projectId: string | undefined,
+  created: ExternalIssue,
+): Promise<
+  Result<CreatedProviderIssueDto, typeof CommonErrorCode.NotFound | IntegrationErrorCode>
+> {
+  await mirrorExternalIssues(ctx, target, [created]);
 
   const [mirrored] = await ctx.db
     .select({ id: issue.id })
     .from(issue)
-    .where(and(eq(issue.repositoryId, repo.data.id), eq(issue.externalId, created.externalId)))
+    .where(
+      and(eq(issue.repositoryId, target.repositoryId), eq(issue.externalId, created.externalId)),
+    )
     .limit(1);
   // The mirror is an insert this function just made; no row means the provider answered with an
   // `externalId` it also gave to something else, which is a state to refuse rather than guess at.
@@ -208,14 +267,14 @@ export async function createProviderIssue(
   // "nothing is imported by hand", the same call `issue.createIssue` makes for a local Issue.
   await attachIssueToLocalProjects(ctx.db, ctx.workspaceId, {
     issueId: mirrored.id,
-    repositoryId: repo.data.id,
+    repositoryId: target.repositoryId,
   });
   // ...and the Project the create was started from gains it whether or not that registration
   // exists: the operator pressed "＋ New" on *this* table, and a row that lands in every Project
   // but the one they were looking at is the outcome Action 5 exists to prevent. Idempotent, so
   // the attach above having already covered it is a no-op rather than a duplicate.
-  if (input.projectId !== undefined) {
-    await addIssueToProject(ctx.db, ctx.workspaceId, input.projectId, mirrored.id);
+  if (projectId !== undefined) {
+    await addIssueToProject(ctx.db, ctx.workspaceId, projectId, mirrored.id);
   }
 
   return ok({
@@ -224,6 +283,70 @@ export async function createProviderIssue(
     externalUrl: created.url,
     title: created.title,
   });
+}
+
+/**
+ * Create the parent planning item other work items nest under, in a **repository** (F23a Part 3).
+ *
+ * Where `createEpic` below deliberately writes no row, this one mirrors — and the difference is
+ * the object, not a change of heart. A GitLab epic is a group object: it has no repository, no
+ * issue number and no `issue` row to hang off, and only the next sync can see which issues the
+ * provider decided to nest under it, so synthesising anything for it would be importing by hand
+ * the one thing F23 says is never imported by hand. This item *is* an issue, in a repository this
+ * Workspace already mirrors; it will come back on the very next `listIssues` whatever happens
+ * here, and not mirroring it now would leave the operator's own creation invisible until a poll —
+ * and then, very likely, created a second time.
+ *
+ * Nothing is hand-built even so: the row comes from `mirrorExternalIssues`, the same path the
+ * import uses. And no hierarchy edge is written, because there is none to write yet — children
+ * draw it themselves through `parentIssueNumber`, which the read side reports back as
+ * `parentExternalId`.
+ */
+export async function createParentPlanningItem(
+  ctx: RequestContext,
+  input: CreateParentPlanningItemInput,
+): Promise<
+  Result<CreatedProviderIssueDto, typeof CommonErrorCode.NotFound | IntegrationErrorCode>
+> {
+  const repo = await loadCreatableRepository(ctx, input.repositoryId);
+  if (!repo.ok) return repo;
+
+  // Before the provider is touched, for the reason `createProviderIssue` states: a foreign
+  // `projectId` must not cost a real issue on somebody's GitHub before it is refused (Principle V).
+  if (input.projectId !== undefined) {
+    const [row] = await ctx.db
+      .select({ id: project.id })
+      .from(project)
+      .where(and(eq(project.workspaceId, ctx.workspaceId), eq(project.id, input.projectId)))
+      .limit(1);
+    if (!row) return err(CommonErrorCode.NotFound);
+  }
+
+  const resolved = await parentPlanningDriver(ctx, repo.data.integrationId, "repository");
+  if (!resolved.ok) return resolved;
+
+  // Absent stays absent, the same rule `createProviderIssue` follows: an omitted field is "let the
+  // provider decide", which is not the request an explicitly empty one makes.
+  const seed: IssueSeed = { title: input.title };
+  if (input.description !== undefined) seed.description = input.description;
+  if (input.labels !== undefined) seed.labels = input.labels;
+
+  const created = await resolved.data.driver.createParentPlanningItem(
+    resolved.data.credential,
+    repo.data.externalFullName,
+    seed,
+  );
+
+  return mirrorCreatedIssue(
+    ctx,
+    {
+      provider: resolved.data.provider,
+      integrationId: repo.data.integrationId,
+      repositoryId: repo.data.id,
+    },
+    input.projectId,
+    created,
+  );
 }
 
 /**

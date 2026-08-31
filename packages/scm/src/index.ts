@@ -117,14 +117,23 @@ registry.register({
   issueWrites: ISSUE_WRITES_WITHOUT_GITLAB_EXTRAS("GitHub"),
   /**
    * GitHub can create an Issue and has no epics — its own parity concept is the sub-issue, which
-   * `parentIssue` below now declares in its own right (spec F23a Part 1).
+   * `parentIssue` below declares in its own right (spec F23a Part 1).
    * `createEpic`/`listGroups`/`listEpics` still exist on `GithubProvider` (the registry's
    * `CapabilityNotImplemented` check requires it), and each throws a descriptive
-   * `ScmProviderError` a caller should never actually reach because `epics: false` is what
-   * disables the "New epic" menu entry before it gets the chance.
+   * `ScmProviderError` a caller should never actually reach: `epics: false` is what withholds the
+   * compose form's Parent-epic picker, and `parentPlanningItem` below is what routes the ＋New
+   * menu to `createParentPlanningItem` instead.
    */
   issueCreates: {
     epics: false,
+    /**
+     * And this is the honest form of what GitHub *does* have (user request 2026-08-31). The
+     * manifest still refuses to claim epics — flipping `epics` to true would be a lie about a
+     * group object GitHub has none of, and the one Decision 0016 exists to prevent. What it claims
+     * instead is the thing that exists: an ordinary issue, in a repository, that other issues nest
+     * under. Both keys are present because neither implies the other.
+     */
+    parentPlanningItem: { container: "repository", noun: "parent issue" },
     // GitHub's issues carry none of these four as a field of their own: no due date, no weight,
     // no confidential flag and no time estimate (user request 2026-08-30). Declared `false`
     // explicitly rather than left to the schema default, because "we checked and it has none" and
@@ -190,6 +199,14 @@ registry.register({
    */
   issueCreates: {
     epics: true,
+    /**
+     * GitLab's parent planning item and its epic are the same object seen twice: `epics` says
+     * there are epic objects to list and nest under, this says one can be *originated* and that
+     * the Where step must collect a group to do it in. Both keys are declared rather than one
+     * inferred from the other, because on GitHub they diverge — and a reader of this manifest
+     * should not have to know which provider is the exception to tell what is being claimed.
+     */
+    parentPlanningItem: { container: "group", noun: "epic" },
     dueDate: true,
     weight: true,
     confidential: true,

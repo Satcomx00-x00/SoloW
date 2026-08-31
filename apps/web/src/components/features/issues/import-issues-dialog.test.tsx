@@ -54,7 +54,11 @@ const handlers = {
   "integration.listExternalIssues": () => external,
 };
 
-/** The dialog opens itself when driven controlled, which is how `CreateMenu` uses it. */
+/**
+ * The dialog opens itself when driven controlled — the only way it is ever opened, and since the
+ * shell header's Create menu was removed there is no caller in the app doing it. These tests are
+ * what keeps the import flow proven while it has no button.
+ */
 function renderOpen(extra: Record<string, unknown> = {}) {
   return renderWithTrpc(<ImportIssuesDialog trigger={null} open onOpenChange={() => {}} />, {
     ...handlers,

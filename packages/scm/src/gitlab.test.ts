@@ -968,6 +968,21 @@ describe("creating an Issue or Epic on GitLab (spec F23a)", () => {
     await expect(gitlab().listIssueTypes(credential(), PROJECT)).rejects.toThrow(/issue.type/i);
   });
 
+  it("refuses createParentPlanningItem with a sentence about the group", async () => {
+    // GitLab's parent item is the epic, and an epic lives in a group. Quietly creating a plain
+    // project issue instead would be a create that reports success and hands back the wrong
+    // object — the one failure mode worse than refusing.
+    receivedWrites = [];
+
+    await expect(
+      gitlab().createParentPlanningItem(credential(), PROJECT, { title: "Would-be parent" }),
+    ).rejects.toBeInstanceOf(ScmProviderError);
+    await expect(
+      gitlab().createParentPlanningItem(credential(), PROJECT, { title: "Would-be parent" }),
+    ).rejects.toThrow(/group/i);
+    expect(receivedWrites).toHaveLength(0);
+  });
+
   it("lists a group's existing epics, for the parent-epic picker", async () => {
     const epics = await gitlab().listEpics(credential(), GROUP);
 

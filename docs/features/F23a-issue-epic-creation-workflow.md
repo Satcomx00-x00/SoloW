@@ -25,10 +25,13 @@ A single **`＋ New`** split-button sits top-right in the Project toolbar, immed
 `Adopt project` (mirrored projects) / `Repositories` (local projects). It has two entries:
 
 - **New issue**
-- **New epic** — shown only when the active Project resolves to a provider whose manifest
-  declares `issueCreates.epics` (GitLab groups on a tier with epics). Otherwise the entry is
-  present but disabled with the reason, so the capability difference is stated, never hidden
-  (the same rule F23 FR-5 follows for unexpressible fields).
+- **New <parent item>** — shown when the active Project resolves to a provider whose manifest
+  declares `issueCreates.parentPlanningItem`, and labelled with the noun that descriptor carries
+  ("New epic" on GitLab, "New parent issue" on GitHub). Otherwise the entry is present but
+  disabled with the reason, so the capability difference is stated, never hidden (the same rule
+  F23 FR-5 follows for unexpressible fields). *Corrected 2026-08-31:* this used to read
+  `issueCreates.epics`, which locked out every provider that has a parent item and no epic
+  object — see Part 3.
 
 ### Flow A — New issue
 
@@ -105,7 +108,76 @@ ACTION 5 · Insert the epic row (collapsed, 0% rollup), invalidate, toast.
 
 Epics are a **group** object, not a project one — the driver translates, the domain stays
 neutral (an epic is "a parent planning item"). GitHub declares `issueCreates.epics = false`;
-its parity concept is the sub-issue, tracked separately.
+its parity concept is the sub-issue, and Part 3 is how the menu offers it.
+
+---
+
+## Part 3 — Providers without epics: the parent planning item
+
+**Date:** 2026-08-31 · **Decision:** the parent issue *is* the epic on GitHub.
+
+GitHub has no epic object. Its parity concept is the sub-issue: an ordinary issue that other
+issues nest under. So creating "an epic" on GitHub creates an **ordinary issue**, and the
+epic-ness is entirely the sub-issue edges the children later draw to it — the same edges the read
+side already mirrors as `ExternalIssue.parentExternalId`. No second hierarchy is invented.
+
+### Two manifest facts, not one
+
+`issueCreates.epics` was made to answer both questions and can only answer one. It now answers
+exactly what it says:
+
+| Manifest key | The question it answers | GitLab | GitHub | Gitea |
+| --- | --- | --- | --- | --- |
+| `epics` | Are there epic objects to list and nest issues under? (gates `createEpic` / `listGroups` / `listEpics` and the compose form's Parent-epic picker) | `true` | `false` | — |
+| `parentPlanningItem` | Can this provider *originate* a parent item, and what container does the Where step collect? | `{ container: "group", noun: "epic" }` | `{ container: "repository", noun: "parent issue" }` | — |
+
+They are deliberately independent: a provider may declare either, both or neither, so neither can
+answer for the other. Flipping `epics` to `true` for GitHub was rejected outright — the manifest
+would then claim a group object GitHub does not have, which is precisely the false claim
+Decision 0016 exists to prevent. Gitea declares no `issueCreates` at all and therefore declares
+neither, which is the honest answer rather than a default.
+
+The driver boundary gains `createParentPlanningItem(credential, repo, seed: IssueSeed)`, answering
+with an `ExternalIssue`. GitHub implements it by delegating to its own `createIssue`; GitLab
+implements it as a descriptive `ScmProviderError` its declared container stops anyone reaching.
+
+### Flow B, repository-container variant
+
+```
+[Button ＋New ▸ New parent issue]
+        │
+        ▼
+┌─ MODAL 1 · "Where" ──────────────────────────────┐
+│  • Repository picker — only repositories on the   │   (skipped when only one is eligible)
+│    connection whose manifest declared this        │
+│    container; a repository on another connection  │
+│    may be on a provider with no parent item at all │
+│  [Cancel]                       [Next →]          │
+└───────────────────────────────────────────────────┘
+        │
+        ▼
+┌─ MODAL 2 · "Compose" ────────────────────────────┐
+│  • Title            (required)                    │
+│  • Description      (Markdown, optional)          │
+│  • Labels                                         │
+│  • No start/due date — an item in a repository is │
+│    an issue, and `issueCreates.dueDate` is false  │
+│  [← Back]                  [Create parent issue]  │
+└───────────────────────────────────────────────────┘
+        │
+        ▼
+ACTION 3 · POST /repos/:owner/:repo/issues  (issue.createParentOnProvider mutation)
+        ▼
+ACTION 4 · Mirror through the same path Flow A uses, and attach to this Project
+        ▼
+ACTION 5 · Invalidate project.allItems and issue.list, close the modal.
+```
+
+Unlike a group epic, this item genuinely **gets a row**: it is an issue in a repository this
+Workspace mirrors, it will come back on the very next `listIssues` regardless, and leaving it
+unmirrored would hide the operator's own creation until the next poll — and invite them to create
+it a second time. A group epic still writes nothing, for the reason Flow B already gives: it has
+no repository, no issue number, and only a sync can see what the provider nests under it.
 
 ---
 

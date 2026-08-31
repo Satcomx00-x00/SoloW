@@ -21,8 +21,8 @@ import { seedIssue, seedTask } from "../support/seed.js";
  *  · Principle V — a user of one Workspace cannot reach another Workspace's work, through the
  *    UI or through the API, and no data about it leaks in the refusal.
  *
- * Driven through today's journey (Create menu → Issue page → Task page — see
- * `support/flows.ts`); the assertions themselves are unchanged, because the principles are.
+ * Driven through today's journey (Issue page → Task page — see `support/flows.ts`); the
+ * assertions themselves are unchanged, because the principles are.
  */
 
 const REPO_NAME = "e2e-fixture-repo";
@@ -68,8 +68,18 @@ test.describe("@critical isolation", () => {
     await ensureRepository(page);
     const issue = seedIssue(SEED_WORKSPACE_A, issueTitle, REPO_NAME);
 
-    await createTask(page, { title: titleA, issue: issueTitle, repository: REPO_NAME });
-    await createTask(page, { title: titleB, issue: issueTitle, repository: REPO_NAME });
+    await createTask(page, {
+      title: titleA,
+      issueId: issue.id,
+      issue: issueTitle,
+      repository: REPO_NAME,
+    });
+    await createTask(page, {
+      title: titleB,
+      issueId: issue.id,
+      issue: issueTitle,
+      repository: REPO_NAME,
+    });
 
     /*
      * Launches are staggered so two `git worktree add` calls do not contend for the repo lock;
@@ -117,6 +127,7 @@ test.describe("@critical isolation", () => {
 
     await createTask(page, {
       title,
+      issueId: issue.id,
       issue: issueTitle,
       repository: REPO_NAME,
       alsoWorksIn: [REPO2_NAME],
