@@ -114,17 +114,44 @@ describe("the providers this build ships", () => {
       expect(providerManifest("github")?.issueCreates?.epics).toBe(false);
     });
 
-    it("GitLab declares the four extra issue fields and links; GitHub declares none of them", () => {
+    it("GitLab declares the four extra issue fields; GitHub declares none of them", () => {
       // What the compose form gates each control on (user request 2026-08-30) — asked of the
       // manifest, never of the provider's name.
       const gitlab = providerManifest("gitlab")?.issueCreates;
       const github = providerManifest("github")?.issueCreates;
-      for (const flag of ["dueDate", "weight", "confidential", "timeEstimate", "links"] as const) {
+      for (const flag of ["dueDate", "weight", "confidential", "timeEstimate"] as const) {
         expect(gitlab?.[flag]).toBe(true);
         // Explicitly false, not merely absent: "we checked and it has none" and "nobody has said"
         // must not look the same in a manifest.
         expect(github?.[flag]).toBe(false);
       }
+    });
+
+    it("GitHub declares the three fields of its own, and GitLab declares none of them", () => {
+      // The other direction of the same rule (user request 2026-08-31). The point worth holding:
+      // there is no "standard" set with a GitLab annexe — each provider declares what it holds.
+      const gitlab = providerManifest("gitlab")?.issueCreates;
+      const github = providerManifest("github")?.issueCreates;
+      for (const flag of ["issueTypes", "parentIssue", "providerProject"] as const) {
+        expect(github?.[flag]).toBe(true);
+        expect(gitlab?.[flag]).toBe(false);
+      }
+    });
+
+    it("both declare links, and GitHub narrows them to the two relations it expresses", () => {
+      // GitHub's issue dependencies are blocking in both directions and nothing else. Narrowing
+      // the set is what keeps the form from offering a "relates to" the driver would then drop.
+      expect(providerManifest("gitlab")?.issueCreates?.links).toBe(true);
+      expect(providerManifest("github")?.issueCreates?.links).toBe(true);
+      expect(providerManifest("gitlab")?.issueCreates?.linkTypes).toEqual([
+        "relates_to",
+        "blocks",
+        "is_blocked_by",
+      ]);
+      expect(providerManifest("github")?.issueCreates?.linkTypes).toEqual([
+        "blocks",
+        "is_blocked_by",
+      ]);
     });
 
     it("a provider without the capability declares nothing about issue creation", () => {

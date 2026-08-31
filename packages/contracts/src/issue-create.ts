@@ -74,6 +74,28 @@ export const createProviderIssueInput = z.object({
     .array(z.object({ issueNumber: z.number().int().positive(), type: issueLinkTypeSchema }))
     .max(20)
     .optional(),
+  /**
+   * The three below are the provider's extras on the other side — GitHub's — and they are gated
+   * the same way, by `issueCreates.issueTypes` / `.parentIssue` / `.providerProject`. A GitLab
+   * caller simply never sends any of them, exactly as a GitHub caller never sends the five above.
+   */
+  /**
+   * The provider's own name for an issue type ("Bug", "Feature", "Task"). The *name*, not an id:
+   * that is what GitHub's create endpoint takes, and the picker is populated from the same list
+   * the provider answers with, so there is no id here to be stale.
+   */
+  issueType: z.string().max(80).optional(),
+  /**
+   * The Issue this one is created under, by its number within the same repository — GitHub's
+   * sub-issues. A number rather than an id for the same reason `links` uses one: it is what a
+   * person reading the repository sees, and it is the space the picker offers.
+   */
+  parentIssueNumber: z.number().int().positive().optional(),
+  /**
+   * A provider project board to put the new Issue on — the same opaque id `project.listAvailable`
+   * reports as `externalId` and the `project` row stores as `providerProjectId`.
+   */
+  providerProjectId: z.string().max(200).optional(),
 });
 export type CreateProviderIssueInput = z.infer<typeof createProviderIssueInput>;
 

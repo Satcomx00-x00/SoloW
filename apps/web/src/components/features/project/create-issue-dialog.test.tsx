@@ -38,6 +38,35 @@ const composeReads = {
   "repository.listMilestones": () => [],
 };
 
+/** GitHub's manifest as the registry declares it — the shape the compose form gates on. */
+const GITHUB_MANIFEST = {
+  id: "github",
+  name: "GitHub",
+  issueCreates: {
+    epics: false,
+    dueDate: false,
+    weight: false,
+    confidential: false,
+    timeEstimate: false,
+    links: true,
+    linkTypes: ["blocks", "is_blocked_by"],
+    issueTypes: true,
+    parentIssue: true,
+    providerProject: true,
+  },
+};
+
+/** One Projects v2 board on the same connection the chosen Repository lives on. */
+const BOARD = {
+  integrationId: "int-1",
+  provider: "github",
+  externalId: "PVT_board",
+  title: "Roadmap",
+  url: "u",
+  ownerLogin: "acme",
+  adopted: false,
+};
+
 describe("CreateIssueDialog", () => {
   it("skips the 'Where' modal when exactly one repository is eligible", async () => {
     renderWithTrpc(
@@ -222,9 +251,9 @@ describe("CreateIssueDialog", () => {
   });
 
   it("draws none of them for a provider whose manifest declares them false", async () => {
-    const github = {
-      id: "github",
-      name: "GitHub",
+    const spartan = {
+      id: "spartan",
+      name: "Spartan",
       issueCreates: {
         epics: false,
         dueDate: false,
@@ -237,20 +266,207 @@ describe("CreateIssueDialog", () => {
     renderWithTrpc(
       <CreateIssueDialog projectId="prj-1" epicsSupported={false} open onOpenChange={() => {}} />,
       {
-        "repository.list": () => list([repo({ provider: "github" })]),
+        "repository.list": () => list([repo({ provider: "spartan" })]),
         ...composeReads,
-        "integration.providers": () => [github],
+        "integration.providers": () => [spartan],
         "issue.list": () => list([]),
       },
     );
 
     await screen.findByText("New issue · compose");
-    // The whole point of gating on the manifest: a GitHub issue holds none of these, so the form
-    // never draws a control its driver would refuse.
+    // The whole point of gating on the manifest: this provider's issues hold none of these, so the
+    // form never draws a control its driver would refuse.
     expect(screen.queryByLabelText("Due date")).toBeNull();
     expect(screen.queryByLabelText("Weight")).toBeNull();
     expect(screen.queryByText("Confidential")).toBeNull();
     expect(screen.queryByRole("combobox", { name: "Linked items" })).toBeNull();
+  });
+
+  it("draws GitHub's own three where GitLab's are absent — the gating runs both ways", async () => {
+    renderWithTrpc(
+      <CreateIssueDialog projectId="prj-1" epicsSupported={false} open onOpenChange={() => {}} />,
+      {
+        "repository.list": () => list([repo({ provider: "github" })]),
+        ...composeReads,
+        "integration.providers": () => [GITHUB_MANIFEST],
+        "issue.list": () => list([]),
+        "repository.listIssueTypes": () => [
+          { externalId: "1", name: "Bug", description: null, color: "red" },
+        ],
+        "project.available": () => [BOARD],
+      },
+    );
+
+    await screen.findByText("New issue · compose");
+    // None of GitLab's, all of GitHub's. Neither set is the standard one with the other bolted on.
+    expect(screen.queryByLabelText("Due date")).toBeNull();
+    expect(screen.queryByLabelText("Weight")).toBeNull();
+    expect(await screen.findByLabelText("Type")).toBeDefined();
+    expect(await screen.findByRole("combobox", { name: "Parent issue" })).toBeDefined();
+    expect(await screen.findByLabelText("Project board")).toBeDefined();
+  });
+
+  it("hides the type picker when the repository inherits no types, flag or not", async () => {
+    renderWithTrpc(
+      <CreateIssueDialog projectId="prj-1" epicsSupported={false} open onOpenChange={() => {}} />,
+      {
+        "repository.list": () => list([repo({ provider: "github" })]),
+        ...composeReads,
+        "integration.providers": () => [GITHUB_MANIFEST],
+        "issue.list": () => list([]),
+        // The flag says *GitHub* has issue types; the empty list says *this repository* inherits
+        // none — a repository owned by a person rather than an organisation. A picker whose only
+        // choice is "No type" is a control that means nothing.
+        "repository.listIssueTypes": () => [],
+        "project.available": () => [BOARD],
+      },
+    );
+
+    await screen.findByLabelText("Project board");
+    expect(screen.queryByLabelText("Type")).toBeNull();
+  });
+
+  it("offers only the link relations the provider expresses", async () => {
+    renderWithTrpc(
+      <CreateIssueDialog projectId="prj-1" epicsSupported={false} open onOpenChange={() => {}} />,
+      {
+        "repository.list": () => list([repo({ provider: "github" })]),
+        ...composeReads,
+        "integration.providers": () => [GITHUB_MANIFEST],
+        "issue.list": () => list([]),
+        "repository.listIssueTypes": () => [],
+        "project.available": () => [],
+      },
+    );
+
+    fireEvent.click(await screen.findByRole("combobox", { name: "Link type" }));
+
+    // GitHub's dependencies are blocking in both directions and nothing else. Offering "Relates
+    // to" would collect a relation the driver has to drop on the way out.
+    expect(await screen.findByRole("option", { name: "Blocks" })).toBeDefined();
+    expect(screen.getByRole("option", { name: "Is blocked by" })).toBeDefined();
+    expect(screen.queryByRole("option", { name: "Relates to" })).toBeNull();
+  });
+
+  it("links on the provider's own first relation, not a hard-coded 'relates to'", async () => {
+    let received: unknown;
+    renderWithTrpc(
+      <CreateIssueDialog projectId="prj-1" epicsSupported={false} open onOpenChange={() => {}} />,
+      {
+        "repository.list": () => list([repo({ provider: "github" })]),
+        ...composeReads,
+        "integration.providers": () => [GITHUB_MANIFEST],
+        "issue.list": () =>
+          list([{ id: "iss-9", title: "The blocker", externalNumber: 10, labels: [] }]),
+        "repository.listIssueTypes": () => [],
+        "project.available": () => [],
+        "issue.createOnProvider": (input) => {
+          received = input;
+          return { issueId: "i", externalNumber: 7, externalUrl: "u", title: "t" };
+        },
+      },
+    );
+
+    fireEvent.change(await screen.findByLabelText(/Title/), { target: { value: "Cold start" } });
+    // The relation control is deliberately left untouched, which is the whole point: whatever it
+    // opens on is what the link carries. On GitHub that must be "blocks" — a control seeded with
+    // a relation the provider does not express would collect one the driver then drops.
+    fireEvent.click(await screen.findByRole("combobox", { name: "Linked items" }));
+    fireEvent.click(await screen.findByText(/The blocker/));
+    fireEvent.click(screen.getByRole("button", { name: /Create issue/ }));
+
+    await waitFor(() =>
+      expect(received).toEqual({
+        repositoryId: "repo-1",
+        projectId: "prj-1",
+        title: "Cold start",
+        links: [{ issueNumber: 10, type: "blocks" }],
+      }),
+    );
+    // And the trigger agrees with what was sent — the two are the same value by construction.
+    expect(screen.getByRole("combobox", { name: "Link type" }).textContent).toBe("Blocks");
+  });
+
+  it("offers only the boards on the connection the chosen repository lives on", async () => {
+    renderWithTrpc(
+      <CreateIssueDialog projectId="prj-1" epicsSupported={false} open onOpenChange={() => {}} />,
+      {
+        "repository.list": () => list([repo({ provider: "github" })]),
+        ...composeReads,
+        "integration.providers": () => [GITHUB_MANIFEST],
+        "issue.list": () => list([]),
+        "repository.listIssueTypes": () => [],
+        // `project.available` answers across every connection in the Workspace. A board on a
+        // different one cannot hold an issue created here, so it is not offered.
+        "project.available": () => [
+          BOARD,
+          { ...BOARD, integrationId: "int-2", externalId: "PVT_other", title: "Other roadmap" },
+        ],
+      },
+    );
+
+    fireEvent.click(await screen.findByLabelText("Project board"));
+
+    expect(await screen.findByRole("option", { name: /Roadmap/ })).toBeDefined();
+    expect(screen.queryByRole("option", { name: /Other roadmap/ })).toBeNull();
+  });
+
+  it("hides the board picker when the connection has no boards at all", async () => {
+    renderWithTrpc(
+      <CreateIssueDialog projectId="prj-1" epicsSupported={false} open onOpenChange={() => {}} />,
+      {
+        "repository.list": () => list([repo({ provider: "github" })]),
+        ...composeReads,
+        "integration.providers": () => [GITHUB_MANIFEST],
+        "issue.list": () => list([]),
+        "repository.listIssueTypes": () => [],
+        "project.available": () => [{ ...BOARD, integrationId: "int-2" }],
+      },
+    );
+
+    // Same second gate the type picker has: the flag says the provider has boards, the list says
+    // this connection has none to choose from, and a picker whose only entry is "No board" is a
+    // control that means nothing.
+    await screen.findByRole("combobox", { name: "Parent issue" });
+    expect(screen.queryByLabelText("Project board")).toBeNull();
+  });
+
+  it("sends the type, the parent issue and the board only once each was chosen", async () => {
+    let received: unknown;
+    renderWithTrpc(
+      <CreateIssueDialog projectId="prj-1" epicsSupported={false} open onOpenChange={() => {}} />,
+      {
+        "repository.list": () => list([repo({ provider: "github" })]),
+        ...composeReads,
+        "integration.providers": () => [GITHUB_MANIFEST],
+        "issue.list": () =>
+          list([{ id: "iss-9", title: "The epic", externalNumber: 10, labels: [] }]),
+        "repository.listIssueTypes": () => [
+          { externalId: "1", name: "Bug", description: null, color: null },
+        ],
+        "project.available": () => [BOARD],
+        "issue.createOnProvider": (input) => {
+          received = input;
+          return { issueId: "i", externalNumber: 7, externalUrl: "u", title: "t" };
+        },
+      },
+    );
+
+    fireEvent.change(await screen.findByLabelText(/Title/), { target: { value: "Cold start" } });
+    fireEvent.click(await screen.findByRole("combobox", { name: "Parent issue" }));
+    fireEvent.click(await screen.findByText(/The epic/));
+    fireEvent.click(screen.getByRole("button", { name: /Create issue/ }));
+
+    // The parent rode along as the *number* the provider knows it by; the type and the board were
+    // never touched, so neither key is present at all.
+    await waitFor(() =>
+      expect(received).toEqual({
+        repositoryId: "repo-1",
+        projectId: "prj-1",
+        title: "Cold start",
+        parentIssueNumber: 10,
+      }),
+    );
   });
 
   it("sends due date, weight, confidential and estimate only when they were filled in", async () => {

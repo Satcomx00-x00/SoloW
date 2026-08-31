@@ -100,7 +100,7 @@ const REQUIRED_METHODS: Record<IntegrationCapability, readonly string[]> = {
   changeRequests: ["listChangeRequests"],
   projects: ["listProjects", "readProjectFields", "readProjectItems", "writeProjectFieldValue"],
   labelWrites: ["createLabels"],
-  issueCreates: ["createIssue", "createEpic", "listGroups", "listEpics"],
+  issueCreates: ["createIssue", "createEpic", "listGroups", "listEpics", "listIssueTypes"],
 };
 
 export class ProviderRegistry<Driver extends object> {

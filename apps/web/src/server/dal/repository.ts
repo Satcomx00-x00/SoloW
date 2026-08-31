@@ -8,6 +8,7 @@ import {
   ok,
   type RepositoryAssigneeDto,
   type RepositoryDto,
+  type RepositoryIssueTypeDto,
   type RepositoryLabelDto,
   type RepositoryListDto,
   type RepositoryMilestoneDto,
@@ -19,6 +20,7 @@ import { decryptForScmSync, integration, issue, repository, secret } from "@solo
 import {
   DEFAULT_LABEL_TAXONOMY,
   isProviderInstalled,
+  providerManifest,
   providerWith,
   type ScmCredential,
 } from "@solow/scm";
@@ -289,6 +291,48 @@ export async function listRepositoryMilestones(
     resolved.data.externalFullName,
   );
   return ok(milestones);
+}
+
+/**
+ * The issue types a provider Issue can be given on this Repository, for the Compose modal's type
+ * picker (F23a Flow A, user request 2026-08-31).
+ *
+ * Two answers are empty and only one of them is a refusal. A provider whose manifest declares no
+ * `issueCreates.issueTypes` is not asked at all — its driver says so with a sentence rather than
+ * an empty list (`GitlabProvider.listIssueTypes`), and propagating that throw would turn "GitLab
+ * has no such vocabulary", which the form already knows, into a 500. A provider that *does*
+ * declare it and answers with nothing is reporting a fact about the repository — a GitHub
+ * repository owned by a person inherits no organisation types — and that empty list is the real
+ * one.
+ */
+export async function listRepositoryIssueTypes(
+  ctx: RequestContext,
+  repositoryId: string,
+): Promise<
+  Result<RepositoryIssueTypeDto[], typeof CommonErrorCode.NotFound | IntegrationErrorCode>
+> {
+  const resolved = await loadRepositoryCredential(ctx, repositoryId);
+  if (!resolved.ok) return resolved;
+
+  // `issueCreates`, not `issueWrites`: the vocabulary belongs to the capability that originates an
+  // Issue, which is the only place this build offers to set a type.
+  const driver = providerWith(resolved.data.provider, "issueCreates");
+  if (!driver) {
+    return err(
+      isProviderInstalled(resolved.data.provider)
+        ? IntegrationErrorCode.CapabilityUnavailable
+        : IntegrationErrorCode.ProviderUnavailable,
+    );
+  }
+  // Asked of the manifest, never of the provider's name (Decision 0016) — the same check
+  // `epicDriver` makes before reaching for `listEpics`.
+  if (!providerManifest(resolved.data.provider)?.issueCreates?.issueTypes) return ok([]);
+
+  const types = await driver.listIssueTypes(
+    resolved.data.credential,
+    resolved.data.externalFullName,
+  );
+  return ok(types);
 }
 
 /**

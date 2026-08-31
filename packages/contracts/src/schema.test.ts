@@ -2,8 +2,10 @@ import { describe, expect, it } from "bun:test";
 import {
   connectIntegrationInput,
   connectRepositoryInput,
+  createProviderIssueInput,
   createTaskInput,
   importIssuesInput,
+  issueCreateSupportSchema,
   MAX_SETUP_FILE_PATTERNS,
   MAX_TASK_REPOSITORIES,
   reviewDecisionInput,
@@ -580,5 +582,92 @@ describe("todoItemSchema", () => {
         activeForm: "y".repeat(501),
       }).success,
     ).toBe(false);
+  });
+});
+
+/**
+ * What a compose form may collect, and what a manifest may promise (F23a, user request
+ * 2026-08-31).
+ *
+ * The schema is the only place that says a provider extra is *optional* — every one of them is
+ * absent for some provider — so the cases worth pinning are the two edges of that: a create
+ * carrying nothing but a title is valid, and a create carrying every provider's extras at once is
+ * too. The second is not hypothetical politeness: this schema deliberately does not know which
+ * provider the Repository is on, and a refinement that started rejecting combinations would move
+ * that decision out of the manifest and into a file that cannot see it (Decision 0016).
+ */
+describe("createProviderIssueInput (spec F23a)", () => {
+  it("accepts a title alone — every extra belongs to some provider and none to all", () => {
+    const res = createProviderIssueInput.safeParse({ repositoryId: "rep_1", title: "Gate sticks" });
+    expect(res.success).toBe(true);
+  });
+
+  it("accepts both providers' extras together, because it cannot tell them apart", () => {
+    const res = createProviderIssueInput.safeParse({
+      repositoryId: "rep_1",
+      title: "Gate sticks",
+      dueDate: "2026-09-30",
+      weight: 3,
+      confidential: true,
+      timeEstimate: "1w 2d",
+      links: [{ issueNumber: 12, type: "blocks" }],
+      issueType: "Bug",
+      parentIssueNumber: 7,
+      providerProjectId: "PVT_board",
+    });
+    expect(res.success).toBe(true);
+  });
+
+  it("refuses a parent issue that is not a real issue number", () => {
+    // A number within a repository starts at 1. Zero and negatives are not "no parent" — absence
+    // is what says that — so they are a malformed request rather than a defaulted one.
+    for (const parentIssueNumber of [0, -1, 1.5]) {
+      const res = createProviderIssueInput.safeParse({
+        repositoryId: "rep_1",
+        title: "Gate sticks",
+        parentIssueNumber,
+      });
+      expect(res.success).toBe(false);
+    }
+  });
+
+  it("refuses a link relation no provider vocabulary contains", () => {
+    const res = createProviderIssueInput.safeParse({
+      repositoryId: "rep_1",
+      title: "Gate sticks",
+      links: [{ issueNumber: 12, type: "duplicates" }],
+    });
+    expect(res.success).toBe(false);
+  });
+});
+
+describe("issueCreateSupportSchema (spec F23a)", () => {
+  it("requires only `epics` — a provider written before the extras still declares validly", () => {
+    // The reason every extra is `.optional()`: this schema outlived the manifest that first used
+    // it, and a provider that has not answered about due dates must not become unregisterable.
+    expect(issueCreateSupportSchema.safeParse({ epics: false }).success).toBe(true);
+  });
+
+  it("takes a narrowed link vocabulary, and refuses a relation outside it", () => {
+    const narrowed = issueCreateSupportSchema.safeParse({
+      epics: false,
+      links: true,
+      linkTypes: ["blocks", "is_blocked_by"],
+    });
+    expect(narrowed.success).toBe(true);
+    if (narrowed.success) expect(narrowed.data.linkTypes).toEqual(["blocks", "is_blocked_by"]);
+
+    expect(
+      issueCreateSupportSchema.safeParse({ epics: false, links: true, linkTypes: ["duplicates"] })
+        .success,
+    ).toBe(false);
+  });
+
+  it("leaves `linkTypes` absent rather than defaulting it — absent means all three", () => {
+    // A default here would be a second place that knows what the full vocabulary is, and the two
+    // would drift. The reading lives at the one call site that needs it (`ProviderExtras`).
+    const res = issueCreateSupportSchema.safeParse({ epics: true, links: true });
+    expect(res.success).toBe(true);
+    if (res.success) expect(res.data.linkTypes).toBeUndefined();
   });
 });

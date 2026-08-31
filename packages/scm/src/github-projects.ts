@@ -235,6 +235,22 @@ query($project: ID!, $after: String) {
   } }
 }`;
 
+/**
+ * Put an existing issue on a project board (spec F23a Flow A, GitHub extras).
+ *
+ * `contentId` is the issue's **GraphQL node id**, which is why this is reachable only from a call
+ * that has just read the issue back: the REST create returns `node_id` beside the database id,
+ * and there is no cheaper way to get from the number a person picked to the id this mutation
+ * wants. Idempotent on GitHub's side — an issue already on the board answers with the item it
+ * already has rather than adding a second one.
+ */
+const ADD_ITEM_MUTATION = `
+mutation($project: ID!, $content: ID!) {
+  addProjectV2ItemById(input: { projectId: $project, contentId: $content }) {
+    item { id }
+  }
+}`;
+
 const WRITE_MUTATION = `
 mutation($project: ID!, $item: ID!, $field: ID!, $value: ProjectV2FieldValue!) {
   updateProjectV2ItemFieldValue(input: {
@@ -559,5 +575,26 @@ export class GithubProjects {
       .map(toExternalValue)
       .find((v) => v?.fieldExternalId === write.fieldExternalId);
     return stored ?? { fieldExternalId: write.fieldExternalId, value: null };
+  }
+
+  /**
+   * Add one issue to a project board, answering with the item id the board now holds it under.
+   *
+   * Lives here rather than in `github.ts` for the reason the whole module exists: this is
+   * GraphQL, and `createIssue` — its only caller — is REST from top to bottom.
+   */
+  async addIssueToProject(
+    credential: ScmCredential,
+    projectExternalId: string,
+    issueNodeId: string,
+  ): Promise<string | null> {
+    const data = await scmGraphql<{ addProjectV2ItemById?: { item?: { id?: string } } }>(
+      PROVIDER,
+      this.graphqlUrl(credential),
+      this.headers(credential),
+      ADD_ITEM_MUTATION,
+      { project: projectExternalId, content: issueNodeId },
+    );
+    return data.addProjectV2ItemById?.item?.id ?? null;
   }
 }

@@ -172,6 +172,12 @@ export async function createProviderIssue(
   if (input.confidential !== undefined) seed.confidential = input.confidential;
   if (input.timeEstimate !== undefined) seed.timeEstimate = input.timeEstimate;
   if (input.links !== undefined) seed.links = input.links;
+  // The other provider's three, carried through under the same rule and for the same reason: the
+  // manifest decided whether the compose form offered them, and the driver decides what to do
+  // with one that arrives anyway. Nothing here knows which provider this is.
+  if (input.issueType !== undefined) seed.issueType = input.issueType;
+  if (input.parentIssueNumber !== undefined) seed.parentIssueNumber = input.parentIssueNumber;
+  if (input.providerProjectId !== undefined) seed.providerProjectId = input.providerProjectId;
 
   const created = await resolved.data.driver.createIssue(
     resolved.data.credential,

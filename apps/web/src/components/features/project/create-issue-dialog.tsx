@@ -8,13 +8,17 @@ import type {
   RepositoryLabelDto,
   RepositoryMilestoneDto,
 } from "@solow/contracts";
+import { ISSUE_LINK_TYPES } from "@solow/contracts";
 import {
   CalendarDays,
   Check,
   ChevronsUpDown,
+  Columns3,
   EyeOff,
   Link2,
+  ListTree,
   Milestone as MilestoneIcon,
+  Shapes,
   Tags,
   Timer,
   UserPlus,
@@ -68,9 +72,16 @@ import { groupLabelsByCategory, MarkdownField } from "./issue-authoring";
  * it cannot drop it (the F23a error rule applied to navigation, not just to a server refusal).
  *
  * Compose is a GitHub-shaped two-column form: the *content* (title, description) on the left and a
- * *metadata sidebar* (assignees, labels, milestone, parent epic) on the right. Each sidebar control
- * is a real provider-backed picker — the same reads the project table's own cells use — so what is
- * offered here is exactly what the provider will accept, never a free-typed guess it might reject.
+ * *metadata sidebar* (assignees, labels, milestone, and whatever else the provider holds) on the
+ * right. Each sidebar control is a real provider-backed picker — the same reads the project table's
+ * own cells use — so what is offered here is exactly what the provider will accept, never a
+ * free-typed guess it might reject.
+ *
+ * Below the universal fields the sidebar is entirely manifest-driven, in both directions: GitLab
+ * contributes a due date, a weight, a confidential flag, an estimate and three kinds of link;
+ * GitHub contributes an issue type, a parent issue and a project board, and narrows the link
+ * relations to the two it expresses. Neither list is hard-coded against a provider's name — see
+ * `ProviderExtras` (Decision 0016).
  */
 
 const TITLE_MAX = 300;
@@ -144,6 +155,12 @@ export function CreateIssueDialog({
   const [confidential, setConfidential] = useState(false);
   const [timeEstimate, setTimeEstimate] = useState("");
   const [links, setLinks] = useState<IssueLinkDraft[]>([]);
+  // And GitHub's three, held the same way (user request 2026-08-31). `parentIssueNumber` is a
+  // string for the same reason `weight` is: state holds what the control holds, and the coercion
+  // happens once, at submit.
+  const [issueType, setIssueType] = useState("");
+  const [parentIssueNumber, setParentIssueNumber] = useState("");
+  const [providerProjectId, setProviderProjectId] = useState("");
 
   // A fresh dialog every open: form state seeded once at mount would carry a previous attempt's
   // title into the next New issue, which is the leak `issue-form-dialog` resets for the same reason.
@@ -163,6 +180,9 @@ export function CreateIssueDialog({
     setConfidential(false);
     setTimeEstimate("");
     setLinks([]);
+    setIssueType("");
+    setParentIssueNumber("");
+    setProviderProjectId("");
   }, [open]);
 
   // "Skip Modal 1 when there is exactly one choice" (F23a Flow A): pre-select the sole eligible
@@ -265,6 +285,11 @@ export function CreateIssueDialog({
       ...(creates?.links && links.length > 0
         ? { links: links.map(({ issueNumber, type }) => ({ issueNumber, type })) }
         : {}),
+      ...(creates?.issueTypes && issueType ? { issueType } : {}),
+      ...(creates?.parentIssue && parentIssueNumber
+        ? { parentIssueNumber: Number(parentIssueNumber) }
+        : {}),
+      ...(creates?.providerProject && providerProjectId ? { providerProjectId } : {}),
     });
   };
 
@@ -403,8 +428,8 @@ export function CreateIssueDialog({
                 />
 
                 {/* Everything below is declared by the provider's manifest, never by its name
-                    (Decision 0016) — on GitHub none of it renders, because its issues hold none
-                    of it. `ProviderExtras` keeps that gating in one place. */}
+                    (Decision 0016) — which controls appear differs by provider, and neither set
+                    is the "extra" one. `ProviderExtras` keeps that gating in one place. */}
                 <ProviderExtras
                   creates={creates}
                   dueDate={dueDate}
@@ -417,7 +442,14 @@ export function CreateIssueDialog({
                   onTimeEstimate={setTimeEstimate}
                   links={links}
                   onLinks={setLinks}
+                  issueType={issueType}
+                  onIssueType={setIssueType}
+                  parentIssueNumber={parentIssueNumber}
+                  onParentIssueNumber={setParentIssueNumber}
+                  providerProjectId={providerProjectId}
+                  onProviderProjectId={setProviderProjectId}
                   repositoryId={repositoryId}
+                  integrationId={selectedRepo?.integrationId ?? null}
                   enabled={onCompose}
                 />
 
@@ -485,13 +517,19 @@ export function CreateIssueDialog({
 }
 
 /**
- * The sidebar controls that exist only because the provider says so (user request 2026-08-30).
+ * The sidebar controls that exist only because the provider says so (user request 2026-08-30,
+ * extended 2026-08-31).
  *
- * One component rather than five inline `&&`s in the form, so the gating rule is stated once and
+ * One component rather than eight inline `&&`s in the form, so the gating rule is stated once and
  * in one place: **a control is drawn iff the manifest's `issueCreates` flag for it is true.** A
  * flag that is absent reads as false — a provider that has not answered offers nothing rather than
- * something its driver would refuse. On GitHub every flag is false and this renders nothing at
- * all, which is why there is no separator or heading outside the guard.
+ * something its driver would refuse.
+ *
+ * The set started as GitLab's and is now both providers', which is the point worth keeping: there
+ * is no "standard" sidebar with a GitLab annexe. GitHub draws an issue type, a parent issue, a
+ * project board and links restricted to its two dependency relations; GitLab draws its five and
+ * all three relations; a third provider draws whatever it declares. Nothing here reads a
+ * provider's name to decide (Decision 0016).
  */
 function ProviderExtras({
   creates,
@@ -505,7 +543,14 @@ function ProviderExtras({
   onTimeEstimate,
   links,
   onLinks,
+  issueType,
+  onIssueType,
+  parentIssueNumber,
+  onParentIssueNumber,
+  providerProjectId,
+  onProviderProjectId,
   repositoryId,
+  integrationId,
   enabled,
 }: {
   creates: IssueCreateSupport | undefined;
@@ -519,7 +564,15 @@ function ProviderExtras({
   onTimeEstimate: (v: string) => void;
   links: IssueLinkDraft[];
   onLinks: (next: IssueLinkDraft[]) => void;
+  issueType: string;
+  onIssueType: (v: string) => void;
+  parentIssueNumber: string;
+  onParentIssueNumber: (v: string) => void;
+  providerProjectId: string;
+  onProviderProjectId: (v: string) => void;
   repositoryId: string;
+  /** Which connection the chosen Repository lives on — the board picker asks it, not the Project. */
+  integrationId: string | null;
   enabled: boolean;
 }) {
   if (!creates) return null;
@@ -528,12 +581,24 @@ function ProviderExtras({
     creates.weight ||
     creates.confidential ||
     creates.timeEstimate ||
-    creates.links;
+    creates.links ||
+    creates.issueTypes ||
+    creates.parentIssue ||
+    creates.providerProject;
   if (!any) return null;
 
   return (
     <>
       <Separator />
+      {creates.issueTypes && (
+        <IssueTypeField
+          value={issueType}
+          onChange={onIssueType}
+          repositoryId={repositoryId}
+          enabled={enabled}
+        />
+      )}
+
       {creates.dueDate && (
         <FieldShell icon={<CalendarDays aria-hidden />} label="Due date">
           <Input
@@ -587,9 +652,214 @@ function ProviderExtras({
       )}
 
       {creates.links && (
-        <LinksField links={links} onLinks={onLinks} repositoryId={repositoryId} enabled={enabled} />
+        <LinksField
+          links={links}
+          onLinks={onLinks}
+          /* Absent means all three — what `links` alone meant before any provider narrowed it. */
+          types={creates.linkTypes ?? ISSUE_LINK_TYPES}
+          repositoryId={repositoryId}
+          enabled={enabled}
+        />
+      )}
+
+      {creates.parentIssue && (
+        <ParentIssueField
+          value={parentIssueNumber}
+          onChange={onParentIssueNumber}
+          repositoryId={repositoryId}
+          enabled={enabled}
+        />
+      )}
+
+      {creates.providerProject && (
+        <ProviderProjectField
+          value={providerProjectId}
+          onChange={onProviderProjectId}
+          integrationId={integrationId}
+          enabled={enabled}
+        />
       )}
     </>
+  );
+}
+
+/**
+ * The provider's own issue-type vocabulary — GitHub's "Bug" / "Feature" / "Task".
+ *
+ * Draws nothing when the list comes back empty, and that is a second gate on top of the manifest
+ * flag rather than a redundant one: the flag says *the provider* has issue types, the list says
+ * *this repository* inherits any. A GitHub repository owned by a person inherits none, and an
+ * empty picker would be a control offering one choice — "None" — that means nothing.
+ */
+function IssueTypeField({
+  value,
+  onChange,
+  repositoryId,
+  enabled,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  repositoryId: string;
+  enabled: boolean;
+}) {
+  const types = trpc.repository.listIssueTypes.useQuery(
+    { repositoryId },
+    { enabled: enabled && repositoryId.length > 0 },
+  );
+  const options = types.data ?? [];
+  if (options.length === 0) return null;
+
+  return (
+    <FieldShell icon={<Shapes aria-hidden />} label="Type">
+      {/* The type's *name*, not its id: that is what the provider's create endpoint reads, so the
+          value chosen here is the value sent, with nothing to resolve in between. */}
+      <Select value={value || "none"} onValueChange={(v) => onChange(v === "none" ? "" : v)}>
+        <SelectTrigger className="w-full" aria-label="Type">
+          <SelectValue placeholder="No type" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="none">No type</SelectItem>
+          {options.map((t) => (
+            <SelectItem key={t.externalId} value={t.name}>
+              {t.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </FieldShell>
+  );
+}
+
+/**
+ * The Issue this one is created under — GitHub's sub-issue, and the parity of the Parent-epic
+ * control a GitLab repository gets instead.
+ *
+ * Picked from the repository's own Issues rather than typed, and filtered to those that exist on
+ * the provider, for exactly the reasons `LinksField` states: a number typed from memory nests the
+ * new Issue under whatever happens to hold it, and a purely local Issue has no number to nest
+ * under at all.
+ */
+function ParentIssueField({
+  value,
+  onChange,
+  repositoryId,
+  enabled,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  repositoryId: string;
+  enabled: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const issues = trpc.issue.list.useQuery(
+    { repositoryId, ...WHOLE_PAGE },
+    { enabled: enabled && repositoryId.length > 0 },
+  );
+  const candidates = (issues.data?.items ?? []).filter(
+    (i): i is typeof i & { externalNumber: number } => i.externalNumber !== null,
+  );
+  const chosen = candidates.find((i) => String(i.externalNumber) === value);
+
+  return (
+    <FieldShell icon={<ListTree aria-hidden />} label="Parent issue">
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            role="combobox"
+            aria-expanded={open}
+            aria-label="Parent issue"
+            className="w-full justify-between font-normal"
+          >
+            <span className={cn("truncate", !chosen && "text-muted-foreground")}>
+              {chosen ? `#${chosen.externalNumber} ${chosen.title}` : "No parent"}
+            </span>
+            <ChevronsUpDown aria-hidden className="size-3.5 shrink-0 opacity-50" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-72 p-0" align="start">
+          <Command>
+            <CommandInput placeholder="Search issues" className="h-8" />
+            <CommandList>
+              <CommandEmpty>No issues found.</CommandEmpty>
+              <CommandGroup>
+                <CommandItem
+                  value="No parent"
+                  onSelect={() => {
+                    onChange("");
+                    setOpen(false);
+                  }}
+                >
+                  <span className="text-muted-foreground">No parent</span>
+                </CommandItem>
+                {candidates.map((i) => (
+                  <CommandItem
+                    key={i.id}
+                    value={`#${i.externalNumber} ${i.title}`}
+                    onSelect={() => {
+                      onChange(String(i.externalNumber));
+                      setOpen(false);
+                    }}
+                  >
+                    <span className="shrink-0 font-mono text-2xs text-muted-foreground">
+                      #{i.externalNumber}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate">{i.title}</span>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            </CommandList>
+          </Command>
+        </PopoverContent>
+      </Popover>
+    </FieldShell>
+  );
+}
+
+/**
+ * A provider project board to put the new Issue on — GitHub Projects v2.
+ *
+ * Every board the connection can see, adopted by this Workspace or not: the question here is
+ * "which board should hold this issue", and a board SoloW does not mirror is still a perfectly
+ * good answer to it. Keyed off the *Repository's* integration rather than the Project's, the same
+ * choice the epic picker makes and for the same reason — the repository is where the issue lands.
+ */
+function ProviderProjectField({
+  value,
+  onChange,
+  integrationId,
+  enabled,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  integrationId: string | null;
+  enabled: boolean;
+}) {
+  const available = trpc.project.available.useQuery(
+    {},
+    { enabled: enabled && integrationId !== null },
+  );
+  const boards = (available.data ?? []).filter((p) => p.integrationId === integrationId);
+  if (boards.length === 0) return null;
+
+  return (
+    <FieldShell icon={<Columns3 aria-hidden />} label="Project board">
+      <Select value={value || "none"} onValueChange={(v) => onChange(v === "none" ? "" : v)}>
+        <SelectTrigger className="w-full" aria-label="Project board">
+          <SelectValue placeholder="No board" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="none">No board</SelectItem>
+          {boards.map((p) => (
+            <SelectItem key={p.externalId} value={p.externalId}>
+              {p.ownerLogin ? `${p.ownerLogin} / ${p.title}` : p.title}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </FieldShell>
   );
 }
 
@@ -601,23 +871,39 @@ function ProviderExtras({
  * happens to hold it. The relation is chosen per row, because "blocks" and "is blocked by" are
  * different facts about the same pair and picking one for the whole set would flatten them.
  *
- * These are applied *after* the issue exists — GitLab's create endpoint takes no links — which is
- * why the driver treats a refused link as leaving the created issue standing rather than failing
- * the create (see `GitlabProvider.createIssue`).
+ * `types` is which relations the provider actually expresses, from its manifest: GitLab has all
+ * three, GitHub's issue dependencies have the two blocking ones and no "relates to". Offering a
+ * relation the driver would then drop is the failure this narrowing exists to prevent — the same
+ * rule the flags above follow, that a control is drawn only where the provider can hold what it
+ * collects.
+ *
+ * These are applied *after* the issue exists — neither provider's create endpoint takes links —
+ * which is why both drivers treat a refused link as leaving the created issue standing rather
+ * than failing the create.
  */
 function LinksField({
   links,
   onLinks,
+  types,
   repositoryId,
   enabled,
 }: {
   links: IssueLinkDraft[];
   onLinks: (next: IssueLinkDraft[]) => void;
+  types: readonly IssueLinkType[];
   repositoryId: string;
   enabled: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const [type, setType] = useState<IssueLinkType>("relates_to");
+  // The provider's first declared relation, not a fixed "relates to" — a provider that does not
+  // express one must not open the control on it.
+  const [type, setType] = useState<IssueLinkType>(types[0] ?? "relates_to");
+  // ...and the relation that is *submitted* is read back through what is currently on offer, not
+  // taken from state on trust. Today nothing can drive the two apart — leaving Compose unmounts
+  // this control, so a provider switch re-seeds it — which is precisely why it is worth stating
+  // as an invariant rather than relying on: what the trigger shows and what the link carries are
+  // the same value by construction, and no later change to when this remounts can separate them.
+  const active = types.includes(type) ? type : (types[0] ?? "relates_to");
   const issues = trpc.issue.list.useQuery(
     { repositoryId, ...WHOLE_PAGE },
     { enabled: enabled && repositoryId.length > 0 },
@@ -632,12 +918,12 @@ function LinksField({
 
   return (
     <FieldShell icon={<Link2 aria-hidden />} label="Linked items" count={links.length || undefined}>
-      <Select value={type} onValueChange={(v) => setType(v as IssueLinkType)}>
+      <Select value={active} onValueChange={(v) => setType(v as IssueLinkType)}>
         <SelectTrigger className="w-full" aria-label="Link type">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          {(Object.keys(LINK_TYPE_LABEL) as IssueLinkType[]).map((t) => (
+          {types.map((t) => (
             <SelectItem key={t} value={t}>
               {LINK_TYPE_LABEL[t]}
             </SelectItem>
@@ -671,7 +957,10 @@ function LinksField({
                     key={i.id}
                     value={`#${i.externalNumber} ${i.title}`}
                     onSelect={() => {
-                      onLinks([...links, { issueNumber: i.externalNumber, type, title: i.title }]);
+                      onLinks([
+                        ...links,
+                        { issueNumber: i.externalNumber, type: active, title: i.title },
+                      ]);
                       setOpen(false);
                     }}
                   >

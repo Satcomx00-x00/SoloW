@@ -957,6 +957,17 @@ describe("creating an Issue or Epic on GitLab (spec F23a)", () => {
     expect(receivedPaths.at(-1)).toContain("min_access_level=30");
   });
 
+  it("refuses listIssueTypes with a sentence, not an empty list", async () => {
+    // GitLab's `issue_type` is a fixed product set, not a vocabulary a group configures, and its
+    // manifest declares `issueCreates.issueTypes: false`. Answering `[]` would read as "this
+    // project happens to define none", which is a different and untrue statement — the same
+    // reason GitHub's `createEpic` throws rather than returning nothing.
+    await expect(gitlab().listIssueTypes(credential(), PROJECT)).rejects.toBeInstanceOf(
+      ScmProviderError,
+    );
+    await expect(gitlab().listIssueTypes(credential(), PROJECT)).rejects.toThrow(/issue.type/i);
+  });
+
   it("lists a group's existing epics, for the parent-epic picker", async () => {
     const epics = await gitlab().listEpics(credential(), GROUP);
 

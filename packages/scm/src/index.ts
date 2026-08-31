@@ -116,24 +116,40 @@ registry.register({
   projectFields: { expresses: PROJECT_FIELD_TYPES, cannot: {} },
   issueWrites: ISSUE_WRITES_WITHOUT_GITLAB_EXTRAS("GitHub"),
   /**
-   * GitHub can create an Issue and has no epics — its own parity concept is the sub-issue,
-   * tracked separately (spec F23a Part 1). `createEpic`/`listGroups`/`listEpics` still exist on
-   * `GithubProvider` (the registry's `CapabilityNotImplemented` check requires it), and each
-   * throws a descriptive `ScmProviderError` a caller should never actually reach because this
-   * flag is what disables the "New epic" menu entry before it gets the chance.
+   * GitHub can create an Issue and has no epics — its own parity concept is the sub-issue, which
+   * `parentIssue` below now declares in its own right (spec F23a Part 1).
+   * `createEpic`/`listGroups`/`listEpics` still exist on `GithubProvider` (the registry's
+   * `CapabilityNotImplemented` check requires it), and each throws a descriptive
+   * `ScmProviderError` a caller should never actually reach because `epics: false` is what
+   * disables the "New epic" menu entry before it gets the chance.
    */
   issueCreates: {
     epics: false,
-    // GitHub's issues carry none of these five as a field of their own: no due date, no weight,
-    // no confidential flag, no time estimate, and its issue relationships are sub-issues rather
-    // than the blocks/relates-to links GitLab models (user request 2026-08-30). Declared `false`
+    // GitHub's issues carry none of these four as a field of their own: no due date, no weight,
+    // no confidential flag and no time estimate (user request 2026-08-30). Declared `false`
     // explicitly rather than left to the schema default, because "we checked and it has none" and
     // "nobody has said" should not look the same in a manifest.
     dueDate: false,
     weight: false,
     confidential: false,
     timeEstimate: false,
-    links: false,
+    /**
+     * It does have links, and they are dependencies: an issue blocks, or is blocked by, another
+     * (user request 2026-08-31). It has no "relates to" at all, which `linkTypes` says rather
+     * than leaving the form to offer a relation the driver would have to drop.
+     */
+    links: true,
+    linkTypes: ["blocks", "is_blocked_by"],
+    /**
+     * And three fields GitLab has no equivalent of. Issue types are configured on an organisation
+     * (a user-owned repository inherits none, which `listIssueTypes` reports as an empty list
+     * rather than an error); the parent is a sub-issue, GitHub's answer to the epic it does not
+     * have; the board is a Projects v2 project, which is the `projects` capability's object seen
+     * from the create side.
+     */
+    issueTypes: true,
+    parentIssue: true,
+    providerProject: true,
   },
   changeRequestNoun: "pull request",
   fields: [
@@ -179,6 +195,17 @@ registry.register({
     confidential: true,
     timeEstimate: true,
     links: true,
+    /** All three, which is what `links` alone used to mean and still means where it is absent. */
+    linkTypes: ["relates_to", "blocks", "is_blocked_by"],
+    /**
+     * The three GitHub extras, and why not. GitLab's `issue_type` is a fixed product set (issue,
+     * incident, test case, task) rather than a vocabulary a group configures, and is not offered
+     * on the compose form; its hierarchy is the epic above, not an issue nested under an issue;
+     * and it has no project object at all (Decision 0018) to put a new issue on.
+     */
+    issueTypes: false,
+    parentIssue: false,
+    providerProject: false,
   },
   changeRequestNoun: "merge request",
   fields: [

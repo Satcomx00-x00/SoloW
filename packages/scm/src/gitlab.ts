@@ -7,30 +7,32 @@ import {
   scmFetchPaged,
   scmSend,
 } from "./http.js";
-import type {
-  ChangeProvider,
-  EpicSeed,
-  ExternalBranch,
-  ExternalChangeRequest,
-  ExternalComment,
-  ExternalEpic,
-  ExternalGroup,
-  ExternalIssue,
-  ExternalLabel,
-  ExternalLinkedChange,
-  ExternalMilestone,
-  ExternalRepository,
-  ExternalUser,
-  IssueCreatesCapability,
-  IssuePatch,
-  IssueSeed,
-  LabelSeed,
-  ListIssuesOptions,
-  ProjectFieldWrite,
-  ProjectStructureProvisioned,
-  ProjectsCapability,
-  RepoRef,
-  ScmCredential,
+import {
+  type ChangeProvider,
+  type EpicSeed,
+  type ExternalBranch,
+  type ExternalChangeRequest,
+  type ExternalComment,
+  type ExternalEpic,
+  type ExternalGroup,
+  type ExternalIssue,
+  type ExternalIssueType,
+  type ExternalLabel,
+  type ExternalLinkedChange,
+  type ExternalMilestone,
+  type ExternalRepository,
+  type ExternalUser,
+  type IssueCreatesCapability,
+  type IssuePatch,
+  type IssueSeed,
+  type LabelSeed,
+  type ListIssuesOptions,
+  type ProjectFieldWrite,
+  type ProjectStructureProvisioned,
+  type ProjectsCapability,
+  type RepoRef,
+  type ScmCredential,
+  ScmProviderError,
 } from "./types.js";
 
 /**
@@ -578,6 +580,24 @@ export class GitlabProvider implements ChangeProvider, ProjectsCapability, Issue
     } catch {
       return false;
     }
+  }
+
+  /**
+   * GitLab has no picker-shaped issue-type vocabulary to offer (spec F23a, user request
+   * 2026-08-31).
+   *
+   * It does have an `issue_type` — issue, incident, test case, task — but that is a fixed set
+   * built into the product, not a list an organisation configures and a repository inherits the
+   * way GitHub's issue types are, and this build does not offer it on the compose form. So the
+   * manifest declares `issueCreates.issueTypes: false` and this throws rather than answering with
+   * an empty list, for the reason `createEpic` throws on GitHub: an empty list would read as
+   * "this project happens to define none", which is a different and untrue statement.
+   */
+  async listIssueTypes(_credential: ScmCredential, _repo: RepoRef): Promise<ExternalIssueType[]> {
+    throw new ScmProviderError(
+      "gitlab",
+      "GitLab has no configurable issue-type vocabulary; its issue types are a fixed product set, not offered here.",
+    );
   }
 
   /**

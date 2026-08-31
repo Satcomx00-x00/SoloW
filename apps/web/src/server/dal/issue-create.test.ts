@@ -11,7 +11,14 @@ import {
   secret,
 } from "@solow/db";
 import { createTestDb, type TestDb } from "@solow/db/testing";
-import type { EpicSeed, ExternalEpic, ExternalGroup, ExternalIssue, IssueSeed } from "@solow/scm";
+import type {
+  EpicSeed,
+  ExternalEpic,
+  ExternalGroup,
+  ExternalIssue,
+  ExternalIssueType,
+  IssueSeed,
+} from "@solow/scm";
 import { testing } from "@solow/scm";
 import { eq } from "drizzle-orm";
 import { appRouter } from "../routers/index.js";
@@ -22,6 +29,7 @@ import {
   listCreatableGroups,
   listGroupEpics,
 } from "./issue-create.js";
+import { listRepositoryIssueTypes } from "./repository.js";
 import { ctxFor, seedWorkspaceGraph } from "./test-fixtures.js";
 
 /**
@@ -43,6 +51,13 @@ let lastSeed: IssueSeed | null = null;
 let lastEpicSeed: EpicSeed | null = null;
 /** How many times the provider was actually reached — a refusal must not have touched it. */
 let createIssueCalls = 0;
+/** Same, for the type picker: a provider that declares none must not be asked at all. */
+let listIssueTypesCalls = 0;
+
+const STORED_TYPES: ExternalIssueType[] = [
+  { externalId: "1", name: "Bug", description: "Something is broken", color: "red" },
+  { externalId: "2", name: "Feature", description: null, color: null },
+];
 
 const STORED_ISSUE: ExternalIssue = {
   externalId: "ext-9001",
@@ -89,7 +104,10 @@ beforeAll(() => {
     name: "Fixture Creator",
     capabilities: ["issueCreates"],
     fields: [],
-    issueCreates: { epics: true },
+    // Two capabilities in one fixture, deliberately: `epics` and `issueTypes` are declared
+    // independently, and a DAL that gated one on the other would pass every epic test and still
+    // be wrong. No real provider declares both today, which is exactly why the fixture does.
+    issueCreates: { epics: true, issueTypes: true },
     driver: {
       provider: EPICS,
       authenticate: async () => ({ ok: true as const }),
@@ -104,6 +122,10 @@ beforeAll(() => {
       },
       listGroups: async () => GROUPS,
       listEpics: async (_c: unknown, groupRef: string) => [{ ...STORED_EPIC, groupRef }],
+      listIssueTypes: async () => {
+        listIssueTypesCalls += 1;
+        return STORED_TYPES;
+      },
     },
   });
   testing.register({
@@ -120,6 +142,7 @@ beforeAll(() => {
       createEpic: throwing("this provider has no epics"),
       listGroups: throwing("this provider has no groups"),
       listEpics: throwing("this provider has no epics"),
+      listIssueTypes: throwing("this provider has no issue types"),
     },
   });
 });
@@ -139,7 +162,14 @@ async function seedLinkedRepository(
 ): Promise<{ integrationId: string; repositoryId: string }> {
   const [token] = await db
     .insert(secret)
-    .values({ workspaceId, name: "pat", kind: "scm_pat", ciphertext: encryptSecret("t") })
+    // Named for the provider rather than a fixed "pat": secret names are unique per Workspace,
+    // and a test that connects two providers at once would otherwise collide on the seed.
+    .values({
+      workspaceId,
+      name: `pat-${provider}`,
+      kind: "scm_pat",
+      ciphertext: encryptSecret("t"),
+    })
     .returning();
   const [connected] = await db
     .insert(integration)
@@ -172,6 +202,7 @@ beforeEach(async () => {
   lastSeed = null;
   lastEpicSeed = null;
   createIssueCalls = 0;
+  listIssueTypesCalls = 0;
 });
 
 describe("createProviderIssue", () => {
@@ -202,6 +233,37 @@ describe("createProviderIssue", () => {
     });
 
     expect(lastSeed).toEqual({ title: "Gate sticks", labels: [] });
+  });
+
+  it("carries every provider extra through to the seed, whichever provider's it is", async () => {
+    const { repositoryId } = await seedLinkedRepository(acme, EPICS);
+
+    await createProviderIssue(ctxFor(db, acme), {
+      repositoryId,
+      title: "Gate sticks",
+      // Five that only GitLab holds and three that only GitHub does, sent together on purpose:
+      // this layer does not know which provider it is talking to, and must not start.
+      dueDate: "2026-09-30",
+      weight: 3,
+      confidential: true,
+      timeEstimate: "2h",
+      links: [{ issueNumber: 12, type: "blocks" }],
+      issueType: "Bug",
+      parentIssueNumber: 7,
+      providerProjectId: "PVT_board",
+    });
+
+    expect(lastSeed).toEqual({
+      title: "Gate sticks",
+      dueDate: "2026-09-30",
+      weight: 3,
+      confidential: true,
+      timeEstimate: "2h",
+      links: [{ issueNumber: 12, type: "blocks" }],
+      issueType: "Bug",
+      parentIssueNumber: 7,
+      providerProjectId: "PVT_board",
+    });
   });
 
   it("mirrors the created Issue locally, with what the provider stored on it", async () => {
@@ -422,6 +484,61 @@ describe("listCreatableGroups / listGroupEpics", () => {
 });
 
 /**
+ * The type picker behind the compose form's Type control (user request 2026-08-31).
+ *
+ * The property worth holding is the *gate*, not the pass-through: a provider that does not
+ * declare `issueCreates.issueTypes` must never be asked, because a real driver in that position
+ * throws a sentence rather than answering with an empty list (`GitlabProvider.listIssueTypes`),
+ * and propagating that throw would turn a fact the form already knows into a 500.
+ */
+describe("listRepositoryIssueTypes", () => {
+  it("passes the provider's vocabulary through, as the provider named it", async () => {
+    const { repositoryId } = await seedLinkedRepository(acme, EPICS);
+
+    const result = await listRepositoryIssueTypes(ctxFor(db, acme), repositoryId);
+
+    expect(result).toEqual({ ok: true, data: STORED_TYPES });
+  });
+
+  it("never asks a provider whose manifest declares no issue types", async () => {
+    const { repositoryId } = await seedLinkedRepository(acme, NO_EPICS);
+
+    const result = await listRepositoryIssueTypes(ctxFor(db, acme), repositoryId);
+
+    // Empty, and — the part that matters — empty *without* reaching the driver, whose
+    // `listIssueTypes` throws. An implementation that called it first and caught the throw would
+    // pass the assertion above and still be wrong.
+    expect(result).toEqual({ ok: true, data: [] });
+    expect(listIssueTypesCalls).toBe(0);
+  });
+
+  it("distinguishes a provider with no vocabulary from a repository with no types", async () => {
+    // Both answer `[]`, and only one of them asked. The distinction is invisible in the result by
+    // design — the picker draws nothing either way — so it is asserted on the call count instead.
+    const declaring = await seedLinkedRepository(acme, EPICS);
+    await listRepositoryIssueTypes(ctxFor(db, acme), declaring.repositoryId);
+    expect(listIssueTypesCalls).toBe(1);
+  });
+
+  it("returns NOT_LINKED for a local-path Repository — there is no provider to ask", async () => {
+    const result = await listRepositoryIssueTypes(ctxFor(db, acme), localRepositoryId);
+
+    expect(result).toEqual({ ok: false, error: "INTEGRATION_NOT_LINKED" });
+  });
+
+  it("returns NOT_FOUND for a Repository from another Workspace (Principle V)", async () => {
+    const { repositoryId } = await seedLinkedRepository(acme, EPICS);
+    const intruder = await seedWorkspaceGraph(db, "intruder");
+
+    const result = await listRepositoryIssueTypes(ctxFor(db, intruder.workspaceId), repositoryId);
+
+    expect(result).toEqual({ ok: false, error: "NOT_FOUND" });
+    // Refused before the provider was touched, not after it answered.
+    expect(listIssueTypesCalls).toBe(0);
+  });
+});
+
+/**
  * The four procedures the client is written against, called through the router that publishes
  * them — the layer where a renamed procedure or a mis-wired input schema would show up.
  */
@@ -430,7 +547,11 @@ describe("router wiring", () => {
     const ctx: BaseContext = {
       db,
       session: { workspaceId, userId: "user-1" },
-      flagOverrides: { "ff-core-program": true },
+      // Two kill switches, because this describe now spans two of them: the create flow is behind
+      // `ff-core-program` and the repository pickers behind `ff-integrations` (issue #15's
+      // separate switch). A caller enabling only the first would fail the type-picker call on a
+      // FORBIDDEN that says nothing about the wiring under test.
+      flagOverrides: { "ff-core-program": true, "ff-integrations": true },
     };
     return appRouter.createCaller(ctx);
   }
@@ -454,6 +575,19 @@ describe("router wiring", () => {
 
     expect(await api.project.listGroups({ integrationId })).toHaveLength(2);
     expect(await api.project.listEpics({ integrationId, groupRef: "acme" })).toHaveLength(1);
+  });
+
+  it("repository.listIssueTypes, on a provider that has them and one that does not", async () => {
+    const declaring = await seedLinkedRepository(acme, EPICS);
+    const silent = await seedLinkedRepository(acme, NO_EPICS);
+    const api = caller(acme);
+
+    expect(await api.repository.listIssueTypes({ repositoryId: declaring.repositoryId })).toEqual(
+      STORED_TYPES,
+    );
+    // Not a thrown 500 for the provider that declares none — an empty list is the honest answer,
+    // and it is what makes the client's picker hide itself rather than render an error.
+    expect(await api.repository.listIssueTypes({ repositoryId: silent.repositoryId })).toEqual([]);
   });
 
   it("surfaces a provider without epics as a stated refusal rather than a 500", async () => {
