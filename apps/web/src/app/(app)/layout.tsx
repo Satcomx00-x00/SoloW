@@ -3,7 +3,6 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
 import { DashboardShell } from "@/components/shell/dashboard-shell";
-import { createAuth } from "@/server/auth/auth";
 import { resolveSession } from "@/server/auth/session";
 import { getWorkspaceName } from "@/server/dal/workspace";
 import { devOwnerMode } from "@/server/env";
@@ -23,22 +22,21 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   const requestHeaders = await headers();
   const dev = devOwnerMode();
 
+  // Under the dev-owner stand-in there is no account to name, and the shell says so rather than
+  // inventing one — which is what `identity: null` means on both branches.
   const session = dev
-    ? { workspaceId: LOCAL_WORKSPACE_ID, userId: "local-owner" }
+    ? { workspaceId: LOCAL_WORKSPACE_ID, userId: "local-owner", identity: null }
     : await resolveSession(requestHeaders);
   if (!session) redirect("/sign-in");
 
-  // Both resolved here so the shell can name the Workspace and the Owner in its first paint.
-  // Under the dev-owner stand-in there is no account to name, and the shell says so rather
-  // than inventing one.
-  const user = dev ? null : (await createAuth().api.getSession({ headers: requestHeaders }))?.user;
+  // The Owner's name comes back with the session that was just verified, rather than from a
+  // second `getSession` against the same cookie. That call sat here because the shell needs a
+  // name and this function used to return only ids, and it made every authenticated page render
+  // decode the cookie and read the session and user rows twice, in series, before painting.
   const workspaceName = (await getWorkspaceName(createDb(), session.workspaceId)) ?? "Workspace";
 
   return (
-    <DashboardShell
-      identity={user ? { name: user.name, email: user.email } : null}
-      workspaceName={workspaceName}
-    >
+    <DashboardShell identity={session.identity} workspaceName={workspaceName}>
       {children}
     </DashboardShell>
   );

@@ -98,7 +98,13 @@ describe("resolveSession", () => {
     const { cookie, userId } = await signUpOwner();
 
     const resolved = await resolveSession(withCookie(cookie), deps());
-    expect(resolved).toEqual({ userId, workspaceId: (await workspaceForUser(db, userId)) ?? "" });
+    expect(resolved).toEqual({
+      userId,
+      workspaceId: (await workspaceForUser(db, userId)) ?? "",
+      // Carried out of the same verification, so the shell can name the Owner without paying
+      // for a second one.
+      identity: { name: OWNER.name, email: OWNER.email },
+    });
   });
 
   it("returns null with no cookie at all", async () => {

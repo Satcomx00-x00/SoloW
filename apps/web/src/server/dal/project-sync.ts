@@ -50,28 +50,47 @@ export interface AvailableProject {
  *
  * One integration failing does not hide the others: a token that lost its scope, or a host that
  * is down, costs its own projects and nothing else.
+ *
+ * **The integrations are asked concurrently**, and the reason they can be is that they are
+ * strictly independent: each reads its own credential and calls its own host, and nothing here
+ * writes. A Workspace connected to GitHub, GitLab and a self-hosted Gitea used to wait for three
+ * round trips end to end — to three different hosts, one of which might be a slow one on the
+ * other side of a VPN — to render one picker. It now waits for the slowest.
+ *
+ * Not `mapConcurrently` with a window: the fan-out is bounded by how many integrations a
+ * Workspace has (a handful), and each one is a *different host*, so the concurrency limits that
+ * make a window necessary inside a single provider's API do not apply across them.
+ *
+ * The result order is the integration order, because `Promise.all` resolves positionally — a
+ * picker whose rows reshuffled according to which host answered first would be worse than a slow
+ * one.
  */
 export async function listAvailableProjects(ctx: RequestContext): Promise<AvailableProject[]> {
-  const connected = await ctx.db
-    .select({ id: integration.id, provider: integration.provider })
-    .from(integration)
-    .where(eq(integration.workspaceId, ctx.workspaceId));
-
-  const mirrored = await ctx.db
-    .select({ integrationId: project.integrationId, providerProjectId: project.providerProjectId })
-    .from(project)
-    .where(eq(project.workspaceId, ctx.workspaceId));
+  // Two independent reads of the same Workspace: what it is connected to, and what it already
+  // mirrors. Neither feeds the other, so they go together.
+  const [connected, mirrored] = await Promise.all([
+    ctx.db
+      .select({ id: integration.id, provider: integration.provider })
+      .from(integration)
+      .where(eq(integration.workspaceId, ctx.workspaceId)),
+    ctx.db
+      .select({
+        integrationId: project.integrationId,
+        providerProjectId: project.providerProjectId,
+      })
+      .from(project)
+      .where(eq(project.workspaceId, ctx.workspaceId)),
+  ]);
   const already = new Set(mirrored.map((m) => `${m.integrationId}:${m.providerProjectId}`));
 
-  const found: AvailableProject[] = [];
-  for (const row of connected) {
-    const driver = driverWith(row.provider, "projects");
-    if (!driver.ok) continue;
-    const credential = await loadCredential(ctx, row.id);
-    if (!credential.ok) continue;
-    try {
-      for (const p of await driver.data.listProjects(credential.data.credential)) {
-        found.push({
+  const perIntegration = await Promise.all(
+    connected.map(async (row): Promise<AvailableProject[]> => {
+      const driver = driverWith(row.provider, "projects");
+      if (!driver.ok) return [];
+      const credential = await loadCredential(ctx, row.id);
+      if (!credential.ok) return [];
+      try {
+        return (await driver.data.listProjects(credential.data.credential)).map((p) => ({
           integrationId: row.id,
           provider: row.provider,
           externalId: p.externalId,
@@ -79,11 +98,16 @@ export async function listAvailableProjects(ctx: RequestContext): Promise<Availa
           url: p.url,
           ownerLogin: p.ownerLogin ?? null,
           adopted: already.has(`${row.id}:${p.externalId}`),
-        });
+        }));
+      } catch {
+        // Swallowed per integration, exactly as before: this one contributes nothing and the
+        // rest of the picker still fills. `Promise.all` would otherwise reject the whole listing
+        // on the first host that is down.
+        return [];
       }
-    } catch {}
-  }
-  return found;
+    }),
+  );
+  return perIntegration.flat();
 }
 
 /**

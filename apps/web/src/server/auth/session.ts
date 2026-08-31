@@ -14,11 +14,32 @@ import { createAuth, workspaceForUser } from "./auth.js";
 export interface ResolvedSession {
   workspaceId: string;
   userId: string;
+  /**
+   * Who the Owner is, for a surface that has to name them.
+   *
+   * Carried here rather than looked up again because verifying a session is not cheap — a cookie
+   * to decode, a session row, a user row — and the signed-in layout was paying for it twice on
+   * every page render: once through this function for the tenant key, and once more directly
+   * against the auth instance purely to put a name and an email in the header. Two round trips
+   * to the same tables, in series, before anything rendered.
+   *
+   * Null when the session is resolved without an account behind it, which is the dev-owner
+   * stand-in: `userId` is then a fixed string and there is nobody to name. A caller must say so
+   * rather than invent a name, which is why this is nullable and not an empty string.
+   */
+  identity: { name: string; email: string } | null;
 }
 
 export interface SessionDeps {
   db: Db;
-  getSession: (headers: Headers) => Promise<{ user: { id: string } } | null>;
+  /**
+   * The user's own fields are optional because a caller may stub this with only what session
+   * resolution structurally needs — an id. A stub that omits them resolves to a null `identity`,
+   * the same shape the dev-owner path produces.
+   */
+  getSession: (
+    headers: Headers,
+  ) => Promise<{ user: { id: string; name?: string | null; email?: string | null } } | null>;
 }
 
 function defaultDeps(): SessionDeps {
@@ -37,5 +58,12 @@ export async function resolveSession(
   const workspaceId = await workspaceForUser(deps.db, session.user.id);
   if (!workspaceId) return null;
 
-  return { workspaceId, userId: session.user.id };
+  const { id, name, email } = session.user;
+  return {
+    workspaceId,
+    userId: id,
+    // Both or neither: a header showing a name with no address, or an address with no name, is a
+    // half-rendered identity, and the shell already knows how to say "no account behind this".
+    identity: name && email ? { name, email } : null,
+  };
 }
