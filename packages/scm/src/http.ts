@@ -1,17 +1,79 @@
 /**
- * A tiny fetch wrapper shared by every driver. Not a generic HTTP client — just the two things
- * every provider call needs: throw a typed `ScmProviderError` on a non-2xx response (so a
- * caller never has to remember to check `res.ok`), and never let the token leak into the error
- * message.
+ * A tiny fetch wrapper shared by every driver. Not a generic HTTP client — just the things every
+ * provider call needs and none of them should have to remember:
+ *
+ *  - throw a typed `ScmProviderError` on a non-2xx response, so a caller never has to check
+ *    `res.ok`, and never let the token leak into the error message (Principle IV);
+ *  - revalidate rather than re-download, and never issue the same request twice at once — the
+ *    conditional-GET and coalescing contract in `./cache.ts`;
+ *  - read a listing's pages concurrently when the provider says how many there are.
  */
+import { cachedEtag, cachedValue, cacheKey, coalesce, remember } from "./cache.js";
 import { type ScmProvider, ScmProviderError } from "./types.js";
 
-export async function scmFetch(
+/**
+ * A read, and the response metadata a caller sometimes needs as much as the body.
+ *
+ * A plain record rather than the `Headers` object it came from: this value is shared with any
+ * caller that joined the same in-flight request, and joiners are handed a structured clone —
+ * which `Headers`, not being a cloneable type, would throw on.
+ */
+interface ScmResponse {
+  readonly body: unknown;
+  readonly headers: Record<string, string>;
+}
+
+/**
+ * One conditional GET, plus the headers it came back with.
+ *
+ * Separate from `scmFetch` only because paging needs something `scmFetch` deliberately throws
+ * away: providers report how many pages a listing has *in a header*, and reading it is the
+ * difference between walking pages one at a time and asking for all of them at once
+ * (`scmFetchPaged`).
+ *
+ * Everything else here is the caching contract described in `./cache.ts`:
+ *
+ *  - **`If-None-Match`, when we have held a body for this exact URL under this exact token.** A
+ *    `304` returns that body without transferring it again, and on GitHub without spending a
+ *    rate-limit point. The answer is the provider's, not a guess about how long its answer stays
+ *    good — there is no TTL anywhere in this path.
+ *  - **One request per identity at a time.** Two callers reaching for the same URL with the same
+ *    credential in the same moment share the one request rather than issuing two.
+ *
+ * A 304 with nothing held for it is the one case that cannot be honoured: it means the entry was
+ * evicted between sending the tag and reading the reply, and there is no body to return. The
+ * request is simply reissued unconditionally.
+ */
+async function scmFetchWithMeta(
   provider: ScmProvider,
   url: string,
   headers: Record<string, string>,
-): Promise<unknown> {
-  const res = await fetch(url, { headers });
+): Promise<ScmResponse> {
+  const key = cacheKey(provider, url, headers);
+  return coalesce(key, async () => {
+    const etag = cachedEtag(key);
+    const res = await fetch(url, {
+      headers: etag ? { ...headers, "if-none-match": etag } : headers,
+    });
+
+    if (res.status === 304) {
+      const held = cachedValue(key);
+      if (held !== undefined) return { body: held, headers: plainHeaders(res) };
+      // Evicted mid-flight. Ask again without the tag rather than report an empty listing.
+      const fresh = await fetch(url, { headers });
+      return readOk(provider, url, fresh, key);
+    }
+    return readOk(provider, url, res, key);
+  });
+}
+
+/** The success path both branches above share: check the status, parse once, remember once. */
+async function readOk(
+  provider: ScmProvider,
+  url: string,
+  res: Response,
+  key: string,
+): Promise<ScmResponse> {
   if (!res.ok) {
     // The body sometimes carries a useful reason ("Not Found", "401 Unauthorized"); the request
     // headers (which hold the token) never do, because they are never included here.
@@ -21,7 +83,25 @@ export async function scmFetch(
       `${provider} request to ${url} failed: ${res.status} ${body.slice(0, 200)}`,
     );
   }
-  return res.json();
+  // Read as text and parse, rather than `res.json()`, because the byte count is what bounds the
+  // cache — an entry whose size is unknown cannot be evicted against a memory budget.
+  const text = await res.text();
+  const body = text.length === 0 ? undefined : JSON.parse(text);
+  remember(key, res.headers.get("etag"), body, text.length);
+  return { body, headers: plainHeaders(res) };
+}
+
+/** Header names are case-insensitive on `Headers` and lowercased by it; reads below assume that. */
+function plainHeaders(res: Response): Record<string, string> {
+  return Object.fromEntries(res.headers);
+}
+
+export async function scmFetch(
+  provider: ScmProvider,
+  url: string,
+  headers: Record<string, string>,
+): Promise<unknown> {
+  return (await scmFetchWithMeta(provider, url, headers)).body;
 }
 
 /**
@@ -220,6 +300,39 @@ export const ISSUE_PAGE_SIZE = 100;
 export const ISSUE_PAGE_CAP = 50;
 
 /**
+ * How many pages of one listing are read at once.
+ *
+ * Deliberately the same width as the per-issue fan-out in the drivers, and for the same reason:
+ * GitHub's *secondary* rate limit punishes concurrency rather than volume, and losing a
+ * repository's whole sync to it is a far worse trade than a listing that takes another second.
+ */
+const PAGE_FANOUT = 5;
+
+/**
+ * The last page number the provider says this listing has, or null when it did not say.
+ *
+ * Two dialects, because the providers here speak two:
+ *
+ *  - **`Link: <…page=7>; rel="last"`** — GitHub, Gitea, and GitLab's offset pagination all send
+ *    RFC 8288 links, and `rel="last"` names the final page outright.
+ *  - **`x-total-pages`** — GitLab's own count header, present on the same responses.
+ *
+ * Null is not a failure, it is the ordinary answer for a listing whose end the provider will only
+ * reveal by being asked (GitLab omits the count on keyset pagination, and GitHub omits `Link`
+ * entirely when there is exactly one page). The caller walks sequentially then, which is correct
+ * and merely slower — the shape this function optimises away, never the shape it assumes.
+ */
+function lastPage(headers: Record<string, string>): number | null {
+  const total = Number(headers["x-total-pages"]);
+  if (Number.isInteger(total) && total > 0) return total;
+  const link = headers.link;
+  if (!link) return null;
+  const last = /[?&]page=(\d+)[^>]*>\s*;\s*rel="last"/.exec(link);
+  const page = Number(last?.[1]);
+  return Number.isInteger(page) && page > 0 ? page : null;
+}
+
+/**
  * Walk a paged REST listing until it runs out, or until the cap.
  *
  * Written because every driver here fetched exactly one page of 100 and returned it as though it
@@ -227,8 +340,17 @@ export const ISSUE_PAGE_CAP = 50;
  * advanced its watermark past them, so they were never asked for again. A first import of a
  * 1000-issue backlog kept 100 of it, permanently.
  *
- * A short page ends the walk: it is the one signal every one of these APIs gives that there is
- * nothing more, and it costs no extra request to read.
+ * **Pages 2..n are read concurrently when the provider has said what n is.** The first page's
+ * headers carry that number (see `lastPage`), so a ten-page backlog costs two round trips end to
+ * end instead of ten — without speculating: every page fetched is one the provider has already
+ * confirmed exists, so widening the walk spends no request that a sequential walk would not also
+ * have spent. That distinction is the whole design. Guessing ahead and discarding the overshoot
+ * would buy the same latency by burning rate limit, which is the budget this listing is short of
+ * in the first place.
+ *
+ * When the provider does not say, the sequential walk remains, ending on a short page: it is the
+ * one signal every one of these APIs gives that there is nothing more, and it costs no extra
+ * request to read.
  */
 export async function scmFetchPaged<T>(
   provider: ScmProvider,
@@ -237,13 +359,38 @@ export async function scmFetchPaged<T>(
   pageSize: number = ISSUE_PAGE_SIZE,
   pageCap: number = ISSUE_PAGE_CAP,
 ): Promise<T[]> {
-  const all: T[] = [];
-  for (let page = 1; page <= pageCap; page++) {
+  const first = await scmFetchWithMeta(provider, url(1), headers);
+  const head = first.body as T[];
+  if (!Array.isArray(head)) return [];
+  // A short first page is the whole listing, whatever any header claims about page counts.
+  if (head.length < pageSize || pageCap < 2) return head;
+
+  const announced = lastPage(first.headers);
+  if (announced !== null) {
+    const pages = [];
+    for (let page = 2; page <= Math.min(announced, pageCap); page++) pages.push(page);
+    const rest = await mapConcurrently(
+      pages,
+      PAGE_FANOUT,
+      (page) => scmFetch(provider, url(page), headers) as Promise<T[]>,
+    );
+    const all = [...head];
+    for (const rows of rest) {
+      if (!Array.isArray(rows)) break;
+      all.push(...rows);
+      // A page that came back short still ends the listing. The count was read before these
+      // requests were issued, and a backlog can be edited in between — trusting the header over
+      // what the provider just sent would append whatever a shifted page repeated.
+      if (rows.length < pageSize) break;
+    }
+    return all;
+  }
+
+  const all = [...head];
+  for (let page = 2; page <= pageCap; page++) {
     const rows = (await scmFetch(provider, url(page), headers)) as T[];
     if (!Array.isArray(rows)) break;
     all.push(...rows);
-    // A page that came back short is the last one. A full page means "ask again", which is the
-    // only reason this loop exists.
     if (rows.length < pageSize) break;
   }
   return all;
