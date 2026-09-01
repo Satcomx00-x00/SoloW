@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import { AGENT_PROFILE_NAME, EXECUTOR_PROFILE_NAME } from "./fixture.js";
 
 /**
  * The user journeys the E2E suite drives, as one shared vocabulary.
@@ -68,8 +69,8 @@ export async function createTask(
   // flow stays readable without the reader having to know what the preset does.
   await pickOption(page, "Repository", opts.repository);
   await pickOption(page, "Issue", opts.issue);
-  await pickOption(page, "Agent profile", opts.agentProfile ?? "Claude Code (subscription)");
-  await pickOption(page, "Executor", "Local executor");
+  await pickOption(page, "Agent profile", opts.agentProfile ?? AGENT_PROFILE_NAME);
+  await pickOption(page, "Executor", EXECUTOR_PROFILE_NAME);
   if (opts.alsoWorksIn && opts.alsoWorksIn.length > 0) {
     // A second repository is the exception, so the form folds it away — the disclosure has to
     // be opened before the checkboxes exist on screen.

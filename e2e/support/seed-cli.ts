@@ -9,7 +9,8 @@
  * `db:migrate`/`db:seed`); this is the same pattern for the two things a spec needs mid-run:
  *
  *   bun run e2e/support/seed-cli.ts tenants
- *     → creates the two Workspaces this suite runs against, each with its agent catalog.
+ *     → creates the two Workspaces this suite runs against, each with its agent catalog, and
+ *       gives the local one the Agent Profile and Executor every spec drives the Task form with.
  *
  *   bun run e2e/support/seed-cli.ts issue <workspaceId> <title>
  *     → inserts one Issue into an existing Workspace, prints its id.
@@ -37,6 +38,7 @@ import {
   taskRepository,
   workspace,
 } from "@solow/db";
+import { AGENT_PROFILE_NAME, EXECUTOR_PROFILE_NAME } from "./fixture.js";
 
 async function seedIssue(workspaceId: string, repoName: string, title: string): Promise<void> {
   const db = createDb();
@@ -132,6 +134,57 @@ async function seedTask(workspaceId: string, title: string): Promise<void> {
 }
 
 /**
+ * The credential, Agent Profile and Executor a Task cannot be created without.
+ *
+ * These came free until 2026-08-28: the E2E fixture ran `db:seed`, and that two-company fixture
+ * happened to contain an Agent Profile named "Claude Code (subscription)" and an Executor named
+ * "Local executor" — the exact two names `support/flows.ts` picks in the New task form. The
+ * fixture was retired (a fresh install must look unconfigured, because it is), the suite moved to
+ * seeding its own tenants, and nothing replaced those two rows. The form's own guard then did
+ * precisely what it is there for: with no Agent Profile and no Executor in the Workspace it
+ * rendered "Configure a secret, an agent and executor profile, and a repository in Settings
+ * first." instead of the fields, and every spec that creates a Task timed out waiting for a
+ * "Title" box that was never going to exist.
+ *
+ * So they belong here now, with the tenants — test-only rows for a suite that drives the form,
+ * not sample data a real install arrives holding. The names come from `fixture.ts`, which
+ * `flows.ts` reads too, so neither end can drift from the other. Creating them through Settings instead was the alternative, and it is a worse trade —
+ * it would put a second, unrelated journey in front of every Task the suite creates.
+ *
+ * Idempotent by lookup rather than by `onConflictDoNothing`: nothing about a Profile is unique in
+ * the schema, so a conflict target does not exist to hang the clause on.
+ */
+async function seedCoreProfiles(
+  db: ReturnType<typeof createDb>,
+  workspaceId: string,
+): Promise<void> {
+  const profiles = await db.select().from(agentProfile);
+  if (profiles.some((p) => p.workspaceId === workspaceId && p.name === AGENT_PROFILE_NAME)) return;
+
+  const [sec] = await db
+    .insert(secret)
+    .values({
+      workspaceId,
+      name: "e2e-subscription-token",
+      kind: "subscription_token",
+      ciphertext: encryptSecret("e2e-fixture-token"),
+    })
+    .returning();
+  if (!sec) throw new Error("failed to seed the agent profile's secret");
+
+  await db.insert(agentProfile).values({
+    workspaceId,
+    name: AGENT_PROFILE_NAME,
+    agentCatalogId: await ensureDefaultAgentCatalog(db, workspaceId),
+    authMode: "subscription",
+    secretId: sec.id,
+  });
+  await db
+    .insert(executorProfile)
+    .values({ workspaceId, name: EXECUTOR_PROFILE_NAME, kind: "local" });
+}
+
+/**
  * The two Workspaces every spec here assumes.
  *
  * This used to be `db:seed`, back when the product shipped a two-company fixture and the E2E
@@ -148,6 +201,7 @@ async function seedTenants(): Promise<void> {
   // The first one is the product's own bootstrap, at the id dev-owner mode binds to — so the
   // suite exercises the same starting state a real local install has.
   await bootstrapWorkspace(db, { name: "E2E workspace", ownerUserId: "local-owner" });
+  await seedCoreProfiles(db, LOCAL_WORKSPACE);
 
   await db
     .insert(workspace)
