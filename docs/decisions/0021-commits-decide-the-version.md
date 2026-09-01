@@ -71,9 +71,16 @@ Two properties the job needs now that it **commits** where it previously only ta
   dispatched at it. Verified by experiment, not assumed: the same rejected push leaks the tag
   without `--atomic` and does not with it.
 
-The recursion ends by construction rather than by `[skip ci]`: the commit CI pushes is a
-`chore(release)`, and the tag points at that very commit, so the Verify run it triggers finds an
-empty range and cuts nothing. Main's tip stays verified, which `[skip ci]` would have cost.
+The recursion ends on the same GitHub rule the dispatch relies on: **a push made with the built-in
+`GITHUB_TOKEN` does not start a workflow run.** The `chore(release)` commit therefore triggers no
+Verify, and no Verify means no Release. Its `chore` type is a second, independent stop — a run that
+did somehow fire would find only a `chore` since the tag and cut nothing — but the token rule is
+what ends it, and it ends it before anything starts.
+
+The price of that rule is that **the release commit is never verified**, exactly as `[skip ci]`
+would have left it. It differs from the tree Verify passed by one version string, which is why this
+is acceptable; but "main's tip is green" stops being literally true the moment a release lands, and
+anyone reading the branch's checks should know that.
 
 ## Considered options
 
@@ -108,8 +115,10 @@ empty range and cuts nothing. Main's tip stays verified, which `[skip ci]` would
 - Negative: **CI writes to main.** It needs `contents: write` and an unprotected branch, or a rule
   that admits the release bot. That is a real widening of what the workflow can do, mitigated by
   the tip check and the atomic push but not eliminated by them.
-- Negative: every release costs one extra Verify run, on the `chore(release)` commit. Deliberate —
-  the alternative, `[skip ci]`, leaves main's tip unverified.
+- Negative: **the release commit is never verified**, because a `GITHUB_TOKEN` push starts no
+  workflow run. Main's tip after a release is one version string away from a tree that passed, not
+  a tree that passed. Making it green would need a token that is not `GITHUB_TOKEN` — a decision of
+  its own, and a wider grant than this needs.
 - Negative: a squash-merged pull request collapses to one commit, so the *body* of that commit is
   where a `BREAKING CHANGE:` footer has to live. A break declared only in the description of a PR
   that is squashed will not be read.
