@@ -9,6 +9,10 @@ name: Publish
 # packages/cli/package.json disagrees with it, so a tag can never ship a different version than
 # it names.
 #
+# Ordinarily nobody pushes that tag by hand: `release.yml` does it when a merge to main carries a
+# version bump and Verify goes green, then dispatches this workflow at the tag it just created. A
+# hand-pushed tag still works exactly as it always did — that path is the fallback, not the plan.
+#
 # Dry runs are available from the Actions tab (workflow_dispatch) and go all the way through
 # packing without publishing, so the build can be exercised without burning a version number.
 
@@ -27,7 +31,8 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: read
+  # Create the GitHub Release at the end. Read would be enough for the build itself.
+  contents: write
   # Lets npm attach a provenance attestation — a signed, public record tying the published
   # tarball to this workflow run and this commit. Without it `npm publish --provenance` fails.
   id-token: write
@@ -44,6 +49,27 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
+
+      # Whether this run ships, decided once and read by every step that would.
+      #
+      # It is a shell comparison against the *rendered* input rather than the expression
+      # `inputs.dry_run == false`, and the difference is not cosmetic: a boolean input arrives as a
+      # real boolean when a human ticks the box in the Actions tab, but as the string "false" when
+      # the API dispatches it — which is how `release.yml` starts this workflow. GitHub's
+      # expression comparison casts both sides to numbers, "false" becomes NaN, and the test
+      # silently answers "no" — a release that tags, builds, packs, and quietly publishes nothing.
+      # Rendered into shell, both spellings are the same four characters.
+      - name: Decide whether this run publishes
+        id: mode
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "push" ] || [ "$DRY_RUN" = "false" ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -109,7 +135,7 @@ jobs:
       # Versioned on Inngest rather than on SoloW, so this is a no-op on every release that does
       # not move the Inngest version (the script checks npm and skips what is already there).
       - name: Publish the Inngest binaries
-        if: ${{ github.event_name == 'push' || inputs.dry_run == false }}
+        if: steps.mode.outputs.publish == 'true'
         run: bun run packages/cli/scripts/build-inngest-packages.ts --publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -131,12 +157,32 @@ jobs:
         run: make smoke-tarball
 
       - name: Publish
-        if: ${{ github.event_name == 'push' || inputs.dry_run == false }}
+        if: steps.mode.outputs.publish == 'true'
         working-directory: packages/cli
         run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+      # The release the tag has been standing in for. Created last, and only once npm has the
+      # version: a Release is an announcement, and one that outlives a failed publish tells every
+      # reader the opposite of what happened. `--generate-notes` writes them from the commits and
+      # pull requests since the previous tag, which is the same history the tag already implies —
+      # so nothing has to be maintained by hand for it to be right.
+      - name: Create the GitHub Release
+        if: steps.mode.outputs.publish == 'true' && startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # A re-run of this workflow reaches here only if npm accepted the version again, which
+          # it will not — but a Release that already exists is still not a reason to fail the run
+          # that produced the thing it announces.
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "::notice::Release $GITHUB_REF_NAME already exists — leaving it as it is."
+          else
+            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes --verify-tag
+          fi
+
       - name: Dry run complete
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        if: steps.mode.outputs.publish != 'true'
         run: echo "Dry run — built and packed, nothing published."
