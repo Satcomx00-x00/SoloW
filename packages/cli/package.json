@@ -50,6 +50,7 @@
     "build": "bun run scripts/build.ts",
     "build:inngest": "bun run scripts/build-inngest-packages.ts",
     "typecheck": "tsc --noEmit",
+    "test": "bun test",
     "lint": "biome check ."
   },
   "publishConfig": {
