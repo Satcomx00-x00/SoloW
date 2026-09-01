@@ -163,7 +163,7 @@ lucide-react, TanStack Query, Tailwind 4.
 
 | # | Reference capability | SoloW today | Status | Best implementation — and what it unlocks | UI shape & components |
 |---|---|---|---|---|---|
-| 89 | Self-hosted, open source, no telemetry | AGPL-3.0, local-first, no external services required | ✅ | Make it a **test, not a promise**: assert that a default run opens no outbound connection. This property erodes silently, one convenient SDK at a time | None |
+| 89 | Self-hosted, open source, no telemetry | Apache-2.0, local-first, no external services required | ✅ | Make it a **test, not a promise**: assert that a default run opens no outbound connection. This property erodes silently, one convenient SDK at a time | None |
 | 90 | Server-first — reachable from any device | Next.js + orchestrator processes | ✅ | Harden the bind and reverse-proxy story (auth on by default, no localhost-only assumptions, correct `secure` cookies behind TLS) **before** 43 makes remote access the normal case | None |
 | 91 | Installers: Homebrew, Scoop, NPX, NPM | Source checkout + `make` / `bun run dev` only | ❌ | One **launcher that boots web + orchestrator + migrations in a single process** is worth more than three package managers. Until it exists, every non-developer is blocked, and no amount of feature breadth changes that | First-run CLI output printing the URL and the initial owner credentials |
 | 92 | Stable / nightly channels, in-app updates | — | ❌ | Only after 91, and only with 93 as the safety net: version check, changelog fetch, one-command upgrade | Settings → System: an update `existing` Card with current/latest Badges, a changelog `existing` ScrollArea, and an Update Button behind a `existing` AlertDialog |

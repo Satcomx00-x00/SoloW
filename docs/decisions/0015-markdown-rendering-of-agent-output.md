@@ -45,7 +45,9 @@ stay verbatim.
   per block, which the streaming case needs.
 - **`react-markdown` + `remark-gfm` (chosen)** — escapes HTML by default, returns a React tree
   (so settled blocks memoize and only the live tail re-renders), MIT-licensed and compatible
-  with this repository's AGPL-3.0-only, and clean under `bun run audit`.
+  with this repository's licence — AGPL-3.0-only when this was written, Apache-2.0 since
+  [0022](./0022-relicense-to-apache-2.md), and compatible with both — and clean under
+  `bun run audit`.
 
 ## Consequences
 

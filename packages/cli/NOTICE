@@ -1,0 +1,16 @@
+SoloW
+Copyright 2026 Satcomx00-x00
+
+This product includes software developed by Satcomx00-x00.
+
+Licensed under the Apache License, Version 2.0. See the LICENSE file, or
+http://www.apache.org/licenses/LICENSE-2.0, for the terms.
+
+---
+
+`npx @satcomx00-x00/solow` installs one platform-specific optional dependency,
+@satcomx00-x00/solow-inngest-<platform>, which carries the Inngest Dev Server
+binary. That binary is Inngest's own work, redistributed unmodified under the
+Server Side Public License; each of those packages ships upstream's LICENSE.md
+beside it. SoloW invokes it as a separate process and neither links against nor
+modifies it, so its terms apply to that binary alone and not to this product.
