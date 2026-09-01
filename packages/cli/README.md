@@ -103,4 +103,15 @@ Migrations run on every start, so an existing database is brought up to date aut
 
 ## Source and issues
 
-<https://github.com/Satcomx00-x00/SoloW> — AGPL-3.0-only.
+<https://github.com/Satcomx00-x00/SoloW>
+
+## Licence
+
+Apache-2.0. The full text is in `LICENSE`; `NOTICE` carries the copyright and ships with it.
+
+One caveat worth knowing before you build on this. The package declares a platform-specific
+optional dependency, `@satcomx00-x00/solow-inngest-<platform>`, carrying the Inngest Dev Server
+binary. That binary is Inngest's own work, redistributed unmodified under the **Server Side Public
+License**, with upstream's `LICENSE.md` shipped beside it. SoloW starts it as a separate process
+and neither links against nor modifies it, so those terms apply to that binary alone — but "SoloW
+is Apache-2.0" is not the same statement as "everything `npx` installs is Apache-2.0".
