@@ -62,6 +62,43 @@ async function pump(
   if (rest) onText(rest);
 }
 
+/**
+ * How long the pipes get to finish once the command itself has exited.
+ *
+ * Generous by the standard of what it is waiting for — a drain that has anything left to do
+ * finishes in single-digit milliseconds — because the only cost of waiting is a stop that takes
+ * a moment longer, and the cost of cutting it short is a truncated transcript.
+ */
+const DRAIN_GRACE_MS = 2_000;
+
+/**
+ * Wait for the output to drain, but never indefinitely.
+ *
+ * The wait is not optional — the last lines of a short-lived command arrive *after* `exited`
+ * resolves, and answering before them truncates the transcript the answer is about. But it
+ * cannot be unbounded either, and the reason is a process this runner cannot see: a command is
+ * free to fork, and a fork inherits the same stdout and stderr pipes. Kill the command and the
+ * child lives on holding the write end open, so the read end never reaches EOF and a drain that
+ * waits for one waits for the orphan — `stop()` blocking behind a process it has already killed,
+ * for as long as that process happens to live.
+ *
+ * That is not hypothetical: `sh -c 'sleep 30'` reproduces it exactly, because `sh` forks `sleep`
+ * rather than exec'ing it, and the runner's own "a stop is an ended run" test hung on it for
+ * ten seconds at a time until this bound existed.
+ */
+function drained(streams: Promise<unknown>): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, DRAIN_GRACE_MS);
+    // Nothing should stay alive merely because a grace period is still counting down.
+    (timer as { unref?: () => void }).unref?.();
+    const done = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    streams.then(done, done);
+  });
+}
+
 export class CliPassthroughRunner implements AgentRunner {
   constructor(private readonly options: CliPassthroughRunnerOptions) {}
 
@@ -84,8 +121,18 @@ export class CliPassthroughRunner implements AgentRunner {
       stderrTail = `${stderrTail}${text}`.slice(-4_000);
     };
 
-    const emit = (channel: AgentTextChannel, text: string) =>
+    /*
+     * Latched once the outcome is decided. Only the bounded drain below can make it matter: an
+     * orphaned child still holding the pipe can produce output after this run has been answered
+     * for, and a transcript that grows after the run it belongs to has completed describes
+     * something the reviewer is no longer looking at.
+     */
+    let answered = false;
+
+    const emit = (channel: AgentTextChannel, text: string) => {
+      if (answered) return;
       opts.onEvent({ kind: "stdout", channel, text });
+    };
 
     const streams = Promise.all([
       pump(proc.stdout, (text) => emit("assistant", text)),
@@ -98,7 +145,10 @@ export class CliPassthroughRunner implements AgentRunner {
       const code = await proc.exited;
       // Drained before answering: the last lines of a short-lived command arrive after `exited`
       // resolves, and an outcome reported before them would truncate the transcript it is about.
-      await streams.catch(() => undefined);
+      // Bounded, because a forked child can hold those pipes open long after the command is gone
+      // — see `drained`.
+      await drained(streams);
+      answered = true;
 
       if (code === 0) return { kind: "completed" };
       /*
