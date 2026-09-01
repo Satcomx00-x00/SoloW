@@ -39,6 +39,18 @@ export const PORTS = { web: 5050, orchestrator: 5051, ws: 5052 } as const;
 export const SEED_WORKSPACE_A = "11111111-1111-4111-8111-111111111111";
 export const SEED_WORKSPACE_B = "22222222-2222-4222-8222-222222222222";
 
+/**
+ * The Agent Profile and Executor `seed-cli.ts tenants` writes into the local Workspace, and that
+ * `support/flows.ts` picks by name in the New task form.
+ *
+ * One definition for both ends on purpose. They used to be string literals in the specs that
+ * happened to match rows in the retired `db:seed` fixture; when that fixture went, nothing failed
+ * at the seam — the names simply stopped matching anything, and the suite waited out its timeout
+ * against a form the app was correctly refusing to render.
+ */
+export const AGENT_PROFILE_NAME = "Claude Code (subscription)";
+export const EXECUTOR_PROFILE_NAME = "Local executor";
+
 /** Deterministic test-only values — never used by a real deployment. */
 export const E2E_ENV = {
   SOLOW_SQLITE_PATH: PATHS.db,
