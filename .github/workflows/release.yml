@@ -1,0 +1,99 @@
+name: Release
+
+# Cuts a release when a merge to main carries a version bump.
+#
+# The version stays where it already was — `packages/cli/package.json`. This workflow does not
+# invent one: it reads the manifest on the commit that just passed Verify, and if no `v<version>`
+# tag exists yet, that is a bump, so it tags the commit and asks Publish to ship it. A merge that
+# leaves the version alone finds its tag already there and does nothing. Deciding the number
+# therefore stays where it belongs — in the pull request that earns it — while the mechanical part
+# (tag, npm, GitHub Release) stops being something a human has to remember at the right moment.
+#
+# Gated on Verify rather than on the push, so a red main cannot ship. `workflow_run` is what makes
+# that expressible: it fires after Verify finishes and carries its conclusion and its commit.
+#
+# Publish is *dispatched* rather than left to its own `push: tags` trigger, and that is not a
+# stylistic choice — a tag pushed with the built-in GITHUB_TOKEN deliberately does not start a new
+# workflow run, so relying on the tag alone would tag every release and publish none of them.
+# `workflow_dispatch` is one of the two events documented as exempt from that rule. The same rule
+# is why there is no double-publish to guard against: only this dispatch starts Publish.
+
+on:
+  workflow_run:
+    workflows: ["Verify"]
+    types: [completed]
+
+# One release at a time, and never cancel one — a half-finished tag-and-ship is worse than a queue.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+# A `permissions:` block replaces the defaults rather than extending them.
+permissions:
+  # Push the tag.
+  contents: write
+  # Dispatch Publish.
+  actions: write
+
+jobs:
+  tag:
+    name: Tag a bumped version and ship it
+    # Verify runs on pull requests too, and on branches that are not main; a release may come from
+    # exactly one of its runs — the one that went green on a push to main.
+    if: >-
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # The commit Verify actually passed on, not whatever main's tip has become since. They are
+      # usually the same commit; when a second merge has landed in between they are not, and the
+      # tag has to name the tree that was tested.
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Read the version, and decide whether it is new
+        id: decide
+        env:
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./packages/cli/package.json').version")"
+          tag="v${version}"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          # Asked of the remote rather than of a local ref: this is a shallow checkout with no tags
+          # in it, and "did we already ship this" is a question only the remote can answer.
+          if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
+            echo "new=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::${tag} is already tagged — this merge carried no version bump, so there is nothing to release."
+          else
+            echo "new=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::${tag} is new — tagging ${SHA} and dispatching Publish."
+          fi
+
+      - name: Tag the commit
+        if: steps.decide.outputs.new == 'true'
+        env:
+          TAG: ${{ steps.decide.outputs.tag }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Annotated, so the tag carries an author and a date of its own — `git describe` and the
+          # releases list both read better for it, and a lightweight tag on a merge commit says
+          # nothing about when it was cut.
+          git tag -a "$TAG" -m "$TAG" "$SHA"
+          git push origin "$TAG"
+
+      # Dispatched at the tag, so Publish sees `refs/tags/v<version>` exactly as it would from a
+      # hand-pushed tag: its version guard compares the tag against the manifest, and its checkout
+      # takes the tagged tree.
+      - name: Ask Publish to ship it
+        if: steps.decide.outputs.new == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.decide.outputs.tag }}
+        run: gh workflow run publish.yml --ref "$TAG" --field dry_run=false
