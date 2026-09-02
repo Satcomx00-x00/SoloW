@@ -2,6 +2,7 @@ import "server-only";
 import {
   type AgentProbeReport,
   agentProbeReport,
+  REPOSITORY_SYNC_REQUESTED,
   type ReviewDecision,
   type TaskState,
 } from "@solow/contracts";
@@ -48,6 +49,24 @@ export interface OrchestratorClient {
    * must not turn a completed action into an error. The worst case is the old behaviour.
    */
   announceTask(input: { workspaceId: string; taskId: string; state: TaskState }): Promise<void>;
+  /**
+   * Ask the poll to run now, rather than waiting for its next tick.
+   *
+   * The escape hatch that makes the background cadences acceptable. Issues are polled every five
+   * minutes and a repository's label vocabulary only every six hours, which is right for a
+   * mirror nobody is staring at — and wrong for the person who just created a label on GitHub
+   * and came back here to use it. This is how they stop waiting.
+   *
+   * Deliberately the *same* pass the cron runs, forced: a second code path for "refresh now"
+   * would be a second answer to what a refresh means, and the two would drift the first time
+   * either gained a step. It is also durable for the same reason the cron is — the request
+   * survives an orchestrator restart mid-pass.
+   *
+   * Fire and forget: it answers when the engine has accepted the request, not when the provider
+   * has been read. What tells the screen the pass landed is the mirror announcement on the
+   * WebSocket, exactly as it does for a pass nobody asked for.
+   */
+  requestMirrorSync(input: { workspaceId: string }): Promise<void>;
   /**
    * Ask the orchestrator whether an Agent Profile actually works, before a Task depends on it.
    *
@@ -105,6 +124,13 @@ export const orchestrator: OrchestratorClient = {
       return;
     }
     throw new Error(`${UNWIRED}: review resume unavailable`);
+  },
+
+  async requestMirrorSync(input) {
+    if (orchestratorUrl()) return emit(REPOSITORY_SYNC_REQUESTED, input);
+    // Silent in dev without an orchestrator, like `announceTask`: there is no poll to hurry, and
+    // the button that calls this has already done the part that does not need one.
+    return;
   },
 
   async announceTask(input) {

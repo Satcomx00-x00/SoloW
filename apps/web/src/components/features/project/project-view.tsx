@@ -56,6 +56,7 @@ import {
 import { ProjectViewTabs } from "@/components/features/project/project-view-tabs";
 import { useRowRefresh } from "@/components/features/project/row-refresh";
 import { summariseRowTasks, tasksByIssue } from "@/components/features/project/row-tasks";
+import { useMirrorRefresh } from "@/components/hooks/use-mirror-refresh";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -256,6 +257,15 @@ export function ProjectView({ projectId }: { projectId: string }) {
    * property of the repositories, not of any issue, and it changes far less often than the rows.
    */
   const labelVocabulary = trpc.issue.labelColors.useQuery({});
+  /*
+   * No polling on this screen, and no stale table either.
+   *
+   * Every query above reads the local mirror and is served from cache between navigations. The
+   * background poll is what keeps that mirror current, and this is how the screen hears about it
+   * — one frame on the Workspace channel when a pass actually wrote something, rather than a
+   * timer that asks whether it did.
+   */
+  useMirrorRefresh();
   const labelColours = useMemo(
     () => Object.fromEntries((labelVocabulary.data ?? []).map((l) => [l.name, l.color])),
     [labelVocabulary.data],

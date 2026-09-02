@@ -4,6 +4,7 @@ import {
   CommonErrorCode,
   type TaskDependencyDto,
   type TaskDto,
+  type TaskEvent,
   type TaskState,
 } from "@solow/contracts";
 import { unsatisfiedDependencies } from "@solow/core";
@@ -187,10 +188,20 @@ export function Board({
   // Workspace channel, so a run that advances in the background lands here without a poll.
   // Dependencies ride the same event — the announcement that moves a predecessor into Done is
   // exactly the announcement that unblocks whatever was waiting on it (AC-4).
-  const onStatus = useCallback(() => {
-    utils.task.list.invalidate();
-    utils.task.dependencies.invalidate();
-  }, [utils]);
+  const onStatus = useCallback(
+    (event: TaskEvent) => {
+      // The poll's own announcement rides this channel too, and it is about the mirror, not
+      // about a run. Re-reading the board's Tasks because a provider label changed colour would
+      // be work nothing on this screen asked for.
+      if (event.kind === "mirror") {
+        if (event.scope === "issues") utils.issue.list.invalidate();
+        return;
+      }
+      utils.task.list.invalidate();
+      utils.task.dependencies.invalidate();
+    },
+    [utils],
+  );
   useWorkspaceEvents(onStatus);
 
   // Both queries, not just the Tasks: readiness is derived from the edges, so a board drawn

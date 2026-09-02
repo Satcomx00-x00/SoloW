@@ -1,10 +1,18 @@
 /// <reference types="bun-types" />
 import { beforeAll, beforeEach, describe, expect, it } from "bun:test";
-import { agentCatalog, executorProfile, repository, secret, workspace } from "@solow/db";
+import {
+  agentCatalog,
+  encryptSecret,
+  executorProfile,
+  integration,
+  repository,
+  secret,
+  workspace,
+} from "@solow/db";
 import { createTestDb, type TestDb } from "@solow/db/testing";
 import { eq } from "drizzle-orm";
 import { ctxFor, seedWorkspaceGraph } from "./test-fixtures.js";
-import { getWorkspace, getWorkspaceSetup, renameWorkspace } from "./workspace.js";
+import { getSyncStatus, getWorkspace, getWorkspaceSetup, renameWorkspace } from "./workspace.js";
 
 /**
  * The Workspace, as something an Owner can read and act on (2026-08-28).
@@ -213,5 +221,129 @@ describe("getWorkspaceSetup", () => {
 
     expect(step(data, "secret")?.done).toBe(false);
     expect(step(data, "agents")?.done).toBe(false);
+  });
+});
+
+describe("getSyncStatus reports the repository that is furthest behind", () => {
+  /** A real Integration to hang repositories off — the FK is what makes one "linked". */
+  async function integrationFor(workspaceId: string): Promise<string> {
+    const [token] = await db
+      .insert(secret)
+      .values({
+        workspaceId,
+        name: "pat",
+        kind: "scm_pat",
+        ciphertext: encryptSecret("glpat-fixture"),
+      })
+      .returning();
+    const [row] = await db
+      .insert(integration)
+      .values({ workspaceId, provider: "github", secretId: token?.id ?? "" })
+      .returning();
+    if (!row) throw new Error("failed to insert integration");
+    return row.id;
+  }
+
+  /** A linked repository — the only kind a poll has anything to do for. */
+  async function linked(
+    workspaceId: string,
+    integrationId: string,
+    over: {
+      issuesSyncedAt?: string | null;
+      syncStaleSince?: string;
+      syncStaleReason?: string;
+    } = {},
+  ) {
+    await db.insert(repository).values({
+      workspaceId,
+      name: `repo-${Math.random().toString(36).slice(2, 8)}`,
+      source: "remote_url",
+      location: "https://example.test/acme/gate.git",
+      integrationId,
+      externalFullName: "acme/gate",
+      ...over,
+    });
+  }
+
+  it("answers zero repositories for a Workspace with nothing linked", async () => {
+    const wsId = await bareWorkspace();
+
+    const result = await getSyncStatus(ctxFor(db, wsId));
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data).toEqual({
+      repositories: 0,
+      syncedAt: null,
+      stale: 0,
+      staleReason: null,
+    });
+  });
+
+  it("reports the oldest watermark, not the newest", async () => {
+    const wsId = await bareWorkspace();
+    const int = await integrationFor(wsId);
+    await linked(wsId, int, { issuesSyncedAt: "2026-09-01T12:00:00.000Z" });
+    await linked(wsId, int, { issuesSyncedAt: "2026-09-01T09:00:00.000Z" });
+
+    const result = await getSyncStatus(ctxFor(db, wsId));
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // "Synced just now" beside a repository three hours behind is a bar that lies in exactly the
+    // situation it exists for.
+    expect(result.data.syncedAt).toBe("2026-09-01T09:00:00.000Z");
+  });
+
+  it("answers unknown when any repository has never been read", async () => {
+    const wsId = await bareWorkspace();
+    const int = await integrationFor(wsId);
+    await linked(wsId, int, { issuesSyncedAt: "2026-09-01T12:00:00.000Z" });
+    await linked(wsId, int, { issuesSyncedAt: null });
+
+    const result = await getSyncStatus(ctxFor(db, wsId));
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // An age alongside rows that do not exist yet would be a claim about nothing.
+    expect(result.data.syncedAt).toBeNull();
+    expect(result.data.repositories).toBe(2);
+  });
+
+  it("counts the repositories that backed off, and says why one of them did", async () => {
+    const wsId = await bareWorkspace();
+    const int = await integrationFor(wsId);
+    await linked(wsId, int, { issuesSyncedAt: "2026-09-01T12:00:00.000Z" });
+    await linked(wsId, int, {
+      issuesSyncedAt: "2026-09-01T11:00:00.000Z",
+      syncStaleSince: "2026-09-01T11:05:00.000Z",
+      syncStaleReason: "the provider is rate limiting this connection",
+    });
+
+    const result = await getSyncStatus(ctxFor(db, wsId));
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.stale).toBe(1);
+    expect(result.data.staleReason).toContain("rate limiting");
+  });
+
+  it("never counts another Workspace's repositories", async () => {
+    const mine = await bareWorkspace("Mine");
+    const theirs = await bareWorkspace("Theirs");
+    await linked(mine, await integrationFor(mine), {
+      issuesSyncedAt: "2026-09-01T12:00:00.000Z",
+    });
+    await linked(theirs, await integrationFor(theirs), {
+      syncStaleSince: "2026-09-01T11:00:00.000Z",
+      syncStaleReason: "boom",
+    });
+
+    const result = await getSyncStatus(ctxFor(db, mine));
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.repositories).toBe(1);
+    expect(result.data.stale).toBe(0);
   });
 });

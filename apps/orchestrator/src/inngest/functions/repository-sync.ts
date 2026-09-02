@@ -1,7 +1,10 @@
+import { REPOSITORY_SYNC_REQUESTED } from "@solow/contracts";
 import { createDb } from "@solow/db";
 import { createLogger } from "@solow/observability";
+import { MirrorChanges } from "../../sync/announce.js";
 import { linkedRepositories, syncRepositoryIssues } from "../../sync/issues.js";
 import { syncRepositoryLabels } from "../../sync/labels.js";
+import { hub } from "../../ws/hub.js";
 import { inngest } from "../client.js";
 
 /**
@@ -38,9 +41,20 @@ export const repositorySync = inngest.createFunction(
   {
     id: "repository-sync",
     retries: 1,
-    triggers: [{ cron: REPOSITORY_SYNC_CRON }],
+    /**
+     * Two ways in, one pass.
+     *
+     * The manual refresh is the same function as the cron rather than a second implementation of
+     * it, because "refresh" and "the scheduled poll" mean the same thing and two code paths for
+     * one meaning drift the first time either gains a step. All the event changes is `force`,
+     * which is exactly the difference the person pressing the button intends: read it now, even
+     * though we read it recently.
+     */
+    triggers: [{ cron: REPOSITORY_SYNC_CRON }, { event: REPOSITORY_SYNC_REQUESTED }],
   },
-  async ({ step }) => {
+  async ({ step, event }) => {
+    // A cron tick carries the scheduled event's own name; anything else here is a person asking.
+    const forced = event?.name === REPOSITORY_SYNC_REQUESTED;
     const db = createDb();
     const log = createLogger({ service: "orchestrator" });
 
@@ -49,6 +63,9 @@ export const repositorySync = inngest.createFunction(
     let updated = 0;
     let stale = 0;
     let labelled = 0;
+    // What this pass actually changed, so open tabs can be told — and only if there is something
+    // to tell them. See `sync/announce.ts`.
+    const changes = new MirrorChanges();
 
     for (const row of repositories) {
       // Its own step: a rate limit on one connection must not cost the others their pass, and a
@@ -57,6 +74,7 @@ export const repositorySync = inngest.createFunction(
       imported += result.imported;
       updated += result.updated;
       if (result.staleReason) stale += 1;
+      if (result.imported > 0 || result.updated > 0) changes.issuesChanged(row.workspaceId);
 
       /*
        * The label vocabulary, on its own much slower clock.
@@ -67,16 +85,41 @@ export const repositorySync = inngest.createFunction(
        * majority) where it is not. Reading it here rather than on a cron of its own means it
        * inherits this loop's ordering and its per-repository isolation for free.
        */
-      const labels = await step.run(`labels-${row.id}`, () => syncRepositoryLabels(db, row));
+      const labels = await step.run(`labels-${row.id}`, () =>
+        syncRepositoryLabels(db, row, { force: forced }),
+      );
       if (!labels.skipped && !labels.failedReason) labelled += 1;
+      // Only a vocabulary that actually moved is worth telling anyone about. A six-hourly
+      // re-read that came back identical is the common case, and announcing it would make every
+      // open tab re-query for rows that did not change.
+      if (labels.changed) changes.labelsChanged(row.workspaceId);
     }
+
+    /*
+     * Announced outside every `step.run`, on purpose.
+     *
+     * A step's result is memoized and replayed; a WebSocket frame is not a result, it is a side
+     * effect on a connection that exists only in this process right now. Publishing inside a step
+     * would send nothing on a replay that skipped it, which is the run where a client most needs
+     * telling. Out here it is sent once per attempt, and a duplicate nudge costs a client one
+     * invalidation of data it was about to be told to re-read anyway.
+     */
+    const announced = changes.announce(hub);
 
     if (imported > 0 || updated > 0 || stale > 0 || labelled > 0) {
       log.info(
-        { imported, updated, stale, labelled, repositories: repositories.length },
+        {
+          imported,
+          updated,
+          stale,
+          labelled,
+          announced,
+          forced,
+          repositories: repositories.length,
+        },
         "repository sync pass complete",
       );
     }
-    return { repositories: repositories.length, imported, updated, stale, labelled };
+    return { repositories: repositories.length, imported, updated, stale, labelled, announced };
   },
 );

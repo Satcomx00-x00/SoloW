@@ -42,12 +42,10 @@ function Counter({ name }: { name: string }) {
 }
 
 const ticket = { "stream.ticket": () => ({ url: "ws://hub.test/stream?ticket=t" }) };
-const frame = (taskId = "t1"): unknown => ({
-  kind: "status",
-  taskId,
-  state: "review",
-  at: "2026-09-01T12:00:00.000Z",
-});
+const frame = (kind: string): unknown =>
+  kind === "mirror"
+    ? { kind: "mirror", scope: "issues", at: "2026-09-01T12:00:00.000Z" }
+    : { kind: "status", taskId: "t1", state: "review", at: "2026-09-01T12:00:00.000Z" };
 
 describe("WorkspaceEventsProvider", () => {
   it("opens exactly one socket however many surfaces are listening", async () => {
@@ -78,8 +76,8 @@ describe("WorkspaceEventsProvider", () => {
     await waitFor(() => expect(sockets.length).toBe(1));
 
     act(() => {
-      sockets[0]?.emit(frame("t1"));
-      sockets[0]?.emit(frame("t2"));
+      sockets[0]?.emit(frame("mirror"));
+      sockets[0]?.emit(frame("status"));
     });
 
     await waitFor(() => expect(screen.getByTestId("a").textContent).toBe("2"));
@@ -106,7 +104,7 @@ describe("WorkspaceEventsProvider", () => {
       await waitFor(() => expect(sockets.length).toBe(1));
 
       act(() => {
-        sockets[0]?.emit(frame());
+        sockets[0]?.emit(frame("status"));
       });
 
       // These are unrelated features that happen to share a connection. One bad handler taking
@@ -140,7 +138,7 @@ describe("WorkspaceEventsProvider", () => {
     expect(screen.queryByTestId("b")).toBeNull();
 
     act(() => {
-      sockets[0]?.emit(frame());
+      sockets[0]?.emit(frame("status"));
     });
 
     await waitFor(() => expect(screen.getByTestId("a").textContent).toBe("1"));
