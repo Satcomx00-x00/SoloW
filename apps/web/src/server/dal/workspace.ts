@@ -6,6 +6,8 @@ import {
   type RenameWorkspaceInput,
   type Result,
   type SetupStepDto,
+  type SyncRequestDto,
+  type SyncStatusDto,
   type WorkspaceDto,
   type WorkspaceSetupDto,
 } from "@solow/contracts";
@@ -20,7 +22,8 @@ import {
   secret,
   workspace,
 } from "@solow/db";
-import { count, eq } from "drizzle-orm";
+import { and, count, eq, isNotNull } from "drizzle-orm";
+import { orchestrator } from "../orchestrator-client.js";
 import type { RequestContext } from "./context.js";
 
 /**
@@ -65,6 +68,96 @@ export async function getWorkspaceName(db: Db, workspaceId: string): Promise<str
     .where(eq(workspace.id, workspaceId))
     .limit(1);
   return row?.name ?? null;
+}
+
+/**
+ * How current the mirror is — one read, no network, for the status bar.
+ *
+ * Every field is the *pessimistic* aggregate, and that is the whole design. A bar that averaged
+ * its repositories, or took the newest watermark, would read "synced just now" while one
+ * connection had been rate limited since yesterday — which is precisely the situation the bar
+ * exists to make visible. So the age shown is the age of the repository that is furthest behind,
+ * and a repository that has never been read makes the answer null rather than optimistic.
+ */
+export async function getSyncStatus(ctx: RequestContext): Promise<Result<SyncStatusDto>> {
+  const rows = await ctx.db
+    .select({
+      issuesSyncedAt: repository.issuesSyncedAt,
+      syncStaleSince: repository.syncStaleSince,
+      syncStaleReason: repository.syncStaleReason,
+    })
+    .from(repository)
+    .where(and(eq(repository.workspaceId, ctx.workspaceId), isNotNull(repository.integrationId)));
+
+  let oldest: string | null = null;
+  let neverRead = false;
+  let stale = 0;
+  let staleReason: string | null = null;
+  for (const row of rows) {
+    if (!row.issuesSyncedAt) neverRead = true;
+    else if (oldest === null || row.issuesSyncedAt < oldest) oldest = row.issuesSyncedAt;
+    if (row.syncStaleSince) {
+      stale += 1;
+      staleReason ??= row.syncStaleReason;
+    }
+  }
+
+  return ok({
+    repositories: rows.length,
+    // One repository that has never been read makes the whole answer unknown. "Synced 2 minutes
+    // ago" alongside a repository nobody has ever read is a claim about rows that do not exist.
+    syncedAt: neverRead ? null : oldest,
+    stale,
+    staleReason,
+  });
+}
+
+/**
+ * Run the poll now, across everything this Workspace has linked.
+ *
+ * The global counterpart to the project-scoped refresh, and deliberately the *same* durable pass
+ * the five-minute cron runs rather than a second implementation of it — see
+ * `requestMirrorSync` in the orchestrator client for why "refresh" must mean one thing.
+ *
+ * Returns on the handoff, not on the read: a button that blocked until every repository had
+ * answered would hold a request open for as long as the slowest provider takes, and the screen
+ * would learn nothing it is not about to be told anyway. The mirror announcement on the
+ * WebSocket is what says the pass landed.
+ */
+/**
+ * The slice of the orchestrator client this needs, injected so a test can assert the handoff.
+ *
+ * Injected rather than mocked at the module level, and the difference is not stylistic: Bun's
+ * `mock.module` replaces a module for the whole test *process*, so a stub installed here would
+ * have followed every other suite in the run — which it did, taking nineteen unrelated tests
+ * with it before this became a parameter. Every other collaborator in this codebase is passed
+ * in for the same reason.
+ */
+export interface MirrorSyncRequester {
+  isWired(): boolean;
+  requestMirrorSync(input: { workspaceId: string }): Promise<void>;
+}
+
+export async function requestWorkspaceSync(
+  ctx: RequestContext,
+  client: MirrorSyncRequester = orchestrator,
+): Promise<Result<SyncRequestDto>> {
+  const [linked] = await ctx.db
+    .select({ value: count() })
+    .from(repository)
+    .where(and(eq(repository.workspaceId, ctx.workspaceId), isNotNull(repository.integrationId)));
+  const repositories = linked?.value ?? 0;
+
+  if (!client.isWired()) return ok({ accepted: false, repositories });
+  try {
+    await client.requestMirrorSync({ workspaceId: ctx.workspaceId });
+  } catch {
+    // The engine is unreachable. Answered rather than thrown, because the caller is a status bar
+    // button and "we could not ask" is a state it can show — where a red toast reading
+    // "Internal error" would send someone looking for a fault in their provider.
+    return ok({ accepted: false, repositories });
+  }
+  return ok({ accepted: true, repositories });
 }
 
 /** The Workspace itself, for the header control and the Settings section. */

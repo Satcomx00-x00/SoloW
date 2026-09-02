@@ -19,6 +19,7 @@ import {
 } from "@solow/db";
 import type { ExternalProjectItem, ScmCredential } from "@solow/scm";
 import { and, eq, inArray, sql } from "drizzle-orm";
+import { orchestrator } from "../orchestrator-client.js";
 import type { RequestContext } from "./context.js";
 import { driverWith, importIssues, loadCredential } from "./integration.js";
 import { getProject, replaceProjectFields, setProjectSyncCursor } from "./project.js";
@@ -639,6 +640,24 @@ export async function refreshProject(
     page.nextCursor,
     page.nextCursor ? undefined : new Date().toISOString(),
   );
+
+  /*
+   * The rest of the mirror, hurried along.
+   *
+   * This function reads the *board* — its fields, its items, their values. The Issues those rows
+   * project, and the label vocabulary that colours them, are mirrored by the orchestrator's poll
+   * on its own cadence, and someone who presses refresh means all of it, not the third of it
+   * that happens to live behind this call.
+   *
+   * Handed to the durable engine rather than done here for the reason every provider read that
+   * is not answering a person is: this returns as soon as the request is accepted, so pressing
+   * refresh does not block on ten repositories, and the screen learns the pass landed from the
+   * mirror announcement on the WebSocket like any other pass.
+   *
+   * Never fatal. The board refresh above has already succeeded and is what the caller asked for;
+   * an orchestrator that is down costs the extra freshness, not the action.
+   */
+  void orchestrator.requestMirrorSync({ workspaceId: ctx.workspaceId }).catch(() => {});
 
   return ok({
     items: written,

@@ -152,6 +152,29 @@ export const taskEventSchema = z.discriminatedUnion("kind", [
     values: z.array(z.string()),
     text: z.string().nullable(),
   }),
+  /**
+   * The mirror moved: a poll brought in provider data that a screen may be showing.
+   *
+   * The one frame here that is not about a Task, and it is on this channel for a reason. A
+   * screen reading mirrored rows has two ways to notice that a background poll changed them:
+   * ask again on a timer, or be told. Asking on a timer is the thing this whole design is trying
+   * to avoid — it is a request per open tab per interval whether or not anything happened, it is
+   * still stale for up to one interval, and shortening the interval to hide that multiplies the
+   * cost of finding out that nothing changed.
+   *
+   * Being told costs one frame on a socket that is already open for the board, and only when
+   * something actually changed. A tab left open sees the provider's new issues within a second
+   * of the poll writing them, and issues no requests at all in between.
+   *
+   * `scope` is what a client invalidates, not what changed in detail: the frame is a nudge to
+   * re-read, never the data itself. Sending the rows here would make the socket a second way to
+   * learn what the API already answers, and the two would disagree the first time one changed.
+   */
+  z.object({
+    kind: z.literal("mirror"),
+    scope: z.enum(["issues", "labels"]),
+    at: z.string().datetime(),
+  }),
 ]);
 export type TaskEvent = z.infer<typeof taskEventSchema>;
 

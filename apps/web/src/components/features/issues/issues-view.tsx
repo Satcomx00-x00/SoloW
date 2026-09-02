@@ -8,6 +8,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { IssueLabel } from "@/components/features/project/issue-label";
+import { useMirrorRefresh } from "@/components/hooks/use-mirror-refresh";
 import { useProviderNames } from "@/components/hooks/use-provider-names";
 import { Button } from "@/components/ui/button";
 import {
@@ -375,6 +376,9 @@ export function IssuesView({
    * label systems rather than one seen twice.
    */
   const labelVocabulary = trpc.issue.labelColors.useQuery({});
+  // Told rather than asking: the poll announces a mirror write, and this list re-reads then and
+  // only then. See `use-mirror-refresh.ts`.
+  useMirrorRefresh();
   const labelColours = useMemo(
     () => Object.fromEntries((labelVocabulary.data ?? []).map((l) => [l.name, l.color])),
     [labelVocabulary.data],

@@ -1,6 +1,18 @@
 import "server-only";
-import { renameWorkspaceInput, workspaceDto, workspaceSetupDto } from "@solow/contracts";
-import { getWorkspace, getWorkspaceSetup, renameWorkspace } from "../dal/workspace.js";
+import {
+  renameWorkspaceInput,
+  syncRequestDto,
+  syncStatusDto,
+  workspaceDto,
+  workspaceSetupDto,
+} from "@solow/contracts";
+import {
+  getSyncStatus,
+  getWorkspace,
+  getWorkspaceSetup,
+  renameWorkspace,
+  requestWorkspaceSync,
+} from "../dal/workspace.js";
 import { router, sessionProcedure, unwrap } from "../trpc.js";
 
 /**
@@ -60,4 +72,44 @@ export const workspaceRouter = router({
     .input(workspaceDto.pick({}).optional())
     .output(workspaceSetupDto)
     .query(async ({ ctx }) => unwrap(await getWorkspaceSetup(ctx.rctx))),
+
+  /**
+   * How current the mirror is. A local read — no provider is contacted to answer it, which is
+   * what lets a status bar ask for it without becoming the thing that costs the rate limit.
+   */
+  syncStatus: sessionProcedure
+    .meta({
+      openapi: {
+        method: "GET",
+        path: "/workspace.syncStatus",
+        tags: ["workspace"],
+        protect: true,
+        summary:
+          "How current this Workspace's mirror is: how many Repositories are linked, the oldest watermark among them, and how many are behind. Derived from the stored rows — no provider is contacted.",
+      },
+    })
+    .input(workspaceDto.pick({}).optional())
+    .output(syncStatusDto)
+    .query(async ({ ctx }) => unwrap(await getSyncStatus(ctx.rctx))),
+
+  /**
+   * Sync everything now: the same durable pass the five-minute cron runs, forced.
+   *
+   * A mutation because it changes the world outside this process, and it answers on the handoff
+   * rather than on the read — see `requestWorkspaceSync`.
+   */
+  syncNow: sessionProcedure
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/workspace.syncNow",
+        tags: ["workspace"],
+        protect: true,
+        summary:
+          "Ask the poll to run now across every linked Repository, ignoring its watermarks. Answers as soon as the durable engine has accepted the request, not when the providers have been read; `accepted: false` means there was no engine to hand it to.",
+      },
+    })
+    .input(workspaceDto.pick({}).optional())
+    .output(syncRequestDto)
+    .mutation(async ({ ctx }) => unwrap(await requestWorkspaceSync(ctx.rctx))),
 });
