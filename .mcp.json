@@ -4,6 +4,10 @@
       "command": "npx",
       "args": ["-y", "chrome-devtools-mcp@latest", "--browser-url=http://192.168.1.85:9222"]
     },
+    "chrome-devtools-local": {
+      "command": "npx",
+      "args": ["-y", "chrome-devtools-mcp@latest", "--browser-url=http://127.0.0.1:9222"]
+    },
     "mermaid": {
       "command": "npx",
       "args": ["-y", "mcp-mermaid"]
