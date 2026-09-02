@@ -371,6 +371,14 @@ export const repository = sqliteTable(
      */
     issuesSyncedAt: text("issues_synced_at"),
     /**
+     * When this repository's label vocabulary was last mirrored (see `repositoryLabel`).
+     *
+     * Separate from `issuesSyncedAt` because it moves on a different clock: issues change every
+     * few minutes, a repository's set of labels changes a few times a year. Null means never
+     * read, which the next poll treats as due.
+     */
+    labelsSyncedAt: text("labels_synced_at"),
+    /**
      * When this repository's data stopped being current, and why.
      *
      * Set when a poll backs off — a rate limit, an unreachable host — and cleared by the next
@@ -418,6 +426,51 @@ export const repositoryBranch = sqliteTable(
   (t) => ({
     byRepo: index("repository_branch_repo").on(t.repositoryId),
     byName: uniqueIndex("repository_branch_repo_name").on(t.repositoryId, t.name),
+  }),
+);
+
+/**
+ * A Repository's label vocabulary, mirrored from its provider.
+ *
+ * This table exists because reading it live was the single slowest thing the app did. The
+ * project table colours its label chips from the provider's own palette, and the read behind
+ * that — `listIssueLabelColors` — walked every linked repository and called the provider for
+ * each one, in sequence, on every render of the screen. On a ten-repository workspace that was
+ * 2.3 seconds and ten GitHub requests *per page view*, and because the SPA batches its queries
+ * into one HTTP call, the seven fast queries beside it waited for all of it.
+ *
+ * So labels join the branches, issues and change requests already mirrored here: the poll writes
+ * them, the screen reads SQLite, and the provider is not on the path of anything a person is
+ * waiting for. A label whose colour changed is wrong for one refresh interval, which is the same
+ * contract every other mirrored column on this repository already has.
+ *
+ * Keyed by `(repository, name)` rather than by the provider's label id: a label is renamed far
+ * more often than it is recreated, GitLab and GitHub disagree about whether that id is even
+ * stable, and the name is what an issue's `labels` column stores — so the name is the join that
+ * has to be unique for a colour lookup to work at all.
+ */
+export const repositoryLabel = sqliteTable(
+  "repository_label",
+  {
+    id: id(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspace.id),
+    repositoryId: text("repository_id")
+      .notNull()
+      .references(() => repository.id),
+    name: text("name").notNull(),
+    /** Null where the provider reports no colour, which is a fact and not a missing read. */
+    color: text("color"),
+    syncedAt: text("synced_at").notNull().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ','now'))`),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => ({
+    byRepo: index("repository_label_repo").on(t.repositoryId),
+    // The lookup the table screen actually makes: every label in one Workspace, in one query.
+    byWs: index("repository_label_ws").on(t.workspaceId),
+    byName: uniqueIndex("repository_label_repo_name").on(t.repositoryId, t.name),
   }),
 );
 
@@ -1360,6 +1413,7 @@ export const schema = {
   executorProfile,
   repository,
   repositoryBranch,
+  repositoryLabel,
   changeRequest,
   task,
   taskRepository,

@@ -49,6 +49,8 @@ export interface SyncableRepository {
   integrationId: string | null;
   externalFullName: string | null;
   issuesSyncedAt: string | null;
+  /** The label mirror's own watermark, on its own much slower clock — see `sync/labels.ts`. */
+  labelsSyncedAt: string | null;
 }
 
 /**
@@ -259,6 +261,7 @@ export async function linkedRepositories(db: Db): Promise<SyncableRepository[]> 
       integrationId: repository.integrationId,
       externalFullName: repository.externalFullName,
       issuesSyncedAt: repository.issuesSyncedAt,
+      labelsSyncedAt: repository.labelsSyncedAt,
     })
     .from(repository)
     .where(isNotNull(repository.integrationId));

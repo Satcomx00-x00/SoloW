@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it } from "bun:test";
 import { CommonErrorCode, IssueErrorCode, type TaskState } from "@solow/contracts";
 import {
   issue as issueTable,
+  repository,
+  repositoryLabel,
   session,
   taskDependency,
   task as taskTable,
@@ -16,6 +18,7 @@ import {
   deleteIssue,
   getIssueById,
   issueDeletionImpact,
+  listIssueLabelColors,
   listIssueLabels,
   listIssues,
   runningTasksForIssue,
@@ -937,5 +940,97 @@ describe("issue DAL — paging", () => {
 
     expect(page.ok && page.data.items).toHaveLength(10);
     expect(page.ok && page.data.items.every((i) => i.status === "open")).toBe(true);
+  });
+});
+
+describe("listIssueLabelColors reads the mirror, never the provider", () => {
+  let db: TestDb;
+
+  beforeEach(() => {
+    db = createTestDb();
+  });
+
+  /** A repository row is all this read needs — the labels hang off it, not off an integration. */
+  async function seedRepository(workspaceId: string, name: string): Promise<string> {
+    const [row] = await db
+      .insert(repository)
+      .values({
+        workspaceId,
+        name,
+        source: "remote_url",
+        location: `https://example.test/acme/${name}.git`,
+        externalFullName: `acme/${name}`,
+      })
+      .returning();
+    if (!row) throw new Error("failed to seed repository");
+    return row.id;
+  }
+
+  it("returns the mirrored vocabulary, sorted by name", async () => {
+    const wsId = await seedWorkspace(db, "acme");
+    const repoId = await seedRepository(wsId, "gate");
+    await db.insert(repositoryLabel).values([
+      { workspaceId: wsId, repositoryId: repoId, name: "chore", color: "#cccccc" },
+      { workspaceId: wsId, repositoryId: repoId, name: "bug", color: "#d73a4a" },
+    ]);
+
+    const result = await listIssueLabelColors(ctxFor(db, wsId));
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data).toEqual([
+      { name: "bug", color: "#d73a4a" },
+      { name: "chore", color: "#cccccc" },
+    ]);
+  });
+
+  it("never reports another Workspace's labels", async () => {
+    const mine = await seedWorkspace(db, "acme");
+    const theirs = await seedWorkspace(db, "other");
+    const myRepo = await seedRepository(mine, "gate");
+    const theirRepo = await seedRepository(theirs, "vault");
+    await db.insert(repositoryLabel).values([
+      { workspaceId: mine, repositoryId: myRepo, name: "bug", color: "#d73a4a" },
+      { workspaceId: theirs, repositoryId: theirRepo, name: "secret", color: "#000000" },
+    ]);
+
+    const result = await listIssueLabelColors(ctxFor(db, mine));
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.map((l) => l.name)).toEqual(["bug"]);
+  });
+
+  it("answers empty rather than failing when nothing has been mirrored yet", async () => {
+    // A workspace on its first run, before the poll's first pass. The chips draw in the fallback
+    // colour; the screen does not wait, and does not error.
+    const wsId = await seedWorkspace(db, "acme");
+    await seedRepository(wsId, "gate");
+
+    const result = await listIssueLabelColors(ctxFor(db, wsId));
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data).toEqual([]);
+  });
+
+  it("resolves a name two repositories both define, stably", async () => {
+    const wsId = await seedWorkspace(db, "acme");
+    const first = await seedRepository(wsId, "gate");
+    const second = await seedRepository(wsId, "vault");
+    await db.insert(repositoryLabel).values([
+      { workspaceId: wsId, repositoryId: first, name: "bug", color: "#111111" },
+      { workspaceId: wsId, repositoryId: second, name: "bug", color: "#222222" },
+    ]);
+
+    // Which one wins is arbitrary — the repositories disagree at the source. That it wins the
+    // same way every call is not: a chip that changes colour on refresh reads as a bug.
+    const once = await listIssueLabelColors(ctxFor(db, wsId));
+    const twice = await listIssueLabelColors(ctxFor(db, wsId));
+
+    expect(once.ok && twice.ok).toBe(true);
+    if (!once.ok || !twice.ok) return;
+    expect(once.data).toHaveLength(1);
+    expect(once.data).toEqual(twice.data);
   });
 });

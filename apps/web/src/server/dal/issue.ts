@@ -24,13 +24,13 @@ import {
   projectItem,
   projectValue,
   repository,
+  repositoryLabel,
   session,
   task,
   worktree,
 } from "@solow/db";
-import { and, eq, inArray, like, notInArray, or } from "drizzle-orm";
+import { and, asc, eq, inArray, like, notInArray, or } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
-import { driverWith, loadCredential } from "./integration.js";
 import { type IssueRollup, issueToDto, NO_TASKS } from "./mappers.js";
 import { encodeCursor, pageAfter, pageLimit, pageOrder, pageProbe, toPage } from "./page.js";
 import { cascadeDeleteTasks } from "./task-cascade.js";
@@ -239,45 +239,38 @@ export async function listIssueLabels(ctx: RequestContext): Promise<Result<Issue
 /**
  * Every label the Workspace's linked Repositories define, with the colour its provider gives it.
  *
- * Asked of the providers rather than read from the mirror: `issue.labels` stores names only, so a
- * table that wanted to paint a label had nowhere to get the colour from and drew every one of
- * them grey.
+ * Read from the mirror (`repository_label`), which is the whole point of that table existing.
+ * This used to ask the providers directly, once per linked repository, in sequence, on a query
+ * the project table issues on every render: 2.3 seconds and ten GitHub requests per page view on
+ * a ten-repository workspace, with the seven other queries of that screen batched behind it in
+ * the same HTTP call. It was simultaneously the slowest thing in the app and the largest
+ * consumer of the rate limit, for an answer that changes a few times a year.
  *
- * One repository failing costs its own vocabulary and nothing else — a token that expired on one
- * connection must not blank the labels of every other. Later definitions win on a name collision,
- * which is arbitrary and harmless: two repositories that both define `bug` in different colours
- * disagree at the source, and no answer here is more correct than the other.
+ * The poll writes the rows now (`sync/labels.ts`), so this is one indexed query and no network.
+ * A repository whose labels have never been mirrored contributes nothing rather than blocking —
+ * its chips draw in the fallback colour until the next pass, which is the same degradation the
+ * old per-repository `catch` produced, minus the wait.
+ *
+ * Later definitions still win on a name collision, which is arbitrary and harmless: two
+ * repositories that both define `bug` in different colours disagree at the source, and no answer
+ * here is more correct than the other. Ordering the read by repository id keeps that arbitrary
+ * choice *stable* between calls, which the old ordering — whatever order the network answered
+ * in — did not, and an unstable colour is worse than an arbitrary one.
  */
 export async function listIssueLabelColors(
   ctx: RequestContext,
 ): Promise<Result<IssueLabelColorListDto>> {
-  const repositories = await ctx.db
+  const rows = await ctx.db
     .select({
-      id: repository.id,
-      integrationId: repository.integrationId,
-      externalFullName: repository.externalFullName,
+      name: repositoryLabel.name,
+      color: repositoryLabel.color,
     })
-    .from(repository)
-    .where(eq(repository.workspaceId, ctx.workspaceId));
+    .from(repositoryLabel)
+    .where(eq(repositoryLabel.workspaceId, ctx.workspaceId))
+    .orderBy(asc(repositoryLabel.repositoryId), asc(repositoryLabel.name));
 
   const byName = new Map<string, string | null>();
-  for (const repo of repositories) {
-    if (!repo.integrationId || !repo.externalFullName) continue;
-    try {
-      const credential = await loadCredential(ctx, repo.integrationId);
-      if (!credential.ok) continue;
-      const driver = driverWith(credential.data.row.provider, "issues");
-      if (!driver.ok) continue;
-      for (const label of await driver.data.listLabels(
-        credential.data.credential,
-        repo.externalFullName,
-      )) {
-        byName.set(label.name, label.color ?? null);
-      }
-    } catch {
-      // See the note above: one repository's failure is its own.
-    }
-  }
+  for (const row of rows) byName.set(row.name, row.color);
 
   return ok(
     [...byName.entries()]
