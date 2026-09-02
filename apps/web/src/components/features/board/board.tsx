@@ -13,13 +13,13 @@ import type { ReactNode } from "react";
 import { useCallback, useMemo, useState } from "react";
 import { ConfirmDialog } from "@/components/features/confirm-action";
 import { DeleteTaskAction } from "@/components/features/task/delete-task-action";
-import { useEventStream } from "@/components/hooks/use-task-stream";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { settingsHref } from "@/lib/navigation";
 import { WHOLE_PAGE } from "@/lib/paged";
 import { taskActionMessage } from "@/lib/task-errors";
 import { BOARD_COLUMNS, CREDENTIAL_EXPIRED_REASON, STATE_LABELS } from "@/lib/task-states";
+import { useWorkspaceEvents } from "@/lib/workspace-events";
 import { trpc } from "@/trpc/react";
 import { BlockedByDialog } from "./blocked-by-dialog";
 import { moveRefusal, waitingOn } from "./blockers";
@@ -191,7 +191,7 @@ export function Board({
     utils.task.list.invalidate();
     utils.task.dependencies.invalidate();
   }, [utils]);
-  useEventStream({ onEvent: onStatus });
+  useWorkspaceEvents(onStatus);
 
   // Both queries, not just the Tasks: readiness is derived from the edges, so a board drawn
   // before they land would render every blocked card undimmed, lockless and launchable. The

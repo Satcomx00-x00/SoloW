@@ -5,6 +5,7 @@ import { StatusBar } from "@/components/features/status-bar/status-bar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppContextProvider } from "@/lib/app-context";
 import type { AppContext, ShellIdentity } from "@/lib/contributions";
+import { WorkspaceEventsProvider } from "@/lib/workspace-events";
 import { ActivityBar } from "./activity-bar";
 import { CommandPalette } from "./command-palette";
 import { HeaderBar } from "./header-bar";
@@ -35,14 +36,22 @@ export function DashboardShell({
 
   return (
     <AppContextProvider value={appContext}>
-      <TooltipProvider delayDuration={200}>
-        <div className="flex h-[100dvh] flex-col overflow-hidden bg-background text-foreground">
-          <div className="flex min-h-0 flex-1">
-            <ActivityBar signedIn={identity !== null} />
-            <Navigator workspaceName={workspaceName} />
-            <div className="flex min-w-0 flex-1 flex-col">
-              <HeaderBar workspaceName={workspaceName} />
-              {/*
+      {/*
+        One socket for the app, opened here.
+
+        Above the status bar and above every surface that wants to be live, for the same reason
+        the AppContext is published here: several of them listening to the same channel is one
+        subscription with several consumers, not several subscriptions.
+      */}
+      <WorkspaceEventsProvider>
+        <TooltipProvider delayDuration={200}>
+          <div className="flex h-[100dvh] flex-col overflow-hidden bg-background text-foreground">
+            <div className="flex min-h-0 flex-1">
+              <ActivityBar signedIn={identity !== null} />
+              <Navigator workspaceName={workspaceName} />
+              <div className="flex min-w-0 flex-1 flex-col">
+                <HeaderBar workspaceName={workspaceName} />
+                {/*
                 `relative` is load-bearing, not decoration.
 
                 This is the SPA's only scrolling region, and without a positioning context on it
@@ -58,15 +67,16 @@ export function DashboardShell({
                 places at once. Making this element the containing block puts those descendants
                 back inside the region that owns them, and the document stays exactly `100dvh`.
               */}
-              <main className="relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
-                {children}
-              </main>
+                <main className="relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+                  {children}
+                </main>
+              </div>
             </div>
+            <StatusBar />
           </div>
-          <StatusBar />
-        </div>
-        <CommandPalette />
-      </TooltipProvider>
+          <CommandPalette />
+        </TooltipProvider>
+      </WorkspaceEventsProvider>
     </AppContextProvider>
   );
 }

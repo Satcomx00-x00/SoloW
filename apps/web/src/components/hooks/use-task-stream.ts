@@ -81,6 +81,12 @@ export interface UseEventStreamOptions {
 /**
  * Subscribe to one channel. Returns the connection status for display; events are delivered to
  * `onEvent` (kept in a ref so a new closure each render does not tear the socket down).
+ *
+ * **Two callers, on purpose.** `useTaskStream` below opens the Task-scoped channel, and
+ * `WorkspaceEventsProvider` opens the Workspace one — once, for the whole app. A screen that
+ * wants Workspace events calls `useWorkspaceEvents`, not this: several surfaces listening to the
+ * same channel is one connection with several consumers, and calling this directly from each of
+ * them meant a ticket, a socket and a reconnect loop per surface for identical frames.
  */
 export function useEventStream({
   taskId,
