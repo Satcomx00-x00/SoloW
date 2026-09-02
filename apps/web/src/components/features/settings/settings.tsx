@@ -19,6 +19,7 @@ import {
   settingsSectionFor,
   settingsSectionsIn,
 } from "@/lib/navigation";
+import { cn } from "@/lib/utils";
 import { AgentProfilesSection } from "./agent-profiles-section";
 import { ExecutorProfilesSection } from "./executor-profiles-section";
 import { FlagsSection } from "./flags-section";
@@ -90,7 +91,7 @@ export function Settings() {
   }, [active.id, opensOn]);
 
   return (
-    <div className="mx-auto w-full max-w-3xl space-y-5 px-6 py-6">
+    <div className={PAGE_WIDTH}>
       <header className="space-y-1.5">
         <p className="text-2xs text-muted-foreground uppercase tracking-wider">Settings</p>
         <h1 className="font-semibold text-lg tracking-[-0.01em]">{group}</h1>
@@ -126,7 +127,7 @@ export function Settings() {
         </SelectContent>
       </Select>
 
-      <div className="space-y-6">
+      <div className={cn("space-y-6", WIDE_SECTION_LAYOUT)}>
         {sections.map((section) => (
           <div key={section.id}>{SECTION_COMPONENTS[section.id]?.()}</div>
         ))}
@@ -134,6 +135,50 @@ export function Settings() {
     </div>
   );
 }
+
+/**
+ * How wide the column is allowed to get, and why it is two numbers rather than one.
+ *
+ * Measured: at 1280 the old fixed `max-w-3xl` column filled 78% of the area beside the sidebar,
+ * which reads as a page. At 1920 it filled **47%** — a 768px form marooned in 1622px with 427
+ * pixels of nothing down each side, which reads as a page that failed to load. A single Workspace
+ * card, the shortest section here, occupied about a seventh of the screen and the rest was empty.
+ *
+ * Widening it unconditionally would be the opposite mistake: a text input stretched to 1500px is
+ * harder to use than a narrow one, and prose past about 90 characters stops being readable. So
+ * the column only grows where there is genuinely space to grow into, and what it does with that
+ * space is described below — it is not spent on longer lines.
+ */
+const PAGE_WIDTH = "mx-auto w-full max-w-3xl 2xl:max-w-6xl space-y-5 px-6 py-6";
+
+/**
+ * On a wide screen a section becomes two columns: what it is on the left, its controls on the
+ * right.
+ *
+ * This is the shape that lets a settings page use a large screen without making anything on it
+ * wider. The heading and its explanation move out of the controls' way into a fixed 18rem
+ * column, and the controls keep roughly the measure they already had — 776px at 1536 and above,
+ * against 720 before — so no input grows and no sentence gets longer. The page stops being a
+ * narrow ribbon down the middle; nothing inside it changes size.
+ *
+ * Expressible in one place because every section here has the same skeleton: exactly one `Card`,
+ * holding exactly one `CardHeader` and one `CardContent`. Grid auto-placement does the rest, so
+ * ten sections are re-laid out without any of them learning about it — and a section added later
+ * inherits it by being built the same way as its neighbours.
+ *
+ * `2xl`, not `xl`: at 1280 the split would take the controls down to 606px, narrower than the
+ * 720 they have today, so the breakpoint is set where the trade actually pays. Below it this is
+ * inert and the layout is exactly the one that measured healthy.
+ *
+ * Scoped `> div >` rather than by descendant: `flags-section` opens a dialog, and a dialog that
+ * happened to hold a card would otherwise be re-laid out as a settings row.
+ */
+const WIDE_SECTION_LAYOUT = [
+  "2xl:[&>div>[data-slot=card]]:grid",
+  "2xl:[&>div>[data-slot=card]]:grid-cols-[minmax(0,18rem)_minmax(0,1fr)]",
+  "2xl:[&>div>[data-slot=card]]:items-start",
+  "2xl:[&>div>[data-slot=card]]:gap-x-10",
+].join(" ");
 
 function captionFor(group: SettingsGroup): string {
   return SETTINGS_GROUPS.find((g) => g.name === group)?.caption ?? "";
