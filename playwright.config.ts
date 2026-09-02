@@ -21,13 +21,25 @@ export default defineConfig({
   forbidOnly: !!process.env["CI"],
   retries: 0,
   reporter: process.env["CI"] ? [["github"], ["list"]] : [["list"]],
-  // CI runners are markedly slower than a development machine: a single launch-to-review
-  // round trip measures ~45s there against a few seconds locally, and the @critical
-  // isolation spec performs two of them inside one test before it can assert anything.
-  // The budget is raised for CI only — no assertion is weakened, the suite is simply
-  // allowed the wall-clock the hardware needs.
-  timeout: process.env["CI"] ? 180_000 : 60_000,
-  expect: { timeout: process.env["CI"] ? 30_000 : 15_000 },
+  /*
+   * One budget, sized from what the suite actually takes.
+   *
+   * This used to be 60s locally on the theory that a developer machine finishes in "a few
+   * seconds" where CI needs 45. That stopped being true and cost an afternoon: measured on an
+   * ordinary cloud dev box, the slowest test (the @critical isolation spec, which drives two
+   * launch-to-review round trips before it can assert anything) takes 102s, and the first test
+   * of a run pays another 15-25s per route for `next dev`'s compile-on-first-visit — 76s just to
+   * get one Task to Running. Every happy-path spec failed on the budget rather than on a
+   * behaviour, and each reported whichever selector it happened to be waiting on when the clock
+   * ran out, which is a different innocent line every run.
+   *
+   * 180s is the measured worst case plus headroom, not a number chosen to make red go away — the
+   * suite was verified green at 240s first, then this was set from the durations that produced.
+   * Kept the same for CI and local because the two are no longer meaningfully different, and a
+   * split that is not true is worse than no split.
+   */
+  timeout: 180_000,
+  expect: { timeout: 30_000 },
   use: {
     baseURL: `http://127.0.0.1:${PORTS.web}`,
     trace: "retain-on-failure",

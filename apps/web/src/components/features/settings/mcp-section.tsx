@@ -38,22 +38,43 @@ function useEndpointUrl(): string {
   return url;
 }
 
+/**
+ * Copy, and say what actually happened.
+ *
+ * This used to fire the write and set "Copied" without waiting for it, which on this screen of
+ * all screens is the wrong lie to tell: `navigator.clipboard` exists only in a secure context,
+ * so it is missing over plain HTTP — and the whole point of these two buttons is to carry an
+ * endpoint and a command line to *another machine*, which is exactly the case where the app is
+ * reached over the network at `http://192.168.1.x:5000`. The button said "Copied", the clipboard
+ * held whatever it held before, and the paste that followed was silently stale.
+ *
+ * It now reports the refusal instead. There is no fallback copy to offer — a page cannot write
+ * the clipboard without the API — so the honest thing is to stop claiming and let the reader
+ * select the text themselves, which they can: both are rendered as selectable text.
+ */
 function CopyButton({ text, label }: { text: string; label: string }) {
-  const [copied, setCopied] = useState(false);
+  const [state, setState] = useState<"idle" | "copied" | "refused">("idle");
   return (
     <Button
       type="button"
       variant="outline"
       size="sm"
       aria-label={label}
-      onClick={() => {
-        void navigator.clipboard?.writeText(text);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1500);
+      onClick={async () => {
+        try {
+          // Not `?.` — an absent clipboard has to reach the `catch` rather than resolve to
+          // undefined and be reported as a success, which is the bug this replaces.
+          await navigator.clipboard.writeText(text);
+          setState("copied");
+        } catch {
+          // Refused, not broken: an insecure origin, or a permission the browser declined.
+          setState("refused");
+        }
+        setTimeout(() => setState("idle"), 2500);
       }}
     >
-      {copied ? <Check /> : <Copy />}
-      {copied ? "Copied" : "Copy"}
+      {state === "copied" ? <Check /> : <Copy />}
+      {state === "copied" ? "Copied" : state === "refused" ? "Select it to copy" : "Copy"}
     </Button>
   );
 }

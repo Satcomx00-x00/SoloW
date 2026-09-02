@@ -9,7 +9,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { IssueLabel } from "@/components/features/project/issue-label";
 import { useProviderNames } from "@/components/hooks/use-provider-names";
-import { useEventStream } from "@/components/hooks/use-task-stream";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -33,6 +32,7 @@ import {
 } from "@/lib/issue-status";
 import { WHOLE_PAGE } from "@/lib/paged";
 import { cn } from "@/lib/utils";
+import { useWorkspaceEvents } from "@/lib/workspace-events";
 import { trpc } from "@/trpc/react";
 
 /**
@@ -389,7 +389,7 @@ export function IssuesView({
   const onStatus = useCallback(() => {
     utils.issue.list.invalidate();
   }, [utils]);
-  useEventStream({ onEvent: onStatus });
+  useWorkspaceEvents(onStatus);
 
   const narrowed = Boolean(
     filters.status || filters.query || filters.labels.length || filters.source,

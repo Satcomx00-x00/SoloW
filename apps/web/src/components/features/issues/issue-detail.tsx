@@ -10,11 +10,11 @@ import { TaskCard } from "@/components/features/board/task-card";
 import { TaskStateBadge } from "@/components/features/board/task-state-badge";
 import { useBackToProject } from "@/components/features/shared/back-to-project";
 import { useProviderNames } from "@/components/hooks/use-provider-names";
-import { useEventStream } from "@/components/hooks/use-task-stream";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { issueSourceLabel } from "@/lib/issue-status";
 import { WHOLE_PAGE } from "@/lib/paged";
+import { useWorkspaceEvents } from "@/lib/workspace-events";
 import { trpc } from "@/trpc/react";
 import { DeleteIssueAction } from "./delete-issue-action";
 import { IssueBody } from "./issue-body";
@@ -57,7 +57,7 @@ export function IssueDetail({ issueId }: { issueId: string }) {
     utils.task.list.invalidate();
     utils.task.dependencies.invalidate();
   }, [utils, issueId]);
-  useEventStream({ onEvent: onStatus });
+  useWorkspaceEvents(onStatus);
 
   /**
    * The Task dialog this page opens, and what it opens on — one value doing both jobs, because

@@ -3,6 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import type { TaskDependencyDto, TaskDto, TaskState } from "@solow/contracts";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { WorkspaceEventsProvider } from "@/lib/workspace-events";
 import { type FakeSocket, installFakeWebSocket, renderWithTrpc } from "@/test/trpc-harness";
 import { moveRefusal } from "./blockers";
 import { Board } from "./board";
@@ -74,23 +75,40 @@ afterEach(() => {
   cleanup();
 });
 
+/**
+ * Rendered inside `WorkspaceEventsProvider`, because that is where the board's live connection
+ * comes from in the app.
+ *
+ * The board used to open its own socket. It now consumes the shell's single subscription — every
+ * surface that wants to be live listens to the same channel for the same frames, so the fan-out
+ * belongs on the client side of one connection rather than in one connection per surface. A test
+ * that rendered the board bare would be testing a component that cannot receive an event, which
+ * is not the component that ships.
+ */
+const Live = WorkspaceEventsProvider;
+
 describe("Board dependencies", () => {
   it("marks a blocked card with a lock and its outstanding count, and disables Launch", async () => {
-    renderWithTrpc(<Board />, {
-      ...ticket,
-      "task.list": () => ({
-        items: [
-          makeTask({ id: "a", state: "ready", title: "Wire the latch" }),
-          makeTask({ id: "b", state: "running", title: "Order the servo" }),
-          makeTask({ id: "c", state: "backlog", title: "Cut the bracket" }),
+    renderWithTrpc(
+      <Live>
+        <Board />
+      </Live>,
+      {
+        ...ticket,
+        "task.list": () => ({
+          items: [
+            makeTask({ id: "a", state: "ready", title: "Wire the latch" }),
+            makeTask({ id: "b", state: "running", title: "Order the servo" }),
+            makeTask({ id: "c", state: "backlog", title: "Cut the bracket" }),
+          ],
+          nextCursor: null,
+        }),
+        "task.dependencies": () => [
+          makeEdge("a", "b", "Order the servo", "running"),
+          makeEdge("a", "c", "Cut the bracket", "backlog"),
         ],
-        nextCursor: null,
-      }),
-      "task.dependencies": () => [
-        makeEdge("a", "b", "Order the servo", "running"),
-        makeEdge("a", "c", "Cut the bracket", "backlog"),
-      ],
-    });
+      },
+    );
 
     const lock = await screen.findByRole("button", { name: "Blocked by 2 tasks" });
     expect(lock.textContent).toContain("2");
@@ -100,15 +118,20 @@ describe("Board dependencies", () => {
   });
 
   it("leaves an unblocked Ready Task launchable", async () => {
-    const { log } = renderWithTrpc(<Board />, {
-      ...ticket,
-      "task.list": () => ({
-        items: [makeTask({ id: "a", state: "ready", title: "Wire the latch" })],
-        nextCursor: null,
-      }),
-      "task.dependencies": () => [],
-      "task.launch": () => makeTask({ id: "a", state: "running" }),
-    });
+    const { log } = renderWithTrpc(
+      <Live>
+        <Board />
+      </Live>,
+      {
+        ...ticket,
+        "task.list": () => ({
+          items: [makeTask({ id: "a", state: "ready", title: "Wire the latch" })],
+          nextCursor: null,
+        }),
+        "task.dependencies": () => [],
+        "task.launch": () => makeTask({ id: "a", state: "running" }),
+      },
+    );
 
     fireEvent.click(await screen.findByRole("button", { name: "Launch" }));
     await waitFor(() => {
@@ -118,17 +141,22 @@ describe("Board dependencies", () => {
 
   it("unblocks the card when its last predecessor reaches Done", async () => {
     let blockerState: TaskState = "running";
-    renderWithTrpc(<Board />, {
-      ...ticket,
-      "task.list": () => ({
-        items: [
-          makeTask({ id: "a", state: "ready", title: "Wire the latch" }),
-          makeTask({ id: "b", state: blockerState, title: "Order the servo" }),
-        ],
-        nextCursor: null,
-      }),
-      "task.dependencies": () => [makeEdge("a", "b", "Order the servo", blockerState)],
-    });
+    renderWithTrpc(
+      <Live>
+        <Board />
+      </Live>,
+      {
+        ...ticket,
+        "task.list": () => ({
+          items: [
+            makeTask({ id: "a", state: "ready", title: "Wire the latch" }),
+            makeTask({ id: "b", state: blockerState, title: "Order the servo" }),
+          ],
+          nextCursor: null,
+        }),
+        "task.dependencies": () => [makeEdge("a", "b", "Order the servo", blockerState)],
+      },
+    );
 
     await screen.findByRole("button", { name: "Blocked by 1 task" });
 
@@ -152,20 +180,25 @@ describe("Board dependencies", () => {
   });
 
   it("names the offending path with Task titles when an edge is refused as a cycle", async () => {
-    renderWithTrpc(<Board />, {
-      ...ticket,
-      "task.list": () => ({
-        items: [
-          makeTask({ id: "a", state: "backlog", title: "Wire the latch" }),
-          makeTask({ id: "b", state: "backlog", title: "Order the servo" }),
-        ],
-        nextCursor: null,
-      }),
-      "task.dependencies": () => [],
-      "task.addDependency": () => {
-        throw new Error("TASK_DEPENDENCY_CYCLE: a → b → a");
+    renderWithTrpc(
+      <Live>
+        <Board />
+      </Live>,
+      {
+        ...ticket,
+        "task.list": () => ({
+          items: [
+            makeTask({ id: "a", state: "backlog", title: "Wire the latch" }),
+            makeTask({ id: "b", state: "backlog", title: "Order the servo" }),
+          ],
+          nextCursor: null,
+        }),
+        "task.dependencies": () => [],
+        "task.addDependency": () => {
+          throw new Error("TASK_DEPENDENCY_CYCLE: a → b → a");
+        },
       },
-    });
+    );
 
     // Open the picker from the card that would be blocked, then choose the offending Task.
     fireEvent.click((await screen.findAllByRole("button", { name: "Blocked by" }))[0] as Element);
@@ -188,14 +221,19 @@ describe("Board dependencies", () => {
       landEdges = resolve;
     });
 
-    const { log } = renderWithTrpc(<Board />, {
-      ...ticket,
-      "task.list": () => ({
-        items: [makeTask({ id: "a", state: "ready", title: "Wire the latch" })],
-        nextCursor: null,
-      }),
-      "task.dependencies": () => edges,
-    });
+    const { log } = renderWithTrpc(
+      <Live>
+        <Board />
+      </Live>,
+      {
+        ...ticket,
+        "task.list": () => ({
+          items: [makeTask({ id: "a", state: "ready", title: "Wire the latch" })],
+          nextCursor: null,
+        }),
+        "task.dependencies": () => edges,
+      },
+    );
 
     await waitFor(() => {
       expect(log.calls.some((c) => c.path === "task.list")).toBe(true);
@@ -214,16 +252,21 @@ describe("Board dependencies", () => {
   });
 
   it("reports a failed dependency query instead of showing every Task as ready", async () => {
-    renderWithTrpc(<Board />, {
-      ...ticket,
-      "task.list": () => ({
-        items: [makeTask({ id: "a", state: "ready", title: "Wire the latch" })],
-        nextCursor: null,
-      }),
-      "task.dependencies": () => {
-        throw new Error("edges unavailable");
+    renderWithTrpc(
+      <Live>
+        <Board />
+      </Live>,
+      {
+        ...ticket,
+        "task.list": () => ({
+          items: [makeTask({ id: "a", state: "ready", title: "Wire the latch" })],
+          nextCursor: null,
+        }),
+        "task.dependencies": () => {
+          throw new Error("edges unavailable");
+        },
       },
-    });
+    );
 
     expect((await screen.findByRole("alert")).textContent).toContain("edges unavailable");
     expect(screen.queryByRole("button", { name: "Launch" })).toBeNull();
@@ -234,17 +277,22 @@ describe("Board dependencies", () => {
     // Dragging is the one way into Running that never meets the disabled Launch button, so the
     // server's `TASK_BLOCKED` used to reach the Owner verbatim. Driven here through the Ready
     // button, which reaches the same banner through the same mutation.
-    renderWithTrpc(<Board />, {
-      ...ticket,
-      "task.list": () => ({
-        items: [makeTask({ id: "a", state: "backlog", title: "Wire the latch" })],
-        nextCursor: null,
-      }),
-      "task.dependencies": () => [],
-      "task.move": () => {
-        throw new Error("TASK_BLOCKED");
+    renderWithTrpc(
+      <Live>
+        <Board />
+      </Live>,
+      {
+        ...ticket,
+        "task.list": () => ({
+          items: [makeTask({ id: "a", state: "backlog", title: "Wire the latch" })],
+          nextCursor: null,
+        }),
+        "task.dependencies": () => [],
+        "task.move": () => {
+          throw new Error("TASK_BLOCKED");
+        },
       },
-    });
+    );
 
     fireEvent.click(await screen.findByRole("button", { name: "Ready" }));
 

@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { relativeAge } from "@/lib/relative-time";
 import { trpc } from "@/trpc/react";
 
 /**
@@ -24,20 +25,6 @@ import { trpc } from "@/trpc/react";
  * is worth doing for something we can render ourselves.
  */
 
-/** When it was said, in words rather than a timestamp nobody converts in their head. */
-function whenSaid(iso: string): string {
-  const then = new Date(iso).getTime();
-  const minutes = Math.round((Date.now() - then) / 60_000);
-  if (!Number.isFinite(minutes)) return "";
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.round(hours / 24);
-  // Past a fortnight a relative age stops being useful — "43d ago" is a date nobody can place.
-  return days <= 14 ? `${days}d ago` : new Date(iso).toLocaleDateString();
-}
-
 function Comment({ comment }: { comment: IssueCommentDto }) {
   const login = comment.author?.login ?? "unknown";
   return (
@@ -51,7 +38,7 @@ function Comment({ comment }: { comment: IssueCommentDto }) {
           {comment.author?.name ?? login}
         </span>
         <span className="shrink-0 text-2xs text-muted-foreground">
-          {whenSaid(comment.createdAt)}
+          {relativeAge(comment.createdAt)}
         </span>
         {comment.updatedAt && (
           // Only when there was one: GitHub stamps `updated_at` on every comment, and passing that

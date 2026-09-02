@@ -4,6 +4,7 @@ import { GUARDED_ENV_VARS, isGuardedEnvVar } from "@solow/contracts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { newRowId } from "@/lib/row-id";
 
 /**
  * Key/value repeater for a profile's runtime environment (issue #73).
@@ -18,10 +19,10 @@ export type EnvPair = { id: string; key: string; value: string };
  * The id is what React keys on. An array index would do until a row is removed, at which point
  * every row below it inherits a neighbour's key — and with it that neighbour's focus and cursor.
  */
-export const newEnvPair = (): EnvPair => ({ id: crypto.randomUUID(), key: "", value: "" });
+export const newEnvPair = (): EnvPair => ({ id: newRowId(), key: "", value: "" });
 
 export const toEnvPairs = (env: Record<string, string> | undefined): EnvPair[] =>
-  Object.entries(env ?? {}).map(([key, value]) => ({ id: crypto.randomUUID(), key, value }));
+  Object.entries(env ?? {}).map(([key, value]) => ({ id: newRowId(), key, value }));
 
 export const fromEnvPairs = (pairs: EnvPair[]): Record<string, string> => {
   const env: Record<string, string> = {};

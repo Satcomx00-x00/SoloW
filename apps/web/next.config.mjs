@@ -4,6 +4,19 @@ import { fileURLToPath } from "node:url";
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  /**
+   * Where the build output goes, overridable so two Next servers can share this checkout.
+   *
+   * The E2E suite starts its own `next dev` in this directory while `scripts/start.sh` may be
+   * serving a production build from the same one, and they both default to `.next`. The dev
+   * server wins, silently: it replaces the built output with development chunks, `BUILD_ID`
+   * empties, and the running production server answers **400 on every static asset** while still
+   * serving HTML — a blank app with no error anywhere that names the cause. Diagnosed exactly
+   * that way, from a browser console full of chunk 404s.
+   *
+   * Left at `.next` for every ordinary build; the suite sets this to a directory of its own.
+   */
+  distDir: process.env.SOLOW_NEXT_DIST_DIR ?? ".next",
   // `npx solow` ships a prebuilt web app, and standalone is what makes that shippable: Next
   // traces the server's real imports and copies just those into `.next/standalone`, turning a
   // 1.1 GB build directory into a few megabytes that run without the monorepo around them.

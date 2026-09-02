@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { newRowId } from "@/lib/row-id";
 import { trpc } from "@/trpc/react";
 
 /**
@@ -22,7 +23,7 @@ import { trpc } from "@/trpc/react";
 /** One editable row. The id is what React keys on — see `env-rows.tsx` for why not the index. */
 type PatternRow = { id: string; value: string };
 
-const newRow = (value = ""): PatternRow => ({ id: crypto.randomUUID(), value });
+const newRow = (value = ""): PatternRow => ({ id: newRowId(), value });
 
 export function SetupFileRows({
   repositoryId,

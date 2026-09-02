@@ -3,6 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { type TaskDto, TaskErrorCode, type TaskState } from "@solow/contracts";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { WorkspaceEventsProvider } from "@/lib/workspace-events";
 import { type FakeSocket, installFakeWebSocket, renderWithTrpc } from "@/test/trpc-harness";
 import { Board } from "./board";
 
@@ -61,19 +62,36 @@ function column(label: string): HTMLElement {
   return screen.getByLabelText(`${label} column`);
 }
 
+/**
+ * Rendered inside `WorkspaceEventsProvider`, because that is where the board's live connection
+ * comes from in the app.
+ *
+ * The board used to open its own socket. It now consumes the shell's single subscription — every
+ * surface that wants to be live listens to the same channel for the same frames, so the fan-out
+ * belongs on the client side of one connection rather than in one connection per surface. A test
+ * that rendered the board bare would be testing a component that cannot receive an event, which
+ * is not the component that ships.
+ */
+const Live = WorkspaceEventsProvider;
+
 describe("Board (wired)", () => {
   it("moves a Task to its new column when the orchestrator announces a status change", async () => {
     let state: TaskState = "running";
-    renderWithTrpc(<Board />, {
-      ...ticket,
-      "task.list": () => ({
-        items: [makeTask({ id: "task-1", state, title: "Fix the gate latch" })],
-        nextCursor: null,
-      }),
-      // The board waits for the edges before it draws: an undelivered dependency query would
-      // otherwise let a blocked card render as launchable (issue #6).
-      "task.dependencies": () => [],
-    });
+    renderWithTrpc(
+      <Live>
+        <Board />
+      </Live>,
+      {
+        ...ticket,
+        "task.list": () => ({
+          items: [makeTask({ id: "task-1", state, title: "Fix the gate latch" })],
+          nextCursor: null,
+        }),
+        // The board waits for the edges before it draws: an undelivered dependency query would
+        // otherwise let a blocked card render as launchable (issue #6).
+        "task.dependencies": () => [],
+      },
+    );
 
     await waitFor(() => {
       expect(within(column("Running")).getByText("Fix the gate latch")).toBeDefined();
@@ -101,18 +119,23 @@ describe("Board (wired)", () => {
 
   it("advances a Backlog Task to Ready through the card action", async () => {
     let state: TaskState = "backlog";
-    const { log } = renderWithTrpc(<Board />, {
-      ...ticket,
-      "task.list": () => ({
-        items: [makeTask({ id: "task-1", state, title: "Investigate servo" })],
-        nextCursor: null,
-      }),
-      "task.dependencies": () => [],
-      "task.move": (input) => {
-        state = (input as { to: TaskState }).to;
-        return makeTask({ id: "task-1", state });
+    const { log } = renderWithTrpc(
+      <Live>
+        <Board />
+      </Live>,
+      {
+        ...ticket,
+        "task.list": () => ({
+          items: [makeTask({ id: "task-1", state, title: "Investigate servo" })],
+          nextCursor: null,
+        }),
+        "task.dependencies": () => [],
+        "task.move": (input) => {
+          state = (input as { to: TaskState }).to;
+          return makeTask({ id: "task-1", state });
+        },
       },
-    });
+    );
 
     const action = await screen.findByRole("button", { name: "Ready" });
     fireEvent.click(action);
@@ -127,17 +150,22 @@ describe("Board (wired)", () => {
   });
 
   it("surfaces a rejected launch as a sentence, not as the wire code", async () => {
-    renderWithTrpc(<Board />, {
-      ...ticket,
-      "task.list": () => ({
-        items: [makeTask({ id: "task-1", state: "ready", title: "Launchable" })],
-        nextCursor: null,
-      }),
-      "task.dependencies": () => [],
-      "task.launch": () => {
-        throw new Error(TaskErrorCode.ConcurrencyCapReached);
+    renderWithTrpc(
+      <Live>
+        <Board />
+      </Live>,
+      {
+        ...ticket,
+        "task.list": () => ({
+          items: [makeTask({ id: "task-1", state: "ready", title: "Launchable" })],
+          nextCursor: null,
+        }),
+        "task.dependencies": () => [],
+        "task.launch": () => {
+          throw new Error(TaskErrorCode.ConcurrencyCapReached);
+        },
       },
-    });
+    );
 
     fireEvent.click(await screen.findByRole("button", { name: "Launch" }));
 
@@ -151,17 +179,22 @@ describe("Board (wired)", () => {
   });
 
   it("falls back to a sentence for a code it does not know, rather than leaking it", async () => {
-    renderWithTrpc(<Board />, {
-      ...ticket,
-      "task.list": () => ({
-        items: [makeTask({ id: "task-1", state: "ready", title: "Launchable" })],
-        nextCursor: null,
-      }),
-      "task.dependencies": () => [],
-      "task.launch": () => {
-        throw new Error("SOME_FUTURE_CODE");
+    renderWithTrpc(
+      <Live>
+        <Board />
+      </Live>,
+      {
+        ...ticket,
+        "task.list": () => ({
+          items: [makeTask({ id: "task-1", state: "ready", title: "Launchable" })],
+          nextCursor: null,
+        }),
+        "task.dependencies": () => [],
+        "task.launch": () => {
+          throw new Error("SOME_FUTURE_CODE");
+        },
       },
-    });
+    );
 
     fireEvent.click(await screen.findByRole("button", { name: "Launch" }));
 
@@ -173,13 +206,18 @@ describe("Board (wired)", () => {
   });
 
   it("reports a failed board load rather than rendering an empty board", async () => {
-    renderWithTrpc(<Board />, {
-      ...ticket,
-      "task.list": () => {
-        throw new Error("UNAUTHORIZED");
+    renderWithTrpc(
+      <Live>
+        <Board />
+      </Live>,
+      {
+        ...ticket,
+        "task.list": () => {
+          throw new Error("UNAUTHORIZED");
+        },
+        "task.dependencies": () => [],
       },
-      "task.dependencies": () => [],
-    });
+    );
 
     await waitFor(() => {
       expect(screen.getByRole("alert").textContent).toContain("UNAUTHORIZED");
@@ -211,7 +249,12 @@ describe("Board (wired)", () => {
     };
 
     it("offers a Renew link naming the Secret that expired, to the pre-filled Settings form", async () => {
-      renderWithTrpc(<Board />, handlers);
+      renderWithTrpc(
+        <Live>
+          <Board />
+        </Live>,
+        handlers,
+      );
 
       const renew = await screen.findByRole("link", { name: /Renew/ });
       expect(renew.getAttribute("href")).toBe(
@@ -220,15 +263,20 @@ describe("Board (wired)", () => {
     });
 
     it("offers no Renew link for a Task that failed for any other reason", async () => {
-      renderWithTrpc(<Board />, {
-        ...handlers,
-        "task.list": () => ({
-          items: [
-            makeTask({ id: "ord-1", state: "failed", title: "Crashed", failureReason: "fail" }),
-          ],
-          nextCursor: null,
-        }),
-      });
+      renderWithTrpc(
+        <Live>
+          <Board />
+        </Live>,
+        {
+          ...handlers,
+          "task.list": () => ({
+            items: [
+              makeTask({ id: "ord-1", state: "failed", title: "Crashed", failureReason: "fail" }),
+            ],
+            nextCursor: null,
+          }),
+        },
+      );
 
       await screen.findByText("Crashed");
       expect(screen.queryByRole("link", { name: /Renew/ })).toBeNull();
@@ -245,27 +293,32 @@ describe("Board (wired)", () => {
 
     it("re-runs a Task that failed for a reason a fresh attempt can fix", async () => {
       const retried: unknown[] = [];
-      renderWithTrpc(<Board />, {
-        ...handlers,
-        "task.list": () => ({
-          items: [
-            // The exact reason an orchestrator restart leaves behind (issue: an Owner reported a
-            // Task's input box answering "No agent is running" forever after a restart) — Retry is
-            // how it comes back, since the worktree and its commits were never touched.
-            makeTask({
-              id: "int-1",
-              state: "failed",
-              title: "Stuck",
-              failureReason: "interrupted",
-            }),
-          ],
-          nextCursor: null,
-        }),
-        "task.retry": (input) => {
-          retried.push(input);
-          return makeTask({ id: "int-1", state: "running", title: "Stuck", failureReason: null });
+      renderWithTrpc(
+        <Live>
+          <Board />
+        </Live>,
+        {
+          ...handlers,
+          "task.list": () => ({
+            items: [
+              // The exact reason an orchestrator restart leaves behind (issue: an Owner reported a
+              // Task's input box answering "No agent is running" forever after a restart) — Retry is
+              // how it comes back, since the worktree and its commits were never touched.
+              makeTask({
+                id: "int-1",
+                state: "failed",
+                title: "Stuck",
+                failureReason: "interrupted",
+              }),
+            ],
+            nextCursor: null,
+          }),
+          "task.retry": (input) => {
+            retried.push(input);
+            return makeTask({ id: "int-1", state: "running", title: "Stuck", failureReason: null });
+          },
         },
-      });
+      );
 
       fireEvent.click(await screen.findByRole("button", { name: /Retry/ }));
 
@@ -273,33 +326,43 @@ describe("Board (wired)", () => {
     });
 
     it("offers no Retry button for a credential-expired Task — Renew covers that path instead", async () => {
-      renderWithTrpc(<Board />, {
-        ...handlers,
-        "task.list": () => ({
-          items: [
-            makeTask({
-              id: "cred-1",
-              state: "failed",
-              title: "Needs a credential",
-              failureReason: "credential_expired",
-            }),
-          ],
-          nextCursor: null,
-        }),
-      });
+      renderWithTrpc(
+        <Live>
+          <Board />
+        </Live>,
+        {
+          ...handlers,
+          "task.list": () => ({
+            items: [
+              makeTask({
+                id: "cred-1",
+                state: "failed",
+                title: "Needs a credential",
+                failureReason: "credential_expired",
+              }),
+            ],
+            nextCursor: null,
+          }),
+        },
+      );
 
       await screen.findByText("Needs a credential");
       expect(screen.queryByRole("button", { name: /Retry/ })).toBeNull();
     });
 
     it("offers no Retry button for a Task that has not failed", async () => {
-      renderWithTrpc(<Board />, {
-        ...handlers,
-        "task.list": () => ({
-          items: [makeTask({ id: "run-1", state: "running", title: "Working" })],
-          nextCursor: null,
-        }),
-      });
+      renderWithTrpc(
+        <Live>
+          <Board />
+        </Live>,
+        {
+          ...handlers,
+          "task.list": () => ({
+            items: [makeTask({ id: "run-1", state: "running", title: "Working" })],
+            nextCursor: null,
+          }),
+        },
+      );
 
       await screen.findByText("Working");
       expect(screen.queryByRole("button", { name: /Retry/ })).toBeNull();

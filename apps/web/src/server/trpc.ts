@@ -19,6 +19,15 @@ export interface BaseContext {
   /** Resolved from the authenticated session; null when unauthenticated. */
   session: { workspaceId: string; userId: string } | null;
   flagOverrides?: Partial<Record<FlagKey, boolean>>;
+  /**
+   * The host this request arrived on — `localhost:5000`, `192.168.1.137:5000`, a real domain.
+   *
+   * Needed by exactly one procedure, and for a reason worth stating: `stream.ticket` hands the
+   * browser an absolute URL for the WebSocket hub, and the configured one names `localhost`. A
+   * browser on another machine then dials *its own* localhost. Answering with the host the
+   * client demonstrably reached is the only thing here that knows better than the config.
+   */
+  requestHost?: string | null;
 }
 
 const t = initTRPC.meta<OpenApiMeta>().context<BaseContext>().create({ transformer: superjson });
