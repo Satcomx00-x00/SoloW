@@ -12,9 +12,15 @@
     "isolatedModules": true,
     "incremental": true,
     "types": ["bun-types", "react", "react-dom"],
-    "plugins": [{ "name": "next" }],
-    "paths": { "@/*": ["./src/*"] }
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "paths": {
+      "@/*": ["./src/*"]
+    }
   },
-  "include": ["next-env.d.ts", "src", ".next/types/**/*.ts"],
+  "include": [".next/types/**/*.ts", "next-env.d.ts", "src", ".next-e2e/types/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }

@@ -6,6 +6,9 @@ node_modules/
 dist/
 build/
 .next/
+# The E2E suite builds into its own directory so it cannot overwrite the one a running
+# `scripts/start.sh` stack is serving (see apps/web/next.config.mjs).
+.next-e2e/
 next-env.d.ts
 out/
 *.tsbuildinfo

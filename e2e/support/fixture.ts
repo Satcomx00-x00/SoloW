@@ -65,6 +65,11 @@ export const E2E_ENV = {
   SOLOW_ORCHESTRATOR_URL: `http://127.0.0.1:${PORTS.orchestrator}`,
   SOLOW_WORKTREE_ROOT: PATHS.worktrees,
   SOLOW_REPO_CACHE_ROOT: PATHS.repoCache,
+  /**
+   * Its own build directory, so running the suite cannot overwrite the output a
+   * `scripts/start.sh` stack is serving from the same checkout — see `next.config.mjs`.
+   */
+  SOLOW_NEXT_DIST_DIR: ".next-e2e",
 } as const;
 
 const git = (args: string[], cwd?: string) =>
@@ -81,11 +86,36 @@ function initRepo(dir: string, file: string, contents: string): void {
 }
 
 /**
+ * The marker that makes this run once per suite rather than once per process that loads the
+ * config — and the config is loaded by more processes than it looks.
+ *
+ * Playwright imports `playwright.config.ts` in the main runner *and* again in every worker it
+ * spawns, including each replacement worker it spawns after a test fails. That made this
+ * function run four times in one four-minute suite, and every call after the first deleted the
+ * database **while the web app and the orchestrator were running on it**.
+ *
+ * What that looks like from the outside is a haunting rather than an error. The servers keep
+ * their open handle to the now-unlinked file and go on reading and writing it perfectly happily;
+ * a `seed-cli` subprocess opens the *path* and gets the new, empty database. So the UI connects
+ * a repository, shows it connected, and is telling the truth — while the seeder one line later
+ * reports no such repository exists. Five specs failed that way, none of them near the cause.
+ *
+ * An environment variable rather than a module-level boolean, because the workers are separate
+ * processes: a module flag is per-process and would not stop a single one of these calls.
+ * Workers inherit the runner's environment at spawn, so setting it in the first call is what the
+ * later ones see. A fresh `playwright` invocation gets a fresh environment and rebuilds, which is
+ * the behaviour every run wants.
+ */
+const FIXTURE_BUILT = "SOLOW_E2E_FIXTURE_BUILT";
+
+/**
  * Rebuild the scratch root from scratch: fresh git fixture, fresh database, both tenants.
  * Starting clean matters — a stale Task left Running by an earlier run would make the happy
  * path assert against the wrong row.
  */
 export function prepareFixture(): void {
+  if (process.env[FIXTURE_BUILT] === "1") return;
+  process.env[FIXTURE_BUILT] = "1";
   rmSync(SCRATCH, { recursive: true, force: true });
   mkdirSync(PATHS.repo, { recursive: true });
   mkdirSync(PATHS.repo2, { recursive: true });
