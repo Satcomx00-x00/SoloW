@@ -170,8 +170,7 @@ async function loadRepositoryCredential(
     // The provider is whatever the row holds, not a member of a pair. Whether this build has a
     // driver for it is the caller's question, asked of the registry (F21).
     { provider: string; credential: ScmCredential; externalFullName: string },
-    typeof CommonErrorCode.NotFound | typeof IntegrationErrorCode.NotLinked
-  >
+    typeof CommonErrorCode.NotFound | typeof IntegrationErrorCode.NotLinked>
 > {
   const [repo] = await ctx.db
     .select()
