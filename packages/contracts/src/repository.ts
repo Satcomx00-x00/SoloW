@@ -23,6 +23,33 @@ export const connectRepositoryInput = z
         });
       }
     }
+    /*
+     * The other half of the same sentence, and defence in depth rather than the defence.
+     *
+     * A `local_path` location reaches the orchestrator as a host path — `manager.ts` returns it
+     * verbatim, `task-run.ts` bind-mounts it — and a *relative* one is completed from whatever
+     * directory the orchestrator process happens to be running in. `"."` therefore named SoloW's
+     * own checkout, and the Docker driver's mount guard mounted it read-write into the agent's
+     * container until it learned to refuse a source that is not absolute. That guard is still
+     * where this is enforced, because it is the last thing before `docker run` and it also sees
+     * paths that never came through this schema; what this adds is the Owner-facing half — the
+     * error arrives on the field they typed into, at the moment they typed it, rather than as a
+     * container that would not start three steps later.
+     *
+     * `startsWith("/")` and not `node:path`: this package is imported by the browser bundle, and
+     * every path this describes is a POSIX one on the orchestrator's host.
+     *
+     * Deliberately only on the *input* schema. `repositoryDto` still reads `location` as a plain
+     * string, so a row already stored by a deployment that predates this — however odd — keeps
+     * loading; the constraint applies to what is connected from now on.
+     */
+    if (val.source === "local_path" && !val.location.startsWith("/")) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["location"],
+        message: "local_path location must be an absolute path",
+      });
+    }
   });
 export type ConnectRepositoryInput = z.infer<typeof connectRepositoryInput>;
 

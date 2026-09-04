@@ -27,6 +27,7 @@ import {
   hasChanges,
   prepareRepository,
   provisionWorktree,
+  publishWorktreeBranch,
 } from "../../apps/orchestrator/src/worktree/manager.js";
 import { seedSetupFiles } from "../../apps/orchestrator/src/worktree/setup-files.js";
 import { hub } from "../../apps/orchestrator/src/ws/hub.js";
@@ -159,22 +160,35 @@ function deps(): TaskRunDeps {
     // One fixture runner whatever the catalog row's protocol says: the E2E proves the lifecycle,
     // not the protocol, and `packages/acp` covers that against a scripted peer (issue #58).
     runner: () => new FixtureAgentRunner(),
+    /*
+     * The fixture's own executor, not `createExecutorFor` (issue #96): the suite pins its roots
+     * to `PATHS`, while the factory reads the deployment's environment, and a fixture that ran
+     * against `.solow/worktrees` would be proving the lifecycle somewhere else entirely. Every
+     * profile the suite seeds is local, so there is nothing for a preflight to ask a daemon.
+     */
+    executorFor: () => executor,
+    preflight: async () => ({ ok: true, agentCommands: [] }),
     worktreeRoot: PATHS.worktrees,
     repoCacheRoot: PATHS.repoCache,
     logger: createLogger({ service: "e2e-orchestrator", destination: quietLogs }),
-    worktree: {
+    worktree: () => ({
       prepare: (params) => prepareRepository(executor, params),
       provision: (params) => provisionWorktree(executor, params),
       adopt: (repoPath, reportedPath) => adoptWorktree(executor, repoPath, reportedPath),
       seed: (params) => seedSetupFiles(executor, params),
       commit: (path, message, patterns) => commitWorktree(executor, path, message, patterns),
       discard: (path) => discardWorktreeChanges(executor, path),
+      // Every profile the suite seeds is local, so the Task works directly in the shared
+      // repository and this is the no-op branch of `publishWorktreeBranch` — wired anyway
+      // rather than stubbed, so a future containerised fixture publishes for real.
+      publish: (repoPath, upstreamPath, branch) =>
+        publishWorktreeBranch(executor, repoPath, upstreamPath, branch),
       cleanup: (repoPath, worktree) => cleanupWorktree(executor, repoPath, worktree),
       hasChanges: (path, patterns) => hasChanges(executor, path, patterns),
       // The real capture against the real worktree, so the E2E proves the diff a reviewer sees
       // is the diff git reports.
       diff: (path, patterns) => diffWorktree(executor, path, patterns),
-    },
+    }),
     hub,
     // The same process-wide registry the WebSocket hub looks in, so a frame the SPA sends
     // reaches this run's agent exactly as it would in a deployment.

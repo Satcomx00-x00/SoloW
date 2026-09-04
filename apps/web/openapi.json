@@ -10737,6 +10737,16 @@
                             "type": "string",
                             "minLength": 1
                           },
+                          "cpus": {
+                            "type": "number",
+                            "minimum": 0,
+                            "exclusiveMinimum": true,
+                            "maximum": 1024
+                          },
+                          "memoryMb": {
+                            "type": "integer",
+                            "minimum": 6
+                          },
                           "prepareScript": {
                             "type": "string",
                             "maxLength": 20000
@@ -10958,6 +10968,16 @@
                             "network": {
                               "type": "string",
                               "minLength": 1
+                            },
+                            "cpus": {
+                              "type": "number",
+                              "minimum": 0,
+                              "exclusiveMinimum": true,
+                              "maximum": 1024
+                            },
+                            "memoryMb": {
+                              "type": "integer",
+                              "minimum": 6
                             },
                             "prepareScript": {
                               "type": "string",
@@ -11240,6 +11260,16 @@
                             "type": "string",
                             "minLength": 1
                           },
+                          "cpus": {
+                            "type": "number",
+                            "minimum": 0,
+                            "exclusiveMinimum": true,
+                            "maximum": 1024
+                          },
+                          "memoryMb": {
+                            "type": "integer",
+                            "minimum": 6
+                          },
                           "prepareScript": {
                             "type": "string",
                             "maxLength": 20000
@@ -11457,6 +11487,16 @@
                             "network": {
                               "type": "string",
                               "minLength": 1
+                            },
+                            "cpus": {
+                              "type": "number",
+                              "minimum": 0,
+                              "exclusiveMinimum": true,
+                              "maximum": 1024
+                            },
+                            "memoryMb": {
+                              "type": "integer",
+                              "minimum": 6
                             },
                             "prepareScript": {
                               "type": "string",
@@ -11771,6 +11811,16 @@
                                   "network": {
                                     "type": "string",
                                     "minLength": 1
+                                  },
+                                  "cpus": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "exclusiveMinimum": true,
+                                    "maximum": 1024
+                                  },
+                                  "memoryMb": {
+                                    "type": "integer",
+                                    "minimum": 6
                                   },
                                   "prepareScript": {
                                     "type": "string",

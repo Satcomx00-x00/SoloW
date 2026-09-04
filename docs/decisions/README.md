@@ -41,3 +41,4 @@ Rules for this log ([per our conventions](../CONVENTIONS.md)):
 | [0020](./0020-provider-revalidation-not-expiry.md) | Cache provider reads by revalidation, never by expiry | Accepted |
 | [0021](./0021-commits-decide-the-version.md) | The commits decide the version, not the pull request | Accepted |
 | [0022](./0022-relicense-to-apache-2.md) | Relicense from AGPL-3.0-only to Apache-2.0 | Accepted |
+| [0023](./0023-docker-executor-cli.md) | Drive the container Executor through the `docker` CLI, one session container per Task | Accepted, amended 2026-09-03 |

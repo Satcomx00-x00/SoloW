@@ -5,7 +5,10 @@ name: Verify
 # says which gate failed without opening the log.
 #
 # The @critical isolation suite is the merge blocker (constitution Principle V,
-# TASK-026) — it runs inside the `e2e` job as part of the full suite.
+# TASK-026) — it runs inside the `e2e` job as part of the full suite. It runs Tasks on the
+# *local* executor, so the containerised half of that same claim is the `Smoke (Docker
+# executor)` and `Executor contract (live daemon)` steps below — the only gates anywhere
+# that start a container, and both of them fail rather than skip when no daemon answers.
 
 on:
   pull_request:
@@ -64,6 +67,34 @@ jobs:
       # remaining, separate gap.
       - name: Smoke (end-to-end lifecycle)
         run: make smoke
+
+      # The one gate that runs a container. Everything else about the Docker executor is a unit
+      # test against a fake host executor, and a fake agrees with whatever the driver says —
+      # three of the driver's claims were wrong in review and only a live run said so. Placed
+      # after the tests, where a red check needs no triage, and before the slower gates below.
+      #
+      # `SMOKE_DOCKER_REQUIRED` is the whole point of running it here: the script skips cleanly
+      # when no daemon answers, which is right on a laptop and would make this step report the
+      # same green whether the Docker executor works or was never exercised at all. Set, a
+      # runner without a daemon fails loudly instead. GitHub-hosted `ubuntu-latest` runners ship
+      # a running Docker daemon; a self-hosted runner that does not have one has to be given one.
+      - name: Smoke (Docker executor, live daemon)
+        env:
+          SMOKE_DOCKER_REQUIRED: "1"
+        run: make smoke-docker
+
+      # The other half of the live evidence, and it was opt-in until now: `docker.live.test.ts`
+      # runs the driver-agnostic Executor contract — and the differential cases that compare what
+      # the driver decided against what the daemon actually did — but only when someone sets
+      # `SOLOW_TEST_DOCKER=1` by hand. Without it the file registers one visible `it.skip` and
+      # passes, so `make test` above has been reporting green on a suite that never ran.
+      #
+      # `SMOKE_DOCKER_REQUIRED` is reused rather than a second switch invented: one variable
+      # decides, for both live gates, whether "no daemon" is a laptop's skip or a gate's failure.
+      - name: Executor contract (live daemon)
+        env:
+          SMOKE_DOCKER_REQUIRED: "1"
+        run: make test-docker-live
 
       - name: OpenAPI freshness
         run: make openapi-check

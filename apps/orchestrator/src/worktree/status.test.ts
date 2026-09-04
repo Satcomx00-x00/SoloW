@@ -152,6 +152,7 @@ function fakeGit(
     spawn: () => {
       throw new Error("not used");
     },
+    baseEnv: async () => ({}),
     fs: {} as Executor["fs"],
     forward: async () => ({ url: "", close: async () => {} }),
     metrics: async () => ({

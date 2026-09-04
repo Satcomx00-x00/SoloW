@@ -2,13 +2,20 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { describeExecutorContract } from "./contract.js";
 import { createLocalExecutor } from "./local.js";
 
 /**
- * The local `Executor` (issue #1). What matters here is the contract every future executor kind
- * (#46 #47 #48) must also satisfy: `fs` cannot be walked outside its root (AC-2), `spawn` hands
- * the child exactly the environment it was given and nothing of the host's own (AC-3), and `exec`
- * reports failure through the exit code rather than throwing.
+ * The local `Executor` (issue #1).
+ *
+ * Everything the interface promises *every* driver — the root jail (AC-2), the verbatim spawn
+ * environment (AC-3), `exec` reporting failure through the exit code rather than throwing — now
+ * lives in `contract.ts` and is run at the bottom of this file. That is what this file's header
+ * used to claim it was doing on its own: the claim only became true once a second driver was
+ * made to run the same cases (#96).
+ *
+ * What is left here is what is genuinely *local*: the answers that are correct precisely because
+ * the execution host is this process.
  */
 
 let root: string | undefined;
@@ -23,134 +30,33 @@ async function freshRoot(): Promise<string> {
   return root;
 }
 
-describe("fs — root-jailed (AC-2)", () => {
-  it("round-trips a file written and read back within the root", async () => {
-    const executor = createLocalExecutor(await freshRoot());
-    await executor.fs.writeFile("notes.txt", "hello\n");
-    expect(await executor.fs.exists("notes.txt")).toBe(true);
-    expect(await executor.fs.readFile("notes.txt")).toBe("hello\n");
-    expect(await executor.fs.list(".")).toContain("notes.txt");
-  });
-
-  it("writes into a nested directory that does not exist yet", async () => {
-    const executor = createLocalExecutor(await freshRoot());
-    await executor.fs.writeFile("nested/dir/file.txt", "deep\n");
-    expect(await executor.fs.readFile("nested/dir/file.txt")).toBe("deep\n");
-  });
-
-  it("copies a file within the root", async () => {
-    const executor = createLocalExecutor(await freshRoot());
-    await executor.fs.writeFile("src.txt", "copy me\n");
-    await executor.fs.copy("src.txt", "dest/copied.txt");
-    expect(await executor.fs.readFile("dest/copied.txt")).toBe("copy me\n");
-  });
-
-  it("reports a missing file as not existing rather than throwing", async () => {
-    const executor = createLocalExecutor(await freshRoot());
-    expect(await executor.fs.exists("nope.txt")).toBe(false);
-  });
-
-  it("rejects a relative traversal attempt out of the root", async () => {
-    const executor = createLocalExecutor(await freshRoot());
-    await expect(executor.fs.readFile("../../etc/passwd")).rejects.toThrow(/escapes executor root/);
-    await expect(executor.fs.exists("../outside.txt")).rejects.toThrow(/escapes executor root/);
-    await expect(executor.fs.writeFile("../escape.txt", "x")).rejects.toThrow(
-      /escapes executor root/,
-    );
-  });
-
-  it("rejects an absolute path outside the root", async () => {
-    const executor = createLocalExecutor(await freshRoot());
-    await expect(executor.fs.readFile("/etc/passwd")).rejects.toThrow(/escapes executor root/);
-  });
-
-  it("rejects a traversal that is disguised inside a longer relative path", async () => {
-    const executor = createLocalExecutor(await freshRoot());
-    // A naive `startsWith` jail check that skips resolving `..` segments would let this through.
-    await expect(executor.fs.readFile("nested/../../escape.txt")).rejects.toThrow(
-      /escapes executor root/,
-    );
-  });
-});
-
-describe("spawn — environment is verbatim (AC-3)", () => {
-  it("gives the child none of the parent's environment beyond what it was handed", async () => {
-    process.env["SOLOW_TEST_LEAK"] = "must-not-reach-the-child";
+describe("baseEnv — the base a caller shapes the child environment from", () => {
+  it("hands back the host's own environment, which is what a local child would inherit", async () => {
+    process.env["SOLOW_TEST_BASE"] = "from-the-host";
     try {
       const executor = createLocalExecutor(await freshRoot());
-      const proc = executor.spawn(["sh", "-c", 'echo "LEAK=[$SOLOW_TEST_LEAK]"'], {
-        cwd: root as string,
-        env: { PATH: process.env["PATH"] ?? "" },
-      });
-      const output = await new Response(proc.stdout as unknown as ReadableStream).text();
-      await proc.exited;
-      expect(output).toContain("LEAK=[]");
+      const base = await executor.baseEnv();
+      // The whole reason this member exists is that a container executor answers differently:
+      // for the local driver the host *is* the execution host, so the value must stay exactly
+      // what `task-run` used to read out of `process.env` itself — no behaviour change.
+      expect(base["SOLOW_TEST_BASE"]).toBe("from-the-host");
+      expect(base["PATH"]).toBe(process.env["PATH"] as string);
     } finally {
-      delete process.env["SOLOW_TEST_LEAK"];
+      delete process.env["SOLOW_TEST_BASE"];
     }
-  });
-
-  it("passes through exactly the environment it was given", async () => {
-    const executor = createLocalExecutor(await freshRoot());
-    const proc = executor.spawn(["sh", "-c", 'echo "MARKER=[$SOLOW_TEST_MARKER]"'], {
-      cwd: root as string,
-      env: { PATH: process.env["PATH"] ?? "", SOLOW_TEST_MARKER: "present" },
-    });
-    const output = await new Response(proc.stdout as unknown as ReadableStream).text();
-    await proc.exited;
-    expect(output).toContain("MARKER=[present]");
-  });
-
-  it("kill ends the process", async () => {
-    const executor = createLocalExecutor(await freshRoot());
-    const proc = executor.spawn(["sh", "-c", "sleep 30"], {
-      cwd: root as string,
-      env: { PATH: process.env["PATH"] ?? "" },
-    });
-    proc.kill();
-    const code = await proc.exited;
-    expect(code).not.toBe(0);
   });
 });
 
-describe("exec — one-shot commands never throw on failure", () => {
-  it("captures stdout and a zero exit code", async () => {
+describe("exec — the host's own environment is what gets merged into", () => {
+  it("hands the child the host's PATH, not a container's", async () => {
     const executor = createLocalExecutor(await freshRoot());
-    const result = await executor.exec(["sh", "-c", "echo hi"]);
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe("hi\n");
-  });
-
-  it("reports a non-zero exit code instead of throwing", async () => {
-    const executor = createLocalExecutor(await freshRoot());
-    const result = await executor.exec(["sh", "-c", "echo oops 1>&2; exit 3"]);
-    expect(result.exitCode).toBe(3);
-    expect(result.stderr).toBe("oops\n");
-  });
-
-  it("runs in the given cwd", async () => {
-    const dir = await freshRoot();
-    const executor = createLocalExecutor(dir);
-    const result = await executor.exec(["pwd"], { cwd: dir });
-    expect(result.stdout.trim()).toBe(dir);
-  });
-
-  it("merges the given env over the host's, rather than replacing it", async () => {
-    const executor = createLocalExecutor(await freshRoot());
-    const result = await executor.exec(["sh", "-c", 'echo "$GC_TEST_VAR"; echo "$PATH"'], {
+    const result = await executor.exec(["sh", "-c", 'echo "$PATH"'], {
       env: { GC_TEST_VAR: "supplied" },
     });
-    const [supplied, inherited] = result.stdout.trim().split("\n");
-    // Merged, unlike `spawn` (see the AC-3 suite above): this channel exists so `git` can be
-    // handed a credential, and a git that lost PATH and HOME would not run at all.
-    expect(supplied).toBe("supplied");
-    expect(inherited?.length ?? 0).toBeGreaterThan(0);
-  });
-
-  it("leaves the environment untouched when none is given", async () => {
-    const executor = createLocalExecutor(await freshRoot());
-    const result = await executor.exec(["sh", "-c", 'echo "[$GC_TEST_VAR]"']);
-    expect(result.stdout.trim()).toBe("[]");
+    // The contract only asks that *something* was inherited; for this driver the something is
+    // identifiable, and it is the host's own — which is exactly what makes the local driver the
+    // wrong place to run a Task that asked for isolation.
+    expect(result.stdout.trim()).toBe(process.env["PATH"] as string);
   });
 });
 
@@ -162,23 +68,35 @@ describe("forward and metrics and dispose", () => {
     await handle.close();
   });
 
-  it("metrics reports sane, typed values", async () => {
+  it("reports a real load average, which only a driver on the host can", async () => {
     const executor = createLocalExecutor(await freshRoot());
     const metrics = await executor.metrics();
-    expect(Array.isArray(metrics.loadAverage)).toBe(true);
+    // Deliberately *not* in the shared contract: `/proc/loadavg` inside a container reports the
+    // host's figures, so the Docker driver answers `[]` rather than passing off the
+    // orchestrator's load as the Task's. Here the host genuinely is the execution host.
     expect(metrics.loadAverage.length).toBeGreaterThan(0);
-    if (metrics.cpuPercent !== null) {
-      expect(metrics.cpuPercent).toBeGreaterThanOrEqual(0);
-      expect(metrics.cpuPercent).toBeLessThanOrEqual(100);
-    }
-    if (metrics.memPercent !== null) {
-      expect(metrics.memPercent).toBeGreaterThanOrEqual(0);
-      expect(metrics.memPercent).toBeLessThanOrEqual(100);
-    }
   });
 
   it("dispose resolves without touching anything (nothing to tear down locally)", async () => {
     const executor = createLocalExecutor(await freshRoot());
     await expect(executor.dispose()).resolves.toBeUndefined();
   });
+});
+
+/**
+ * The cross-driver contract, against the driver it was first written from.
+ *
+ * `docker.live.test.ts` runs the identical suite against a real daemon. If a case here is
+ * genuinely local-only it belongs above, not in `contract.ts` — the value of the suite is
+ * entirely in it being the same code for both.
+ */
+describeExecutorContract("local", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "gc-executor-contract-"));
+  return {
+    executor: createLocalExecutor(dir),
+    root: dir,
+    cleanup: async () => {
+      await rm(dir, { recursive: true, force: true });
+    },
+  };
 });

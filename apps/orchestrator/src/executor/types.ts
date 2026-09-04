@@ -87,6 +87,14 @@ export interface Executor {
   spawn(cmd: string[], opts: SpawnOpts): ProcessHandle;
   /** A one-shot command: git, du, version probes. Never throws on a non-zero exit. */
   exec(cmd: string[], opts?: ExecOpts): Promise<ExecResult>;
+  /**
+   * The environment a command run by this Executor would otherwise inherit — the host's for the
+   * local driver, the image's for a container one. `spawn` replaces the child's environment
+   * wholesale (Principle IV), so the *caller* must shape it from the right base: handing a
+   * containerised agent the orchestrator's own `PATH` and `HOME` describes a machine it is not
+   * running on, and it fails for reasons that have nothing to do with the Task.
+   */
+  baseEnv(): Promise<Record<string, string>>;
   fs: ExecutorFs;
   /** A dev-server preview (#35). Already reachable for the local executor; a real tunnel for remote ones. */
   forward(port: number): Promise<ForwardHandle>;
