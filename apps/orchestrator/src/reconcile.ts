@@ -263,6 +263,219 @@ export async function reportStrandedReviews(
   return reported;
 }
 
+/**
+ * The `failureReason` a Task carries when the run sleeping out its quota window never came back.
+ *
+ * Not a failure of the work: the worktree and its commits are untouched, and one Retry starts the
+ * round the sleep was supposed to start. What it names is that nothing will happen on its own —
+ * a Task showing `parked` says "waiting for a quota window", and this is the row saying that
+ * window closed hours ago with nobody there to notice.
+ *
+ * Written beside its writer rather than in `@solow/core` next to `STRANDED_REVIEW_REASON`, which
+ * is there because the board matches on it and gives it its own words. This one has no card
+ * treatment yet and falls into the generic reason badge; move it across in the change that gives
+ * it one, so there is never a reason string the board can render only as a machine name.
+ *
+ * Cleared by the park step itself when its sleep returns (`park-woke-` in task-run.ts, through
+ * `clearStrandedPark` below), so a run that was merely late is not still carrying a verdict that
+ * has been overtaken. Nothing else in the orchestrator clears it: `updateTaskState` in the web DAL
+ * does, when an operator moves the card, and that used to be the only thing that did.
+ */
+export const STRANDED_PARK_REASON = "park_never_resumed";
+
+/**
+ * Take that verdict back — but only from a row that is still the one it was written about.
+ *
+ * A conditional update rather than `setTaskState(db, ws, id, "parked", { failureReason: null })`,
+ * and the precondition is the whole point: `setTaskState` has none, and five hours is a long time
+ * to assume nothing moved. An operator who finished the Task or sent it back to `ready` while the
+ * run slept had that decision overwritten by the sleeper waking up, which then announced `parked`
+ * over the top of it — and the clobbered row dropped out of `reclaimOrphanedRuns` (it selects only
+ * `running`) into this sweep's own window. What the sleeper is entitled to take back is the
+ * verdict written *about* its sleep, never the state of a Task somebody else has since moved.
+ *
+ * The state test lives in the `where` so the read and the decision cannot come apart, and the
+ * answer is the write's own: `true` only if a `parked` row was still there to update. The caller
+ * announces on it — a row that moved has already been announced by whoever moved it.
+ *
+ * `updatedAt` moves with the clear, which is what stops this sweep reaching the same conclusion
+ * again while the woken round runs: the round leaves the Task reading `parked` throughout, so the
+ * row's own last write is half of what `reportStrandedParks` measures.
+ *
+ * Here rather than in `data.ts` beside `setTaskState` because it is this reason's inverse, and
+ * `reportStrandedParks` above is the only thing that writes it: the one write that takes a verdict
+ * back belongs next to the one that reaches it. A `setTaskState` able to carry an expected state
+ * would subsume this and should.
+ */
+export async function clearStrandedPark(
+  db: Db,
+  workspaceId: string,
+  taskId: string,
+): Promise<boolean> {
+  const cleared = await db
+    .update(task)
+    .set({ failureReason: null, updatedAt: new Date().toISOString() })
+    .where(and(eq(task.workspaceId, workspaceId), eq(task.id, taskId), eq(task.state, "parked")))
+    .returning({ id: task.id });
+  return cleared.length > 0;
+}
+
+/**
+ * How long the review gate waits for a person before the run gives up (`review_timeout`).
+ *
+ * The second copy of a value `task-run.ts` owns — the `timeout` on `await-review-`, exported there
+ * as `REVIEW_WAIT_TIMEOUT` — kept here for the same reason `PARK_WINDOW_MS` is: a sweep running
+ * every sixty seconds must not import the durable workflow module. It bounds guard 2 of
+ * `reportStrandedParks`, so the drift direction is the same one that matters everywhere in this
+ * file — grow the gate's wait without growing this, and the sweep starts condemning runs that are
+ * still legitimately waiting for a reviewer. `reconcile.test.ts` pins the two equal.
+ */
+export const REVIEW_WAIT_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * How long a parked run sleeps before it wakes itself up.
+ *
+ * The literal from `task-run.ts`'s park step — `step.sleepUntil(..., now + PARK_SLEEP_MS)` —
+ * restated here rather than imported, because the reconciler must not pull the durable workflow
+ * module (and everything it drags with it) into a sweep that runs every sixty seconds. That makes
+ * this a second copy of a value with one real owner, and the drift that matters has a direction:
+ * if the park step's window ever *grows* and this does not, the tell below starts firing on runs
+ * that are still legitimately asleep.
+ *
+ * So the duplication is pinned rather than trusted: the park step exports `PARK_SLEEP_MS`, and
+ * `reconcile.test.ts` asserts the two are equal. Changing one alone is a red test, not a sweep
+ * that starts condemning sleepers — which is the guarantee the comment on its own could not give.
+ */
+export const PARK_WINDOW_MS = 5 * 60 * 60 * 1000;
+
+/**
+ * The third way a run goes missing, and the one nothing at all was watching for.
+ *
+ * `running` heals through `reclaimOrphanedRuns` and `review` through `reportStrandedReviews`.
+ * `parked` — a run inside the five-hour `step.sleepUntil` that waits out a quota window — healed
+ * through neither: the reclaim sweep selects only `running` rows, and a sleeping run has no
+ * recorded decision to strand. Lose that run (an engine restarted without `--persist`, a redrive
+ * past its retry budget) and the Task reads `parked` for ever, nothing ever wakes it, and its
+ * executor container keeps the CPU reservation and memory ceiling it was given — the leak
+ * `reapOrphanedContainers` could not close, because every signal it reads says a run is coming
+ * back. Nothing on the board says why the Task never resumed, either.
+ *
+ * **What tells "lost" from "legitimately asleep" is the clock, and nothing but the clock**, which
+ * is why three things have to agree before anything is named:
+ *
+ * 1. **Not in `agentRegistry`.** Conclusive when it answers: registration spans the whole
+ *    `agent-run` step, so a run that woke and is working is always present. It matters more here
+ *    than in either neighbour, because the park step moves the Task out of `running` and nothing
+ *    ever moves it back — a woken run does its next round with the row still reading `parked`.
+ * 2. **Its Session is not at the review gate — or that gate's own wait has itself run out.** Same
+ *    row, later in that round: a run that woke, worked and finished leaves the Session
+ *    `awaiting_review` while the Task still reads `parked` (only an operator opening the gate
+ *    moves it), and then waits in `waitForEvent` for up to seven days. That is a run waiting for a
+ *    *person*, which is never stranded — the same distinction `reportStrandedReviews` draws, and
+ *    skipping it would condemn every Task that ever parked and then finished a round.
+ *
+ *    Left unbounded it was not a distinction but a permanent leak, because nothing else in the
+ *    orchestrator can reach such a row: `reportStrandedReviews` selects `task.state === "review"`
+ *    and a parked round never moves the Task there (`to-review-` records the completion and leaves
+ *    the Task state alone), while `heldByRun` reads `parked` with no reason as held for ever, so
+ *    the reaper never takes the container either. Reproduced with three sweeps at a clock forty
+ *    park windows out: nothing reported, nothing removed, and no later sweep that would. So the
+ *    skip now lasts exactly as long as the wait it stands for — `REVIEW_WAIT_MS +
+ *    RECLAIM_STALE_MS` of silence — after which either the run is gone or its own `waitForEvent`
+ *    has timed out and returned `review_timeout`, and in both of those the Task stays `parked`
+ *    with nothing coming to move it. That is the sentence this reason exists to say, even though
+ *    what actually ran out here was a reviewer's attention rather than a quota window; the row
+ *    names the state a person has to act on, and there is no second reason string for the shape.
+ * 3. **Silent for longer than a whole park window.** `PARK_WINDOW_MS + RECLAIM_STALE_MS` measured
+ *    from the last thing this Task or its Session actually did. A run still inside its window has
+ *    not reached its own wake-up time yet, so by construction it cannot be reported; a run that
+ *    passed it and produced nothing has missed a deadline it set itself.
+ *
+ * **The worst case when it is wrong** is an engine so backed up that a wake-up is more than a
+ * whole park window plus ten minutes late. The Task keeps its state, its worktree and its commits
+ * — this writes a reason and nothing else — and if the reaper has meanwhile taken the container,
+ * `ensureContainer` finds nothing to adopt and builds a fresh one over the same host worktree,
+ * re-running the profile's prepare script. Verified on Docker 29.7.2 against a real container:
+ * after a `docker rm -f` the resumed executor rebuilt and started it, the bind-mounted worktree
+ * read back byte-identical, and the only thing lost was a file written inside the container's own
+ * filesystem.
+ *
+ * **"Rebuild, never the work" is the good case, not the guaranteed one, and the correction is why
+ * two things now stand between a stamp and a removal.** A `docker rm -f` issued while an exec is
+ * running in the container kills that exec with 137 — verified on 29.7.2 — and a prepare script
+ * killed that way becomes an `ExecutorUnavailableError` that fails the round. Nothing rebuilds
+ * anything in that story. The exposure was not "until the round ends" either: the Task stays
+ * `parked` for the whole of the round a woken run does, and only an operator moving the card
+ * cleared `failureReason`, so an overtaken stamp stayed readable to the reaper across every gap
+ * between that round's durable steps.
+ *
+ * So the park step now clears the reason the moment its sleep returns, before the round it wakes
+ * into reaches an executor — and only while the row still reads `parked`, since a Task an operator
+ * moved during the sleep is theirs and not the sleeper's — and `reap.ts` measures its
+ * `RECLAIM_STALE_MS` quiet window from a Task row's own last write rather than from what that row
+ * says. What is left is a wake-up whose clearing write never lands at all: the process dies
+ * between the sleep returning and that step committing. Covering it means the run lifecycle
+ * publishing a container's existence before an agent exists to own it, since the container is
+ * built inside `executor-preflight`, a durable step that holds no `AgentHandle` to register: a
+ * change to the run lifecycle, and not one any sweep can make.
+ *
+ * Like its twin this names the condition and does not act on it: the Task stays `parked`, so the
+ * row still says what happened, and a person retries. Applying anything here would be a second
+ * orchestration path over worktrees the durable run owns.
+ */
+export async function reportStrandedParks(
+  db: Db,
+  registry: Pick<AgentRegistry, "get">,
+  hub: Pick<EventHub, "publish" | "boardChannel" | "taskChannel">,
+  now: () => Date = () => new Date(),
+): Promise<number> {
+  const parked = await db
+    .select({ id: task.id, workspaceId: task.workspaceId, updatedAt: task.updatedAt })
+    .from(task)
+    .where(and(eq(task.state, "parked"), isNull(task.failureReason)));
+
+  let reported = 0;
+  for (const row of parked) {
+    if (registry.get(row.workspaceId, row.id)) continue;
+
+    const [newest] = await db
+      .select({ id: session.id, state: session.state, startedAt: session.startedAt })
+      .from(session)
+      .where(and(eq(session.workspaceId, row.workspaceId), eq(session.taskId, row.id)))
+      .orderBy(desc(session.startedAt))
+      .limit(1);
+
+    // The newest sign of life from either half of the pair, because they record different halves
+    // of the same round: the Session carries everything the agent said, and the Task row carries
+    // the park itself. Taking only one of them would read a run that had just parked, or one
+    // mid-round in a Session that has not spoken for a while, as older than it is.
+    const spokeAt = newest ? await latestActivity(db, newest.id, newest.startedAt) : row.updatedAt;
+    const lastSpoke = Math.max(Date.parse(spokeAt), Date.parse(row.updatedAt));
+    // Guards 2 and 3 are one comparison against two different windows, because they are the same
+    // question asked about two different waits: a Session at the gate is inside a seven-day one,
+    // and everything else is inside a five-hour one. Neither is open-ended.
+    const waiting =
+      newest?.state === "awaiting_review"
+        ? REVIEW_WAIT_MS + RECLAIM_STALE_MS
+        : PARK_WINDOW_MS + RECLAIM_STALE_MS;
+    if (now().getTime() - lastSpoke < waiting) continue;
+
+    await setTaskState(db, row.workspaceId, row.id, "parked", {
+      failureReason: STRANDED_PARK_REASON,
+    });
+    const message = {
+      kind: "status" as const,
+      taskId: row.id,
+      state: "parked" as const,
+      at: now().toISOString(),
+    };
+    hub.publish(hub.boardChannel(row.workspaceId), message);
+    hub.publish(hub.taskChannel(row.workspaceId, row.id), message);
+    reported += 1;
+  }
+  return reported;
+}
+
 /** When this Session last produced anything, falling back to when it began. */
 async function latestActivity(db: Db, sessionId: string, startedAt: string): Promise<string> {
   const [newest] = await db

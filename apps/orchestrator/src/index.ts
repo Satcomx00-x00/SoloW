@@ -16,10 +16,12 @@ import { prepareAgentEnv } from "./billing/guard.js";
 import { loadAgentProbeContext, updateAgentCatalogCapabilities } from "./data.js";
 import { orchestratorEnv } from "./env.js";
 import { createLocalExecutor } from "./executor/local.js";
+import { reapOrphanedContainers } from "./executor/reap.js";
+import type { Executor } from "./executor/types.js";
 import { inngest } from "./inngest/client.js";
 import { handleEventPost } from "./inngest/events.js";
 import { INNGEST_FUNCTIONS, inngestServeHandler } from "./inngest/serve.js";
-import { reclaimOrphanedRuns, reportStrandedReviews } from "./reconcile.js";
+import { reclaimOrphanedRuns, reportStrandedParks, reportStrandedReviews } from "./reconcile.js";
 import { hub } from "./ws/hub.js";
 import { attachSubscriber } from "./ws/replay.js";
 
@@ -44,6 +46,15 @@ export interface WsServerDeps {
   streamSecret: string;
   /** Where a client's input or stop is routed — the agent running that Task, if any. */
   registry: AgentRegistry;
+  /**
+   * How the container reaper reaches the Docker daemon (issue #96).
+   *
+   * A host `Executor`, not a Docker client: the reaper composes `docker ps` / `docker rm` argv
+   * the same way the driver does, which is what keeps "exactly one file touches the host" true
+   * with a container driver in the tree. Injectable so the fake-deps tests can drive the sweep
+   * without a daemon.
+   */
+  dockerHost: Executor;
 }
 
 function defaultWsDeps(): WsServerDeps {
@@ -52,6 +63,9 @@ function defaultWsDeps(): WsServerDeps {
     now: () => Date.now(),
     streamSecret: orchestratorEnv().SOLOW_STREAM_SECRET,
     registry: agentRegistry,
+    // `process.cwd()` as its root because the reaper uses only `exec`, and every command it
+    // issues names what it acts on. In idiom with `handleProbePost` below.
+    dockerHost: createLocalExecutor(process.cwd()),
   };
 }
 
@@ -353,6 +367,111 @@ const RECONCILE_GRACE_MS = 20_000;
 const RECONCILE_INTERVAL_MS = 60_000;
 
 /**
+ * What one sweep needs, which is less than the server has.
+ *
+ * `Pick<WsServerDeps, ...>` would drag the whole `AgentRegistry` class in, and every arm here
+ * asks it exactly one question — the same `Pick<AgentRegistry, "get">` the reconcilers themselves
+ * take. A `WsServerDeps` satisfies this structurally, so the production call site is unchanged.
+ */
+export interface SweepDeps {
+  db: Db;
+  registry: Pick<AgentRegistry, "get">;
+  dockerHost: Executor;
+}
+
+/**
+ * One pass of the reconciliation sweep, in two phases: everything that writes a verdict onto a
+ * Task row, and then the reaper that reads those verdicts off the host's containers.
+ *
+ * A named function rather than a closure inside the server, so the wiring itself can be driven in
+ * a test with an injected clock (`reap.test.ts`, "the sweep it is an arm of"). That test exists
+ * because the arm below was missing for a whole round while every unit test around it passed:
+ * `reportStrandedParks` was written, tested and correct, this list had three entries, and the
+ * container leak it closes stayed open in production the entire time.
+ *
+ * **The phases are ordered, and the concurrency they replaced was itself a defect.** The first
+ * three start from Task rows and write verdicts onto them; the reaper starts from the *host* and
+ * reads those same rows as evidence of life — it is a reader of what the other three write. Run
+ * inside one `Promise.all` it raced them, and lost: reproduced on Docker 29.7.2, where the sweep
+ * that stamped a stranded park read the row before the stamp landed and reasoned from a table that
+ * was already out of date. A sweep runs every sixty seconds, so the cost of that was survivable —
+ * which is exactly why it has to be a decision rather than an accident. Ordering costs one extra
+ * round trip to a local SQLite file and makes each pass act on the table as that pass left it.
+ *
+ * **Ordering is not the same as removing in the same pass, and it never is.** `reap.ts` waits a
+ * quiet window out from a Task row's own last write whatever that row says, so a verdict any of
+ * the three above stamps on this pass is acted on ten minutes later, not now. That used not to
+ * hold for `reclaimOrphanedRuns` — the `failed` row it writes was reapable with no cushion at all,
+ * which is how a `running` Task inside a long `executor-preflight` had its live container removed
+ * by the same sweep call that condemned it, reproduced here in one pass. Verified live end to end
+ * for the park case: first sweep stamps and keeps, a later sweep removes.
+ *
+ * What the ordering still buys is that the reaper reads a table this pass has finished writing
+ * rather than one it is racing — reproduced on Docker 29.7.2, where the concurrent version read a
+ * row before the stranded-park stamp landed and reasoned from a table already out of date.
+ *
+ * The three inside phase one stay concurrent: they select disjoint sets of rows (`running`,
+ * `review` with no reason, `parked` with no reason) and none of them reads what another writes.
+ *
+ * Each phase keeps its own `catch`, and that is load-bearing rather than tidy. A failed sweep must
+ * never stop the next one — the reasons these throw (a locked database, a transient driver error)
+ * are exactly the transient kind — and under the single shared `catch` this used to have, a
+ * throwing tell would now also skip the reaper for that pass, so making the phases sequential
+ * would have quietly cost coverage.
+ */
+export async function reconcileSweep(
+  deps: SweepDeps,
+  now: () => Date = () => new Date(),
+): Promise<void> {
+  await Promise.all([
+    reclaimOrphanedRuns(deps.db, deps.registry, hub, now).then((count) => {
+      if (count > 0) {
+        console.log(`[solow/orchestrator] reclaimed ${count} orphaned running task(s)`);
+      }
+    }),
+    // The second way a run goes missing: a Task at the gate whose decision was recorded and never
+    // applied, because the run holding the wait is gone.
+    reportStrandedReviews(deps.db, deps.registry, hub, now).then((count) => {
+      if (count > 0) {
+        console.log(`[solow/orchestrator] ${count} review decision(s) were never applied`);
+      }
+    }),
+    // And the third, which nothing was watching at all: a run inside the five-hour park sleep that
+    // never woke. The reaper below cannot reach that container on its own — every signal it reads
+    // says a run is coming back — so this is the sweep that has to speak before it looks.
+    reportStrandedParks(deps.db, deps.registry, hub, now).then((count) => {
+      if (count > 0) {
+        console.log(`[solow/orchestrator] ${count} parked task(s) never resumed`);
+      }
+    }),
+  ]).catch(sweepFailed);
+
+  /*
+   * Then the container a lost run was running in (issue #96). An arm of this sweep rather than a
+   * boot-only hook, because boot-only is exactly the incident `RECONCILE_INTERVAL_MS` above
+   * documents — and a container leaked at 13:54 holds its CPU reservation and its memory ceiling
+   * for the same ninety minutes, where nobody can even see it from the board.
+   *
+   * The inference runs the other way from the three above: it starts at the host and asks whether
+   * a container still belongs to something, so the database and the registry are evidence of life
+   * rather than a list of things to kill. It resolves rather than throwing on a host with no
+   * Docker — see `reap.ts`, and the `catch` here, which would otherwise print a failed sweep every
+   * sixty seconds for ever.
+   */
+  await reapOrphanedContainers(deps.dockerHost, deps.db, deps.registry, now)
+    .then((count) => {
+      if (count > 0) {
+        console.log(`[solow/orchestrator] removed ${count} orphaned executor container(s)`);
+      }
+    })
+    .catch(sweepFailed);
+}
+
+function sweepFailed(cause: unknown): void {
+  console.error("[solow/orchestrator] reconciliation sweep failed:", cause);
+}
+
+/**
  * Long-lived orchestrator process (Decision 0002): hosts the WebSocket hub and the Inngest
  * functions. Serverless-style Next.js cannot hold these, so they run here.
  */
@@ -360,31 +479,9 @@ export function startWebSocketServer(
   port = orchestratorEnv().SOLOW_WS_PORT,
   deps: WsServerDeps = defaultWsDeps(),
 ) {
-  // A failed sweep must never stop the next one: the reasons this throws (a locked database, a
-  // transient driver error) are exactly the transient kind, and a net that retires on its first
-  // stumble is the shape of the bug this schedule replaced.
-  const sweep = () =>
-    Promise.all([
-      reclaimOrphanedRuns(deps.db, deps.registry, hub).then((count) => {
-        if (count > 0) {
-          console.log(`[solow/orchestrator] reclaimed ${count} orphaned running task(s)`);
-        }
-      }),
-      // The same sweep's other half: a Task at the gate whose decision was recorded and never
-      // applied, because the run holding the wait is gone. Run together so one schedule covers
-      // both ways a run goes missing.
-      reportStrandedReviews(deps.db, deps.registry, hub).then((count) => {
-        if (count > 0) {
-          console.log(`[solow/orchestrator] ${count} review decision(s) were never applied`);
-        }
-      }),
-    ]).catch((cause) => {
-      console.error("[solow/orchestrator] reconciliation sweep failed:", cause);
-    });
-
   setTimeout(() => {
-    void sweep();
-    setInterval(() => void sweep(), RECONCILE_INTERVAL_MS);
+    void reconcileSweep(deps);
+    setInterval(() => void reconcileSweep(deps), RECONCILE_INTERVAL_MS);
   }, RECONCILE_GRACE_MS);
 
   return Bun.serve<WsData>({

@@ -5,9 +5,11 @@ import { Writable } from "node:stream";
 import {
   type AgentProtocol,
   type ExecutorConfig,
+  type RepositorySource,
   TaskErrorCode,
   WIDGET_ANSWER_PREFIX,
 } from "@solow/contracts";
+import { CREDENTIAL_EXPIRED_REASON } from "@solow/core";
 import {
   agentCatalog,
   agentProfile,
@@ -38,12 +40,16 @@ import type {
   AgentStreamEvent,
 } from "../../agent/runner.js";
 import type { AgentLaunchSettings } from "../../agent/runners.js";
-import { listTaskEventsSince } from "../../data.js";
-import { RepositoryUnusableError } from "../../worktree/manager.js";
+import { listTaskEventsSince, setTaskState } from "../../data.js";
+import type { ExecutorFactoryOpts } from "../../executor/factory.js";
+import type { Executor } from "../../executor/types.js";
+import { STRANDED_PARK_REASON } from "../../reconcile.js";
+import { RepositoryUnusableError, worktreePath } from "../../worktree/manager.js";
 import {
   runTaskLifecycle,
   type StepLike,
   type TaskRunDeps,
+  type WorktreeOps,
   widgetAnswerMessage,
 } from "./task-run.js";
 
@@ -83,6 +89,13 @@ interface ExtraRepository {
   setupFilePatterns?: string[];
   /** Defaults to the Task's derived branch, which is what the DAL would have written. */
   checkoutBranch?: string;
+  /**
+   * Defaults to a local path under `/srv`, like the primary. A test that cares where a *cloned*
+   * repository lands names a `remote_url` and a URL, because that one is resolved into the shared
+   * clone cache rather than used where it stands.
+   */
+  source?: RepositorySource;
+  location?: string;
 }
 
 async function seedRun(
@@ -102,6 +115,12 @@ async function seedRun(
     checkoutBranch?: string;
     /** Extra Repositories attached after the primary, in the order given (issue #7). */
     extraRepositories?: ExtraRepository[];
+    /**
+     * Where the primary Repository lives. Defaults to a path of the Task's own, so most tests
+     * describe Tasks that happen to share nothing; a test about isolation between two Tasks on
+     * **one** Repository has to say so, because that is the case the mount set gets wrong.
+     */
+    repositoryLocation?: string;
   } = {},
 ): Promise<void> {
   await db.insert(workspace).values({ id: ids.workspaceId, name: "WS", ownerUserId: "owner" });
@@ -149,7 +168,7 @@ async function seedRun(
     workspaceId: ids.workspaceId,
     name: "repo",
     source: "local_path",
-    location: `/srv/${ids.taskId}`,
+    location: opts.repositoryLocation ?? `/srv/${ids.taskId}`,
     ...(opts.setupFilePatterns ? { setupFilePatterns: opts.setupFilePatterns } : {}),
   });
   const issueId = `issue-${ids.taskId}`;
@@ -178,8 +197,8 @@ async function seedRun(
       id: extraRepoId,
       workspaceId: ids.workspaceId,
       name: extra.name,
-      source: "local_path",
-      location: `/srv/${ids.taskId}-${extra.key}`,
+      source: extra.source ?? "local_path",
+      location: extra.location ?? `/srv/${ids.taskId}-${extra.key}`,
       ...(extra.setupFilePatterns ? { setupFilePatterns: extra.setupFilePatterns } : {}),
     });
     await db.insert(taskRepository).values({
@@ -345,6 +364,8 @@ interface Spies {
   provisionedFrom: Array<{ path: string; baseRef: string | null; checkoutBranch: string | null }>;
   /** The patterns each diff/commit was told to exclude — how AC-4 becomes observable. */
   excluded: string[][];
+  /** Every branch moved into the Repository the Owner has, and out of which repository. */
+  publishedBranches: Array<{ repoPath: string; upstreamPath: string; branch: string }>;
   /** Which worktree each plural operation acted on (issue #7): one entry per worktree. */
   committed: string[];
   discarded: string[];
@@ -352,16 +373,59 @@ interface Spies {
   diffed: string[];
 }
 
+/**
+ * A stand-in for the executor the lifecycle now builds per run (issue #96).
+ *
+ * `baseEnv` answers what the local driver answers, because that is what the agent environment
+ * was shaped from before the seam existed and none of these tests are about the change. Only
+ * `dispose` is observed: it is the one member the lifecycle itself calls, and the `finally` that
+ * calls it is new behaviour worth pinning.
+ */
+function fakeExecutor(): Executor & { disposed: number } {
+  const unimplemented = (member: string) => () => {
+    throw new Error(`the lifecycle should not reach the executor's ${member}`);
+  };
+  const executor = {
+    disposed: 0,
+    spawn: unimplemented("spawn"),
+    exec: unimplemented("exec"),
+    baseEnv: async () =>
+      Object.fromEntries(Object.entries(process.env).filter(([, v]) => v !== undefined)) as Record<
+        string,
+        string
+      >,
+    fs: {
+      exists: unimplemented("fs.exists"),
+      readFile: unimplemented("fs.readFile"),
+      writeFile: unimplemented("fs.writeFile"),
+      list: unimplemented("fs.list"),
+      copy: unimplemented("fs.copy"),
+    },
+    forward: unimplemented("forward"),
+    metrics: unimplemented("metrics"),
+    dispose: async () => {
+      executor.disposed += 1;
+    },
+  } as unknown as Executor & { disposed: number };
+  return executor;
+}
+
 function makeDeps(
   db: TestDb,
   runner: AgentRunner,
   logStream: NodeJS.WritableStream,
-): { deps: TaskRunDeps; spies: Spies } {
+): {
+  deps: TaskRunDeps;
+  spies: Spies;
+  ops: WorktreeOps;
+  executor: Executor & { disposed: number };
+} {
   const spies: Spies = {
     commit: 0,
     discard: 0,
     cleanup: 0,
     published: [],
+    publishedBranches: [],
     seeded: [],
     provisioned: [],
     provisionedFrom: [],
@@ -371,69 +435,84 @@ function makeDeps(
     cleaned: [],
     diffed: [],
   };
+  /*
+   * One operations object, handed back so a test can still reach in and make `provision` throw.
+   * The lifecycle now asks for these *per executor*, but the fake has one execution host, so
+   * binding is a closure over this object rather than a second set of fakes per call.
+   */
+  const ops: WorktreeOps = {
+    // Distinct per attachment, mirroring `worktreePath`: the primary keeps the Task's own
+    // path so nothing about a single-Repository Task moves.
+    prepare: async (p) =>
+      p.attachmentId ? `/repo/${p.taskId}--${p.attachmentId}` : `/repo/${p.taskId}`,
+    provision: async (p) => {
+      const suffix = p.attachmentId ? `--${p.attachmentId}` : "";
+      const path = `/wt/solow-task-${p.taskId}${suffix}`;
+      spies.provisioned.push(path);
+      spies.provisionedFrom.push({
+        path,
+        baseRef: p.baseRef ?? null,
+        checkoutBranch: p.checkoutBranch ?? null,
+      });
+      return {
+        path,
+        branch: p.checkoutBranch ?? `solow/task-${p.taskId}`,
+        repoPath: p.attachmentId ? `/repo/${p.taskId}--${p.attachmentId}` : `/repo/${p.taskId}`,
+      };
+    },
+    // Stands in for git confirming the agent's worktree really belongs to the repository.
+    adopt: async (repoPath, reported) => {
+      if (!reported) throw new Error("agent did not report a workspace");
+      // `claude --worktree <name>` names the branch after the worktree, and the real `adopt`
+      // reads whatever git reports; the fake mirrors that shape.
+      return { path: reported, branch: reported.split("/").pop() ?? "", repoPath };
+    },
+    seed: async (params) => {
+      spies.seeded.push(params);
+      return { copied: params.patterns.length, unmatched: [], failed: 0 };
+    },
+    commit: async (path, _message, patterns) => {
+      spies.commit += 1;
+      spies.committed.push(path);
+      spies.excluded.push(patterns);
+    },
+    discard: async (path) => {
+      spies.discard += 1;
+      spies.discarded.push(path);
+    },
+    publish: async (repoPath, upstreamPath, branch) => {
+      spies.publishedBranches.push({ repoPath, upstreamPath, branch });
+    },
+    cleanup: async (_repoPath, worktree) => {
+      spies.cleanup += 1;
+      spies.cleaned.push(worktree);
+    },
+    hasChanges: async () => true,
+    diff: async (path, patterns) => {
+      spies.diffed.push(path);
+      spies.excluded.push(patterns);
+      return {
+        files: [{ path: "src/latch.ts", status: "modified" as const, additions: 4, deletions: 1 }],
+        patch: "--- a/src/latch.ts\n+++ b/src/latch.ts\n",
+        truncated: false,
+      };
+    },
+  };
+  const executor = fakeExecutor();
   const deps: TaskRunDeps = {
     db,
     runner: () => runner,
+    // The lifecycle builds the executor from the Task's profile; the fake ignores the profile
+    // because every test here seeds a local one, and the tests that care about a *docker* one
+    // are about the preflight verdict rather than about which driver answered.
+    executorFor: () => executor,
+    // A host that is ready. The failure path is driven by the tests that override this — nothing
+    // here should reach a daemon.
+    preflight: async () => ({ ok: true, agentCommands: [] }),
     worktreeRoot: "/wt",
     repoCacheRoot: "/cache",
     logger: createLogger({ service: "orchestrator", destination: logStream }),
-    worktree: {
-      // Distinct per attachment, mirroring `worktreePath`: the primary keeps the Task's own
-      // path so nothing about a single-Repository Task moves.
-      prepare: async (p) =>
-        p.attachmentId ? `/repo/${p.taskId}--${p.attachmentId}` : `/repo/${p.taskId}`,
-      provision: async (p) => {
-        const suffix = p.attachmentId ? `--${p.attachmentId}` : "";
-        const path = `/wt/solow-task-${p.taskId}${suffix}`;
-        spies.provisioned.push(path);
-        spies.provisionedFrom.push({
-          path,
-          baseRef: p.baseRef ?? null,
-          checkoutBranch: p.checkoutBranch ?? null,
-        });
-        return {
-          path,
-          branch: p.checkoutBranch ?? `solow/task-${p.taskId}`,
-          repoPath: p.attachmentId ? `/repo/${p.taskId}--${p.attachmentId}` : `/repo/${p.taskId}`,
-        };
-      },
-      // Stands in for git confirming the agent's worktree really belongs to the repository.
-      adopt: async (repoPath, reported) => {
-        if (!reported) throw new Error("agent did not report a workspace");
-        // `claude --worktree <name>` names the branch after the worktree, and the real `adopt`
-        // reads whatever git reports; the fake mirrors that shape.
-        return { path: reported, branch: reported.split("/").pop() ?? "", repoPath };
-      },
-      seed: async (params) => {
-        spies.seeded.push(params);
-        return { copied: params.patterns.length, unmatched: [], failed: 0 };
-      },
-      commit: async (path, _message, patterns) => {
-        spies.commit += 1;
-        spies.committed.push(path);
-        spies.excluded.push(patterns);
-      },
-      discard: async (path) => {
-        spies.discard += 1;
-        spies.discarded.push(path);
-      },
-      cleanup: async (_repoPath, worktree) => {
-        spies.cleanup += 1;
-        spies.cleaned.push(worktree);
-      },
-      hasChanges: async () => true,
-      diff: async (path, patterns) => {
-        spies.diffed.push(path);
-        spies.excluded.push(patterns);
-        return {
-          files: [
-            { path: "src/latch.ts", status: "modified" as const, additions: 4, deletions: 1 },
-          ],
-          patch: "--- a/src/latch.ts\n+++ b/src/latch.ts\n",
-          truncated: false,
-        };
-      },
-    },
+    worktree: () => ops,
     hub: {
       taskChannel: (w, t) => `ws:${w}:task:${t}`,
       boardChannel: (w) => `ws:${w}:board`,
@@ -442,7 +521,7 @@ function makeDeps(
     },
     registry: new AgentRegistry(),
   };
-  return { deps, spies };
+  return { deps, spies, ops, executor };
 }
 
 function nullStream(): NodeJS.WritableStream {
@@ -534,6 +613,151 @@ describe("runTaskLifecycle (integration)", () => {
     expect(sleeps).toBe(1); // parked once
     expect(result.result).toBe("done");
     expect(await taskState(db, ids.taskId)).toBe("done");
+  });
+
+  it("a run woken from a Park clears the stranded stamp before its next round starts", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const runner = new ScriptedRunner([
+      { kind: "failed", signal: { quotaExhausted: true } },
+      { kind: "completed" },
+    ]);
+
+    /*
+     * The reason `park_never_resumed` is on this row at all: `reportStrandedParks` decided, while
+     * this run was asleep, that it was never coming back — which an engine backed up past the
+     * sweep's window is enough to produce, and the sweep says as much.
+     *
+     * Nothing used to take it off again. The Task stays `parked` for the whole of the round this
+     * wakes into (only an operator opening the gate moves it), and `resume-` is reached only by a
+     * Task that got as far as `review` — so the stamp stayed readable to the container reaper
+     * across every gap between this round's durable steps, and `reap.ts` reads `parked` + that
+     * reason as "no run is in here". Verified on Docker 29.7.2 what that costs when the run is in
+     * fact alive: `docker rm -f` on a container with a running exec kills it with 137, which
+     * `ensureContainer` reports as an `ExecutorUnavailableError` that fails the round.
+     */
+    const stamped: StepLike = {
+      ...scriptedStep(["approve"]),
+      sleepUntil: async () => {
+        await setTaskState(db, ids.workspaceId, ids.taskId, "parked", {
+          failureReason: STRANDED_PARK_REASON,
+        });
+      },
+    };
+
+    // Read at the moment each round's agent is started, because *when* the row is clean is the
+    // whole property: a clear that landed after the executor had built its container would leave
+    // the window this closes exactly as wide as it was.
+    const atStart: Array<Promise<string>> = [];
+    const watched: AgentRunner = {
+      start: (opts) => {
+        atStart.push(taskFailureReason(db, ids.taskId));
+        return runner.start(opts);
+      },
+    };
+    const { deps } = makeDeps(db, watched, nullStream());
+
+    const result = await runTaskLifecycle(deps, { event: { data: ids }, step: stamped });
+
+    expect(runner.starts).toBe(2);
+    expect(await Promise.all(atStart)).toEqual(["", ""]);
+    expect(await taskFailureReason(db, ids.taskId)).toBe("");
+    expect(result.result).toBe("done");
+  });
+
+  it("a Park clears a reason it carried in, so the row is not unreachable by every sweep at once", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const runner = new ScriptedRunner([
+      { kind: "failed", signal: { quotaExhausted: true } },
+      { kind: "completed" },
+    ]);
+
+    /*
+     * A reason already on the row when the quota runs out. `setTaskState` writes `failure_reason`
+     * only when it is handed one, so the park used to carry whatever was there straight through —
+     * and `parked` + a reason is the one combination no sweep can act on: `heldByRun` reads any
+     * reason other than `STRANDED_PARK_REASON` as a run still sitting in here, and
+     * `reportStrandedParks` selects `isNull(failure_reason)`, so the sweep that would have
+     * stamped it never sees the row. The container is then unreachable by every path that
+     * removes one, for the life of the deployment.
+     *
+     * `credential_expired` is the shape that gets here in practice — a reason written by an
+     * earlier round's classifier, on a Task that goes on to exhaust its quota.
+     */
+    await setTaskState(db, ids.workspaceId, ids.taskId, "running", {
+      failureReason: CREDENTIAL_EXPIRED_REASON,
+    });
+
+    // Read inside the sleep, which is the only moment that matters: this is the window the
+    // container reaper looks at, and a clear that landed after it would leave it exactly as wide.
+    let whileParked = "";
+    const step: StepLike = {
+      ...scriptedStep(["approve"]),
+      sleepUntil: async () => {
+        whileParked = await taskFailureReason(db, ids.taskId);
+      },
+    };
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    const result = await runTaskLifecycle(deps, { event: { data: ids }, step });
+
+    expect(whileParked).toBe("");
+    expect(await taskState(db, ids.taskId)).toBe("done");
+    expect(result.result).toBe("done");
+  });
+
+  it("a run woken from a Park does not undo what an operator did while it slept", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const runner = new ScriptedRunner([
+      { kind: "failed", signal: { quotaExhausted: true } },
+      { kind: "completed" },
+    ]);
+
+    /*
+     * Five hours is a long time to assume nothing moved. The card is on the board the whole time
+     * reading `parked`, and the two things an operator can do with it — finish it, or retry it —
+     * are exactly what the web DAL's `updateTaskState` writes: a new state with the reason
+     * cleared. This models the finish, because it is the one whose loss is silent.
+     *
+     * The step that wakes up used to write `parked` back over it unconditionally (`setTaskState`
+     * has no precondition at all), and then announce `parked` to the board on top of the
+     * operator's own state. The row it left behind was out of `reclaimOrphanedRuns`' reach — that
+     * sweep selects only `running` — and inside `reportStrandedParks`' window, so the decision
+     * did not merely flicker; it was gone and nothing was watching for it.
+     */
+    const operatorMoved: StepLike = {
+      ...scriptedStep(["approve"]),
+      sleepUntil: async () => {
+        await setTaskState(db, ids.workspaceId, ids.taskId, "done", { failureReason: null });
+      },
+    };
+
+    // Read where the round actually begins, for the same reason the case above does: a revert
+    // that landed and was corrected later would still have raced whatever the operator did next.
+    const atStart: Array<Promise<string>> = [];
+    const watched: AgentRunner = {
+      start: (opts) => {
+        atStart.push(taskState(db, ids.taskId));
+        return runner.start(opts);
+      },
+    };
+    const { deps, spies } = makeDeps(db, watched, nullStream());
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: operatorMoved });
+
+    expect(runner.starts).toBe(2);
+    expect(await Promise.all(atStart)).toEqual(["running", "done"]);
+
+    // And the board is told once, by the park itself. The announce that follows the wake-up is
+    // there to take a stranded badge off a card that is still parked; on a card the operator has
+    // moved it published `parked` over their own state, which is the half of the clobber a
+    // reader would have seen.
+    const parkedOnBoard = spies.published.filter(
+      (p) => p.channel === `ws:${ids.workspaceId}:board` && p.event["state"] === "parked",
+    );
+    expect(parkedOnBoard).toHaveLength(1);
   });
 
   it("hard failure → Task Failed with the worktree preserved (not cleaned)", async () => {
@@ -1214,18 +1438,18 @@ describe("the diff a reviewer is shown", () => {
     const ids = freshIds();
     await seedRun(db, ids);
     const runner = new ScriptedRunner([{ kind: "completed" }], [usageEvent("msg-1")]);
-    const { deps } = makeDeps(db, runner, nullStream());
+    const { deps, ops } = makeDeps(db, runner, nullStream());
     let calls = 0;
     const flaky: TaskRunDeps = {
       ...deps,
-      worktree: {
-        ...deps.worktree,
+      worktree: () => ({
+        ...ops,
         diff: async (path, patterns) => {
           calls += 1;
           if (calls === 1) throw new Error("git exploded mid-turn");
-          return deps.worktree.diff(path, patterns);
+          return ops.diff(path, patterns);
         },
-      },
+      }),
     };
 
     const result = await runTaskLifecycle(flaky, {
@@ -1245,15 +1469,15 @@ describe("the diff a reviewer is shown", () => {
     // shown" rather than stranding the Task short of the gate.
     const ids = freshIds();
     await seedRun(db, ids);
-    const { deps } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+    const { deps, ops } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
     const failing: TaskRunDeps = {
       ...deps,
-      worktree: {
-        ...deps.worktree,
+      worktree: () => ({
+        ...ops,
         diff: async () => {
           throw new Error("git exploded");
         },
-      },
+      }),
     };
 
     const result = await runTaskLifecycle(failing, {
@@ -1270,18 +1494,181 @@ describe("the diff a reviewer is shown", () => {
   });
 
   describe("executor profile configuration (issue #73)", () => {
-    it("fails a Task whose Executor kind has no driver, rather than running it on the host", async () => {
+    /*
+     * This pair used to be one test asserting that a Docker-profiled Task failed at the driver
+     * gate. It is the regression that gate existed for — an executor kind nothing downstream
+     * read — and the answer to it is no longer "refuse" but "build the executor the profile
+     * names". So the first half now pins *which* executor the run was given, and the second
+     * keeps the guarantee that mattered: a container that cannot be provided fails the Task,
+     * legibly, before the agent starts.
+     */
+    it("builds the executor from the Task's own profile, mounted for the work ahead (#96)", async () => {
       const ids = freshIds();
       await seedRun(db, ids, {
         executorConfig: { kind: "docker", image: "oven/bun:1.3", mounts: [], env: {} },
       });
       const runner = new ScriptedRunner([{ kind: "completed" }]);
-      const { deps, spies } = makeDeps(db, runner, nullStream());
+      const { deps, executor } = makeDeps(db, runner, nullStream());
+      const built: Array<{ kind: string; opts: ExecutorFactoryOpts }> = [];
 
-      const result = await runTaskLifecycle(deps, {
-        event: { data: ids },
-        step: scriptedStep(["approve"]),
+      const result = await runTaskLifecycle(
+        {
+          ...deps,
+          executorFor: (profile, opts) => {
+            built.push({ kind: profile.config.kind, opts });
+            return executor;
+          },
+        },
+        { event: { data: ids }, step: scriptedStep(["approve"]) },
+      );
+
+      expect(result.result).toBe("done");
+      /*
+       * The kind comes off the Task's profile, once, per run — the gate is no longer the only
+       * thing in the lifecycle that has read it. A containerised Task builds a *second*
+       * executor, on the host, and the order matters: the Task's own comes first and everything
+       * about its work runs there, while the local one exists only for the administration of the
+       * repository the deployment shares — the clone, the worktree, and publishing the approved
+       * branch back (issue #96 round 2). Without the split there is no way to keep the shared
+       * repository out of the container's mounts, and with it reversed a Docker-profiled Task
+       * would be doing its work on the orchestrator's own host.
+       */
+      expect(built.map((b) => b.kind)).toEqual(["docker", "local"]);
+      /*
+       * This Task's worktree and this Task's *own clone* of the repository — not `/wt`, not
+       * `/cache`, and not the Repository the deployment shares. Those roots hold every Task in
+       * the deployment, and mounting them read-write was the first half of the isolation defect;
+       * mounting the shared repository was the second, because a worktree of it carries every
+       * other Task's objects, refs and worktree registrations with it (Principle II). Naming
+       * directories that do not exist yet is the point: the driver creates every bind source
+       * before the container, and the clone and the worktree are both made afterwards.
+       */
+      expect(built[0]?.opts.bindPaths).toEqual([`/wt/${ids.taskId}`, `/cache/tasks/${ids.taskId}`]);
+      // The jail — the driver's host-side path check — is this Task's worktree, so the fs API
+      // cannot reach a sibling Task's even though they are siblings on disk.
+      expect(built[0]?.opts.jailRoot).toBe(`/wt/${ids.taskId}`);
+      // Still the deployment root, because the driver derives the container's name from it and
+      // `guardMountSource` measures a Repository's location against it.
+      expect(built[0]?.opts.worktreeRoot).toBe("/wt");
+      // The lifecycle's `finally` is the only thing that disposes on the happy path; the reaper
+      // is the net behind it, not a second caller.
+      expect(executor.disposed).toBe(1);
+    });
+
+    /**
+     * The isolation property itself, pinned rather than described (AC-2, Principle II).
+     *
+     * Written as a comparison between two *real* mount sets, because that is the shape the defect
+     * had: `SOLOW_WORKTREE_ROOT` and `SOLOW_REPO_CACHE_ROOT` are perfectly reasonable-looking
+     * answers for one Task considered on its own, and only become a read-write view of somebody
+     * else's source tree once a second Task exists beside it. A test that asserted a literal
+     * mount list for one Task — which is what the test above it is — could not have caught that,
+     * and did not.
+     */
+    it("gives a Task no path belonging to another Task under the same roots (AC-2)", async () => {
+      const docker: ExecutorConfig = { kind: "docker", image: "oven/bun:1.3", mounts: [], env: {} };
+      const a = freshIds();
+      const b = freshIds();
+      /*
+       * Two attachments each, and — this is the whole point — **the same two Repositories**: one
+       * local path both Tasks are attached to, and one URL that resolves to a single directory
+       * in the shared clone cache. Written with a repository apiece, this test passed while a
+       * reviewer was reading Task B's committed secrets out of the shared parent from inside
+       * Task A's container: two Tasks that share nothing are the easy case, and the mount set
+       * was only ever wrong for two Tasks that share a Repository.
+       */
+      for (const ids of [a, b]) {
+        await seedRun(db, ids, {
+          executorConfig: docker,
+          repositoryLocation: "/srv/shared",
+          extraRepositories: [
+            {
+              key: "docs",
+              name: "docs",
+              source: "remote_url",
+              location: "https://git.test/shared.git",
+            },
+          ],
+        });
+      }
+
+      /** Run one Task to completion and keep the mounts its container was described with. */
+      const mountsFor = async (ids: Ids): Promise<ExecutorFactoryOpts> => {
+        const runner = new ScriptedRunner([{ kind: "completed" }]);
+        const { deps, executor } = makeDeps(db, runner, nullStream());
+        let built: ExecutorFactoryOpts | undefined;
+        const result = await runTaskLifecycle(
+          {
+            ...deps,
+            executorFor: (_profile, opts) => {
+              built = opts;
+              return executor;
+            },
+          },
+          { event: { data: ids }, step: scriptedStep(["approve"]) },
+        );
+        expect(result.result).toBe("done");
+        if (!built) throw new Error("the run never built an executor");
+        return built;
+      };
+
+      const mine = await mountsFor(a);
+      const theirs = await mountsFor(b);
+
+      // Exactly what Task A works in: its own primary worktree, the sibling worktree for its
+      // second attachment, and — one per attachment — the clone of each Repository that belongs
+      // to this Task alone. Neither `/srv/shared` nor the shared cache directory for the URL
+      // appears at all: the container has no path to the repository the deployment holds, which
+      // is what makes the loop below a property rather than a coincidence of naming.
+      expect(mine.jailRoot).toBe(worktreePath("/wt", a.taskId));
+      expect(mine.bindPaths).toEqual([
+        worktreePath("/wt", a.taskId),
+        `/cache/tasks/${a.taskId}`,
+        worktreePath("/wt", a.taskId, attachmentId(a.taskId, "docs")),
+        `/cache/tasks/${a.taskId}--${attachmentId(a.taskId, "docs")}`,
+      ]);
+
+      /** A mount hands the container a path when it *is* that path or an ancestor of it. */
+      const covers = (mount: string, path: string): boolean =>
+        path === mount || path.startsWith(`${mount}/`);
+
+      // The property. Both directions, because "A cannot see B" is not the guarantee — the
+      // guarantee is that neither Task's container is a way into the other's work. `/wt` and
+      // `/cache` fail this on the ancestor clause, which is precisely how it used to fail.
+      for (const mount of [mine.jailRoot, ...(mine.bindPaths ?? [])]) {
+        for (const path of [theirs.jailRoot, ...(theirs.bindPaths ?? [])]) {
+          expect({ mount, path, reachable: covers(mount, path) }).toEqual({
+            mount,
+            path,
+            reachable: false,
+          });
+          expect({ mount: path, path: mount, reachable: covers(path, mount) }).toEqual({
+            mount: path,
+            path: mount,
+            reachable: false,
+          });
+        }
+      }
+    });
+
+    it("fails a Task whose executor cannot be provided, before anything is cloned (AC-6)", async () => {
+      const ids = freshIds();
+      await seedRun(db, ids, {
+        executorConfig: { kind: "docker", image: "oven/bun:1.3", mounts: [], env: {} },
       });
+      const reason = 'Docker is not available on this host: the "docker" command was not found';
+      const runner = new ScriptedRunner([{ kind: "completed" }]);
+      const { deps, ops, spies, executor } = makeDeps(db, runner, nullStream());
+      let cloned = false;
+      ops.prepare = async (p) => {
+        cloned = true;
+        return `/repo/${p.taskId}`;
+      };
+
+      const result = await runTaskLifecycle(
+        { ...deps, preflight: async () => ({ ok: false, reason }) },
+        { event: { data: ids }, step: scriptedStep(["approve"]) },
+      );
 
       expect(result.result).toBe("failed");
       expect(await taskState(db, ids.taskId)).toBe("failed");
@@ -1289,8 +1676,18 @@ describe("the diff a reviewer is shown", () => {
       // would be the product silently ignoring the isolation it was asked for.
       expect(runner.starts).toBe(0);
       expect(spies.commit).toBe(0);
+      // Before `prepare-repository`: that placement is the acceptance criterion, not a detail.
+      // A probe that ran after the clone would spend minutes proving the image name is wrong.
+      expect(cloned).toBe(false);
+      // The daemon's own words reach the board, not a paraphrase and not a stack trace.
       const [row] = await db.select().from(task).where(eq(task.id, ids.taskId)).limit(1);
-      expect(row?.failureReason).toContain("docker");
+      expect(row?.failureReason).toBe(reason);
+      // Whatever the preflight got as far as creating is still torn down on the way out.
+      expect(executor.disposed).toBe(1);
+      const states = (
+        await db.select().from(sessionEvent).where(eq(sessionEvent.sessionId, ids.sessionId))
+      ).filter((e) => e.kind === "state");
+      expect(states).toHaveLength(1);
     });
 
     it("hands the profile's environment to the agent process", async () => {
@@ -1449,16 +1846,21 @@ describe("setup files copied into the agent's worktree (issue #52)", () => {
     db = createTestDb();
   });
 
-  it("copies them into the worktree the agent reported, from the repository it prepared", async () => {
+  it("copies them into the worktree the agent reported, from the Repository the Owner has", async () => {
     const ids = freshIds();
     await seedRun(db, ids, { setupFilePatterns: [".env", "config/local.json"] });
     const { deps, spies } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
 
     await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
+    // The Repository's own location, not whatever `prepare` handed back (issue #96 round 2):
+    // for a Task given a clone of its own, those are different directories, and the file this
+    // feature exists to copy — an ignored `.env` — was never committed, so it is only in the
+    // Owner's working tree. Seeding from the clone would find nothing and say so in a warning
+    // nobody reads, which is a worse failure than an error.
     expect(spies.seeded).toEqual([
       {
-        repoPath: `/repo/${ids.taskId}`,
+        repoPath: `/srv/${ids.taskId}`,
         worktreePath: `/wt/${worktreeNameForTask(ids.taskId)}`,
         patterns: [".env", "config/local.json"],
       },
@@ -1516,10 +1918,10 @@ describe("setup files copied into the agent's worktree (issue #52)", () => {
         cb();
       },
     });
-    const { deps } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), stream);
+    const { deps, ops } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), stream);
     // A copy that partly failed is the only case that logs at all — and the warning must still
     // say nothing about which files were involved.
-    deps.worktree.seed = async () => ({ copied: 1, unmatched: ["absent.env"], failed: 1 });
+    ops.seed = async () => ({ copied: 1, unmatched: ["absent.env"], failed: 1 });
 
     await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
@@ -1703,18 +2105,18 @@ describe("the worktree a Task runs in", () => {
     const ids = freshIds();
     await seedRun(db, ids);
     const runner = new WorktreeRecordingRunner();
-    const { deps, spies } = makeDeps(db, runner, nullStream());
+    const { deps, ops, spies } = makeDeps(db, runner, nullStream());
     const cleaned: string[] = [];
 
     await runTaskLifecycle(
       {
         ...deps,
-        worktree: {
-          ...deps.worktree,
+        worktree: () => ({
+          ...ops,
           cleanup: async (_repo: string, path: string) => {
             cleaned.push(path);
           },
-        },
+        }),
       },
       { event: { data: ids }, step: scriptedStep(["approve"]) },
     );
@@ -1937,8 +2339,8 @@ describe("a Task driven over ACP (issue #58)", () => {
     const ids = freshIds();
     await seedRun(db, ids, { agentProtocol: "acp" });
     const runner = new ScriptedRunner([{ kind: "completed" }]);
-    const { deps, spies } = makeDeps(db, runner, nullStream());
-    deps.worktree.provision = async () => {
+    const { deps, ops, spies } = makeDeps(db, runner, nullStream());
+    ops.provision = async () => {
       throw new Error("fatal: a branch named 'solow/task-1' already exists");
     };
 
@@ -1961,8 +2363,8 @@ describe("a Task driven over ACP (issue #58)", () => {
     // The detail belongs in the log, not in a column the UI renders.
     const ids = freshIds();
     await seedRun(db, ids, { agentProtocol: "acp" });
-    const { deps } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
-    deps.worktree.provision = async () => {
+    const { deps, ops } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+    ops.provision = async () => {
       throw new Error("command failed (128): git -c credential.helper=echo password=$TOKEN");
     };
 
@@ -2033,9 +2435,13 @@ describe("a Task spanning several Repositories (issue #7)", () => {
   it("AC-4: fails the Task and names both halves when only some repositories integrate", async () => {
     const ids = freshIds();
     await seedRun(db, ids, { agentProtocol: "acp", ...twoRepositories });
-    const { deps, spies } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+    const { deps, ops, spies } = makeDeps(
+      db,
+      new ScriptedRunner([{ kind: "completed" }]),
+      nullStream(),
+    );
     const secondary = `/wt/solow-task-${ids.taskId}--${attachmentId(ids.taskId, "lib")}`;
-    deps.worktree.commit = async (path, message, patterns) => {
+    ops.commit = async (path, message, patterns) => {
       if (path === secondary) throw new Error("index.lock exists");
       spies.commit += 1;
       spies.committed.push(path);
@@ -2075,8 +2481,8 @@ describe("a Task spanning several Repositories (issue #7)", () => {
     const ids = freshIds();
     await seedRun(db, ids, twoRepositories);
     const runner = new ScriptedRunner([{ kind: "completed" }]);
-    const { deps, spies } = makeDeps(db, runner, nullStream());
-    deps.worktree.prepare = async (p) => {
+    const { deps, ops, spies } = makeDeps(db, runner, nullStream());
+    ops.prepare = async (p) => {
       // The kind of failure no retry can fix, which is what makes it answerable now.
       if (p.repository.location.endsWith("-lib")) {
         throw new RepositoryUnusableError("not a git repository");
@@ -2104,8 +2510,8 @@ describe("a Task spanning several Repositories (issue #7)", () => {
     // A failed clone echoes back the credential-helper argument list (Principle IV).
     const ids = freshIds();
     await seedRun(db, ids, twoRepositories);
-    const { deps } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
-    deps.worktree.prepare = async () => {
+    const { deps, ops } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+    ops.prepare = async () => {
       throw new Error("command failed (128): git -c credential.helper=echo password=$TOKEN");
     };
 
@@ -2202,9 +2608,9 @@ describe("a Task spanning several Repositories (issue #7)", () => {
       ],
     });
     const runner = new ScriptedRunner([{ kind: "completed" }]);
-    const { deps, spies } = makeDeps(db, runner, nullStream());
-    const provision = deps.worktree.provision;
-    deps.worktree.provision = async (params) => {
+    const { deps, ops, spies } = makeDeps(db, runner, nullStream());
+    const provision = ops.provision;
+    ops.provision = async (params) => {
       if (params.attachmentId === attachmentId(ids.taskId, "docs")) {
         throw new Error("fatal: could not create worktree");
       }
@@ -2229,8 +2635,8 @@ describe("a Task spanning several Repositories (issue #7)", () => {
     const ids = freshIds();
     await seedRun(db, ids, twoRepositories);
     const runner = new ScriptedRunner([{ kind: "completed" }]);
-    const { deps } = makeDeps(db, runner, nullStream());
-    deps.worktree.prepare = async () => {
+    const { deps, ops } = makeDeps(db, runner, nullStream());
+    ops.prepare = async () => {
       throw new Error("fatal: unable to access remote: could not resolve host");
     };
 
@@ -2249,8 +2655,8 @@ describe("a Task spanning several Repositories (issue #7)", () => {
     const ids = freshIds();
     await seedRun(db, ids, twoRepositories);
     const runner = new ScriptedRunner([{ kind: "completed" }]);
-    const { deps } = makeDeps(db, runner, nullStream());
-    deps.worktree.prepare = async () => {
+    const { deps, ops } = makeDeps(db, runner, nullStream());
+    ops.prepare = async () => {
       throw new Error("fatal: unable to access remote: could not resolve host");
     };
 
@@ -2272,8 +2678,8 @@ describe("a Task spanning several Repositories (issue #7)", () => {
     const ids = freshIds();
     await seedRun(db, ids, { agentProtocol: "acp", ...twoRepositories });
     const runner = new ScriptedRunner([{ kind: "completed" }]);
-    const { deps } = makeDeps(db, runner, nullStream());
-    deps.worktree.provision = async (p) => {
+    const { deps, ops } = makeDeps(db, runner, nullStream());
+    ops.provision = async (p) => {
       if (p.attachmentId) throw new Error("fatal: branch already checked out");
       return {
         path: `/wt/solow-task-${p.taskId}`,
@@ -2319,9 +2725,9 @@ describe("a Task spanning several Repositories (issue #7)", () => {
   it("AC-4: one repository failing to capture costs only its own group", async () => {
     const ids = freshIds();
     await seedRun(db, ids, { agentProtocol: "acp", ...twoRepositories });
-    const { deps } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
-    const realDiff = deps.worktree.diff;
-    deps.worktree.diff = async (path, patterns) => {
+    const { deps, ops } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+    const realDiff = ops.diff;
+    ops.diff = async (path, patterns) => {
       if (path.includes("--")) throw new Error("git exploded");
       return realDiff(path, patterns);
     };
@@ -2496,9 +2902,13 @@ describe("approving a multi-Repository Task that changed only some of them", () 
       agentProtocol: "acp",
       extraRepositories: [{ key: "lib", name: "shared-lib" }],
     });
-    const { deps, spies } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+    const { deps, ops, spies } = makeDeps(
+      db,
+      new ScriptedRunner([{ kind: "completed" }]),
+      nullStream(),
+    );
     // The agent worked in the primary and never went near the secondary.
-    deps.worktree.hasChanges = async (path) => !path.includes("--");
+    ops.hasChanges = async (path) => !path.includes("--");
 
     const result = await runTaskLifecycle(deps, {
       event: { data: ids },
@@ -2546,9 +2956,9 @@ describe("task-run permission mode", () => {
     const asked: Array<string | undefined> = [];
     const wrapped = {
       ...deps,
-      runner: (protocol: AgentProtocol, settings: AgentLaunchSettings) => {
+      runner: (protocol: AgentProtocol, settings: AgentLaunchSettings, executor: Executor) => {
         asked.push(settings.permissionMode);
-        return deps.runner(protocol, settings);
+        return deps.runner(protocol, settings, executor);
       },
     };
 
@@ -2567,9 +2977,9 @@ describe("task-run permission mode", () => {
     const asked: Array<string | undefined> = [];
     const wrapped = {
       ...deps,
-      runner: (protocol: AgentProtocol, settings: AgentLaunchSettings) => {
+      runner: (protocol: AgentProtocol, settings: AgentLaunchSettings, executor: Executor) => {
         asked.push(settings.permissionMode);
-        return deps.runner(protocol, settings);
+        return deps.runner(protocol, settings, executor);
       },
     };
 
@@ -3059,9 +3469,9 @@ describe("an Agent Profile's launch settings", () => {
     const asked: AgentLaunchSettings[] = [];
     const wrapped = {
       ...deps,
-      runner: (protocol: AgentProtocol, settings: AgentLaunchSettings) => {
+      runner: (protocol: AgentProtocol, settings: AgentLaunchSettings, executor: Executor) => {
         asked.push(settings);
-        return deps.runner(protocol, settings);
+        return deps.runner(protocol, settings, executor);
       },
     };
     await runTaskLifecycle(wrapped, { event: { data: ids }, step: scriptedStep(["approve"]) });

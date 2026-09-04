@@ -52,6 +52,27 @@ export function worktreePath(root: string, taskId: string, attachmentId?: string
   return attachmentId ? join(root, `${taskId}--${attachmentId}`) : join(root, taskId);
 }
 
+/**
+ * Where a Task's **own** copy of a Repository lives, when it is given one (`ownClone`).
+ *
+ * Under the cache root rather than the worktree root, because it is a repository and not a
+ * worktree, and keyed exactly like `worktreePath` — one directory per *attachment*, so the two
+ * halves of one attachment (its repository and its worktree) are named by the same rule and a
+ * Task attaching one Repository twice gets two of each. As with `worktreePath`, no
+ * Owner-authored text reaches the path: a Repository called `../../etc` cannot climb out.
+ *
+ * `tasks/` keeps them out of the way of the URL-named shared clones beside them
+ * (`encodeURIComponent(location)`), which always contain a `%` or a `:` and so can never
+ * collide with this segment.
+ */
+export function taskRepositoryPath(
+  repoCacheRoot: string,
+  taskId: string,
+  attachmentId?: string,
+): string {
+  return join(repoCacheRoot, "tasks", attachmentId ? `${taskId}--${attachmentId}` : taskId);
+}
+
 export interface ProvisionParams {
   taskId: string;
   repository: { source: RepositorySource; location: string };
@@ -68,6 +89,21 @@ export interface ProvisionParams {
   attachmentId?: string | undefined;
   worktreeRoot: string;
   repoCacheRoot: string;
+  /**
+   * Give this Task a repository of its own instead of adding a worktree to the shared one
+   * (issue #96 round 2, Principle II).
+   *
+   * Set when the Task runs somewhere the shared repository must not be reachable from — today
+   * that means a container, whose mounts are the whole of what the agent can touch. Every git
+   * command below then acts on `taskRepositoryPath` rather than on the clone two Tasks on one
+   * Repository would otherwise share, which is what makes the container's mount set contain
+   * nothing but this Task's own directories.
+   *
+   * Off by default, and off for a local run: two local Tasks share a uid, a filesystem and a
+   * process table, so a private clone there would cost a copy of the repository to buy an
+   * isolation the host does not provide anyway (F07, *the isolation that holds*).
+   */
+  ownClone?: boolean | undefined;
   /**
    * The credential for cloning an imported repository (issue #15). Present only for a Repository
    * that came from an Integration; a public URL or a local path needs none. The token is read
@@ -120,8 +156,8 @@ export interface Worktree {
   repoPath: string;
 }
 
-/** The main repository path a worktree is added onto (local path, or a cached clone). */
-async function resolveRepoPath(executor: Executor, params: ProvisionParams): Promise<string> {
+/** The Repository as the deployment holds it (local path, or a cached clone). */
+async function upstreamRepoPath(executor: Executor, params: ProvisionParams): Promise<string> {
   if (params.repository.source === "local_path") return params.repository.location;
   // remote_url: clone into the cache once (idempotent), then add worktrees from it.
   const cachePath = join(params.repoCacheRoot, encodeURIComponent(params.repository.location));
@@ -135,6 +171,109 @@ async function resolveRepoPath(executor: Executor, params: ProvisionParams): Pro
     );
   }
   return cachePath;
+}
+
+/**
+ * The Task's own copy of the repository, made once and reused (`ownClone`).
+ *
+ * **`init` + `fetch`, not `clone`**, and both departures are load-bearing:
+ *
+ *  - `git clone` refuses a destination that is not empty, and this destination is not always
+ *    empty: it is a directory the container driver `mkdir -p`s as a bind source before the
+ *    container exists, and an attempt killed part-way through leaves it half-populated. `clone`
+ *    would then fail on every retry for the life of the Task, and the obvious repair — remove
+ *    the directory and clone again — is the one thing that must not happen here, because the
+ *    running container holds a bind mount of that inode and would keep looking at the deleted
+ *    one. `init` and `fetch` are both idempotent *in place*, so a retry finishes the job.
+ *  - `clone` from a local path **hardlinks** the object files by default, so the Task's objects
+ *    and the shared repository's would be the same inodes — and the container owns them (it runs
+ *    as the orchestrator's uid), so an agent could `chmod +w` and rewrite the shared
+ *    repository's history through a file inside its own private clone. Verified: a hardlinked
+ *    object rewritten from inside a container changed the source repository's copy. A fetch
+ *    transfers a pack, so no inode is ever shared.
+ *
+ * The refspec copies every upstream head to a **local** head rather than a remote-tracking one,
+ * because an attachment's `baseRef` has to mean here what it meant in the shared repository. With
+ * remote-tracking refs only, `git worktree add -B solow/task-<id> <path> feature-1` does not fail
+ * — it silently DWIMs `feature-1` into a new local branch tracking `origin/feature-1` and drops
+ * the `-B` entirely, so the Task commits onto the *Owner's* branch instead of its own. Verified
+ * on git 2.47. Tags come too, because a base ref may be one.
+ *
+ * HEAD is pointed outside `refs/heads/` for the duration: git refuses to fetch into the branch
+ * HEAD names even when that branch does not exist yet, which is every fresh `init`. The checkout
+ * below puts it back on a real branch, and `refs/solow/…` is a namespace no fetched head can
+ * occupy.
+ *
+ * `HEAD` resolving to a commit is the completion marker: it is true only once the fetch *and*
+ * the checkout have finished, so an interrupted attempt is redone rather than adopted half-made.
+ * No `origin` remote is configured — the shared repository is not reachable from where this runs
+ * (that is the point), and a remote pointing at a path the container has no mount for would turn
+ * an agent's `git fetch` into a confusing error instead of an honest one.
+ */
+async function ensureTaskClone(
+  executor: Executor,
+  params: ProvisionParams,
+  upstream: string,
+): Promise<string> {
+  const own = taskRepositoryPath(params.repoCacheRoot, params.taskId, params.attachmentId);
+  const ready = await executor.exec(["git", "-C", own, "rev-parse", "--verify", "-q", "HEAD"]);
+  if (ready.exitCode === 0) return own;
+
+  await run(executor, ["git", "init", "-q", own]);
+  await run(executor, ["git", "-C", own, "symbolic-ref", "HEAD", "refs/solow/unborn"]);
+  await run(executor, [
+    "git",
+    "-C",
+    own,
+    "fetch",
+    upstream,
+    "+refs/heads/*:refs/heads/*",
+    "+refs/tags/*:refs/tags/*",
+  ]);
+  // Check out what the shared repository has checked out, so an agent whose protocol starts it
+  // *in the repository* (`claude --worktree`) finds the working tree it expects. Best-effort in
+  // both directions: a repository with no commits yet, or one left on a detached HEAD, has
+  // nothing to name here, and it is `worktree add` below that owes the caller the error.
+  const head = await executor.exec([
+    "git",
+    "-C",
+    upstream,
+    "symbolic-ref",
+    "--short",
+    "-q",
+    "HEAD",
+  ]);
+  const branch = head.stdout.trim();
+  if (branch) {
+    const exists = await executor.exec([
+      "git",
+      "-C",
+      own,
+      "rev-parse",
+      "--verify",
+      "-q",
+      `refs/heads/${branch}`,
+    ]);
+    if (exists.exitCode === 0) await run(executor, ["git", "-C", own, "checkout", "-f", branch]);
+  }
+  return own;
+}
+
+/** The Repository, and the repository this Task's worktree is actually added onto. */
+interface ResolvedRepository {
+  /** The shared one, where a result branch has to land to be of any use to the Owner. */
+  upstream: string;
+  /** The Task's own clone when it has one, and the shared one when it does not. */
+  repoPath: string;
+}
+
+async function resolveRepoPath(
+  executor: Executor,
+  params: ProvisionParams,
+): Promise<ResolvedRepository> {
+  const upstream = await upstreamRepoPath(executor, params);
+  if (!params.ownClone) return { upstream, repoPath: upstream };
+  return { upstream, repoPath: await ensureTaskClone(executor, params, upstream) };
 }
 
 /**
@@ -158,7 +297,7 @@ export async function provisionWorktree(
   executor: Executor,
   params: ProvisionParams,
 ): Promise<Worktree> {
-  const repoPath = await resolveRepoPath(executor, params);
+  const { repoPath } = await resolveRepoPath(executor, params);
   const branch = params.checkoutBranch ?? worktreeBranch(params.taskId);
   const path = worktreePath(params.worktreeRoot, params.taskId, params.attachmentId);
   const base = params.baseRef ?? "HEAD";
@@ -221,12 +360,16 @@ export async function prepareRepository(
   executor: Executor,
   params: ProvisionParams,
 ): Promise<string> {
-  const repoPath = await resolveRepoPath(executor, params);
-  const isRepo = await executor.exec(["git", "-C", repoPath, "rev-parse", "--git-dir"]);
+  // The *shared* repository is what "is this location usable at all" is a question about, and it
+  // is asked before this Task's own clone is made rather than after: a location that is not a
+  // repository would otherwise be reported as a fetch that failed — a retryable-looking error
+  // for a condition no retry can change (AC-3).
+  const upstream = await upstreamRepoPath(executor, params);
+  const isRepo = await executor.exec(["git", "-C", upstream, "rev-parse", "--git-dir"]);
   if (isRepo.exitCode !== 0) {
     throw new RepositoryUnusableError(`not a git repository: ${params.repository.location}`);
   }
-  return repoPath;
+  return params.ownClone ? await ensureTaskClone(executor, params, upstream) : upstream;
 }
 
 /** A worktree as git reports it. */
@@ -351,6 +494,47 @@ export async function commitWorktree(
   await run(executor, ["git", "-C", path, "commit", "-m", message]);
 }
 
+/**
+ * Put the Task's finished branch into the Repository the Owner actually has (`ownClone`).
+ *
+ * A Task given its own clone commits into that clone, and a branch nobody can reach is not a
+ * result: F08's promise is one branch per Repository per Task, in the Repository, for a reviewer
+ * to fetch and merge. So the last act of an approved Task is to move exactly one ref from its
+ * private repository into the shared one — and this is the **only** write to the shared
+ * repository in the whole lifecycle.
+ *
+ * It runs where the orchestrator runs, never in the Task's execution host, and that is the shape
+ * of the guarantee rather than an implementation detail: the shared repository is not mounted
+ * into the container at all, so the agent has no path to it, and what reaches it is one refspec
+ * this code wrote naming this Task's own branch. A container that could write to the shared
+ * repository is precisely how a peer Task's result branch got rewritten (G4).
+ *
+ * `fetch` rather than `push`: it needs nothing to be configured in either repository, and it
+ * asks the *destination* to do the work, so no hook of the source's can run. Forced, because a
+ * second review round may rewrite the branch it published in the first — the safety here is the
+ * refspec's single, derived name, not git's non-fast-forward check.
+ *
+ * A no-op when the Task worked directly in the shared repository (a local run), where the branch
+ * is already exactly where it needs to be.
+ */
+export async function publishWorktreeBranch(
+  executor: Executor,
+  repoPath: string,
+  upstreamPath: string,
+  branch: string,
+): Promise<void> {
+  if (samePath(repoPath, upstreamPath)) return;
+  await run(executor, [
+    "git",
+    "-C",
+    upstreamPath,
+    "fetch",
+    "--no-tags",
+    repoPath,
+    `+refs/heads/${branch}:refs/heads/${branch}`,
+  ]);
+}
+
 /** Discard uncommitted changes (reject). */
 export async function discardWorktreeChanges(executor: Executor, path: string): Promise<void> {
   await run(executor, ["git", "-C", path, "reset", "--hard"]);
@@ -377,6 +561,7 @@ export async function cleanupWorktree(
   executor: Executor,
   repoPath: string,
   worktree: string,
+  opts: CleanupOpts = {},
 ): Promise<void> {
   await run(executor, [
     "git",
@@ -388,6 +573,28 @@ export async function cleanupWorktree(
     "--force",
     worktree,
   ]);
+  if (!opts.ownRepository) return;
+  /*
+   * A Task's own clone goes with its worktree (`ownClone`).
+   *
+   * Left behind it would be a copy of the whole repository per Task per attachment, growing the
+   * cache without bound — and, worse, it holds the Task's committed work, including whatever a
+   * discarded round wrote, long after the Task is over. The branch a reviewer approved is not in
+   * it by then: `publishWorktreeBranch` has already moved it into the Repository.
+   *
+   * `rm -rf` is safe here only because the caller cannot choose the path: the directory is the
+   * one `taskRepositoryPath` derives from the cache root and the ids, and the flag is set by the
+   * same code that asked for the clone. Nothing Owner-authored reaches this argument vector.
+   */
+  await run(executor, ["rm", "-rf", "--", repoPath]);
+}
+
+export interface CleanupOpts {
+  /**
+   * Remove the repository itself, not just the worktree: true exactly when `repoPath` is the
+   * private clone this Task was given rather than a repository the deployment shares.
+   */
+  ownRepository?: boolean | undefined;
 }
 
 /**

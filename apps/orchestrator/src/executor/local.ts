@@ -1,5 +1,5 @@
 /// <reference types="bun-types" />
-import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { cpus, freemem, loadavg, totalmem } from "node:os";
 import { dirname, resolve, sep } from "node:path";
 import type {
@@ -78,7 +78,13 @@ export function createLocalExecutor(root: string): Executor {
       const from = resolveJailed(fromRelativePath);
       const to = resolveJailed(toRelativePath);
       await mkdir(dirname(to), { recursive: true });
-      await Bun.write(to, Bun.file(from));
+      // `copyFile`, not `Bun.write(to, Bun.file(from))`: the latter creates the destination at
+      // the process umask, which the shared contract suite caught widening a 0600 source to
+      // 0664. The Docker driver copies with `cp -p` and `setup-files.ts` copies with `cp -p`,
+      // so this was the one copy in the product that could turn an Owner's private key
+      // world-readable — and it would have done it silently, on the #52 path that copies
+      // `.env` files into a worktree.
+      await copyFile(from, to);
     },
   };
 
@@ -114,6 +120,19 @@ export function createLocalExecutor(root: string): Executor {
     },
 
     exec: execLocal,
+
+    async baseEnv(): Promise<Record<string, string>> {
+      // For the local driver the executor's host *is* this process, so the base is `process.env`
+      // — minus the `undefined` values Node's typing admits and `SpawnOpts.env` cannot carry.
+      // This is deliberately the same drop `resolveAgentRunEnv` already performs on the base it
+      // is handed, so routing the call site through the interface changes nothing about the
+      // environment a locally-run agent receives.
+      const env: Record<string, string> = {};
+      for (const [key, value] of Object.entries(process.env)) {
+        if (value !== undefined) env[key] = value;
+      }
+      return env;
+    },
 
     fs,
 
@@ -153,8 +172,15 @@ export function createLocalExecutor(root: string): Executor {
   };
 }
 
-/** Parse the `Use%` column from `df -P` output (POSIX format, one header line + one data line). */
-function parseDiskPercent(dfOutput: string): number | null {
+/**
+ * Parse the `Use%` column from `df -P` output (POSIX format, one header line + one data line).
+ *
+ * Exported because the Docker driver reads the same `df -Pk` output from inside the container
+ * (issue #96) and a second copy of this parse would be a second answer to "which column is the
+ * percentage" — busybox labels it `Capacity` and coreutils `Use%`, which is exactly the kind of
+ * difference one of the two copies would eventually get wrong on its own.
+ */
+export function parseDiskPercent(dfOutput: string): number | null {
   const dataLine = dfOutput.trim().split("\n")[1];
   const percent = dataLine?.trim().split(/\s+/)[4];
   if (!percent) return null;

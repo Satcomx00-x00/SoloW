@@ -35,6 +35,24 @@ describe("AC-1/AC-2 — configuration is validated per Executor kind", () => {
     expect(parse({ kind: "local", image: "oven/bun:1.3" }).success).toBe(false);
   });
 
+  it("carries a container's CPU and memory limits, and still refuses a field it has not got", () => {
+    // Every member is `.strict()`, so before these fields existed a profile asking for them was
+    // *rejected* rather than quietly stripped — which is the right failure, and the reason F07's
+    // resource-limit criterion could not be met without a contract change. A stripped limit
+    // would have shown the operator a ceiling the daemon was never told about.
+    const limited = parse({ kind: "docker", image: "x", cpus: 1.5, memoryMb: 2048 });
+    expect(limited.success && limited.data.kind === "docker" && limited.data.cpus).toBe(1.5);
+    expect(limited.success && limited.data.kind === "docker" && limited.data.memoryMb).toBe(2048);
+    // 6 MiB is the daemon's own floor (`docker run --memory 4m` answers "Minimum memory limit
+    // allowed is 6MB"), so the boundary refuses it here rather than letting `docker run` fail
+    // halfway through provisioning with a message about a number the operator typed in Settings.
+    expect(parse({ kind: "docker", image: "x", memoryMb: 4 }).success).toBe(false);
+    expect(parse({ kind: "docker", image: "x", cpus: 0 }).success).toBe(false);
+    // Widening the member must not widen it to anything: a neighbouring flag nobody implemented
+    // has to keep failing, or the profile promises isolation the driver never applies.
+    expect(parse({ kind: "docker", image: "x", gpus: 1 }).success).toBe(false);
+  });
+
   it("rejects an unknown kind rather than falling back to local", () => {
     expect(parse({ kind: "kubernetes", image: "x" }).success).toBe(false);
   });

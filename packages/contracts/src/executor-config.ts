@@ -75,6 +75,10 @@ const dockerConfig = z
     mounts: z.array(dockerMount).max(32).default([]),
     /** Docker network name, or omitted for the daemon's default. */
     network: z.string().min(1).optional(),
+    /** Fractional host CPUs (`--cpus`). Omitted means the daemon's default: no quota. */
+    cpus: z.number().positive().max(1024).optional(),
+    /** Hard memory ceiling in MiB (`--memory`). 6 is the daemon's own floor. */
+    memoryMb: z.number().int().min(6).optional(),
     prepareScript,
     env: envMap,
   })
