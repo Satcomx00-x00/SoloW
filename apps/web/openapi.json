@@ -7094,6 +7094,16 @@
                       "type": "string",
                       "nullable": true
                     },
+                    "workflowId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
+                    "workflowStepId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
                     "createdAt": {
                       "type": "string",
                       "format": "date-time"
@@ -7115,6 +7125,8 @@
                     "completedAt",
                     "completedOutcome",
                     "completedSummary",
+                    "workflowId",
+                    "workflowStepId",
                     "createdAt",
                     "updatedAt"
                   ]
@@ -7324,6 +7336,16 @@
                       "type": "string",
                       "nullable": true
                     },
+                    "workflowId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
+                    "workflowStepId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
                     "createdAt": {
                       "type": "string",
                       "format": "date-time"
@@ -7345,6 +7367,8 @@
                     "completedAt",
                     "completedOutcome",
                     "completedSummary",
+                    "workflowId",
+                    "workflowStepId",
                     "createdAt",
                     "updatedAt"
                   ]
@@ -7577,6 +7601,16 @@
                             "type": "string",
                             "nullable": true
                           },
+                          "workflowId": {
+                            "type": "string",
+                            "nullable": true,
+                            "minLength": 1
+                          },
+                          "workflowStepId": {
+                            "type": "string",
+                            "nullable": true,
+                            "minLength": 1
+                          },
                           "createdAt": {
                             "type": "string",
                             "format": "date-time"
@@ -7598,6 +7632,8 @@
                           "completedAt",
                           "completedOutcome",
                           "completedSummary",
+                          "workflowId",
+                          "workflowStepId",
                           "createdAt",
                           "updatedAt"
                         ]
@@ -7792,6 +7828,16 @@
                       "type": "string",
                       "nullable": true
                     },
+                    "workflowId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
+                    "workflowStepId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
                     "createdAt": {
                       "type": "string",
                       "format": "date-time"
@@ -7813,6 +7859,8 @@
                     "completedAt",
                     "completedOutcome",
                     "completedSummary",
+                    "workflowId",
+                    "workflowStepId",
                     "createdAt",
                     "updatedAt"
                   ]
@@ -8004,6 +8052,16 @@
                       "type": "string",
                       "nullable": true
                     },
+                    "workflowId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
+                    "workflowStepId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
                     "createdAt": {
                       "type": "string",
                       "format": "date-time"
@@ -8025,6 +8083,8 @@
                     "completedAt",
                     "completedOutcome",
                     "completedSummary",
+                    "workflowId",
+                    "workflowStepId",
                     "createdAt",
                     "updatedAt"
                   ]
@@ -8219,6 +8279,16 @@
                       "type": "string",
                       "nullable": true
                     },
+                    "workflowId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
+                    "workflowStepId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
                     "createdAt": {
                       "type": "string",
                       "format": "date-time"
@@ -8240,6 +8310,8 @@
                     "completedAt",
                     "completedOutcome",
                     "completedSummary",
+                    "workflowId",
+                    "workflowStepId",
                     "createdAt",
                     "updatedAt"
                   ]
@@ -8421,6 +8493,16 @@
                       "type": "string",
                       "nullable": true
                     },
+                    "workflowId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
+                    "workflowStepId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
                     "createdAt": {
                       "type": "string",
                       "format": "date-time"
@@ -8442,6 +8524,8 @@
                     "completedAt",
                     "completedOutcome",
                     "completedSummary",
+                    "workflowId",
+                    "workflowStepId",
                     "createdAt",
                     "updatedAt"
                   ]
@@ -8623,6 +8707,16 @@
                       "type": "string",
                       "nullable": true
                     },
+                    "workflowId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
+                    "workflowStepId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
                     "createdAt": {
                       "type": "string",
                       "format": "date-time"
@@ -8644,6 +8738,8 @@
                     "completedAt",
                     "completedOutcome",
                     "completedSummary",
+                    "workflowId",
+                    "workflowStepId",
                     "createdAt",
                     "updatedAt"
                   ]
@@ -24709,6 +24805,12 @@
                   "handoff": {
                     "type": "string",
                     "maxLength": 20000
+                  },
+                  "call": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200,
+                    "default": "api"
                   }
                 },
                 "required": [

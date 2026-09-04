@@ -122,6 +122,11 @@ export function taskToDto(row: TaskRow, attachments: readonly TaskRepositoryRow[
     completedAt: row.completedAt,
     completedOutcome: row.completedOutcome,
     completedSummary: row.completedSummary,
+    // Straight off the row (issue #5 AC-6): both are columns on `task`, so the board places a
+    // card in its Step column with no join and no per-tile query. `workflowStepId` is a Step id
+    // rather than an ordinal on purpose — see the column comments in `schema.ts`.
+    workflowId: row.workflowId,
+    workflowStepId: row.workflowStepId,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };

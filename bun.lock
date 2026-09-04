@@ -121,7 +121,7 @@
     },
     "packages/cli": {
       "name": "@satcomx00-x00/solow",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "bin": {
         "solow": "bin/solow.mjs",
       },
@@ -169,6 +169,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@solow/contracts": "workspace:*",
+        "@solow/core": "workspace:*",
         "drizzle-orm": "^0.45.2",
         "zod": "^3.23.8",
       },

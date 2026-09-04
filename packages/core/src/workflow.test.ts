@@ -42,7 +42,13 @@ function pipeline(gate: WorkflowStepGate = "auto"): WorkflowStepRule[] {
 }
 
 function outcome(over: Partial<WorkflowStepOutcome> = {}): WorkflowStepOutcome {
-  return { signal: "agent-signal", producedChanges: false, unspentApproval: false, ...over };
+  return {
+    signal: "agent-signal",
+    producedChanges: false,
+    unspentApproval: false,
+    approvalAlreadySpent: false,
+    ...over,
+  };
 }
 
 describe("workflow step ordering", () => {
@@ -283,6 +289,43 @@ describe("advancing a task through its steps", () => {
   });
 
   /**
+   * Re-executing the terminal Step must reach the same answer (Principle III, AC-5).
+   *
+   * The cursor is the replay guard everywhere else — an `advanced` outcome moves it, so a second
+   * pass is refused as stale. The last Step has nowhere to move it to, so a step body that
+   * committed and was then re-executed arrives here again, in a world where its own first pass
+   * has already spent the approval. Answering `awaiting-decision` there strands the Task on a
+   * decision the operator has already given, and the run exits before it integrates anything.
+   */
+  it("reports the last step completed again on a replay, without a second decision", () => {
+    const steps = [step("only", appendRank(null), "human", "review")];
+    const first = unwrap(
+      advanceWorkflowStep(steps, "only", outcome({ signal: "review", unspentApproval: true })),
+    );
+    expect(first).toEqual({ status: "completed", stepId: "only", consumedApproval: true });
+
+    // The world the first pass left: that approval is now the Task's recorded decision, so it is
+    // no longer *unspent* — it is spent, by this same call.
+    const replay = unwrap(
+      advanceWorkflowStep(
+        steps,
+        "only",
+        outcome({ signal: "review", unspentApproval: false, approvalAlreadySpent: true }),
+      ),
+    );
+    expect(replay).toEqual({ status: "completed", stepId: "only", consumedApproval: false });
+  });
+
+  it("does not complete the last step on a decision that is not an approval it already spent", () => {
+    const steps = [step("only", appendRank(null), "human", "review")];
+    // Neither unspent nor already-spent-here: a rejection, or an approval belonging to some other
+    // Task. The replay branch must not be reachable from "there exists a decision".
+    expect(unwrap(advanceWorkflowStep(steps, "only", outcome({ signal: "review" }))).status).toBe(
+      "awaiting-decision",
+    );
+  });
+
+  /**
    * The other half of Principle I, and the half that was missing: an approval is spent on the
    * gate it opens. Every branch that leans on one has to say so, or one decision releases the
    * rest of the pipeline and the invariant degrades to "somebody looked at this Task once".
@@ -316,6 +359,23 @@ describe("advancing a task through its steps", () => {
       });
     },
   );
+
+  /**
+   * The other direction of the same rule, and a real Principle I hole before it was closed: a
+   * Step whose gate needs nothing but whose `advanceOn` is `review` moves *because* a human
+   * approved. If that approval is not marked spent it is still on offer at the last Step, and the
+   * last Step is where Principle I asks for one — so approving the plan would silently release
+   * the integration of an implementation nobody has looked at.
+   */
+  it("spends an approval that triggered the move even where the gate needed none", () => {
+    const a = appendRank(null);
+    const b = appendRank(a);
+    const steps = [step("plan", a, "auto", "review"), step("implement", b, "auto", "review")];
+    const advance = unwrap(
+      advanceWorkflowStep(steps, "plan", outcome({ signal: "review", unspentApproval: true })),
+    );
+    expect(advance).toEqual({ status: "advanced", stepId: "implement", consumedApproval: true });
+  });
 
   it("spends nothing on an auto gate, so a pipeline of them still costs exactly one decision", () => {
     const steps = pipeline("auto");

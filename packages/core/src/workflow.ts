@@ -202,6 +202,23 @@ export interface WorkflowStepOutcome {
    * from a caller.
    */
   unspentApproval: boolean;
+  /**
+   * Was this Task's recorded decision spent by *this very* approval — i.e. is this a replay?
+   *
+   * The cursor is the replay guard everywhere else: an `advanced` outcome moves it, so a
+   * re-executed step body names a Step the Task has left and the caller refuses it as stale. The
+   * terminal Step has nowhere to move the cursor to, so that guard is silent exactly where the
+   * run integrates, and the second pass reads a world the first pass changed — the approval it
+   * needs is the one it just marked spent. Verified against a real transaction: an identical call
+   * repeated returns `completed` and then `awaiting-decision`, and the run exits before it
+   * commits anything, leaving the Task waiting on a decision the operator has already given.
+   *
+   * This says "the decision on record is this same approval, already spent here", which is a
+   * replay and not a second gate. It cannot launder one approval into two: a `request-changes`
+   * makes the latest decision something other than an approval, and a fresh approval writes a new
+   * row whose id differs from the spent one — so both of those take the ordinary path.
+   */
+  approvalAlreadySpent: boolean;
 }
 
 export interface WorkflowAdvance {
@@ -212,6 +229,13 @@ export interface WorkflowAdvance {
    * Did this move rest on the approval? The DAL marks that approval spent when it did, which is
    * what stops the same one from releasing every remaining gate. `auto` moves consume nothing,
    * so a pipeline of `auto` Steps still costs exactly one human decision — at the end.
+   *
+   * "Rest on" includes a move a human *triggered* even where the gate asked for nothing, and
+   * that distinction was a Principle I hole reachable by configuration alone: Step 1 `gate: "auto"`
+   * with `advanceOn: "review"`, a last Step with `advanceOn: "agent-signal"`. A reviewer approves
+   * the *plan*; the advance needs no approval, so on the narrow reading nothing is spent; the last
+   * Step's agent then signals, finds that same approval unspent, and the implementation is
+   * integrated with nobody having seen its diff. An approval buys the move it caused and no other.
    */
   consumedApproval: boolean;
 }
@@ -256,18 +280,31 @@ export function advanceWorkflowStep(
 
   const next = ordered[index + 1];
   if (!next) {
-    return ok(
-      outcome.unspentApproval
-        ? { status: "completed", stepId: current.id, consumedApproval: true }
-        : { status: "awaiting-decision", stepId: current.id, consumedApproval: false },
-    );
+    if (outcome.unspentApproval) {
+      return ok({ status: "completed", stepId: current.id, consumedApproval: true });
+    }
+    // The replay. `consumedApproval` is false because the first pass already spent it — saying
+    // true would rewrite the same id over itself, which is harmless but claims a second spend
+    // that never happened. This branch is why the terminal Step is safe to re-execute at all:
+    // see `approvalAlreadySpent`.
+    if (outcome.approvalAlreadySpent) {
+      return ok({ status: "completed", stepId: current.id, consumedApproval: false });
+    }
+    return ok({ status: "awaiting-decision", stepId: current.id, consumedApproval: false });
   }
 
   const needsApproval = gateNeedsApproval(current.gate, outcome);
   if (needsApproval && !outcome.unspentApproval) {
     return ok({ status: "awaiting-decision", stepId: current.id, consumedApproval: false });
   }
-  return ok({ status: "advanced", stepId: next.id, consumedApproval: needsApproval });
+  // A move a human's approval *triggered* spends that approval, whatever the gate thought it
+  // needed. Without the second clause an approval that released nothing is never marked spent,
+  // and it is still on offer at the last Step — where Principle I asks for one.
+  return ok({
+    status: "advanced",
+    stepId: next.id,
+    consumedApproval: needsApproval || (outcome.signal === "review" && outcome.unspentApproval),
+  });
 }
 
 /** The heading the handoff is carried under. One constant so the brief reads the same every run. */

@@ -259,6 +259,22 @@ export const taskDto = z
     completedAt: z.string().nullable(),
     completedOutcome: taskCompletionOutcomeSchema.nullable(),
     completedSummary: z.string().nullable(),
+    /**
+     * Where this Task sits in its pipeline: the Workflow it follows, and the Step its cursor is
+     * parked on (issue #5 AC-6). Both null for a Task on no Workflow, which is every Task while
+     * `ff-workflows` is off — nothing but the flag-gated procedures ever writes those columns.
+     *
+     * Here for the reason `completedAt` gives above: the board asks this once per card, and
+     * "which column does this tile belong in" must be answerable without a query per tile.
+     *
+     * The *names* behind the ids are deliberately absent. This DTO is an MCP tool output, so
+     * every field on it is handed to an agent verbatim — and the Step row a name would be
+     * joined from also carries `promptTemplate`, Owner-authored text that must never travel on
+     * a board payload. The board already holds `workflow.list` and `workflow.get` for its
+     * picker, which is where the names it renders come from.
+     */
+    workflowId: idSchema.nullable(),
+    workflowStepId: idSchema.nullable(),
   })
   .merge(timestampsSchema);
 export type TaskDto = z.infer<typeof taskDto>;

@@ -15,15 +15,23 @@ import { useCallback, useMemo, useState } from "react";
 import { ConfirmDialog } from "@/components/features/confirm-action";
 import { DeleteTaskAction } from "@/components/features/task/delete-task-action";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { type BoardColumn, lifecycleColumns, workflowColumns } from "@/lib/board-columns";
 import { settingsHref } from "@/lib/navigation";
 import { WHOLE_PAGE } from "@/lib/paged";
 import { taskActionMessage } from "@/lib/task-errors";
-import { BOARD_COLUMNS, CREDENTIAL_EXPIRED_REASON, STATE_LABELS } from "@/lib/task-states";
+import { BOARD_COLUMNS, CREDENTIAL_EXPIRED_REASON } from "@/lib/task-states";
 import { useWorkspaceEvents } from "@/lib/workspace-events";
 import { trpc } from "@/trpc/react";
 import { BlockedByDialog } from "./blocked-by-dialog";
-import { moveRefusal, waitingOn } from "./blockers";
+import { moveRefusal, stepMoveRefusal, waitingOn } from "./blockers";
 import { type BoardReferences, BoardReferencesProvider } from "./board-references";
 import { Column } from "./column";
 import { DependencyCycleDialog } from "./dependency-cycle-dialog";
@@ -44,12 +52,11 @@ export function BoardView({
       className="flex min-h-0 flex-1 items-stretch gap-3 overflow-x-auto p-4"
       aria-label="Task board"
     >
-      {BOARD_COLUMNS.map((state) => (
+      {lifecycleColumns().map((column) => (
         <Column
-          key={state}
-          state={state}
-          label={STATE_LABELS[state]}
-          tasks={tasks.filter((task) => task.state === state)}
+          key={column.id}
+          column={column}
+          tasks={tasks.filter((task) => column.kind === "state" && task.state === column.state)}
           renderActions={renderActions}
           blockersFor={blockersFor}
         />
@@ -96,6 +103,12 @@ function BoardSkeleton() {
     </div>
   );
 }
+
+/**
+ * The picker's value for "no Workflow, show the lifecycle" — a sentinel rather than an empty
+ * string, because Radix treats `""` as "nothing selected" and would render a blank trigger.
+ */
+const LIFECYCLE_MODE = "lifecycle";
 
 /** Shown when the Workspace has no Tasks at all, rather than seven empty columns. */
 function BoardEmpty() {
@@ -183,6 +196,45 @@ export function Board({
   const [pendingMove, setPendingMove] = useState<{ taskId: string; to: TaskState } | null>(null);
   const [editingBlockersFor, setEditingBlockersFor] = useState<TaskDto | null>(null);
   const [cyclePath, setCyclePath] = useState<readonly string[] | null>(null);
+  /**
+   * Which Workflow the board is showing, or null for the lifecycle board (issue #5 AC-6).
+   *
+   * A control, never an inference. A board that silently re-columned itself because somebody
+   * attached a Workflow to one Task would move every other card on screen for a reason the
+   * operator did not ask for and cannot see.
+   */
+  const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(null);
+  /*
+   * The picker's own data, and the one query on this screen that is allowed to fail.
+   *
+   * `workflow.list` sits on `workflowProcedure`, which THROWS `FLAG_DISABLED` wherever
+   * `ff-workflows` is off — which is everywhere, by default. It must therefore never join
+   * `loadError` below, because that blanks the whole board: doing so would replace the board with
+   * an error page for every Workspace that has not turned the flag on. Any failure at all — flag
+   * off, network, anything — means no picker and a board byte-identical to the one that shipped
+   * before Workflows existed. `retry: false` so a disabled flag is not retried on a timer.
+   */
+  const workflowsQuery = trpc.workflow.list.useQuery({}, { retry: false });
+  const workflows = Array.isArray(workflowsQuery.data) ? workflowsQuery.data : [];
+  /*
+   * The selected Workflow's Steps, which are what the columns are. Same rule as above: it is
+   * never part of `loadError`, and until it lands (or if it fails) the board keeps its lifecycle
+   * columns rather than showing a half-built pipeline — falling back to the board that is always
+   * correct is the safe direction to fail in.
+   */
+  const workflowQuery = trpc.workflow.get.useQuery(
+    { id: selectedWorkflowId ?? "" },
+    { enabled: selectedWorkflowId !== null, retry: false },
+  );
+  const steps = selectedWorkflowId && workflowQuery.data ? workflowQuery.data.steps : null;
+  const columns: readonly BoardColumn[] = steps ? workflowColumns(steps) : lifecycleColumns();
+  const workflowNameFor = (id: string) => workflows.find((w) => w.id === id)?.name ?? null;
+  // A Workflow deleted out from under the picker leaves a selection nothing in the list matches,
+  // which Radix would render as a blank trigger. Fall back to the label that is always true.
+  const pickerValue =
+    selectedWorkflowId && workflows.some((w) => w.id === selectedWorkflowId)
+      ? selectedWorkflowId
+      : LIFECYCLE_MODE;
 
   // Live board (TASK-018/021): the orchestrator announces every Task state change on the
   // Workspace channel, so a run that advances in the background lands here without a poll.
@@ -442,6 +494,31 @@ export function Board({
 
   return (
     <BoardReferencesProvider value={references}>
+      {workflows.length > 0 ? (
+        <div className="flex items-center gap-2 px-4 pt-3">
+          <span className="text-2xs text-muted-foreground uppercase tracking-[0.12em]">
+            Columns
+          </span>
+          <Select
+            value={pickerValue}
+            onValueChange={(value) =>
+              setSelectedWorkflowId(value === LIFECYCLE_MODE ? null : value)
+            }
+          >
+            <SelectTrigger size="sm" className="w-56" aria-label="Board columns">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={LIFECYCLE_MODE}>Lifecycle</SelectItem>
+              {workflows.map((workflow) => (
+                <SelectItem key={workflow.id} value={workflow.id}>
+                  {workflow.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      ) : null}
       {errorMessage ? (
         <p
           className="mx-4 mt-3 flex items-center gap-2 rounded-lg border border-state-failed/30 bg-state-failed/10 px-3 py-2 text-state-failed text-sm"
@@ -456,9 +533,14 @@ export function Board({
       ) : (
         <DndBoard
           tasks={tasks}
+          columns={columns}
           renderActions={renderActions}
           blockersFor={blockersFor}
           onMove={onMove}
+          // A Step column is not a drop target, so this only fires if one somehow becomes one.
+          // It says what actually moves a pipeline rather than letting the card snap back mute.
+          onRefusedMove={() => setDragError(stepMoveRefusal())}
+          workflowNameFor={workflowNameFor}
           onSubmitForReview={(id) => submitForReview.mutate({ id })}
           submittingOn={pendingOn}
         />

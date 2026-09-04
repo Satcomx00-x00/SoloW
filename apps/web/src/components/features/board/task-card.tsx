@@ -8,6 +8,7 @@ import {
   Lock,
   RotateCcw,
   TriangleAlert,
+  Workflow,
 } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
@@ -24,6 +25,7 @@ import { cn } from "@/lib/utils";
 import { waitingOn } from "./blockers";
 import { useBoardReferences } from "./board-references";
 import { IssueMenu } from "./issue-menu";
+import { TaskStateBadge } from "./task-state-badge";
 
 /**
  * A single Task card on the board.
@@ -54,6 +56,8 @@ export function TaskCard({
   ghost,
   onSubmitForReview,
   submitting = false,
+  workflowName,
+  showState = false,
 }: {
   task: TaskDto;
   actions?: ReactNode;
@@ -69,6 +73,25 @@ export function TaskCard({
    */
   onSubmitForReview?: (taskId: string) => void;
   submitting?: boolean;
+  /**
+   * The Workflow this card is on, when its column does not say (issue #5 AC-6).
+   *
+   * Only ever supplied for the `Other work` lane of a Workflow board, which is where cards on a
+   * *different* pipeline collect — hiding them would lose work, and showing them unlabelled would
+   * put a card under a column heading that says nothing about it. The name comes from the board's
+   * own `workflow.list`; the DTO deliberately carries only the id (see `taskDto`).
+   */
+  workflowName?: string | null;
+  /**
+   * Put the lifecycle state on the card (issue #5 AC-6).
+   *
+   * Off by default, and off for the whole lifecycle board: there the column the card sits in is
+   * the state, and a pill repeating it on every tile is seven columns of noise. It is turned on
+   * for a Workflow board's Step and `Other work` columns, where the column says *where in the
+   * pipeline* the work is and nothing says what is happening to it — a Task that failed on Step 2
+   * stays in Step 2, which is the useful place for it, but only if the card says it failed.
+   */
+  showState?: boolean;
 }) {
   const attention = needsAttention(task.state);
   const references = useBoardReferences();
@@ -127,8 +150,13 @@ export function TaskCard({
           {dragHandle}
         </div>
 
-        {(outstanding.length > 0 || task.failureReason || declared || extraRepositories > 0) && (
-          <div className="mt-2.5 flex items-center gap-1.5">
+        {(showState ||
+          outstanding.length > 0 ||
+          task.failureReason ||
+          declared ||
+          extraRepositories > 0) && (
+          <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+            {showState ? <TaskStateBadge state={task.state} size="sm" /> : null}
             {declared ? (
               <span
                 className={cn(
@@ -302,6 +330,13 @@ export function TaskCard({
             <CheckCircle2 className="size-3.5 shrink-0" aria-hidden />
             Open review
           </button>
+        ) : null}
+
+        {workflowName ? (
+          <p className="mt-2.5 flex min-w-0 items-center gap-1.5 text-2xs text-muted-foreground/80">
+            <Workflow className="size-3 shrink-0 text-muted-foreground/60" aria-hidden />
+            <span className="truncate">{workflowName}</span>
+          </p>
         ) : null}
 
         {actions ? <div className="mt-2.5 flex gap-1.5">{actions}</div> : null}

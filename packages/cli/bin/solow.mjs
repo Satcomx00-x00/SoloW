@@ -128,6 +128,27 @@ function fail(message) {
   process.exit(1);
 }
 
+/**
+ * Is `git` on the PATH, and usable?
+ *
+ * Checked at start-up rather than left to the first Task, because that is the difference between
+ * a sentence someone can act on and a failure buried in an agent run: every Repository is cloned
+ * with `git`, and every Task's worktree is a `git worktree add`. Without it nothing that makes
+ * this a product works, but the web UI comes up perfectly, so the person who is missing it finds
+ * out at the least convenient moment and with the least legible error.
+ *
+ * `--version` rather than `command -v`: a `git` that is on the PATH but cannot execute — a broken
+ * shim, an unsatisfied dynamic link, a Windows Store stub — passes the lookup and fails the run,
+ * and this whole check exists to move that discovery earlier.
+ */
+function gitUsable() {
+  try {
+    return spawnSync("git", ["--version"], { stdio: "ignore" }).status === 0;
+  } catch {
+    return false;
+  }
+}
+
 // ------------------------------------------------------------------- vendored binaries
 
 /**
@@ -468,6 +489,19 @@ function openBrowser(url) {
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
   const bun = resolveBun();
+
+  if (!gitUsable()) {
+    fail(
+      "could not run `git`.\n" +
+        "  Every Repository is cloned with git, and every Task works in a `git worktree`, so\n" +
+        "  solow cannot do anything useful without it. Install it once and re-run:\n" +
+        "    macOS          xcode-select --install\n" +
+        "    Debian/Ubuntu  sudo apt install git\n" +
+        "    Fedora         sudo dnf install git\n" +
+        "    Windows        winget install Git.Git",
+    );
+  }
+
   const env = buildEnv(opts);
 
   for (const [label, p] of [

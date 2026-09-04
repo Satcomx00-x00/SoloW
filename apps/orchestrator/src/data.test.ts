@@ -24,6 +24,7 @@ import {
   listSessionSummaries,
   listSessionUsage,
   loadTaskRunContext,
+  loadWorkflowStepAgents,
   nextSessionUsageSeq,
   recordSessionUsage,
   setTaskRepositoryResultBranch,
@@ -751,5 +752,144 @@ describe("session log (issue #2)", () => {
     await compactSession(db, WS, "sess-1", { threshold: 20, tail: 10 });
 
     expect(await listSessionSummaries(db, OTHER_WS, "sess-1")).toHaveLength(0);
+  });
+});
+
+describe("the Workflow flag on a run context", () => {
+  it("is off for a Workspace that has said nothing about it", async () => {
+    const db = createTestDb();
+    await seed(db);
+
+    const ctx = await loadTaskRunContext(db, WS, "task-1");
+
+    // Default OFF is the Definition of Done, and "no flags row at all" is the shape every
+    // existing Workspace is in.
+    expect(ctx.workflowsEnabled).toBe(false);
+  });
+
+  it("is read from the same Workspace row the widget flag comes from", async () => {
+    const db = createTestDb();
+    await seed(db);
+    await db
+      .update(workspace)
+      .set({ enabledFlags: { "ff-workflows": true } })
+      .where(eq(workspace.id, WS));
+
+    const ctx = await loadTaskRunContext(db, WS, "task-1");
+
+    expect(ctx.workflowsEnabled).toBe(true);
+    // And nothing else about the context moves: the Task's own Profile, catalog row and
+    // credential stay the Task's, because half the run loop reads them and a Task with no
+    // Workflow must not change at all.
+    expect(ctx.agentProfile.id).toBe("ap-1");
+    expect(ctx.agentCatalog.id).toBe("cat-1");
+    expect(ctx.secretCiphertext).not.toBeNull();
+  });
+});
+
+describe("resolving the Agent Profile behind every Workflow Step", () => {
+  /** A second Profile in `WS`, and one in the other tenant that must never resolve. */
+  async function seedProfiles(db: TestDb): Promise<void> {
+    await db.insert(agentCatalog).values({
+      id: "cat-2",
+      workspaceId: WS,
+      key: "acp_agent",
+      displayName: "ACP",
+      protocol: "acp",
+      command: "acp-agent",
+      subscriptionEnvVar: "CLAUDE_CODE_OAUTH_TOKEN",
+      meteredEnvVar: "ANTHROPIC_API_KEY",
+    });
+    await db.insert(agentProfile).values({
+      id: "ap-2",
+      workspaceId: WS,
+      name: "Reviewer",
+      agentCatalogId: "cat-2",
+      authMode: "subscription",
+      secretId: "sec-1",
+    });
+    await db.insert(secret).values({
+      id: "sec-2",
+      workspaceId: OTHER_WS,
+      name: "other-token",
+      kind: "subscription_token",
+      ciphertext: encryptSecret("not-yours"),
+    });
+    /*
+     * The other tenant's Profile points at *this* tenant's catalog row.
+     *
+     * Contrived on purpose, and the contrivance is what makes the next test able to fail: with a
+     * catalog row of its own, dropping the Workspace filter on the Profile would still be caught
+     * by the Workspace filter on the catalog, and the test would pass while the defect it is
+     * named after was live. Sharing the catalog id leaves the Profile's own filter as the only
+     * thing standing between this Workspace and another tenant's agent (Principle V).
+     */
+    await db.insert(agentProfile).values({
+      id: "ap-other",
+      workspaceId: OTHER_WS,
+      name: "Theirs",
+      agentCatalogId: "cat-1",
+      authMode: "subscription",
+      secretId: "sec-2",
+    });
+  }
+
+  it("pairs each Profile with its catalog row, resolving a repeated one once", async () => {
+    const db = createTestDb();
+    await seed(db);
+    await seedProfiles(db);
+
+    const resolved = await loadWorkflowStepAgents(db, WS, ["ap-1", "ap-2", "ap-1"]);
+
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) return;
+    // Two Steps naming one Profile resolve it once; the caller pairs by id, never by position.
+    expect(resolved.agents.map((a) => a.agentProfileId)).toEqual(["ap-1", "ap-2"]);
+    expect(resolved.agents.map((a) => a.agentCatalog.command)).toEqual(["claude", "acp-agent"]);
+  });
+
+  it("carries no credential, so a memoized durable step holds none", async () => {
+    // `step.run` memoizes what it returns into Inngest's durable store, and `load` already puts
+    // one decryptable ciphertext there. Multiplying that per Step would widen an existing
+    // exposure for nothing (Principle IV) — the Step's own is read at the point of use.
+    const db = createTestDb();
+    await seed(db);
+    await seedProfiles(db);
+
+    const resolved = await loadWorkflowStepAgents(db, WS, ["ap-1"]);
+
+    expect(resolved.ok).toBe(true);
+    if (!resolved.ok) return;
+    const serialised = JSON.stringify(resolved);
+    expect(serialised).not.toContain(SECRET_PLAINTEXT);
+    // Not the ciphertext either: it is what `decryptForAgentRun` takes, so storing it durably is
+    // storing the credential behind one call.
+    const [row] = await db.select().from(secret).where(eq(secret.id, "sec-1")).limit(1);
+    expect(serialised).not.toContain(row?.ciphertext ?? "IMPOSSIBLE");
+    expect(Object.keys(resolved.agents[0] ?? {})).toEqual([
+      "agentProfileId",
+      "agentProfile",
+      "agentCatalog",
+    ]);
+  });
+
+  it("reports the missing Profile by id rather than skipping the Step", async () => {
+    const db = createTestDb();
+    await seed(db);
+
+    const resolved = await loadWorkflowStepAgents(db, WS, ["ap-1", "ap-gone"]);
+
+    // Named, because the alternative to refusing is running that Step under some other agent.
+    expect(resolved).toEqual({ ok: false, missingAgentProfileId: "ap-gone" });
+  });
+
+  it("reads another tenant's Profile as absent, never as someone else's agent", async () => {
+    const db = createTestDb();
+    await seed(db);
+    await seedProfiles(db);
+
+    const resolved = await loadWorkflowStepAgents(db, WS, ["ap-other"]);
+
+    expect(resolved).toEqual({ ok: false, missingAgentProfileId: "ap-other" });
   });
 });
