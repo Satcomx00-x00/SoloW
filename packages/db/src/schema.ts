@@ -590,6 +590,23 @@ export const task = sqliteTable(
      * and it must keep its meaning even if the row it names is one day archived away.
      */
     workflowDecisionId: text("workflow_decision_id"),
+    /**
+     * Which durable step call spent that approval — an idempotency key, not a Step id.
+     *
+     * The terminal Step has to tell a *replay of one call* apart from *a different call*, and
+     * neither the Workflow Step nor the signal can do it: both advance call sites in the run
+     * lifecycle sit on the same Step and pass the same signal when `advance_on` is `agent-signal`.
+     * The durable step id (`workflow-signal-3`, `workflow-review-3`) is what differs, and it is
+     * exactly the identity Inngest itself replays under.
+     *
+     * Why the question arises at all: the cursor never moves at the last Step, so the
+     * `StaleCursor` guard that makes every other advance replay-safe is silent there. Its own step
+     * body can therefore re-execute after committing, and read a world where the approval it needs
+     * is the one it just marked spent. Scoping to the call means a re-run of that call completes
+     * again, while the *other* call site — which is a second gate crossing, not a replay — still
+     * has to find an approval of its own.
+     */
+    workflowDecisionCall: text("workflow_decision_call"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

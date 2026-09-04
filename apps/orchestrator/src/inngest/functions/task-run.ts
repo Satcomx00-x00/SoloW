@@ -14,6 +14,11 @@ import {
   WIDGET_ANSWER_PREFIX,
   type Widget,
   type WidgetResponse,
+  type WorkflowAdvanceOn,
+  type WorkflowAdvanceStatus,
+  WorkflowErrorCode,
+  type WorkflowStepDto,
+  type WorkflowStepGate,
   widgetExpectsResponse,
   widgetOptions,
 } from "@solow/contracts";
@@ -24,7 +29,14 @@ import {
   primaryTaskRepository,
   taskCheckoutBranch,
 } from "@solow/core";
-import { createDb, type Db, decryptForScmSync } from "@solow/db";
+import {
+  advanceTaskWorkflow,
+  clearTaskWorkflowPendingHandoff,
+  createDb,
+  type Db,
+  decryptForScmSync,
+  loadTaskWorkflowRun,
+} from "@solow/db";
 import {
   captureException,
   createLogger,
@@ -56,10 +68,13 @@ import {
   compactSession,
   isMissingParentRow,
   latestStateTransition,
+  loadAgentProbeContext,
   loadTaskRunContext,
+  loadWorkflowStepAgents,
   markWorktreesRemoved,
   nextSessionEventSeq,
   nextSessionUsageSeq,
+  readTaskState,
   recordSessionUsage,
   recordTaskCompletion,
   recordWorktree,
@@ -136,6 +151,66 @@ interface WorktreeBinding {
 }
 
 /**
+ * The agent binding and brief in force for the round about to run (issue #5, AC-3).
+ *
+ * A *leg* rather than a Step, because a Step is not the unit this loop counts. The round counter
+ * stays monotonic across Step boundaries — see the loop — so what actually changes at a boundary
+ * is which agent is launched and which brief it is given, and this is exactly those two things.
+ *
+ * Every field is null for a Task on no Workflow, and the two that are not — the Profile and the
+ * catalog row — are then the Task's own. That is why the leg exists at all instead of the Step's
+ * Profile being written over `ctx.agentProfile` in `loadTaskRunContext`: roughly a quarter of
+ * this file reads `ctx.agentProfile`, and a Task with no Workflow must not move at all.
+ */
+interface RunLeg {
+  /** The Workflow Step this leg runs, or null for a Task following no Workflow. */
+  stepId: string | null;
+  stepName: string | null;
+  gate: WorkflowStepGate | null;
+  /** Which signal finishes this Step. Read at both advance call sites — never a literal. */
+  advanceOn: WorkflowAdvanceOn | null;
+  agentProfile: TaskRunContext["agentProfile"];
+  agentCatalog: TaskRunContext["agentCatalog"];
+  /**
+   * The Step's prompt with the previous Step's handoff already prepended — `buildStepBrief`'s
+   * output, carried from `loadTaskWorkflowRun` or from the advance DTO and never re-derived here.
+   * One string, built in one place, so the API's preview and the agent's prompt cannot drift.
+   */
+  stepBrief: string | null;
+}
+
+/**
+ * What reporting a Step finished came back as, from the loop's point of view.
+ *
+ * `failed` folds every error the shared transaction can return *except* `StaleCursor`, which is
+ * resolved into one of the other two before it gets here — see `reportStepFinished`.
+ */
+type LegAdvance =
+  | { kind: "advanced"; stepId: string; brief: string }
+  | { kind: "status"; status: WorkflowAdvanceStatus }
+  | { kind: "failed" };
+
+/**
+ * What an Agent Profile asked its agent to be launched with (issue #94).
+ *
+ * A function of the Profile rather than a constant read of `ctx.agentProfile`, because under a
+ * Workflow the Profile changes at a Step boundary and the launch settings have to change with it
+ * — a Step pinned to a planning model must not be launched with the previous Step's pin.
+ */
+function launchSettingsFor(profile: TaskRunContext["agentProfile"]): AgentLaunchSettings {
+  return {
+    permissionMode: profile.permissionMode,
+    ...(profile.model ? { model: profile.model } : {}),
+    ...(profile.modeId ? { modeId: profile.modeId } : {}),
+  };
+}
+
+/** The sentence a run says about a pinned setting its protocol cannot carry (issue #94 AC-3). */
+function unsupportedLaunchSettingsNotice(protocol: AgentProtocol, unsupported: string[]): string {
+  return `This agent profile pins ${unsupported.join(" and ")}, which ${protocol} cannot select. The run used the agent's own choice instead.`;
+}
+
+/**
  * Durable Task lifecycle (plan §9 / task TASK-019). Steps are resumable: an orchestrator
  * restart resumes from the last completed step (Principle III). The review gate is a
  * `waitForEvent` (Principle I — no integration without a recorded human decision).
@@ -158,6 +233,19 @@ const reviewData = z.object({
 });
 
 const MAX_REVIEW_ROUNDS = 5;
+
+/**
+ * The longest Workflow this run loop will walk (issue #5).
+ *
+ * A bound rather than a truncation, and the difference is the whole of it: silently running the
+ * first twenty Steps of a twenty-five Step pipeline would drop five Steps of an Owner's process
+ * and report the Task done. The number is a sanity limit on a hand-authored list, not a product
+ * decision — a Workflow past it is refused by name so somebody can look at it.
+ *
+ * It also bounds the loop: `maxRounds` is `MAX_REVIEW_ROUNDS * stepCount`, so without this a
+ * pathological Step list would decide how long one Inngest run may live.
+ */
+const MAX_WORKFLOW_STEPS = 20;
 
 /**
  * How long a run parked on an exhausted quota sleeps before it wakes itself up.
@@ -664,23 +752,147 @@ export async function runTaskLifecycle(
   };
 
   /**
+   * Fail the run, say why, and stop — the shape `prepare-failed` and `executor-unavailable`
+   * already use, factored out because the Workflow entry adds three more of them.
+   *
+   * The state write and the transition record stay inside one `step.run` for the reason those
+   * two do: split apart, an Inngest retry appends a second copy of the transition.
+   */
+  const failRun = async (
+    stepId: string,
+    reason: string,
+    /** The state being left. The row's own at entry; `running` once the loop is turning. */
+    from: TaskState = ctx.task.state,
+  ): Promise<{ taskId: string; result: string }> => {
+    await step.run(stepId, async () => {
+      await setTaskState(db, workspaceId, taskId, "failed", { failureReason: reason });
+      await recordTransition(from, "failed", reason);
+    });
+    logStateTransition(log, { workspaceId, taskId, from, to: "failed" });
+    announce("failed");
+    captureException(log, new Error(reason), { failureReason: reason });
+    return { taskId, result: reason };
+  };
+
+  /**
+   * Which Step of its Workflow this Task picks up on (issue #5, AC-5).
+   *
+   * Before `executor-preflight` and before anything is cloned, because everything the pre-clone
+   * gates below check is per-Step under a Workflow: which binaries the pipeline can spawn, and
+   * which protocols it speaks. A resume that ran after the clone would discover the fourth
+   * Step's missing agent having already paid for three Steps of work.
+   *
+   * Read-only. `loadTaskWorkflowRun` deliberately does not write the resolved cursor back — the
+   * web DAL's `taskHasBegunWorkflow` reads exactly those columns to refuse a re-attach, and a
+   * merely-resolved cursor persisted here would make "this Task has begun its pipeline" true for
+   * a Task whose agent never started.
+   *
+   * Skipped entirely — no step, no id — for a Task with no `workflowId` or in a Workspace with
+   * `ff-workflows` off, which is what keeps the durable step sequence of every existing Task
+   * byte-identical to what it was before this change.
+   */
+  const resumedWorkflow =
+    ctx.workflowsEnabled && ctx.task.workflowId
+      ? await step.run("workflow-resume", () => loadTaskWorkflowRun(db, workspaceId, taskId))
+      : null;
+  if (resumedWorkflow && !resumedWorkflow.ok) {
+    /*
+     * The cursor names a Step this Workflow no longer contains — `resumeWorkflowCursor` refuses
+     * that on purpose, and this side must not undo it. Restarting at Step one would silently
+     * re-run work an Owner has already paid an agent for, at the moment they are least able to
+     * notice; the honest answer is a failed Task with the reason on it.
+     */
+    return await failRun("workflow-unresumable", "workflow_unresumable");
+  }
+  const wf = resumedWorkflow?.ok ? resumedWorkflow.data : null;
+  if (wf && wf.steps.length > MAX_WORKFLOW_STEPS) {
+    // Refused, never truncated: running the first `MAX_WORKFLOW_STEPS` of a longer pipeline
+    // would drop the rest of an Owner's process and report the Task done.
+    return await failRun("workflow-too-long", "workflow_too_long");
+  }
+
+  /**
+   * The Agent Profile behind every Step, resolved in one durable step (AC-3).
+   *
+   * Deliberately carries no credential — see `loadWorkflowStepAgents`. `step.run` memoizes what
+   * it returns into Inngest's durable store, and `load` already puts one decryptable ciphertext
+   * there; the Step's own is read at the point of use inside `agent-run-${round}` instead.
+   */
+  const stepAgents = wf
+    ? await step.run("workflow-agents", () =>
+        loadWorkflowStepAgents(
+          db,
+          workspaceId,
+          wf.steps.map((entry) => entry.agentProfileId),
+        ),
+      )
+    : null;
+  if (stepAgents && !stepAgents.ok) {
+    // A Profile or catalog row a Step names is gone. Failing by name beats launching the Step
+    // under some other agent, which is the only alternative that keeps the run going.
+    return await failRun("workflow-agents-missing", "workflow_step_agent_missing");
+  }
+  const stepAgentByProfileId = new Map(
+    (stepAgents?.ok ? stepAgents.agents : []).map(
+      (entry) => [entry.agentProfileId, entry] as const,
+    ),
+  );
+
+  /** The leg a Task with no Workflow runs, every round: its own Profile and its own brief. */
+  const legForTask = (): RunLeg => ({
+    stepId: null,
+    stepName: null,
+    gate: null,
+    advanceOn: null,
+    agentProfile: ctx.agentProfile,
+    agentCatalog: ctx.agentCatalog,
+    stepBrief: null,
+  });
+
+  /**
+   * The leg one Workflow Step runs. Null only if its Profile is absent from the resolved set,
+   * which `workflow-agents` above already refused — kept as a value rather than an assertion so
+   * a future edit that loosens that gate fails legibly here instead of launching the wrong agent.
+   */
+  const legForStep = (workflowStep: WorkflowStepDto, brief: string): RunLeg | null => {
+    const bound = stepAgentByProfileId.get(workflowStep.agentProfileId);
+    if (!bound) return null;
+    return {
+      stepId: workflowStep.id,
+      stepName: workflowStep.name,
+      gate: workflowStep.gate,
+      advanceOn: workflowStep.advanceOn,
+      agentProfile: bound.agentProfile,
+      agentCatalog: bound.agentCatalog,
+      stepBrief: brief,
+    };
+  };
+
+  const entryLeg = wf ? legForStep(wf.currentStep, wf.brief) : legForTask();
+  if (!entryLeg) return await failRun("workflow-agents-missing", "workflow_step_agent_missing");
+
+  /**
    * An Agent Profile names the protocol its catalog row declares, and only some protocols have
    * a runner behind them (issues #10 and #58). Checked here, before anything is cloned: a Task
    * pointed at a protocol nothing speaks must fail with a legible reason, not crash deep inside
    * a runner that was never built for it.
+   *
+   * The *entry* leg's protocol under a Workflow, which is the Task's own when there is none. It
+   * decides the pre-clone shape of the run — whether the agent makes its own worktree — and that
+   * decision is taken once, before the first Step. Later Steps continue inside whatever the first
+   * one ended up with (`resuming` in the run body), so a pipeline mixing protocols still has
+   * exactly one worktree per attachment. Every Step's protocol is still checked for a runner
+   * below; only this one shapes the clone.
    */
-  const protocol = ctx.agentCatalog.protocol;
+  const protocol = entryLeg.agentCatalog.protocol;
   /**
    * What this Profile asked to launch with (issue #94).
    *
    * The Profile's settings, not a constant — that is the whole of AC-1 — and they reach the run
-   * through the one seam that already existed for the permission mode.
+   * through the one seam that already existed for the permission mode. Under a Workflow this is
+   * the entry Step's Profile; a Step boundary rebuilds it, and re-emits the notice below.
    */
-  const launchSettings: AgentLaunchSettings = {
-    permissionMode: ctx.agentProfile.permissionMode,
-    ...(ctx.agentProfile.model ? { model: ctx.agentProfile.model } : {}),
-    ...(ctx.agentProfile.modeId ? { modeId: ctx.agentProfile.modeId } : {}),
-  };
+  const launchSettings: AgentLaunchSettings = launchSettingsFor(entryLeg.agentProfile);
 
   /*
    * A setting this protocol cannot carry is **said**, never dropped (issue #94 AC-3).
@@ -694,14 +906,14 @@ export async function runTaskLifecycle(
    */
   const unsupported = unsupportedLaunchSettings(protocol, launchSettings);
   if (unsupported.length > 0) {
+    // The bare id stays reserved for this, the pre-loop emission. A Step boundary that finds its
+    // own unsupported pins emits under `launch-settings-unsupported-${round}` instead, so a
+    // Workflow cannot collide with the id a Task with no Workflow has always used.
     await step.run("launch-settings-unsupported", async () => {
       await appendSessionEvent(db, workspaceId, {
         sessionId,
         seq: await nextSessionEventSeq(db, workspaceId, sessionId),
-        payload: {
-          kind: "notice",
-          text: `This agent profile pins ${unsupported.join(" and ")}, which ${protocol} cannot select. The run used the agent's own choice instead.`,
-        },
+        payload: { kind: "notice", text: unsupportedLaunchSettingsNotice(protocol, unsupported) },
       });
     });
   }
@@ -777,7 +989,14 @@ export async function runTaskLifecycle(
     bindPaths: executorBindPaths(deps, taskId, ctx.repositories, ownClone),
     // What this run is going to spawn, probed once by the preflight so a missing agent binary
     // throws on the line the runners already guard rather than arriving as an exit 127.
-    agentCommands: [ctx.agentCatalog.command],
+    //
+    // Every binary the *pipeline* can spawn under a Workflow, not just the entry Step's: the
+    // probe is the one thing that runs before the clone, and discovering the fourth Step's
+    // missing agent after three Steps of paid agent time is the ordering it exists to prevent.
+    // Distinct, because two Steps routinely share one agent and probing it twice buys nothing.
+    agentCommands: wf
+      ? [...new Set([...stepAgentByProfileId.values()].map((e) => e.agentCatalog.command))]
+      : [ctx.agentCatalog.command],
     // One map, shared by reference with the preflight that fills it — see `probeExecutorFor`.
     probedCommands: new Map(),
   };
@@ -853,9 +1072,22 @@ export async function runTaskLifecycle(
      * The "can this build drive the protocol at all" gate moves with it, so there is still one
      * place that question is asked, and it is still asked before anything is cloned.
      */
-    const runner = deps.runner(protocol, launchSettings, executor);
-    if (!hasAgentRunner(protocol) || !runner) {
-      const reason = missingAgentRunnerReason(protocol);
+    const entryRunner = deps.runner(protocol, launchSettings, executor);
+    /*
+     * Every Step's protocol under a Workflow, not just the entry Step's (AC-3).
+     *
+     * A Task on a Workflow can speak three protocols before it is finished, and the whole point
+     * of this gate is that the refusal arrives before anything is cloned. Checked in pipeline
+     * order and reported on the first one that has no runner, so the operator is told about the
+     * Step they will actually hit first.
+     */
+    const undrivenProtocol = wf
+      ? wf.steps
+          .map((entry) => stepAgentByProfileId.get(entry.agentProfileId)?.agentCatalog.protocol)
+          .find((candidate) => candidate !== undefined && !hasAgentRunner(candidate))
+      : undefined;
+    if (!hasAgentRunner(protocol) || !entryRunner || undrivenProtocol) {
+      const reason = missingAgentRunnerReason(undrivenProtocol ?? protocol);
       await step.run("agent-runner-unavailable", async () => {
         await setTaskState(db, workspaceId, taskId, "failed", { failureReason: reason });
         await recordTransition(ctx.task.state, "failed", reason);
@@ -1169,16 +1401,208 @@ export async function runTaskLifecycle(
     /** Feedback from the previous review round; it becomes the next round's brief. */
     let pendingFeedback: string | undefined;
 
-    for (let round = 0; round < MAX_REVIEW_ROUNDS; round++) {
+    /**
+     * The agent binding and brief this round runs under (issue #5, AC-3).
+     *
+     * `let`, and so is the runner beside it — that pair is the whole of what a Step boundary
+     * changes. Everything else the loop touches is per *round*, which is why there is no nested
+     * Step loop: a nested one would reset `round` and Inngest would hand Step 2 back Step 1's
+     * memoized `agent-run-0` and `approve-0`, silently skipping Step 2's agent run and replaying
+     * Step 1's review decision. A monotonic counter makes that impossible to write.
+     */
+    let leg = entryLeg;
+    let runner: AgentRunner = entryRunner;
+    /**
+     * How many rounds this Step has had. `MAX_REVIEW_ROUNDS` is per Step, not per run: a
+     * five-Step pipeline that spent its whole budget on Step 1 would otherwise reach Step 2 with
+     * no rounds left and stop without saying why.
+     */
+    let roundsOnStep = 0;
+
+    /**
+     * Report the current Step finished, and read what the shared transaction decided (AC-2).
+     *
+     * One implementation for both call sites, and the transaction itself lives in `@solow/db`
+     * rather than here: `unspentApproval` and `producedChanges` are the two inputs to a
+     * Principle I gate, and a second copy of them on this side is a second copy that drifts.
+     *
+     * `StaleCursor` is **not** a failure. It means the transaction committed and Inngest then
+     * retried this body from the top — the durable step's own replay hazard, which is why
+     * `advanceTaskWorkflow` takes a `fromStepId` at all. The cursor is re-read and a cursor that
+     * has moved past the Step we named is reported as the advance it was. Treating it as an error
+     * would turn every retried approve into a failed Task.
+     */
+    const reportStepFinished = async (
+      id: string,
+      recheckId: string,
+      input: {
+        fromStepId: string;
+        signal: WorkflowAdvanceOn;
+        producedChanges: boolean;
+        handoff?: string;
+      },
+    ): Promise<LegAdvance> => {
+      // `call: id` is the durable step's own name, and it is what lets the terminal Step tell a
+      // re-run of *this* call apart from the other call site asking for a second gate. See
+      // `advanceTaskWorkflowInput.call`.
+      const reported = await step.run(id, () =>
+        advanceTaskWorkflow(db, workspaceId, { taskId, call: id, ...input }),
+      );
+      if (reported.ok) {
+        return reported.data.status === "advanced"
+          ? { kind: "advanced", stepId: reported.data.currentStepId, brief: reported.data.brief }
+          : { kind: "status", status: reported.data.status };
+      }
+      if (reported.error !== WorkflowErrorCode.StaleCursor) return { kind: "failed" };
+      const recheck = await step.run(recheckId, () => loadTaskWorkflowRun(db, workspaceId, taskId));
+      if (!recheck.ok) return { kind: "failed" };
+      // The cursor still naming the Step we tried to finish is the one shape the recheck cannot
+      // explain — some other writer moved it back. `held` sends the round to the review gate,
+      // which is the conservative reading: nothing integrates without a decision either way.
+      return recheck.data.currentStep.id === input.fromStepId
+        ? { kind: "status", status: "held" }
+        : { kind: "advanced", stepId: recheck.data.currentStep.id, brief: recheck.data.brief };
+    };
+
+    /**
+     * Take the advance: rebind the agent, clear what belonged to the finished Step, carry on
+     * (AC-2 — "advance to the next Step WITHOUT starting a new Task").
+     *
+     * Physically that means: no commit, no publish, no result branch, no `done`, no cleanup and
+     * no second Task. The worktrees are deliberately kept, because the next Step continues in
+     * them — `resuming` in the run body already runs every round after the first inside the
+     * primary worktree, so Step 2 sees Step 1's uncommitted work with no new mechanism. Ending
+     * the run and re-emitting `task.launch.requested` was the alternative and it destroys that
+     * work: the `finally` disposes the executor and `cleanup` removes every worktree.
+     *
+     * Returns a terminal result when the run cannot go on, and null when the loop continues.
+     */
+    const takeAdvance = async (
+      round: number,
+      next: { stepId: string; brief: string },
+    ): Promise<{ taskId: string; result: string } | null> => {
+      const landed = wf?.steps.find((entry) => entry.id === next.stepId);
+      const nextLeg = landed ? legForStep(landed, next.brief) : null;
+      if (!nextLeg) {
+        /*
+         * The cursor landed on a Step this run has never seen — a Step inserted into the
+         * definition while the run was live. The advance itself already committed, so nothing is
+         * lost by stopping: relaunching the Task reads the definition afresh and resumes on the
+         * new cursor. Binding it here is what is impossible, because the Step's Agent Profile was
+         * not in the set `workflow-agents` resolved and the pre-clone probe never saw its binary.
+         *
+         * This is the *only* thing drift costs a durable run. The step ids carry no Step ordinal,
+         * so an edit cannot invalidate a memo, and there is deliberately no drift refusal at entry.
+         */
+        return await failRun(`workflow-step-unknown-${round}`, "workflow_step_unknown", "running");
+      }
+      const rebuiltRunner = deps.runner(
+        nextLeg.agentCatalog.protocol,
+        launchSettingsFor(nextLeg.agentProfile),
+        executor,
+      );
+      if (!rebuiltRunner) {
+        // Unreachable through the pre-clone gate, which checked `hasAgentRunner` for every Step —
+        // but `hasAgentRunner` is the contracts' claim and this call is the fact, so the two are
+        // allowed to disagree here rather than in a null dereference three lines on.
+        return await failRun(
+          `workflow-runner-missing-${round}`,
+          missingAgentRunnerReason(nextLeg.agentCatalog.protocol),
+          "running",
+        );
+      }
+
+      const stateNow = await step.run(`workflow-advanced-${round}`, async () => {
+        // Step N's declaration must not linger on Step N+1's card: the board would keep offering
+        // to review a summary describing work that is now the *previous* Step's.
+        await clearTaskCompletion(db, workspaceId, taskId);
+        // A Step that advanced is not awaiting review, whatever `to-review` left behind.
+        await setSessionState(db, workspaceId, sessionId, "active");
+        // Read, never assumed from `ctx.task.state`. `to-review` deliberately does not move the
+        // Task into `review`, so at an agent-signal advance the row is usually still `running`
+        // and no transition is due — writing one anyway would put a `review → running` pair in
+        // the log for a review that never happened.
+        const state = await readTaskState(db, workspaceId, taskId);
+        if (state === "review") {
+          await setTaskState(db, workspaceId, taskId, "running");
+          await recordTransition("review", "running", "workflow_step_advanced");
+          return "running" as TaskState;
+        }
+        return (state ?? "running") as TaskState;
+      });
+      announce(stateNow);
+
+      // The new Step's Profile may pin something its protocol cannot carry, and a setting that
+      // cannot be honoured is said rather than dropped (issue #94 AC-3). Under the round-scoped
+      // id, so the bare one stays exactly what a Task with no Workflow emits.
+      const legUnsupported = unsupportedLaunchSettings(
+        nextLeg.agentCatalog.protocol,
+        launchSettingsFor(nextLeg.agentProfile),
+      );
+      if (legUnsupported.length > 0) {
+        await step.run(`launch-settings-unsupported-${round}`, async () => {
+          await appendSessionEvent(db, workspaceId, {
+            sessionId,
+            seq: await nextSessionEventSeq(db, workspaceId, sessionId),
+            payload: {
+              kind: "notice",
+              text: unsupportedLaunchSettingsNotice(nextLeg.agentCatalog.protocol, legUnsupported),
+            },
+          });
+        });
+      }
+
+      leg = nextLeg;
+      runner = rebuiltRunner;
+      roundsOnStep = 0;
+      // The previous Step's review feedback is not the next Step's brief. Left set, Step 2 would
+      // open with "your previous attempt was not accepted" about work it did not do.
+      pendingFeedback = undefined;
+      return null;
+    };
+
+    /**
+     * How many Steps this run believes the Workflow has.
+     *
+     * Read from the **memoized** `workflow-resume` output and from nowhere else. A live read
+     * would let an edit change the loop bound between replays, and a replay that walked a
+     * different number of iterations would reach a different step id than the journal holds.
+     */
+    const stepCount = wf ? wf.steps.length : 1;
+    const maxRounds = MAX_REVIEW_ROUNDS * Math.max(1, stepCount);
+    for (let round = 0; round < maxRounds; round++) {
+      // With no Workflow: stepCount 1, maxRounds 5, `roundsOnStep === round + 1`, and this never
+      // fires — rounds 0 to 4 exactly as before. With one: the budget is per Step and resets at
+      // every advance, so a Step that exhausts it stops the run rather than the pipeline running
+      // on into the next Step with the reviewer's patience already spent.
+      if (roundsOnStep >= MAX_REVIEW_ROUNDS) break;
+      roundsOnStep += 1;
       const brief = agentBrief(
         ctx,
         pendingFeedback,
         briefWorkspaces(ctx, primaryBinding, wt, provisionedByAttachment),
+        leg.stepBrief !== null && leg.stepName !== null
+          ? { name: leg.stepName, brief: leg.stepBrief }
+          : undefined,
       );
       const run = await step.run(`agent-run-${round}`, async () => {
+        /*
+         * The credential for the Profile *this leg* runs under (AC-3).
+         *
+         * Resolved here, inside the step that uses it, rather than carried on the memoized
+         * `workflow-agents` output: `step.run` memoizes what it returns into Inngest's durable
+         * store, and `load` already puts one decryptable ciphertext there. One more per Step
+         * widens an existing exposure to buy nothing (Principle IV). A Profile deleted since
+         * `workflow-agents` resolved reads as no credential, which `prepareAgentEnv` refuses
+         * below as `credential_expired` — the same answer a revoked secret already gets.
+         */
+        const legCiphertext = wf
+          ? ((await loadAgentProbeContext(db, workspaceId, leg.agentProfile.id))
+              ?.secretCiphertext ?? null)
+          : ctx.secretCiphertext;
         const shaped = prepareAgentEnv({
-          authMode: ctx.agentProfile.authMode,
-          secretCiphertext: ctx.secretCiphertext,
+          authMode: leg.agentProfile.authMode,
+          secretCiphertext: legCiphertext,
           /*
            * What a command run by *this* executor would inherit, not what the orchestrator
            * inherited (issue #96, §1). `SpawnOpts.env` replaces the child's environment wholesale,
@@ -1188,8 +1612,8 @@ export async function runTaskLifecycle(
            * `process.env` for the local driver, which is what it always was.
            */
           baseEnv: await executor.baseEnv(),
-          subscriptionEnvVar: ctx.agentCatalog.subscriptionEnvVar,
-          meteredEnvVar: ctx.agentCatalog.meteredEnvVar,
+          subscriptionEnvVar: leg.agentCatalog.subscriptionEnvVar,
+          meteredEnvVar: leg.agentCatalog.meteredEnvVar,
           // The Executor Profile's environment (issue #73). It is applied under the credential
           // shaping, never over it, so a profile cannot become a route to metered billing.
           profileEnv: ctx.executorProfile.config.env ?? {},
@@ -1198,7 +1622,7 @@ export async function runTaskLifecycle(
 
         // What must never reach a payload, computed from the env this run actually shaped rather
         // than from a list of variable names, so it holds for whichever Agent is running.
-        const needles = secretNeedles(shaped.data, ctx.agentCatalog, ctx.secretCiphertext);
+        const needles = secretNeedles(shaped.data, leg.agentCatalog, legCiphertext);
 
         // Every streamed event is published live *and* appended to the session log, so a client
         // that reconnects can replay from `seq` instead of losing history (TASK-018). Writes are
@@ -1267,7 +1691,12 @@ export async function runTaskLifecycle(
               recordSessionUsage(db, workspaceId, {
                 sessionId,
                 taskId,
-                agentProfileId: ctx.agentProfile.id,
+                // The Profile that actually burned these tokens, which under a Workflow is the
+                // Step's rather than the Task's (AC-3). `profile.ts` counts usage rows per
+                // Profile, so attributing Step 2's turns to Step 1's agent would be a durable
+                // record of work that agent never did. Identical to `ctx.agentProfile.id` for a
+                // Task on no Workflow.
+                agentProfileId: leg.agentProfile.id,
                 messageId,
                 seq,
                 reported: u.reported,
@@ -1562,7 +1991,7 @@ export async function runTaskLifecycle(
         // Launch command and arguments come from the Agent's catalog row (issue #10) — not a
         // global env var, since two Agent Profiles in the same Workspace can point at different
         // catalog entries.
-        const { command, argsTemplate: args } = ctx.agentCatalog;
+        const { command, argsTemplate: args } = leg.agentCatalog;
         // First round with a `--worktree`-capable agent: run in the repository and have it create
         // the Task's worktree. Later rounds continue *inside* that worktree — a reviewer asking
         // for changes wants the work carried on, and asking for the worktree again would branch a
@@ -1644,7 +2073,10 @@ export async function runTaskLifecycle(
               const advertised = { models: e.models, modes: e.modes };
               writes = writes
                 .then(() =>
-                  updateAgentCatalogCapabilities(db, workspaceId, ctx.agentCatalog.id, advertised),
+                  // The catalog row of the agent that advertised them — the Step's under a
+                  // Workflow. Writing one agent's advertised models over another's cache is how
+                  // the Settings pickers start suggesting models the agent cannot run.
+                  updateAgentCatalogCapabilities(db, workspaceId, leg.agentCatalog.id, advertised),
                 )
                 .catch((cause) => captureException(log, cause, { stage: "capabilities-cache" }));
             } else recordUsage(e);
@@ -1959,6 +2391,55 @@ export async function runTaskLifecycle(
       // the Task's state has not changed to carry the news for it.
       announce("running");
 
+      /*
+       * The agent has finished, and on an `agent-signal` Step that is the signal the Step
+       * advances on (AC-2). Reported here, and the placement is load-bearing:
+       *
+       * **After `to-review-${round}`, never before it.** `to-review` is what writes the `diff`
+       * session events, and `taskHasRecordedChanges` corroborates the `producedChanges` claim
+       * against exactly those events. Move this call above it and the corroborating scan finds
+       * nothing, so an `auto-unless-changes` gate opens on the agent's unverified word about its
+       * own output — which is the party the gate exists to catch.
+       *
+       * **Before `waitForEvent`,** because an `auto` Step must not need a human at all.
+       */
+      if (wf && leg.advanceOn === "agent-signal" && leg.stepId) {
+        const reported = await reportStepFinished(
+          `workflow-signal-${round}`,
+          `workflow-recheck-${round}`,
+          {
+            fromStepId: leg.stepId,
+            signal: "agent-signal",
+            producedChanges: run.outcome === "changes_ready",
+            ...(run.summary ? { handoff: run.summary } : {}),
+          },
+        );
+        if (reported.kind === "failed") {
+          return await failRun(
+            `workflow-advance-failed-${round}`,
+            "workflow_advance_failed",
+            "running",
+          );
+        }
+        if (reported.kind === "advanced") {
+          const terminal = await takeAdvance(round, reported);
+          if (terminal) return terminal;
+          continue;
+        }
+        /*
+         * `completed` here means the *last* Step signalled and an unspent approval was found —
+         * and it deliberately does not integrate. Integration keeps exactly one home in this
+         * file, inside `approve-${round}`, reachable only from a `review.decided` carrying
+         * `approve`. Falling through to the gate costs one extra approval in a rare state, which
+         * is stricter than Principle I requires and never looser.
+         *
+         * `awaiting-decision` and `held` fall through for the ordinary reason: the cursor did not
+         * move and a person has to look. The Step's summary is parked in
+         * `workflow_pending_handoff`, which is the column's whole purpose — the caller that
+         * replays this once someone has decided no longer has the agent's words.
+         */
+      }
+
       const decidedEvent = await step.waitForEvent(`await-review-${round}`, {
         event: "review.decided",
         timeout: REVIEW_WAIT_TIMEOUT,
@@ -1969,6 +2450,78 @@ export async function runTaskLifecycle(
       const { decision, feedback } = reviewData.parse(decidedEvent.data);
 
       if (decision === "approve") {
+        /*
+         * A human approved, and under a Workflow that is the second of the two facts a Step
+         * boundary needs — the agent finished (we are past `to-review`) and a person said yes.
+         *
+         * `signal: leg.advanceOn`, and **never the literal `"review"`**. A Step that advances on
+         * `agent-signal` sitting behind a `human` gate is an ordinary configuration: sending
+         * `"review"` to it makes `advanceWorkflowStep` return `held`, the cursor never moves, the
+         * approval is never spent, and the pipeline stalls with no error anywhere — a deadlock
+         * that reads as the run simply having stopped. The Step's own rule is what decides
+         * whether this signal finishes it.
+         *
+         * `handoff` carries this round's declaration when the agent made one, and is omitted when
+         * it did not — in which case the transaction falls back to `workflow_pending_handoff`.
+         *
+         * The plan for this change had it omitted unconditionally, on the reasoning that "the
+         * caller that noticed the decision no longer has the agent's words". That is true of the
+         * *web* caller and false here: this call site is inside the same round as the agent run,
+         * with `run.summary` in scope. Omitting it would mean a Step whose `advanceOn` is `review`
+         * never carries a handoff at all — site A is the only thing that parks one, and site A
+         * does not fire on a `review` Step — which would leave AC-2's "carrying the handoff
+         * context" unmet for half the Step configurations the designer offers. The fallback is
+         * unchanged for the case the plan was actually protecting: when the agent said nothing,
+         * nothing is sent and the parked summary is promoted.
+         */
+        if (wf && leg.stepId && leg.advanceOn) {
+          const reported = await reportStepFinished(
+            `workflow-review-${round}`,
+            `workflow-recheck-review-${round}`,
+            {
+              fromStepId: leg.stepId,
+              signal: leg.advanceOn,
+              producedChanges: run.outcome === "changes_ready",
+              ...(run.summary ? { handoff: run.summary } : {}),
+            },
+          );
+          if (reported.kind === "failed") {
+            return await failRun(
+              `workflow-advance-failed-${round}`,
+              "workflow_advance_failed",
+              "review",
+            );
+          }
+          if (reported.kind === "advanced") {
+            const terminal = await takeAdvance(round, reported);
+            if (terminal) return terminal;
+            continue;
+          }
+          if (reported.status !== "completed") {
+            /*
+             * Reachable when site A already spent this approval earlier in the same run: the
+             * `agent-signal` advance consumed it, and the review that arrives afterwards finds
+             * nothing left to spend. Nothing is integrated on any status but `completed`.
+             *
+             * The Task is left in `review` with the cursor unmoved and the worktrees intact —
+             * the same shape `resume-blocked` returns — so a relaunch resumes on this Step via
+             * the cursor rather than restarting the pipeline.
+             */
+            await step.run(`workflow-awaiting-${round}`, async () => {
+              await appendSessionEvent(db, workspaceId, {
+                sessionId,
+                seq: await nextSessionEventSeq(db, workspaceId, sessionId),
+                payload: {
+                  kind: "notice",
+                  text: `This step reported ${reported.status} rather than completing, so nothing was integrated. Approve this step again to move the workflow on.`,
+                },
+              });
+            });
+            return { taskId, result: "workflow_awaiting_decision" };
+          }
+          // `completed`: the last Step, with a human's approval recorded and now spent. Falls
+          // through to the approve block below entirely unchanged — the one path that integrates.
+        }
         const outcome = await step.run(`approve-${round}`, async () => {
           // One commit per worktree, and each attachment records the branch its own change landed
           // on: a single column on `task` could only ever name one of the branches a reviewer
@@ -2094,6 +2647,22 @@ export async function runTaskLifecycle(
           await setTaskState(db, workspaceId, taskId, "ready");
           await recordTransition("review", "ready");
         });
+        /*
+         * A rejection is not a Step completion, so the cursor deliberately does not move — but the
+         * rejected attempt still parked its summary in `workflow_pending_handoff`, and that column
+         * is promoted into the handoff by whatever eventually completes this Step. Left in place,
+         * the work a human explicitly refused becomes the next Step's inbound context, presented
+         * to that agent as what it is building on.
+         *
+         * Its own durable step rather than folded into `reject-${round}`, which does filesystem
+         * work that can throw ahead of it.
+         */
+        if (wf && leg.stepId) {
+          const rejectedStepId = leg.stepId;
+          await step.run(`workflow-reject-${round}`, () =>
+            clearTaskWorkflowPendingHandoff(db, workspaceId, taskId, rejectedStepId),
+          );
+        }
         logStateTransition(log, { workspaceId, taskId, from: "review", to: "ready" });
         announce("ready");
         break;
@@ -2366,6 +2935,17 @@ export function agentBrief(
   ctx: TaskRunContext,
   feedback?: string | undefined,
   workspaces: readonly BriefWorkspace[] = [],
+  /**
+   * The Workflow Step this round runs, if any (issue #5, AC-2). `brief` is its prompt template
+   * with the previous Step's handoff already prepended — `buildStepBrief`'s output, passed in
+   * rather than built here, because the API's preview and the agent's prompt must be one string
+   * and two places that concatenate it are two that drift.
+   *
+   * Absent for a Task on no Workflow, which is what keeps that Task's brief byte-identical to
+   * what it was before Workflows existed. A name *and* a brief rather than the brief alone: the
+   * section names the Step so an agent reading a transcript can tell which one it is answering.
+   */
+  step?: { name: string; brief: string } | undefined,
 ): string {
   // Widgets are taught, not assumed: an agent emits one only because the brief told it how, so
   // the flag that draws them is the same flag that explains them (`ctx.widgetsEnabled`).
@@ -2382,6 +2962,18 @@ export function agentBrief(
     parts.push(
       `# Repositories\nThis task spans ${workspaces.length} repositories. Each has its own worktree and its own branch; changes in each are reviewed separately.\n${lines.join("\n")}`,
     );
+  }
+  /*
+   * The Step, between the repositories and the review feedback.
+   *
+   * Added to the brief rather than replacing it, and that is a Principle I decision rather than a
+   * formatting one: a Step's `promptTemplate` is Owner-authored text that becomes an agent's
+   * prompt, so letting it stand alone would let one Step silently repurpose the run away from the
+   * Task and Issue it was launched for. The agent is told what it is working on *and* what this
+   * Step of the pipeline asks of it.
+   */
+  if (step) {
+    parts.push(`# Step\n${step.name}\n\n${step.brief.trim()}`);
   }
   // A rejection is announced whether or not the reviewer wrote anything. `undefined` is round
   // one and says nothing; an empty string is "rejected, no words", which the review gate now

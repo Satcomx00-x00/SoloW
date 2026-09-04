@@ -80,6 +80,19 @@ export interface TaskRunContext {
    * would either teach a language nothing listens to or listen for one nothing was taught.
    */
   widgetsEnabled: boolean;
+  /**
+   * Whether this Workspace has Workflows on (`ff-workflows`, issue #5).
+   *
+   * Read here for the same one-decision-per-run reason `widgetsEnabled` is: the flag governs
+   * whether the run walks a Step cursor at all, and a run that asked the flag twice could resolve
+   * a Step's Agent Profile on one pass and integrate at the Task's own Profile on the next.
+   *
+   * It does *not* change anything else on this context. `agentProfile`, `agentCatalog` and
+   * `secretCiphertext` stay the **Task's** own, because roughly a quarter of the lifecycle reads
+   * `ctx.agentProfile` and a Task with no Workflow must not move at all — the Step's binding is
+   * held in the loop's `RunLeg` instead, where it is local and reversible.
+   */
+  workflowsEnabled: boolean;
 }
 
 export async function loadTaskRunContext(
@@ -177,6 +190,7 @@ export async function loadTaskRunContext(
     executorProfile: ep,
     repositories,
     widgetsEnabled: ws?.flags?.["ff-agent-widgets"] === true,
+    workflowsEnabled: ws?.flags?.["ff-workflows"] === true,
     secretCiphertext: sec?.ciphertext ?? null,
   };
 }
@@ -227,6 +241,31 @@ export async function setTaskState(
       updatedAt: new Date().toISOString(),
     })
     .where(and(eq(task.workspaceId, workspaceId), eq(task.id, taskId)));
+}
+
+/**
+ * What state the Task row reads *right now* (issue #5, the Workflow advance path).
+ *
+ * Read rather than inferred from `ctx.task.state`, and that is the point of it existing:
+ * `to-review` deliberately does not move a Task into `review`, so at an agent-signal advance the
+ * Task is usually still `running` and no transition is due. Writing one anyway would put a
+ * `review → running` pair in the session log for a review that never happened — a record a
+ * reviewer would later read as evidence of a decision.
+ *
+ * Called from inside the durable step that acts on the answer, so a replay re-reads rather than
+ * trusting a snapshot taken before the process died.
+ */
+export async function readTaskState(
+  db: Db,
+  workspaceId: string,
+  taskId: string,
+): Promise<TaskState | null> {
+  const [row] = await db
+    .select({ state: task.state })
+    .from(task)
+    .where(and(eq(task.workspaceId, workspaceId), eq(task.id, taskId)))
+    .limit(1);
+  return row?.state ?? null;
 }
 
 /**
@@ -393,6 +432,12 @@ export async function unsatisfiedDependencyIds(
  * work to it — which is the ordering the probe exists to fix. Every lookup is scoped to the
  * Workspace, so a Profile id from another tenant reads as absent rather than as someone else's
  * agent (Principle V).
+ *
+ * It has a second caller now, and the name is kept rather than widened because the probe router
+ * is still the first: the Workflow run loop calls this from *inside* `agent-run-${round}` to read
+ * one Step's `secretCiphertext`, which `loadWorkflowStepAgents` deliberately does not carry (see
+ * there). Both callers want the same thing — one Profile, resolved and Workspace-scoped — so the
+ * second one is a second call site rather than a second function.
  */
 export async function loadAgentProbeContext(
   db: Db,
@@ -424,6 +469,80 @@ export async function loadAgentProbeContext(
     .limit(1);
 
   return { agentProfile: ap, agentCatalog: cat, secretCiphertext: sec?.ciphertext ?? null };
+}
+
+/**
+ * The Agent Profile behind every Step of a Workflow, resolved once per run (issue #5, AC-3).
+ *
+ * Read in one durable step ahead of the loop rather than per Step, because the pre-clone gates
+ * need the whole set before anything is cloned: the executor preflight probes every binary the
+ * pipeline can spawn, and the runner gate refuses a pipeline naming a protocol this build cannot
+ * drive. Asking per Step would discover the fourth Step's missing binary after three Steps' worth
+ * of agent time had already been paid for.
+ *
+ * **No `secretCiphertext`, deliberately.** `step.run` memoizes its return value into Inngest's
+ * durable store, and `load` already puts one decryptable ciphertext there; carrying one per Step
+ * would multiply an existing exposure to buy nothing (Principle IV). The Step's credential is
+ * read instead inside `agent-run-${round}`, at the point of use, through `loadAgentProbeContext`
+ * — already exported, already Workspace-scoped, and the only field taken from it there is
+ * `.secretCiphertext`.
+ *
+ * Duplicate ids resolve once and are returned once: two Steps can name one Profile, and the
+ * caller pairs by `agentProfileId` rather than by position. A Profile or catalog row that is
+ * absent — deleted under a live pipeline, or belonging to another tenant, which reads the same
+ * way here (Principle V) — is reported by id rather than skipped, so the caller can fail the run
+ * with the id named instead of silently running a Step under the wrong agent.
+ */
+export async function loadWorkflowStepAgents(
+  db: Db,
+  workspaceId: string,
+  agentProfileIds: readonly string[],
+): Promise<
+  | {
+      ok: true;
+      agents: Array<{
+        agentProfileId: string;
+        agentProfile: typeof agentProfile.$inferSelect;
+        agentCatalog: typeof agentCatalog.$inferSelect;
+      }>;
+    }
+  | { ok: false; missingAgentProfileId: string }
+> {
+  const wanted = [...new Set(agentProfileIds)];
+  if (wanted.length === 0) return { ok: true, agents: [] };
+
+  const profiles = await db
+    .select()
+    .from(agentProfile)
+    .where(and(eq(agentProfile.workspaceId, workspaceId), inArray(agentProfile.id, wanted)));
+  const profileById = new Map(profiles.map((row) => [row.id, row]));
+
+  // Skipped entirely when nothing resolved: an `inArray` over an empty list is a query whose
+  // meaning depends on the driver, and the loop below already refuses on the missing Profile.
+  const catalogIds = [...new Set(profiles.map((row) => row.agentCatalogId))];
+  const catalogs =
+    catalogIds.length === 0
+      ? []
+      : await db
+          .select()
+          .from(agentCatalog)
+          .where(
+            and(eq(agentCatalog.workspaceId, workspaceId), inArray(agentCatalog.id, catalogIds)),
+          );
+  const catalogById = new Map(catalogs.map((row) => [row.id, row]));
+
+  const agents: Array<{
+    agentProfileId: string;
+    agentProfile: typeof agentProfile.$inferSelect;
+    agentCatalog: typeof agentCatalog.$inferSelect;
+  }> = [];
+  for (const id of wanted) {
+    const ap = profileById.get(id);
+    const cat = ap ? catalogById.get(ap.agentCatalogId) : undefined;
+    if (!ap || !cat) return { ok: false, missingAgentProfileId: id };
+    agents.push({ agentProfileId: id, agentProfile: ap, agentCatalog: cat });
+  }
+  return { ok: true, agents };
 }
 
 /**

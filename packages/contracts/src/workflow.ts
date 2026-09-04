@@ -204,6 +204,18 @@ export const advanceTaskWorkflowInput = z.object({
   signal: workflowAdvanceOnSchema,
   producedChanges: z.boolean().default(false),
   handoff: z.string().max(20000).optional(),
+  /**
+   * Which durable step is making this call — an idempotency key, defaulted so an API caller
+   * outside the run loop needs no opinion about it.
+   *
+   * Only the terminal Step reads it, and only to recognise a re-run of itself. Everywhere else
+   * the cursor is the replay guard: an advance moves it, so a repeated call names a Step the Task
+   * has left and is refused as stale. The last Step has nowhere to move the cursor to, so its own
+   * step body can re-execute after committing and find the approval it needs already spent — by
+   * itself. Passing the caller's durable step id is what lets it tell that apart from the *other*
+   * call site asking for a second gate to open on one decision.
+   */
+  call: z.string().min(1).max(200).default("api"),
 });
 export type AdvanceTaskWorkflowInput = z.infer<typeof advanceTaskWorkflowInput>;
 

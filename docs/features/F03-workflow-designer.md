@@ -69,8 +69,11 @@ steerable without reading logs.
 - A Gate blocks all downstream Steps until resolved; parallel branches not downstream of the
   Gate may continue.
 - A Condition evaluates a defined rule and selects exactly one outgoing branch.
-- A Workflow version in use by an active Run is immutable for that Run; editing produces a
-  new version.
+- Editing a Workflow bumps its version, and a Task records the version it attached at, so an
+  edit underneath a live Run is **detectable**. It is not immutable for that Run: the run loop
+  keeps reading the Step list it resolved when it started, and `workflow.acknowledgeDrift`
+  records that a person saw the edit rather than pinning the Run to a snapshot. Immutability
+  needs copy-on-write versioning, which has no producer yet — see *What ships in v1*.
 
 ## Edge cases & failure handling
 
@@ -146,14 +149,100 @@ The model and its seam ship; the canvas does not. Concretely:
 - **Automations are a Step property.** `workflow_step.on_enter` is reserved for the automations of
   row 08, so an automation is a field on a Step rather than a second rules engine.
 
-Later, in the order they unblock things: the run loop over Steps (the Inngest `task-run`
-function), the Monitor strip of FR-9, board columns derived from Steps rather than the
-`taskStateSchema` enum, non-agent Step kinds (Gate, Condition, Fork/Join — FR-2), validity
+## The run loop (issue #5, AC-2/AC-3/AC-5)
+
+The orchestrator walks the Steps. `runTaskLifecycle` in
+`apps/orchestrator/src/inngest/functions/task-run.ts` is the one place it happens, and the shape
+it took is worth stating because it is not the obvious one.
+
+- **One monotonic round counter, and no nested Step loop.** A Step boundary is a round at which
+  the agent binding and the brief change; the existing review-round loop already does everything a
+  Step loop would. A nested loop that reset `round` per Step would replay `agent-run-0` and
+  `approve-0` on Step 2, and Inngest would hand back Step 1's memoized results — silently skipping
+  Step 2's agent run and replaying Step 1's review decision. Because no durable step id contains a
+  Step ordinal, **a definition edit cannot corrupt a live run's journal**, which is why there is no
+  drift refusal on this side. `MAX_REVIEW_ROUNDS` is per Step; a Workflow may have at most
+  `MAX_WORKFLOW_STEPS` (20) Steps and a longer one is refused by name rather than truncated.
+- **The cursor is read once, at the top, in `workflow-resume`.** It is read-only: the resolved
+  cursor is not written back, because `taskHasBegunWorkflow` reads exactly those columns to refuse
+  a re-attach. A cursor naming a Step the Workflow no longer contains fails the Task with
+  `workflow_unresumable` — never a silent restart at Step one.
+- **Every Step's agent is resolved before anything is cloned.** The executor preflight probes every
+  binary the pipeline can spawn and the runner gate refuses a pipeline naming a protocol this build
+  cannot drive, both before `prepare-repository`. The resolved set deliberately carries **no
+  credential**: `step.run` memoizes its return value durably, so each Step's ciphertext is read at
+  the point of use instead.
+- **An advance keeps the worktrees.** "Advance to the next Step without starting a new Task" is
+  physically one Task row whose cursor moved: no commit, no publish, no result branch, no `done`,
+  no cleanup. The next Step continues in the same worktrees and therefore sees the previous Step's
+  uncommitted work. Ending the run and re-launching would have destroyed exactly that.
+- **Integration has one home.** It is inside `approve-${round}`, reachable only from a
+  `review.decided` carrying `approve`. The agent-signal path can report `completed` and still does
+  not integrate — it falls through to the review gate, which costs one extra approval in a rare
+  state and is stricter than Principle I requires, never looser.
+- **The approve branch sends the Step's own advance rule, not the literal `review`.** A Step that
+  advances on `agent-signal` behind a `human` gate is ordinary; sending `review` to it returns
+  `held`, moves nothing, spends nothing, and stalls the pipeline with no error anywhere.
+- **A rejection clears the Step's parked summary.** The cursor does not move — a rejection is not a
+  completion — but the refused attempt's summary is dropped, or the work a human explicitly
+  declined would become the next Step's inbound context.
+- **`WORKFLOW_STALE_CURSOR` is not a failure.** It means the transaction committed and Inngest
+  retried the step body; the run re-reads the cursor and carries on from where the transaction left
+  it. Treating it as an error would turn every retried approve into a failed Task.
+
+### Board columns (AC-6)
+
+Columns are data, not the lifecycle enum. `taskStateSchema` survives untouched — it is load-bearing
+outside the board — and the board gains two modes chosen by one control, never inferred:
+
+- **Lifecycle mode** is the default and the only mode reachable with `ff-workflows` off. It is
+  today's seven columns, today's order, today's drag and drop.
+- **Workflow mode** shows one column per Step of *one* selected Workflow, in rank order, then a
+  `Done` column, then an `Other work` lane holding everything on another Workflow or on none.
+  Nothing is hidden; a Workspace mid-migration has most of its Tasks on no Workflow at all.
+
+Step columns are **not drop targets**, and that is a Principle I decision rather than a
+convenience one: a drop that wrote `workflow_step_id` would skip the gate, spend no approval,
+promote no handoff and record no decision. Routing such a drop through `workflow.advanceTask`
+instead was rejected too — it is gate-evaluated, so a drop onto a human-gated Step returns
+`awaiting-decision`, does nothing, and snaps the card back with no signal a user can tell from a
+bug. A Task's lifecycle state stays on the card as its badge: the column says *where in the
+pipeline*, the badge says *what is happening to it*.
+
+### What this costs, stated rather than discovered
+
+- **The kill switch is a footgun.** Turning `ff-workflows` off mid-pipeline makes the next run of
+  that Task ignore its cursor entirely: it runs the Task's own Agent Profile from the top and
+  integrates on the first approval, as if the pipeline were not there. The cursor is not cleared,
+  so turning the flag back on resumes where it was — but the work done in between was done outside
+  the pipeline. Turn the flag off for a Workspace with Tasks in flight only deliberately.
+- **One Session for the whole Workflow run.** `sessionId` is a run-scoped constant threaded
+  through the lifecycle and matched by `review.decided`. So `latestDecisionForTask` stays
+  *Task*-scoped, and "which Step was this review about" is answerable only from the state
+  transition events. Two approvals recorded inside one Step's review round leave the newer one
+  unspent and available to the next gate. Per-Step review linkage needs one Session per Step
+  (#26/#61).
+- **An extra approval in one state.** If the agent's signal reaches the last Step while an
+  approval is already unspent, the agent-signal path reports `completed` and marks that approval
+  spent without integrating. The review that follows then finds nothing to spend and the run stops
+  with a notice asking for the decision again. Stricter than required; never looser.
+- **`producedChanges` has no per-Step baseline.** It is computed over the Task's worktrees, which
+  accumulate across Steps, so an `auto-unless-changes` gate placed after any code-writing Step will
+  always see changes and always behave as `human`. A per-Step diff baseline needs a commit or a
+  marker at each boundary, which is the thing an intermediate advance must not do.
+- **Concurrency caps are still checked against the Task's Profile only.** `withinConcurrencyCap` in
+  `apps/web/src/server/dal/task.ts` reads `task.agentProfileId`, so a Workflow walking onto a Step
+  whose Agent Profile is already at its cap is not checked at all. This issue opens that hole; it
+  closes when the cap check learns about the cursor.
+
+Later, in the order they unblock things: the Monitor strip of FR-9, one Session per Step (#26/#61)
+and the per-Step review linkage it unlocks, copy-on-write versioning so a Run really is pinned to
+the definition it started on, non-agent Step kinds (Gate, Condition, Fork/Join — FR-2), validity
 checking (FR-5), import/export (FR-7), and per-Step run history.
 
-Until that run loop ships, the /workflows UI itself carries a WIP badge (`Section.wip` in
-`apps/web/src/lib/navigation.ts`) so a user finds a clearly-marked in-progress surface rather than
-one that looks broken.
+The /workflows UI keeps its WIP badge (`Section.wip` in `apps/web/src/lib/navigation.ts`) while the
+Monitor and per-Step history are outstanding, so a user finds a clearly-marked in-progress surface
+rather than one that looks broken.
 
 ## Related
 
