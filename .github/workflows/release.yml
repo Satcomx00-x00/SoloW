@@ -17,9 +17,16 @@ name: Release
 # of a release that can be wrong without failing, and YAML cannot be unit-tested.
 #
 # A run of `chore`, `docs`, `test`, `refactor`, `style`, `build` or `ci` commits releases nothing.
-# That is also what stops this from recurring: the commit it pushes is a `chore(release)`, and the
-# tag it pushes points at that very commit — so the Verify run it triggers finds an empty range and
-# cuts nothing.
+#
+# This does not recur, and the reason is the same GitHub rule the dispatch below relies on: a push
+# made with the built-in GITHUB_TOKEN does not start a workflow run. So the `chore(release)` commit
+# triggers no Verify, and no Verify means no Release. Its type is a second, independent stop — a
+# run that did somehow fire would find only a `chore` since the tag and cut nothing — but the token
+# rule is what actually ends it, and it ends it before anything starts.
+#
+# The cost of that rule is worth naming: **the release commit is never verified.** It differs from
+# the tree Verify passed by one version string, which is why this is acceptable, but "main's tip is
+# green" stops being literally true the moment a release lands.
 #
 # Gated on Verify rather than on the push, so a red main cannot ship. `workflow_run` is what makes
 # that expressible: it fires after Verify finishes and carries its conclusion and its commit.
