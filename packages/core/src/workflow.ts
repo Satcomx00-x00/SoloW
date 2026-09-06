@@ -317,8 +317,8 @@ export interface WorkflowGraphStep extends RankedStep {
  * This is the rule `advanceWorkflowStep` applies at run time, read off the definition instead
  * of the outcome: a Step without a branch has exactly one exit, to its rank successor or to the
  * end; a Step with one has exactly two. There is no other kind of edge, which is why the
- * designer has no connect gesture — an edge that is not one of these is not something the run
- * loop could ever follow.
+ * designer's one connect gesture only re-points a branch exit — an edge that is not one of
+ * these is not something the run loop could ever follow.
  */
 export function stepExits<T extends WorkflowGraphStep>(
   steps: readonly T[],

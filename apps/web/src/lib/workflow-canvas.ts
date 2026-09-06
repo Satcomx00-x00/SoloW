@@ -212,6 +212,48 @@ export function stepDotColors(
 }
 
 /**
+ * What React Flow hands `onConnect` and `isValidConnection` — a `Connection`, or an existing
+ * `Edge` on a reconnect; only the three fields read here, optional where an Edge leaves them so.
+ */
+export interface CanvasConnection {
+  source: string | null;
+  sourceHandle?: string | null | undefined;
+  target: string | null;
+}
+
+/** A drag from a branch exit, read as the branch edit it is. */
+export interface BranchRetarget {
+  stepId: string;
+  exit: "then" | "else";
+  /** A Step id, or null for the end of the pipeline. */
+  targetStepId: string | null;
+}
+
+/**
+ * The one connect gesture the canvas allows, stated as the write it becomes: dragging a
+ * branching Step's `Yes` or `No` exit onto another Step, or onto the end, re-points that exit.
+ *
+ * Null for everything else, and "everything else" is what keeps the graph the model's own: the
+ * plain `next` exit is the rank order and cannot be dragged elsewhere without lying about it,
+ * the start is not a target, and a Step is not its own (`WORKFLOW_BRANCH_TARGET_IS_SELF` would
+ * refuse it anyway — refusing here means the line says so *while* it is being dragged). The
+ * server still checks the targets it is given; this is the client's reading, not the rule.
+ */
+export function branchRetarget(connection: CanvasConnection): BranchRetarget | null {
+  const { source, target } = connection;
+  const sourceHandle = connection.sourceHandle ?? null;
+  if (!source || !target) return null;
+  if (sourceHandle !== "then" && sourceHandle !== "else") return null;
+  if (source === START_NODE_ID || source === END_NODE_ID) return null;
+  if (target === START_NODE_ID || target === source) return null;
+  return {
+    stepId: source,
+    exit: sourceHandle,
+    targetStepId: target === END_NODE_ID ? null : target,
+  };
+}
+
+/**
  * The name a Step is born with, so the `+` needs no form: the operator renames it in place.
  *
  * `Step ${count + 1}` when that is free, and the next free number when it is not: inserting in

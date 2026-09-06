@@ -88,7 +88,7 @@ Each impossibility below is either *structural* (there is no data that could hol
 | --- | --- | --- |
 | **Two starts.** | structural | The start *is* the first Step in rank order (`resumeWorkflowCursor(steps, null)`). It is not a node the operator places — the `Start` pill draws that fact. To change the start, reorder, or use the `+` on the Start edge to put a Step before the first (`afterStepId: null`). |
 | **Two ends.** | structural | The end *is* a null target. Every Step without a branch whose rank successor does not exist, and every branch exit set to "End of pipeline", lands on the same `End`. There is one `END_NODE_ID` and no row behind it. |
-| **An edge drawn by hand, or a dangling one.** | structural | Edges are not stored. A Step has exactly one exit (its rank successor, or the end) or exactly two (`Yes`/`No`); `nodesConnectable` is off and there is no connect gesture. A drag is a *reorder*, never a link. |
+| **An edge drawn by hand, or a dangling one.** | structural | Edges are not stored. A Step has exactly one exit (its rank successor, or the end) or exactly two (`Yes`/`No`). The only connect gesture is dragging a branch's `Yes`/`No` exit onto a Step or the end, and it *re-points that exit* (`branchRetarget` → `updateStep`) — it cannot create an edge the model has no row for. The plain exit and the start are not draggable; dragging a node is a *reorder*, never a link. |
 | **A Step with no exit.** | structural | See above: the last Step exits to the end. Nothing can be dead-ended by construction — only trapped (below). |
 | **Three exits, or parallel branches (Fork/Join).** | structural | A branch has one condition and two targets. FR-2's Fork/Join stays Later. |
 | **A node position of its own.** | structural | Positions are laid out from rank on every render (`placeSteps`). A drop is turned into a `reorderStep` and the node snaps back. |
@@ -130,8 +130,9 @@ The model, its seam and the designing canvas ship; the monitor does not. Concret
   left to right in rank order, each node carrying its own form — Agent Profile, gate, advance
   rule, prompt — and a `+` beside it that adds the next Step on the first Agent Profile in the
   catalog, renamed in place. Edges follow the order and are not drawn by hand: a linear pipeline
-  has exactly one edge between consecutive Steps, so there is no connect gesture (FR-1 without its
-  branching; FR-4's panning and zooming). Dragging a node past a neighbour is a reorder — the drop
+  has exactly one edge between consecutive Steps, and the one connect gesture — dragging a
+  branch's `Yes`/`No` exit onto a Step or the end — re-points an exit that already exists rather
+  than adding an edge (FR-1 without its branching; FR-4's panning and zooming). Dragging a node past a neighbour is a reorder — the drop
   is turned into the neighbour pair `workflow.reorderStep` takes and the node snaps back to its
   laid-out place, so the canvas never stores a position the run loop could disagree with.
   Parallel Steps and non-agent nodes (Gate, Fork/Join — FR-2) stay Later.

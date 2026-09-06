@@ -622,9 +622,132 @@
     stroke-dashoffset: -12;
   }
 }
+
+/*
+ * The connection line: a branch exit in hand (`ConnectionLine` in workflow-canvas.tsx). One ink,
+ * three weights — a glow under a flowing dash while nothing is decided, solid and named when the
+ * pointer is over a target that will take it, dimmed and crossed out when it will not.
+ */
+.workflow-canvas .workflow-connection__glow {
+  fill: none;
+  stroke: var(--foreground);
+  stroke-width: 6;
+  opacity: 0.22;
+}
+.workflow-canvas .workflow-connection__line {
+  fill: none;
+  stroke: var(--foreground);
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-dasharray: 6 6;
+  animation: workflow-edge-flow 0.5s linear infinite;
+}
+.workflow-canvas .workflow-connection--valid .workflow-connection__line {
+  stroke-dasharray: none;
+  stroke-width: 2.25;
+}
+.workflow-canvas .workflow-connection--valid .workflow-connection__glow {
+  opacity: 0.4;
+}
+.workflow-canvas .workflow-connection--invalid .workflow-connection__line {
+  stroke: var(--muted-foreground);
+  stroke-dasharray: 2 7;
+  animation: none;
+}
+.workflow-canvas .workflow-connection--invalid .workflow-connection__glow {
+  opacity: 0.06;
+}
+.workflow-canvas .workflow-connection__pulse {
+  fill: var(--foreground);
+}
+.workflow-canvas .workflow-connection--invalid .workflow-connection__pulse {
+  display: none;
+}
+.workflow-canvas .workflow-connection__ring {
+  fill: none;
+  stroke: var(--foreground);
+  stroke-width: 1.25;
+  stroke-dasharray: 5 6;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: workflow-reticle-spin 2.4s linear infinite;
+}
+.workflow-canvas .workflow-connection--valid .workflow-connection__ring {
+  stroke-dasharray: none;
+  stroke-width: 2;
+  animation: workflow-reticle-lock 0.35s ease-out both;
+}
+.workflow-canvas .workflow-connection--invalid .workflow-connection__ring {
+  stroke: var(--muted-foreground);
+  animation: none;
+}
+.workflow-canvas .workflow-connection__core {
+  fill: var(--background);
+  stroke: var(--foreground);
+  stroke-width: 1.5;
+}
+.workflow-canvas .workflow-connection__cross {
+  fill: none;
+  stroke: var(--muted-foreground);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+.workflow-canvas .workflow-connection__chip {
+  fill: var(--card);
+  stroke: var(--border);
+}
+.workflow-canvas .workflow-connection__label {
+  fill: var(--muted-foreground);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  dominant-baseline: middle;
+}
+.workflow-canvas .workflow-connection--valid .workflow-connection__label {
+  fill: var(--foreground);
+}
+@keyframes workflow-reticle-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes workflow-reticle-lock {
+  from {
+    transform: scale(1.6);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+/* While an exit is in hand, every place it could land says so; the one under the pointer says
+   it loudest. React Flow adds `valid` to the handle the pointer is snapped to. */
+.workflow-canvas--connecting .react-flow__handle.target {
+  box-shadow: 0 0 0 4px color-mix(in oklch, var(--foreground) 22%, transparent);
+  animation: workflow-handle-breathe 1.2s ease-in-out infinite;
+}
+.workflow-canvas--connecting .react-flow__handle.target.valid {
+  box-shadow: 0 0 0 6px color-mix(in oklch, var(--foreground) 45%, transparent);
+  animation: none;
+}
+@keyframes workflow-handle-breathe {
+  50% {
+    box-shadow: 0 0 0 7px color-mix(in oklch, var(--foreground) 10%, transparent);
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   .workflow-canvas .react-flow__node {
     transition: none;
+  }
+  .workflow-canvas .workflow-connection__line,
+  .workflow-canvas .workflow-connection__ring,
+  .workflow-canvas--connecting .react-flow__handle.target {
+    animation: none;
+  }
+  .workflow-canvas .workflow-connection__pulse {
+    display: none;
   }
   .workflow-canvas .workflow-edge {
     animation: none;

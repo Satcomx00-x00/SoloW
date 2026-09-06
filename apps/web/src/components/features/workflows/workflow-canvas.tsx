@@ -15,10 +15,13 @@ import {
   Background,
   BackgroundVariant,
   BaseEdge,
+  type Connection,
+  type ConnectionLineComponentProps,
   Controls,
   type Edge,
   EdgeLabelRenderer,
   type EdgeProps,
+  getBezierPath,
   getNodesBounds,
   getSmoothStepPath,
   Handle,
@@ -52,6 +55,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { WHOLE_PAGE } from "@/lib/paged";
 import {
+  branchRetarget,
   END_NODE_ID,
   endNodePosition,
   MAIN_LINE_Y,
@@ -86,11 +90,13 @@ import { trpc } from "@/trpc/react";
  * there would be a second, unsaved layout for the run loop to disagree with.
  *
  * Edges are not the operator's to draw. They are the run loop's next-Step rule made visible —
- * `stepEdges` derives them from the list — so `nodesConnectable` is off and there is no connect
- * gesture. A Step without a branch has one exit, to its rank successor; a Step *with* one has a
- * `Yes` exit and a `No` exit, each pointing wherever the branch says, including backwards and
- * including the `End` node. Changing where an edge goes is done on the node that owns it, in the
- * same form as its agent and prompt, which is where a Step's other rules already live.
+ * `stepEdges` derives them from the list. A Step without a branch has one exit, to its rank
+ * successor; a Step *with* one has a `Yes` exit and a `No` exit, each pointing wherever the
+ * branch says, including backwards and including the `End` node. Changing where an exit goes is
+ * done on the node that owns it — in the same form as its agent and prompt — or by *dragging the
+ * exit itself* onto the Step it should reach, which is the one connect gesture there is
+ * (`branchRetarget`): it re-points a branch that already exists, and cannot create an edge the
+ * model has no row for. The plain `next` exit and the start are not draggable at all.
  *
  * What the canvas cannot show is therefore what the model cannot hold (F03 FR-5, and the list in
  * the spec under *What a Workflow graph cannot be*): a second start, a second end, an edge from
@@ -414,6 +420,8 @@ function StepExits({ branching }: { branching: boolean }) {
         position={Position.Right}
         style={{ top: MAIN_LINE_Y }}
         className={HANDLE}
+        // The rank order is not a thing to drag elsewhere; only a branch's exits are.
+        isConnectable={false}
       />
     );
   }
@@ -656,7 +664,12 @@ function StartNodeView({ data }: NodeProps<StartNode>) {
       style={{ width: START_NODE_WIDTH, textAlign: "center" }}
     >
       Start
-      <Handle type="source" position={Position.Right} className={`${HANDLE} !border-foreground`} />
+      <Handle
+        type="source"
+        position={Position.Right}
+        className={`${HANDLE} !border-foreground`}
+        isConnectable={false}
+      />
       <AddInGap
         label="Add a step at the start"
         disabled={data.adding}
@@ -673,6 +686,86 @@ function EndNodeView() {
       <Handle type="target" position={Position.Left} className={HANDLE} />
       End
     </div>
+  );
+}
+
+/**
+ * The line drawn while a branch exit is being dragged (React Flow's `connectionLineComponent`).
+ *
+ * It has three things to say and says each in a different place: *which exit* is in hand (the
+ * chip at the origin), *where it would land* (the reticle at the pointer, snapped to a handle
+ * when one is in reach), and *whether that is allowed* (the whole line's weight — a valid target
+ * pulls the line solid and names itself beside the reticle; an invalid one dims it and crosses
+ * the reticle out). The glow is a blurred copy of the same path, so it cannot drift from it.
+ */
+function ConnectionLine({
+  fromX,
+  fromY,
+  toX,
+  toY,
+  fromHandle,
+  toNode,
+  connectionStatus,
+}: ConnectionLineComponentProps<CanvasNode>) {
+  const [path] = getBezierPath({
+    sourceX: fromX,
+    sourceY: fromY,
+    sourcePosition: Position.Right,
+    targetX: toX,
+    targetY: toY,
+    targetPosition: Position.Left,
+  });
+  const status = connectionStatus ?? "pending";
+  const exit = fromHandle.id === "else" ? "no" : "yes";
+  const landing =
+    status === "valid" && toNode
+      ? toNode.type === "end"
+        ? "End"
+        : ((toNode.data as Partial<StepNodeData>).step?.name ?? null)
+      : null;
+
+  return (
+    <g className={`workflow-connection workflow-connection--${status}`}>
+      <defs>
+        <filter id="workflow-connection-glow" x="-20%" y="-20%" width="140%" height="140%">
+          <feGaussianBlur stdDeviation="4" />
+        </filter>
+      </defs>
+      <path
+        d={path}
+        className="workflow-connection__glow"
+        filter="url(#workflow-connection-glow)"
+      />
+      <path d={path} className="workflow-connection__line" />
+      <circle r={3} className="workflow-connection__pulse">
+        <animateMotion dur="0.9s" repeatCount="indefinite" path={path} />
+      </circle>
+      <g transform={`translate(${fromX + 10} ${fromY - 18})`}>
+        <rect
+          x={0}
+          y={-9}
+          width={exit.length * 7 + 10}
+          height={14}
+          rx={7}
+          className="workflow-connection__chip"
+        />
+        <text x={5} y={1} className="workflow-connection__label">
+          {exit}
+        </text>
+      </g>
+      <g transform={`translate(${toX} ${toY})`} className="workflow-connection__reticle">
+        <circle r={13} className="workflow-connection__ring" />
+        <circle r={4} className="workflow-connection__core" />
+        {status === "invalid" && (
+          <path d="M-4 -4 L4 4 M4 -4 L-4 4" className="workflow-connection__cross" />
+        )}
+      </g>
+      {landing && (
+        <text x={toX + 20} y={toY + 4} className="workflow-connection__label">
+          → {landing}
+        </text>
+      )}
+    </g>
   );
 }
 
@@ -791,8 +884,33 @@ function Canvas({ workflow }: { workflow: WorkflowWithStepsDto }) {
   };
   const add = trpc.workflow.addStep.useMutation({ onSuccess: refresh });
   const reorder = trpc.workflow.reorderStep.useMutation({ onSuccess: refresh });
+  const retarget = trpc.workflow.updateStep.useMutation({ onSuccess: refresh });
   const { mutate: addStep, isPending: adding, error: addError } = add;
   const { mutate: reorderStep, error: reorderError } = reorder;
+  const { mutate: retargetStep, error: retargetError } = retarget;
+
+  /**
+   * A branch exit dropped on a node: the same `updateStep` the node's own selects send, with the
+   * whole branch, because the server checks the two targets together. Read through
+   * `branchRetarget` so the drag and the line agree on what is allowed.
+   */
+  const onConnect = useCallback(
+    (connection: Connection) => {
+      const move = branchRetarget(connection);
+      const step = move ? workflow.steps.find((entry) => entry.id === move.stepId) : undefined;
+      if (!move || !step?.branch) return;
+      retargetStep({
+        stepId: step.id,
+        branch:
+          move.exit === "then"
+            ? { ...step.branch, thenStepId: move.targetStepId }
+            : { ...step.branch, elseStepId: move.targetStepId },
+      });
+    },
+    [retargetStep, workflow.steps],
+  );
+  // Class on the canvas while an exit is in hand, so every target handle can say it is one.
+  const [connecting, setConnecting] = useState(false);
 
   /**
    * The `+` asks nothing: the new Step takes the first Agent Profile in the catalog and a
@@ -950,7 +1068,7 @@ function Canvas({ workflow }: { workflow: WorkflowWithStepsDto }) {
     [workflow.steps, reorderStep, layout, setNodes],
   );
 
-  const error = addError ?? reorderError;
+  const error = addError ?? reorderError ?? retargetError;
 
   return (
     // Full-bleed: the canvas *is* the page. It was a bordered 36rem box in a padded column, so a
@@ -958,7 +1076,7 @@ function Canvas({ workflow }: { workflow: WorkflowWithStepsDto }) {
     // No border and no radius either — there is nothing left beside it for a frame to separate it
     // from, and the shell's own edges already do that job.
     <section
-      className="workflow-canvas h-full w-full overflow-hidden"
+      className={`workflow-canvas h-full w-full overflow-hidden ${connecting ? "workflow-canvas--connecting" : ""}`}
       aria-label={`Steps of ${workflow.name}`}
     >
       <ReactFlow<CanvasNode, StepEdge>
@@ -968,7 +1086,14 @@ function Canvas({ workflow }: { workflow: WorkflowWithStepsDto }) {
         edgeTypes={EDGE_TYPES}
         onNodesChange={onNodesChange}
         onNodeDragStop={onNodeDragStop}
-        nodesConnectable={false}
+        // Only a branch's `Yes`/`No` exits are connectable (see the handles); the drop is judged
+        // by the same function that writes it, so the line and the write cannot disagree.
+        isValidConnection={(connection) => branchRetarget(connection) !== null}
+        onConnect={onConnect}
+        onConnectStart={() => setConnecting(true)}
+        onConnectEnd={() => setConnecting(false)}
+        connectionLineComponent={ConnectionLine}
+        connectionRadius={40}
         edgesFocusable={false}
         elementsSelectable={false}
         deleteKeyCode={null}

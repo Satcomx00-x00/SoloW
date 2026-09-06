@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import type { WorkflowStepDto } from "@solow/contracts";
 import {
+  branchRetarget,
   END_NODE_ID,
   END_NODE_Y,
   endNodePosition,
@@ -246,6 +247,43 @@ describe("the Step dot", () => {
     expect(stepHue("6db6596b-0f90-4c95-a967-7cb6627f54b2")).not.toBe(
       stepHue("6db6596b-0f90-4c95-a967-7cb6627f54b3"),
     );
+  });
+});
+
+describe("branchRetarget", () => {
+  it("reads a drag from a yes or no exit onto a step as that exit's new target", () => {
+    expect(branchRetarget({ source: "s1", sourceHandle: "then", target: "s3" })).toEqual({
+      stepId: "s1",
+      exit: "then",
+      targetStepId: "s3",
+    });
+    expect(branchRetarget({ source: "s3", sourceHandle: "else", target: "s1" })).toEqual({
+      stepId: "s3",
+      exit: "else",
+      targetStepId: "s1",
+    });
+  });
+
+  it("reads a drag onto the end as the pipeline ending there", () => {
+    expect(branchRetarget({ source: "s1", sourceHandle: "then", target: END_NODE_ID })).toEqual({
+      stepId: "s1",
+      exit: "then",
+      targetStepId: null,
+    });
+  });
+
+  it("refuses every drag that is not a branch exit onto another step or the end", () => {
+    // The plain exit is the rank order, not a thing to re-point.
+    expect(branchRetarget({ source: "s1", sourceHandle: "next", target: "s2" })).toBeNull();
+    // The start has nothing to re-point and cannot be pointed at.
+    expect(branchRetarget({ source: START_NODE_ID, sourceHandle: null, target: "s1" })).toBeNull();
+    expect(
+      branchRetarget({ source: "s1", sourceHandle: "then", target: START_NODE_ID }),
+    ).toBeNull();
+    // A Step is not its own target; the server would refuse it, the line says so first.
+    expect(branchRetarget({ source: "s1", sourceHandle: "else", target: "s1" })).toBeNull();
+    // A drag let go over nothing.
+    expect(branchRetarget({ source: "s1", sourceHandle: "then", target: null })).toBeNull();
   });
 });
 
