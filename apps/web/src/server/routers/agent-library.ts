@@ -158,7 +158,7 @@ export const libraryRouter = router({
           tags: ["library"],
           protect: true,
           summary:
-            "Find every Skill — each directory holding a SKILL.md — under a directory on the host or in a git repository, which SoloW clones into its skills directory (and pulls forward on the next scan). Returns them named and described, marking the ones the library already holds. Nothing is imported.",
+            "Find every Skill — each directory holding a SKILL.md — under a directory on the host or in a repository, whose archive (default branch, or #ref) SoloW fetches over HTTPS into its skills directory on every scan. Returns them named and described, marking the ones the library already holds. Nothing is imported.",
         },
       })
       .input(scanSkillsInput)

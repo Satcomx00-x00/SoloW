@@ -8,7 +8,9 @@ import { AgentLibraryErrorCode } from "@solow/contracts";
 import { zipSync } from "fflate";
 import {
   archiveDirFor,
+  archiveUrlsFor,
   cloneDirFor,
+  parseRepositoryUrl,
   resolveImportRoot,
   scanSkillDirectories,
   unpackSkillArchive,
@@ -85,49 +87,108 @@ describe("resolveImportRoot", () => {
     });
   });
 
-  it("clones a repository into the skills root once, and pulls it forward the next time", async () => {
-    const origin = join(root, "origin");
-    await mkdir(origin, { recursive: true });
-    const sh = async (...args: string[]) => {
-      const p = Bun.spawn(["git", ...args], { cwd: origin, stdout: "ignore", stderr: "ignore" });
-      if ((await p.exited) !== 0) throw new Error(`git ${args.join(" ")} failed`);
-    };
-    await sh("init", "-q", "-b", "main");
-    await sh("config", "user.email", "t@example.com");
-    await sh("config", "user.name", "t");
-    await mkdir(join(origin, "skills", "deploy"), { recursive: true });
-    await writeFile(join(origin, "skills", "deploy", "SKILL.md"), "# Deploy\n");
-    await sh("add", ".");
-    await sh("commit", "-q", "-m", "one");
+  /** A stand-in for `fetch` that answers from a function — the typing is what `typeof fetch` demands. */
+  const fetchOf = (fn: (input: RequestInfo | URL) => Promise<Response>) =>
+    fn as unknown as typeof fetch;
+  const zipResponse = (bytes: Uint8Array) =>
+    new Response(new Blob([bytes as unknown as BlobPart]), { status: 200 });
+
+  it("fetches a repository's archive into the skills root, and fetches it again the next time", async () => {
+    const text = (t: string) => new TextEncoder().encode(t);
+    const served: string[] = [];
+    let archive = zipSync({ "skills-main/skills/deploy/SKILL.md": text("# Deploy\n") });
+    const fetchImpl = fetchOf(async (input) => {
+      served.push(String(input));
+      return zipResponse(archive);
+    });
 
     const clones = join(root, "clones");
-    const url = `file://${origin}`;
-    const first = await resolveImportRoot({ kind: "git", url }, clones);
-    expect(first).toEqual({ ok: true, data: cloneDirFor(url, clones) });
-    expect((await scanSkillDirectories(first.ok ? first.data : "")).map((s) => s.name)).toEqual([
+    const url = "https://github.com/Acme/Skills.git";
+    const first = await resolveImportRoot({ kind: "git", url }, clones, fetchImpl);
+    expect(first).toEqual({ ok: true, data: join(clones, "acme-skills") });
+    expect(served).toEqual(["https://codeload.github.com/Acme/Skills/zip/HEAD"]);
+    expect((await scanSkillDirectories(join(clones, "acme-skills"))).map((s) => s.name)).toEqual([
       "deploy",
     ]);
 
-    await mkdir(join(origin, "skills", "review"), { recursive: true });
-    await writeFile(join(origin, "skills", "review", "SKILL.md"), "# Review\n");
-    await sh("add", ".");
-    await sh("commit", "-q", "-m", "two");
-    const second = await resolveImportRoot({ kind: "git", url }, clones);
+    archive = zipSync({
+      "skills-main/skills/deploy/SKILL.md": text("# Deploy\n"),
+      "skills-main/skills/review/SKILL.md": text("# Review\n"),
+    });
+    const second = await resolveImportRoot({ kind: "git", url: `${url}#main` }, clones, fetchImpl);
     expect(second).toEqual(first);
-    expect((await scanSkillDirectories(second.ok ? second.data : "")).map((s) => s.name)).toEqual([
+    expect(served[1]).toBe("https://codeload.github.com/Acme/Skills/zip/main");
+    expect((await scanSkillDirectories(join(clones, "acme-skills"))).map((s) => s.name)).toEqual([
       "deploy",
       "review",
     ]);
   });
 
-  it("refuses what is not a git URL, and a repository it cannot reach", async () => {
+  it("asks a self-hosted forge the GitLab way, then the Gitea way", async () => {
+    const served: string[] = [];
+    const fetchImpl = fetchOf(async (input) => {
+      served.push(String(input));
+      return served.length === 1
+        ? new Response("not here", { status: 404 })
+        : zipResponse(zipSync({ "SKILL.md": new TextEncoder().encode("# One") }));
+    });
+    const out = await resolveImportRoot(
+      { kind: "git", url: "git@git.example.com:team/skills.git" },
+      root,
+      fetchImpl,
+    );
+    expect(out).toEqual({ ok: true, data: join(root, "team-skills") });
+    expect(served).toEqual([
+      "https://git.example.com/team/skills/-/archive/HEAD/skills-HEAD.zip",
+      "https://git.example.com/team/skills/archive/HEAD.zip",
+    ]);
+  });
+
+  it("refuses what is not a repository URL, and a repository it cannot fetch", async () => {
     expect(await resolveImportRoot({ kind: "git", url: "not a url" }, root)).toEqual({
       ok: false,
       error: AgentLibraryErrorCode.ImportCloneFailed,
     });
+    const gone = fetchOf(async () => new Response("", { status: 404 }));
     expect(
-      await resolveImportRoot({ kind: "git", url: `file://${join(root, "missing")}` }, root),
+      await resolveImportRoot({ kind: "git", url: "https://github.com/acme/missing" }, root, gone),
     ).toEqual({ ok: false, error: AgentLibraryErrorCode.ImportCloneFailed });
+    const garbage = fetchOf(async () => new Response("<html>", { status: 200 }));
+    expect(
+      await resolveImportRoot({ kind: "git", url: "https://github.com/acme/html" }, root, garbage),
+    ).toEqual({ ok: false, error: AgentLibraryErrorCode.ImportCloneFailed });
+  });
+});
+
+describe("parseRepositoryUrl / archiveUrlsFor", () => {
+  it("reads the URL forms people paste, with an optional #ref", () => {
+    expect(parseRepositoryUrl("https://github.com/Acme/Skills.git")).toEqual({
+      host: "github.com",
+      path: "Acme/Skills",
+      name: "Skills",
+      ref: "HEAD",
+    });
+    expect(parseRepositoryUrl("git@gitlab.com:group/sub/skills.git#release/2")).toEqual({
+      host: "gitlab.com",
+      path: "group/sub/skills",
+      name: "skills",
+      ref: "release/2",
+    });
+    expect(parseRepositoryUrl("https://github.com/acme")).toBeNull();
+    expect(parseRepositoryUrl("ftp://x/y/z")).toBeNull();
+    expect(parseRepositoryUrl("https://github.com/a/b#bad ref")).toBeNull();
+  });
+
+  it("knows where each forge keeps its archives", () => {
+    expect(archiveUrlsFor({ host: "github.com", path: "a/b", name: "b", ref: "v1" })).toEqual([
+      "https://codeload.github.com/a/b/zip/v1",
+    ]);
+    expect(
+      archiveUrlsFor({ host: "gitlab.com", path: "g/s/b", name: "b", ref: "release/2" }),
+    ).toEqual([
+      "https://gitlab.com/g/s/b/-/archive/release/2/b-release-2.zip",
+      "https://gitlab.com/g/s/b/archive/release/2.zip",
+    ]);
   });
 });
 

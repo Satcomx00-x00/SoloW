@@ -10,7 +10,6 @@ import {
 } from "@solow/contracts";
 import { describeSkill } from "@solow/core";
 import { unzipSync } from "fflate";
-import { childEnv } from "./env.js";
 
 /**
  * Finding every Skill under a directory or in a repository (spec F24): the filesystem and git
@@ -20,13 +19,18 @@ import { childEnv } from "./env.js";
  * directory is what gets imported, as a `path` source, so the scripts, references and assets
  * beside the file travel with it. The walk stops at a Skill's directory: a `SKILL.md` nested
  * under another is that Skill's own material, not a second entry.
+ *
+ * A repository is fetched as the archive its host serves over HTTPS, not cloned: this app never
+ * spawns a process — host access is the executor's alone (`scripts/audit-executor-boundary.ts`)
+ * — and a zip of the default branch is the same tree without a `git` binary, a credential prompt
+ * or a `.git` directory the scan would have to skip.
  */
 
 /** Deep enough for `.claude/skills/<name>` inside a monorepo package; not a filesystem crawl. */
 const MAX_DEPTH = 8;
 const MAX_SKILLS = 200;
 const SKIPPED_DIRS = new Set([".git", "node_modules"]);
-const CLONE_TIMEOUT_MS = 120_000;
+const FETCH_TIMEOUT_MS = 120_000;
 
 export type ScannedSkill = {
   name: string;
@@ -45,13 +49,67 @@ export type ImportError =
 const MAX_ARCHIVE_ENTRIES = 5000;
 const MAX_ARCHIVE_BYTES = 200 * 1024 * 1024;
 
-/** The URL forms `git clone` takes that are not a bare host path — `file://` included, for tests. */
-const GIT_URL = /^(?:(?:https?|ssh|git|file):\/\/\S+|[\w.-]+@[\w.-]+:\S+)$/;
+/**
+ * Where a repository's archive is: the URL forms people paste, reduced to host, path and ref.
+ * `https://host/owner/repo`, with or without `.git`, or `git@host:owner/repo`; a `#ref` names a
+ * branch or tag, and without one the host's default branch (`HEAD`) is asked for.
+ */
+export function parseRepositoryUrl(
+  url: string,
+): { host: string; path: string; name: string; ref: string } | null {
+  const trimmed = url.trim();
+  const [locator, fragment] = trimmed.split("#", 2);
+  const ssh = /^[\w.-]+@([\w.-]+):(.+)$/.exec(locator ?? "");
+  let host: string;
+  let path: string;
+  if (ssh?.[1] && ssh[2]) {
+    host = ssh[1];
+    path = ssh[2];
+  } else {
+    let parsed: URL;
+    try {
+      parsed = new URL(locator ?? "");
+    } catch {
+      return null;
+    }
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return null;
+    host = parsed.host;
+    path = parsed.pathname;
+  }
+  path = path.replace(/^\/+|\/+$/g, "").replace(/\.git$/, "");
+  const segments = path.split("/").filter(Boolean);
+  if (!host || segments.length < 2) return null;
+  const ref = (fragment ?? "").trim() || "HEAD";
+  if (!/^[\w./-]+$/.test(ref)) return null;
+  return { host, path: segments.join("/"), name: segments[segments.length - 1] as string, ref };
+}
 
-/** `<skillsRoot>/<owner>-<repo>`: one clone per repository, refreshed on the next import. */
+/**
+ * The archive URLs to try, in order. GitHub serves every repository from `codeload`; anything
+ * else is asked the GitLab way first and the Gitea way second, which between them cover the
+ * self-hosted forges a team keeps its skills on.
+ */
+export function archiveUrlsFor(repo: {
+  host: string;
+  path: string;
+  name: string;
+  ref: string;
+}): string[] {
+  const ref = encodeURIComponent(repo.ref).replace(/%2F/g, "/");
+  if (repo.host === "github.com" || repo.host === "www.github.com") {
+    return [`https://codeload.github.com/${repo.path}/zip/${ref}`];
+  }
+  return [
+    `https://${repo.host}/${repo.path}/-/archive/${ref}/${repo.name}-${ref.replace(/\//g, "-")}.zip`,
+    `https://${repo.host}/${repo.path}/archive/${ref}.zip`,
+  ];
+}
+
+/** `<skillsRoot>/<owner>-<repo>`: one directory per repository, replaced on the next fetch. */
 export function cloneDirFor(url: string, skillsRoot: string): string {
   const tail = url
-    .replace(/\.git\/?$/, "")
+    .split("#", 1)[0]
+    ?.replace(/\.git\/?$/, "")
     .replace(/[/:]+$/, "")
     .split(/[/:]/)
     .filter(Boolean)
@@ -63,49 +121,48 @@ export function cloneDirFor(url: string, skillsRoot: string): string {
   return join(skillsRoot, tail || "repository");
 }
 
-async function git(args: string[], cwd?: string): Promise<{ ok: boolean; stderr: string }> {
-  const proc = Bun.spawn(["git", ...args], {
-    ...(cwd ? { cwd } : {}),
-    // A clone that wants a password would otherwise wait on a prompt nobody can answer.
-    env: childEnv({ GIT_TERMINAL_PROMPT: "0" }),
-    stdin: "ignore",
-    stdout: "ignore",
-    stderr: "pipe",
-  });
-  const timer = setTimeout(() => proc.kill(), CLONE_TIMEOUT_MS);
-  try {
-    const [stderr, code] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
-    return { ok: code === 0, stderr };
-  } finally {
-    clearTimeout(timer);
+async function fetchArchive(urls: string[], fetchImpl: typeof fetch): Promise<Uint8Array | null> {
+  for (const url of urls) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    try {
+      const res = await fetchImpl(url, { redirect: "follow", signal: controller.signal });
+      if (!res.ok) continue;
+      const declared = Number(res.headers.get("content-length") ?? 0);
+      if (declared > MAX_ARCHIVE_BYTES) return null;
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      if (bytes.byteLength > MAX_ARCHIVE_BYTES) return null;
+      return bytes;
+    } catch {
+      // The next URL form may be the one this host speaks.
+    } finally {
+      clearTimeout(timer);
+    }
   }
+  return null;
 }
 
 /**
- * The directory to scan for a source: the path as given, or the repository's clone — made on
- * the first import, pulled forward on the next, so a team's skills repository is re-imported
- * with one click rather than re-cloned by hand.
+ * The directory to scan for a source: the path as given, or the repository's archive unpacked
+ * under the skills root — fetched again on every scan, so a team's skills repository is
+ * re-imported with one click rather than re-downloaded by hand. `fetchImpl` is a seam for tests.
  */
 export async function resolveImportRoot(
   source: SkillImportSource,
   skillsRoot: string,
+  fetchImpl: typeof fetch = fetch,
 ): Promise<Result<string, ImportError>> {
   if (source.kind === "path") {
     const root = resolve(source.path);
     const info = await stat(root).catch(() => null);
     return info?.isDirectory() ? ok(root) : err(AgentLibraryErrorCode.ImportSourceNotFound);
   }
-  const url = source.url.trim();
-  if (!GIT_URL.test(url)) return err(AgentLibraryErrorCode.ImportCloneFailed);
-  const dir = cloneDirFor(url, skillsRoot);
-  const existing = await stat(join(dir, ".git")).catch(() => null);
-  const result = existing
-    ? await git(["pull", "--ff-only", "--quiet"], dir)
-    : await (async () => {
-        await mkdir(skillsRoot, { recursive: true });
-        return git(["clone", "--depth", "1", "--quiet", url, dir]);
-      })();
-  return result.ok ? ok(dir) : err(AgentLibraryErrorCode.ImportCloneFailed);
+  const repo = parseRepositoryUrl(source.url);
+  if (!repo) return err(AgentLibraryErrorCode.ImportCloneFailed);
+  const bytes = await fetchArchive(archiveUrlsFor(repo), fetchImpl);
+  if (!bytes) return err(AgentLibraryErrorCode.ImportCloneFailed);
+  const unpacked = await unpackArchiveInto(cloneDirFor(source.url, skillsRoot), bytes);
+  return unpacked.ok ? unpacked : err(AgentLibraryErrorCode.ImportCloneFailed);
 }
 
 async function countFiles(dir: string): Promise<number> {
@@ -188,6 +245,13 @@ export async function unpackSkillArchive(
   bytes: Uint8Array,
   skillsRoot: string,
 ): Promise<Result<string, ImportError>> {
+  return unpackArchiveInto(archiveDirFor(fileName, skillsRoot), bytes);
+}
+
+async function unpackArchiveInto(
+  dir: string,
+  bytes: Uint8Array,
+): Promise<Result<string, typeof AgentLibraryErrorCode.ImportArchiveInvalid>> {
   let entries: Record<string, Uint8Array>;
   try {
     entries = unzipSync(bytes);
@@ -198,7 +262,6 @@ export async function unpackSkillArchive(
   if (files.length === 0 || files.length > MAX_ARCHIVE_ENTRIES) {
     return err(AgentLibraryErrorCode.ImportArchiveInvalid);
   }
-  const dir = archiveDirFor(fileName, skillsRoot);
   let total = 0;
   const writes: { path: string; data: Uint8Array }[] = [];
   for (const [name, data] of files) {
