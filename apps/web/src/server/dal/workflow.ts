@@ -18,9 +18,17 @@ import {
   type WorkflowDto,
   WorkflowErrorCode,
   type WorkflowListDto,
+  type WorkflowStepBranch,
   type WorkflowWithStepsDto,
 } from "@solow/contracts";
-import { appendRank, rankBetween, rankForMove, resumeWorkflowCursor, sortSteps } from "@solow/core";
+import {
+  appendRank,
+  rankBetween,
+  rankForMove,
+  resumeWorkflowCursor,
+  sortSteps,
+  validateWorkflowGraph,
+} from "@solow/core";
 import {
   advanceTaskWorkflow as advanceTaskWorkflowIn,
   agentProfile,
@@ -199,6 +207,31 @@ function incrementVersion(tx: Tx, ctx: RequestContext, workflowId: string): void
     .run();
 }
 
+/**
+ * Can this branch be written on this Step? Its targets must be Steps of the same Workflow — a
+ * foreign key would accept another Workflow's Step, and a null-means-end column cannot carry
+ * one anyway — and never the Step itself, which would move no cursor and so defeat the
+ * `StaleCursor` replay guard (see `WorkflowErrorCode.BranchTargetIsSelf`).
+ *
+ * `stepId` is null for a Step being added, which cannot be its own target because it has no id
+ * yet — its targets are checked against the siblings it is about to join.
+ */
+function checkBranchTargets(
+  branch: WorkflowStepBranch | null | undefined,
+  stepId: string | null,
+  siblings: readonly { id: string }[],
+): Result<void, WorkflowErrorCode> {
+  if (!branch) return ok(undefined);
+  for (const target of [branch.thenStepId, branch.elseStepId]) {
+    if (target === null) continue;
+    if (target === stepId) return err(WorkflowErrorCode.BranchTargetIsSelf);
+    if (!siblings.some((step) => step.id === target)) {
+      return err(WorkflowErrorCode.StepNotInWorkflow);
+    }
+  }
+  return ok(undefined);
+}
+
 export async function addWorkflowStep(
   ctx: RequestContext,
   input: AddWorkflowStepInput,
@@ -241,8 +274,16 @@ export async function addWorkflowStep(
           .all(),
       );
 
+      const targets = checkBranchTargets(input.branch, null, existing);
+      if (!targets.ok) return err(targets.error);
+
       let rank: string;
-      if (input.afterStepId) {
+      if (input.afterStepId === null) {
+        // At the head: the new Step becomes the start of the pipeline. Still one row written.
+        const before = rankBetween(null, existing[0]?.rank ?? null);
+        if (!before.ok) return err(before.error);
+        rank = before.data;
+      } else if (input.afterStepId) {
         const index = existing.findIndex((step) => step.id === input.afterStepId);
         if (index === -1) return err(WorkflowErrorCode.StepNotInWorkflow);
         const between = rankBetween(
@@ -267,6 +308,7 @@ export async function addWorkflowStep(
           gate: input.gate ?? "human",
           advanceOn: input.advanceOn ?? "review",
           onEnter: input.onEnter ?? null,
+          branch: input.branch ?? null,
         })
         .returning()
         .all();
@@ -311,6 +353,21 @@ export async function updateWorkflowStep(
         if (!profile) return err(CommonErrorCode.NotFound);
       }
 
+      if (input.branch) {
+        const siblings = tx
+          .select({ id: workflowStep.id })
+          .from(workflowStep)
+          .where(
+            and(
+              eq(workflowStep.workspaceId, ctx.workspaceId),
+              eq(workflowStep.workflowId, step.workflowId),
+            ),
+          )
+          .all();
+        const targets = checkBranchTargets(input.branch, step.id, siblings);
+        if (!targets.ok) return err(targets.error);
+      }
+
       // Only fields that would actually change something are written, and the version is bumped
       // only if at least one of them does. A bump is what raises `definitionDrifted` on every
       // attached Task, so a call that changed nothing — a form saved twice, a field set to the
@@ -334,6 +391,12 @@ export async function updateWorkflowStep(
         JSON.stringify(input.onEnter ?? null) !== JSON.stringify(step.onEnter ?? null)
       ) {
         patch.onEnter = input.onEnter;
+      }
+      if (
+        input.branch !== undefined &&
+        JSON.stringify(input.branch ?? null) !== JSON.stringify(step.branch ?? null)
+      ) {
+        patch.branch = input.branch;
       }
       if (Object.keys(patch).length === 0) return ok(step.workflowId);
 
@@ -407,6 +470,10 @@ export async function reorderWorkflowStep(
  * Deleting a Step is refused while a Task's cursor sits on it. Removing it would leave that
  * Task with a cursor naming nothing, and `resumeWorkflowCursor` is deliberately an error in that
  * case rather than a silent restart — so the Task would be unrunnable, not merely misplaced.
+ *
+ * Refused, too, while another Step's branch names it. The alternative was to null the reference
+ * out, and null has a meaning here — "the pipeline ends" — so a silent patch would rewrite a
+ * branch the operator wrote into one they did not.
  */
 export async function deleteWorkflowStep(
   ctx: RequestContext,
@@ -431,6 +498,23 @@ export async function deleteWorkflowStep(
         .limit(1)
         .all();
       if (parked) return err(WorkflowErrorCode.StepInUse);
+
+      const siblings = tx
+        .select({ id: workflowStep.id, branch: workflowStep.branch })
+        .from(workflowStep)
+        .where(
+          and(
+            eq(workflowStep.workspaceId, ctx.workspaceId),
+            eq(workflowStep.workflowId, step.workflowId),
+          ),
+        )
+        .all();
+      const pointedAt = siblings.some(
+        (other) =>
+          other.id !== step.id &&
+          (other.branch?.thenStepId === step.id || other.branch?.elseStepId === step.id),
+      );
+      if (pointedAt) return err(WorkflowErrorCode.StepBranchedTo);
 
       tx.delete(workflowStep)
         .where(
@@ -483,7 +567,8 @@ function taskHasBegunWorkflow(tx: Tx, ctx: RequestContext, row: typeof task.$inf
  *
  * Refused once the Task has left `backlog`/`ready`: re-pointing the pipeline of a Task whose
  * agent is already running would change what that run is for, mid-run. Refused for an empty
- * Workflow, because a cursor has to name something for the resume rule to have an answer.
+ * Workflow, because a cursor has to name something for the resume rule to have an answer — and
+ * for a graph with a Step nothing leads to or no way to the end (`validateWorkflowGraph`).
  */
 export async function attachTaskWorkflow(
   ctx: RequestContext,
@@ -525,6 +610,10 @@ export async function attachTaskWorkflow(
         .all();
       const first = resumeWorkflowCursor(steps, null);
       if (!first.ok) return err(first.error);
+      // The designer only *shows* an unreachable Step or a loop with no way out, because an
+      // operator building a loop passes through both. Here is where they cost something: a
+      // Task must not be started down a pipeline that skips a Step or can never finish.
+      if (validateWorkflowGraph(steps).length > 0) return err(WorkflowErrorCode.GraphInvalid);
 
       tx.update(task)
         .set({

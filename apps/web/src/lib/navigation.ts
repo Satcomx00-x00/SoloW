@@ -31,8 +31,15 @@ import {
  * Two lists, because there are genuinely two kinds of destination:
  *
  *  - `WORKSPACE_SECTIONS` — the few things that exist without a Project: the Project list itself,
- *    the unassigned escape hatch, and Settings.
+ *    the unassigned escape hatch, Workflows, and Settings.
  *  - `PROJECT_SECTIONS` — everything inside one, resolved against a Project id.
+ *
+ * **Workflows is in the first list, not the second.** It sat under `/projects/:id/workflows` for
+ * a while, which read as "a Project has workflows" — but `workflow.list` takes no Project and
+ * never did, and a Workflow's Steps name Agent Profiles, so the same pipeline was being drawn
+ * identically under every Project in the Workspace. A route that implies a scope the query does
+ * not have is a route that lies; it is a top-level destination now, which is also what
+ * docs/features/F03-workflow-designer.md said all along.
  *
  * Search is deliberately in neither. In VS Code it is a rail icon that opens a panel; here the
  * search surface is the command palette, so the rail entry opens that instead of navigating — a
@@ -68,6 +75,15 @@ export const WORKSPACE_SECTIONS: readonly Section[] = [
     icon: Inbox,
   },
   {
+    href: "/workflows",
+    label: "Workflows",
+    // Deliberately not "…in this project": a Workflow names Agent Profiles and Steps, never a
+    // Project, so the caption must not imply a scope the data does not have.
+    caption: "Repeatable multi-agent pipelines",
+    icon: Workflow,
+    wip: true,
+  },
+  {
     href: "/settings",
     label: "Settings",
     caption: "Profiles, repositories, secrets",
@@ -94,13 +110,6 @@ export const PROJECT_SECTIONS: readonly ProjectSection[] = [
   { path: "", label: "Planning", caption: "The project table", icon: Table2 },
   { path: "/board", label: "Board", caption: "Agent runs, by state", icon: Columns3 },
   { path: "/issues", label: "Issues", caption: "Work in this project", icon: Inbox },
-  {
-    path: "/workflows",
-    label: "Workflows",
-    caption: "Repeatable multi-agent pipelines",
-    icon: Workflow,
-    wip: true,
-  },
 ];
 
 /** The href for one section of one Project. */
@@ -121,6 +130,17 @@ export function projectIdFromPath(pathname: string): string | null {
   // `/projects` alone is the list, not a Project — and it must not resolve to one, or the hub
   // would render as a project whose id is the word "projects".
   return id && id !== "new" ? id : null;
+}
+
+/**
+ * The Workflow a path has open, or null on `/workflows` itself.
+ *
+ * Same reasoning as `projectIdFromPath`: the selection is in the URL rather than in a component's
+ * state, so the primary sidebar's list, the canvas and the secondary sidebar's inspector all read
+ * one answer — and a reload or a shared link lands on the same pipeline.
+ */
+export function workflowIdFromPath(pathname: string): string | null {
+  return /^\/workflows\/([^/]+)/.exec(pathname)?.[1] ?? null;
 }
 
 /** Which project section a path is in. Longest match wins, so `/issues` beats the empty overview. */

@@ -1,17 +1,19 @@
 /// <reference types="bun-types" />
 
-import { afterEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeAll, describe, expect, it } from "bun:test";
 import type { WorkflowStepDto, WorkflowWithStepsDto } from "@solow/contracts";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderWithTrpc } from "@/test/trpc-harness";
 import { WorkflowsView } from "./workflows-view";
 
 /**
- * The Workflow editor (issue #5 AC-1).
+ * The Workflow designer (issue #5 AC-1), drawn as a node graph.
  *
- * What is asserted is what the surface *sends*, not how it looks: a Move up has to name the two
- * Steps the moved one lands between, because that is the contract the server checks for staleness
- * — a button that sent a position would be describing a list nobody is looking at any more.
+ * What is asserted is what the surface *sends*, not how it is drawn: the `+` beside a node has to
+ * name the Step the new one follows and pick an agent without asking, a rename has to reach
+ * `updateStep`. The drag arithmetic — which neighbour pair a drop turns into — is a pure function
+ * with its own suite in `lib/workflow-canvas.test.ts`; React Flow's pointer machinery is not
+ * something a DOM stand-in can drive, so it is not driven here.
  */
 
 const AT = "2026-08-20T00:00:00.000Z";
@@ -28,6 +30,7 @@ function step(id: string, name: string, position: number, rank: string): Workflo
     gate: "human",
     advanceOn: "review",
     onEnter: null,
+    branch: null,
     createdAt: AT,
     updatedAt: AT,
   };
@@ -73,63 +76,220 @@ function handlersFor(overrides: Record<string, (input: unknown) => unknown> = {}
   };
 }
 
+beforeAll(() => {
+  // React Flow measures nodes and the viewport with a ResizeObserver, which happy-dom does not
+  // ship. A silent one is enough: nothing here asserts on geometry.
+  if (typeof globalThis.ResizeObserver === "undefined") {
+    class QuietResizeObserver {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    (globalThis as { ResizeObserver: unknown }).ResizeObserver = QuietResizeObserver;
+  }
+});
+
 afterEach(cleanup);
 
+/** The Step names as the canvas draws them, left to right. */
+async function stepNames(): Promise<string[]> {
+  const inputs = await screen.findAllByLabelText(/^Name of step \d+$/);
+  return inputs.map((input) => (input as HTMLInputElement).value);
+}
+
 describe("WorkflowsView", () => {
-  it("renders the selected workflow's steps in pipeline order", async () => {
+  it("draws the selected workflow's steps in pipeline order", async () => {
     renderWithTrpc(<WorkflowsView />, handlersFor());
 
-    const list = await screen.findByRole("list", { name: "Steps of Plan, build, review" });
-    const names = Array.from(list.querySelectorAll("li")).map((li) =>
-      li.textContent?.replace(/\s+/g, " ").trim(),
-    );
-    expect(names[0]).toMatch(/^1\.\s*Plan/);
-    expect(names[1]).toMatch(/^2\.\s*Implement/);
-    expect(names[2]).toMatch(/^3\.\s*Review/);
+    expect(await stepNames()).toEqual(["Plan", "Implement", "Review"]);
   });
 
-  it("sends the two neighbours a step lands between when it is moved up", async () => {
-    const { log } = renderWithTrpc(<WorkflowsView />, handlersFor());
+  it("adds a step after the one whose + was pressed, on the first agent profile, without asking", async () => {
+    const { log } = renderWithTrpc(
+      <WorkflowsView />,
+      handlersFor({ "workflow.addStep": () => PIPELINE }),
+    );
 
-    fireEvent.click(await screen.findByRole("button", { name: "Move Review up" }));
+    // By label rather than by role: React Flow keeps a node `visibility: hidden` until it has
+    // measured it, which needs the ResizeObserver the DOM stand-in lacks, and role queries skip
+    // hidden elements. The button is there and clickable; it is only unmeasured. Enabled only
+    // once the profile catalog has arrived — a `+` with no agent to give the Step is dimmed.
+    const add = (await screen.findByLabelText("Add a step after Implement")) as HTMLButtonElement;
+    await waitFor(() => expect(add.disabled).toBe(false));
+    fireEvent.click(add);
 
     await waitFor(() => {
-      const call = log.calls.find((c) => c.path === "workflow.reorderStep");
-      expect(call).toBeDefined();
-      // Review moves above Implement: it lands after Plan and before Implement.
+      const call = log.calls.find((c) => c.path === "workflow.addStep");
       expect(call?.input).toEqual({
-        stepId: "s3",
-        afterStepId: "s1",
-        beforeStepId: "s2",
+        workflowId: "wf-1",
+        name: "Step 4",
+        agentProfileId: "ap-1",
+        afterStepId: "s2",
       });
     });
   });
 
-  it("sends nulls for the ends of the list", async () => {
-    const { log } = renderWithTrpc(<WorkflowsView />, handlersFor());
+  it("puts a step at the head from the start pill, with a name no other step has", async () => {
+    // The `+` on the Start edge is the one insert the Steps' own `+` cannot express. A null
+    // `afterStepId` is the head; "Step 4" because 1–3 are taken, whatever order they sit in.
+    const { log } = renderWithTrpc(
+      <WorkflowsView />,
+      handlersFor({
+        "workflow.get": () => ({
+          ...PIPELINE,
+          steps: PIPELINE.steps.map((s, i) => ({ ...s, name: `Step ${i + 1}` })),
+        }),
+        "workflow.addStep": () => PIPELINE,
+      }),
+    );
 
-    fireEvent.click(await screen.findByRole("button", { name: "Move Implement up" }));
-    await waitFor(() => {
-      const call = log.calls.find((c) => c.path === "workflow.reorderStep");
-      expect(call?.input).toEqual({ stepId: "s2", afterStepId: null, beforeStepId: "s1" });
-    });
+    const add = (await screen.findByLabelText("Add a step at the start")) as HTMLButtonElement;
+    await waitFor(() => expect(add.disabled).toBe(false));
+    fireEvent.click(add);
 
-    cleanup();
-    const second = renderWithTrpc(<WorkflowsView />, handlersFor());
-    fireEvent.click(await screen.findByRole("button", { name: "Move Implement down" }));
     await waitFor(() => {
-      const call = second.log.calls.find((c) => c.path === "workflow.reorderStep");
-      expect(call?.input).toEqual({ stepId: "s2", afterStepId: "s3", beforeStepId: null });
+      const call = log.calls.find((c) => c.path === "workflow.addStep");
+      expect(call?.input).toEqual({
+        workflowId: "wf-1",
+        name: "Step 4",
+        agentProfileId: "ap-1",
+        afterStepId: null,
+      });
     });
   });
 
-  it("offers no move that would fall off either end of the list", async () => {
-    renderWithTrpc(<WorkflowsView />, handlersFor());
+  it("renames a step in place, on blur, and sends nothing for an unchanged name", async () => {
+    const { log } = renderWithTrpc(
+      <WorkflowsView />,
+      handlersFor({ "workflow.updateStep": () => PIPELINE }),
+    );
 
-    const up = await screen.findByRole("button", { name: "Move Plan up" });
-    const down = await screen.findByRole("button", { name: "Move Review down" });
-    expect(up.hasAttribute("disabled")).toBe(true);
-    expect(down.hasAttribute("disabled")).toBe(true);
+    const name = await screen.findByLabelText("Name of step 1");
+    fireEvent.blur(name);
+    fireEvent.change(name, { target: { value: "Plan it out" } });
+    fireEvent.blur(name);
+
+    await waitFor(() => {
+      const calls = log.calls.filter((c) => c.path === "workflow.updateStep");
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.input).toEqual({ stepId: "s1", name: "Plan it out" });
+    });
+  });
+
+  it("turns a branch on with both exits pointing where the step already went", async () => {
+    // So that switching the branch on changes nothing until a target is chosen: the default is
+    // the rank successor on both sides, and a placeholder question the operator will replace.
+    const { log } = renderWithTrpc(
+      <WorkflowsView />,
+      handlersFor({ "workflow.updateStep": () => PIPELINE }),
+    );
+
+    fireEvent.click(await screen.findByLabelText("Branch Implement on a condition"));
+
+    await waitFor(() => {
+      const call = log.calls.find((c) => c.path === "workflow.updateStep");
+      expect(call?.input).toEqual({
+        stepId: "s2",
+        branch: {
+          when: { kind: "agent-decides", question: "Is the condition met?" },
+          thenStepId: "s3",
+          elseStepId: "s3",
+        },
+      });
+    });
+  });
+
+  it("draws a branching step with its condition and its two exits, and lets the branch go", async () => {
+    const branched: WorkflowWithStepsDto = {
+      ...PIPELINE,
+      steps: PIPELINE.steps.map((s) =>
+        s.id === "s3"
+          ? {
+              ...s,
+              branch: {
+                when: { kind: "agent-decides", question: "Does it need another pass?" },
+                thenStepId: "s2",
+                elseStepId: null,
+              },
+            }
+          : s,
+      ),
+    };
+    const { log } = renderWithTrpc(
+      <WorkflowsView />,
+      handlersFor({ "workflow.get": () => branched, "workflow.updateStep": () => PIPELINE }),
+    );
+
+    const question = (await screen.findByLabelText(
+      "Question the agent answers",
+    )) as HTMLTextAreaElement;
+    expect(question.value).toBe("Does it need another pass?");
+    // Exactly one Step branches, so exactly one pair of targets is on offer.
+    expect(screen.getAllByText("If yes")).toHaveLength(1);
+    expect(screen.getAllByText("If no")).toHaveLength(1);
+
+    fireEvent.click(screen.getByLabelText("Remove the branch of Review"));
+    await waitFor(() => {
+      const call = log.calls.find((c) => c.path === "workflow.updateStep");
+      expect(call?.input).toEqual({ stepId: "s3", branch: null });
+    });
+  });
+
+  it("says on the node, in words, why a step cannot run as the graph stands", async () => {
+    // Plan branches past Implement on both exits: Implement is unreachable. Review still leads
+    // to the end, so nothing is trapped — exactly one node carries exactly one warning.
+    const skipping: WorkflowWithStepsDto = {
+      ...PIPELINE,
+      steps: PIPELINE.steps.map((s) =>
+        s.id === "s1"
+          ? {
+              ...s,
+              branch: {
+                when: { kind: "agent-decides", question: "Skip implementation?" },
+                thenStepId: "s3",
+                elseStepId: "s3",
+              },
+            }
+          : s,
+      ),
+    };
+    renderWithTrpc(<WorkflowsView />, handlersFor({ "workflow.get": () => skipping }));
+
+    const list = await screen.findByLabelText("Problems with Implement");
+    expect(list.textContent).toContain("Unreachable — no step leads here, so it never runs.");
+    expect(screen.queryByLabelText("Problems with Plan")).toBeNull();
+    expect(screen.queryByLabelText("Problems with Review")).toBeNull();
+  });
+
+  it("offers the first step from the empty canvas itself", async () => {
+    const { log } = renderWithTrpc(
+      <WorkflowsView />,
+      handlersFor({
+        "workflow.get": () => ({ ...PIPELINE, steps: [], stepCount: 0 }),
+        "workflow.addStep": () => PIPELINE,
+      }),
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Add the first step" }));
+
+    await waitFor(() => {
+      const call = log.calls.find((c) => c.path === "workflow.addStep");
+      expect(call?.input).toEqual({ workflowId: "wf-1", name: "Step 1", agentProfileId: "ap-1" });
+    });
+  });
+
+  it("refuses to add a step when there is no agent profile to give it", async () => {
+    renderWithTrpc(
+      <WorkflowsView />,
+      handlersFor({
+        "workflow.get": () => ({ ...PIPELINE, steps: [], stepCount: 0 }),
+        "profile.agent.list": () => ({ items: [], nextCursor: null }),
+      }),
+    );
+
+    const button = await screen.findByRole("button", { name: "Add the first step" });
+    await waitFor(() => expect(button.hasAttribute("disabled")).toBe(true));
+    expect(await screen.findByText(/Create an agent profile first/)).toBeTruthy();
   });
 
   it("tells a workspace with the flag off how to enable it, rather than showing an empty list", async () => {
@@ -150,12 +310,12 @@ describe("WorkflowsView", () => {
   it("names the agent profile each step runs under, from the profile catalog", async () => {
     renderWithTrpc(<WorkflowsView />, handlersFor());
 
-    // One `Agent profile` control per step plus the add-step form's own.
+    // One `Agent profile` control per step, and no add-step form to carry a fourth.
     const labels = await screen.findAllByText("Agent profile");
-    expect(labels).toHaveLength(4);
+    expect(labels).toHaveLength(3);
   });
 
-  it("shows a WIP badge, because advancing a Task through Steps has no run loop behind it yet", async () => {
+  it("shows a WIP badge, because the run's live position on the graph is not drawn yet", async () => {
     renderWithTrpc(<WorkflowsView />, handlersFor());
 
     expect(await screen.findByText("WIP")).toBeTruthy();

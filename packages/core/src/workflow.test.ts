@@ -6,10 +6,15 @@ import {
   advanceWorkflowStep,
   appendRank,
   buildStepBrief,
+  carryAgentDecision,
+  evaluateStepCondition,
   rankBetween,
   rankForMove,
+  readAgentDecision,
   resumeWorkflowCursor,
   sortSteps,
+  stepExits,
+  validateWorkflowGraph,
   type WorkflowStepOutcome,
   type WorkflowStepRule,
 } from "./workflow.js";
@@ -47,8 +52,44 @@ function outcome(over: Partial<WorkflowStepOutcome> = {}): WorkflowStepOutcome {
     producedChanges: false,
     unspentApproval: false,
     approvalAlreadySpent: false,
+    handoff: null,
     ...over,
   };
+}
+
+/**
+ * The pipeline with a branch on it: triage decides whether the change needs a design first.
+ *
+ *   triage ──yes──▶ design ──▶ implement ──▶ review
+ *          └─no──────────────▶ implement
+ *
+ * and review sends the Task *back* to implement when it asked for changes, or ends the pipeline.
+ */
+function branching(gate: WorkflowStepGate = "auto"): WorkflowStepRule[] {
+  const a = appendRank(null);
+  const b = appendRank(a);
+  const c = appendRank(b);
+  const d = appendRank(c);
+  return [
+    {
+      ...step("triage", a, gate),
+      branch: {
+        when: { kind: "agent-decides", question: "Does this change need a design first?" },
+        thenStepId: "design",
+        elseStepId: "implement",
+      },
+    },
+    step("design", b, gate),
+    step("implement", c, gate),
+    {
+      ...step("review", d, gate),
+      branch: {
+        when: { kind: "agent-decides", question: "Does the implementation need another pass?" },
+        thenStepId: "implement",
+        elseStepId: null,
+      },
+    },
+  ];
 }
 
 describe("workflow step ordering", () => {
@@ -384,6 +425,211 @@ describe("advancing a task through its steps", () => {
   });
 });
 
+describe("a step's condition", () => {
+  const decides = { kind: "agent-decides", question: "Is it done?" } as const;
+
+  it("reads the agent's last DECISION line, whatever its case", () => {
+    expect(readAgentDecision("Plan written.\nDECISION: yes")).toBe("yes");
+    expect(readAgentDecision("decision: NO\n\nMore notes.")).toBe("no");
+    // The agent changed its mind while writing; the answer it finished on is the answer.
+    expect(readAgentDecision("DECISION: yes\nOn reflection…\nDECISION: no")).toBe("no");
+  });
+
+  it("does not read a sentence about the format as an answer", () => {
+    expect(readAgentDecision("I will end with the DECISION: yes/no line.")).toBeNull();
+    expect(readAgentDecision("DECISION: maybe")).toBeNull();
+    expect(readAgentDecision(null)).toBeNull();
+  });
+
+  it("takes the agent's yes as the condition met, and anything else as not", () => {
+    expect(
+      evaluateStepCondition(decides, { handoff: "DECISION: yes", producedChanges: false }),
+    ).toBe(true);
+    expect(evaluateStepCondition(decides, { handoff: "DECISION: no", producedChanges: true })).toBe(
+      false,
+    );
+    // Silence is not an affirmation.
+    expect(evaluateStepCondition(decides, { handoff: "All done.", producedChanges: true })).toBe(
+      false,
+    );
+    expect(evaluateStepCondition(decides, { handoff: null, producedChanges: false })).toBe(false);
+  });
+
+  it("carries an answer from the final message into a summary that has none", () => {
+    expect(carryAgentDecision("No defects found.", "…all good.\n\nDECISION: no")).toBe(
+      "No defects found.\n\nDECISION: no",
+    );
+    expect(carryAgentDecision(null, "DECISION: yes")).toBe("DECISION: yes");
+  });
+
+  it("leaves a summary that already answers alone, even when the message disagrees", () => {
+    expect(carryAgentDecision("Done.\nDECISION: yes", "DECISION: no")).toBe("Done.\nDECISION: yes");
+    expect(carryAgentDecision("Done.", "No decision here.")).toBe("Done.");
+    expect(carryAgentDecision(null, null)).toBeNull();
+  });
+
+  it("reads produced-changes from the outcome and nothing else", () => {
+    const changed = { kind: "produced-changes" } as const;
+    expect(
+      evaluateStepCondition(changed, { handoff: "DECISION: yes", producedChanges: false }),
+    ).toBe(false);
+    expect(evaluateStepCondition(changed, { handoff: null, producedChanges: true })).toBe(true);
+  });
+});
+
+describe("branching on a condition", () => {
+  it("takes the yes branch when the condition holds", () => {
+    const advance = unwrap(
+      advanceWorkflowStep(
+        branching(),
+        "triage",
+        outcome({ handoff: "Needs a design.\nDECISION: yes" }),
+      ),
+    );
+    expect(advance).toEqual({ status: "advanced", stepId: "design", consumedApproval: false });
+  });
+
+  it("takes the no branch otherwise, skipping the steps in between", () => {
+    const advance = unwrap(
+      advanceWorkflowStep(
+        branching(),
+        "triage",
+        outcome({ handoff: "Straightforward.\nDECISION: no" }),
+      ),
+    );
+    expect(advance).toEqual({ status: "advanced", stepId: "implement", consumedApproval: false });
+  });
+
+  it("can send the task back to an earlier step", () => {
+    const advance = unwrap(
+      advanceWorkflowStep(
+        branching(),
+        "review",
+        outcome({ handoff: "Missing tests.\nDECISION: yes" }),
+      ),
+    );
+    expect(advance).toEqual({ status: "advanced", stepId: "implement", consumedApproval: false });
+  });
+
+  it("treats a null target as the end of the pipeline, which still needs a decision", () => {
+    // Principle I does not care how the Task reached the end: a branch to "end" is the same end.
+    const steps = branching();
+    const undecided = unwrap(
+      advanceWorkflowStep(steps, "review", outcome({ handoff: "Looks good.\nDECISION: no" })),
+    );
+    expect(undecided).toEqual({
+      status: "awaiting-decision",
+      stepId: "review",
+      consumedApproval: false,
+    });
+    const decided = unwrap(
+      advanceWorkflowStep(
+        steps,
+        "review",
+        outcome({ handoff: "Looks good.\nDECISION: no", unspentApproval: true }),
+      ),
+    );
+    expect(decided).toEqual({ status: "completed", stepId: "review", consumedApproval: true });
+  });
+
+  it("still applies the step's own gate to the move a branch chose", () => {
+    const steps = branching("human");
+    const held = unwrap(
+      advanceWorkflowStep(steps, "triage", outcome({ handoff: "Needs a design.\nDECISION: yes" })),
+    );
+    expect(held.status).toBe("awaiting-decision");
+    const decided = unwrap(
+      advanceWorkflowStep(
+        steps,
+        "triage",
+        outcome({ handoff: "DECISION: yes", unspentApproval: true }),
+      ),
+    );
+    expect(decided).toEqual({ status: "advanced", stepId: "design", consumedApproval: true });
+  });
+
+  it("follows the rank order again from a step that has no branch", () => {
+    const advance = unwrap(advanceWorkflowStep(branching(), "design", outcome()));
+    expect(advance.stepId).toBe("implement");
+  });
+
+  it("refuses a branch whose target step no longer exists", () => {
+    const steps = branching().filter((s) => s.id !== "design");
+    const result = advanceWorkflowStep(
+      steps,
+      "triage",
+      outcome({ handoff: "Needs a design.\nDECISION: yes" }),
+    );
+    expect(result.ok ? null : result.error).toBe(WorkflowErrorCode.StepNotInWorkflow);
+  });
+});
+
+describe("the shape of the graph", () => {
+  const branchTo = (thenStepId: string | null, elseStepId: string | null) => ({
+    when: { kind: "agent-decides" as const, question: "?" },
+    thenStepId,
+    elseStepId,
+  });
+
+  it("gives an unbranched step one exit and a branching step two, and nothing else", () => {
+    const exits = stepExits(branching());
+    expect(exits.get("triage")).toEqual([
+      { kind: "then", stepId: "design" },
+      { kind: "else", stepId: "implement" },
+    ]);
+    expect(exits.get("design")).toEqual([{ kind: "next", stepId: "implement" }]);
+    expect(exits.get("review")).toEqual([
+      { kind: "then", stepId: "implement" },
+      { kind: "else", stepId: null },
+    ]);
+  });
+
+  it("finds nothing wrong with a linear pipeline, or with a loop that can still end", () => {
+    expect(validateWorkflowGraph(pipeline())).toEqual([]);
+    expect(validateWorkflowGraph(branching())).toEqual([]);
+    expect(validateWorkflowGraph([])).toEqual([]);
+  });
+
+  it("names a step nothing leads to", () => {
+    // plan skips implement on both exits; implement's own exit still leads on, so it can finish
+    // — it just never runs.
+    const [plan, implement, review] = pipeline();
+    if (!plan || !implement || !review) throw new Error("pipeline");
+    const steps = [{ ...plan, branch: branchTo("review", "review") }, implement, review];
+    expect(validateWorkflowGraph(steps)).toEqual([{ kind: "unreachable", stepId: "implement" }]);
+  });
+
+  it("names every step from which the end can never be reached", () => {
+    // review always goes back to implement, and implement always goes on to review: a trap.
+    const [plan, implement, review] = pipeline();
+    if (!plan || !implement || !review) throw new Error("pipeline");
+    const steps = [plan, implement, { ...review, branch: branchTo("implement", "implement") }];
+    expect(validateWorkflowGraph(steps)).toEqual([
+      { kind: "no-exit", stepId: "plan" },
+      { kind: "no-exit", stepId: "implement" },
+      { kind: "no-exit", stepId: "review" },
+    ]);
+  });
+
+  it("can fault a step both ways at once, and keeps the others clean", () => {
+    // plan ends the pipeline on both exits; implement and review are cut off and loop on
+    // each other — unreachable and without an exit, both.
+    const [plan, implement, review] = pipeline();
+    if (!plan || !implement || !review) throw new Error("pipeline");
+    const steps = [
+      { ...plan, branch: branchTo(null, null) },
+      implement,
+      { ...review, branch: branchTo("implement", "implement") },
+    ];
+    expect(validateWorkflowGraph(steps)).toEqual([
+      { kind: "unreachable", stepId: "implement" },
+      { kind: "no-exit", stepId: "implement" },
+      { kind: "unreachable", stepId: "review" },
+      { kind: "no-exit", stepId: "review" },
+    ]);
+  });
+});
+
 describe("the handoff brief", () => {
   it("leads with the previous step's handoff and then the step's own prompt", () => {
     const brief = buildStepBrief({ promptTemplate: "Implement the plan." }, "The plan is X.");
@@ -393,6 +639,53 @@ describe("the handoff brief", () => {
 
   it("carries no handoff preamble on the first step", () => {
     expect(buildStepBrief({ promptTemplate: "Draw up a plan." }, null)).toBe("Draw up a plan.");
+  });
+
+  it("asks the agent its branch question, naming what each answer leads to", () => {
+    const [triage, design, implement] = branching();
+    if (!triage || !design || !implement) throw new Error("pipeline");
+    const brief = buildStepBrief(
+      { promptTemplate: "Read the issue.", branch: triage.branch ?? null },
+      null,
+      [
+        { id: "design", name: "Design" },
+        { id: "implement", name: "Implement" },
+      ],
+    );
+    expect(brief.startsWith("Read the issue.")).toBe(true);
+    expect(brief).toContain("## Decision to make");
+    expect(brief).toContain("decide: Does this change need a design first?");
+    expect(brief).toContain("`DECISION: yes` or `DECISION: no`");
+    expect(brief).toContain(
+      'If yes, the pipeline continues with "Design"; if no, the pipeline continues with "Implement".',
+    );
+    expect(brief).toContain("No answer counts as no.");
+  });
+
+  it("names a null target as the end of the pipeline, and asks nothing for the other conditions", () => {
+    const review = branching().find((s) => s.id === "review");
+    if (!review?.branch) throw new Error("pipeline");
+    const brief = buildStepBrief(
+      { promptTemplate: "Review it.", branch: { ...review.branch, elseStepId: null } },
+      "The diff.",
+      [{ id: "implement", name: "Implement" }],
+    );
+    expect(brief).toContain(
+      'If yes, the pipeline continues with "Implement"; if no, the pipeline ends.',
+    );
+    // The handoff still leads, the question still trails.
+    expect(brief.indexOf("The diff.")).toBeLessThan(brief.indexOf("Review it."));
+    expect(brief.indexOf("Review it.")).toBeLessThan(brief.indexOf("## Decision to make"));
+
+    const changes = buildStepBrief(
+      {
+        promptTemplate: "Build it.",
+        branch: { when: { kind: "produced-changes" }, thenStepId: null, elseStepId: null },
+      },
+      null,
+    );
+    expect(changes).toBe("Build it.");
+    expect(buildStepBrief({ promptTemplate: "Plain.", branch: null }, null)).toBe("Plain.");
   });
 
   it("treats a blank handoff as no handoff at all", () => {

@@ -266,6 +266,22 @@ describe("workflows", () => {
       expect(untouched.map((s) => s.updatedAt)).toEqual([first.updatedAt, second.updatedAt]);
     });
 
+    it("puts a step at the head when afterStepId is null, making it the new start", async () => {
+      const { c, planner, newPipeline } = await fixture(db, "acme");
+      const wf = await newPipeline("Ship");
+      const before = wf.steps.map((s) => s.updatedAt);
+
+      const after = await c.workflow.addStep({
+        workflowId: wf.id,
+        name: "Triage",
+        agentProfileId: planner.id,
+        afterStepId: null,
+      });
+      expect(after.steps.map((s) => s.name)).toEqual(["Triage", "Plan", "Implement", "Review"]);
+      // One row written: nothing that was already there was touched.
+      expect(after.steps.slice(1).map((s) => s.updatedAt)).toEqual(before);
+    });
+
     it("moves a step between two named neighbours", async () => {
       const { c, newPipeline } = await fixture(db, "acme");
       const wf = await newPipeline("Ship");
@@ -388,6 +404,42 @@ describe("workflows", () => {
       expect(
         await errMessage(() => c.workflow.attachTask({ taskId: t.id, workflowId: wf.id })),
       ).toBe(WorkflowErrorCode.Empty);
+    });
+
+    it("refuses to attach a workflow whose graph skips a step or can never end", async () => {
+      const { c, newTask, newPipeline } = await fixture(db, "acme");
+      const wf = await newPipeline("Ship");
+      const t = await newTask("Wire the latch");
+      const branch = (thenStepId: string | null, elseStepId: string | null) => ({
+        when: { kind: "agent-decides" as const, question: "?" },
+        thenStepId,
+        elseStepId,
+      });
+
+      // Plan skips Implement on both exits: Implement never runs.
+      await c.workflow.updateStep({
+        stepId: steps(wf, 0),
+        branch: branch(steps(wf, 2), steps(wf, 2)),
+      });
+      expect(
+        await errMessage(() => c.workflow.attachTask({ taskId: t.id, workflowId: wf.id })),
+      ).toBe(WorkflowErrorCode.GraphInvalid);
+
+      // Plan branches properly again, but Review always goes back: the pipeline cannot end.
+      await c.workflow.updateStep({ stepId: steps(wf, 0), branch: null });
+      await c.workflow.updateStep({
+        stepId: steps(wf, 2),
+        branch: branch(steps(wf, 1), steps(wf, 1)),
+      });
+      expect(
+        await errMessage(() => c.workflow.attachTask({ taskId: t.id, workflowId: wf.id })),
+      ).toBe(WorkflowErrorCode.GraphInvalid);
+
+      // A loop that can end is a pipeline, not a fault.
+      await c.workflow.updateStep({ stepId: steps(wf, 2), branch: branch(steps(wf, 1), null) });
+      expect(
+        (await c.workflow.attachTask({ taskId: t.id, workflowId: wf.id })).currentStep.name,
+      ).toBe("Plan");
     });
 
     it("refuses to attach a workflow to a task whose agent is already running", async () => {
@@ -540,6 +592,119 @@ describe("workflows", () => {
 
       await recordDecision(db, wsId, t.id);
       expect((await c.workflow.advanceTask(signal(2))).status).toBe("completed");
+    });
+
+    it("follows the branch its condition chooses — back to an earlier step, or to the end", async () => {
+      // The reviewer *agent* decides: asked whether the implementation needs another pass, its
+      // `DECISION: yes` sends the Task back to Implement and its `DECISION: no` ends the pipeline.
+      // The end reached through a branch is the same end Principle I guards.
+      const { wsId, c, newTask, newPipeline } = await fixture(db, "acme");
+      const wf = await newPipeline("Ship", "auto");
+      await c.workflow.updateStep({
+        stepId: steps(wf, 2),
+        branch: {
+          when: { kind: "agent-decides", question: "Does the implementation need another pass?" },
+          thenStepId: steps(wf, 1),
+          elseStepId: null,
+        },
+      });
+      const t = await newTask("Wire the latch");
+      await c.workflow.attachTask({ taskId: t.id, workflowId: wf.id });
+
+      const signal = (index: number, handoff?: string) => ({
+        taskId: t.id,
+        fromStepId: steps(wf, index),
+        signal: "agent-signal" as const,
+        producedChanges: false,
+        ...(handoff ? { handoff } : {}),
+      });
+      await c.workflow.advanceTask(signal(0));
+      const onReview = await c.workflow.advanceTask(signal(1));
+      // The reviewer is asked the question in its brief, in the words the branch will read.
+      expect(onReview.brief).toContain("decide: Does the implementation need another pass?");
+      expect(onReview.brief).toContain("`DECISION: yes` or `DECISION: no`");
+      expect(onReview.brief).toContain(
+        'If yes, the pipeline continues with "Implement"; if no, the pipeline ends.',
+      );
+
+      const back = await c.workflow.advanceTask(signal(2, "Missing tests.\nDECISION: yes"));
+      expect(back.status).toBe("advanced");
+      expect(back.currentStepId).toBe(steps(wf, 1));
+      // The review's words are what the implementer is briefed with on the way back.
+      expect(back.brief).toContain("Missing tests.");
+      expect((await c.workflow.taskBinding({ taskId: t.id })).currentStep.name).toBe("Implement");
+
+      await c.workflow.advanceTask(signal(1));
+      expect((await c.workflow.advanceTask(signal(2, "Ship it.\nDECISION: no"))).status).toBe(
+        "awaiting-decision",
+      );
+      await recordDecision(db, wsId, t.id);
+      expect((await c.workflow.advanceTask(signal(2, "Ship it.\nDECISION: no"))).status).toBe(
+        "completed",
+      );
+    });
+
+    it("reads the branch back on the step, and refuses a target that is not a step of this workflow", async () => {
+      const { c, newPipeline } = await fixture(db, "acme");
+      const wf = await newPipeline("Ship");
+      const other = await newPipeline("Other");
+      const branch = {
+        when: { kind: "produced-changes" as const },
+        thenStepId: steps(wf, 2),
+        elseStepId: null,
+      };
+
+      const written = await c.workflow.updateStep({ stepId: steps(wf, 0), branch });
+      expect(written.steps[0]?.branch).toEqual(branch);
+      expect(written.version).toBe(wf.version + 1);
+
+      expect(
+        await errMessage(() =>
+          c.workflow.updateStep({
+            stepId: steps(wf, 0),
+            branch: { ...branch, thenStepId: steps(wf, 0) },
+          }),
+        ),
+      ).toBe(WorkflowErrorCode.BranchTargetIsSelf);
+      expect(
+        await errMessage(() =>
+          c.workflow.updateStep({
+            stepId: steps(wf, 0),
+            branch: { ...branch, elseStepId: steps(other, 1) },
+          }),
+        ),
+      ).toBe(WorkflowErrorCode.StepNotInWorkflow);
+      expect(
+        await errMessage(() =>
+          c.workflow.addStep({
+            workflowId: wf.id,
+            name: "Ship",
+            agentProfileId: written.steps[0]?.agentProfileId ?? "",
+            branch: { ...branch, thenStepId: steps(other, 0) },
+          }),
+        ),
+      ).toBe(WorkflowErrorCode.StepNotInWorkflow);
+    });
+
+    it("refuses to delete a step another step still branches to", async () => {
+      const { c, newPipeline } = await fixture(db, "acme");
+      const wf = await newPipeline("Ship");
+      await c.workflow.updateStep({
+        stepId: steps(wf, 2),
+        branch: {
+          when: { kind: "agent-decides", question: "Another pass?" },
+          thenStepId: steps(wf, 1),
+          elseStepId: null,
+        },
+      });
+
+      expect(await errMessage(() => c.workflow.deleteStep({ stepId: steps(wf, 1) }))).toBe(
+        WorkflowErrorCode.StepBranchedTo,
+      );
+      // Removing the branch releases it; a null branch is the rank order again.
+      const cleared = await c.workflow.updateStep({ stepId: steps(wf, 2), branch: null });
+      expect(cleared.steps[2]?.branch).toBeNull();
+      expect((await c.workflow.deleteStep({ stepId: steps(wf, 1) })).steps).toHaveLength(2);
     });
 
     it("does not accept another Workspace's review as this Task's decision", async () => {

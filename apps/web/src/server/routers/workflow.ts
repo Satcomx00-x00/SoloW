@@ -134,7 +134,7 @@ export const workflowRouter = router({
         tags: ["workflow"],
         protect: true,
         summary:
-          "Add a Step to a Workflow, bound to an Agent Profile with its own prompt template and gate rule. Appends unless afterStepId names the Step it should follow; inserting in the middle writes one row and reorders nothing.",
+          "Add a Step to a Workflow, bound to an Agent Profile with its own prompt template and gate rule. Appends unless afterStepId names the Step it should follow, or is null to put it at the head; inserting anywhere writes one row and reorders nothing. An optional branch makes the Step conditional: when its condition holds the Task goes to thenStepId, otherwise to elseStepId — either may be null to end the pipeline, and either may name an earlier Step.",
       },
     })
     .input(addWorkflowStepInput)
@@ -149,7 +149,7 @@ export const workflowRouter = router({
         tags: ["workflow"],
         protect: true,
         summary:
-          "Change a Step's name, Agent Profile, prompt template, gate or advance rule. Bumps the Workflow's definition version, so an attached Task reports the drift.",
+          "Change a Step's name, Agent Profile, prompt template, gate, advance rule or branch. A branch's targets must be Steps of the same Workflow and never the Step itself; null removes the branch. Bumps the Workflow's definition version, so an attached Task reports the drift.",
       },
     })
     .input(updateWorkflowStepInput)
@@ -179,7 +179,7 @@ export const workflowRouter = router({
         tags: ["workflow"],
         protect: true,
         summary:
-          "Remove a Step from a Workflow. Refused while a Task's cursor sits on it, because that Task would then be unable to resume.",
+          "Remove a Step from a Workflow. Refused while a Task's cursor sits on it, because that Task would then be unable to resume, and while another Step's branch still points at it.",
       },
     })
     .input(deleteWorkflowStepInput)
@@ -194,7 +194,7 @@ export const workflowRouter = router({
         tags: ["workflow"],
         protect: true,
         summary:
-          "Put a Task on a Workflow, at its first Step, recording the definition version in force. Refused once the Task has left backlog or ready, and refused once it has begun a pipeline — a cursor that has moved, a handoff, or a spent approval — so re-attaching cannot silently discard work already done.",
+          "Put a Task on a Workflow, at its first Step, recording the definition version in force. Refused once the Task has left backlog or ready, and refused once it has begun a pipeline — a cursor that has moved, a handoff, or a spent approval — so re-attaching cannot silently discard work already done. Also refused for a Workflow with no Steps, or whose graph has a Step nothing leads to or a loop with no way to the end.",
       },
     })
     .input(attachTaskWorkflowInput)
@@ -259,7 +259,7 @@ export const workflowRouter = router({
         tags: ["workflow"],
         protect: true,
         summary:
-          "Report that a Task's current Step finished, moving it to the next Step and carrying the handoff. fromStepId names the Step the caller believes it is finishing, so a redelivered call is refused rather than skipping a Step. The same Task is moved; no new Task is created. The last Step reports completed only once a human approval has been recorded that no earlier gate already spent, whatever the Step's gate says.",
+          "Report that a Task's current Step finished, moving it to the next Step — the rank successor, or the target the Step's branch condition chooses — and carrying the handoff. fromStepId names the Step the caller believes it is finishing, so a redelivered call is refused rather than skipping a Step. The same Task is moved; no new Task is created. The last Step reports completed only once a human approval has been recorded that no earlier gate already spent, whatever the Step's gate says.",
       },
     })
     .input(advanceTaskWorkflowInput)

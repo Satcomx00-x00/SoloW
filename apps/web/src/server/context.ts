@@ -14,12 +14,23 @@ export async function createContext({ req }: { req: Request }): Promise<BaseCont
 
   // Local dev-owner path (see `devOwnerMode`): a fixed Owner on the local Workspace with the
   // core flag enabled, so the SPA and the E2E harness can run without a sign-in.
+  //
+  // The Workspace row's own flags are read *over* that floor. Without this, `bun run flag
+  // enable` writes a flag the orchestrator honours (it reads the row directly) and this
+  // process never sees — so the run loop would walk a Workflow whose API refuses to open, and
+  // the UI tells the operator to run the exact command they just ran. The three hardcoded
+  // flags stay as the floor so the SPA and the E2E harness still come up on an empty database.
   if (devOwnerMode()) {
     return {
       db,
       requestHost,
       session: { workspaceId: LOCAL_WORKSPACE_ID, userId: "local-owner" },
-      flagOverrides: { "ff-core-program": true, "ff-integrations": true, "ff-mcp": true },
+      flagOverrides: {
+        "ff-core-program": true,
+        "ff-integrations": true,
+        "ff-mcp": true,
+        ...(await getWorkspaceFlags(db, LOCAL_WORKSPACE_ID)),
+      },
     };
   }
 

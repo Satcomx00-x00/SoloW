@@ -24,6 +24,7 @@ import {
 } from "@solow/contracts";
 import {
   CREDENTIAL_EXPIRED_REASON,
+  carryAgentDecision,
   classifyRunFailure,
   PARTIAL_INTEGRATION_REASON,
   primaryTaskRepository,
@@ -1919,6 +1920,12 @@ export async function runTaskLifecycle(
         const completion: { widget: Extract<Widget, { kind: "task_complete" }> | null } = {
           widget: null,
         };
+        /**
+         * Everything the agent *said* this round, in order — its answer to a Workflow branch
+         * question is read off the end of it when the widget's summary does not repeat it (see
+         * `carryAgentDecision`). Prose only: reasoning is not a report.
+         */
+        let assistantText = "";
         const scanner = new WidgetFenceScanner();
 
         /**
@@ -1939,10 +1946,12 @@ export async function runTaskLifecycle(
           // Only the model's answer is scanned. Reasoning is a thought about a widget, not a
           // request to draw one, and the operator's own steering is not the agent's to render.
           if (!ctx.widgetsEnabled || thinking) {
+            if (!thinking) assistantText += text;
             emit({ kind: "assistant_turn", text, thinking });
             return;
           }
           const out = scanner.push(text);
+          assistantText += out.text;
           if (out.text !== "") emit({ kind: "assistant_turn", text: out.text, thinking });
           for (const widget of out.widgets) {
             const widgetId = randomUUID();
@@ -2191,12 +2200,15 @@ export async function runTaskLifecycle(
          * that is what the review gate opens, and whatever the agent said about stopping, because
          * that is the only thing here it could have told us itself.
          */
+        // The widget's summary, with a branch answer the agent wrote in its final message
+        // carried in when the summary has none — this is what the next Step is briefed with.
+        const summary = carryAgentDecision(completion.widget?.summary ?? null, assistantText);
         emit({
           kind: "agent_done",
           changed,
           branch: adopted.branch,
           ...(completion.widget ? { outcome: completion.widget.outcome } : {}),
-          ...(completion.widget?.summary ? { summary: completion.widget.summary } : {}),
+          ...(summary ? { summary } : {}),
         });
 
         return {
@@ -2204,7 +2216,7 @@ export async function runTaskLifecycle(
           changed,
           worktree: adopted,
           outcome: completion.widget?.outcome ?? null,
-          summary: completion.widget?.summary ?? null,
+          summary,
         };
       });
 

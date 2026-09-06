@@ -27,6 +27,7 @@ import type {
   TaskState,
   WorkflowAdvanceOn,
   WorkflowStepAutomation,
+  WorkflowStepBranch,
   WorkflowStepGate,
 } from "@solow/contracts";
 import { sql } from "drizzle-orm";
@@ -694,6 +695,17 @@ export const workflowStep = sqliteTable(
      * migration on a populated table plus that argument reopened.
      */
     onEnter: text("on_enter", { mode: "json" }).$type<WorkflowStepAutomation>(),
+    /**
+     * Where this Step sends the Task instead of to its rank successor — a condition and the two
+     * Steps it chooses between (F03 FR-2, *Condition*). Null for the ordinary case, so every
+     * Step written before branches existed still walks the rank order it always did.
+     *
+     * JSON rather than two foreign-key columns: a target of null means "the pipeline ends", and
+     * two nullable FKs cannot say "no branch" and "branch to the end" apart. The DAL checks the
+     * targets are Steps of this Workflow before writing, which is the check an FK would have
+     * done, minus the cross-Workflow hole an FK leaves open.
+     */
+    branch: text("branch", { mode: "json" }).$type<WorkflowStepBranch>(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

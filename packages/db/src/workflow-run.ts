@@ -61,6 +61,7 @@ export function stepToDto(row: WorkflowStepRow, position: number): WorkflowStepD
     gate: row.gate,
     advanceOn: row.advanceOn,
     onEnter: row.onEnter ?? null,
+    branch: row.branch ?? null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -121,7 +122,7 @@ export async function loadTaskWorkflowRun(
     currentStep: current,
     steps,
     handoff: row.workflowHandoff,
-    brief: buildStepBrief(current, row.workflowHandoff),
+    brief: buildStepBrief(current, row.workflowHandoff, steps),
   });
 }
 
@@ -281,19 +282,23 @@ export async function advanceTaskWorkflow(
         (resumed.data.gate === "auto-unless-changes" &&
           taskHasRecordedChanges(tx, workspaceId, input.taskId));
 
+      // The Step's own summary is held apart from the one it was given until the cursor actually
+      // moves. A Step that reports in behind a closed gate is replayed later by a caller that no
+      // longer has the agent's words, so throwing them away here loses the next Step's context on
+      // the one path the state machine guarantees will be taken (AC-2). Resolved *before* the
+      // rules run, because a branch condition reads it — and reads the parked copy on the replay
+      // for exactly the reason it was parked.
+      const reported = input.handoff ?? row.workflowPendingHandoff;
+
       const advance = advanceWorkflowStep(steps, resumed.data.id, {
         signal: input.signal,
         producedChanges,
         unspentApproval,
         approvalAlreadySpent,
+        handoff: reported ?? null,
       });
       if (!advance.ok) return err(advance.error);
 
-      // The Step's own summary is held apart from the one it was given until the cursor actually
-      // moves. A Step that reports in behind a closed gate is replayed later by a caller that no
-      // longer has the agent's words, so throwing them away here loses the next Step's context on
-      // the one path the state machine guarantees will be taken (AC-2).
-      const reported = input.handoff ?? row.workflowPendingHandoff;
       const advanced = advance.data.status === "advanced";
       const handoff = advanced ? (reported ?? null) : row.workflowHandoff;
       const pendingHandoff = advanced ? null : (reported ?? null);
@@ -329,7 +334,7 @@ export async function advanceTaskWorkflow(
         taskId: row.id,
         status: advance.data.status,
         currentStepId: landed.id,
-        brief: buildStepBrief(landed, handoff),
+        brief: buildStepBrief(landed, handoff, steps),
       });
     },
     { behavior: "immediate" },

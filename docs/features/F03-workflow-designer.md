@@ -75,6 +75,36 @@ steerable without reading logs.
   records that a person saw the edit rather than pinning the Run to a snapshot. Immutability
   needs copy-on-write versioning, which has no producer yet — see *What ships in v1*.
 
+## What a Workflow graph cannot be (FR-5)
+
+The designer does not validate a drawing against a rule book; most invalid shapes cannot be
+expressed at all, because the graph is derived from the Step list rather than stored beside it.
+Each impossibility below is either *structural* (there is no data that could hold it), *refused*
+(the API returns the named error), or *flagged* (the canvas says so on the node, and
+`workflow.attachTask` refuses). The single source is `stepExits` / `validateWorkflowGraph` in
+`@solow/core`; the canvas (`stepEdges`) and the attach guard both read it.
+
+| Impossibility | Kind | Why, and where it is held |
+| --- | --- | --- |
+| **Two starts.** | structural | The start *is* the first Step in rank order (`resumeWorkflowCursor(steps, null)`). It is not a node the operator places — the `Start` pill draws that fact. To change the start, reorder, or use the `+` on the Start edge to put a Step before the first (`afterStepId: null`). |
+| **Two ends.** | structural | The end *is* a null target. Every Step without a branch whose rank successor does not exist, and every branch exit set to "End of pipeline", lands on the same `End`. There is one `END_NODE_ID` and no row behind it. |
+| **An edge drawn by hand, or a dangling one.** | structural | Edges are not stored. A Step has exactly one exit (its rank successor, or the end) or exactly two (`Yes`/`No`); `nodesConnectable` is off and there is no connect gesture. A drag is a *reorder*, never a link. |
+| **A Step with no exit.** | structural | See above: the last Step exits to the end. Nothing can be dead-ended by construction — only trapped (below). |
+| **Three exits, or parallel branches (Fork/Join).** | structural | A branch has one condition and two targets. FR-2's Fork/Join stays Later. |
+| **A node position of its own.** | structural | Positions are laid out from rank on every render (`placeSteps`). A drop is turned into a `reorderStep` and the node snaps back. |
+| **A branch to the Step it hangs off.** | refused | `WORKFLOW_BRANCH_TARGET_IS_SELF` — the cursor would not move, so the `StaleCursor` replay guard would be blind. |
+| **A branch to another Workflow's Step, or to a deleted one.** | refused | `WORKFLOW_STEP_NOT_IN_WORKFLOW`, on write. At run time a target deleted since is the same code, never a silent restart. |
+| **Deleting a Step another Step branches to.** | refused | `WORKFLOW_STEP_BRANCHED_TO` — nulling the reference would silently turn "go to X" into "the pipeline ends here". |
+| **Deleting a Step a Task sits on / a Workflow a Task follows.** | refused | `WORKFLOW_STEP_IN_USE` / `WORKFLOW_IN_USE`. |
+| **Attaching a Workflow with no Steps.** | refused | `WORKFLOW_EMPTY` — there is no start. |
+| **A Step nothing leads to.** | flagged | `validateWorkflowGraph` → `unreachable`. Said on the node ("Unreachable — no step leads here, so it never runs."); `attachTask` refuses with `WORKFLOW_GRAPH_INVALID`. Not refused at edit time, because building a loop passes through this shape. |
+| **A loop with no way to the end.** | flagged | `validateWorkflowGraph` → `no-exit`, on every Step trapped in it ("No way out — from here the pipeline can never end."); `attachTask` refuses with `WORKFLOW_GRAPH_INVALID`. A loop that *can* end — review sends the Task back, or ends it — is a pipeline, not a fault. |
+| **Finishing without a human's approval.** | refused | Principle I. Whatever the graph, the terminal rule in `advanceWorkflowStep` completes nothing without a recorded, unspent approval. |
+
+Not an impossibility, and deliberately so: a branch whose two exits name the same Step. It is
+what a branch is born with (both on the rank successor, so switching it on changes nothing), and
+it is how an operator gets from one shape to the next.
+
 ## Edge cases & failure handling
 
 - If a Step fails, the Run pauses at that Step and surfaces the reason; the user can retry
@@ -92,14 +122,42 @@ steerable without reading logs.
 
 ## What ships in v1 (issue #5)
 
-The model and its seam ship; the canvas does not. Concretely:
+The model, its seam and the designing canvas ship; the monitor does not. Concretely:
 
-- **Designing is an ordered Step list, not a node graph.** `workflow` + `workflow_step` tables,
-  Workspace-scoped (Principle V), edited at `/workflows`: a Step Card per row with an Agent
-  Profile select, a prompt template, a gate, an advance rule, and Move up / Move down. FR-1 and
-  FR-4 (the canvas, panning, zooming) and [Decision 0007](../decisions/0007-reactflow-workflow-visualisation.md)
-  move to Later — the pipeline the product needs first is linear, and a graph editor for a linear
-  pipeline is a layout engine to maintain rather than an affordance anyone uses.
+- **Designing is a node graph of a linear pipeline.** `workflow` + `workflow_step` tables,
+  Workspace-scoped (Principle V), drawn at `/workflows` on a React Flow canvas
+  ([Decision 0007](../decisions/0007-reactflow-workflow-visualisation.md)): one node per Step,
+  left to right in rank order, each node carrying its own form — Agent Profile, gate, advance
+  rule, prompt — and a `+` beside it that adds the next Step on the first Agent Profile in the
+  catalog, renamed in place. Edges follow the order and are not drawn by hand: a linear pipeline
+  has exactly one edge between consecutive Steps, so there is no connect gesture (FR-1 without its
+  branching; FR-4's panning and zooming). Dragging a node past a neighbour is a reorder — the drop
+  is turned into the neighbour pair `workflow.reorderStep` takes and the node snaps back to its
+  laid-out place, so the canvas never stores a position the run loop could disagree with.
+  Parallel Steps and non-agent nodes (Gate, Fork/Join — FR-2) stay Later.
+- **A Step can branch on a condition** (FR-2's *Condition*, in the shape this pipeline can
+  answer). It is a property of an agent Step rather than a Step kind of its own — a Condition node
+  would be a row with no agent, no prompt and no gate, and every rule that reads a Step would have
+  to learn to skip it. `workflow_step.branch` holds a condition and two targets: when the
+  condition holds, the Task goes to `thenStepId`, otherwise to `elseStepId`. Either target may be
+  null, meaning *the pipeline ends here*, and either may name an **earlier** Step — "changes
+  requested, go back and implement" is the branch most worth having. Two conditions exist, and
+  neither fetches evidence the advance transaction does not already hold, so a Condition never
+  becomes a second rules engine. **`agent-decides` is the one the feature is for: the agent
+  answers the question.** The operator phrases it ("Does the implementation need another pass?");
+  `buildStepBrief` appends it to the Step's brief under *Decision to make*, with the exact line to
+  answer on (`DECISION: yes` / `DECISION: no`) and what each answer leads to; the agent — the
+  party that has just read the code — answers at the end of its final message, and the advance
+  reads the last such line off the handoff (`readAgentDecision`). The handoff is the
+  `task_complete` widget's summary; an answer the agent wrote in its message but not in that
+  summary is carried into it by the run loop (`carryAgentDecision`), because the first live run
+  did exactly that and the answer would otherwise have been lost. No answer is not an affirmation and counts
+  as `no`, and the brief says so. `produced-changes` is the other: the same corroborated fact
+  `auto-unless-changes` reads. A Step without a branch still goes to its rank successor, so every
+  pipeline written before branches existed walks exactly as it did. A null target lands in the
+  same terminal rule as running off the last Step — Principle I holds however a Task reaches the
+  end. The canvas draws a branching Step with a `yes` and a `no` exit; an edge that skips or goes
+  back is routed around the row, and a null target is an edge to the `End` node.
 - **Step order is a lexicographic rank string**, not a position. Inserting a Step in the middle
   writes exactly one row and renumbers nothing; a reorder names the two Steps the moved one lands
   between, and is refused as stale if those two are no longer adjacent.
@@ -230,6 +288,14 @@ pipeline*, the badge says *what is happening to it*.
   accumulate across Steps, so an `auto-unless-changes` gate placed after any code-writing Step will
   always see changes and always behave as `human`. A per-Step diff baseline needs a commit or a
   marker at each boundary, which is the thing an intermediate advance must not do.
+- **A backward branch is a loop, and the loop is bounded by the round budget, not by design.**
+  `maxRounds` is `MAX_REVIEW_ROUNDS × stepCount`, and every advance resets the per-Step budget, so
+  a review that keeps sending the Task back to implement runs until that global budget is spent
+  and the run stops without a Task-level reason that names the loop. A branch may not target its
+  own Step (`WORKFLOW_BRANCH_TARGET_IS_SELF`), because the cursor would not move and the
+  `StaleCursor` replay guard relies on it moving. A Step another Step branches to cannot be
+  deleted (`WORKFLOW_STEP_BRANCHED_TO`): nulling the reference would silently turn "go to X" into
+  "the pipeline ends here".
 - **Concurrency caps are still checked against the Task's Profile only.** `withinConcurrencyCap` in
   `apps/web/src/server/dal/task.ts` reads `task.agentProfileId`, so a Workflow walking onto a Step
   whose Agent Profile is already at its cap is not checked at all. This issue opens that hole; it
@@ -237,7 +303,7 @@ pipeline*, the badge says *what is happening to it*.
 
 Later, in the order they unblock things: the Monitor strip of FR-9, one Session per Step (#26/#61)
 and the per-Step review linkage it unlocks, copy-on-write versioning so a Run really is pinned to
-the definition it started on, non-agent Step kinds (Gate, Condition, Fork/Join — FR-2), validity
+the definition it started on, non-agent Step kinds (Gate, Fork/Join — FR-2; Condition ships as a Step property, above), validity
 checking (FR-5), import/export (FR-7), and per-Step run history.
 
 The /workflows UI keeps its WIP badge (`Section.wip` in `apps/web/src/lib/navigation.ts`) while the
