@@ -79,14 +79,24 @@ bun run db:bootstrap
 
 # Built once, up front, rather than left to `next dev`'s per-route compile-on-request — that
 # first-hit latency (and the orchestrator's --hot file-watcher) is exactly what this script trades
-# away. A stale build would silently serve old code, so this always rebuilds rather than reusing
-# whatever `.next/` happens to be on disk; skip it yourself with SOLOW_SKIP_BUILD=1 if
-# you've just built and only want to restart the servers.
-if [ "${SOLOW_SKIP_BUILD:-0}" != "1" ]; then
-    echo "[start] building web app..."
-    (cd apps/web && exec bun --bun run build)
-else
+# away.
+#
+# Through Turborepo, so that it is only *actually* built when something the bundle is built from
+# has changed. This used to run `next build` on every start, on the argument that a stale build
+# silently serves old code — true, but the cure cost 50–85 s per restart, including the restarts
+# that touch only the orchestrator, which is not in the bundle at all. `turbo run build` hashes
+# the web package's files, its workspace dependencies, the lockfile and the env `turbo.json`
+# names, and on a hit restores `.next/` from `.turbo/cache` in a few seconds instead. Force a
+# rebuild with SOLOW_FORCE_BUILD=1; skip the step entirely with SOLOW_SKIP_BUILD=1.
+if [ "${SOLOW_SKIP_BUILD:-0}" = "1" ]; then
     echo "[start] SOLOW_SKIP_BUILD=1 set, reusing the existing apps/web/.next build"
+else
+    echo "[start] building web app (cached: turbo)..."
+    if [ "${SOLOW_FORCE_BUILD:-0}" = "1" ]; then
+        bunx turbo run build --filter=@solow/web --force
+    else
+        bunx turbo run build --filter=@solow/web
+    fi
 fi
 
 # Refuse to start on a port something else already holds.

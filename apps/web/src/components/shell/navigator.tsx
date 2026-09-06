@@ -1,9 +1,14 @@
 "use client";
 
 import type { IssueStatus, TaskState } from "@solow/contracts";
+import { Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { type ReactNode, Suspense } from "react";
+import { type ReactNode, Suspense, useState } from "react";
+import { ConfirmAction } from "@/components/features/confirm-action";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
@@ -23,6 +28,7 @@ import {
   settingsHref,
   settingsSectionFor,
   settingsSectionsIn,
+  workflowIdFromPath,
 } from "@/lib/navigation";
 import { WHOLE_PAGE } from "@/lib/paged";
 import { BOARD_COLUMNS, STATE_LABELS, STATE_STYLE } from "@/lib/task-states";
@@ -232,6 +238,147 @@ function AllIcon({ className, strokeWidth }: { className?: string; strokeWidth?:
 }
 
 /**
+ * Workflows context: the pipelines this Workspace has, and the one control that makes another.
+ *
+ * The list and the `New workflow` field used to be a 16rem column *inside* the page, beside the
+ * canvas. That is the primary sidebar's job — it is the same shape as the Project section list
+ * above it and the Settings list below — and having it in the page meant the canvas started a
+ * third of the way across a screen that also had a sidebar on it.
+ *
+ * Each row is a `Link`, not a button: the selection belongs in the URL (`workflowIdFromPath`), so
+ * a pipeline can be linked to, reopened by a reload, and read by the secondary sidebar without
+ * this component having to tell it.
+ */
+function WorkflowsNav() {
+  const pathname = usePathname();
+  const router = useRouter();
+  const utils = trpc.useUtils();
+  const workflows = trpc.workflow.list.useQuery({});
+  const [name, setName] = useState("");
+  const active = workflowIdFromPath(pathname);
+
+  const create = trpc.workflow.create.useMutation({
+    onSuccess: (created) => {
+      utils.workflow.list.invalidate();
+      setName("");
+      // Straight onto the new pipeline: it is empty, and the next thing anyone does is add a
+      // Step to it — which happens on the canvas.
+      router.push(`/workflows/${created.id}`);
+    },
+  });
+  const remove = trpc.workflow.delete.useMutation({
+    onSuccess: (_result, deleted) => {
+      utils.workflow.list.invalidate();
+      if (deleted.id === active) router.push("/workflows");
+    },
+  });
+
+  const list = workflows.data ?? [];
+  // The flag being off is the page's story to tell, in full, with the command that turns it on.
+  // The sidebar just has nothing to list.
+  const failed = workflows.error !== null;
+
+  return (
+    <div className="pb-3">
+      <form
+        className="space-y-1.5 px-2 pt-2.5"
+        onSubmit={(e) => {
+          e.preventDefault();
+          create.mutate({ name });
+        }}
+      >
+        <Label htmlFor="new-workflow-name" className="sr-only">
+          New workflow
+        </Label>
+        <Input
+          id="new-workflow-name"
+          className="h-8 text-xs"
+          placeholder="e.g. Plan, build, review"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          disabled={failed}
+          required
+        />
+        <Button
+          type="submit"
+          size="sm"
+          className="w-full"
+          disabled={!name || failed || create.isPending}
+        >
+          <Plus aria-hidden />
+          New workflow
+        </Button>
+        {create.error && (
+          <p className="font-mono text-2xs text-state-failed" role="alert">
+            {create.error.message}
+          </p>
+        )}
+      </form>
+
+      <nav aria-label="Workflows">
+        <SectionLabel>Pipelines</SectionLabel>
+        <ul className="space-y-px px-2" aria-label="Workflows">
+          {list.map((w) => {
+            const current = w.id === active;
+            return (
+              <li key={w.id} className="group/row flex items-center gap-1">
+                <Link
+                  href={`/workflows/${w.id}`}
+                  aria-current={current ? "page" : undefined}
+                  className={cn(
+                    "min-w-0 flex-1 rounded-md px-2 py-1.5 transition-colors",
+                    current
+                      ? "bg-sidebar-accent text-foreground"
+                      : "text-foreground/75 hover:bg-sidebar-accent/50 hover:text-foreground",
+                  )}
+                >
+                  <span className={cn("block truncate text-sm", current && "font-medium")}>
+                    {w.name}
+                  </span>
+                  <span className="block text-2xs text-muted-foreground tabular-nums">
+                    {w.stepCount === 1 ? "1 step" : `${w.stepCount} steps`} · v{w.version}
+                  </span>
+                </Link>
+                <ConfirmAction
+                  title={`Delete “${w.name}”?`}
+                  description="Its steps go with it. Refused while any task still follows it."
+                  confirmLabel="Delete workflow"
+                  onConfirm={() => remove.mutate({ id: w.id })}
+                  trigger={
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
+                      aria-label={`Delete ${w.name}`}
+                      // Revealed on hover or on focus, never on neither: a delete button beside
+                      // every row is a permanent invitation, and one that only appears on hover
+                      // is unreachable from the keyboard.
+                      className="opacity-0 transition-opacity focus-visible:opacity-100 group-hover/row:opacity-100"
+                    >
+                      <Trash2 aria-hidden />
+                    </Button>
+                  }
+                />
+              </li>
+            );
+          })}
+        </ul>
+        {!workflows.isLoading && !failed && list.length === 0 && (
+          <p className="px-3 pt-1 text-muted-foreground text-xs leading-relaxed">
+            None yet. A workflow chains agents: one plans, another implements, a third reviews.
+          </p>
+        )}
+        {remove.error && (
+          <p className="px-3 pt-1 font-mono text-2xs text-state-failed" role="alert">
+            {remove.error.message}
+          </p>
+        )}
+      </nav>
+    </div>
+  );
+}
+
+/**
  * Settings context: every configuration section, grouped, with the current one marked.
  *
  * It used to be four hard-coded anchors — a second, shorter opinion about what Settings contains
@@ -360,6 +507,7 @@ export function Navigator({ workspaceName }: { workspaceName: string }) {
   const section = sectionFor(pathname);
   const isSettings = section?.href === "/settings";
   const isUnassigned = section?.href === "/unassigned";
+  const isWorkflows = section?.href === "/workflows";
 
   // The Project's name is the sidebar's title when you are inside one: the Workspace is already
   // named in the breadcrumb, and repeating it here would spend the most prominent line in the
@@ -401,6 +549,8 @@ export function Navigator({ workspaceName }: { workspaceName: string }) {
           <Suspense fallback={null}>
             <SettingsNav />
           </Suspense>
+        ) : isWorkflows ? (
+          <WorkflowsNav />
         ) : isUnassigned ? (
           <IssuesNav unassigned />
         ) : null}

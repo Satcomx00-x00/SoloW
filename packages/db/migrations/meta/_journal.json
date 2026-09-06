@@ -232,6 +232,20 @@
       "when": 1788296958406,
       "tag": "0032_romantic_machine_man",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1788539545809,
+      "tag": "0033_even_captain_flint",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "6",
+      "when": 1788689232430,
+      "tag": "0034_melodic_chameleon",
+      "breakpoints": true
     }
   ]
 }

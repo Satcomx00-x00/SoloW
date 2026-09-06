@@ -9,6 +9,8 @@ build/
 # The E2E suite builds into its own directory so it cannot overwrite the one a running
 # `scripts/start.sh` stack is serving (see apps/web/next.config.mjs).
 .next-e2e/
+# Same reason, for a second dev server run beside that stack with SOLOW_NEXT_DIST_DIR set.
+.next-check/
 next-env.d.ts
 out/
 *.tsbuildinfo

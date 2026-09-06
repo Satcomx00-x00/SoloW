@@ -175,6 +175,7 @@ describe("mappers", () => {
       workflowHandoff: null,
       workflowPendingHandoff: null,
       workflowDecisionId: null,
+      workflowDecisionCall: null,
       createdAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-01T00:00:00.000Z",
     };
@@ -224,6 +225,30 @@ describe("mappers", () => {
         attachment({ id: "att-1", repositoryId: "repo-1", position: 0 }),
       ]);
       expect(dto.repositories.map((r) => r.repositoryId)).toEqual(["repo-1", "repo-2"]);
+    });
+
+    it("carries the Workflow cursor through from the row (issue #5 AC-6)", () => {
+      // Two columns already on `task`, so the board places a card in its Step column with no
+      // join and no per-tile query — `dal/task.ts` is not touched by this at all.
+      const dto = taskToDto({ ...taskRow, workflowId: "wf-1", workflowStepId: "step-2" }, [
+        attachment(),
+      ]);
+      expect(dto.workflowId).toBe("wf-1");
+      expect(dto.workflowStepId).toBe("step-2");
+    });
+
+    it("reads null for a Task on no Workflow, which is every Task while the flag is off", () => {
+      // Nothing but the `ff-workflows`-gated procedures ever writes those columns, so "flag off
+      // behaves exactly as today" is true at the API without the DAL reading a flag at all.
+      const dto = taskToDto(taskRow, [attachment()]);
+      expect(dto.workflowId).toBeNull();
+      expect(dto.workflowStepId).toBeNull();
+      // And the rest of the Workflow columns stay server-side: a Step's promptTemplate must
+      // never reach a board payload, and `taskDto` is also an MCP tool output.
+      expect(Object.keys(dto)).not.toContain("workflowHandoff");
+      expect(Object.keys(dto)).not.toContain("workflowPendingHandoff");
+      expect(Object.keys(dto)).not.toContain("workflowDecisionId");
+      expect(Object.keys(dto)).not.toContain("workflowVersion");
     });
   });
 

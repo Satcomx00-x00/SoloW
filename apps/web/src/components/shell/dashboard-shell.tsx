@@ -10,11 +10,18 @@ import { ActivityBar } from "./activity-bar";
 import { CommandPalette } from "./command-palette";
 import { HeaderBar } from "./header-bar";
 import { Navigator } from "./navigator";
+import { SecondarySidebar, SecondarySidebarProvider } from "./secondary-sidebar";
 
 export type { ShellIdentity };
 
 /**
- * VS-Code-style dashboard shell: activity bar + navigator + header'd main + status bar.
+ * VS-Code-style dashboard shell: activity bar + primary sidebar + header'd main + secondary
+ * sidebar + status bar.
+ *
+ * Two sidebars, as in VS Code, because they answer different questions and a single column cannot
+ * hold both without one of them losing: the `Navigator` on the left lists what there is to open,
+ * the `SecondarySidebar` on the right inspects what is open. The right-hand one is a portal
+ * outlet, so it exists only on a surface that fills it — see `secondary-sidebar.tsx`.
  *
  * The shell is where the `AppContext` is published (issue #3), because it is the one component
  * that has the facts a contribution's `when` predicate is judged against and sits above every
@@ -45,13 +52,14 @@ export function DashboardShell({
       */}
       <WorkspaceEventsProvider>
         <TooltipProvider delayDuration={200}>
-          <div className="flex h-[100dvh] flex-col overflow-hidden bg-background text-foreground">
-            <div className="flex min-h-0 flex-1">
-              <ActivityBar signedIn={identity !== null} />
-              <Navigator workspaceName={workspaceName} />
-              <div className="flex min-w-0 flex-1 flex-col">
-                <HeaderBar workspaceName={workspaceName} />
-                {/*
+          <SecondarySidebarProvider>
+            <div className="flex h-[100dvh] flex-col overflow-hidden bg-background text-foreground">
+              <div className="flex min-h-0 flex-1">
+                <ActivityBar signedIn={identity !== null} />
+                <Navigator workspaceName={workspaceName} />
+                <div className="flex min-w-0 flex-1 flex-col">
+                  <HeaderBar workspaceName={workspaceName} />
+                  {/*
                 `relative` is load-bearing, not decoration.
 
                 This is the SPA's only scrolling region, and without a positioning context on it
@@ -67,14 +75,21 @@ export function DashboardShell({
                 places at once. Making this element the containing block puts those descendants
                 back inside the region that owns them, and the document stays exactly `100dvh`.
               */}
-                <main className="relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
-                  {children}
-                </main>
+                  <div className="flex min-h-0 flex-1">
+                    <main className="relative min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
+                      {children}
+                    </main>
+                    {/* Inside the header'd column and beside `main`, not beside the whole column:
+                      the panel belongs to the document being inspected, so the breadcrumb stays
+                      above both and the status bar stays below both. */}
+                    <SecondarySidebar />
+                  </div>
+                </div>
               </div>
+              <StatusBar />
             </div>
-            <StatusBar />
-          </div>
-          <CommandPalette />
+            <CommandPalette />
+          </SecondarySidebarProvider>
         </TooltipProvider>
       </WorkspaceEventsProvider>
     </AppContextProvider>

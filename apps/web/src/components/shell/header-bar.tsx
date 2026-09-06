@@ -7,6 +7,7 @@ import { projectIdFromPath, projectSectionFor, sectionFor } from "@/lib/navigati
 import { trpc } from "@/trpc/react";
 import { CommandPaletteTrigger } from "./command-palette";
 import { HeaderActionsOutlet } from "./header-actions";
+import { SecondarySidebarToggle } from "./secondary-sidebar";
 
 /**
  * The shell's header: where you are on the left, what you can do on the right.
@@ -130,6 +131,10 @@ export function HeaderBar({ workspaceName }: { workspaceName: string }) {
 
       <div className="ml-auto flex items-center gap-2">
         <HeaderActionsOutlet />
+        {/* The right-hand panel's switch, at the right-hand end of the header — where VS Code
+            puts it, and the only chrome in this bar that is about the shell rather than about a
+            page. It renders nothing on a surface that contributes no panel. */}
+        <SecondarySidebarToggle />
         <span className="h-4 w-px bg-border" aria-hidden />
         <CommandPaletteTrigger />
       </div>

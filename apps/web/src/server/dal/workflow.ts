@@ -18,28 +18,27 @@ import {
   type WorkflowDto,
   WorkflowErrorCode,
   type WorkflowListDto,
-  type WorkflowStepDto,
+  type WorkflowStepBranch,
   type WorkflowWithStepsDto,
 } from "@solow/contracts";
 import {
-  advanceWorkflowStep,
   appendRank,
-  buildStepBrief,
   rankBetween,
   rankForMove,
   resumeWorkflowCursor,
   sortSteps,
+  validateWorkflowGraph,
 } from "@solow/core";
 import {
+  advanceTaskWorkflow as advanceTaskWorkflowIn,
   agentProfile,
-  review,
-  session,
-  sessionEvent,
+  loadTaskWorkflowRun,
+  stepsToDto,
   task,
   workflow,
   workflowStep,
 } from "@solow/db";
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
 
 /**
@@ -56,7 +55,6 @@ import type { RequestContext } from "./context.js";
  */
 
 type WorkflowRow = typeof workflow.$inferSelect;
-type WorkflowStepRow = typeof workflowStep.$inferSelect;
 
 type NotFound = typeof CommonErrorCode.NotFound;
 
@@ -71,31 +69,6 @@ function workflowToDto(row: WorkflowRow, stepCount: number): WorkflowDto {
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
-}
-
-/**
- * `position` is derived here and stored nowhere. Storing it would mean an insert in the middle
- * rewrote every row below it — the exact cost the rank exists to avoid.
- */
-function stepToDto(row: WorkflowStepRow, position: number): WorkflowStepDto {
-  return {
-    id: row.id,
-    workflowId: row.workflowId,
-    name: row.name,
-    position,
-    rank: row.rank,
-    agentProfileId: row.agentProfileId,
-    promptTemplate: row.promptTemplate,
-    gate: row.gate,
-    advanceOn: row.advanceOn,
-    onEnter: row.onEnter ?? null,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-  };
-}
-
-function stepsToDto(rows: readonly WorkflowStepRow[]): WorkflowStepDto[] {
-  return sortSteps(rows).map((row, index) => stepToDto(row, index));
 }
 
 const now = () => new Date().toISOString();
@@ -234,6 +207,31 @@ function incrementVersion(tx: Tx, ctx: RequestContext, workflowId: string): void
     .run();
 }
 
+/**
+ * Can this branch be written on this Step? Its targets must be Steps of the same Workflow — a
+ * foreign key would accept another Workflow's Step, and a null-means-end column cannot carry
+ * one anyway — and never the Step itself, which would move no cursor and so defeat the
+ * `StaleCursor` replay guard (see `WorkflowErrorCode.BranchTargetIsSelf`).
+ *
+ * `stepId` is null for a Step being added, which cannot be its own target because it has no id
+ * yet — its targets are checked against the siblings it is about to join.
+ */
+function checkBranchTargets(
+  branch: WorkflowStepBranch | null | undefined,
+  stepId: string | null,
+  siblings: readonly { id: string }[],
+): Result<void, WorkflowErrorCode> {
+  if (!branch) return ok(undefined);
+  for (const target of [branch.thenStepId, branch.elseStepId]) {
+    if (target === null) continue;
+    if (target === stepId) return err(WorkflowErrorCode.BranchTargetIsSelf);
+    if (!siblings.some((step) => step.id === target)) {
+      return err(WorkflowErrorCode.StepNotInWorkflow);
+    }
+  }
+  return ok(undefined);
+}
+
 export async function addWorkflowStep(
   ctx: RequestContext,
   input: AddWorkflowStepInput,
@@ -276,8 +274,16 @@ export async function addWorkflowStep(
           .all(),
       );
 
+      const targets = checkBranchTargets(input.branch, null, existing);
+      if (!targets.ok) return err(targets.error);
+
       let rank: string;
-      if (input.afterStepId) {
+      if (input.afterStepId === null) {
+        // At the head: the new Step becomes the start of the pipeline. Still one row written.
+        const before = rankBetween(null, existing[0]?.rank ?? null);
+        if (!before.ok) return err(before.error);
+        rank = before.data;
+      } else if (input.afterStepId) {
         const index = existing.findIndex((step) => step.id === input.afterStepId);
         if (index === -1) return err(WorkflowErrorCode.StepNotInWorkflow);
         const between = rankBetween(
@@ -302,6 +308,7 @@ export async function addWorkflowStep(
           gate: input.gate ?? "human",
           advanceOn: input.advanceOn ?? "review",
           onEnter: input.onEnter ?? null,
+          branch: input.branch ?? null,
         })
         .returning()
         .all();
@@ -346,6 +353,21 @@ export async function updateWorkflowStep(
         if (!profile) return err(CommonErrorCode.NotFound);
       }
 
+      if (input.branch) {
+        const siblings = tx
+          .select({ id: workflowStep.id })
+          .from(workflowStep)
+          .where(
+            and(
+              eq(workflowStep.workspaceId, ctx.workspaceId),
+              eq(workflowStep.workflowId, step.workflowId),
+            ),
+          )
+          .all();
+        const targets = checkBranchTargets(input.branch, step.id, siblings);
+        if (!targets.ok) return err(targets.error);
+      }
+
       // Only fields that would actually change something are written, and the version is bumped
       // only if at least one of them does. A bump is what raises `definitionDrifted` on every
       // attached Task, so a call that changed nothing — a form saved twice, a field set to the
@@ -369,6 +391,12 @@ export async function updateWorkflowStep(
         JSON.stringify(input.onEnter ?? null) !== JSON.stringify(step.onEnter ?? null)
       ) {
         patch.onEnter = input.onEnter;
+      }
+      if (
+        input.branch !== undefined &&
+        JSON.stringify(input.branch ?? null) !== JSON.stringify(step.branch ?? null)
+      ) {
+        patch.branch = input.branch;
       }
       if (Object.keys(patch).length === 0) return ok(step.workflowId);
 
@@ -442,6 +470,10 @@ export async function reorderWorkflowStep(
  * Deleting a Step is refused while a Task's cursor sits on it. Removing it would leave that
  * Task with a cursor naming nothing, and `resumeWorkflowCursor` is deliberately an error in that
  * case rather than a silent restart — so the Task would be unrunnable, not merely misplaced.
+ *
+ * Refused, too, while another Step's branch names it. The alternative was to null the reference
+ * out, and null has a meaning here — "the pipeline ends" — so a silent patch would rewrite a
+ * branch the operator wrote into one they did not.
  */
 export async function deleteWorkflowStep(
   ctx: RequestContext,
@@ -466,6 +498,23 @@ export async function deleteWorkflowStep(
         .limit(1)
         .all();
       if (parked) return err(WorkflowErrorCode.StepInUse);
+
+      const siblings = tx
+        .select({ id: workflowStep.id, branch: workflowStep.branch })
+        .from(workflowStep)
+        .where(
+          and(
+            eq(workflowStep.workspaceId, ctx.workspaceId),
+            eq(workflowStep.workflowId, step.workflowId),
+          ),
+        )
+        .all();
+      const pointedAt = siblings.some(
+        (other) =>
+          other.id !== step.id &&
+          (other.branch?.thenStepId === step.id || other.branch?.elseStepId === step.id),
+      );
+      if (pointedAt) return err(WorkflowErrorCode.StepBranchedTo);
 
       tx.delete(workflowStep)
         .where(
@@ -518,7 +567,8 @@ function taskHasBegunWorkflow(tx: Tx, ctx: RequestContext, row: typeof task.$inf
  *
  * Refused once the Task has left `backlog`/`ready`: re-pointing the pipeline of a Task whose
  * agent is already running would change what that run is for, mid-run. Refused for an empty
- * Workflow, because a cursor has to name something for the resume rule to have an answer.
+ * Workflow, because a cursor has to name something for the resume rule to have an answer — and
+ * for a graph with a Step nothing leads to or no way to the end (`validateWorkflowGraph`).
  */
 export async function attachTaskWorkflow(
   ctx: RequestContext,
@@ -560,6 +610,10 @@ export async function attachTaskWorkflow(
         .all();
       const first = resumeWorkflowCursor(steps, null);
       if (!first.ok) return err(first.error);
+      // The designer only *shows* an unreachable Step or a loop with no way out, because an
+      // operator building a loop passes through both. Here is where they cost something: a
+      // Task must not be started down a pipeline that skips a Step or can never finish.
+      if (validateWorkflowGraph(steps).length > 0) return err(WorkflowErrorCode.GraphInvalid);
 
       tx.update(task)
         .set({
@@ -666,227 +720,26 @@ export async function acknowledgeTaskWorkflowDrift(
   return written.ok ? getTaskWorkflowBinding(ctx, written.data) : err(written.error);
 }
 
-export async function getTaskWorkflowBinding(
+/**
+ * The two run-time entry points live in `@solow/db` — the orchestrator advances the same Task
+ * from inside a durable step and cannot import from `apps/web`, and a second copy of the
+ * transaction would be a second copy of `unspentApproval` and `producedChanges`, the two inputs
+ * to a Principle I gate.
+ *
+ * They are delegated to rather than re-exported so the router and its regression suite keep the
+ * `RequestContext` signatures they already call — and so the session-to-`workspaceId` unwrap
+ * stays at this boundary, which is where Principle V is enforced for every web caller.
+ */
+export function getTaskWorkflowBinding(
   ctx: RequestContext,
   taskId: string,
 ): Promise<Result<TaskWorkflowBindingDto, NotFound | WorkflowErrorCode>> {
-  const [row] = await ctx.db
-    .select()
-    .from(task)
-    .where(and(eq(task.workspaceId, ctx.workspaceId), eq(task.id, taskId)))
-    .limit(1);
-  if (!row) return err(CommonErrorCode.NotFound);
-  if (!row.workflowId) return err(WorkflowErrorCode.TaskNotOnWorkflow);
-
-  const [parent] = await ctx.db
-    .select()
-    .from(workflow)
-    .where(and(eq(workflow.workspaceId, ctx.workspaceId), eq(workflow.id, row.workflowId)))
-    .limit(1);
-  if (!parent) return err(CommonErrorCode.NotFound);
-
-  const stepRows = await ctx.db
-    .select()
-    .from(workflowStep)
-    .where(
-      and(
-        eq(workflowStep.workspaceId, ctx.workspaceId),
-        eq(workflowStep.workflowId, row.workflowId),
-      ),
-    );
-  const resumed = resumeWorkflowCursor(stepRows, row.workflowStepId);
-  if (!resumed.ok) return err(resumed.error);
-
-  const steps = stepsToDto(stepRows);
-  const current = steps.find((step) => step.id === resumed.data.id);
-  if (!current) return err(WorkflowErrorCode.StepNotInWorkflow);
-
-  return ok({
-    taskId: row.id,
-    workflowId: parent.id,
-    workflowName: parent.name,
-    attachedVersion: row.workflowVersion ?? parent.version,
-    currentVersion: parent.version,
-    definitionDrifted: (row.workflowVersion ?? parent.version) !== parent.version,
-    currentStep: current,
-    steps,
-    handoff: row.workflowHandoff,
-    brief: buildStepBrief(current, row.workflowHandoff),
-  });
+  return loadTaskWorkflowRun(ctx.db, ctx.workspaceId, taskId);
 }
 
-/**
- * The last decision recorded on this Task, if any (Principle I, AC-4).
- *
- * Read from the `review` table through the Task's Sessions, never from the caller's input — an
- * input a caller controls is a claim, not a decision. Both halves of the join are Workspace
- * scoped so a review row belonging to another tenant cannot satisfy this Task's gate.
- *
- * The *last* one rather than any one, and its decision rather than its bare existence, because
- * `review` records refusals as well as consents: `reject` and `request_changes` are a human
- * looking at the work and declining to integrate it, and a rule that counted them would let the
- * Workflow report itself finished on the strength of someone who explicitly stopped it. Taking
- * the newest also means an approval that has since been withdrawn stops opening gates.
- *
- * Ordered by insertion rather than by `created_at`: two decisions recorded inside the same
- * millisecond share a timestamp, and "which one is current" must never be a coin flip.
- *
- * It still asks about the Task rather than about the Step — per-Step review linkage needs the run
- * loop that produces one Session per Step (#26/#61). What stops one approval from releasing the
- * whole pipeline is not this query but `task.workflow_decision_id`, which records the one already
- * spent.
- */
-function latestDecisionForTask(
-  tx: Tx,
-  ctx: RequestContext,
-  taskId: string,
-): { id: string; decision: string } | undefined {
-  const [row] = tx
-    .select({ id: review.id, decision: review.decision })
-    .from(review)
-    .innerJoin(session, eq(review.sessionId, session.id))
-    .where(
-      and(
-        eq(review.workspaceId, ctx.workspaceId),
-        eq(session.workspaceId, ctx.workspaceId),
-        eq(session.taskId, taskId),
-      ),
-    )
-    .orderBy(desc(sql`${review}.rowid`))
-    .limit(1)
-    .all();
-  return row;
-}
-
-/**
- * Has the server itself seen this Task produce changes?
- *
- * `producedChanges` arrives as an input, and the gate it feeds — `auto-unless-changes` — exists
- * precisely to catch a Step that wrote something. A party reporting `false` about its own output
- * is deciding whether the rule applies to it, so the claim is a floor and this is the corroboration:
- * a `diff` event in the append-only Session log naming at least one file is the server's own
- * record, written by the orchestrator at the review gate from the worktree the web app may never
- * touch. It can only ever close a gate the claim would have opened, never the reverse.
- */
-function taskHasRecordedChanges(tx: Tx, ctx: RequestContext, taskId: string): boolean {
-  const rows = tx
-    .select({ payload: sessionEvent.payload })
-    .from(sessionEvent)
-    .innerJoin(session, eq(sessionEvent.sessionId, session.id))
-    .where(
-      and(
-        eq(sessionEvent.workspaceId, ctx.workspaceId),
-        eq(session.workspaceId, ctx.workspaceId),
-        eq(session.taskId, taskId),
-        eq(sessionEvent.kind, "diff"),
-      ),
-    )
-    .all();
-  return rows.some((row) => {
-    const files = (row.payload as { files?: unknown[] } | null)?.files;
-    return Array.isArray(files) && files.length > 0;
-  });
-}
-
-/**
- * Report that the Task's current Step finished, and move the cursor if the rules allow it (AC-2).
- *
- * The Task row is the same row throughout: advancing a Workflow never creates a second Task, it
- * moves one Task's cursor. Everything the decision reads — the cursor, the Step list, the latest
- * review, what the server has recorded about the change — is read inside the transaction that
- * writes the answer, so no input to a Principle I gate is evaluated against a snapshot the write
- * does not hold a lock on.
- *
- * `fromStepId` makes the call replay-safe (Principle III, AC-5). A redelivered payload naming only
- * the Task advances the cursor a second time and skips a Step, and a durable step that re-runs
- * after a process death is exactly the case this is called from — so the caller names the Step it
- * believes it is finishing and a mismatch is `StaleCursor` rather than a silent second advance.
- */
-export async function advanceTaskWorkflow(
+export function advanceTaskWorkflow(
   ctx: RequestContext,
   input: AdvanceTaskWorkflowInput,
 ): Promise<Result<WorkflowAdvanceDto, NotFound | WorkflowErrorCode>> {
-  return ctx.db.transaction(
-    (tx): Result<WorkflowAdvanceDto, NotFound | WorkflowErrorCode> => {
-      const [row] = tx
-        .select()
-        .from(task)
-        .where(and(eq(task.workspaceId, ctx.workspaceId), eq(task.id, input.taskId)))
-        .limit(1)
-        .all();
-      if (!row) return err(CommonErrorCode.NotFound);
-      if (!row.workflowId) return err(WorkflowErrorCode.TaskNotOnWorkflow);
-
-      const steps = tx
-        .select()
-        .from(workflowStep)
-        .where(
-          and(
-            eq(workflowStep.workspaceId, ctx.workspaceId),
-            eq(workflowStep.workflowId, row.workflowId),
-          ),
-        )
-        .all();
-      const resumed = resumeWorkflowCursor(steps, row.workflowStepId);
-      if (!resumed.ok) return err(resumed.error);
-      if (input.fromStepId !== resumed.data.id) return err(WorkflowErrorCode.StaleCursor);
-
-      const decision = latestDecisionForTask(tx, ctx, input.taskId);
-      const unspentApproval =
-        decision?.decision === "approve" && decision.id !== row.workflowDecisionId;
-      // Only the `auto-unless-changes` gate reads this, so the corroborating scan is only paid
-      // for when it can change the answer — and only when the claim is the one worth checking.
-      const producedChanges =
-        input.producedChanges ||
-        (resumed.data.gate === "auto-unless-changes" &&
-          taskHasRecordedChanges(tx, ctx, input.taskId));
-
-      const advance = advanceWorkflowStep(steps, resumed.data.id, {
-        signal: input.signal,
-        producedChanges,
-        unspentApproval,
-      });
-      if (!advance.ok) return err(advance.error);
-
-      // The Step's own summary is held apart from the one it was given until the cursor actually
-      // moves. A Step that reports in behind a closed gate is replayed later by a caller that no
-      // longer has the agent's words, so throwing them away here loses the next Step's context on
-      // the one path the state machine guarantees will be taken (AC-2).
-      const reported = input.handoff ?? row.workflowPendingHandoff;
-      const advanced = advance.data.status === "advanced";
-      const handoff = advanced ? (reported ?? null) : row.workflowHandoff;
-      const pendingHandoff = advanced ? null : (reported ?? null);
-      const decisionId = advance.data.consumedApproval
-        ? (decision?.id ?? null)
-        : row.workflowDecisionId;
-
-      if (
-        advance.data.stepId !== row.workflowStepId ||
-        handoff !== row.workflowHandoff ||
-        pendingHandoff !== row.workflowPendingHandoff ||
-        decisionId !== row.workflowDecisionId
-      ) {
-        tx.update(task)
-          .set({
-            workflowStepId: advance.data.stepId,
-            workflowHandoff: handoff,
-            workflowPendingHandoff: pendingHandoff,
-            workflowDecisionId: decisionId,
-            updatedAt: now(),
-          })
-          .where(and(eq(task.workspaceId, ctx.workspaceId), eq(task.id, input.taskId)))
-          .run();
-      }
-
-      const landed = sortSteps(steps).find((step) => step.id === advance.data.stepId);
-      if (!landed) return err(WorkflowErrorCode.StepNotInWorkflow);
-      return ok({
-        taskId: row.id,
-        status: advance.data.status,
-        currentStepId: landed.id,
-        brief: buildStepBrief(landed, handoff),
-      });
-    },
-    { behavior: "immediate" },
-  );
+  return advanceTaskWorkflowIn(ctx.db, ctx.workspaceId, input);
 }

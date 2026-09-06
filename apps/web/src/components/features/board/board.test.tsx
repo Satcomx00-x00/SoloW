@@ -1,8 +1,9 @@
 /// <reference types="bun-types" />
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { type TaskDto, TaskErrorCode, type TaskState } from "@solow/contracts";
+import { CommonErrorCode, type TaskDto, TaskErrorCode, type TaskState } from "@solow/contracts";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { BOARD_COLUMNS, STATE_LABELS } from "@/lib/task-states";
 import { WorkspaceEventsProvider } from "@/lib/workspace-events";
 import { type FakeSocket, installFakeWebSocket, renderWithTrpc } from "@/test/trpc-harness";
 import { Board } from "./board";
@@ -33,6 +34,9 @@ function makeTask(over: Partial<TaskDto> & { id: string; state: TaskState }): Ta
     completedAt: null,
     completedOutcome: null,
     completedSummary: null,
+    // A Task on no Workflow — every Task while `ff-workflows` is off (issue #5).
+    workflowId: null,
+    workflowStepId: null,
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
     ...over,
@@ -367,5 +371,134 @@ describe("Board (wired)", () => {
       await screen.findByText("Working");
       expect(screen.queryByRole("button", { name: /Retry/ })).toBeNull();
     });
+  });
+});
+
+/**
+ * The board with `ff-workflows` off — which is every Workspace by default (issue #5 AC-6).
+ *
+ * `workflow.list` sits on `workflowProcedure` and THROWS `FLAG_DISABLED` when the flag is off.
+ * The board blanks itself on any `loadError`, so joining the Workflow query to that set would
+ * replace the board with an error page for every Workspace that has not turned the flag on. That
+ * is the single most likely way this change ships a regression, so it is asserted directly: with
+ * the flag off the board is the seven lifecycle columns and nothing else, and no picker appears.
+ */
+describe("Board with ff-workflows off", () => {
+  const flagOff = {
+    ...ticket,
+    "task.dependencies": () => [],
+    "workflow.list": () => {
+      throw new Error(CommonErrorCode.FlagDisabled);
+    },
+  };
+
+  it("draws the same seven columns and the same empty-state count as before Workflows existed", async () => {
+    renderWithTrpc(
+      <Live>
+        <Board />
+      </Live>,
+      {
+        ...flagOff,
+        "task.list": () => ({
+          items: [makeTask({ id: "task-1", state: "running", title: "Fix the gate latch" })],
+          nextCursor: null,
+        }),
+      },
+    );
+
+    await screen.findByText("Fix the gate latch");
+    for (const state of BOARD_COLUMNS) {
+      expect(screen.getByLabelText(`${STATE_LABELS[state]} column`)).toBeDefined();
+    }
+    expect(screen.getAllByLabelText(/ column$/)).toHaveLength(BOARD_COLUMNS.length);
+    // Six of seven still say "No tasks in …" — the flag-off board counts exactly as it did.
+    expect(screen.getAllByText(/^No tasks in/)).toHaveLength(BOARD_COLUMNS.length - 1);
+    // And the refusal never reaches the reader: a disabled flag is not a board failure.
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Board columns" })).toBeNull();
+  });
+
+  it("still moves a card through the board's own mutation, with the same arguments", async () => {
+    let state: TaskState = "backlog";
+    const { log } = renderWithTrpc(
+      <Live>
+        <Board />
+      </Live>,
+      {
+        ...flagOff,
+        "task.list": () => ({
+          items: [makeTask({ id: "task-1", state, title: "Investigate servo" })],
+          nextCursor: null,
+        }),
+        "task.move": (input) => {
+          state = (input as { to: TaskState }).to;
+          return makeTask({ id: "task-1", state });
+        },
+      },
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Ready" }));
+    await waitFor(() => {
+      expect(
+        within(screen.getByLabelText("Ready column")).getByText("Investigate servo"),
+      ).toBeDefined();
+    });
+    expect(log.calls.find((c) => c.path === "task.move")?.input).toEqual({
+      id: "task-1",
+      to: "ready",
+    });
+  });
+});
+
+describe("Board with ff-workflows on", () => {
+  it("offers the column picker once the Workspace has a Workflow to pick", async () => {
+    renderWithTrpc(
+      <Live>
+        <Board />
+      </Live>,
+      {
+        ...ticket,
+        "task.dependencies": () => [],
+        "task.list": () => ({
+          items: [makeTask({ id: "task-1", state: "running", title: "Fix the gate latch" })],
+          nextCursor: null,
+        }),
+        "workflow.list": () => [
+          {
+            id: "wf-1",
+            name: "Plan then build",
+            description: null,
+            version: 1,
+            stepCount: 2,
+            createdAt: "2026-01-01T00:00:00.000Z",
+            updatedAt: "2026-01-01T00:00:00.000Z",
+          },
+        ],
+      },
+    );
+
+    expect(await screen.findByRole("combobox", { name: "Board columns" })).toBeDefined();
+    // Lifecycle until the operator says otherwise: the columns are never inferred from the data.
+    expect(screen.getAllByLabelText(/ column$/)).toHaveLength(BOARD_COLUMNS.length);
+  });
+
+  it("shows no picker when the Workspace has the flag but no Workflows yet", async () => {
+    renderWithTrpc(
+      <Live>
+        <Board />
+      </Live>,
+      {
+        ...ticket,
+        "task.dependencies": () => [],
+        "task.list": () => ({
+          items: [makeTask({ id: "task-1", state: "running", title: "Fix the gate latch" })],
+          nextCursor: null,
+        }),
+        "workflow.list": () => [],
+      },
+    );
+
+    await screen.findByText("Fix the gate latch");
+    expect(screen.queryByRole("combobox", { name: "Board columns" })).toBeNull();
   });
 });

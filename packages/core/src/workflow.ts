@@ -5,6 +5,8 @@ import {
   type WorkflowAdvanceOn,
   type WorkflowAdvanceStatus,
   WorkflowErrorCode,
+  type WorkflowStepBranch,
+  type WorkflowStepCondition,
   type WorkflowStepGate,
 } from "@solow/contracts";
 
@@ -170,6 +172,8 @@ export function resumeWorkflowCursor<T extends RankedStep>(
 export interface WorkflowStepRule extends RankedStep {
   gate: WorkflowStepGate;
   advanceOn: WorkflowAdvanceOn;
+  /** Where the Step sends the Task, if not to its rank successor. Absent and null read alike. */
+  branch?: WorkflowStepBranch | null;
 }
 
 /** What actually happened on the Step that just reported in. */
@@ -202,6 +206,206 @@ export interface WorkflowStepOutcome {
    * from a caller.
    */
   unspentApproval: boolean;
+  /**
+   * Was this Task's recorded decision spent by *this very* approval — i.e. is this a replay?
+   *
+   * The cursor is the replay guard everywhere else: an `advanced` outcome moves it, so a
+   * re-executed step body names a Step the Task has left and the caller refuses it as stale. The
+   * terminal Step has nowhere to move the cursor to, so that guard is silent exactly where the
+   * run integrates, and the second pass reads a world the first pass changed — the approval it
+   * needs is the one it just marked spent. Verified against a real transaction: an identical call
+   * repeated returns `completed` and then `awaiting-decision`, and the run exits before it
+   * commits anything, leaving the Task waiting on a decision the operator has already given.
+   *
+   * This says "the decision on record is this same approval, already spent here", which is a
+   * replay and not a second gate. It cannot launder one approval into two: a `request-changes`
+   * makes the latest decision something other than an approval, and a fresh approval writes a new
+   * row whose id differs from the spent one — so both of those take the ordinary path.
+   */
+  approvalAlreadySpent: boolean;
+  /**
+   * What the Step reported — the summary the next Step is briefed with, and where an agent's
+   * answer to an `agent-decides` question is read from. Null when the Step said nothing, which
+   * no answer can be found in.
+   */
+  handoff: string | null;
+}
+
+/**
+ * The line an agent answers a branch question on. One constant, used to *ask* (in the brief)
+ * and to *read* (off the handoff), so the two cannot drift into asking for one thing and
+ * looking for another.
+ */
+export const DECISION_MARKER = "DECISION:";
+
+/**
+ * The agent's answer to its Step's question, or null when it gave none.
+ *
+ * The *last* `DECISION:` line wins: an agent that reasons its way to an answer may write the
+ * word more than once, and the one it finished on is the one it meant. Case-insensitive on both
+ * the marker and the word — `Decision: Yes` is an answer, not a typo — and anchored to a line so
+ * a sentence *about* the decision ("the DECISION: yes/no format …") is not read as one.
+ */
+export function readAgentDecision(handoff: string | null): "yes" | "no" | null {
+  if (!handoff) return null;
+  let answer: "yes" | "no" | null = null;
+  for (const line of handoff.split(/\r?\n/)) {
+    const match = /^\s*DECISION:\s*(yes|no)\b/i.exec(line);
+    if (match) answer = match[1]?.toLowerCase() === "yes" ? "yes" : "no";
+  }
+  return answer;
+}
+
+/**
+ * The summary the next Step is briefed with, with the agent's answer in it.
+ *
+ * Measured on the first live run: the reviewer wrote `DECISION: no` exactly as asked — at the
+ * end of its final message — and reported through its `task_complete` widget with a summary
+ * that did not repeat it. The summary is what travels as the handoff, so the answer was lost and
+ * the branch fell back to "no answer". An agent's final message is as much its report as the
+ * widget's summary, so an answer found there is carried over when the summary has none. The
+ * summary's own line wins when both exist: it was written last, as the report of record.
+ */
+export function carryAgentDecision(
+  summary: string | null,
+  finalText: string | null,
+): string | null {
+  if (readAgentDecision(summary) !== null) return summary;
+  const answer = readAgentDecision(finalText);
+  if (answer === null) return summary;
+  const line = `${DECISION_MARKER} ${answer}`;
+  return summary ? `${summary.trimEnd()}\n\n${line}` : line;
+}
+
+/**
+ * Is the branch's condition true of what just happened?
+ *
+ * Both questions are answered from the outcome alone, which is what keeps a Condition from
+ * becoming a second rules engine: nothing here is fetched, and the facts consulted are the ones
+ * the advance already had in hand for the gate. For `agent-decides` the fact is the agent's own
+ * answer; an agent that did not answer has not affirmed the condition, so the `no` branch is
+ * taken — the brief says so, and a silent default the agent was not told about would be a rule
+ * nobody wrote.
+ */
+export function evaluateStepCondition(
+  condition: WorkflowStepCondition,
+  outcome: Pick<WorkflowStepOutcome, "handoff" | "producedChanges">,
+): boolean {
+  switch (condition.kind) {
+    case "agent-decides":
+      return readAgentDecision(outcome.handoff) === "yes";
+    case "produced-changes":
+      return outcome.producedChanges;
+  }
+}
+
+/** One way out of a Step. `stepId` null is the end of the pipeline. */
+export interface WorkflowStepExit {
+  /** `next` is the rank successor, the only exit an unbranched Step has; `then`/`else` are a branch's two. */
+  kind: "next" | "then" | "else";
+  stepId: string | null;
+}
+
+/** A Step with the two fields the graph is built from. */
+export interface WorkflowGraphStep extends RankedStep {
+  branch?: WorkflowStepBranch | null;
+}
+
+/**
+ * Where each Step can send the Task — the whole graph, stated once.
+ *
+ * This is the rule `advanceWorkflowStep` applies at run time, read off the definition instead
+ * of the outcome: a Step without a branch has exactly one exit, to its rank successor or to the
+ * end; a Step with one has exactly two. There is no other kind of edge, which is why the
+ * designer's one connect gesture only re-points a branch exit — an edge that is not one of
+ * these is not something the run loop could ever follow.
+ */
+export function stepExits<T extends WorkflowGraphStep>(
+  steps: readonly T[],
+): Map<string, WorkflowStepExit[]> {
+  const ordered = sortSteps(steps);
+  const exits = new Map<string, WorkflowStepExit[]>();
+  ordered.forEach((step, index) => {
+    exits.set(
+      step.id,
+      step.branch
+        ? [
+            { kind: "then", stepId: step.branch.thenStepId },
+            { kind: "else", stepId: step.branch.elseStepId },
+          ]
+        : [{ kind: "next", stepId: ordered[index + 1]?.id ?? null }],
+    );
+  });
+  return exits;
+}
+
+/**
+ * A shape the graph must not have (F03 FR-5).
+ *
+ * - `unreachable`: nothing leads to the Step, so it never runs. The start is the first Step in
+ *   rank order, and a branch that skips over a Step whose predecessor also branches past it
+ *   leaves it with no way in.
+ * - `no-exit`: from this Step the end can never be reached — every path loops. A Task that got
+ *   here would run until the round budget stopped it, and never finish.
+ */
+export interface WorkflowGraphProblem {
+  kind: "unreachable" | "no-exit";
+  stepId: string;
+}
+
+/**
+ * Everything that is wrong with the graph, or nothing.
+ *
+ * Reachability both ways: forward from the start over `stepExits`, and backward from the end
+ * over the same edges reversed. Two walks rather than one clever one, because the two questions
+ * are different — "can this Step run" and "can a Task that ran it finish" — and a Step can fail
+ * either alone. An empty Workflow has no problems here; that it cannot be attached is
+ * `WorkflowErrorCode.Empty`'s to say.
+ *
+ * Reported, not refused, at edit time: a designer that refused an unreachable Step could not be
+ * used to build the loop that makes it reachable again. The refusal is at `attachTask`.
+ */
+export function validateWorkflowGraph<T extends WorkflowGraphStep>(
+  steps: readonly T[],
+): WorkflowGraphProblem[] {
+  const ordered = sortSteps(steps);
+  const start = ordered[0];
+  if (!start) return [];
+  const exits = stepExits(ordered);
+
+  const reachable = new Set<string>();
+  const forward = [start.id];
+  while (forward.length > 0) {
+    const id = forward.pop() as string;
+    if (reachable.has(id)) continue;
+    reachable.add(id);
+    for (const exit of exits.get(id) ?? []) {
+      if (exit.stepId !== null && !reachable.has(exit.stepId)) forward.push(exit.stepId);
+    }
+  }
+
+  // Which Steps lead into each Step, and which lead straight to the end.
+  const into = new Map<string, string[]>();
+  const ending: string[] = [];
+  for (const [id, stepExitList] of exits) {
+    for (const exit of stepExitList) {
+      if (exit.stepId === null) ending.push(id);
+      else into.set(exit.stepId, [...(into.get(exit.stepId) ?? []), id]);
+    }
+  }
+  const finishing = new Set<string>();
+  const backward = [...ending];
+  while (backward.length > 0) {
+    const id = backward.pop() as string;
+    if (finishing.has(id)) continue;
+    finishing.add(id);
+    for (const from of into.get(id) ?? []) if (!finishing.has(from)) backward.push(from);
+  }
+
+  return ordered.flatMap((step): WorkflowGraphProblem[] => [
+    ...(reachable.has(step.id) ? [] : [{ kind: "unreachable" as const, stepId: step.id }]),
+    ...(finishing.has(step.id) ? [] : [{ kind: "no-exit" as const, stepId: step.id }]),
+  ]);
 }
 
 export interface WorkflowAdvance {
@@ -212,6 +416,13 @@ export interface WorkflowAdvance {
    * Did this move rest on the approval? The DAL marks that approval spent when it did, which is
    * what stops the same one from releasing every remaining gate. `auto` moves consume nothing,
    * so a pipeline of `auto` Steps still costs exactly one human decision — at the end.
+   *
+   * "Rest on" includes a move a human *triggered* even where the gate asked for nothing, and
+   * that distinction was a Principle I hole reachable by configuration alone: Step 1 `gate: "auto"`
+   * with `advanceOn: "review"`, a last Step with `advanceOn: "agent-signal"`. A reviewer approves
+   * the *plan*; the advance needs no approval, so on the narrow reading nothing is spent; the last
+   * Step's agent then signals, finds that same approval unspent, and the implementation is
+   * integrated with nobody having seen its diff. An approval buys the move it caused and no other.
    */
   consumedApproval: boolean;
 }
@@ -254,24 +465,62 @@ export function advanceWorkflowStep(
     return ok({ status: "held", stepId: current.id, consumedApproval: false });
   }
 
-  const next = ordered[index + 1];
+  // The rank successor unless the Step branches, in which case the condition picks the target.
+  // A null target is "the pipeline ends here", and it lands in the same terminal rule as running
+  // off the end of the list — which is what keeps Principle I in one place.
+  let next: WorkflowStepRule | undefined;
+  if (current.branch) {
+    const targetId = evaluateStepCondition(current.branch.when, outcome)
+      ? current.branch.thenStepId
+      : current.branch.elseStepId;
+    if (targetId !== null) {
+      next = ordered.find((step) => step.id === targetId);
+      // The DAL refuses a branch to a Step outside the Workflow, so this is a Step deleted since
+      // — refused by name, for the reason `resumeWorkflowCursor` refuses a dangling cursor.
+      if (!next) return err(WorkflowErrorCode.StepNotInWorkflow);
+    }
+  } else {
+    next = ordered[index + 1];
+  }
   if (!next) {
-    return ok(
-      outcome.unspentApproval
-        ? { status: "completed", stepId: current.id, consumedApproval: true }
-        : { status: "awaiting-decision", stepId: current.id, consumedApproval: false },
-    );
+    if (outcome.unspentApproval) {
+      return ok({ status: "completed", stepId: current.id, consumedApproval: true });
+    }
+    // The replay. `consumedApproval` is false because the first pass already spent it — saying
+    // true would rewrite the same id over itself, which is harmless but claims a second spend
+    // that never happened. This branch is why the terminal Step is safe to re-execute at all:
+    // see `approvalAlreadySpent`.
+    if (outcome.approvalAlreadySpent) {
+      return ok({ status: "completed", stepId: current.id, consumedApproval: false });
+    }
+    return ok({ status: "awaiting-decision", stepId: current.id, consumedApproval: false });
   }
 
   const needsApproval = gateNeedsApproval(current.gate, outcome);
   if (needsApproval && !outcome.unspentApproval) {
     return ok({ status: "awaiting-decision", stepId: current.id, consumedApproval: false });
   }
-  return ok({ status: "advanced", stepId: next.id, consumedApproval: needsApproval });
+  // A move a human's approval *triggered* spends that approval, whatever the gate thought it
+  // needed. Without the second clause an approval that released nothing is never marked spent,
+  // and it is still on offer at the last Step — where Principle I asks for one.
+  return ok({
+    status: "advanced",
+    stepId: next.id,
+    consumedApproval: needsApproval || (outcome.signal === "review" && outcome.unspentApproval),
+  });
 }
 
 /** The heading the handoff is carried under. One constant so the brief reads the same every run. */
 const HANDOFF_HEADING = "## Handed over from the previous step";
+
+/** The heading the branch question is asked under. */
+const DECISION_HEADING = "## Decision to make";
+
+/** A Step, as much of it as the brief reads. */
+export interface WorkflowStepBriefSource {
+  promptTemplate: string;
+  branch?: WorkflowStepBranch | null;
+}
 
 /**
  * The prompt the current Step's agent is actually given (AC-2's "carrying the handoff context",
@@ -281,10 +530,42 @@ const HANDOFF_HEADING = "## Handed over from the previous step";
  * spawns the agent all read one string. The handoff leads because it is the context the template
  * is written against — a template that says "review the plan" is unusable if the plan arrives
  * underneath it.
+ *
+ * A Step whose branch is decided by the agent has the question appended, with the exact line to
+ * answer on and what each answer leads to. Appended by *this* function rather than typed into
+ * the template by the operator, so the question the agent is asked is the one the branch will
+ * read — and so the marker the agent is told to write is `DECISION_MARKER`, not a paraphrase of
+ * it. `steps` is what the two targets are named from; a target outside it, or null, is named as
+ * the end of the pipeline.
  */
-export function buildStepBrief(step: { promptTemplate: string }, handoff: string | null): string {
+export function buildStepBrief(
+  step: WorkflowStepBriefSource,
+  handoff: string | null,
+  steps: readonly { id: string; name: string }[] = [],
+): string {
   const template = step.promptTemplate.trim();
   const carried = handoff?.trim();
-  if (!carried) return template;
-  return `${HANDOFF_HEADING}\n\n${carried}\n\n${template}`.trim();
+  const parts = carried ? [HANDOFF_HEADING, carried, template] : [template];
+
+  const branch = step.branch;
+  if (branch?.when.kind === "agent-decides") {
+    const nameOf = (id: string | null) =>
+      (id !== null && steps.find((s) => s.id === id)?.name) || null;
+    const then = nameOf(branch.thenStepId);
+    const otherwise = nameOf(branch.elseStepId);
+    const leads = (name: string | null) =>
+      name ? `the pipeline continues with "${name}"` : "the pipeline ends";
+    parts.push(
+      DECISION_HEADING,
+      [
+        `Before you finish, decide: ${branch.when.question.trim()}`,
+        `Answer on a line of its own, exactly \`${DECISION_MARKER} yes\` or \`${DECISION_MARKER} no\`, at the end of your final message — and in your closing summary too, if you write one.`,
+        `If yes, ${leads(then)}; if no, ${leads(otherwise)}. No answer counts as no.`,
+      ].join("\n"),
+    );
+  }
+  return parts
+    .filter((part) => part.length > 0)
+    .join("\n\n")
+    .trim();
 }

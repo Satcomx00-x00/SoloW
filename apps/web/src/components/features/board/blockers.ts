@@ -39,3 +39,20 @@ export function moveRefusal(
   }
   return null;
 }
+
+/**
+ * Why a card cannot be dragged onto a Workflow Step column (issue #5).
+ *
+ * This is the only place the product explains why a pipeline does not move by hand, so it says
+ * what *does* move it rather than only refusing. A drop that wrote `task.workflow_step_id`
+ * directly would skip the Step's gate, spend no approval, promote no handoff and record no
+ * decision — a Principle I bypass arrived at by gesture — so Step columns register no drop
+ * target at all and this sentence is what the operator gets instead.
+ *
+ * Separate from `moveRefusal`, which knows about lifecycle transitions and dependency edges and
+ * is given no gate knowledge: the two refusals are about different things and a single function
+ * answering both would have to be told which board it was on.
+ */
+export function stepMoveRefusal(): string {
+  return "Steps advance when the step's gate is satisfied — approve the review to move this on.";
+}

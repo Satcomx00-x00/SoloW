@@ -1,0 +1,1 @@
+ALTER TABLE `task` ADD `workflow_decision_call` text;

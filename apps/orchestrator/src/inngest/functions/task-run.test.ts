@@ -1,6 +1,7 @@
 /// <reference types="bun-types" />
 
 import { beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { randomUUID } from "node:crypto";
 import { Writable } from "node:stream";
 import {
   type AgentProtocol,
@@ -17,6 +18,7 @@ import {
   executorProfile,
   issue,
   repository,
+  review,
   secret,
   session,
   sessionEvent,
@@ -24,6 +26,8 @@ import {
   task,
   taskDependency,
   taskRepository,
+  workflow,
+  workflowStep,
   workspace,
   worktree,
 } from "@solow/db";
@@ -3608,5 +3612,940 @@ describe("caching what an agent advertises", () => {
       models: ["claude-opus-4"],
       modes: ["plan"],
     });
+  });
+});
+
+/**
+ * Walking a Workflow's Steps (issue #5, AC-2/AC-3/AC-5).
+ *
+ * Everything here asserts against the **database and the next agent's launch options**, never
+ * against what the lifecycle returned: the defects this loop can have are the ones where the code
+ * decided one thing and the row said another, and a test that reads back the value the code just
+ * computed agrees with the bug. So the cursor, the handoff and the spent decision are read off
+ * the `task` row, and "the next Step actually ran" is read off `AgentStartOpts`.
+ */
+describe("a Task following a Workflow", () => {
+  let db: TestDb;
+
+  beforeAll(() => {
+    process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 3).toString("base64");
+  });
+  beforeEach(() => {
+    db = createTestDb();
+  });
+
+  /** One Step, as a fixture seeds it: its own Agent Profile, catalog row and launch command. */
+  interface WorkflowStepSeed {
+    /** Suffix for this Step's ids, and the name it is given. */
+    key: string;
+    promptTemplate: string;
+    gate?: "human" | "auto" | "auto-unless-changes";
+    advanceOn?: "agent-signal" | "review";
+    /** The binary this Step's agent launches — how AC-3 becomes observable in `AgentStartOpts`. */
+    command: string;
+    /**
+     * Distinct per Step, and the reason is mechanical: `deps.runner` is handed the protocol and
+     * the launch settings, not the catalog row, so the permission mode is the only thing in its
+     * arguments that can tell two Steps apart. It is what lets a test hand each Step a runner of
+     * its own and then assert that the *other* Step's runner was never started.
+     */
+    permissionMode: "acceptEdits" | "plan" | "bypassPermissions";
+  }
+
+  /**
+   * Seed a Workflow, its Steps and a Profile per Step, and point the Task at it.
+   *
+   * Every Step speaks ACP, so SoloW provisions the primary worktree before round 0 and every
+   * round — including the first round of a later Step — resumes inside it. That is the shape a
+   * Workflow actually runs in: an advance keeps the worktrees, because the next Step continues in
+   * them.
+   */
+  async function seedWorkflow(
+    ids: Ids,
+    steps: readonly WorkflowStepSeed[],
+    opts: { enabled?: boolean; attach?: boolean; key?: string } = {},
+  ): Promise<string[]> {
+    const key = opts.key ?? "wf";
+    const workflowId = `${key}-${ids.taskId}`;
+    await db.insert(workflow).values({
+      id: workflowId,
+      workspaceId: ids.workspaceId,
+      name: `${key} ${ids.taskId}`,
+      version: 1,
+    });
+    const stepIds: string[] = [];
+    for (const [index, seed] of steps.entries()) {
+      const catalogId = `catalog-${ids.taskId}-${key}-${seed.key}`;
+      await db.insert(agentCatalog).values({
+        id: catalogId,
+        workspaceId: ids.workspaceId,
+        key: `agent_${key}_${seed.key}`,
+        displayName: seed.key,
+        protocol: "acp",
+        command: seed.command,
+        subscriptionEnvVar: "CLAUDE_CODE_OAUTH_TOKEN",
+        meteredEnvVar: "ANTHROPIC_API_KEY",
+      });
+      const profileId = `agent-${ids.taskId}-${key}-${seed.key}`;
+      await db.insert(agentProfile).values({
+        id: profileId,
+        workspaceId: ids.workspaceId,
+        name: `${key}-${seed.key}`,
+        agentCatalogId: catalogId,
+        authMode: "subscription",
+        secretId: `secret-${ids.taskId}`,
+        concurrencyCap: 3,
+        permissionMode: seed.permissionMode,
+      });
+      const stepId = `${workflowId}-step-${seed.key}`;
+      // Ranks are lexicographic strings and no rank ends in the lowest digit, so "1".."9" is a
+      // valid ordering for a fixture of this size — the same ordering `sortSteps` reads.
+      await db.insert(workflowStep).values({
+        id: stepId,
+        workspaceId: ids.workspaceId,
+        workflowId,
+        rank: String(index + 1),
+        name: seed.key,
+        agentProfileId: profileId,
+        promptTemplate: seed.promptTemplate,
+        gate: seed.gate ?? "human",
+        advanceOn: seed.advanceOn ?? "review",
+      });
+      stepIds.push(stepId);
+    }
+    if (opts.attach !== false) {
+      await db.update(task).set({ workflowId, workflowVersion: 1 }).where(eq(task.id, ids.taskId));
+    }
+    await db
+      .update(workspace)
+      // The widget flag is on because a Step's *handoff* is the agent's own summary, and the
+      // completion widget is the only channel an agent has for saying one.
+      .set({ enabledFlags: { "ff-workflows": opts.enabled !== false, "ff-agent-widgets": true } })
+      .where(eq(workspace.id, ids.workspaceId));
+    return stepIds;
+  }
+
+  /** The agent's completion declaration, as the fenced widget a real agent emits. */
+  const declares = (summary: string, outcome = "changes_ready"): AgentStreamEvent => ({
+    kind: "stdout",
+    channel: "assistant",
+    text: [
+      "```solow:widget",
+      JSON.stringify({ kind: "task_complete", outcome, summary }),
+      "```",
+    ].join("\n"),
+  });
+
+  /** A runner per Step, dispatched on the permission mode each Step's Profile carries. */
+  function runnersByMode(
+    entries: Record<string, AgentRunner>,
+  ): (protocol: AgentProtocol, settings: AgentLaunchSettings) => AgentRunner | null {
+    return (_protocol, settings) => entries[settings.permissionMode] ?? null;
+  }
+
+  /**
+   * A step that records the review decision **as a `review` row** before publishing the event.
+   *
+   * That ordering is the whole reason this exists beside `scriptedStep`: the advance reads the
+   * `review` table, never the event payload (an input a caller controls is a claim, not a
+   * decision), so a fake that only delivered the event would be testing an approval the server
+   * has no record of and every gate would read as unapproved.
+   */
+  function decidingStep(ids: Ids, decisions: ScriptedDecision[]): StepLike {
+    const queue = [...decisions];
+    return {
+      run: async (_id, fn) => fn(),
+      waitForEvent: async (_id, opts) => {
+        const next = queue.shift();
+        if (next === undefined || next === null) return null;
+        const decided = typeof next === "string" ? { decision: next } : next;
+        await db.insert(review).values({
+          // A fresh id per decision, across runs as well as within one: a restart records a
+          // *second* decision, not the same one again.
+          id: `review-${randomUUID()}`,
+          workspaceId: ids.workspaceId,
+          sessionId: ids.sessionId,
+          decision: decided.decision as "approve" | "reject" | "request_changes",
+          actorUserId: "owner",
+        });
+        return { data: { sessionId: opts.match, ...decided } };
+      },
+      sleepUntil: async () => {},
+    };
+  }
+
+  /**
+   * Inngest's own replay, modelled: a step whose id is already in the journal returns the
+   * recorded value and its body is **not** executed. Sharing one map across two invocations is a
+   * process that died mid-run and came back with its journal intact.
+   */
+  function memoizingStep(
+    memo: Map<string, unknown>,
+    inner: StepLike,
+    executed: string[],
+  ): StepLike {
+    return {
+      run: async (id, fn) => {
+        if (memo.has(id)) return memo.get(id) as never;
+        executed.push(id);
+        const out = await inner.run(id, fn);
+        memo.set(id, out);
+        return out;
+      },
+      waitForEvent: async (id, opts) => {
+        if (memo.has(id)) return memo.get(id) as { data: unknown } | null;
+        executed.push(id);
+        const out = await inner.waitForEvent(id, opts);
+        memo.set(id, out);
+        return out;
+      },
+      sleepUntil: async (id, until) => {
+        if (memo.has(id)) return;
+        executed.push(id);
+        memo.set(id, null);
+        await inner.sleepUntil(id, until);
+      },
+    };
+  }
+
+  async function taskRow(taskId: string) {
+    const [row] = await db.select().from(task).where(eq(task.id, taskId)).limit(1);
+    return row;
+  }
+
+  it("advances to the next Step in the database, then resumes there after a cold restart", async () => {
+    /*
+     * THE DURABLE-RESUME TEST (issue #5 Definition of Done, AC-2/AC-3/AC-5).
+     *
+     * Two runs. The first walks Step 1 and advances; the second is a genuine cold restart — a
+     * fresh step with no journal and fresh runners — and it has to pick up on Step 2 with Step 2's
+     * agent and Step 1's words, without re-running Step 1.
+     */
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const [step1, step2] = await seedWorkflow(ids, [
+      {
+        key: "plan",
+        command: "planner",
+        permissionMode: "plan",
+        promptTemplate: "Write the plan.",
+        gate: "auto",
+        advanceOn: "review",
+      },
+      {
+        key: "build",
+        command: "builder",
+        permissionMode: "acceptEdits",
+        promptTemplate: "Implement the plan.",
+        gate: "human",
+        advanceOn: "review",
+      },
+    ]);
+
+    const planner = new ScriptedRunner([{ kind: "completed" }], [declares("the plan, in full")]);
+    const builder = new ScriptedRunner([{ kind: "completed" }], [declares("built it")]);
+    const first = makeDeps(db, planner, nullStream());
+    first.deps.runner = runnersByMode({ plan: planner, acceptEdits: builder });
+
+    await runTaskLifecycle(first.deps, {
+      event: { data: ids },
+      step: decidingStep(ids, ["approve"]),
+    });
+
+    // The row, not the return value: this is the state a restart will actually read.
+    const afterFirst = await taskRow(ids.taskId);
+    expect(afterFirst?.workflowStepId).toBe(step2 as string);
+    expect(afterFirst?.workflowHandoff).toBe("the plan, in full");
+    expect(afterFirst?.workflowPendingHandoff).toBeNull();
+
+    // A cold restart: no journal, no memo, new runners. Nothing carries over but the row.
+    const plannerAgain = new ScriptedRunner([{ kind: "completed" }], [declares("replanned")]);
+    const builderAgain = new ScriptedRunner([{ kind: "completed" }], [declares("built again")]);
+    const second = makeDeps(db, builderAgain, nullStream());
+    second.deps.runner = runnersByMode({ plan: plannerAgain, acceptEdits: builderAgain });
+
+    await runTaskLifecycle(second.deps, {
+      event: { data: ids },
+      step: decidingStep(ids, ["approve"]),
+    });
+
+    // Completed Steps are never re-run — that is what "resume at the last completed Step" means.
+    expect(plannerAgain.starts).toBe(0);
+    // AC-3: the Step's *own* Agent Profile, observed where the agent is actually launched.
+    expect(builderAgain.commands[0]).toBe("builder");
+    // AC-2: and carrying the handoff. Asserted as an ordering, not a substring soup — the handoff
+    // heading leads, Step 1's words follow it, and Step 2's own template comes after both.
+    const prompt = builderAgain.prompts[0] ?? "";
+    const heading = prompt.indexOf("## Handed over from the previous step");
+    const carried = prompt.indexOf("the plan, in full");
+    const template = prompt.indexOf("Implement the plan.");
+    expect(heading).toBeGreaterThanOrEqual(0);
+    expect(carried).toBeGreaterThan(heading);
+    expect(template).toBeGreaterThan(carried);
+    // The Step never replaces the Task's own brief: a Step's prompt template is Owner-authored
+    // text becoming an agent prompt, and one that could stand alone could repurpose the run.
+    expect(prompt).toContain("# Task\nTask");
+    expect(step1).toBeTruthy();
+  });
+
+  it("does not integrate anything while three auto Steps advance themselves", async () => {
+    /*
+     * THE GATE-BYPASS TEST, first half (Definition of Done, AC-4).
+     *
+     * Every gate `auto`, every Step advancing on the agent's own signal, and not one `review` row
+     * anywhere. The pipeline walks itself to the last Step and stops there. Nothing is committed,
+     * nothing is published, no result branch is written, and the Task is not done.
+     */
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const auto = { gate: "auto" as const, advanceOn: "agent-signal" as const };
+    const [, , step3] = await seedWorkflow(ids, [
+      { key: "a", command: "one", permissionMode: "plan", promptTemplate: "A.", ...auto },
+      { key: "b", command: "two", permissionMode: "acceptEdits", promptTemplate: "B.", ...auto },
+      {
+        key: "c",
+        command: "three",
+        permissionMode: "bypassPermissions",
+        promptTemplate: "C.",
+        ...auto,
+      },
+    ]);
+
+    const a = new ScriptedRunner([{ kind: "completed" }], [declares("a done")]);
+    const b = new ScriptedRunner([{ kind: "completed" }], [declares("b done")]);
+    const c = new ScriptedRunner([{ kind: "completed" }], [declares("c done")]);
+    const { deps, spies } = makeDeps(db, a, nullStream());
+    deps.runner = runnersByMode({ plan: a, acceptEdits: b, bypassPermissions: c });
+
+    const result = await runTaskLifecycle(deps, {
+      event: { data: ids },
+      step: decidingStep(ids, []),
+    });
+
+    // All three agents ran, so the pipeline really did walk itself.
+    expect([a.starts, b.starts, c.starts]).toEqual([1, 1, 1]);
+    // And nothing was integrated by any of it.
+    expect(spies.commit).toBe(0);
+    expect(spies.publishedBranches).toEqual([]);
+    expect(await taskState(db, ids.taskId)).not.toBe("done");
+    const [attachment] = await db
+      .select()
+      .from(taskRepository)
+      .where(eq(taskRepository.taskId, ids.taskId));
+    expect(attachment?.resultBranch ?? null).toBeNull();
+    // Sitting at the review gate on the last Step, waiting for a person who never came.
+    expect(result.result).toBe("review_timeout");
+    expect((await taskRow(ids.taskId))?.workflowStepId).toBe(step3 as string);
+  });
+
+  it("refuses to integrate on an approval an earlier Step already spent", async () => {
+    /*
+     * THE GATE-BYPASS TEST, second half — the falsifiable one.
+     *
+     * The reachable bypass in this file is not "no decision exists", which the review gate itself
+     * makes impossible; it is a decision that exists and has *already been spent*. Here the
+     * agent's own signal reaches the last Step, finds the standing approval unspent, reports
+     * `completed` and marks it spent. The review event that follows carries no new `review` row —
+     * a redelivery, or a second click — so by the time the approve branch reports the Step
+     * finished there is nothing left to spend, and nothing may be integrated.
+     *
+     * Red under deleting the `reported.status !== "completed"` early return at advance call site
+     * B: the run falls into `approve-${round}`, commits, and marks the Task done on an approval
+     * that was already accounted for.
+     */
+    const ids = freshIds();
+    await seedRun(db, ids);
+    await seedWorkflow(ids, [
+      {
+        key: "only",
+        command: "solo",
+        permissionMode: "plan",
+        promptTemplate: "Do it.",
+        gate: "auto",
+        advanceOn: "agent-signal",
+      },
+    ]);
+    // The approval is already on the record before the run starts.
+    await db.insert(review).values({
+      id: `review-${ids.taskId}-pre`,
+      workspaceId: ids.workspaceId,
+      sessionId: ids.sessionId,
+      decision: "approve",
+      actorUserId: "owner",
+    });
+
+    const solo = new ScriptedRunner([{ kind: "completed" }], [declares("done")]);
+    const { deps, spies } = makeDeps(db, solo, nullStream());
+    deps.runner = runnersByMode({ plan: solo });
+
+    // `scriptedStep`, not `decidingStep`: the event arrives with no new decision behind it.
+    const result = await runTaskLifecycle(deps, {
+      event: { data: ids },
+      step: scriptedStep(["approve"]),
+    });
+
+    expect(result.result).toBe("workflow_awaiting_decision");
+    expect(spies.commit).toBe(0);
+    expect(spies.publishedBranches).toEqual([]);
+    // Not `done`, and not moved anywhere by this run: `to-review` deliberately leaves the Task
+    // where it was, so the state here is whatever the operator's own click last made it.
+    expect(await taskState(db, ids.taskId)).not.toBe("done");
+    // The approval the agent-signal path spent is on the row, which is what makes it spent.
+    expect((await taskRow(ids.taskId))?.workflowDecisionId).toBe(`review-${ids.taskId}-pre`);
+  });
+
+  it("sends the Step's own advance rule at the review gate, not the literal review", async () => {
+    /*
+     * THE DEADLOCK TEST.
+     *
+     * The last Step advances on `agent-signal` and sits behind a `human` gate — an ordinary
+     * configuration. Reaching the approve branch means both facts are true: the agent finished
+     * (we are past `to-review`) and a person approved. Sending the literal `"review"` there makes
+     * `advanceWorkflowStep` return `held`, the cursor never moves, the approval is never spent,
+     * and the run stops with no error anywhere.
+     *
+     * Red under hardcoding `signal: "review"` at advance call site B: nothing commits and the
+     * Task never reaches `done`.
+     */
+    const ids = freshIds();
+    await seedRun(db, ids);
+    await seedWorkflow(ids, [
+      {
+        key: "plan",
+        command: "planner",
+        permissionMode: "plan",
+        promptTemplate: "Plan.",
+        gate: "auto",
+        advanceOn: "agent-signal",
+      },
+      {
+        key: "ship",
+        command: "shipper",
+        permissionMode: "acceptEdits",
+        promptTemplate: "Ship.",
+        gate: "human",
+        advanceOn: "agent-signal",
+      },
+    ]);
+
+    const planner = new ScriptedRunner([{ kind: "completed" }], [declares("planned")]);
+    const shipper = new ScriptedRunner([{ kind: "completed" }], [declares("shipped")]);
+    const { deps, spies } = makeDeps(db, planner, nullStream());
+    deps.runner = runnersByMode({ plan: planner, acceptEdits: shipper });
+
+    const result = await runTaskLifecycle(deps, {
+      event: { data: ids },
+      step: decidingStep(ids, ["approve"]),
+    });
+
+    expect(result.result).toBe("done");
+    expect(await taskState(db, ids.taskId)).toBe("done");
+    expect(spies.commit).toBe(1);
+  });
+
+  it("clears the rejected attempt's summary without moving the cursor", async () => {
+    /*
+     * A rejection is not a Step completion. The cursor holds — but the rejected attempt already
+     * parked its summary in `workflow_pending_handoff`, and whatever eventually completes this
+     * Step promotes that column into the handoff. Left in place, the work a human explicitly
+     * refused becomes the next Step's inbound context.
+     *
+     * Red under removing the `workflow-reject-${round}` step: the summary is still on the row.
+     */
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const [step1] = await seedWorkflow(ids, [
+      {
+        key: "plan",
+        command: "planner",
+        permissionMode: "plan",
+        promptTemplate: "Plan.",
+        gate: "human",
+        advanceOn: "agent-signal",
+      },
+      {
+        key: "build",
+        command: "builder",
+        permissionMode: "acceptEdits",
+        promptTemplate: "Build.",
+        gate: "human",
+        advanceOn: "review",
+      },
+    ]);
+
+    const planner = new ScriptedRunner([{ kind: "completed" }], [declares("a plan nobody wanted")]);
+    const builder = new ScriptedRunner([{ kind: "completed" }], [declares("never runs")]);
+    const { deps } = makeDeps(db, planner, nullStream());
+    deps.runner = runnersByMode({ plan: planner, acceptEdits: builder });
+
+    await runTaskLifecycle(deps, {
+      event: { data: ids },
+      step: decidingStep(ids, ["reject"]),
+    });
+
+    const row = await taskRow(ids.taskId);
+    expect(row?.workflowPendingHandoff).toBeNull();
+    expect(row?.workflowStepId).toBe(step1 as string);
+    expect(row?.workflowHandoff).toBeNull();
+    expect(builder.starts).toBe(0);
+  });
+
+  it("writes no review transition when the advance happens while the Task is still running", async () => {
+    /*
+     * THE AUTO-ADVANCE STATE TEST.
+     *
+     * `to-review` deliberately does not move the Task into `review`, so at an agent-signal
+     * advance the row is usually still `running` and no state write is due. Writing one anyway
+     * would put a `review → running` pair in the durable log for a review that never happened —
+     * a record a reviewer would later read as evidence of a decision.
+     *
+     * Red under advancing on `ctx.task.state` instead of reading the row inside the step.
+     */
+    const ids = freshIds();
+    await seedRun(db, ids);
+    await seedWorkflow(ids, [
+      {
+        key: "plan",
+        command: "planner",
+        permissionMode: "plan",
+        promptTemplate: "Plan.",
+        gate: "auto",
+        advanceOn: "agent-signal",
+      },
+      {
+        key: "build",
+        command: "builder",
+        permissionMode: "acceptEdits",
+        promptTemplate: "Build.",
+        gate: "human",
+        advanceOn: "review",
+      },
+    ]);
+
+    const planner = new ScriptedRunner([{ kind: "completed" }], [declares("planned")]);
+    // The second Step's agent dies, which ends the run right after the advance — the only moment
+    // at which "the session is active again" is observable before `to-review` moves it on.
+    const builder = new ScriptedRunner([{ kind: "failed", signal: {} }]);
+    const { deps } = makeDeps(db, planner, nullStream());
+    deps.runner = runnersByMode({ plan: planner, acceptEdits: builder });
+
+    await runTaskLifecycle(deps, {
+      event: { data: ids },
+      step: decidingStep(ids, []),
+    });
+
+    const transitions = await db
+      .select()
+      .from(sessionEvent)
+      .where(eq(sessionEvent.sessionId, ids.sessionId))
+      .orderBy(asc(sessionEvent.seq));
+    const states = transitions
+      .map((row) => row.payload as { kind: string; from?: string; to?: string; reason?: string })
+      .filter((payload) => payload.kind === "state");
+    expect(states.some((s) => s.reason === "workflow_step_advanced")).toBe(false);
+    expect(states.some((s) => s.from === "review")).toBe(false);
+
+    const row = await taskRow(ids.taskId);
+    // Step 1's declaration must not linger on Step 2's card.
+    expect(row?.completedAt).toBeNull();
+    expect(row?.completedSummary).toBeNull();
+    const [sess] = await db.select().from(session).where(eq(session.id, ids.sessionId)).limit(1);
+    expect(sess?.state).toBe("active");
+  });
+
+  it("fails legibly when the cursor names a Step this Workflow does not contain", async () => {
+    /*
+     * `resumeWorkflowCursor` refuses a cursor it cannot place, and this side must not undo it:
+     * a silent restart at Step one would re-run work an Owner has already paid an agent for.
+     *
+     * The cursor is pointed at a Step of a *second* Workflow rather than at a deleted one because
+     * `task.workflow_step_id` is a foreign key and SQLite refuses to delete a Step a live cursor
+     * names. The branch reached is identical — the resume is handed this Workflow's Steps and
+     * asked whether the cursor is among them — so this covers the deleted-Step case only insofar
+     * as the two are indistinguishable to the rule. It does not prove the constraint unbypassable;
+     * a Step that vanished by some future path around it lands on the same branch and is refused.
+     */
+    const ids = freshIds();
+    await seedRun(db, ids);
+    await seedWorkflow(ids, [
+      { key: "a", command: "one", permissionMode: "plan", promptTemplate: "A." },
+    ]);
+    const [strayStep] = await seedWorkflow(
+      ids,
+      [{ key: "z", command: "other", permissionMode: "acceptEdits", promptTemplate: "Z." }],
+      { key: "other", attach: false },
+    );
+    await db
+      .update(task)
+      .set({ workflowStepId: strayStep as string })
+      .where(eq(task.id, ids.taskId));
+
+    const runner = new ScriptedRunner([{ kind: "completed" }]);
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    const result = await runTaskLifecycle(deps, {
+      event: { data: ids },
+      step: decidingStep(ids, ["approve"]),
+    });
+
+    expect(result.result).toBe("workflow_unresumable");
+    expect(await taskState(db, ids.taskId)).toBe("failed");
+    expect(await taskFailureReason(db, ids.taskId)).toBe("workflow_unresumable");
+    // Nothing was started, and nothing was cloned: the refusal is before the agent and before the
+    // repository.
+    expect(runner.starts).toBe(0);
+  });
+
+  it("refuses a Workflow longer than the bound rather than running part of it", async () => {
+    // Truncating would silently drop the Owner's last Steps and report the Task done. The
+    // refusal is by name, before the clone and before any agent.
+    const ids = freshIds();
+    await seedRun(db, ids);
+    await seedWorkflow(
+      ids,
+      Array.from({ length: 21 }, (_, index) => ({
+        key: `s${index}`,
+        command: `agent-${index}`,
+        permissionMode: "plan" as const,
+        promptTemplate: `Step ${index}.`,
+      })),
+    );
+
+    const runner = new ScriptedRunner([{ kind: "completed" }]);
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    const result = await runTaskLifecycle(deps, {
+      event: { data: ids },
+      step: decidingStep(ids, ["approve"]),
+    });
+
+    expect(result.result).toBe("workflow_too_long");
+    expect(await taskFailureReason(db, ids.taskId)).toBe("workflow_too_long");
+    expect(runner.starts).toBe(0);
+  });
+
+  it("fails by name when a Step's Agent Profile cannot be resolved in this Workspace", async () => {
+    /*
+     * The Profile is pointed at another tenant's row — `workflow_step.agent_profile_id` is a
+     * foreign key to `agent_profile.id` and nothing in the schema confines it to one Workspace,
+     * so this is the reachable shape of "the Profile is gone". Resolving it would run the Step
+     * under another tenant's agent (Principle V); the alternative to refusing is worse than the
+     * refusal.
+     */
+    const ids = freshIds();
+    const other = freshIds();
+    await seedRun(db, ids);
+    await seedRun(db, other);
+    await seedWorkflow(ids, [
+      { key: "a", command: "one", permissionMode: "plan", promptTemplate: "A." },
+    ]);
+    await db
+      .update(workflowStep)
+      .set({ agentProfileId: `agent-${other.taskId}` })
+      .where(eq(workflowStep.id, `wf-${ids.taskId}-step-a`));
+
+    const runner = new ScriptedRunner([{ kind: "completed" }]);
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    const result = await runTaskLifecycle(deps, {
+      event: { data: ids },
+      step: decidingStep(ids, ["approve"]),
+    });
+
+    expect(result.result).toBe("workflow_step_agent_missing");
+    expect(await taskFailureReason(db, ids.taskId)).toBe("workflow_step_agent_missing");
+    expect(runner.starts).toBe(0);
+  });
+
+  it("ignores the Workflow entirely when the flag is off", async () => {
+    /*
+     * THE FLAG-OFF TEST. `ff-workflows` default OFF is the Definition of Done, and a Task that
+     * happens to carry a `workflowId` in a Workspace with the flag off must behave exactly as a
+     * Task with none: its own Agent Profile, integration on the first approve, and a cursor
+     * nothing writes to.
+     */
+    const ids = freshIds();
+    await seedRun(db, ids);
+    await seedWorkflow(
+      ids,
+      [
+        { key: "plan", command: "planner", permissionMode: "plan", promptTemplate: "Plan." },
+        { key: "build", command: "builder", permissionMode: "acceptEdits", promptTemplate: "B." },
+      ],
+      { enabled: false },
+    );
+
+    const own = new ScriptedRunner([{ kind: "completed" }]);
+    const { deps, spies } = makeDeps(db, own, nullStream());
+
+    const result = await runTaskLifecycle(deps, {
+      event: { data: ids },
+      step: decidingStep(ids, ["approve"]),
+    });
+
+    expect(result.result).toBe("done");
+    expect(await taskState(db, ids.taskId)).toBe("done");
+    expect(spies.commit).toBe(1);
+    // The Task's own catalog row, not either Step's.
+    expect(own.commands[0]).toBe("fake");
+    expect(own.prompts[0]).not.toContain("Plan.");
+    const row = await taskRow(ids.taskId);
+    expect(row?.workflowStepId).toBeNull();
+    expect(row?.workflowHandoff).toBeNull();
+  });
+
+  it("advances the cursor exactly once when a durable step body is retried", async () => {
+    /*
+     * THE REPLAY GUARD. Inngest retries a step *body* from the top when anything after the work
+     * throws, so the advance can commit and then run again. `fromStepId` is what makes the second
+     * pass a `StaleCursor` rather than a second advance — and a `StaleCursor` is not a failure:
+     * the run re-reads the cursor and carries on from where the transaction actually left it.
+     *
+     * Red under dropping `fromStepId` from the advance call — modelled by re-reading the live
+     * cursor and passing *that*, which is what a payload naming only the Task amounts to: the
+     * retried body advances a second time, Step 2 is skipped whole, and its agent never runs.
+     */
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const auto = { gate: "auto" as const, advanceOn: "agent-signal" as const };
+    const [, , step3] = await seedWorkflow(ids, [
+      { key: "a", command: "one", permissionMode: "plan", promptTemplate: "A.", ...auto },
+      { key: "b", command: "two", permissionMode: "acceptEdits", promptTemplate: "B.", ...auto },
+      {
+        key: "c",
+        command: "three",
+        permissionMode: "bypassPermissions",
+        promptTemplate: "C.",
+        ...auto,
+      },
+    ]);
+
+    const a = new ScriptedRunner([{ kind: "completed" }], [declares("a done")]);
+    const b = new ScriptedRunner([{ kind: "completed" }], [declares("b done")]);
+    const c = new ScriptedRunner([{ kind: "completed" }], [declares("c done")]);
+    const { deps } = makeDeps(db, a, nullStream());
+    deps.runner = runnersByMode({ plan: a, acceptEdits: b, bypassPermissions: c });
+
+    await runTaskLifecycle(deps, {
+      event: { data: ids },
+      step: retryingStep([], "workflow-signal-0"),
+    });
+
+    // Step 2's agent ran, which is the observable form of "the retry skipped no Step". The
+    // cursor's final position cannot say it: a double advance ends on Step 3 as well, having
+    // walked straight past Step 2 without running it.
+    expect(b.starts).toBe(1);
+    expect((await taskRow(ids.taskId))?.workflowStepId).toBe(step3 as string);
+  });
+
+  it("integrates on a retried terminal advance rather than asking for a second approval", async () => {
+    /*
+     * THE REPLAY GUARD, WHERE IT DOES NOT EXIST. `fromStepId` makes every other advance
+     * replay-safe because an advance MOVES the cursor, so the retried body names a Step the Task
+     * has left. The terminal Step has nowhere to move it to, so `fromStepId` still matches on the
+     * second pass — and that pass reads a world the first one changed, because the first pass
+     * wrote its approval into `workflow_decision_id`.
+     *
+     * The cost when it is wrong is not a cosmetic one: the retried body reports
+     * `awaiting-decision`, the run returns before `approve-${round}`, and the Task sits unmerged
+     * on a decision the operator has already given — with the approval spent, so giving it again
+     * changes nothing.
+     *
+     * Red under dropping `call` from the advance payload, or under scoping the replay check to
+     * the Workflow Step instead of to the call: both make this pass look like the *other* call
+     * site, and the run stops short of integrating.
+     */
+    const ids = freshIds();
+    await seedRun(db, ids);
+    await seedWorkflow(ids, [
+      {
+        key: "only",
+        command: "solo",
+        permissionMode: "plan",
+        promptTemplate: "Do it.",
+        gate: "human",
+        advanceOn: "review",
+      },
+    ]);
+
+    const solo = new ScriptedRunner([{ kind: "completed" }], [declares("done")]);
+    const { deps, spies } = makeDeps(db, solo, nullStream());
+    deps.runner = runnersByMode({ plan: solo });
+
+    // `decidingStep` records a real `review` row, because the whole defect is about what the
+    // second pass reads back from the database. Wrapped so that one durable step — the terminal
+    // advance — has its body executed twice, which is Inngest's at-least-once window.
+    const deciding = decidingStep(ids, ["approve"]);
+    const retriedOnce = new Set<string>();
+    const step: StepLike = {
+      ...deciding,
+      run: async (id, fn) => {
+        if (id === "workflow-review-0" && !retriedOnce.has(id)) {
+          retriedOnce.add(id);
+          await fn();
+        }
+        return fn();
+      },
+    };
+
+    const result = await runTaskLifecycle(deps, { event: { data: ids }, step });
+
+    expect(result.result).toBe("done");
+    expect(await taskState(db, ids.taskId)).toBe("done");
+    // Integrated exactly once — a replay that re-integrated would be its own defect.
+    expect(spies.commit).toBe(1);
+  });
+
+  it("re-walks a memoized journal without re-running the agent or advancing twice", async () => {
+    /*
+     * THE MEMOIZED-REPLAY TEST. A process that died and came back with its journal intact replays
+     * every completed step from the recorded value and executes no body. Every branch this loop
+     * takes is decided by a memoized step output — which is why `stepCount` is read from
+     * `workflow-resume` and from nowhere else — so the replay rebuilds an identical leg.
+     */
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const [, step2] = await seedWorkflow(ids, [
+      {
+        key: "a",
+        command: "one",
+        permissionMode: "plan",
+        promptTemplate: "A.",
+        gate: "auto",
+        advanceOn: "agent-signal",
+      },
+      { key: "b", command: "two", permissionMode: "acceptEdits", promptTemplate: "B." },
+    ]);
+
+    const a = new ScriptedRunner([{ kind: "completed" }], [declares("a done")]);
+    const b = new ScriptedRunner([{ kind: "completed" }], [declares("b done")]);
+    const { deps } = makeDeps(db, a, nullStream());
+    deps.runner = runnersByMode({ plan: a, acceptEdits: b });
+
+    const memo = new Map<string, unknown>();
+    const firstIds: string[] = [];
+    await runTaskLifecycle(deps, {
+      event: { data: ids },
+      step: memoizingStep(memo, decidingStep(ids, []), firstIds),
+    });
+    // Non-vacuous on both sides: these ids have to be *durable steps* in the first run for their
+    // absence in the second to mean anything. Calling the resume or the advance outside
+    // `step.run` would make the first assertion fail rather than the second silently pass.
+    expect(firstIds).toContain("workflow-resume");
+    expect(firstIds).toContain("agent-run-0");
+    expect(firstIds).toContain("workflow-signal-0");
+
+    const replayed: string[] = [];
+    await runTaskLifecycle(deps, {
+      event: { data: ids },
+      step: memoizingStep(memo, decidingStep(ids, []), replayed),
+    });
+
+    // Nothing already in the journal was executed again.
+    expect(replayed).not.toContain("agent-run-0");
+    expect(replayed).not.toContain("workflow-signal-0");
+    expect(replayed).not.toContain("workflow-resume");
+    // Two runs, one advance: the agents each started exactly once across both.
+    expect([a.starts, b.starts]).toEqual([1, 1]);
+    expect((await taskRow(ids.taskId))?.workflowStepId).toBe(step2 as string);
+  });
+});
+
+/**
+ * The regression that matters most: a Task on no Workflow emits the same durable step ids, in the
+ * same order, as it did before Workflows existed (issue #5).
+ *
+ * Asserted as an exact sequence rather than as "no `workflow-` id appears", because an id that
+ * merely *moved* would break an in-flight run's memo just as badly as one that was added.
+ */
+describe("a Task on no Workflow", () => {
+  let db: TestDb;
+
+  beforeAll(() => {
+    process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 3).toString("base64");
+  });
+  beforeEach(() => {
+    db = createTestDb();
+  });
+
+  function recordingStep(inner: StepLike, ids: string[]): StepLike {
+    return {
+      run: (id, fn) => {
+        ids.push(id);
+        return inner.run(id, fn);
+      },
+      waitForEvent: (id, opts) => {
+        ids.push(id);
+        return inner.waitForEvent(id, opts);
+      },
+      sleepUntil: (id, until) => {
+        ids.push(id);
+        return inner.sleepUntil(id, until);
+      },
+    };
+  }
+
+  async function idsFor(decisions: ScriptedDecision[]): Promise<string[]> {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const { deps } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+    const emitted: string[] = [];
+    await runTaskLifecycle(deps, {
+      event: { data: ids },
+      step: recordingStep(scriptedStep(decisions), emitted),
+    });
+    return emitted;
+  }
+
+  it("emits the pre-Workflow step sequence on approve", async () => {
+    expect(await idsFor(["approve"])).toEqual([
+      "load",
+      "executor-preflight",
+      "prepare-repository",
+      "agent-run-0",
+      "compact-0",
+      "record-worktree-0",
+      "to-review-0",
+      "await-review-0",
+      "approve-0",
+      "cleanup",
+    ]);
+  });
+
+  it("emits the pre-Workflow step sequence on request_changes then approve", async () => {
+    expect(await idsFor(["request_changes", "approve"])).toEqual([
+      "load",
+      "executor-preflight",
+      "prepare-repository",
+      "agent-run-0",
+      "compact-0",
+      "record-worktree-0",
+      "to-review-0",
+      "await-review-0",
+      "resume-blockers-0",
+      "resume-0",
+      "agent-run-1",
+      "compact-1",
+      "record-worktree-1",
+      "to-review-1",
+      "await-review-1",
+      "approve-1",
+      "cleanup",
+    ]);
+  });
+
+  it("emits the pre-Workflow step sequence on reject", async () => {
+    expect(await idsFor(["reject"])).toEqual([
+      "load",
+      "executor-preflight",
+      "prepare-repository",
+      "agent-run-0",
+      "compact-0",
+      "record-worktree-0",
+      "to-review-0",
+      "await-review-0",
+      "reject-0",
+      "cleanup",
+    ]);
   });
 });

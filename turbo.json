@@ -1,0 +1,30 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "ui": "stream",
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "env": ["SOLOW_PACKAGE_BUILD", "SOLOW_NEXT_DIST_DIR", "NEXT_PUBLIC_*"],
+      "outputs": [".next*/**", "!.next*/cache/**", "dist/**"]
+    },
+    "typecheck": {
+      "dependsOn": ["^typecheck"],
+      "outputs": []
+    },
+    "lint": {
+      "outputs": []
+    },
+    "test": {
+      "dependsOn": ["^test"],
+      "outputs": []
+    },
+    "openapi:check": {
+      "dependsOn": ["^typecheck"],
+      "inputs": ["$TURBO_DEFAULT$", "openapi.json"],
+      "outputs": []
+    },
+    "db:generate": { "cache": false },
+    "db:migrate": { "cache": false },
+    "db:bootstrap": { "cache": false }
+  }
+}

@@ -38,8 +38,9 @@ describe("ActivityBar", () => {
     /*
      * The rail used to be five peers — Board, Issues, Projects, Workflows, Settings — which told
      * a newcomer a Project was one more view of the same pile. It is the container the pile lives
-     * in, so the rail now holds only what genuinely exists with no Project selected: the Project
-     * list, the unassigned escape hatch, and Settings. A board is reached *through* a Project.
+     * in, so the rail holds only what genuinely exists with no Project selected: the Project
+     * list, the unassigned escape hatch, Workflows, and Settings. A board is reached *through* a
+     * Project; a Workflow is not, because `workflow.list` takes no Project and never did.
      */
     render(
       <TooltipProvider>
@@ -47,26 +48,24 @@ describe("ActivityBar", () => {
       </TooltipProvider>,
     );
 
-    for (const name of [/^Projects$/, /^Unassigned$/, /^Settings$/]) {
+    for (const name of [/^Projects$/, /^Unassigned$/, /^Workflows/, /^Settings$/]) {
       expect(screen.getByRole("link", { name })).toBeTruthy();
     }
-    // The sections that moved inside a Project must not still be reachable from the rail, or the
-    // hierarchy would be contradicted by the one component that states it most often.
-    for (const name of [/^Board$/, /^Workflows/]) {
-      expect(screen.queryByRole("link", { name })).toBeNull();
-    }
+    // The sections that really did move inside a Project must not still be reachable from the
+    // rail, or the hierarchy would be contradicted by the component that states it most often.
+    expect(screen.queryByRole("link", { name: /^Board$/ })).toBeNull();
   });
 
-  it("carries no WIP badge, because the section that is WIP now lives inside a project", () => {
-    // Workflows is still work in progress (F03); it is simply no longer a rail destination. The
-    // marker moved to the navigator's project section list, and asserting its absence here is
-    // what keeps a stale badge from being left behind on a link that no longer exists.
+  it("marks Workflows as WIP, in the accessible name as well as the badge", () => {
+    // F03's Monitor half is not built, so the section is live but unfinished. The badge is
+    // `aria-hidden`, which is why the link's own name has to carry the same fact.
     render(
       <TooltipProvider>
         <ActivityBar signedIn={false} />
       </TooltipProvider>,
     );
 
-    expect(screen.queryByText("WIP")).toBeNull();
+    expect(screen.getByRole("link", { name: "Workflows (work in progress)" })).toBeTruthy();
+    expect(screen.getByText("WIP")).toBeTruthy();
   });
 });

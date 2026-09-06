@@ -112,6 +112,30 @@ curl -fsS --max-time 20 "http://localhost:$WEB_PORT/" > /dev/null || {
     exit 1
 }
 
+# And that the page it serves is the one a new install actually lands on (issue #17: "a smoke test
+# that runs the launcher in a clean container and reaches the sign-in page"). Serving *something*
+# on `/` is the weaker question, and this stack has answered it while being unusable: a 200 that
+# is a Next error boundary, or a redirect chain that never terminates, both pass the check above.
+#
+# `-L` because `/` redirects here, and the assertion is on the rendered sign-in form rather than
+# on the status code, because that is what "a person can start using it" means. A fresh data
+# directory has no Owner yet, so this is also the first-run sign-up path — the one the deployment
+# view says exists instead of printed credentials.
+#
+# `id="auth-password"` rather than a `name=` attribute: the field is a controlled React input with
+# no `name`, so that is the stable handle in the markup. It is server-rendered even though the
+# form is a client component, which is what makes it visible to curl at all.
+echo "==> the sign-in page renders"
+SIGNIN="$(curl -fsSL --max-time 20 "http://localhost:$WEB_PORT/sign-in" || true)"
+case "$SIGNIN" in
+    *'id="auth-password"'*) ;;
+    *)
+        echo "smoke-tarball: /sign-in did not render its password field — a new install cannot be" >&2
+        echo "  signed into, whatever the status code on / said." >&2
+        exit 1
+        ;;
+esac
+
 echo "==> orchestrator responds"
 # `/api/inngest` is the introspection route the Dev Server itself polls, so a 200 here means the
 # orchestrator is not merely listening but has its functions registered.

@@ -27,6 +27,7 @@ import type {
   TaskState,
   WorkflowAdvanceOn,
   WorkflowStepAutomation,
+  WorkflowStepBranch,
   WorkflowStepGate,
 } from "@solow/contracts";
 import { sql } from "drizzle-orm";
@@ -590,6 +591,23 @@ export const task = sqliteTable(
      * and it must keep its meaning even if the row it names is one day archived away.
      */
     workflowDecisionId: text("workflow_decision_id"),
+    /**
+     * Which durable step call spent that approval — an idempotency key, not a Step id.
+     *
+     * The terminal Step has to tell a *replay of one call* apart from *a different call*, and
+     * neither the Workflow Step nor the signal can do it: both advance call sites in the run
+     * lifecycle sit on the same Step and pass the same signal when `advance_on` is `agent-signal`.
+     * The durable step id (`workflow-signal-3`, `workflow-review-3`) is what differs, and it is
+     * exactly the identity Inngest itself replays under.
+     *
+     * Why the question arises at all: the cursor never moves at the last Step, so the
+     * `StaleCursor` guard that makes every other advance replay-safe is silent there. Its own step
+     * body can therefore re-execute after committing, and read a world where the approval it needs
+     * is the one it just marked spent. Scoping to the call means a re-run of that call completes
+     * again, while the *other* call site — which is a second gate crossing, not a replay — still
+     * has to find an approval of its own.
+     */
+    workflowDecisionCall: text("workflow_decision_call"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -677,6 +695,17 @@ export const workflowStep = sqliteTable(
      * migration on a populated table plus that argument reopened.
      */
     onEnter: text("on_enter", { mode: "json" }).$type<WorkflowStepAutomation>(),
+    /**
+     * Where this Step sends the Task instead of to its rank successor — a condition and the two
+     * Steps it chooses between (F03 FR-2, *Condition*). Null for the ordinary case, so every
+     * Step written before branches existed still walks the rank order it always did.
+     *
+     * JSON rather than two foreign-key columns: a target of null means "the pipeline ends", and
+     * two nullable FKs cannot say "no branch" and "branch to the end" apart. The DAL checks the
+     * targets are Steps of this Workflow before writing, which is the check an FK would have
+     * done, minus the cross-Workflow hole an FK leaves open.
+     */
+    branch: text("branch", { mode: "json" }).$type<WorkflowStepBranch>(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

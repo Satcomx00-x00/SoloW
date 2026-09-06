@@ -95,3 +95,10 @@ export * from "./schema.js";
 export { schema } from "./schema.js";
 export { decryptForAgentRun, decryptForScmSync, encryptSecret } from "./secret-store.js";
 export { allTables } from "./tables.js";
+export {
+  advanceTaskWorkflow,
+  clearTaskWorkflowPendingHandoff,
+  loadTaskWorkflowRun,
+  stepsToDto,
+  stepToDto,
+} from "./workflow-run.js";

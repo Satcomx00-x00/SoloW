@@ -1,52 +1,35 @@
 "use client";
 
 import { CommonErrorCode } from "@solow/contracts";
-import { Trash2, TriangleAlert } from "lucide-react";
-import { useState } from "react";
-import { ConfirmAction } from "@/components/features/confirm-action";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { cn } from "@/lib/utils";
+import { TriangleAlert, Workflow as WorkflowIcon } from "lucide-react";
+import { WorkflowInspector } from "@/components/features/workflows/workflow-inspector";
+import { SecondaryPanel } from "@/components/shell/secondary-sidebar";
 import { trpc } from "@/trpc/react";
-import { WorkflowStepEditor } from "./workflow-step-editor";
+import { WorkflowCanvas } from "./workflow-canvas";
 
 /**
- * The Workflows section (issue #5, spec F03).
+ * The Workflows surface (issue #5, spec F03).
  *
  * A Workflow is the thing that makes "multi-agent orchestration" mean more than several
  * single-agent Tasks running at once: an ordered pipeline whose Steps each name their own agent.
- * This is the surface where one is defined — a list on the left, the selected pipeline's Steps
- * on the right.
  *
- * The monitor half of F03 (a run's live position on the pipeline) belongs with the run loop that
- * produces the timings, and is not here.
+ * **This surface is now the canvas and nothing else.** It used to be a three-column page — a
+ * create form and a list in a 16rem column, the graph in the rest, all inside a `max-w-7xl` with
+ * page padding — which spent a third of the width and a fixed 36rem of height on chrome that the
+ * shell already has a place for. The list and the create button moved into the primary sidebar
+ * (`Navigator`), the pipeline's own properties into the secondary one, and what is left fills the
+ * viewport. That is also why the selection is a prop read from the route rather than component
+ * state: three surfaces now draw the same choice, and a `useState` here could only be read by one
+ * of them.
  */
-export function WorkflowsView() {
-  const utils = trpc.useUtils();
+export function WorkflowsView({ workflowId }: { workflowId?: string | undefined }) {
   const workflows = trpc.workflow.list.useQuery({});
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [name, setName] = useState("");
-
-  const create = trpc.workflow.create.useMutation({
-    onSuccess: (created) => {
-      utils.workflow.list.invalidate();
-      setSelectedId(created.id);
-      setName("");
-    },
-  });
-  const remove = trpc.workflow.delete.useMutation({
-    onSuccess: () => {
-      utils.workflow.list.invalidate();
-      setSelectedId(null);
-    },
-  });
-
   const list = workflows.data ?? [];
-  // The selection follows the list rather than being remembered independently: a Workflow
-  // deleted in another tab would otherwise leave this pane rendering a NOT_FOUND forever.
-  const selected = list.find((w) => w.id === selectedId) ?? list[0] ?? null;
+
+  // The route names a Workflow; `/workflows` names none and opens on the first, so the surface is
+  // never an empty frame when there is something to draw. A stale id — deleted in another tab —
+  // falls back the same way rather than leaving the canvas on a NOT_FOUND forever.
+  const selected = list.find((w) => w.id === workflowId) ?? list[0] ?? null;
   const detail = trpc.workflow.get.useQuery(
     { id: selected?.id ?? "" },
     { enabled: selected !== null },
@@ -76,99 +59,32 @@ export function WorkflowsView() {
     );
   }
 
+  if (detail.data) {
+    return (
+      <>
+        <WorkflowCanvas workflow={detail.data} />
+        {/* The pipeline's own settings — its name, its Steps as a list — go to the secondary
+            sidebar rather than onto the canvas, which is the whole point of having one. */}
+        <SecondaryPanel title="Workflow">
+          <WorkflowInspector workflow={detail.data} />
+        </SecondaryPanel>
+      </>
+    );
+  }
+
   return (
-    <div className="mx-auto w-full max-w-5xl px-6 py-5">
-      <div className="mb-4 flex items-center gap-2">
-        <h1 className="font-semibold text-lg">Workflows</h1>
-        {/* No run loop drives a Task through these Steps yet (issue #5) — the badge says so
-            before a click does, not after. */}
-        <Badge variant="outline" className="text-2xs">
-          WIP
-        </Badge>
-      </div>
-      <div className="grid gap-6 md:grid-cols-[16rem_1fr]">
-        <div className="space-y-4">
-          <form
-            className="space-y-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              create.mutate({ name });
-            }}
-          >
-            <Label htmlFor="new-workflow-name">New workflow</Label>
-            <Input
-              id="new-workflow-name"
-              placeholder="e.g. Plan, build, review"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-            />
-            <Button type="submit" className="w-full" disabled={!name || create.isPending}>
-              Create workflow
-            </Button>
-            {create.error && (
-              <p className="font-mono text-state-failed text-xs" role="alert">
-                {create.error.message}
-              </p>
-            )}
-          </form>
-
-          <ul className="space-y-1" aria-label="Workflows">
-            {list.map((w) => (
-              <li key={w.id} className="flex items-center gap-1">
-                <button
-                  type="button"
-                  aria-current={selected?.id === w.id ? "true" : undefined}
-                  onClick={() => setSelectedId(w.id)}
-                  className={cn(
-                    "min-w-0 flex-1 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors",
-                    selected?.id === w.id
-                      ? "bg-accent text-foreground"
-                      : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
-                  )}
-                >
-                  <span className="block truncate">{w.name}</span>
-                  <span className="block text-2xs text-muted-foreground tabular-nums">
-                    {w.stepCount === 1 ? "1 step" : `${w.stepCount} steps`} · v{w.version}
-                  </span>
-                </button>
-                <ConfirmAction
-                  title={`Delete “${w.name}”?`}
-                  description="Its steps go with it. Refused while any task still follows it."
-                  confirmLabel="Delete workflow"
-                  onConfirm={() => remove.mutate({ id: w.id })}
-                  trigger={
-                    <Button type="button" variant="ghost" size="sm" aria-label={`Delete ${w.name}`}>
-                      <Trash2 aria-hidden className="size-4" />
-                    </Button>
-                  }
-                />
-              </li>
-            ))}
-          </ul>
-          {remove.error && (
-            <p className="font-mono text-state-failed text-xs" role="alert">
-              {remove.error.message}
-            </p>
-          )}
-          {!workflows.isLoading && list.length === 0 && (
-            <p className="text-muted-foreground text-sm">
-              No workflows yet. A workflow chains agents: one plans, another implements, a third
-              reviews.
-            </p>
-          )}
-        </div>
-
-        <div>
-          {detail.data ? (
-            <WorkflowStepEditor workflow={detail.data} />
-          ) : (
-            <p className="text-muted-foreground text-sm">
-              {selected ? "Loading steps…" : "Select a workflow to edit its steps."}
-            </p>
-          )}
-        </div>
-      </div>
+    <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
+      <WorkflowIcon aria-hidden className="size-6 text-muted-foreground/50" strokeWidth={1.5} />
+      <p className="text-muted-foreground text-sm">
+        {selected
+          ? "Loading steps…"
+          : workflows.isLoading
+            ? "Loading workflows…"
+            : "No workflows yet. A workflow chains agents: one plans, another implements, a third reviews."}
+      </p>
+      {!selected && !workflows.isLoading && (
+        <p className="text-muted-foreground/70 text-xs">Create one from the sidebar.</p>
+      )}
     </div>
   );
 }

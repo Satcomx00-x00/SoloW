@@ -48,6 +48,50 @@ export const workflowStepAutomationSchema = z.object({
 export type WorkflowStepAutomation = z.infer<typeof workflowStepAutomationSchema>;
 
 /**
+ * What a branching Step asks about the outcome it just had (F03 FR-2's *Condition*, in the
+ * shape this product's pipeline can actually answer).
+ *
+ * Two questions, and neither needs evidence the advance transaction does not already hold — a
+ * condition that fetched its own facts would be a second rules engine, which is the thing the
+ * Step model refuses to grow:
+ *
+ *  - `agent-decides`: **the agent answers the question.** The Step's brief carries it, asks for
+ *    a `DECISION: yes` or `DECISION: no` line at the end of its final message, and the advance reads that
+ *    line off the handoff — see `buildStepBrief` and `readAgentDecision` in `@solow/core`. The
+ *    agent is the party that has just read the code, the plan or the review, so it is the party
+ *    that can say whether the condition is met; the operator only phrases the question. An agent
+ *    that does not answer has not affirmed the condition, and that counts as `no`.
+ *  - `produced-changes`: the Step left a diff behind. The same fact `auto-unless-changes` reads,
+ *    corroborated the same way — the caller's claim is a floor, the Session log is the answer.
+ */
+export const workflowStepConditionSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("agent-decides"), question: z.string().min(1).max(500) }),
+  z.object({ kind: z.literal("produced-changes") }),
+]);
+export type WorkflowStepCondition = z.infer<typeof workflowStepConditionSchema>;
+
+/**
+ * Where a Step sends the Task next, as a function of a condition — "if yes, run X; if no, run Y".
+ *
+ * On a Step rather than as a Step *kind*: a Condition node of its own would be a row with no
+ * agent, no prompt and no gate, and every rule that reads a Step would have to learn to skip it.
+ * The condition is evaluated on the outcome of the Step it hangs off, which is also the only
+ * outcome it can be about.
+ *
+ * A null target means *the pipeline ends here*. It is the same end as running off the last Step
+ * in rank order, and it goes through the same rule: `advanceWorkflowStep` completes nothing
+ * without a recorded human approval, however a Task got to the end (Principle I). A target may
+ * name an *earlier* Step — "changes requested, go back and implement" is the branch most worth
+ * having — and the run loop's per-Step round budget is what bounds the loop that creates.
+ */
+export const workflowStepBranchSchema = z.object({
+  when: workflowStepConditionSchema,
+  thenStepId: idSchema.nullable(),
+  elseStepId: idSchema.nullable(),
+});
+export type WorkflowStepBranch = z.infer<typeof workflowStepBranchSchema>;
+
+/**
  * Workflow error codes.
  *
  * They live here rather than in `errors.ts` for the reason `TaskDependencyErrorCode` does:
@@ -88,6 +132,26 @@ export const WorkflowErrorCode = {
    * nothing on the server able to tell that from an ordinary advance (Principle III, AC-5).
    */
   StaleCursor: "WORKFLOW_STALE_CURSOR",
+  /**
+   * A branch names the Step it hangs off as its own target. The cursor would not move, so the
+   * `StaleCursor` replay guard — which relies on an advance moving it — would be silent, and a
+   * retried step body would run the same Step again with nothing able to tell that from a loop
+   * the operator asked for.
+   */
+  BranchTargetIsSelf: "WORKFLOW_BRANCH_TARGET_IS_SELF",
+  /**
+   * Another Step's branch still points at this one. Deleting it would turn "go to X" into a
+   * dangling id — or, patched silently to null, into "the pipeline ends here", which is a change
+   * of meaning nobody asked for. Re-point the branch first.
+   */
+  StepBranchedTo: "WORKFLOW_STEP_BRANCHED_TO",
+  /**
+   * The graph has a Step nothing leads to, or one from which the end can never be reached (F03
+   * FR-5). Refused when a Task is *attached*, not when the Step is written: an operator building
+   * a loop passes through both shapes on the way, and the designer flags them on the node as
+   * they happen. A Task must not start down a pipeline that skips a Step or cannot finish.
+   */
+  GraphInvalid: "WORKFLOW_GRAPH_INVALID",
 } as const;
 export type WorkflowErrorCode = (typeof WorkflowErrorCode)[keyof typeof WorkflowErrorCode];
 
@@ -116,8 +180,9 @@ export const deleteWorkflowInput = z.object({ id: idSchema });
 export type DeleteWorkflowInput = z.infer<typeof deleteWorkflowInput>;
 
 /**
- * `afterStepId` names the Step the new one follows; omitting it appends. Positions are never
- * sent: a client that computed one would be describing a list it had already stopped looking at.
+ * `afterStepId` names the Step the new one follows; omitting it appends, and `null` puts it at
+ * the head — before the first Step, which is the start of the pipeline. Positions are never sent:
+ * a client that computed one would be describing a list it had already stopped looking at.
  */
 export const addWorkflowStepInput = z.object({
   workflowId: idSchema,
@@ -127,7 +192,8 @@ export const addWorkflowStepInput = z.object({
   gate: workflowStepGateSchema.optional(),
   advanceOn: workflowAdvanceOnSchema.optional(),
   onEnter: workflowStepAutomationSchema.nullable().optional(),
-  afterStepId: idSchema.optional(),
+  branch: workflowStepBranchSchema.nullable().optional(),
+  afterStepId: idSchema.nullable().optional(),
 });
 export type AddWorkflowStepInput = z.infer<typeof addWorkflowStepInput>;
 
@@ -139,6 +205,8 @@ export const updateWorkflowStepInput = z.object({
   gate: workflowStepGateSchema.optional(),
   advanceOn: workflowAdvanceOnSchema.optional(),
   onEnter: workflowStepAutomationSchema.nullable().optional(),
+  /** Null removes the branch; the Step then goes to its rank successor again. */
+  branch: workflowStepBranchSchema.nullable().optional(),
 });
 export type UpdateWorkflowStepInput = z.infer<typeof updateWorkflowStepInput>;
 
@@ -204,6 +272,18 @@ export const advanceTaskWorkflowInput = z.object({
   signal: workflowAdvanceOnSchema,
   producedChanges: z.boolean().default(false),
   handoff: z.string().max(20000).optional(),
+  /**
+   * Which durable step is making this call — an idempotency key, defaulted so an API caller
+   * outside the run loop needs no opinion about it.
+   *
+   * Only the terminal Step reads it, and only to recognise a re-run of itself. Everywhere else
+   * the cursor is the replay guard: an advance moves it, so a repeated call names a Step the Task
+   * has left and is refused as stale. The last Step has nowhere to move the cursor to, so its own
+   * step body can re-execute after committing and find the approval it needs already spent — by
+   * itself. Passing the caller's durable step id is what lets it tell that apart from the *other*
+   * call site asking for a second gate to open on one decision.
+   */
+  call: z.string().min(1).max(200).default("api"),
 });
 export type AdvanceTaskWorkflowInput = z.infer<typeof advanceTaskWorkflowInput>;
 
@@ -224,6 +304,7 @@ export const workflowStepDto = z
     gate: workflowStepGateSchema,
     advanceOn: workflowAdvanceOnSchema,
     onEnter: workflowStepAutomationSchema.nullable(),
+    branch: workflowStepBranchSchema.nullable(),
   })
   .merge(timestampsSchema);
 export type WorkflowStepDto = z.infer<typeof workflowStepDto>;
