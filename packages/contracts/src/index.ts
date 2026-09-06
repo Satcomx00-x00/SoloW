@@ -1,4 +1,5 @@
 export * from "./agent-catalog.js";
+export * from "./agent-library.js";
 export * from "./common.js";
 export * from "./contribution.js";
 export * from "./errors.js";

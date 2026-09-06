@@ -17,7 +17,8 @@ export type FlagKey =
   | "ff-integrations"
   | "ff-mcp"
   | "ff-workflows"
-  | "ff-agent-widgets";
+  | "ff-agent-widgets"
+  | "ff-agent-libraries";
 
 export interface FlagDefinition {
   key: FlagKey;
@@ -58,6 +59,13 @@ export const FLAGS: Record<FlagKey, FlagDefinition> = {
     key: "ff-agent-widgets",
     description:
       "Agent widgets — teach the agent to emit tappable questions, diagrams and checklists, and draw them in the transcript.",
+    default: false,
+    granularity: "workspace",
+  },
+  "ff-agent-libraries": {
+    key: "ff-agent-libraries",
+    description:
+      "Agent libraries — MCP servers and Skills kept in one place, loaded into every agent or into the Workflow Steps that name them (spec F24).",
     default: false,
     granularity: "workspace",
   },

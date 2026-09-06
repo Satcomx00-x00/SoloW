@@ -25,9 +25,11 @@ import { ExecutorProfilesSection } from "./executor-profiles-section";
 import { FlagsSection } from "./flags-section";
 import { IntegrationsSection } from "./integrations-section";
 import { McpSection } from "./mcp-section";
+import { McpServersSection } from "./mcp-servers-section";
 import { ProviderIdentitySection } from "./provider-identity-section";
 import { RepositoriesSection } from "./repositories-section";
 import { SecretsSection } from "./secrets-section";
+import { SkillsSection } from "./skills-section";
 import { StatusBarSection } from "./status-bar-section";
 import { WorkspaceSection } from "./workspace-section";
 
@@ -172,12 +174,23 @@ const PAGE_WIDTH = "mx-auto w-full max-w-3xl 2xl:max-w-6xl space-y-5 px-6 py-6";
  *
  * Scoped `> div >` rather than by descendant: `flags-section` opens a dialog, and a dialog that
  * happened to hold a card would otherwise be re-laid out as a settings row.
+ *
+ * A header that carries a `CardAction` (the libraries' *New …* / *Import* buttons) is two columns
+ * on its own — `1fr auto`, the action in the corner — which inside an 18rem column left the
+ * description a few rems and wrapped it one word per line. Wide, the header goes back to one
+ * column and the action sits beneath the description, where the 18rem is all its own.
  */
 const WIDE_SECTION_LAYOUT = [
   "2xl:[&>div>[data-slot=card]]:grid",
   "2xl:[&>div>[data-slot=card]]:grid-cols-[minmax(0,18rem)_minmax(0,1fr)]",
   "2xl:[&>div>[data-slot=card]]:items-start",
   "2xl:[&>div>[data-slot=card]]:gap-x-10",
+  "2xl:[&>div>[data-slot=card]>[data-slot=card-header]]:grid-cols-1",
+  "2xl:[&>div>[data-slot=card]>[data-slot=card-header]>[data-slot=card-action]]:col-start-1",
+  "2xl:[&>div>[data-slot=card]>[data-slot=card-header]>[data-slot=card-action]]:row-start-3",
+  "2xl:[&>div>[data-slot=card]>[data-slot=card-header]>[data-slot=card-action]]:row-span-1",
+  "2xl:[&>div>[data-slot=card]>[data-slot=card-header]>[data-slot=card-action]]:justify-self-start",
+  "2xl:[&>div>[data-slot=card]>[data-slot=card-header]>[data-slot=card-action]]:pt-2",
 ].join(" ");
 
 function captionFor(group: SettingsGroup): string {
@@ -199,6 +212,8 @@ const SECTION_COMPONENTS: Record<string, () => React.ReactNode> = {
   secrets: () => <SecretsSection />,
   "agent-profiles": () => <AgentProfilesSection />,
   "executor-profiles": () => <ExecutorProfilesSection />,
+  "mcp-servers": () => <McpServersSection />,
+  skills: () => <SkillsSection />,
   mcp: () => <McpSection />,
   "status-bar": () => <StatusBarSection />,
   flags: () => <FlagsSection />,

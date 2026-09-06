@@ -104,6 +104,16 @@ export const workflowProcedure = publicProcedure
   .use(requireFlag("ff-workflows"));
 
 /**
+ * The agent libraries — MCP servers and Skills (spec F24). Under the core switch for the same
+ * reason Workflows are: what these rows say is loaded into every agent the core loop runs, so
+ * they must not stay editable once that loop is off.
+ */
+export const libraryProcedure = publicProcedure
+  .use(requireSession)
+  .use(requireFlag("ff-core-program"))
+  .use(requireFlag("ff-agent-libraries"));
+
+/**
  * Per-Owner rate limit for a sensitive write. Returns a middleware to chain after
  * `ownerProcedure` (session already required), tripping `TOO_MANY_REQUESTS` past the window
  * limit (plan §12).

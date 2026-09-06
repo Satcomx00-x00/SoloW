@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { z } from "zod";
 
 /**
@@ -63,4 +64,27 @@ const orchestratorEnvSchema = z.object({
 
 export function orchestratorUrl(): string | undefined {
   return orchestratorEnvSchema.parse(process.env).SOLOW_ORCHESTRATOR_URL;
+}
+
+/**
+ * Where a bulk Skill import keeps the repositories it clones (spec F24). Relative to the
+ * process's working directory like the orchestrator's roots, and resolved here so the paths
+ * written into `skill.source` are absolute — those are read by the orchestrator at launch, from
+ * whatever directory *it* runs in.
+ */
+const skillsEnvSchema = z.object({
+  SOLOW_SKILLS_ROOT: z.string().min(1).default(".solow/skills"),
+});
+
+export function skillsRoot(): string {
+  return resolve(skillsEnvSchema.parse(process.env).SOLOW_SKILLS_ROOT);
+}
+
+/**
+ * The environment a child process this app spawns should see: this process's, plus what the
+ * caller sets. The one place a subprocess env is built, so the "no other module reads
+ * process.env" rule above holds for `git` as well.
+ */
+export function childEnv(extra: Record<string, string>): Record<string, string | undefined> {
+  return { ...process.env, ...extra };
 }

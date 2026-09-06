@@ -1,4 +1,5 @@
 /// <reference types="bun-types" />
+import type { AcpMcpServer } from "@solow/acp";
 import type { FailureSignal } from "@solow/core";
 
 /**
@@ -111,6 +112,11 @@ export interface AgentStartOpts {
   worktreeName: string | null;
   /** What the agent is asked to do this round — the Task brief, plus any review feedback. */
   prompt: string;
+  /**
+   * MCP servers for a runtime that takes them over its protocol (ACP's `session/new`); a
+   * runtime that takes them as arguments finds them in `args` instead (spec F24).
+   */
+  mcpServers?: AcpMcpServer[];
   onEvent: (e: AgentStreamEvent) => void;
 }
 

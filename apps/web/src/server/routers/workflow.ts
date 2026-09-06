@@ -149,7 +149,7 @@ export const workflowRouter = router({
         tags: ["workflow"],
         protect: true,
         summary:
-          "Change a Step's name, Agent Profile, prompt template, gate, advance rule or branch. A branch's targets must be Steps of the same Workflow and never the Step itself; null removes the branch. Bumps the Workflow's definition version, so an attached Task reports the drift.",
+          "Change a Step's name, Agent Profile, prompt template, gate, advance rule, branch, or the MCP servers and Skills it loads on top of the Workspace-wide ones. A branch's targets must be Steps of the same Workflow and never the Step itself; null removes the branch. Bumps the Workflow's definition version, so an attached Task reports the drift.",
       },
     })
     .input(updateWorkflowStepInput)

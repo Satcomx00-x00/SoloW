@@ -6,5 +6,6 @@ export * from "./priority.js";
 export * from "./project-filter.js";
 export * from "./project-hierarchy.js";
 export * from "./registry.js";
+export * from "./skill.js";
 export * from "./task.js";
 export * from "./workflow.js";

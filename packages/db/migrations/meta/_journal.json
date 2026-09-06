@@ -246,6 +246,13 @@
       "when": 1788689232430,
       "tag": "0034_melodic_chameleon",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "6",
+      "when": 1788714857500,
+      "tag": "0035_regular_starfox",
+      "breakpoints": true
     }
   ]
 }

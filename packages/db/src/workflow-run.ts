@@ -62,6 +62,8 @@ export function stepToDto(row: WorkflowStepRow, position: number): WorkflowStepD
     advanceOn: row.advanceOn,
     onEnter: row.onEnter ?? null,
     branch: row.branch ?? null,
+    mcpServerIds: row.mcpServerIds ?? [],
+    skillIds: row.skillIds ?? [],
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };

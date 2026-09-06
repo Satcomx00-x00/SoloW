@@ -56,6 +56,8 @@ const HANDLERS = {
   "integration.list": () => [],
   "identity.list": () => [],
   "mcpToken.list": () => [],
+  "library.mcp.list": () => [],
+  "library.skill.list": () => [],
   "flag.list": () => [],
   "preference.getSurfaceLayout": () => ({
     surface: "status-bar",
@@ -131,11 +133,14 @@ describe("the settings page", () => {
 
     await screen.findByRole("heading", { name: "Agents", level: 1 });
     // A Secret, then the Agent Profile that spends it, then somewhere to execute — the sequence
-    // the old single column was arranged to show, kept.
+    // the old single column was arranged to show, kept — and then what the agent is handed once
+    // it runs: the MCP servers it can call and the Skills it reads (spec F24).
     expect(settingsSectionsIn("Agents").map((s) => s.id)).toEqual([
       "secrets",
       "agent-profiles",
       "executor-profiles",
+      "mcp-servers",
+      "skills",
     ]);
   });
 

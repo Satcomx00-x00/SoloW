@@ -136,6 +136,11 @@ The model, its seam and the designing canvas ship; the monitor does not. Concret
   is turned into the neighbour pair `workflow.reorderStep` takes and the node snaps back to its
   laid-out place, so the canvas never stores a position the run loop could disagree with.
   Parallel Steps and non-agent nodes (Gate, Fork/Join — FR-2) stay Later.
+- **A Step names what it loads from the agent libraries** ([F24](./F24-agent-libraries.md)):
+  `workflow_step.mcp_server_ids` / `skill_ids`, chosen on the node under *Loads*, additively —
+  the Workspace-wide items are checked and locked there, the rest are the Step's own. Every id is
+  checked against the Workspace's libraries before it is written (`WORKFLOW_TOOL_NOT_IN_WORKSPACE`),
+  and an item a Step names cannot be deleted from its library.
 - **A Step can branch on a condition** (FR-2's *Condition*, in the shape this pipeline can
   answer). It is a property of an agent Step rather than a Step kind of its own — a Condition node
   would be a row with no agent, no prompt and no gate, and every rule that reads a Step would have

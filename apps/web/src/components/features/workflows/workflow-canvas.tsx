@@ -3,6 +3,8 @@
 import "@xyflow/react/dist/style.css";
 
 import type {
+  McpServerDto,
+  SkillDto,
   WorkflowAdvanceOn,
   WorkflowStepBranch,
   WorkflowStepCondition,
@@ -38,13 +40,23 @@ import {
   useReactFlow,
   useStore,
 } from "@xyflow/react";
-import { GitBranch, Plus, Trash2, TriangleAlert, X } from "lucide-react";
+import { ChevronsUpDown, GitBranch, Plus, Trash2, TriangleAlert, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ConfirmAction } from "@/components/features/confirm-action";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -172,9 +184,13 @@ const PROBLEM_TEXT: Record<WorkflowGraphProblem["kind"], string> = {
   "no-exit": "No way out — from here the pipeline can never end.",
 };
 
+/** The libraries a Step can name (spec F24), or null where the feature is off. */
+type Libraries = { mcp: readonly McpServerDto[]; skills: readonly SkillDto[] } | null;
+
 type StepNodeData = {
   step: WorkflowStepDto;
   index: number;
+  libraries: Libraries;
   /** The dot's colour — this Step's own, resolved against its siblings (`stepDotColors`). */
   dotColor: string;
   /** Why this Step cannot be run as it stands, if it cannot. */
@@ -407,6 +423,140 @@ function ExitChip({ top, children }: { top: number; children: string }) {
 const HANDLE = "!size-2.5 !border-2 !border-card !bg-muted-foreground";
 
 /**
+ * One library, as a Step picks from it: a dropdown with a search box and a checkbox per item.
+ *
+ * A `Command` inside a `Popover` rather than a list of checkboxes on the card: a library of
+ * twenty servers would make every node twenty rows taller, and the search is what finds the
+ * one among them. The trigger reads the choice back in a line, so the card still says what the
+ * Step loads without being opened. An item switched on Workspace-wide is checked and cannot be
+ * cleared here — it is loaded whether or not the Step asks — and says so in the row.
+ */
+function LibraryPicker({
+  label,
+  stepName,
+  items,
+  chosen,
+  onChange,
+}: {
+  label: string;
+  stepName: string;
+  items: readonly { id: string; name: string; description: string | null; enabled: boolean }[];
+  chosen: readonly string[];
+  onChange: (ids: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const loads = items.filter((item) => item.enabled || chosen.includes(item.id));
+  const summary = loads.length === 0 ? "None" : loads.map((item) => item.name).join(", ");
+  const toggle = (id: string, on: boolean) =>
+    onChange(on ? [...new Set([...chosen, id])] : chosen.filter((x) => x !== id));
+  return (
+    <div className="grid gap-1">
+      <span className="text-2xs text-muted-foreground uppercase tracking-wide">{label}</span>
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            role="combobox"
+            aria-expanded={open}
+            aria-label={`${label} for ${stepName}`}
+            className={`${FIELD} h-7 w-full justify-between px-2 font-normal text-xs`}
+          >
+            <span
+              className={`truncate font-mono ${loads.length === 0 ? "text-muted-foreground" : ""}`}
+            >
+              {summary}
+            </span>
+            <ChevronsUpDown aria-hidden className="size-3 shrink-0 opacity-50" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-72 p-0" align="start">
+          <Command>
+            <CommandInput placeholder={`Search ${label.toLowerCase()}…`} className="h-8 text-xs" />
+            <CommandList>
+              <CommandEmpty>Nothing in the library matches.</CommandEmpty>
+              <CommandGroup>
+                {items.map((item) => {
+                  const on = item.enabled || chosen.includes(item.id);
+                  return (
+                    <CommandItem
+                      key={item.id}
+                      value={`${item.name} ${item.description ?? ""}`}
+                      disabled={item.enabled}
+                      onSelect={() => toggle(item.id, !on)}
+                      className="gap-2 text-xs"
+                    >
+                      <Checkbox
+                        checked={on}
+                        disabled={item.enabled}
+                        tabIndex={-1}
+                        aria-label={`Load ${item.name} in ${stepName}`}
+                        className="pointer-events-none"
+                      />
+                      <span className="min-w-0 flex-1 truncate">
+                        <span className="block truncate font-mono">{item.name}</span>
+                        {item.description && (
+                          <span className="block truncate text-2xs text-muted-foreground">
+                            {item.description}
+                          </span>
+                        )}
+                      </span>
+                      {item.enabled && (
+                        <span className="shrink-0 text-2xs text-muted-foreground">every agent</span>
+                      )}
+                    </CommandItem>
+                  );
+                })}
+              </CommandGroup>
+            </CommandList>
+          </Command>
+        </PopoverContent>
+      </Popover>
+    </div>
+  );
+}
+
+/**
+ * What this Step loads from the libraries, on top of what every agent loads (spec F24): one
+ * picker per library, each saved whole on every change, like the Task's repositories are.
+ */
+function LoadsFields({
+  step,
+  libraries,
+  save,
+}: {
+  step: WorkflowStepDto;
+  libraries: Libraries;
+  save: (patch: { mcpServerIds?: string[]; skillIds?: string[] }) => void;
+}) {
+  if (!libraries || (libraries.mcp.length === 0 && libraries.skills.length === 0)) return null;
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-xs">Loads</Label>
+      {libraries.mcp.length > 0 && (
+        <LibraryPicker
+          label="MCP servers"
+          stepName={step.name}
+          items={libraries.mcp}
+          chosen={step.mcpServerIds}
+          onChange={(mcpServerIds) => save({ mcpServerIds })}
+        />
+      )}
+      {libraries.skills.length > 0 && (
+        <LibraryPicker
+          label="Skills"
+          stepName={step.name}
+          items={libraries.skills}
+          chosen={step.skillIds}
+          onChange={(skillIds) => save({ skillIds })}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
  * A Step's exits, on its right edge. One in the middle for a Step that goes to its successor;
  * two — labelled, because the palette is greyscale and a colour would be the only cue — for a
  * Step that branches. The ids are what `stepEdges` names as `sourceHandle`.
@@ -448,7 +598,8 @@ function StepExits({ branching }: { branching: boolean }) {
 }
 
 function StepNodeView({ data }: NodeProps<StepNode>) {
-  const { step, index, dotColor, problems, profiles, siblings, onAddAfter, adding } = data;
+  const { step, index, dotColor, libraries, problems, profiles, siblings, onAddAfter, adding } =
+    data;
   const utils = trpc.useUtils();
   const refresh = () => utils.workflow.get.invalidate({ id: step.workflowId });
   const update = trpc.workflow.updateStep.useMutation({ onSuccess: refresh });
@@ -622,6 +773,11 @@ function StepNodeView({ data }: NodeProps<StepNode>) {
             }}
           />
         </div>
+        <LoadsFields
+          step={step}
+          libraries={libraries}
+          save={(patch) => update.mutate({ stepId: step.id, ...patch })}
+        />
         <BranchFields
           step={step}
           siblings={siblings}
@@ -870,6 +1026,17 @@ const EDGE_TYPES = { step: StepEdge };
 function Canvas({ workflow }: { workflow: WorkflowWithStepsDto }) {
   const utils = trpc.useUtils();
   const profiles = trpc.profile.agent.list.useQuery({ ...WHOLE_PAGE });
+  // The libraries a Step can name (spec F24). Off — the flag, or a failed read — is null, and
+  // the node then shows no `Loads` block at all rather than an empty one.
+  const mcpLibrary = trpc.library.mcp.list.useQuery({}, { retry: false });
+  const skillLibrary = trpc.library.skill.list.useQuery({}, { retry: false });
+  const libraries = useMemo<Libraries>(
+    () =>
+      mcpLibrary.data && skillLibrary.data
+        ? { mcp: mcpLibrary.data, skills: skillLibrary.data }
+        : null,
+    [mcpLibrary.data, skillLibrary.data],
+  );
   // Memoized, and the mutation *functions* below are what the callbacks close over rather than
   // the mutation objects: `layout` feeds `setNodes` from an effect, so anything in its dependency
   // chain that is a fresh value on every render is a render loop, not a stale closure.
@@ -949,6 +1116,7 @@ function Canvas({ workflow }: { workflow: WorkflowWithStepsDto }) {
       data: {
         step,
         index,
+        libraries,
         dotColor: dots.get(step.id) ?? "var(--muted-foreground)",
         problems: problems.filter((p) => p.stepId === step.id).map((p) => p.kind),
         profiles: options,
@@ -978,7 +1146,7 @@ function Canvas({ workflow }: { workflow: WorkflowWithStepsDto }) {
       selectable: false,
     };
     return [start, ...stepNodes, end];
-  }, [workflow.steps, options, addAfter, cannotAdd]);
+  }, [workflow.steps, options, libraries, addAfter, cannotAdd]);
   const edges = useMemo<StepEdge[]>(() => {
     const names = new Map(workflow.steps.map((step) => [step.id, step.name]));
     const nameOf = (id: string) => (id === END_NODE_ID ? "the end" : (names.get(id) ?? id));

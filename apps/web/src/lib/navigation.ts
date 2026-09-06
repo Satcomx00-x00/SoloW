@@ -1,5 +1,6 @@
 import {
   Blocks,
+  BookOpen,
   Bot,
   Building2,
   Columns3,
@@ -9,6 +10,7 @@ import {
   KeyRound,
   type LucideIcon,
   PanelBottom,
+  Plug,
   PlugZap,
   Server,
   Settings,
@@ -272,8 +274,24 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
     icon: Server,
   },
   {
+    id: "mcp-servers",
+    label: "MCP servers",
+    caption: "Tools every agent can call — or only the Steps that name them",
+    group: "Agents",
+    icon: Plug,
+  },
+  {
+    id: "skills",
+    label: "Skills",
+    caption: "Playbooks an agent reads before it works, written here or kept in a directory",
+    group: "Agents",
+    icon: BookOpen,
+  },
+  {
     id: "mcp",
-    label: "MCP",
+    // "MCP access", not "MCP": the *servers* an agent loads live under Agents, and a section
+    // called MCP beside them would read as the same thing from the other side.
+    label: "MCP access",
     caption: "Tokens that let an outside agent drive this Workspace",
     group: "Extensions",
     icon: Blocks,

@@ -4145,6 +4145,2655 @@
         }
       }
     },
+    "/library.mcp.list": {
+      "get": {
+        "operationId": "library-mcp-list",
+        "summary": "List this Workspace's MCP servers. Secrets referenced by a server's env or headers appear as references, never as values.",
+        "tags": [
+          "library"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "name": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+                      },
+                      "description": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "transport": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "stdio"
+                                ]
+                              },
+                              "command": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 500
+                              },
+                              "args": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "maxLength": 2000
+                                },
+                                "maxItems": 64,
+                                "default": []
+                              },
+                              "env": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "oneOf": [
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "kind": {
+                                          "type": "string",
+                                          "enum": [
+                                            "literal"
+                                          ]
+                                        },
+                                        "value": {
+                                          "type": "string",
+                                          "maxLength": 4000
+                                        }
+                                      },
+                                      "required": [
+                                        "kind",
+                                        "value"
+                                      ]
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "kind": {
+                                          "type": "string",
+                                          "enum": [
+                                            "secret"
+                                          ]
+                                        },
+                                        "secretId": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        }
+                                      },
+                                      "required": [
+                                        "kind",
+                                        "secretId"
+                                      ]
+                                    }
+                                  ]
+                                },
+                                "default": {}
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "command",
+                              "args",
+                              "env"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "http"
+                                ]
+                              },
+                              "url": {
+                                "type": "string",
+                                "format": "uri",
+                                "maxLength": 2000
+                              },
+                              "headers": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "oneOf": [
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "kind": {
+                                          "type": "string",
+                                          "enum": [
+                                            "literal"
+                                          ]
+                                        },
+                                        "value": {
+                                          "type": "string",
+                                          "maxLength": 4000
+                                        }
+                                      },
+                                      "required": [
+                                        "kind",
+                                        "value"
+                                      ]
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "kind": {
+                                          "type": "string",
+                                          "enum": [
+                                            "secret"
+                                          ]
+                                        },
+                                        "secretId": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        }
+                                      },
+                                      "required": [
+                                        "kind",
+                                        "secretId"
+                                      ]
+                                    }
+                                  ]
+                                },
+                                "default": {}
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "url",
+                              "headers"
+                            ]
+                          }
+                        ]
+                      },
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "createdAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "updatedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "name",
+                      "description",
+                      "transport",
+                      "enabled",
+                      "createdAt",
+                      "updatedAt"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.NOT_FOUND"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/library.mcp.create": {
+      "post": {
+        "operationId": "library-mcp-create",
+        "summary": "Add an MCP server — a stdio command or an HTTP endpoint — to the library. Each env variable or header is a literal or a reference to one of this Workspace's Secrets. `enabled` loads it into every agent run; off, it is loaded only by the Workflow Steps that name it.",
+        "tags": [
+          "library"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 2000
+                  },
+                  "transport": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "stdio"
+                            ]
+                          },
+                          "command": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          },
+                          "args": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "maxLength": 2000
+                            },
+                            "maxItems": 64,
+                            "default": []
+                          },
+                          "env": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "oneOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "literal"
+                                      ]
+                                    },
+                                    "value": {
+                                      "type": "string",
+                                      "maxLength": 4000
+                                    }
+                                  },
+                                  "required": [
+                                    "kind",
+                                    "value"
+                                  ]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "secret"
+                                      ]
+                                    },
+                                    "secretId": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    }
+                                  },
+                                  "required": [
+                                    "kind",
+                                    "secretId"
+                                  ]
+                                }
+                              ]
+                            },
+                            "default": {}
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "command"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "http"
+                            ]
+                          },
+                          "url": {
+                            "type": "string",
+                            "format": "uri",
+                            "maxLength": 2000
+                          },
+                          "headers": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "oneOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "literal"
+                                      ]
+                                    },
+                                    "value": {
+                                      "type": "string",
+                                      "maxLength": 4000
+                                    }
+                                  },
+                                  "required": [
+                                    "kind",
+                                    "value"
+                                  ]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "secret"
+                                      ]
+                                    },
+                                    "secretId": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    }
+                                  },
+                                  "required": [
+                                    "kind",
+                                    "secretId"
+                                  ]
+                                }
+                              ]
+                            },
+                            "default": {}
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "url"
+                        ]
+                      }
+                    ]
+                  },
+                  "enabled": {
+                    "type": "boolean",
+                    "default": false
+                  }
+                },
+                "required": [
+                  "name",
+                  "transport"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "name": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+                    },
+                    "description": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "transport": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "stdio"
+                              ]
+                            },
+                            "command": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 500
+                            },
+                            "args": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "maxLength": 2000
+                              },
+                              "maxItems": 64,
+                              "default": []
+                            },
+                            "env": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "oneOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "literal"
+                                        ]
+                                      },
+                                      "value": {
+                                        "type": "string",
+                                        "maxLength": 4000
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "value"
+                                    ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "secret"
+                                        ]
+                                      },
+                                      "secretId": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "secretId"
+                                    ]
+                                  }
+                                ]
+                              },
+                              "default": {}
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "command",
+                            "args",
+                            "env"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "http"
+                              ]
+                            },
+                            "url": {
+                              "type": "string",
+                              "format": "uri",
+                              "maxLength": 2000
+                            },
+                            "headers": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "oneOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "literal"
+                                        ]
+                                      },
+                                      "value": {
+                                        "type": "string",
+                                        "maxLength": 4000
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "value"
+                                    ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "secret"
+                                        ]
+                                      },
+                                      "secretId": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "secretId"
+                                    ]
+                                  }
+                                ]
+                              },
+                              "default": {}
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "url",
+                            "headers"
+                          ]
+                        }
+                      ]
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "description",
+                    "transport",
+                    "enabled",
+                    "createdAt",
+                    "updatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/library.mcp.update": {
+      "post": {
+        "operationId": "library-mcp-update",
+        "summary": "Change an MCP server's name, description, transport or Workspace-wide switch. A transport replaces the previous one whole.",
+        "tags": [
+          "library"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "name": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+                  },
+                  "description": {
+                    "type": "string",
+                    "nullable": true,
+                    "maxLength": 2000
+                  },
+                  "transport": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "stdio"
+                            ]
+                          },
+                          "command": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                          },
+                          "args": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "maxLength": 2000
+                            },
+                            "maxItems": 64,
+                            "default": []
+                          },
+                          "env": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "oneOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "literal"
+                                      ]
+                                    },
+                                    "value": {
+                                      "type": "string",
+                                      "maxLength": 4000
+                                    }
+                                  },
+                                  "required": [
+                                    "kind",
+                                    "value"
+                                  ]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "secret"
+                                      ]
+                                    },
+                                    "secretId": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    }
+                                  },
+                                  "required": [
+                                    "kind",
+                                    "secretId"
+                                  ]
+                                }
+                              ]
+                            },
+                            "default": {}
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "command"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "http"
+                            ]
+                          },
+                          "url": {
+                            "type": "string",
+                            "format": "uri",
+                            "maxLength": 2000
+                          },
+                          "headers": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "oneOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "literal"
+                                      ]
+                                    },
+                                    "value": {
+                                      "type": "string",
+                                      "maxLength": 4000
+                                    }
+                                  },
+                                  "required": [
+                                    "kind",
+                                    "value"
+                                  ]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "secret"
+                                      ]
+                                    },
+                                    "secretId": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    }
+                                  },
+                                  "required": [
+                                    "kind",
+                                    "secretId"
+                                  ]
+                                }
+                              ]
+                            },
+                            "default": {}
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "url"
+                        ]
+                      }
+                    ]
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "name": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+                    },
+                    "description": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "transport": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "stdio"
+                              ]
+                            },
+                            "command": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 500
+                            },
+                            "args": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "maxLength": 2000
+                              },
+                              "maxItems": 64,
+                              "default": []
+                            },
+                            "env": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "oneOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "literal"
+                                        ]
+                                      },
+                                      "value": {
+                                        "type": "string",
+                                        "maxLength": 4000
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "value"
+                                    ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "secret"
+                                        ]
+                                      },
+                                      "secretId": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "secretId"
+                                    ]
+                                  }
+                                ]
+                              },
+                              "default": {}
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "command",
+                            "args",
+                            "env"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "http"
+                              ]
+                            },
+                            "url": {
+                              "type": "string",
+                              "format": "uri",
+                              "maxLength": 2000
+                            },
+                            "headers": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "oneOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "literal"
+                                        ]
+                                      },
+                                      "value": {
+                                        "type": "string",
+                                        "maxLength": 4000
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "value"
+                                    ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "secret"
+                                        ]
+                                      },
+                                      "secretId": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "secretId"
+                                    ]
+                                  }
+                                ]
+                              },
+                              "default": {}
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "url",
+                            "headers"
+                          ]
+                        }
+                      ]
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "description",
+                    "transport",
+                    "enabled",
+                    "createdAt",
+                    "updatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/library.mcp.delete": {
+      "post": {
+        "operationId": "library-mcp-delete",
+        "summary": "Remove an MCP server from the library. Refused while a Workflow Step still names it.",
+        "tags": [
+          "library"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "name": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+                      },
+                      "description": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "transport": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "stdio"
+                                ]
+                              },
+                              "command": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 500
+                              },
+                              "args": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "maxLength": 2000
+                                },
+                                "maxItems": 64,
+                                "default": []
+                              },
+                              "env": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "oneOf": [
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "kind": {
+                                          "type": "string",
+                                          "enum": [
+                                            "literal"
+                                          ]
+                                        },
+                                        "value": {
+                                          "type": "string",
+                                          "maxLength": 4000
+                                        }
+                                      },
+                                      "required": [
+                                        "kind",
+                                        "value"
+                                      ]
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "kind": {
+                                          "type": "string",
+                                          "enum": [
+                                            "secret"
+                                          ]
+                                        },
+                                        "secretId": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        }
+                                      },
+                                      "required": [
+                                        "kind",
+                                        "secretId"
+                                      ]
+                                    }
+                                  ]
+                                },
+                                "default": {}
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "command",
+                              "args",
+                              "env"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "http"
+                                ]
+                              },
+                              "url": {
+                                "type": "string",
+                                "format": "uri",
+                                "maxLength": 2000
+                              },
+                              "headers": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "oneOf": [
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "kind": {
+                                          "type": "string",
+                                          "enum": [
+                                            "literal"
+                                          ]
+                                        },
+                                        "value": {
+                                          "type": "string",
+                                          "maxLength": 4000
+                                        }
+                                      },
+                                      "required": [
+                                        "kind",
+                                        "value"
+                                      ]
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "kind": {
+                                          "type": "string",
+                                          "enum": [
+                                            "secret"
+                                          ]
+                                        },
+                                        "secretId": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        }
+                                      },
+                                      "required": [
+                                        "kind",
+                                        "secretId"
+                                      ]
+                                    }
+                                  ]
+                                },
+                                "default": {}
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "url",
+                              "headers"
+                            ]
+                          }
+                        ]
+                      },
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "createdAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "updatedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "name",
+                      "description",
+                      "transport",
+                      "enabled",
+                      "createdAt",
+                      "updatedAt"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/library.skill.list": {
+      "get": {
+        "operationId": "library-skill-list",
+        "summary": "List this Workspace's Skills, with where each one's text comes from.",
+        "tags": [
+          "library"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "name": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+                      },
+                      "description": {
+                        "type": "string"
+                      },
+                      "source": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "inline"
+                                ]
+                              },
+                              "body": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200000
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "body"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "path"
+                                ]
+                              },
+                              "path": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 4000
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "path"
+                            ]
+                          }
+                        ]
+                      },
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "createdAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "updatedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "name",
+                      "description",
+                      "source",
+                      "enabled",
+                      "createdAt",
+                      "updatedAt"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.NOT_FOUND"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/library.skill.create": {
+      "post": {
+        "operationId": "library-skill-create",
+        "summary": "Add a Skill — written inline as the SKILL.md the agent will read, or pointing at a directory on the host that holds one. `enabled` loads it into every agent run; off, only the Workflow Steps that name it load it.",
+        "tags": [
+          "library"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+                  },
+                  "description": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  "source": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "inline"
+                            ]
+                          },
+                          "body": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200000
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "body"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "path"
+                            ]
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4000
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "path"
+                        ]
+                      }
+                    ]
+                  },
+                  "enabled": {
+                    "type": "boolean",
+                    "default": false
+                  }
+                },
+                "required": [
+                  "name",
+                  "description",
+                  "source"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "name": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "inline"
+                              ]
+                            },
+                            "body": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 200000
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "body"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "path"
+                              ]
+                            },
+                            "path": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 4000
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "path"
+                          ]
+                        }
+                      ]
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "description",
+                    "source",
+                    "enabled",
+                    "createdAt",
+                    "updatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/library.skill.update": {
+      "post": {
+        "operationId": "library-skill-update",
+        "summary": "Change a Skill's name, description, source or Workspace-wide switch.",
+        "tags": [
+          "library"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "name": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+                  },
+                  "description": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  "source": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "inline"
+                            ]
+                          },
+                          "body": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200000
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "body"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "path"
+                            ]
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4000
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "path"
+                        ]
+                      }
+                    ]
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "name": {
+                      "type": "string",
+                      "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "inline"
+                              ]
+                            },
+                            "body": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 200000
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "body"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "path"
+                              ]
+                            },
+                            "path": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 4000
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "path"
+                          ]
+                        }
+                      ]
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "description",
+                    "source",
+                    "enabled",
+                    "createdAt",
+                    "updatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/library.skill.scan": {
+      "post": {
+        "operationId": "library-skill-scan",
+        "summary": "Find every Skill — each directory holding a SKILL.md — under a directory on the host or in a git repository, which SoloW clones into its skills directory (and pulls forward on the next scan). Returns them named and described, marking the ones the library already holds. Nothing is imported.",
+        "tags": [
+          "library"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "source": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "path"
+                            ]
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4000
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "path"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "git"
+                            ]
+                          },
+                          "url": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 2000
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "url"
+                        ]
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "source"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "root": {
+                      "type": "string"
+                    },
+                    "skills": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "path": {
+                            "type": "string"
+                          },
+                          "relativePath": {
+                            "type": "string"
+                          },
+                          "files": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "existing": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "description",
+                          "path",
+                          "relativePath",
+                          "files",
+                          "existing"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "root",
+                    "skills"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/library.skill.unpack": {
+      "post": {
+        "operationId": "library-skill-unpack",
+        "summary": "Unpack a base64-encoded .zip into SoloW's skills directory (under the archive's name, replaced on re-upload) and scan it the way `library.skill.scan` scans a directory. An archive naming a path outside its own directory is refused whole. Nothing is imported.",
+        "tags": [
+          "library"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "fileName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "zipBase64": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 40000000
+                  }
+                },
+                "required": [
+                  "fileName",
+                  "zipBase64"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "root": {
+                      "type": "string"
+                    },
+                    "skills": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "path": {
+                            "type": "string"
+                          },
+                          "relativePath": {
+                            "type": "string"
+                          },
+                          "files": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "existing": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "description",
+                          "path",
+                          "relativePath",
+                          "files",
+                          "existing"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "root",
+                    "skills"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/library.skill.import": {
+      "post": {
+        "operationId": "library-skill-import",
+        "summary": "Import Skills found by a scan, each as a directory source so the scripts and references beside its SKILL.md travel with it. A name already in the library, or a directory that no longer holds a SKILL.md, is skipped by name rather than failing the batch.",
+        "tags": [
+          "library"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "skills": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+                        },
+                        "description": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 500
+                        },
+                        "path": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4000
+                        }
+                      },
+                      "required": [
+                        "name",
+                        "description",
+                        "path"
+                      ]
+                    },
+                    "minItems": 1,
+                    "maxItems": 200
+                  },
+                  "enabled": {
+                    "type": "boolean",
+                    "default": false
+                  }
+                },
+                "required": [
+                  "skills"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "imported": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "name": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "source": {
+                            "oneOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "inline"
+                                    ]
+                                  },
+                                  "body": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 200000
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "body"
+                                ]
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "path"
+                                    ]
+                                  },
+                                  "path": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 4000
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "path"
+                                ]
+                              }
+                            ]
+                          },
+                          "enabled": {
+                            "type": "boolean"
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "updatedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name",
+                          "description",
+                          "source",
+                          "enabled",
+                          "createdAt",
+                          "updatedAt"
+                        ]
+                      }
+                    },
+                    "skipped": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+                      }
+                    }
+                  },
+                  "required": [
+                    "imported",
+                    "skipped"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/library.skill.delete": {
+      "post": {
+        "operationId": "library-skill-delete",
+        "summary": "Remove a Skill from the library. Refused while a Workflow Step still names it.",
+        "tags": [
+          "library"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "name": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+                      },
+                      "description": {
+                        "type": "string"
+                      },
+                      "source": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "inline"
+                                ]
+                              },
+                              "body": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200000
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "body"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "path"
+                                ]
+                              },
+                              "path": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 4000
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "path"
+                            ]
+                          }
+                        ]
+                      },
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "createdAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "updatedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "name",
+                      "description",
+                      "source",
+                      "enabled",
+                      "createdAt",
+                      "updatedAt"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/integration.providers": {
       "get": {
         "operationId": "integration-providers",
@@ -22345,6 +24994,20 @@
                               "elseStepId"
                             ]
                           },
+                          "mcpServerIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "skillIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
                           "createdAt": {
                             "type": "string",
                             "format": "date-time"
@@ -22366,6 +25029,8 @@
                           "advanceOn",
                           "onEnter",
                           "branch",
+                          "mcpServerIds",
+                          "skillIds",
                           "createdAt",
                           "updatedAt"
                         ]
@@ -22959,6 +25624,22 @@
                       "elseStepId"
                     ]
                   },
+                  "mcpServerIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "maxItems": 64
+                  },
+                  "skillIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "maxItems": 64
+                  },
                   "afterStepId": {
                     "type": "string",
                     "nullable": true,
@@ -23134,6 +25815,20 @@
                               "elseStepId"
                             ]
                           },
+                          "mcpServerIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "skillIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
                           "createdAt": {
                             "type": "string",
                             "format": "date-time"
@@ -23155,6 +25850,8 @@
                           "advanceOn",
                           "onEnter",
                           "branch",
+                          "mcpServerIds",
+                          "skillIds",
                           "createdAt",
                           "updatedAt"
                         ]
@@ -23221,7 +25918,7 @@
     "/workflow.updateStep": {
       "post": {
         "operationId": "workflow-updateStep",
-        "summary": "Change a Step's name, Agent Profile, prompt template, gate, advance rule or branch. A branch's targets must be Steps of the same Workflow and never the Step itself; null removes the branch. Bumps the Workflow's definition version, so an attached Task reports the drift.",
+        "summary": "Change a Step's name, Agent Profile, prompt template, gate, advance rule, branch, or the MCP servers and Skills it loads on top of the Workspace-wide ones. A branch's targets must be Steps of the same Workflow and never the Step itself; null removes the branch. Bumps the Workflow's definition version, so an attached Task reports the drift.",
         "tags": [
           "workflow"
         ],
@@ -23346,6 +26043,22 @@
                       "thenStepId",
                       "elseStepId"
                     ]
+                  },
+                  "mcpServerIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "maxItems": 64
+                  },
+                  "skillIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "maxItems": 64
                   }
                 },
                 "required": [
@@ -23515,6 +26228,20 @@
                               "elseStepId"
                             ]
                           },
+                          "mcpServerIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "skillIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
                           "createdAt": {
                             "type": "string",
                             "format": "date-time"
@@ -23536,6 +26263,8 @@
                           "advanceOn",
                           "onEnter",
                           "branch",
+                          "mcpServerIds",
+                          "skillIds",
                           "createdAt",
                           "updatedAt"
                         ]
@@ -23802,6 +26531,20 @@
                               "elseStepId"
                             ]
                           },
+                          "mcpServerIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "skillIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
                           "createdAt": {
                             "type": "string",
                             "format": "date-time"
@@ -23823,6 +26566,8 @@
                           "advanceOn",
                           "onEnter",
                           "branch",
+                          "mcpServerIds",
+                          "skillIds",
                           "createdAt",
                           "updatedAt"
                         ]
@@ -24077,6 +26822,20 @@
                               "elseStepId"
                             ]
                           },
+                          "mcpServerIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "skillIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
                           "createdAt": {
                             "type": "string",
                             "format": "date-time"
@@ -24098,6 +26857,8 @@
                           "advanceOn",
                           "onEnter",
                           "branch",
+                          "mcpServerIds",
+                          "skillIds",
                           "createdAt",
                           "updatedAt"
                         ]
@@ -24351,6 +27112,20 @@
                             "elseStepId"
                           ]
                         },
+                        "mcpServerIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "skillIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
                         "createdAt": {
                           "type": "string",
                           "format": "date-time"
@@ -24372,6 +27147,8 @@
                         "advanceOn",
                         "onEnter",
                         "branch",
+                        "mcpServerIds",
+                        "skillIds",
                         "createdAt",
                         "updatedAt"
                       ]
@@ -24500,6 +27277,20 @@
                               "elseStepId"
                             ]
                           },
+                          "mcpServerIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "skillIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
                           "createdAt": {
                             "type": "string",
                             "format": "date-time"
@@ -24521,6 +27312,8 @@
                           "advanceOn",
                           "onEnter",
                           "branch",
+                          "mcpServerIds",
+                          "skillIds",
                           "createdAt",
                           "updatedAt"
                         ]
@@ -24864,6 +27657,20 @@
                             "elseStepId"
                           ]
                         },
+                        "mcpServerIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "skillIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
                         "createdAt": {
                           "type": "string",
                           "format": "date-time"
@@ -24885,6 +27692,8 @@
                         "advanceOn",
                         "onEnter",
                         "branch",
+                        "mcpServerIds",
+                        "skillIds",
                         "createdAt",
                         "updatedAt"
                       ]
@@ -25013,6 +27822,20 @@
                               "elseStepId"
                             ]
                           },
+                          "mcpServerIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "skillIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
                           "createdAt": {
                             "type": "string",
                             "format": "date-time"
@@ -25034,6 +27857,8 @@
                           "advanceOn",
                           "onEnter",
                           "branch",
+                          "mcpServerIds",
+                          "skillIds",
                           "createdAt",
                           "updatedAt"
                         ]
@@ -25301,6 +28126,20 @@
                             "elseStepId"
                           ]
                         },
+                        "mcpServerIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "skillIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
                         "createdAt": {
                           "type": "string",
                           "format": "date-time"
@@ -25322,6 +28161,8 @@
                         "advanceOn",
                         "onEnter",
                         "branch",
+                        "mcpServerIds",
+                        "skillIds",
                         "createdAt",
                         "updatedAt"
                       ]
@@ -25450,6 +28291,20 @@
                               "elseStepId"
                             ]
                           },
+                          "mcpServerIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "skillIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
                           "createdAt": {
                             "type": "string",
                             "format": "date-time"
@@ -25471,6 +28326,8 @@
                           "advanceOn",
                           "onEnter",
                           "branch",
+                          "mcpServerIds",
+                          "skillIds",
                           "createdAt",
                           "updatedAt"
                         ]
