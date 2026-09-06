@@ -31,6 +31,8 @@ function step(id: string, name: string, position: number, rank: string): Workflo
     advanceOn: "review",
     onEnter: null,
     branch: null,
+    mcpServerIds: [],
+    skillIds: [],
     createdAt: AT,
     updatedAt: AT,
   };
@@ -72,6 +74,8 @@ function handlersFor(overrides: Record<string, (input: unknown) => unknown> = {}
       ],
       nextCursor: null,
     }),
+    "library.mcp.list": () => [],
+    "library.skill.list": () => [],
     ...overrides,
   };
 }
@@ -259,6 +263,53 @@ describe("WorkflowsView", () => {
     expect(list.textContent).toContain("Unreachable — no step leads here, so it never runs.");
     expect(screen.queryByLabelText("Problems with Plan")).toBeNull();
     expect(screen.queryByLabelText("Problems with Review")).toBeNull();
+  });
+
+  it("lets a step pick a library item from a searchable dropdown, and locks the ones every agent loads", async () => {
+    const { log } = renderWithTrpc(
+      <WorkflowsView />,
+      handlersFor({
+        "library.mcp.list": () => [
+          {
+            id: "m1",
+            name: "github",
+            description: null,
+            transport: { kind: "http", url: "https://x.example/mcp", headers: {} },
+            enabled: false,
+            createdAt: AT,
+            updatedAt: AT,
+          },
+          {
+            id: "m2",
+            name: "docs",
+            description: null,
+            transport: { kind: "http", url: "https://d.example/mcp", headers: {} },
+            enabled: true,
+            createdAt: AT,
+            updatedAt: AT,
+          },
+        ],
+        "workflow.updateStep": () => PIPELINE,
+      }),
+    );
+
+    // The picker reads the choice back on its trigger before it is opened: the Workspace-wide
+    // server is what every Step loads, so it is the whole summary on a Step that chose nothing.
+    const trigger = await screen.findByLabelText("MCP servers for Implement");
+    expect(trigger.textContent).toContain("docs");
+    expect(trigger.textContent).not.toContain("github");
+
+    // Opened, the Workspace-wide one is checked and locked; the other is this Step's to choose.
+    fireEvent.click(trigger);
+    const locked = (await screen.findByLabelText("Load docs in Implement")) as HTMLButtonElement;
+    expect(locked.getAttribute("data-state")).toBe("checked");
+    expect(locked.disabled).toBe(true);
+
+    fireEvent.click(screen.getByLabelText("Load github in Implement"));
+    await waitFor(() => {
+      const call = log.calls.find((c) => c.path === "workflow.updateStep");
+      expect(call?.input).toEqual({ stepId: "s2", mcpServerIds: ["m1"] });
+    });
   });
 
   it("offers the first step from the empty canvas itself", async () => {

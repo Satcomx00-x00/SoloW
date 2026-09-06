@@ -36,6 +36,7 @@ differentiator) · **Later** (planned after first release).
 | [F21](./F21-integration-providers.md) | Integration Providers | Core | J2, J10 |
 | [F22](./F22-source-control.md) | Source Control Panel | Core | J5, J10 |
 | [F23](./F23-project-planning.md) | Project Planning | Core | J2, J3, J10 |
+| [F24](./F24-agent-libraries.md) | Agent Libraries: MCP servers and Skills | Core | J1, J3, J6 |
 
 ## Specification template
 

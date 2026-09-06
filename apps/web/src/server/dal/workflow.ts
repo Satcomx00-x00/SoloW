@@ -39,6 +39,7 @@ import {
   workflowStep,
 } from "@solow/db";
 import { and, asc, eq, sql } from "drizzle-orm";
+import { checkStepTools } from "./agent-library.js";
 import type { RequestContext } from "./context.js";
 
 /**
@@ -276,6 +277,9 @@ export async function addWorkflowStep(
 
       const targets = checkBranchTargets(input.branch, null, existing);
       if (!targets.ok) return err(targets.error);
+      if (!checkStepTools(tx, ctx, input.mcpServerIds, input.skillIds)) {
+        return err(WorkflowErrorCode.ToolNotInWorkspace);
+      }
 
       let rank: string;
       if (input.afterStepId === null) {
@@ -309,6 +313,8 @@ export async function addWorkflowStep(
           advanceOn: input.advanceOn ?? "review",
           onEnter: input.onEnter ?? null,
           branch: input.branch ?? null,
+          mcpServerIds: [...new Set(input.mcpServerIds ?? [])],
+          skillIds: [...new Set(input.skillIds ?? [])],
         })
         .returning()
         .all();
@@ -397,6 +403,21 @@ export async function updateWorkflowStep(
         JSON.stringify(input.branch ?? null) !== JSON.stringify(step.branch ?? null)
       ) {
         patch.branch = input.branch;
+      }
+      // The libraries a Step loads (spec F24): whole lists, de-duplicated, every id checked
+      // against this Workspace's rows before it is written.
+      if (input.mcpServerIds !== undefined || input.skillIds !== undefined) {
+        if (!checkStepTools(tx, ctx, input.mcpServerIds, input.skillIds)) {
+          return err(WorkflowErrorCode.ToolNotInWorkspace);
+        }
+        const nextMcp = [...new Set(input.mcpServerIds ?? step.mcpServerIds)];
+        const nextSkills = [...new Set(input.skillIds ?? step.skillIds)];
+        if (JSON.stringify(nextMcp) !== JSON.stringify(step.mcpServerIds)) {
+          patch.mcpServerIds = nextMcp;
+        }
+        if (JSON.stringify(nextSkills) !== JSON.stringify(step.skillIds)) {
+          patch.skillIds = nextSkills;
+        }
       }
       if (Object.keys(patch).length === 0) return ok(step.workflowId);
 

@@ -1,7 +1,10 @@
 /// <reference types="bun-types" />
 
-import { beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { randomUUID } from "node:crypto";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Writable } from "node:stream";
 import {
   type AgentProtocol,
@@ -17,12 +20,14 @@ import {
   encryptSecret,
   executorProfile,
   issue,
+  mcpServer,
   repository,
   review,
   secret,
   session,
   sessionEvent,
   sessionSummary,
+  skill,
   task,
   taskDependency,
   taskRepository,
@@ -4547,5 +4552,122 @@ describe("a Task on no Workflow", () => {
       "reject-0",
       "cleanup",
     ]);
+  });
+});
+
+describe("the agent libraries a run is handed (spec F24)", () => {
+  let db: TestDb;
+  let root: string;
+  beforeAll(() => {
+    process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 3).toString("base64");
+  });
+  beforeEach(async () => {
+    db = createTestDb();
+    root = await mkdtemp(join(tmpdir(), "solow-run-libraries-"));
+  });
+  afterEach(() => rm(root, { recursive: true, force: true }));
+
+  async function seedLibraries(workspaceId: string, enabled: boolean): Promise<void> {
+    await db.insert(mcpServer).values({
+      workspaceId,
+      name: "docs",
+      transport: {
+        kind: "http",
+        url: "https://docs.example/mcp",
+        headers: { Authorization: { kind: "literal", value: "Bearer t" } },
+      },
+      enabled,
+    });
+    await db.insert(skill).values({
+      workspaceId,
+      name: "review-checklist",
+      description: "How we review",
+      source: { kind: "inline", body: "# Review\n\nCheck the tests." },
+      enabled,
+    });
+  }
+
+  it("hands a Claude Code agent the enabled items by argument, and says so in the transcript", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    await db
+      .update(workspace)
+      .set({ enabledFlags: { "ff-agent-libraries": true } })
+      .where(eq(workspace.id, ids.workspaceId));
+    await seedLibraries(ids.workspaceId, true);
+
+    const runner = new ScriptedRunner([{ kind: "completed" }]);
+    const { deps } = makeDeps(db, runner, nullStream());
+    const started: AgentStartOpts[] = [];
+    const wrapped: TaskRunDeps = {
+      ...deps,
+      // A real directory: the run writes the config where the Task's own directory is.
+      worktreeRoot: root,
+      runner: () => ({
+        start: (opts) => {
+          started.push(opts);
+          return runner.start(opts);
+        },
+      }),
+    };
+
+    await runTaskLifecycle(wrapped, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    const args = started[0]?.args ?? [];
+    const libraryDir = join(root, ids.taskId, ".solow-libraries");
+    expect(args).toEqual([
+      "--mcp-config",
+      join(libraryDir, "mcp.json"),
+      "--plugin-dir",
+      join(libraryDir, "plugin"),
+    ]);
+    expect(started[0]?.mcpServers).toBeUndefined();
+    expect(JSON.parse(await readFile(join(libraryDir, "mcp.json"), "utf8"))).toEqual({
+      mcpServers: {
+        docs: {
+          type: "http",
+          url: "https://docs.example/mcp",
+          headers: { Authorization: "Bearer t" },
+        },
+      },
+    });
+    expect(
+      await readFile(join(libraryDir, "plugin", "skills", "review-checklist", "SKILL.md"), "utf8"),
+    ).toContain("# Review");
+
+    const notices = (
+      await db
+        .select({ payload: sessionEvent.payload })
+        .from(sessionEvent)
+        .where(eq(sessionEvent.kind, "notice"))
+    ).map((row) => (row.payload as { text?: string }).text ?? "");
+    expect(notices).toContain(
+      "Loaded from the libraries: MCP server docs, skill review-checklist.",
+    );
+  });
+
+  it("hands the agent nothing while the flag is off, whatever the library rows say", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    await seedLibraries(ids.workspaceId, true);
+
+    const runner = new ScriptedRunner([{ kind: "completed" }]);
+    const { deps } = makeDeps(db, runner, nullStream());
+    const started: AgentStartOpts[] = [];
+    const wrapped: TaskRunDeps = {
+      ...deps,
+      worktreeRoot: root,
+      runner: () => ({
+        start: (opts) => {
+          started.push(opts);
+          return runner.start(opts);
+        },
+      }),
+    };
+
+    await runTaskLifecycle(wrapped, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    expect(started[0]?.args).toEqual([]);
+    expect(await stat(join(root, ids.taskId, ".solow-libraries")).catch(() => null)).toBeNull();
   });
 });

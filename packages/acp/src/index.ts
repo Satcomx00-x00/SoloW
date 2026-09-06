@@ -29,6 +29,7 @@ export {
   JsonRpcPeer,
   parseJsonRpcMessage,
 } from "./jsonrpc.js";
+export type { AcpMcpServer } from "./protocol.js";
 export {
   AcpMethod,
   type AcpPermissionOption,

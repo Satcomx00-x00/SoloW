@@ -35,6 +35,8 @@ function step(id: string, rank: string): WorkflowStepDto {
     advanceOn: "review",
     onEnter: null,
     branch: null,
+    mcpServerIds: [],
+    skillIds: [],
     createdAt: AT,
     updatedAt: AT,
   };

@@ -152,6 +152,8 @@ export const WorkflowErrorCode = {
    * they happen. A Task must not start down a pipeline that skips a Step or cannot finish.
    */
   GraphInvalid: "WORKFLOW_GRAPH_INVALID",
+  /** A Step names an MCP server or a Skill that is not in this Workspace's libraries. */
+  ToolNotInWorkspace: "WORKFLOW_TOOL_NOT_IN_WORKSPACE",
 } as const;
 export type WorkflowErrorCode = (typeof WorkflowErrorCode)[keyof typeof WorkflowErrorCode];
 
@@ -193,6 +195,12 @@ export const addWorkflowStepInput = z.object({
   advanceOn: workflowAdvanceOnSchema.optional(),
   onEnter: workflowStepAutomationSchema.nullable().optional(),
   branch: workflowStepBranchSchema.nullable().optional(),
+  /**
+   * Library items loaded for this Step *on top of* the ones enabled Workspace-wide (spec F24).
+   * Ids into `library.mcp` / `library.skill`; additive, never an exclusion.
+   */
+  mcpServerIds: z.array(idSchema).max(64).optional(),
+  skillIds: z.array(idSchema).max(64).optional(),
   afterStepId: idSchema.nullable().optional(),
 });
 export type AddWorkflowStepInput = z.infer<typeof addWorkflowStepInput>;
@@ -207,6 +215,9 @@ export const updateWorkflowStepInput = z.object({
   onEnter: workflowStepAutomationSchema.nullable().optional(),
   /** Null removes the branch; the Step then goes to its rank successor again. */
   branch: workflowStepBranchSchema.nullable().optional(),
+  /** The whole list, replaced — the same rule as a Task's repositories. */
+  mcpServerIds: z.array(idSchema).max(64).optional(),
+  skillIds: z.array(idSchema).max(64).optional(),
 });
 export type UpdateWorkflowStepInput = z.infer<typeof updateWorkflowStepInput>;
 
@@ -305,6 +316,8 @@ export const workflowStepDto = z
     advanceOn: workflowAdvanceOnSchema,
     onEnter: workflowStepAutomationSchema.nullable(),
     branch: workflowStepBranchSchema.nullable(),
+    mcpServerIds: z.array(idSchema),
+    skillIds: z.array(idSchema),
   })
   .merge(timestampsSchema);
 export type WorkflowStepDto = z.infer<typeof workflowStepDto>;

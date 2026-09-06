@@ -118,6 +118,47 @@ describe("startAcpSession — turn taking", () => {
     expect(await session.send("too late")).toBe(false);
   });
 
+  it("tells the agent about the MCP servers it was given, on session/new (spec F24)", async () => {
+    const created: unknown[] = [];
+    const peer = scriptedAcpPeer({ turns: [{ text: ["done"] }] });
+    const watched = {
+      ...peer,
+      stdin: {
+        ...peer.stdin,
+        write: (data: string) => {
+          for (const line of data.split("\n")) {
+            if (!line.trim()) continue;
+            const frame = JSON.parse(line) as {
+              method?: string;
+              params?: { mcpServers?: unknown };
+            };
+            if (frame.method === "session/new") created.push(frame.params?.mcpServers);
+          }
+          return peer.stdin.write(data);
+        },
+      },
+    };
+    const mcpServers = [
+      { name: "github", command: "npx", args: ["-y", "x"], env: [{ name: "T", value: "v" }] },
+      { type: "http" as const, name: "docs", url: "https://d.example/mcp", headers: [] },
+    ];
+    const session = startAcpSession(
+      {
+        command: "scripted-agent",
+        cwd: "/wt/task-1",
+        env: {},
+        mcpServers,
+        spawn: () => watched,
+        onUpdate: () => {},
+        cancelGraceMs: 50,
+        exitGraceMs: 20,
+      },
+      "THE TASK BRIEF",
+    );
+    await session.outcome;
+    expect(created).toEqual([mcpServers]);
+  });
+
   it("gives the Task brief the first turn even when the operator types during the handshake", async () => {
     // The reproduction of the ordering defect: an operator whose socket is already open can
     // land a frame before `initialize` has answered. Their message must queue *behind* the

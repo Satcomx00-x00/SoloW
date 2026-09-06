@@ -1,5 +1,6 @@
 import "server-only";
 import { router } from "../trpc.js";
+import { libraryRouter } from "./agent-library.js";
 import { flagRouter } from "./flag.js";
 import { identityRouter } from "./identity.js";
 import { integrationRouter } from "./integration.js";
@@ -22,6 +23,7 @@ export const appRouter = router({
   flag: flagRouter,
   identity: identityRouter,
   issue: issueRouter,
+  library: libraryRouter,
   integration: integrationRouter,
   mcpToken: mcpTokenRouter,
   preference: preferenceRouter,

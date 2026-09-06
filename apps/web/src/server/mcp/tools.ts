@@ -64,6 +64,10 @@ const WITHHELD_NAMESPACES = new Set([
   "preference",
   "workflow",
   "review",
+  // `library` — the MCP servers and Skills every agent is started with, and the Secrets they
+  // reference (spec F24). A token held by an agent must not be able to hand that agent a new
+  // server, or point an existing one at a different credential.
+  "library",
 ]);
 
 export interface McpToolDefinition {

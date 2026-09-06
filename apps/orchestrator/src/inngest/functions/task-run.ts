@@ -36,6 +36,7 @@ import {
   createDb,
   type Db,
   decryptForScmSync,
+  loadAgentLibrariesForRun,
   loadTaskWorkflowRun,
 } from "@solow/db";
 import {
@@ -49,6 +50,7 @@ import {
 import { cloneUsernameFor } from "@solow/scm";
 import { z } from "zod";
 import { worktreeNameForTask } from "../../agent/claude-code-runner.js";
+import { materializeLibraries } from "../../agent/libraries.js";
 import {
   agentCreatesOwnWorktree,
   hasAgentRunner,
@@ -2009,13 +2011,45 @@ export async function runTaskLifecycle(
         // path from its very first round — as does a Claude Code Task whose primary attachment
         // named a base ref or a branch of its own.
         const resuming = wt;
+
+        /*
+         * What this leg loads from the libraries (spec F24): everything enabled Workspace-wide,
+         * plus whatever its Workflow Step names. Resolved *here*, inside the step that spawns
+         * the agent, because it decrypts the Secrets an MCP server references — the same
+         * point-of-use rule the credential above follows (Principle IV) — and materialized the
+         * way this leg's runtime takes it (`materializeLibraries`). A Secret that is gone fails
+         * the round by name rather than starting a server without its token.
+         */
+        const libraries = ctx.librariesEnabled
+          ? await loadAgentLibrariesForRun(db, workspaceId, leg.stepId)
+          : { ok: true as const, data: { mcpServers: [], skills: [] } };
+        if (!libraries.ok) {
+          emit({
+            kind: "notice",
+            text: `An MCP server in the library references a Secret that no longer exists (${libraries.error}). Fix the server in Settings → MCP servers, then relaunch.`,
+          });
+          return { kind: "failed" as const, cls: "fail" as const };
+        }
+        const loaded = await materializeLibraries({
+          libraries: libraries.data,
+          protocol: leg.agentCatalog.protocol,
+          catalogKey: leg.agentCatalog.key,
+          libraryDir: join(worktreePath(deps.worktreeRoot, taskId), ".solow-libraries"),
+          worktreePath: resuming ? resuming.path : null,
+        });
+        for (const text of loaded.notices) emit({ kind: "notice", text });
+        if (loaded.loaded.length > 0) {
+          emit({ kind: "notice", text: `Loaded from the libraries: ${loaded.loaded.join(", ")}.` });
+        }
+
         const handle = runner.start({
           command,
-          args,
+          args: [...args, ...loaded.extraArgs],
           cwd: resuming ? resuming.path : repoPath,
           env: shaped.data,
           worktreeName: resuming ? null : worktreeNameForTask(taskId),
           prompt: brief,
+          ...(loaded.mcpServers.length > 0 ? { mcpServers: loaded.mcpServers } : {}),
           onEvent: (e) => {
             // The agent's channel decides what kind of record this is. `user` is the operator's
             // own steering echoed back, `system` is the machinery talking about itself, and the

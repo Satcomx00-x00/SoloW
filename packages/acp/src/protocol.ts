@@ -273,3 +273,15 @@ export function toUpdates(params: unknown): AcpUpdate[] {
       return [];
   }
 }
+
+/**
+ * An MCP server handed to the agent on `session/new` / `session/load` (spec F24).
+ *
+ * The protocol's two shapes: a process the agent spawns (stdio), and an HTTP endpoint it
+ * connects to. Env and headers are name/value lists rather than records because that is how
+ * the wire format spells them — a record here would be one more place to get the translation
+ * wrong, and this type *is* the wire format.
+ */
+export type AcpMcpServer =
+  | { name: string; command: string; args: string[]; env: Array<{ name: string; value: string }> }
+  | { type: "http"; name: string; url: string; headers: Array<{ name: string; value: string }> };

@@ -12,6 +12,7 @@ import type {
   IssueStatus,
   LinkedChangeRequest,
   McpScope,
+  McpServerTransport,
   ProjectFieldOption,
   ProjectFieldType,
   ProjectFilter,
@@ -23,6 +24,7 @@ import type {
   ScmProvider,
   SecretKind,
   SessionState,
+  SkillSource,
   TaskCompletionOutcome,
   TaskState,
   WorkflowAdvanceOn,
@@ -706,6 +708,17 @@ export const workflowStep = sqliteTable(
      * done, minus the cross-Workflow hole an FK leaves open.
      */
     branch: text("branch", { mode: "json" }).$type<WorkflowStepBranch>(),
+    /**
+     * Library items loaded for this Step on top of the Workspace-wide ones (spec F24). Id
+     * arrays rather than join tables: the lists are short, replaced whole, and read only by the
+     * Step's own row — and a join table per library would be two more tables for one rule.
+     * The DAL checks every id is a row of this Workspace before writing.
+     */
+    mcpServerIds: text("mcp_server_ids", { mode: "json" })
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    skillIds: text("skill_ids", { mode: "json" }).$type<string[]>().notNull().default(sql`'[]'`),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -1433,6 +1446,58 @@ export const providerIdentity = sqliteTable(
  * The domain tables. BetterAuth's tables live in `auth-schema.ts` and are joined onto this in
  * `tables.ts` — kept in separate files because drizzle-kit reads each schema file standalone.
  */
+/**
+ * The agent libraries (spec F24): MCP servers and Skills, one row each, Workspace-scoped.
+ *
+ * `enabled` is the Workspace-wide switch — loaded into every agent run — and a Workflow Step
+ * names further items by id (`workflow_step.mcp_server_ids` / `skill_ids`). `name` is unique per
+ * Workspace because it is the key the agent sees: two rows with one name would be one MCP entry
+ * or one Skill directory, decided by whichever was written last.
+ *
+ * `transport` and `source` are JSON: their shape is a discriminated union the contract owns, and
+ * a column per variant would be a null-riddled table for a value nothing queries by. Secrets are
+ * referenced by id inside `transport`, never stored in it (Principle IV).
+ */
+export const mcpServer = sqliteTable(
+  "mcp_server",
+  {
+    id: id(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspace.id),
+    name: text("name").notNull(),
+    description: text("description"),
+    transport: text("transport", { mode: "json" }).$type<McpServerTransport>().notNull(),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(false),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => ({
+    byWs: index("mcp_server_ws").on(t.workspaceId),
+    byName: uniqueIndex("mcp_server_ws_name").on(t.workspaceId, t.name),
+  }),
+);
+
+export const skill = sqliteTable(
+  "skill",
+  {
+    id: id(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspace.id),
+    name: text("name").notNull(),
+    description: text("description").notNull(),
+    source: text("source", { mode: "json" }).$type<SkillSource>().notNull(),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(false),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => ({
+    byWs: index("skill_ws").on(t.workspaceId),
+    byName: uniqueIndex("skill_ws_name").on(t.workspaceId, t.name),
+  }),
+);
+
 export const schema = {
   workspace,
   integration,
@@ -1454,6 +1519,8 @@ export const schema = {
   projectView,
   workflow,
   workflowStep,
+  mcpServer,
+  skill,
   worktree,
   session,
   sessionEvent,

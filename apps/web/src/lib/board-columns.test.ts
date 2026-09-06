@@ -24,6 +24,8 @@ function step(over: Partial<WorkflowStepDto> & { id: string; rank: string }): Wo
     advanceOn: "review",
     onEnter: null,
     branch: null,
+    mcpServerIds: [],
+    skillIds: [],
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
     ...over,

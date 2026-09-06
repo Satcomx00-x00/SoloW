@@ -74,6 +74,7 @@ export class AcpRunner implements AgentRunner {
           ...(opts.args.length > 0 ? { extraArgs: opts.args } : {}),
           cwd: opts.cwd,
           env: opts.env,
+          ...(opts.mcpServers && opts.mcpServers.length > 0 ? { mcpServers: opts.mcpServers } : {}),
           ...(this.options.modeId ? { modeId: this.options.modeId } : {}),
           ...(this.options.modelId ? { modelId: this.options.modelId } : {}),
           spawn: (cmd, spawnOpts) => this.options.executor.spawn(cmd, spawnOpts),

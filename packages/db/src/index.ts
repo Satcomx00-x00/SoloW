@@ -67,6 +67,7 @@ export function createDb() {
 export type Db = ReturnType<typeof createDb>;
 
 export { ensureDefaultAgentCatalog } from "./agent-catalog-defaults.js";
+export { loadAgentLibrariesForRun } from "./agent-library-run.js";
 export * from "./auth-schema.js";
 export { bootstrapWorkspace, LOCAL_WORKSPACE_ID } from "./bootstrap.js";
 export { dbEnv } from "./env.js";

@@ -81,6 +81,12 @@ export interface TaskRunContext {
    */
   widgetsEnabled: boolean;
   /**
+   * Whether this Workspace has the agent libraries on (`ff-agent-libraries`, spec F24): the
+   * MCP servers and Skills every agent is handed, and the ones a Workflow Step names. Off, the
+   * run hands the agent nothing from them, whatever the library rows say.
+   */
+  librariesEnabled: boolean;
+  /**
    * Whether this Workspace has Workflows on (`ff-workflows`, issue #5).
    *
    * Read here for the same one-decision-per-run reason `widgetsEnabled` is: the flag governs
@@ -190,6 +196,7 @@ export async function loadTaskRunContext(
     executorProfile: ep,
     repositories,
     widgetsEnabled: ws?.flags?.["ff-agent-widgets"] === true,
+    librariesEnabled: ws?.flags?.["ff-agent-libraries"] === true,
     workflowsEnabled: ws?.flags?.["ff-workflows"] === true,
     secretCiphertext: sec?.ciphertext ?? null,
   };

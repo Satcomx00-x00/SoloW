@@ -7,6 +7,7 @@ import {
 } from "./capabilities.js";
 import { JsonRpcError, JsonRpcErrorCode, JsonRpcPeer } from "./jsonrpc.js";
 import {
+  type AcpMcpServer,
   AcpMethod,
   type AcpPermissionOption,
   type AcpUpdate,
@@ -119,6 +120,11 @@ export interface AcpSessionOptions {
   onPermission?: (request: AcpPermissionRequest) => Promise<AcpPermissionDecision>;
   /** Resume a previous session. Requires the agent to have advertised `loadSession` (AC-2). */
   resumeSessionId?: string;
+  /**
+   * MCP servers the agent is told about when its session is created or loaded (spec F24). The
+   * protocol's own channel for them — nothing is written to disk on the agent's behalf.
+   */
+  mcpServers?: AcpMcpServer[];
   /** Session mode to select. Only sent when the agent listed it in `session/new` (AC-2). */
   modeId?: string;
   /** Model to select. Only sent when the agent listed it in `session/new`, same rule as the mode. */
@@ -341,12 +347,15 @@ export function startAcpSession(options: AcpSessionOptions, prompt: string): Acp
         await peer.request(AcpMethod.SessionLoad, {
           sessionId: options.resumeSessionId,
           cwd: options.cwd,
-          mcpServers: [],
+          mcpServers: options.mcpServers ?? [],
         });
         sessionId = options.resumeSessionId;
       } else {
         const created = sessionNewResultSchema.parse(
-          await peer.request(AcpMethod.SessionNew, { cwd: options.cwd, mcpServers: [] }),
+          await peer.request(AcpMethod.SessionNew, {
+            cwd: options.cwd,
+            mcpServers: options.mcpServers ?? [],
+          }),
         );
         sessionId = created.sessionId;
         /*
