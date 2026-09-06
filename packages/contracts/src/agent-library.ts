@@ -96,7 +96,7 @@ export const AgentLibraryErrorCode = {
   SecretMissing: "AGENT_LIBRARY_SECRET_MISSING",
   /** The directory to import Skills from is not there, or is not a directory. */
   ImportSourceNotFound: "AGENT_LIBRARY_IMPORT_SOURCE_NOT_FOUND",
-  /** The repository to import Skills from could not be cloned or refreshed. */
+  /** The repository to import Skills from could not be fetched: not a repository URL, or its host would not serve the archive. */
   ImportCloneFailed: "AGENT_LIBRARY_IMPORT_CLONE_FAILED",
   /** The uploaded file is not a zip archive SoloW can unpack, or holds a path it will not write. */
   ImportArchiveInvalid: "AGENT_LIBRARY_IMPORT_ARCHIVE_INVALID",
@@ -179,10 +179,10 @@ export type SkillListDto = z.infer<typeof skillListDto>;
 // ---- Importing Skills in bulk ----
 
 /**
- * Where a bulk import reads from: a directory on the host, or a git repository SoloW clones
- * into its own skills directory once and refreshes on the next import. Either way, every
- * directory holding a `SKILL.md` becomes one Skill of the `path` kind, so the scripts, references
- * and assets beside that file travel with it.
+ * Where a bulk import reads from: a directory on the host, or a repository whose archive SoloW
+ * fetches over HTTPS (its default branch, or `#ref`) into its own skills directory, again on
+ * every scan. Either way, every directory holding a `SKILL.md` becomes one Skill of the `path`
+ * kind, so the scripts, references and assets beside that file travel with it.
  */
 export const skillImportSourceSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("path"), path: z.string().min(1).max(4000) }),

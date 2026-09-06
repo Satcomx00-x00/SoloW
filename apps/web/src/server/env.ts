@@ -79,12 +79,3 @@ const skillsEnvSchema = z.object({
 export function skillsRoot(): string {
   return resolve(skillsEnvSchema.parse(process.env).SOLOW_SKILLS_ROOT);
 }
-
-/**
- * The environment a child process this app spawns should see: this process's, plus what the
- * caller sets. The one place a subprocess env is built, so the "no other module reads
- * process.env" rule above holds for `git` as well.
- */
-export function childEnv(extra: Record<string, string>): Record<string, string | undefined> {
-  return { ...process.env, ...extra };
-}

@@ -41,8 +41,8 @@ import { trpc } from "@/trpc/react";
  * there is shown unticked and locked, with the reason, rather than silently dropped.
  *
  * Each import is a directory source: the scripts, references and assets beside the SKILL.md go
- * with it, and the directory is read again on every run — so a repository is cloned once into
- * SoloW's skills directory and pulled forward on the next scan, never re-cloned by hand.
+ * with it, and the directory is read again on every run — so a repository's archive is fetched
+ * into SoloW's skills directory and fetched again on the next scan, never downloaded by hand.
  *
  * A `.zip` is the third way in: picked here, or dropped anywhere on the Skills card, which hands
  * it over as `droppedFile`. The archive is unpacked server-side into that same directory and
@@ -240,7 +240,7 @@ export function ImportSkillsDialog({
                     id="skills-import-location"
                     className="font-mono"
                     placeholder={
-                      kind === "path" ? "/srv/skills" : "https://github.com/acme/skills.git"
+                      kind === "path" ? "/srv/skills" : "https://github.com/acme/skills#main"
                     }
                     value={location}
                     onChange={(e) => setLocation(e.target.value)}
@@ -358,7 +358,7 @@ function describeScanError(code: string, kind: Source): string {
   }
   if (code === AgentLibraryErrorCode.ImportCloneFailed) {
     return kind === "git"
-      ? "That repository could not be cloned — check the URL, and that this machine can reach it without a password prompt."
+      ? "That repository's archive could not be fetched — check the URL (add #branch for a branch other than the default), and that it is public or reachable from this machine."
       : code;
   }
   return code;

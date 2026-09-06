@@ -131,7 +131,10 @@ await run(["bun", "--bun", "run", "build"], join(ROOT, "apps", "web"), {
   SOLOW_PACKAGE_BUILD: "1",
 });
 
-const standalone = join(ROOT, "apps", "web", ".next", "standalone");
+// The same knob `next.config.mjs` reads: a build made beside a running `next start` (which holds
+// `.next` open) goes into another directory, and everything copied below has to follow it.
+const distDir = process.env.SOLOW_NEXT_DIST_DIR ?? ".next";
+const standalone = join(ROOT, "apps", "web", distDir, "standalone");
 if (!existsSync(standalone)) {
   throw new Error(
     `expected a standalone build at ${standalone} — is SOLOW_PACKAGE_BUILD wired in next.config.mjs?`,
@@ -144,8 +147,8 @@ await flattenNodeModules(join(DIST, "web"));
 // but never imported by it, and `public/` is not code at all. Standalone deployments are
 // expected to copy them in, and a build that skips this serves a page with no CSS or JS.
 await cp(
-  join(ROOT, "apps", "web", ".next", "static"),
-  join(DIST, "web", "apps", "web", ".next", "static"),
+  join(ROOT, "apps", "web", distDir, "static"),
+  join(DIST, "web", "apps", "web", distDir, "static"),
   { recursive: true },
 );
 const publicDir = join(ROOT, "apps", "web", "public");

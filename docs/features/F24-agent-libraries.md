@@ -55,8 +55,10 @@ each agent runtime is handed it, because Claude Code and an ACP agent take it di
   the core kill switch like Workflows.
 - **Bulk import** (`library.skill.scan`, `library.skill.unpack`, `library.skill.import`; Settings →
   Skills → *Import*, or a `.zip` dropped anywhere on the Skills card): point at a directory on the
-  host, a git repository, or an archive — unpacked into `SOLOW_SKILLS_ROOT/<archive name>`, an
-  entry naming a path outside it refusing the whole archive — and every directory holding a `SKILL.md`
+  host, a repository (its archive, fetched over HTTPS — GitHub, GitLab or Gitea layouts; the
+  default branch or `#ref`; public or reachable without credentials), or an archive — unpacked
+  into `SOLOW_SKILLS_ROOT/<name>`, an entry naming a path outside it refusing the whole archive —
+  and every directory holding a `SKILL.md`
   is listed — named and described from its frontmatter, or from the directory and its first line
   of prose when there is none — ticked for import unless the library already holds that name.
   Each import is a directory source, so the scripts, references and assets beside the `SKILL.md`
@@ -90,10 +92,11 @@ each agent runtime is handed it, because Claude Code and an ACP agent take it di
   server is a server switched on Workspace-wide, or a Step that names it.
 - **A Step's selection is additive.** There is no way to keep a Workspace-wide item out of one
   Step; switching it off Workspace-wide and naming it on the other Steps is the way to say that.
-- **Fetching a remote skills repository at launch is not a source.** A clone inside the run loop
-  is a network dependency inside the run loop. A repository is instead imported once — cloned
-  into `SOLOW_SKILLS_ROOT` (default `.solow/skills`) and pulled forward on the next import — and
-  every Skill found in it becomes a directory source, read from that clone like any other.
+- **Fetching a remote skills repository at launch is not a source.** A download inside the run
+  loop is a network dependency inside the run loop. A repository is instead imported — its archive
+  fetched into `SOLOW_SKILLS_ROOT` (default `.solow/skills`), again on the next scan — and every
+  Skill found in it becomes a directory source, read from that directory like any other. Never
+  cloned: the web app spawns no process (the executor boundary), and an archive needs no `git`.
 
 ## Related
 

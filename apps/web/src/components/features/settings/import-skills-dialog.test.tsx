@@ -163,6 +163,6 @@ describe("ImportSkillsDialog", () => {
       target: { value: "https://github.com/acme/skills.git" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Scan" }));
-    expect((await screen.findByRole("alert")).textContent).toContain("could not be cloned");
+    expect((await screen.findByRole("alert")).textContent).toContain("could not be fetched");
   });
 });

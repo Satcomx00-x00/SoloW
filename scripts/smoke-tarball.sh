@@ -74,38 +74,51 @@ BIN="$WORK/node_modules/.bin/solow"
 echo "==> solow --version"
 "$BIN" --version
 
-echo "==> booting the stack (web $WEB_PORT, orchestrator $WS_PORT, inngest $INNGEST_PORT)"
-# Its own process group, so cleanup can take the whole tree down rather than orphaning children.
-setsid "$BIN" \
-    --no-open \
-    --port "$WEB_PORT" \
-    --ws-port "$WS_PORT" \
-    --inngest-port "$INNGEST_PORT" \
-    --data-dir "$WORK/data" \
-    > "$WORK/solow.log" 2>&1 &
-SOLOW_PID=$!
+# Boot the installed CLI and wait for its own "up" line. Called twice below, so the stack is a
+# function: once the way a user runs it, once with sign-in switched on. `$@` is the environment
+# for the run, the way `env` takes it, so a caller can say what differs and nothing else.
+boot_stack() {
+    echo "==> booting the stack (web $WEB_PORT, orchestrator $WS_PORT, inngest $INNGEST_PORT)$BOOT_NOTE"
+    : > "$WORK/solow.log"
+    setsid env "$@" "$BIN" \
+        --no-open \
+        --port "$WEB_PORT" \
+        --ws-port "$WS_PORT" \
+        --inngest-port "$INNGEST_PORT" \
+        --data-dir "$WORK/data" \
+        > "$WORK/solow.log" 2>&1 &
+    SOLOW_PID=$!
 
-# The CLI stops everything and exits non-zero if any child dies, so a dead process is the
-# signal — no need to parse the log for it.
-waited=0
-while [ "$waited" -lt "$BOOT_TIMEOUT" ]; do
-    if ! kill -0 "$SOLOW_PID" 2> /dev/null; then
-        echo "smoke-tarball: the stack exited during startup." >&2
+    waited=0
+    while [ "$waited" -lt "$BOOT_TIMEOUT" ]; do
+        if ! kill -0 "$SOLOW_PID" 2> /dev/null; then
+            echo "smoke-tarball: the stack exited during startup." >&2
+            exit 1
+        fi
+        if grep -q "SoloW is up" "$WORK/solow.log" 2> /dev/null; then
+            break
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+    [ "$waited" -lt "$BOOT_TIMEOUT" ] || {
+        echo "smoke-tarball: the stack did not come up within ${BOOT_TIMEOUT}s." >&2
         exit 1
-    fi
-    if grep -q "SoloW is up" "$WORK/solow.log" 2> /dev/null; then
-        break
-    fi
-    sleep 1
-    waited=$((waited + 1))
-done
-[ "$waited" -lt "$BOOT_TIMEOUT" ] || {
-    echo "smoke-tarball: the stack did not come up within ${BOOT_TIMEOUT}s." >&2
-    exit 1
+    }
 }
 
-# Each port is a distinct failure this has actually seen: the web app is the one `next` broke,
-# and Inngest is the one that shipped as a stub. Asserted separately so the message names which.
+# Stop it and wait for the ports to be free again, so the second boot does not race the first
+# one's teardown for :15000. The `wait` on a process started in the same shell is what says the
+# group is gone; `SOLOW_PID` is cleared so `cleanup` does not kill a pid the kernel may reuse.
+stop_stack() {
+    kill -TERM "-$SOLOW_PID" 2> /dev/null || kill -TERM "$SOLOW_PID" 2> /dev/null || true
+    wait "$SOLOW_PID" 2> /dev/null || true
+    SOLOW_PID=""
+}
+
+BOOT_NOTE=""
+boot_stack
+
 echo "==> web responds"
 curl -fsS --max-time 20 "http://localhost:$WEB_PORT/" > /dev/null || {
     echo "smoke-tarball: the web app did not serve a page." >&2
@@ -117,21 +130,19 @@ curl -fsS --max-time 20 "http://localhost:$WEB_PORT/" > /dev/null || {
 # on `/` is the weaker question, and this stack has answered it while being unusable: a 200 that
 # is a Next error boundary, or a redirect chain that never terminates, both pass the check above.
 #
-# `-L` because `/` redirects here, and the assertion is on the rendered sign-in form rather than
-# on the status code, because that is what "a person can start using it" means. A fresh data
-# directory has no Owner yet, so this is also the first-run sign-up path — the one the deployment
-# view says exists instead of printed credentials.
-#
-# `id="auth-password"` rather than a `name=` attribute: the field is a controlled React input with
-# no `name`, so that is the stable handle in the markup. It is server-rendered even though the
-# form is a client component, which is what makes it visible to curl at all.
-echo "==> the sign-in page renders"
-SIGNIN="$(curl -fsSL --max-time 20 "http://localhost:$WEB_PORT/sign-in" || true)"
-case "$SIGNIN" in
-    *'id="auth-password"'*) ;;
+# What a new install lands on is *the app*, not a sign-in form: the launcher runs as a
+# single-user local install (`SOLOW_DEV_OWNER=on` in `bin/solow.mjs`), which binds the person at
+# the machine to the local Workspace instead of asking them to invent an account. So the first
+# check asserts the shell — its breadcrumb is server-rendered and appears on no other page — and
+# the sign-in form is exercised separately, below, with that switch off. The assertion on the
+# markup rather than the status code is what "a person can start using it" means.
+echo "==> the local owner lands on the app"
+LANDING="$(curl -fsSL --max-time 20 "http://localhost:$WEB_PORT/" || true)"
+case "$LANDING" in
+    *'aria-label="Breadcrumb"'*) ;;
     *)
-        echo "smoke-tarball: /sign-in did not render its password field — a new install cannot be" >&2
-        echo "  signed into, whatever the status code on / said." >&2
+        echo "smoke-tarball: / did not render the app shell for the local owner — a new install" >&2
+        echo "  lands on nothing usable, whatever the status code on / said." >&2
         exit 1
         ;;
 esac
@@ -149,6 +160,30 @@ curl -fsS --max-time 20 "http://localhost:$INNGEST_PORT/" > /dev/null || {
     echo "smoke-tarball: the Inngest Dev Server is not serving — is the binary a real executable?" >&2
     exit 1
 }
+
+# The other way in. A deployment that is not one person at one machine turns the local-owner
+# stand-in off, and then a fresh data directory has no Owner yet: `/sign-in` is the one-time
+# setup form — the path the deployment view says exists instead of printed credentials. Same
+# tarball, same data directory, one switch, so what is asserted is the packaged auth path and
+# nothing else.
+#
+# `id="auth-password"` rather than a `name=` attribute: the field is a controlled React input with
+# no `name`, so that is the stable handle in the markup. It is server-rendered even though the
+# form is a client component, which is what makes it visible to curl at all.
+stop_stack
+BOOT_NOTE=" — sign-in on"
+boot_stack SOLOW_DEV_OWNER=off
+
+echo "==> the sign-in page renders its form"
+SIGNIN="$(curl -fsSL --max-time 20 "http://localhost:$WEB_PORT/sign-in" || true)"
+case "$SIGNIN" in
+    *'id="auth-password"'*) ;;
+    *)
+        echo "smoke-tarball: /sign-in did not render its password field — an install with sign-in" >&2
+        echo "  on cannot be signed into, whatever the status code on / said." >&2
+        exit 1
+        ;;
+esac
 
 echo
 echo "smoke-tarball OK — the published artifact installs and runs."
