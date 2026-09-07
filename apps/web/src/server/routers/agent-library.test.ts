@@ -340,10 +340,15 @@ describe("agent libraries", () => {
     });
   });
 
-  it("is withheld from the external MCP surface, and refused when the flag is off", async () => {
-    // A token an agent holds must not be able to hand that agent a new server.
+  it("keeps its writes off the external MCP surface, and is refused when the flag is off", async () => {
+    // A token an agent holds must not be able to hand that agent a new server — but a Workflow
+    // builder names library items by id, so the two lists are readable (they carry references,
+    // never a Secret's value).
     expect(findMcpTool("library_mcp_create")).toBeUndefined();
-    expect(findMcpTool("library_skill_list")).toBeUndefined();
+    expect(findMcpTool("library_skill_create")).toBeUndefined();
+    expect(findMcpTool("library_skill_import")).toBeUndefined();
+    expect(findMcpTool("library_mcp_list")).toBeDefined();
+    expect(findMcpTool("library_skill_list")).toBeDefined();
 
     const [ws] = await db.insert(workspace).values({ name: "off", ownerUserId: "o" }).returning();
     const off = caller(db, ws?.id ?? "", { "ff-agent-libraries": false });

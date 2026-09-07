@@ -122,6 +122,12 @@ it is how an operator gets from one shape to the next.
 
 ## What ships in v1
 
+- **Built through the SoloW MCP too** — the `workflow.*` authoring procedures (create, add /
+  update / reorder / delete Steps, attach and detach a Task) are exposed as MCP tools, with
+  `workflow.authoringGuide` returning the rules and the tool sequence so an AI holding a token
+  can design a pipeline. `workflow.advanceTask` and `workflow.acknowledgeDrift` stay withheld:
+  the gates are a person's to open. The two library *lists* are exposed so a Step can name items
+  by id; library writes stay signed-in.
 - **Three pipelines by default** — *Implement & review* (a reviewer agent decides whether another
   pass is needed), *Plan, then build* (a plan you approve, then the build), *Bug fix* (reproduce,
   fix, verify, looping while the bug still reproduces). Seeded once the Workspace has its first
