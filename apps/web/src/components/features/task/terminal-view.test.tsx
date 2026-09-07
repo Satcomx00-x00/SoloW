@@ -180,3 +180,85 @@ describe("harness activity", () => {
     expect(container.querySelector("[data-harness-activity]")).toBeNull();
   });
 });
+
+describe("thinking toggle", () => {
+  const withThinking: TranscriptRow[] = [
+    ...rows,
+    {
+      kind: "text",
+      id: "3",
+      sessionId: "s",
+      seq: 3,
+      channel: "thinking",
+      text: "Considering whether pip is already pinned",
+      open: false,
+    },
+  ];
+
+  it("shows the harness's thinking by default, and folds it away from the toolbar", () => {
+    renderTerminal({ rows: withThinking });
+    const toggle = screen.getByRole("button", { name: "Thinking" });
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByText(/Considering whether pip/)).toBeDefined();
+
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    expect(screen.queryByText(/Considering whether pip/)).toBeNull();
+    // What was done stays: only the reasoning is folded.
+    expect(screen.getByText(/Running pip to check versions/)).toBeDefined();
+
+    fireEvent.click(toggle);
+    expect(screen.getByText(/Considering whether pip/)).toBeDefined();
+  });
+
+  it("does not find matches inside thinking that is hidden", () => {
+    renderTerminal({ rows: withThinking });
+    fireEvent.click(screen.getByRole("button", { name: "Thinking" }));
+    fireEvent.click(screen.getByRole("button", { name: /Find/ }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Find in terminal" }), {
+      target: { value: "pinned" },
+    });
+    expect(screen.getByText("no results")).toBeDefined();
+  });
+});
+
+describe("thinking toggle", () => {
+  const withThinking: TranscriptRow[] = [
+    ...rows,
+    {
+      kind: "text",
+      id: "3",
+      sessionId: "s",
+      seq: 3,
+      channel: "thinking",
+      text: "Considering whether pip is already pinned",
+      open: false,
+    },
+  ];
+
+  it("shows the harness's thinking by default, and folds it away from the toolbar", () => {
+    renderTerminal({ rows: withThinking });
+    const toggle = screen.getByRole("button", { name: "Thinking" });
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByText(/Considering whether pip/)).toBeDefined();
+
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    expect(screen.queryByText(/Considering whether pip/)).toBeNull();
+    // What was done stays: only the reasoning is folded.
+    expect(screen.getByText(/Running pip to check versions/)).toBeDefined();
+
+    fireEvent.click(toggle);
+    expect(screen.getByText(/Considering whether pip/)).toBeDefined();
+  });
+
+  it("does not find matches inside thinking that is hidden", () => {
+    renderTerminal({ rows: withThinking });
+    fireEvent.click(screen.getByRole("button", { name: "Thinking" }));
+    fireEvent.click(screen.getByRole("button", { name: /Find/ }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Find in terminal" }), {
+      target: { value: "pinned" },
+    });
+    expect(screen.getByText("no results")).toBeDefined();
+  });
+});

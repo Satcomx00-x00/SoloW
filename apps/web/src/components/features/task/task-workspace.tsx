@@ -148,6 +148,8 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
         utils.task.get.invalidate({ id: taskId });
         utils.session.listForTask.invalidate({ taskId });
         utils.session.get.invalidate();
+        // A Step advancing announces the state too, so this is what moves the step strip.
+        utils.workflow.taskBinding.invalidate({ taskId });
         // The Issue above this Task derives its status from the Tasks under it, so a run that
         // finishes changes what the Issues list and the board card would say. Both are a
         // navigation away and would otherwise be stale on arrival.
