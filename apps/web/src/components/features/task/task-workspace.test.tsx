@@ -872,7 +872,7 @@ describe("TaskWorkspace workflow steps", () => {
     const items = within(strip).getAllByRole("listitem");
     expect(items.map((li) => li.getAttribute("data-status"))).toEqual([
       "done",
-      "current",
+      "running",
       "upcoming",
     ]);
     expect(items[1]?.getAttribute("aria-current")).toBe("step");

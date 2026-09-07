@@ -145,6 +145,11 @@ export function workflowIdFromPath(pathname: string): string | null {
   return /^\/workflows\/([^/]+)/.exec(pathname)?.[1] ?? null;
 }
 
+/** The Task a path has open, or null. The route is flat on purpose — see `sectionFor`. */
+export function taskIdFromPath(pathname: string): string | null {
+  return /^\/task\/([^/]+)/.exec(pathname)?.[1] ?? null;
+}
+
 /** Which project section a path is in. Longest match wins, so `/issues` beats the empty overview. */
 export function projectSectionFor(pathname: string): ProjectSection | null {
   const projectId = projectIdFromPath(pathname);

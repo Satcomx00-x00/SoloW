@@ -28,12 +28,14 @@ import {
   settingsHref,
   settingsSectionFor,
   settingsSectionsIn,
+  taskIdFromPath,
   workflowIdFromPath,
 } from "@/lib/navigation";
 import { WHOLE_PAGE } from "@/lib/paged";
 import { BOARD_COLUMNS, STATE_LABELS, STATE_STYLE } from "@/lib/task-states";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
+import { TaskNav } from "./task-nav";
 
 function SectionLabel({ children }: { children: ReactNode }) {
   return (
@@ -503,6 +505,7 @@ function ProjectNav({ projectId }: { projectId: string }) {
 export function Navigator({ workspaceName }: { workspaceName: string }) {
   const pathname = usePathname();
   const projectId = projectIdFromPath(pathname);
+  const taskId = taskIdFromPath(pathname);
   const projectSection = projectSectionFor(pathname);
   const section = sectionFor(pathname);
   const isSettings = section?.href === "/settings";
@@ -517,10 +520,20 @@ export function Navigator({ workspaceName }: { workspaceName: string }) {
     { enabled: projectId !== null },
   );
 
-  const title = projectId ? (project.data?.title ?? "Project") : (section?.label ?? workspaceName);
-  const caption = projectId
-    ? (projectSection?.caption ?? "Project")
-    : (section?.caption ?? "Workspace");
+  // A Task page is titled by the Task: its route is flat, so nothing else on the sidebar could
+  // say which one is open.
+  const task = trpc.task.get.useQuery({ id: taskId ?? "" }, { enabled: taskId !== null });
+
+  const title = taskId
+    ? (task.data?.title ?? "Task")
+    : projectId
+      ? (project.data?.title ?? "Project")
+      : (section?.label ?? workspaceName);
+  const caption = taskId
+    ? "Task"
+    : projectId
+      ? (projectSection?.caption ?? "Project")
+      : (section?.caption ?? "Workspace");
 
   return (
     <aside className="hidden w-60 shrink-0 flex-col border-r bg-sidebar md:flex">
@@ -529,7 +542,9 @@ export function Navigator({ workspaceName }: { workspaceName: string }) {
         <span className="truncate text-2xs text-muted-foreground leading-tight">{caption}</span>
       </div>
       <ScrollArea className="flex-1">
-        {projectId ? (
+        {taskId ? (
+          <TaskNav taskId={taskId} />
+        ) : projectId ? (
           <>
             <ProjectNav projectId={projectId} />
             {/*

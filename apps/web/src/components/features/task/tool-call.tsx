@@ -31,28 +31,29 @@ const STATUS: Record<
   NonNullable<ToolRow["status"]>,
   { label: string; icon: typeof CircleDot; className: string; spin?: boolean }
 > = {
-  // The same tint-plus-icon treatment the Task states use (see `lib/task-states.ts`): colour is
-  // never the only signal, so a colour-blind reader gets the glyph and the word too (WCAG 1.4.1).
+  // The same palette the Workflow steps use (`ui/steps.tsx`) — orange waiting, blue running,
+  // green done, red failed — and never colour alone: a colour-blind reader gets the glyph and
+  // the word too (WCAG 1.4.1).
   pending: {
     label: "Pending",
     icon: CircleDot,
-    className: "badge-soft [--badge-color:var(--state-queued)]",
+    className: "badge-soft [--badge-color:var(--color-amber-500)]",
   },
   in_progress: {
     label: "Running",
     icon: LoaderCircle,
-    className: "badge-soft [--badge-color:var(--state-running)]",
+    className: "badge-soft [--badge-color:var(--color-sky-500)]",
     spin: true,
   },
   completed: {
     label: "Completed",
     icon: CircleCheck,
-    className: "badge-soft [--badge-color:var(--state-done)]",
+    className: "badge-soft [--badge-color:var(--color-emerald-500)]",
   },
   failed: {
     label: "Failed",
     icon: CircleAlert,
-    className: "badge-soft [--badge-color:var(--state-failed)]",
+    className: "badge-soft [--badge-color:var(--color-red-500)]",
   },
 };
 
@@ -123,7 +124,7 @@ export function ToolCall({ row }: { row: ToolRow }) {
       data-tool-status={row.status ?? "unknown"}
       className={cn(
         "group rounded-lg border bg-card/40 px-3 py-2",
-        failed && "border-state-failed/40 bg-state-failed/8",
+        failed && "border-red-500/40 bg-red-500/8",
       )}
     >
       <summary className="flex cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
@@ -191,7 +192,7 @@ export function ToolCall({ row }: { row: ToolRow }) {
             <p
               className={cn(
                 "font-medium text-2xs",
-                row.result.ok ? "text-muted-foreground" : "text-state-failed",
+                row.result.ok ? "text-muted-foreground" : "text-red-500",
               )}
             >
               {row.result.ok ? (shell ? "Output" : "Result") : "Failed"}

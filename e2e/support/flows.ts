@@ -107,9 +107,11 @@ export async function openTask(page: Page, issueId: string, title: string): Prom
  * the same start path the old board button used: same session, same concurrency cap.
  */
 export async function launchTask(page: Page): Promise<void> {
-  await page.getByRole("button", { name: "Move to Ready" }).click();
+  // Scoped to the page: the sidebar offers the same moves, and one gesture must press one button.
+  const main = page.getByRole("main");
+  await main.getByRole("button", { name: "Move to Ready" }).click();
   await expect(page.locator('[data-task-state="ready"]').first()).toBeVisible();
-  await page.getByRole("button", { name: "Move to Running" }).click();
+  await main.getByRole("button", { name: "Move to Running" }).click();
   await expect(page.locator('[data-task-state="running"]').first()).toBeVisible();
 }
 
@@ -121,7 +123,7 @@ export async function launchTask(page: Page): Promise<void> {
  * operator's (Principle I is a gate a human opens, not a conveyor).
  */
 export async function openReview(page: Page): Promise<void> {
-  await page.getByRole("button", { name: "Open review" }).click();
+  await page.getByRole("main").getByRole("button", { name: "Open review" }).click();
   await expect(page.locator('[data-task-state="review"]').first()).toBeVisible();
 }
 

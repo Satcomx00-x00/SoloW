@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ChevronDown, ChevronUp, Search, X } from "lucide-react";
+import { ArrowDown, Brain, ChevronDown, ChevronUp, Search, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -56,8 +56,17 @@ export function TerminalView({
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const searchInput = useRef<HTMLInputElement | null>(null);
+  // The harness's reasoning is most of a long run by volume and least of it by consequence; a
+  // reader after what was *done* can fold it away. Off the rows before search sees them, so a
+  // match is never found in a block nobody can see.
+  const [showThinking, setShowThinking] = useState(true);
+  const visible = useMemo(
+    () =>
+      showThinking ? rows : rows.filter((r) => !(r.kind === "text" && r.channel === "thinking")),
+    [rows, showThinking],
+  );
 
-  const matches = useMemo(() => findMatches(rows, query), [rows, query]);
+  const matches = useMemo(() => findMatches(visible, query), [visible, query]);
   const activeMatch = matches[active] ?? null;
   const activity = useMemo(() => harnessActivity(rows, isRunning), [rows, isRunning]);
 
@@ -195,6 +204,18 @@ export function TerminalView({
         )}
 
         <div className="ml-auto flex items-center gap-1.5">
+          <button
+            type="button"
+            aria-pressed={showThinking}
+            title={showThinking ? "Hide the harness's thinking" : "Show the harness's thinking"}
+            onClick={() => setShowThinking((v) => !v)}
+            className={cn(
+              "inline-flex h-6 items-center gap-1.5 rounded-md px-1.5 text-2xs transition-colors duration-100 hover:bg-white/5",
+              showThinking ? "text-foreground/80" : "text-muted-foreground line-through",
+            )}
+          >
+            <Brain aria-hidden className="size-3" /> Thinking
+          </button>
           {searchOpen ? (
             <>
               <div className="relative">
@@ -288,7 +309,7 @@ export function TerminalView({
               </p>
             )}
             <Transcript
-              rows={rows}
+              rows={visible}
               onRespondPermission={onRespondPermission}
               onRespondWidget={onRespondWidget}
               search={{ query, active: activeMatch }}

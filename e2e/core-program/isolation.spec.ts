@@ -166,7 +166,7 @@ test.describe("@critical isolation", () => {
 
     // Approve once, and both branches exist afterwards. This is the claim that makes "one
     // decision, all consequences" true rather than merely displayed.
-    await page.getByRole("button", { name: "Approve" }).click();
+    await page.getByRole("main").getByRole("button", { name: "Approve" }).click();
     const branch = `solow-task-${id}`;
     await expect
       .poll(() => gitIn(PATHS.repo, ["branch", "--list", branch]), { timeout: 20_000 })
