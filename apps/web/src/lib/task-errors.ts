@@ -3,6 +3,7 @@ import {
   CommonErrorCode,
   TaskDependencyErrorCode,
   TaskErrorCode,
+  WorkflowErrorCode,
 } from "@solow/contracts";
 
 /**
@@ -45,6 +46,10 @@ const MESSAGES: Record<string, string> = {
   [BillingErrorCode.CredentialExpired]:
     "The harness's credential was rejected. Update it in Settings, then try again.",
   [BillingErrorCode.QuotaExhausted]: "The harness's quota is exhausted.",
+  [WorkflowErrorCode.InUse]:
+    "A task is still on this workflow. Finish it, or move it off the workflow from its launch dialog, then delete.",
+  [WorkflowErrorCode.StepInUse]:
+    "A task is still on this step. Finish it, or move it off the workflow, then delete the step.",
 };
 
 /**

@@ -523,6 +523,44 @@ describe("workflows", () => {
       );
     });
 
+    it("lets a finished Task go: deleting its Workflow or Step unbinds it rather than refusing", async () => {
+      // A Workflow that had ever run a Task could otherwise never be deleted — the Task keeps
+      // its binding after it is done, and "in use" used to count that.
+      const { c, newTask, newPipeline } = await fixture(db, "acme");
+      const wf = await newPipeline("Ship");
+      const t = await newTask("Wire the latch");
+      await c.workflow.attachTask({ taskId: t.id, workflowId: wf.id });
+      await db.update(taskTable).set({ state: "done" }).where(eq(taskTable.id, t.id));
+
+      const first = wf.steps[0];
+      if (!first) throw new Error("pipeline");
+      await c.workflow.deleteStep({ stepId: first.id });
+      let row = await db.query.task.findFirst({ where: eq(taskTable.id, t.id) });
+      expect(row?.workflowId).toBeNull();
+      expect(row?.workflowStepId).toBeNull();
+
+      // And the Workflow itself, with another finished Task on it.
+      const u = await newTask("Oil the hinge");
+      await c.workflow.attachTask({ taskId: u.id, workflowId: wf.id });
+      await db.update(taskTable).set({ state: "failed" }).where(eq(taskTable.id, u.id));
+      await c.workflow.delete({ id: wf.id });
+      expect((await c.workflow.list({})).map((w) => w.id)).not.toContain(wf.id);
+      row = await db.query.task.findFirst({ where: eq(taskTable.id, u.id) });
+      expect(row?.workflowId).toBeNull();
+    });
+
+    it("still refuses while a Task is running on it", async () => {
+      const { c, newTask, newPipeline } = await fixture(db, "acme");
+      const wf = await newPipeline("Ship");
+      const t = await newTask("Wire the latch");
+      await c.workflow.attachTask({ taskId: t.id, workflowId: wf.id });
+      await db.update(taskTable).set({ state: "running" }).where(eq(taskTable.id, t.id));
+
+      expect(await errMessage(() => c.workflow.delete({ id: wf.id }))).toBe(
+        WorkflowErrorCode.InUse,
+      );
+    });
+
     it("reports a definition edited underneath a running Task as drift", async () => {
       const { c, newTask, newPipeline } = await fixture(db, "acme");
       const wf = await newPipeline("Ship");
