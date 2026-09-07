@@ -420,7 +420,7 @@ export async function updateIssue(
  * Callers passing `force` are expected to have stopped the running Tasks already (the router
  * does, through the orchestrator). This refuses with `HasRunningTasks` if any are still running
  * when it gets here, so a direct DAL caller cannot skip that step: dropping a `task` row while
- * its agent process is alive would orphan the process with nothing left referencing it.
+ * its harness process is alive would orphan the process with nothing left referencing it.
  */
 export async function deleteIssue(
   ctx: RequestContext,
@@ -455,7 +455,7 @@ export async function deleteIssue(
 
       // Re-checked inside the transaction rather than trusting the caller's earlier stop: a Task
       // can enter `running` between the router's stop and this delete, and that is exactly the
-      // row whose agent would be orphaned.
+      // row whose harness would be orphaned.
       const sessionRows = tx
         .select({ id: session.id, state: session.state })
         .from(session)
@@ -557,7 +557,7 @@ export async function issueDeletionImpact(
 }
 
 /**
- * The Tasks under this Issue that still have an agent to stop, with the session to stop them on.
+ * The Tasks under this Issue that still have a harness to stop, with the session to stop them on.
  * The router walks this before a force delete; `deleteIssue` re-checks the same condition inside
  * its transaction, so this is the hand-off list, not the safety net.
  */

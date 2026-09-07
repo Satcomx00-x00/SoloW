@@ -5,8 +5,8 @@
 ## Summary
 
 The Integrated Review Workspace is the focused, per-Task surface where a user watches an
-Agent work and reviews what it produced. It brings together a live terminal, a code editor,
-a diff viewer, a preview of the running result, and the Agent conversation — so everything
+Harness work and reviews what it produced. It brings together a live terminal, a code editor,
+a diff viewer, a preview of the running result, and the Harness conversation — so everything
 needed to understand and judge a Task is in one place.
 
 ## Jobs served
@@ -15,7 +15,7 @@ needed to understand and judge a Task is in one place.
 
 ## User stories
 
-- As a Reviewer, I want to see the Agent's changes as a clear diff, so I can judge them.
+- As a Reviewer, I want to see the Harness's changes as a clear diff, so I can judge them.
 - As a user, I want a live terminal for the Task, so I can see and steer what is happening.
 - As a user, I want to open and read the changed files with proper code intelligence, so I
   understand the change in context.
@@ -26,11 +26,11 @@ needed to understand and judge a Task is in one place.
 - **FR-1** The workspace presents, for a single Task: a live **terminal**, a **code
   editor**, a **diff viewer**, a **preview**, and the **Conversation** for the Task's
   Session.
-- **FR-2** The **terminal** streams the Agent's live activity and lets the user send input
-  and stop the Agent.
+- **FR-2** The **terminal** streams the Harness's live activity and lets the user send input
+  and stop the Harness.
 - **FR-3** The **code editor** lets the user open and read files in the Task's Worktree with
   code intelligence (navigation, symbol awareness) appropriate to the language.
-- **FR-4** The **diff viewer** shows the Agent's proposed changes, grouped by Repository and
+- **FR-4** The **diff viewer** shows the Harness's proposed changes, grouped by Repository and
   file, at a level of detail sufficient to review hunk by hunk (see [F10](./F10-review-approval.md)).
 - **FR-5** The **preview** shows the running result of the Task where applicable (for
   example, a running application), so the user can verify behaviour.

@@ -12,13 +12,13 @@ import { beforeAll, describe, expect, it } from "bun:test";
 type SecretStore = typeof import("./secret-store.js");
 
 let encryptSecret: SecretStore["encryptSecret"];
-let decryptForAgentRun: SecretStore["decryptForAgentRun"];
+let decryptForHarnessRun: SecretStore["decryptForHarnessRun"];
 
 beforeAll(async () => {
   process.env.SOLOW_SECRET_KEY = Buffer.alloc(32, 7).toString("base64");
   const mod = await import("./secret-store.js");
   encryptSecret = mod.encryptSecret;
-  decryptForAgentRun = mod.decryptForAgentRun;
+  decryptForHarnessRun = mod.decryptForHarnessRun;
 });
 
 describe("secret store", () => {
@@ -30,12 +30,12 @@ describe("secret store", () => {
     expect(ciphertext.split(".")).toHaveLength(3);
     expect(ciphertext).not.toContain(plaintext);
 
-    expect(decryptForAgentRun(ciphertext)).toBe(plaintext);
+    expect(decryptForHarnessRun(ciphertext)).toBe(plaintext);
   });
 
   it("round-trips multibyte unicode plaintext", () => {
     const unicode = "clé-secrète-🔐-Ω";
-    expect(decryptForAgentRun(encryptSecret(unicode))).toBe(unicode);
+    expect(decryptForHarnessRun(encryptSecret(unicode))).toBe(unicode);
   });
 
   it("produces different ciphertext for the same plaintext (random IV)", () => {
@@ -48,8 +48,8 @@ describe("secret store", () => {
     expect(a.split(".")[0]).not.toBe(b.split(".")[0]);
 
     // Both still decrypt back to the identical plaintext.
-    expect(decryptForAgentRun(a)).toBe(plaintext);
-    expect(decryptForAgentRun(b)).toBe(plaintext);
+    expect(decryptForHarnessRun(a)).toBe(plaintext);
+    expect(decryptForHarnessRun(b)).toBe(plaintext);
   });
 
   it("throws when the data segment is tampered with (GCM auth tag mismatch)", () => {
@@ -64,7 +64,7 @@ describe("secret store", () => {
     const tampered = [iv, tag, chars.join("")].join(".");
 
     expect(tampered).not.toBe(ciphertext);
-    expect(() => decryptForAgentRun(tampered)).toThrow();
+    expect(() => decryptForHarnessRun(tampered)).toThrow();
   });
 
   it("throws when the auth tag is tampered with", () => {
@@ -74,12 +74,12 @@ describe("secret store", () => {
     chars[0] = chars[0] === "A" ? "B" : "A";
     const tampered = [iv, chars.join(""), data].join(".");
 
-    expect(() => decryptForAgentRun(tampered)).toThrow();
+    expect(() => decryptForHarnessRun(tampered)).toThrow();
   });
 
   it("throws on a malformed ciphertext with missing segments", () => {
-    expect(() => decryptForAgentRun("only-one-segment")).toThrow(/malformed secret ciphertext/);
-    expect(() => decryptForAgentRun("iv.tag")).toThrow(/malformed secret ciphertext/);
-    expect(() => decryptForAgentRun("")).toThrow(/malformed secret ciphertext/);
+    expect(() => decryptForHarnessRun("only-one-segment")).toThrow(/malformed secret ciphertext/);
+    expect(() => decryptForHarnessRun("iv.tag")).toThrow(/malformed secret ciphertext/);
+    expect(() => decryptForHarnessRun("")).toThrow(/malformed secret ciphertext/);
   });
 });

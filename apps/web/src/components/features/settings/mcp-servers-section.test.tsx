@@ -10,7 +10,7 @@ const AT = "2026-08-20T00:00:00.000Z";
 afterEach(cleanup);
 
 describe("McpServersSection", () => {
-  it("switches a server on for every agent through the row's checkbox", async () => {
+  it("switches a server on for every harness through the row's checkbox", async () => {
     const { log } = renderWithTrpc(<McpServersSection />, {
       "library.mcp.list": () => [
         {
@@ -27,7 +27,7 @@ describe("McpServersSection", () => {
       "library.mcp.update": () => ({}),
     });
 
-    fireEvent.click(await screen.findByLabelText("Load github in every agent"));
+    fireEvent.click(await screen.findByLabelText("Load github in every harness"));
     await waitFor(() => {
       const call = log.calls.find((c) => c.path === "library.mcp.update");
       expect(call?.input).toEqual({ id: "m1", enabled: true });

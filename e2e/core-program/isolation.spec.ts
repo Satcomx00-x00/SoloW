@@ -83,7 +83,7 @@ test.describe("@critical isolation", () => {
 
     /*
      * Launches are staggered so two `git worktree add` calls do not contend for the repo lock;
-     * both Tasks are still in flight together afterwards. "In flight" today means the agent has
+     * both Tasks are still in flight together afterwards. "In flight" today means the harness has
      * declared and the run holds the gate open with the worktree live on disk — the Task never
      * enters review on its own, and it does not need to for this assertion: the worktrees are
      * the subject, and they exist from the launch until a decision.
@@ -94,7 +94,7 @@ test.describe("@critical isolation", () => {
     await launchTask(page);
     expect(idA).not.toBe(idB);
 
-    // Named by the agent: `claude --worktree solow-task-<id>` is what creates these.
+    // Named by the harness: `claude --worktree solow-task-<id>` is what creates these.
     const pathA = join(PATHS.worktrees, `solow-task-${idA}`);
     const pathB = join(PATHS.worktrees, `solow-task-${idB}`);
     const filesA = readdirSync(pathA);
@@ -106,7 +106,7 @@ test.describe("@critical isolation", () => {
     expect(filesB).toContain(`marker-solow-task-${idB}.txt`);
     expect(filesB).not.toContain(`marker-solow-task-${idA}.txt`);
 
-    // And what each agent could actually see from inside its worktree was only its own file.
+    // And what each harness could actually see from inside its worktree was only its own file.
     expect(readFileSync(join(pathA, "visible.txt"), "utf8").trim()).toBe(
       `marker-solow-task-${idA}.txt`,
     );
@@ -135,7 +135,7 @@ test.describe("@critical isolation", () => {
     const id = await openTask(page, issue.id, title);
     await launchToReview(page);
 
-    // The primary worktree is the one the agent made, at exactly the path a single-Repository
+    // The primary worktree is the one the harness made, at exactly the path a single-Repository
     // Task has always used. The secondary is a sibling SoloW provisioned, named for the
     // attachment — no Owner-authored text ever reaches the path.
     const primary = join(PATHS.worktrees, `solow-task-${id}`);
@@ -143,7 +143,7 @@ test.describe("@critical isolation", () => {
     expect(siblings).toHaveLength(1);
     const secondary = join(PATHS.worktrees, siblings[0] as string);
 
-    // Each worktree holds only its own Repository's content: the marker the agent wrote is in
+    // Each worktree holds only its own Repository's content: the marker the harness wrote is in
     // the primary and nowhere else, and the second Repository's file is only in the secondary.
     expect(readdirSync(primary)).toContain(`marker-solow-task-${id}.txt`);
     expect(readdirSync(primary)).toContain("README.md");

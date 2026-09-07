@@ -24,7 +24,7 @@ import { IssueStatusControl } from "./issue-status-control";
 /**
  * One Issue and the Tasks cut from it.
  *
- * The board answers "what is every agent doing right now"; this answers "how far along is this
+ * The board answers "what is every harness doing right now"; this answers "how far along is this
  * one piece of work" — the same Tasks, grouped by intent instead of by lifecycle. Both read the
  * same `task.list`, filtered by `issueId` here.
  */
@@ -243,7 +243,7 @@ export function IssueDetail({ issueId }: { issueId: string }) {
                 for their case is worse than saying nothing.
               */}
               Nothing has been cut from this issue yet. Create a task to hand a slice of it to an
-              agent.
+              harness.
             </p>
           ) : (
             <ul className="space-y-2">
@@ -262,7 +262,7 @@ export function IssueDetail({ issueId }: { issueId: string }) {
 
       {/*
         Mounted only while open. The form starts empty every visit without a reset path, and the
-        dialog's four lookups (issues, repositories, agent profiles, executors) stay off every
+        dialog's four lookups (issues, repositories, harness profiles, executors) stay off every
         read of this page — four round-trips nobody standing here asked for. Clearing the preset
         on close is what stops a second `New task` landing on the previous request.
       */}

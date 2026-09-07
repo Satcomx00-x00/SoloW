@@ -182,7 +182,7 @@ export function describeExecutorContract(driver: string, create: ExecutorContrac
 
       it("keeps stdout and stderr as separate streams", async () => {
         const { executor, root } = await fresh();
-        // `acp-runner.ts` reads protocol frames off stdout while the agent's diagnostics go to
+        // `acp-runner.ts` reads protocol frames off stdout while the harness's diagnostics go to
         // stderr; a driver that merged them (a `docker exec -t`, say) would feed the parser log
         // lines and fail with a message about malformed JSON.
         const proc = executor.spawn(["sh", "-c", "echo out; echo err 1>&2"], {

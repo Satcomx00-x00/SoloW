@@ -6,16 +6,16 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { latestTodos, TodoList } from "./todo-list";
 
 /**
- * The agent's plan, drawn as a checklist.
+ * The harness's plan, drawn as a checklist.
  *
  * Two properties matter enough to pin down. The first is that the three states are told apart
  * without hue: a reader who cannot see the green tick still has a different glyph and struck-out
  * text, which is what WCAG 1.4.1 asks of a distinction that carries meaning. The second is that
  * the list stays inert — a tickable box here would let a person record a claim about work only
- * the agent does, and it would be overwritten by the next `TodoWrite` regardless.
+ * the harness does, and it would be overwritten by the next `TodoWrite` regardless.
  *
  * `latestTodos` is tested for the property that makes it correct rather than for its shape: the
- * agent republishes the whole list every time, so the newest event has to win outright over the
+ * harness republishes the whole list every time, so the newest event has to win outright over the
  * ones behind it rather than being merged with them.
  */
 
@@ -92,7 +92,7 @@ describe("TodoList", () => {
     expect(screen.getByText(/2 of 4 done/)).toBeDefined();
   });
 
-  it("offers nothing to click, because the list is the agent's and not the reader's", () => {
+  it("offers nothing to click, because the list is the harness's and not the reader's", () => {
     // A tickable box would be a lie twice over: the reader cannot do the work, and the next
     // `TodoWrite` would overwrite whatever they recorded.
     const { container } = render(<TodoList items={sample} />);

@@ -183,7 +183,7 @@ describe("issue status is derived from its Tasks (FR-006)", () => {
 
   it("is In progress while any Task is still moving", async () => {
     // The bug this covers: `deriveIssueStatus` existed and was never called, so an Issue whose
-    // agents were mid-run still reported "Open" — the column is written once and never updated.
+    // harnesses were mid-run still reported "Open" — the column is written once and never updated.
     expect(await statusWith(["running"])).toBe("in_progress");
     expect(await statusWith(["done", "review"])).toBe("in_progress");
   });
@@ -474,7 +474,7 @@ describe("deleteIssue (issue #15 reversal)", () => {
     expect(await db.select().from(worktree).where(eq(worktree.taskId, taskId))).toHaveLength(0);
   });
 
-  it("refuses a force delete while a Task is still running, so no agent is left orphaned", async () => {
+  it("refuses a force delete while a Task is still running, so no harness is left orphaned", async () => {
     const g = await seedWorkspaceGraph(db, "delete-force-running");
     const ctx = ctxFor(db, g.workspaceId);
     const created = await createIssue(ctx, {
@@ -833,7 +833,7 @@ describe("setIssueStatus (spec F01 FR-7 / FR-9)", () => {
  * Paging, against the real database (issue #82 AC-4).
  *
  * `issue.list` is an MCP tool, so its bound is the difference between a discovery call and one
- * that spends an agent's whole context. These tests hold the three things that make the bound
+ * that spends a harness's whole context. These tests hold the three things that make the bound
  * usable rather than merely present: it applies when nobody asked for it, walking the cursor
  * reaches every row exactly once, and the Workspace scope survives paging — a cursor is a value a
  * caller hands back, and a cursor is exactly the sort of thing a tenancy check gets forgotten on.

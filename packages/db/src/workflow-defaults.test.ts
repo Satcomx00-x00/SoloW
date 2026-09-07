@@ -3,8 +3,8 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import { validateWorkflowGraph } from "@solow/core";
 import { asc, eq } from "drizzle-orm";
-import { ensureDefaultAgentCatalog } from "./agent-catalog-defaults.js";
-import { agentProfile, secret, workflow, workflowStep, workspace } from "./schema.js";
+import { ensureDefaultHarnessCatalog } from "./harness-catalog-defaults.js";
+import { harnessProfile, secret, workflow, workflowStep, workspace } from "./schema.js";
 import { createTestDb, type TestDb } from "./testing.js";
 import { DEFAULT_WORKFLOWS, ensureDefaultWorkflows } from "./workflow-defaults.js";
 
@@ -18,15 +18,15 @@ describe("ensureDefaultWorkflows", () => {
     wsId = ws.id;
   });
 
-  async function seedProfile(name = "Agent#1"): Promise<string> {
-    const catalogId = await ensureDefaultAgentCatalog(db, wsId);
+  async function seedProfile(name = "Harness#1"): Promise<string> {
+    const catalogId = await ensureDefaultHarnessCatalog(db, wsId);
     const [token] = await db
       .insert(secret)
       .values({ workspaceId: wsId, name: `${name}-token`, kind: "api_key", ciphertext: "x" })
       .returning({ id: secret.id });
     if (!token) throw new Error("seed secret");
     const [row] = await db
-      .insert(agentProfile)
+      .insert(harnessProfile)
       .values({
         workspaceId: wsId,
         name,
@@ -35,12 +35,12 @@ describe("ensureDefaultWorkflows", () => {
         secretId: token.id,
         concurrencyCap: 1,
       })
-      .returning({ id: agentProfile.id });
+      .returning({ id: harnessProfile.id });
     if (!row) throw new Error("seed profile");
     return row.id;
   }
 
-  it("waits for an Agent Profile, then seeds three pipelines whose graphs are valid", async () => {
+  it("waits for a Harness Profile, then seeds three pipelines whose graphs are valid", async () => {
     expect(await ensureDefaultWorkflows(db, wsId)).toEqual({ seeded: 0 });
     const profileId = await seedProfile();
     expect(await ensureDefaultWorkflows(db, wsId)).toEqual({ seeded: 3 });

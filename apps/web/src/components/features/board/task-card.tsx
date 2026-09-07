@@ -65,7 +65,7 @@ export function TaskCard({
   blockers?: readonly TaskDependencyDto[] | undefined;
   ghost?: boolean;
   /**
-   * Open the review gate on a Task whose agent has declared it finished.
+   * Open the review gate on a Task whose harness has declared it finished.
    *
    * Absent on a board that cannot act — the ghost a drag leaves behind, and any read-only view.
    * The control is the *only* way a Task enters review: the run records the declaration and
@@ -96,7 +96,7 @@ export function TaskCard({
   const attention = needsAttention(task.state);
   const references = useBoardReferences();
   // The primary attachment (issue #7): a Task spanning several Repositories has several branches
-  // and the card has room for one, so it names the one the agent is actually started in and says
+  // and the card has room for one, so it names the one the harness is actually started in and says
   // how many others there are beside it.
   const primary = task.repositories.length > 0 ? primaryTaskRepository(task.repositories) : null;
   const repositoryName = primary ? references.repositoryName(primary.repositoryId) : null;
@@ -110,7 +110,7 @@ export function TaskCard({
   const outstanding = unsatisfiedDependencies(blockers ?? []);
   const first = outstanding[0];
   /*
-   * "The agent says it has finished, and there is something to look at."
+   * "The harness says it has finished, and there is something to look at."
    *
    * Both halves matter. `completedAt` alone would also be true of a run that finished having
    * changed nothing (`nothing_to_do`) or one that gave up (`blocked`) — neither has anything to
@@ -314,7 +314,7 @@ export function TaskCard({
         {/*
           The one action that opens the review gate.
           
-          Green, and only present when the agent has declared `changes_ready` — a Task still
+          Green, and only present when the harness has declared `changes_ready` — a Task still
           working, or one that finished with nothing to show, offers nothing to click. The label
           says what will happen rather than naming a column, because "Review" beside a card
           already sitting in a column is ambiguous about which way it goes.

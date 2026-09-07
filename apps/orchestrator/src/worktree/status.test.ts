@@ -185,7 +185,7 @@ describe("readScmStatus", () => {
   });
 
   it("excludes the Repository's setup files from every call it makes (issue #52)", async () => {
-    // A `.env` copied in for the agent is not part of what the agent proposed, and rendering it
+    // A `.env` copied in for the harness is not part of what the harness proposed, and rendering it
     // would put a secret on screen (Principle IV).
     const calls: string[][] = [];
     await readScmStatus(fakeGit({}, calls), "/wt/task", [".env"]);

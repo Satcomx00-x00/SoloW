@@ -18,7 +18,7 @@ import { ctxFor, seedIssue, seedWorkspaceGraph } from "./test-fixtures.js";
 /**
  * Deleting a single Task (board card + Task page). The cascade itself is shared with
  * `deleteIssue` via `task-cascade.ts`; what is proved here is the two guards that are specific
- * to deleting one Task — a running agent, and Tasks blocked by this one.
+ * to deleting one Task — a running harness, and Tasks blocked by this one.
  */
 
 describe("deleteTask", () => {
@@ -97,7 +97,7 @@ describe("deleteTask", () => {
 
   it("deletes a Task stuck in `running` with no Session left to stop", async () => {
     // The wreckage a run that died without reconciling leaves behind: the state says running,
-    // nothing will ever update it again, and it holds the Agent Profile's concurrency slot.
+    // nothing will ever update it again, and it holds the Harness Profile's concurrency slot.
     // Keying the guard on `task.state` made this permanently undeletable from the UI.
     const { ctx, make } = await seed("delete-task-stale-running");
     const t = await make("Its run died two days ago", "running");

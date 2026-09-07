@@ -4,19 +4,19 @@
 
 ## Context
 
-Many users already pay for a Claude Pro/Max subscription and want to run agents on it rather
-than paying per token through an API key. Because SoloW drives the real agent CLI (see
-[0003](./0003-agent-connection-protocol.md)), an agent inherits whatever authentication that
-CLI has. A portable subscription token can be provisioned once and supplied to agents in any
+Many users already pay for a Claude Pro/Max subscription and want to run harnesses on it rather
+than paying per token through an API key. Because SoloW drives the real harness CLI (see
+[0003](./0003-agent-connection-protocol.md)), a harness inherits whatever authentication that
+CLI has. A portable subscription token can be provisioned once and supplied to harnesses in any
 Executor. Two hazards must be managed: an API-key credential present in the environment
-silently diverts a subscription agent to metered billing, and subscription plans have quota
+silently diverts a subscription harness to metered billing, and subscription plans have quota
 windows that make unbounded parallel fan-out impossible.
 
 ## Decision
 
-Support **two billing modes per Agent Profile**: Subscription and API Key. For Subscription
+Support **two billing modes per Harness Profile**: Subscription and API Key. For Subscription
 mode, use a **portable subscription token** provisioned once and supplied across all Executor
-types. The orchestrator **removes any conflicting credential** from a subscription agent's
+types. The orchestrator **removes any conflicting credential** from a subscription harness's
 run environment so billing cannot be diverted, applies a **configurable concurrency cap**,
 and **Parks** work (preserving it) when a quota window is exhausted, resuming automatically
 when the window resets.
@@ -32,7 +32,7 @@ when the window resets.
 
 ## Consequences
 
-- Positive: users run agents on a plan they already pay for, everywhere; a primary
+- Positive: users run harnesses on a plan they already pay for, everywhere; a primary
   differentiator from comparable tools.
 - Positive: the Parked state and concurrency caps prevent silent quota exhaustion and
   surprise bills (product NFR-10).

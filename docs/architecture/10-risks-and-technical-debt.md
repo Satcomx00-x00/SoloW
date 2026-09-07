@@ -11,12 +11,12 @@ This section records known risks and areas to watch. It is revisited as the prod
   concurrency caps, the Parked state, and an easy path to API-key billing for fan-out
   ([F06](../features/F06-authentication-billing.md)).
 
-- **R-2 Agent protocol maturity.** The standard agent protocol is evolving, and not every
-  agent tool supports every capability equally. *Mitigation:* the uniform boundary isolates
-  the rest of the system from per-agent differences; capabilities degrade per Profile rather
+- **R-2 Harness protocol maturity.** The standard harness protocol is evolving, and not every
+  harness tool supports every capability equally. *Mitigation:* the uniform boundary isolates
+  the rest of the system from per-harness differences; capabilities degrade per Profile rather
   than breaking orchestration ([Decision 0003](../decisions/0003-agent-connection-protocol.md)).
 
-- **R-3 Credential-isolation completeness.** The guarantee that agent-run code cannot read
+- **R-3 Credential-isolation completeness.** The guarantee that harness-run code cannot read
   credentials must hold across every Executor type, including remote and container.
   *Mitigation:* credential isolation is a cross-cutting rule verified per Executor
   ([F17](../features/F17-security-secrets.md)).

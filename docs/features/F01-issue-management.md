@@ -15,11 +15,11 @@ Whichever way an Issue arrives, its Tasks and derived status are always SoloW's 
 
 ## Jobs served
 
-- **J2 — Organise agent work around issues.**
+- **J2 — Organise harness work around issues.**
 
 ## User stories
 
-- As a Team Lead, I want to import Issues from our existing tracker, so agent work is
+- As a Team Lead, I want to import Issues from our existing tracker, so harness work is
   anchored to our real backlog, not a duplicate of it.
 - As a Solo Power User, I want to see all Tasks that belong to an Issue in one place, so I
   know the whole state of that work.
@@ -116,7 +116,7 @@ Whichever way an Issue arrives, its Tasks and derived status are always SoloW's 
 ## Out of scope
 
 - Full issue-tracker capabilities (sprints, estimation, custom fields) beyond what is
-  needed to organise agent Tasks. Those remain in the external tracker.
+  needed to organise harness Tasks. Those remain in the external tracker.
 
 ## Related
 

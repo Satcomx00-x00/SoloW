@@ -38,7 +38,7 @@ const contentBlockSchema = z.object({ type: z.string() }).passthrough();
 
 /**
  * The session preamble. `cwd` is the load-bearing field: with `--worktree`, this is the
- * worktree Claude Code created, and it is how SoloW learns where the agent is working
+ * worktree Claude Code created, and it is how SoloW learns where the harness is working
  * without having to guess a naming convention.
  */
 export const initEventSchema = z

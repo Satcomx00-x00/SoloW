@@ -3,21 +3,21 @@ import { BillingErrorCode } from "@solow/contracts";
 import {
   classifyRunFailure,
   detectFailureSignal,
-  resolveAgentRunEnv,
+  resolveHarnessRunEnv,
   withinConcurrencyCap,
 } from "./billing.js";
 
 // Claude Code's own variable names, used throughout as a stand-in for "whatever the running
-// Agent's catalog row declares" (issue #10) — the point under test is that the guard uses the
+// Harness's catalog row declares" (issue #10) — the point under test is that the guard uses the
 // parameters, not that it happens to know Claude Code's names.
 const CLAUDE_CODE_VARS = {
   subscriptionEnvVar: "CLAUDE_CODE_OAUTH_TOKEN",
   meteredEnvVar: "ANTHROPIC_API_KEY",
 };
 
-describe("resolveAgentRunEnv — billing integrity (Principle IV)", () => {
+describe("resolveHarnessRunEnv — billing integrity (Principle IV)", () => {
   it("subscription mode injects the subscription variable and STRIPS the metered one", () => {
-    const r = resolveAgentRunEnv({
+    const r = resolveHarnessRunEnv({
       authMode: "subscription",
       credentialValue: "sk-ant-oat01-abc",
       baseEnv: { ANTHROPIC_API_KEY: "sk-should-be-removed", PATH: "/usr/bin" },
@@ -32,7 +32,7 @@ describe("resolveAgentRunEnv — billing integrity (Principle IV)", () => {
   });
 
   it("api_key mode injects the metered variable and drops any stale subscription one", () => {
-    const r = resolveAgentRunEnv({
+    const r = resolveHarnessRunEnv({
       authMode: "api_key",
       credentialValue: "sk-ant-key",
       baseEnv: { CLAUDE_CODE_OAUTH_TOKEN: "stale" },
@@ -45,25 +45,25 @@ describe("resolveAgentRunEnv — billing integrity (Principle IV)", () => {
     }
   });
 
-  it("uses whichever variable names the running Agent's catalog row declares", () => {
-    // A hypothetical second agent with entirely different variable names — proves the guard is
+  it("uses whichever variable names the running Harness's catalog row declares", () => {
+    // A hypothetical second harness with entirely different variable names — proves the guard is
     // driven by its parameters and not still secretly hardcoded to Claude Code's.
-    const r = resolveAgentRunEnv({
+    const r = resolveHarnessRunEnv({
       authMode: "subscription",
       credentialValue: "tok-123",
-      baseEnv: { OTHER_AGENT_API_KEY: "should-be-stripped" },
-      subscriptionEnvVar: "OTHER_AGENT_OAUTH_TOKEN",
-      meteredEnvVar: "OTHER_AGENT_API_KEY",
+      baseEnv: { OTHER_HARNESS_API_KEY: "should-be-stripped" },
+      subscriptionEnvVar: "OTHER_HARNESS_OAUTH_TOKEN",
+      meteredEnvVar: "OTHER_HARNESS_API_KEY",
     });
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.data["OTHER_AGENT_OAUTH_TOKEN"]).toBe("tok-123");
-      expect(r.data).not.toHaveProperty("OTHER_AGENT_API_KEY");
+      expect(r.data["OTHER_HARNESS_OAUTH_TOKEN"]).toBe("tok-123");
+      expect(r.data).not.toHaveProperty("OTHER_HARNESS_API_KEY");
     }
   });
 
   it("applies an Executor Profile's environment over the base environment (issue #73)", () => {
-    const r = resolveAgentRunEnv({
+    const r = resolveHarnessRunEnv({
       authMode: "subscription",
       credentialValue: "sk-ant-oat01-abc",
       baseEnv: { PATH: "/usr/bin", NODE_ENV: "development" },
@@ -81,7 +81,7 @@ describe("resolveAgentRunEnv — billing integrity (Principle IV)", () => {
   it("AC-6: a profile env cannot set the credential the guard owns", () => {
     // The contract already refuses such a profile, so this is the second lock: a row written
     // before that check existed, or by anything bypassing the API, still cannot divert billing.
-    const r = resolveAgentRunEnv({
+    const r = resolveHarnessRunEnv({
       authMode: "subscription",
       credentialValue: "sk-ant-oat01-abc",
       baseEnv: {},
@@ -93,7 +93,7 @@ describe("resolveAgentRunEnv — billing integrity (Principle IV)", () => {
   });
 
   it("AC-6: a profile env cannot replace the credential the guard just injected", () => {
-    const r = resolveAgentRunEnv({
+    const r = resolveHarnessRunEnv({
       authMode: "subscription",
       credentialValue: "sk-ant-oat01-real",
       baseEnv: {},
@@ -104,27 +104,30 @@ describe("resolveAgentRunEnv — billing integrity (Principle IV)", () => {
     if (r.ok) expect(r.data["CLAUDE_CODE_OAUTH_TOKEN"]).toBe("sk-ant-oat01-real");
   });
 
-  it("AC-6: a profile env cannot set the *running agent's* credential var, even if it's not Claude Code's", () => {
+  it("AC-6: a profile env cannot set the *running harness's* credential var, even if it's not Claude Code's", () => {
     // The contract's static GUARDED_ENV_VARS check only knows Claude Code's two names. This
-    // proves the runtime guard also strips whichever names the actual running agent's catalog
-    // row declares, closing the gap for #10's catalog-driven agents.
-    const r = resolveAgentRunEnv({
+    // proves the runtime guard also strips whichever names the actual running harness's catalog
+    // row declares, closing the gap for #10's catalog-driven harnesses.
+    const r = resolveHarnessRunEnv({
       authMode: "subscription",
       credentialValue: "tok-123",
       baseEnv: {},
-      profileEnv: { OTHER_AGENT_OAUTH_TOKEN: "sk-someone-elses", OTHER_AGENT_API_KEY: "leaked" },
-      subscriptionEnvVar: "OTHER_AGENT_OAUTH_TOKEN",
-      meteredEnvVar: "OTHER_AGENT_API_KEY",
+      profileEnv: {
+        OTHER_HARNESS_OAUTH_TOKEN: "sk-someone-elses",
+        OTHER_HARNESS_API_KEY: "leaked",
+      },
+      subscriptionEnvVar: "OTHER_HARNESS_OAUTH_TOKEN",
+      meteredEnvVar: "OTHER_HARNESS_API_KEY",
     });
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.data["OTHER_AGENT_OAUTH_TOKEN"]).toBe("tok-123");
-      expect(r.data).not.toHaveProperty("OTHER_AGENT_API_KEY");
+      expect(r.data["OTHER_HARNESS_OAUTH_TOKEN"]).toBe("tok-123");
+      expect(r.data).not.toHaveProperty("OTHER_HARNESS_API_KEY");
     }
   });
 
   it("errors when the credential is missing", () => {
-    const r = resolveAgentRunEnv({
+    const r = resolveHarnessRunEnv({
       authMode: "subscription",
       credentialValue: null,
       baseEnv: {},
@@ -154,7 +157,7 @@ describe("classifyRunFailure", () => {
 });
 
 describe("detectFailureSignal", () => {
-  it("reads quota exhaustion out of what the agent reported", () => {
+  it("reads quota exhaustion out of what the harness reported", () => {
     for (const text of [
       "Error: usage limit reached, resets at 18:00",
       "API error 429: too many requests",
@@ -164,7 +167,7 @@ describe("detectFailureSignal", () => {
     }
   });
 
-  it("reads a rejected credential out of what the agent reported", () => {
+  it("reads a rejected credential out of what the harness reported", () => {
     for (const text of [
       "HTTP 401 Unauthorized",
       "invalid api key provided",

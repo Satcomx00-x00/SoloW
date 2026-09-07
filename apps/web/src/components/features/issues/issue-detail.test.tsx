@@ -62,7 +62,7 @@ function makeTask(id: string, state: TaskState, title: string): TaskDto {
     issueId: issue.id,
     title,
     state,
-    agentProfileId: "agent-1",
+    agentProfileId: "harness-1",
     executorProfileId: "exec-1",
     repositories: [
       {
@@ -158,7 +158,10 @@ describe("IssueDetail — starting a Task on this Issue", () => {
       items: [{ id: "repo-1", name: "api", source: "local_path", location: "/srv/api" }],
       nextCursor: null,
     }),
-    "profile.agent.list": () => ({ items: [{ id: "agent-1", name: "Claude" }], nextCursor: null }),
+    "profile.agent.list": () => ({
+      items: [{ id: "harness-1", name: "Claude" }],
+      nextCursor: null,
+    }),
     "profile.executor.list": () => ({ items: [{ id: "exec-1", name: "Local" }], nextCursor: null }),
     "issue.list": () => ({ items: [{ ...issue, repositoryId: "repo-1" }], nextCursor: null }),
   };

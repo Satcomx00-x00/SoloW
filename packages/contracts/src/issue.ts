@@ -40,7 +40,7 @@ export const issueLabelsSchema = z.array(issueLabelSchema).max(MAX_ISSUE_LABELS)
  * a second, worse client for the provider the team already has.
  *
  * Distinct from the branch a SoloW Task produced (issue #104). One is what the provider
- * knows, the other is what an agent did here; showing them as one list would make it impossible
+ * knows, the other is what a harness did here; showing them as one list would make it impossible
  * to tell which of the two a reader is looking at.
  *
  * `state` reuses `changeRequestStateSchema` rather than declaring a second `open|closed|merged`:

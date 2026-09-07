@@ -1,9 +1,9 @@
 import { beforeAll, describe, expect, it } from "bun:test";
 import {
-  agentCatalog,
-  agentProfile,
   encryptSecret,
   executorProfile,
+  harnessCatalog,
+  harnessProfile,
   integration,
   issue,
   repository,
@@ -24,7 +24,7 @@ import {
   listSessionSummaries,
   listSessionUsage,
   loadTaskRunContext,
-  loadWorkflowStepAgents,
+  loadWorkflowStepHarnesses,
   nextSessionUsageSeq,
   recordSessionUsage,
   setTaskRepositoryResultBranch,
@@ -56,7 +56,7 @@ async function seed(db: TestDb) {
     ciphertext,
   });
 
-  await db.insert(agentCatalog).values({
+  await db.insert(harnessCatalog).values({
     id: "cat-1",
     workspaceId: WS,
     key: "claude_code",
@@ -67,7 +67,7 @@ async function seed(db: TestDb) {
     meteredEnvVar: "ANTHROPIC_API_KEY",
   });
 
-  await db.insert(agentProfile).values({
+  await db.insert(harnessProfile).values({
     id: "ap-1",
     workspaceId: WS,
     name: "Default Claude",
@@ -233,7 +233,7 @@ describe("loadTaskRunContext — several attached Repositories", () => {
   it("orders them by position, not by insertion, so the primary is never insertion-order luck", async () => {
     const db = createTestDb();
     await seed(db);
-    // Inserted second but positioned first: the agent must be started in this one.
+    // Inserted second but positioned first: the harness must be started in this one.
     await db.update(taskRepository).set({ position: 1 }).where(eq(taskRepository.id, "attach-1"));
     await attachSecond(db, 0);
 
@@ -343,7 +343,7 @@ describe("setTaskRepositoryResultBranch", () => {
 });
 
 describe("loadTaskRunContext", () => {
-  it("returns the task, agent profile, repository and the secret ciphertext", async () => {
+  it("returns the task, harness profile, repository and the secret ciphertext", async () => {
     const db = createTestDb();
     const { ciphertext } = await seed(db);
 
@@ -353,13 +353,13 @@ describe("loadTaskRunContext", () => {
     expect(ctx.task.title).toBe("Implement gate fix");
     expect(ctx.task.state).toBe("ready");
 
-    expect(ctx.agentProfile.id).toBe("ap-1");
-    expect(ctx.agentProfile.authMode).toBe("subscription");
-    expect(ctx.agentProfile.secretId).toBe("sec-1");
+    expect(ctx.harnessProfile.id).toBe("ap-1");
+    expect(ctx.harnessProfile.authMode).toBe("subscription");
+    expect(ctx.harnessProfile.secretId).toBe("sec-1");
 
-    expect(ctx.agentCatalog.id).toBe("cat-1");
-    expect(ctx.agentCatalog.command).toBe("claude");
-    expect(ctx.agentCatalog.subscriptionEnvVar).toBe("CLAUDE_CODE_OAUTH_TOKEN");
+    expect(ctx.harnessCatalog.id).toBe("cat-1");
+    expect(ctx.harnessCatalog.command).toBe("claude");
+    expect(ctx.harnessCatalog.subscriptionEnvVar).toBe("CLAUDE_CODE_OAUTH_TOKEN");
 
     expect(ctx.repositories).toHaveLength(1);
     expect(ctx.repositories[0]?.repository.id).toBe("repo-1");
@@ -373,14 +373,14 @@ describe("loadTaskRunContext", () => {
     expect(ctx.secretCiphertext).not.toContain(SECRET_PLAINTEXT);
   });
 
-  it("yields null ciphertext when the agent profile's secret is absent", async () => {
+  it("yields null ciphertext when the harness profile's secret is absent", async () => {
     const db = createTestDb();
     await seed(db);
     // Point the profile at a non-existent secret id.
     await db
-      .update(agentProfile)
+      .update(harnessProfile)
       .set({ secretId: "sec-missing" })
-      .where(eq(agentProfile.id, "ap-1"));
+      .where(eq(harnessProfile.id, "ap-1"));
 
     const ctx = await loadTaskRunContext(db, WS, "task-1");
     expect(ctx.secretCiphertext).toBeNull();
@@ -781,16 +781,16 @@ describe("the Workflow flag on a run context", () => {
     // And nothing else about the context moves: the Task's own Profile, catalog row and
     // credential stay the Task's, because half the run loop reads them and a Task with no
     // Workflow must not change at all.
-    expect(ctx.agentProfile.id).toBe("ap-1");
-    expect(ctx.agentCatalog.id).toBe("cat-1");
+    expect(ctx.harnessProfile.id).toBe("ap-1");
+    expect(ctx.harnessCatalog.id).toBe("cat-1");
     expect(ctx.secretCiphertext).not.toBeNull();
   });
 });
 
-describe("resolving the Agent Profile behind every Workflow Step", () => {
+describe("resolving the Harness Profile behind every Workflow Step", () => {
   /** A second Profile in `WS`, and one in the other tenant that must never resolve. */
   async function seedProfiles(db: TestDb): Promise<void> {
-    await db.insert(agentCatalog).values({
+    await db.insert(harnessCatalog).values({
       id: "cat-2",
       workspaceId: WS,
       key: "acp_agent",
@@ -800,7 +800,7 @@ describe("resolving the Agent Profile behind every Workflow Step", () => {
       subscriptionEnvVar: "CLAUDE_CODE_OAUTH_TOKEN",
       meteredEnvVar: "ANTHROPIC_API_KEY",
     });
-    await db.insert(agentProfile).values({
+    await db.insert(harnessProfile).values({
       id: "ap-2",
       workspaceId: WS,
       name: "Reviewer",
@@ -822,9 +822,9 @@ describe("resolving the Agent Profile behind every Workflow Step", () => {
      * catalog row of its own, dropping the Workspace filter on the Profile would still be caught
      * by the Workspace filter on the catalog, and the test would pass while the defect it is
      * named after was live. Sharing the catalog id leaves the Profile's own filter as the only
-     * thing standing between this Workspace and another tenant's agent (Principle V).
+     * thing standing between this Workspace and another tenant's harness (Principle V).
      */
-    await db.insert(agentProfile).values({
+    await db.insert(harnessProfile).values({
       id: "ap-other",
       workspaceId: OTHER_WS,
       name: "Theirs",
@@ -839,13 +839,16 @@ describe("resolving the Agent Profile behind every Workflow Step", () => {
     await seed(db);
     await seedProfiles(db);
 
-    const resolved = await loadWorkflowStepAgents(db, WS, ["ap-1", "ap-2", "ap-1"]);
+    const resolved = await loadWorkflowStepHarnesses(db, WS, ["ap-1", "ap-2", "ap-1"]);
 
     expect(resolved.ok).toBe(true);
     if (!resolved.ok) return;
     // Two Steps naming one Profile resolve it once; the caller pairs by id, never by position.
-    expect(resolved.agents.map((a) => a.agentProfileId)).toEqual(["ap-1", "ap-2"]);
-    expect(resolved.agents.map((a) => a.agentCatalog.command)).toEqual(["claude", "acp-agent"]);
+    expect(resolved.harnesses.map((a) => a.agentProfileId)).toEqual(["ap-1", "ap-2"]);
+    expect(resolved.harnesses.map((a) => a.harnessCatalog.command)).toEqual([
+      "claude",
+      "acp-agent",
+    ]);
   });
 
   it("carries no credential, so a memoized durable step holds none", async () => {
@@ -856,20 +859,20 @@ describe("resolving the Agent Profile behind every Workflow Step", () => {
     await seed(db);
     await seedProfiles(db);
 
-    const resolved = await loadWorkflowStepAgents(db, WS, ["ap-1"]);
+    const resolved = await loadWorkflowStepHarnesses(db, WS, ["ap-1"]);
 
     expect(resolved.ok).toBe(true);
     if (!resolved.ok) return;
     const serialised = JSON.stringify(resolved);
     expect(serialised).not.toContain(SECRET_PLAINTEXT);
-    // Not the ciphertext either: it is what `decryptForAgentRun` takes, so storing it durably is
+    // Not the ciphertext either: it is what `decryptForHarnessRun` takes, so storing it durably is
     // storing the credential behind one call.
     const [row] = await db.select().from(secret).where(eq(secret.id, "sec-1")).limit(1);
     expect(serialised).not.toContain(row?.ciphertext ?? "IMPOSSIBLE");
-    expect(Object.keys(resolved.agents[0] ?? {})).toEqual([
+    expect(Object.keys(resolved.harnesses[0] ?? {})).toEqual([
       "agentProfileId",
-      "agentProfile",
-      "agentCatalog",
+      "harnessProfile",
+      "harnessCatalog",
     ]);
   });
 
@@ -877,19 +880,19 @@ describe("resolving the Agent Profile behind every Workflow Step", () => {
     const db = createTestDb();
     await seed(db);
 
-    const resolved = await loadWorkflowStepAgents(db, WS, ["ap-1", "ap-gone"]);
+    const resolved = await loadWorkflowStepHarnesses(db, WS, ["ap-1", "ap-gone"]);
 
-    // Named, because the alternative to refusing is running that Step under some other agent.
-    expect(resolved).toEqual({ ok: false, missingAgentProfileId: "ap-gone" });
+    // Named, because the alternative to refusing is running that Step under some other harness.
+    expect(resolved).toEqual({ ok: false, missingHarnessProfileId: "ap-gone" });
   });
 
-  it("reads another tenant's Profile as absent, never as someone else's agent", async () => {
+  it("reads another tenant's Profile as absent, never as someone else's harness", async () => {
     const db = createTestDb();
     await seed(db);
     await seedProfiles(db);
 
-    const resolved = await loadWorkflowStepAgents(db, WS, ["ap-other"]);
+    const resolved = await loadWorkflowStepHarnesses(db, WS, ["ap-other"]);
 
-    expect(resolved).toEqual({ ok: false, missingAgentProfileId: "ap-other" });
+    expect(resolved).toEqual({ ok: false, missingHarnessProfileId: "ap-other" });
   });
 });

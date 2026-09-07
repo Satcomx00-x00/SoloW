@@ -31,7 +31,7 @@ export const reviewRouter = router({
         tags: ["review"],
         protect: true,
         summary:
-          "Record the human decision on a Session's diff: approve (commit), reject (discard), or request_changes (resume the agent with feedback). This is the review gate — nothing is integrated without it.",
+          "Record the human decision on a Session's diff: approve (commit), reject (discard), or request_changes (resume the harness with feedback). This is the review gate — nothing is integrated without it.",
       },
     })
     .input(reviewDecisionInput)
@@ -40,7 +40,7 @@ export const reviewRouter = router({
       // Ownership: the Session must belong to this Workspace before we record a decision.
       const session = unwrap(await getSessionById(ctx.rctx, input.sessionId));
 
-      // `request_changes` resumes the agent, so it is a start (issue #6 AC-3: "SHALL NOT start
+      // `request_changes` resumes the harness, so it is a start (issue #6 AC-3: "SHALL NOT start
       // it by any automated path"). The reading applied is the one `task.move` already applies —
       // the transition *into* `running` is the start, whoever asks for it — so a decision that
       // would set a blocked Task going is refused with the same code, rather than the same state
@@ -93,12 +93,12 @@ export const reviewRouter = router({
          *
          * Approve claims the change was *integrated* — and integration is the orchestrator's
          * alone: committing means reaching a worktree through an Executor, which is the boundary
-         * this process sits on the wrong side of by design. Request-changes claims an agent is
+         * this process sits on the wrong side of by design. Request-changes claims a harness is
          * *running*, and no process here starts one. Reject alone is pure state: back to
          * `ready`, no claim about the work at all.
          *
          * So writing `done` here was reporting a success nobody achieved. Observed end to end on
-         * 2026-08-27: an agent edited a file, the reviewer approved, the Task went Done, and the
+         * 2026-08-27: a harness edited a file, the reviewer approved, the Task went Done, and the
          * branch still pointed at the commit before the run — the work sat uncommitted in a
          * worktree nothing would ever clean up, with no error anywhere on screen. That is the
          * worst failure a review gate can have: it is indistinguishable from having worked.
@@ -110,17 +110,17 @@ export const reviewRouter = router({
         /*
          * `request_changes` may not be applied here either, for the sibling reason.
          *
-         * The durable path resumes the agent because the parked run consumes `review.decided`
+         * The durable path resumes the harness because the parked run consumes `review.decided`
          * and starts the next round itself. On this path there is no run to consume it, so
-         * writing `running` produces a Task that *says* an agent is working while no process
+         * writing `running` produces a Task that *says* a harness is working while no process
          * exists anywhere — the exact zombie this codebase already documents ("a Task's input
-         * box answering 'No agent is running' forever"), fixed only by the orchestrator's next
+         * box answering 'No harness is running' forever"), fixed only by the orchestrator's next
          * boot-time reconcile. A state must not claim more than this process did.
          *
          * Both therefore land on `STRANDED_REVIEW_REASON`: decision recorded, delivery failed,
          * Retry redrives a fresh run. One honest limit, stated rather than hidden — a redriven
          * run starts from the Task brief, so the reviewer's feedback reaches the record (the
-         * review row above holds it) but not the next agent's prompt. That loses less than a
+         * review row above holds it) but not the next harness's prompt. That loses less than a
          * permanently fake "Running".
          *
          * Reject stays applicable: it is pure state — back to `ready`, no claim that anything

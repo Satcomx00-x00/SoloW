@@ -13,7 +13,7 @@ import { WIDGET_ANSWER_PREFIX } from "@solow/contracts";
  * keyed on `(sessionId, seq)`, which is the identity the orchestrator assigns, and the persisted
  * copy wins: it is the one that survived a round trip through the database.
  *
- * **Coalescing.** An agent's turn arrives as many small chunks — ACP emits one per fragment — and
+ * **Coalescing.** A harness's turn arrives as many small chunks — ACP emits one per fragment — and
  * markdown cannot be parsed on a fragment: a fence that has only half arrived would swallow the
  * rest of the transcript on every keystroke of output. Consecutive chunks on the same channel
  * are merged into one block, so a renderer sees turns, not deltas.
@@ -67,7 +67,7 @@ export interface PermissionRow {
 }
 
 /**
- * Something the agent asked the frontend to draw. The answer, when there is one, is folded into
+ * Something the harness asked the frontend to draw. The answer, when there is one, is folded into
  * the same row — a widget and its response are one thing on screen, exactly as a permission and
  * its resolution are.
  */
@@ -133,13 +133,13 @@ interface Normalised {
 /**
  * Whether an operator turn is the machine's copy of a widget answer.
  *
- * The answer reaches the agent as a message, and a protocol that echoes operator input puts that
+ * The answer reaches the harness as a message, and a protocol that echoes operator input puts that
  * message straight back in the transcript — directly beneath the widget card that already shows,
  * in the operator's own words, what they picked. One of the two is a duplicate, and it is this
  * one: it is addressed to the model, phrased for the model, and carries option ids.
  *
  * Dropped from the transcript only. The turn stays in the session log and stays visible in the
- * Conversation tab, so "what was the agent actually told" is still answerable — this hides a
+ * Conversation tab, so "what was the harness actually told" is still answerable — this hides a
  * repetition in the one view where the thing it repeats is on screen.
  */
 function isWidgetAnswerEcho(channel: TranscriptChannel, text: string): boolean {
@@ -234,7 +234,7 @@ function fromPersisted(e: SessionEventDto): Normalised | null {
         },
       };
     // `usage`, `state`, `diff` and `todos` are records the transcript does not narrate: usage has
-    // its own panel, state is the header's badge, a diff is the Changes tab, and the agent's plan
+    // its own panel, state is the header's badge, a diff is the Changes tab, and the harness's plan
     // is the Plan panel beside it.
     default:
       return null;
@@ -512,14 +512,14 @@ export function buildTranscript(
  *
  * The tail of a live turn is rendered as plain text because a fence that has only half arrived
  * would, parsed as markdown, swallow everything after it — and re-parse into something different
- * on the next chunk. That rule was applied to the whole tail, and the cost was this: an agent
+ * on the next chunk. That rule was applied to the whole tail, and the cost was this: a harness
  * whose last turn *ends* in a closed code block — the summary, the diff, the requirements file it
  * just wrote — showed the reader raw backticks for as long as the run stayed alive, which for a
  * run waiting on an answer is indefinitely.
  *
  * Counting the fences separates the two cases exactly. An even count means every fence that was
  * opened was closed, so the block can be parsed with no risk of a runaway; an odd count means the
- * agent is mid-block and plain text is still the honest rendering.
+ * harness is mid-block and plain text is still the honest rendering.
  */
 export function fencesBalanced(text: string): boolean {
   let count = 0;
@@ -540,30 +540,30 @@ export function openPermission(rows: readonly TranscriptRow[]): PermissionRow | 
 }
 
 /**
- * What the agent appears to be doing right now.
+ * What the harness appears to be doing right now.
  *
- * A running agent is silent for long stretches — a launch takes seconds to reach the first
+ * A running harness is silent for long stretches — a launch takes seconds to reach the first
  * token, a `Bash` call can take a minute, and a thinking block streams nothing the operator was
  * meant to read. During any of those the panel showed a settled transcript and nothing else,
  * which is indistinguishable from a run that has hung. This is the difference, derived from the
  * rows rather than tracked in state so a reconnect cannot leave it stuck saying "launching" about
- * an agent that is already writing.
+ * a harness that is already writing.
  *
  * `null` twice, and both times on purpose. Not running: there is nothing to report and a line
  * saying so would be noise under every finished run. Blocked on a question: the permission card
  * or the widget already says what is happening, and "thinking" underneath it would be a lie —
- * the agent is not thinking, it is waiting for the operator.
+ * the harness is not thinking, it is waiting for the operator.
  */
-export type AgentActivity =
+export type HarnessActivity =
   | { kind: "launching" }
   | { kind: "thinking" }
   | { kind: "tool"; name: string }
   | { kind: "writing" };
 
-export function agentActivity(
+export function harnessActivity(
   rows: readonly TranscriptRow[],
   isRunning: boolean,
-): AgentActivity | null {
+): HarnessActivity | null {
   if (!isRunning) return null;
   // Nothing has arrived yet: the orchestrator is still starting the session and checking out the
   // worktree. This is the window the operator most needs a word for — they pressed Launch and
@@ -582,7 +582,7 @@ export function agentActivity(
     return { kind: "writing" };
   }
   // Everything else — a thinking block still arriving, a finished tool call, a settled turn the
-  // agent has not followed up yet — is the model working with nothing to show for it.
+  // harness has not followed up yet — is the model working with nothing to show for it.
   return { kind: "thinking" };
 }
 

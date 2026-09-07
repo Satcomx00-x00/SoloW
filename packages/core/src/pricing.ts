@@ -8,7 +8,7 @@
  * provider adjusts a rate. Both are wrong. Counts are recorded; cost is computed on demand.
  *
  * It also means usage capture never blocks on a price being known — which matters, because
- * capture cannot be deferred (the agent reports usage once) while a price table can be filled
+ * capture cannot be deferred (the harness reports usage once) while a price table can be filled
  * in at any time.
  */
 
@@ -23,11 +23,11 @@ export interface ModelPrice {
 }
 
 /**
- * Known prices, keyed by the **exact** model identifier the agent reports.
+ * Known prices, keyed by the **exact** model identifier the harness reports.
  *
- * These keys must match the agent's own strings character for character, and this table is a
+ * These keys must match the harness's own strings character for character, and this table is a
  * starting point rather than an authority — it is expected to be incomplete, and a model the
- * agent reports under a name that is not here is simply not priced.
+ * harness reports under a name that is not here is simply not priced.
  *
  * That failure is deliberately loud rather than silent: an unknown model yields `null`, and
  * `totalUsage` surfaces it as `unpricedTurns`. A `costUsd` of 0 alongside a non-zero
@@ -88,7 +88,7 @@ export interface UsageTotals {
   costUsd: number;
   /** Turns whose model had no price — the reason `costUsd` may understate the truth. */
   unpricedTurns: number;
-  /** Turns the agent reported no usage for at all. */
+  /** Turns the harness reported no usage for at all. */
   unreportedTurns: number;
 }
 

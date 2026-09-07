@@ -1,6 +1,6 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { authSchema, createDb, type Db, ensureDefaultAgentCatalog, workspace } from "@solow/db";
+import { authSchema, createDb, type Db, ensureDefaultHarnessCatalog, workspace } from "@solow/db";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { count, eq } from "drizzle-orm";
@@ -14,7 +14,7 @@ import { webEnv } from "../env.js";
  * Two decisions worth stating outright:
  *
  * **One Owner per instance.** A self-hosted SoloW is one person's control plane, and its
- * Workspace holds their agent credentials. Leaving sign-up open would let anyone who can reach
+ * Workspace holds their harness credentials. Leaving sign-up open would let anyone who can reach
  * the port create an account on someone else's machine, so the *second* sign-up is refused at
  * the database hook — the closest point to the write, where no route can route around it.
  *
@@ -23,7 +23,7 @@ import { webEnv } from "../env.js";
  * is created in the same user-creation hook, and a user without one cannot get a session at all.
  */
 
-/** Model names are remapped: BetterAuth's `session` would collide with our *agent* session. */
+/** Model names are remapped: BetterAuth's `session` would collide with our *harness* session. */
 const MODEL_NAMES = {
   user: { modelName: "authUser" },
   session: { modelName: "authSession" },
@@ -74,9 +74,9 @@ export function createAuth(db: Db = createDb()) {
               // is enabled deliberately, not by signing up (constitution: feature flags).
               enabledFlags: null,
             });
-            // Agent identity is a catalog row, not an enum (issue #10) — without this, a
-            // brand-new Workspace could not create even the one agent SoloW ships.
-            await ensureDefaultAgentCatalog(db, workspaceId);
+            // Harness identity is a catalog row, not an enum (issue #10) — without this, a
+            // brand-new Workspace could not create even the one harness SoloW ships.
+            await ensureDefaultHarnessCatalog(db, workspaceId);
           },
         },
       },

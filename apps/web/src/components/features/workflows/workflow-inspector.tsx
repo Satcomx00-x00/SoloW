@@ -24,7 +24,7 @@ import { trpc } from "@/trpc/react";
  *
  * Deliberately *not* here: a Step's own fields. Those stay on the node that draws the Step (see
  * `workflow-canvas.tsx`) — a Step is edited in sight of the Steps it connects to, and moving its
- * agent and prompt into this panel would undo exactly what the node graph is for. The outline
+ * harness and prompt into this panel would undo exactly what the node graph is for. The outline
  * navigates to a Step; it does not become a second place to edit one.
  */
 const GATE_SUMMARY: Record<WorkflowStepGate, string> = {
@@ -59,7 +59,7 @@ function Outline({ workflow }: { workflow: WorkflowWithStepsDto }) {
   const firstProfile = profiles.data?.items[0];
   const nameOf = (id: string) => profiles.data?.items.find((p) => p.id === id)?.name ?? "…";
   // A branch is the one thing about a Step the outline cannot infer from its place in the list,
-  // so it is the one thing said beyond the agent and the gate.
+  // so it is the one thing said beyond the harness and the gate.
   const stepName = (id: string | null) =>
     id === null ? "end" : (workflow.steps.find((s) => s.id === id)?.name ?? "?");
   // The same colours the canvas draws, from the same list: the dot is the one thing that says
@@ -127,7 +127,7 @@ function Outline({ workflow }: { workflow: WorkflowWithStepsDto }) {
       </Button>
       {!profiles.isLoading && !firstProfile && (
         <p className="px-2 text-muted-foreground text-2xs">
-          Create an agent profile first — a step has to name one.
+          Create a harness profile first — a step has to name one.
         </p>
       )}
       {add.error && (

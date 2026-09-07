@@ -96,7 +96,7 @@ describe("toolStatus", () => {
 });
 
 /**
- * Reading the agent's plan out of a `TodoWrite` call (`readTodoWrite`).
+ * Reading the harness's plan out of a `TodoWrite` call (`readTodoWrite`).
  *
  * This function decides whether a plan reaches the durable log or is replaced by the
  * contentless `tool_call` row that recording it exists to abolish, so both directions are
@@ -104,7 +104,7 @@ describe("toolStatus", () => {
  * while a payload that is not a todo list at all must be refused so the caller can fall back.
  */
 describe("readTodoWrite", () => {
-  it("reads a well-formed list, keeping the present-tense form the agent renders", () => {
+  it("reads a well-formed list, keeping the present-tense form the harness renders", () => {
     expect(
       readTodoWrite({
         todos: [
@@ -127,7 +127,7 @@ describe("readTodoWrite", () => {
   });
 
   it("reads an emptied list as an empty list, not as a missing one", () => {
-    // An agent that finished its plan clears it. That is a fact about the run and has to be
+    // A harness that finished its plan clears it. That is a fact about the run and has to be
     // distinguishable from a payload this function could not read — the caller emits one and
     // falls back for the other.
     expect(readTodoWrite({ todos: [] })).toEqual([]);

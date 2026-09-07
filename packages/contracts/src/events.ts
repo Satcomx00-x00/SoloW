@@ -8,13 +8,13 @@ import { widgetSchema } from "./widget.js";
  */
 
 /**
- * One line of the plan the agent keeps for itself.
+ * One line of the plan the harness keeps for itself.
  *
  * Defined once, here, and imported by the persisted union in `session.ts` for the same reason
  * `widgetSchema` is: the wire frame and the durable record carry the identical list, and two
  * declarations of it would drift the moment either side gained a status the other did not know.
  *
- * The bounds are not decoration. A todo list is a handful of short lines an agent rewrites on
+ * The bounds are not decoration. A todo list is a handful of short lines a harness rewrites on
  * every turn, so an "item" that is a thousand characters long is a malfunction, not a plan, and
  * the log is the record that outlives the run — its producer cuts anything longer down before
  * it gets here (see `readTodoWrite` in the orchestrator).
@@ -22,14 +22,14 @@ import { widgetSchema } from "./widget.js";
 export const todoItemSchema = z.object({
   content: z.string().min(1).max(500),
   status: z.enum(["pending", "in_progress", "completed"]),
-  /** The present-tense form the agent shows while the item is in progress. */
+  /** The present-tense form the harness shows while the item is in progress. */
   activeForm: z.string().max(500).optional(),
 });
 export type TodoItem = z.infer<typeof todoItemSchema>;
 
 export const taskEventSchema = z.discriminatedUnion("kind", [
   /**
-   * A line of agent output, with the channel it came from.
+   * A line of harness output, with the channel it came from.
    *
    * `channel` used to be thrown away on the way here — the orchestrator collapsed
    * `assistant_turn` / `user_turn` / `notice` into one `stdout` frame and encoded thinking as a
@@ -53,7 +53,7 @@ export const taskEventSchema = z.discriminatedUnion("kind", [
     at: z.string().datetime(),
   }),
   /**
-   * A tool the agent invoked. `callId` is what lets a client fold a call, its status updates and
+   * A tool the harness invoked. `callId` is what lets a client fold a call, its status updates and
    * its result into one row instead of three unrelated lines — without it the terminal could
    * only ever print "tool: Read" and hope.
    *
@@ -88,8 +88,8 @@ export const taskEventSchema = z.discriminatedUnion("kind", [
     diffRef: idSchema,
   }),
   /**
-   * The agent is asking to do something (issue #58, AC-4). Surfaced to the operator rather than
-   * silently granted — carrying the agent's own options, never a tool call's raw input, which
+   * The harness is asking to do something (issue #58, AC-4). Surfaced to the operator rather than
+   * silently granted — carrying the harness's own options, never a tool call's raw input, which
    * can hold the contents of a file being written (Principle IV).
    */
   z.object({
@@ -115,7 +115,7 @@ export const taskEventSchema = z.discriminatedUnion("kind", [
     decidedBy: z.enum(["operator", "policy"]),
   }),
   /**
-   * Something the agent asked the frontend to draw (see `widget.ts`). The payload travels whole
+   * Something the harness asked the frontend to draw (see `widget.ts`). The payload travels whole
    * rather than as a reference the client would have to fetch: a widget is at most a bounded
    * blob, and a transcript row that needs a round trip before it can render is a row that blinks.
    */
@@ -128,9 +128,9 @@ export const taskEventSchema = z.discriminatedUnion("kind", [
     widget: widgetSchema,
   }),
   /**
-   * The agent's own todo list, as it stood after the last time it rewrote it.
+   * The harness's own todo list, as it stood after the last time it rewrote it.
    *
-   * A whole list rather than a delta: the agent republishes the list entire on every change, and
+   * A whole list rather than a delta: the harness republishes the list entire on every change, and
    * a client that joined halfway through a run — or reconnected — has nothing to apply a delta
    * to. Each of these frames supersedes the one before it, so a renderer keeps the newest and
    * discards the rest rather than accumulating rows the way it does for prose.
@@ -197,7 +197,7 @@ export type StreamTicketDto = z.infer<typeof streamTicketDto>;
 export const taskInputSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("input"), taskId: idSchema, data: z.string() }),
   z.object({ kind: z.literal("stop"), taskId: idSchema }),
-  /** The operator's answer to a permission the agent asked for (issue #58, AC-4). */
+  /** The operator's answer to a permission the harness asked for (issue #58, AC-4). */
   z.object({
     kind: z.literal("permission"),
     taskId: idSchema,
@@ -207,7 +207,7 @@ export const taskInputSchema = z.discriminatedUnion("kind", [
   /**
    * The operator's answer to an interactive widget. Routed exactly like a permission — same
    * ticket, same tenant key, same ack — because it is the same act: a person answering something
-   * the agent asked, on the one Task their ticket authorized.
+   * the harness asked, on the one Task their ticket authorized.
    */
   z.object({
     kind: z.literal("widget_response"),
@@ -221,7 +221,7 @@ export type TaskInput = z.infer<typeof taskInputSchema>;
 
 /**
  * The hub's reply to a client frame. Sent on refusal *and* on success: input that reached no
- * agent — because the run already finished, or the orchestrator restarted — must not look to
+ * harness — because the run already finished, or the orchestrator restarted — must not look to
  * the operator as though it were delivered.
  */
 export const taskInputAckSchema = z.object({
@@ -233,14 +233,14 @@ export const taskInputAckSchema = z.object({
       "frame_malformed",
       "frame_not_authorized",
       "agent_not_running",
-      // A permission answer that found the agent and still could not land (issue #58, AC-4):
-      // the question was already settled, the option was not one the agent offered, or the
+      // A permission answer that found the harness and still could not land (issue #58, AC-4):
+      // the question was already settled, the option was not one the harness offered, or the
       // protocol has no permission channel at all. Distinct from `agent_not_running`, which is
       // what all three used to be reported as.
       "permission_not_pending",
       "permission_option_unknown",
       "permission_unsupported",
-      // A widget answer that found the agent and still could not land: the widget is no longer
+      // A widget answer that found the harness and still could not land: the widget is no longer
       // waiting (answered already, or the run moved on), or the answer named an option the
       // widget never offered. Kept apart from the permission codes so the operator is told which
       // question failed to take their answer.

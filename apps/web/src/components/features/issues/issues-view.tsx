@@ -40,7 +40,7 @@ import { trpc } from "@/trpc/react";
  * The Issues section (spec F01).
  *
  * An Issue is the unit of intent — the thing you actually want done — and Tasks are the slices
- * of it handed to agents. Until now it existed only as a row in a create dialog and a foreign
+ * of it handed to harnesses. Until now it existed only as a row in a create dialog and a foreign
  * key on a Task, so there was no way to ask "what am I working on, and how far along is it".
  *
  * Status is derived from the Issue's Tasks (`deriveIssueStatus`), so this list is a read of the
@@ -451,7 +451,7 @@ export function IssuesView({
             <p className="max-w-md text-muted-foreground text-sm leading-relaxed">
               {narrowed
                 ? "Widen the search, or clear the filters to see everything."
-                : "An issue describes what you want done. Tasks under it are the slices you hand to an agent."}
+                : "An issue describes what you want done. Tasks under it are the slices you hand to a harness."}
             </p>
           </div>
         ) : (

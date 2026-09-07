@@ -104,7 +104,7 @@ export function taskRepositoryToDto(row: TaskRepositoryRow): TaskRepositoryDto {
  * one query per card.
  *
  * Sorted here rather than trusted from the caller. `repositories[0]` is the primary attachment —
- * the worktree the agent is started in — so position order is a promise the DTO makes, and the
+ * the worktree the harness is started in — so position order is a promise the DTO makes, and the
  * write paths get their rows from `INSERT … RETURNING`, whose order SQLite documents as
  * undefined. One sort at the single point every Task DTO is built beats a sort at each caller,
  * one of which would eventually be forgotten.

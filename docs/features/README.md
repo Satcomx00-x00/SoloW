@@ -16,8 +16,8 @@ differentiator) · **Later** (planned after first release).
 | [F01](./F01-issue-management.md) | Issue Management | Core | J2 |
 | [F02](./F02-kanban-task-administration.md) | Kanban Task Administration | Core | J1, J2 |
 | [F03](./F03-workflow-designer.md) | Visual Workflow Designer & Monitor | Core / Edge | J3, J4, J8 |
-| [F04](./F04-agent-orchestration.md) | Multi-Agent Orchestration | Core | J1, J7 |
-| [F05](./F05-agent-executor-profiles.md) | Agent & Executor Profiles | Core | J1, J6, J7 |
+| [F04](./F04-harness-orchestration.md) | Multi-Harness Orchestration | Core | J1, J7 |
+| [F05](./F05-harness-executor-profiles.md) | Harness & Executor Profiles | Core | J1, J6, J7 |
 | [F06](./F06-authentication-billing.md) | Authentication & Billing Modes | Edge | J6 |
 | [F07](./F07-execution-environments.md) | Execution Environments | Core | J7 |
 | [F08](./F08-workspaces-repositories.md) | Worktrees & Repositories | Core | J1 |
@@ -32,11 +32,11 @@ differentiator) · **Later** (planned after first release).
 | [F17](./F17-security-secrets.md) | Security & Secrets | Core | J6, J10 |
 | [F18](./F18-onboarding-setup-workflow.md) | First-Run Onboarding & Setup Workflow | Core | J6, J10 |
 | [F19](./F19-extension-contributions.md) | Extension Contributions | Core | J4, J10 |
-| [F20](./F20-agent-widgets.md) | Agent Widgets | Core | J4, J10 |
+| [F20](./F20-harness-widgets.md) | Harness Widgets | Core | J4, J10 |
 | [F21](./F21-integration-providers.md) | Integration Providers | Core | J2, J10 |
 | [F22](./F22-source-control.md) | Source Control Panel | Core | J5, J10 |
 | [F23](./F23-project-planning.md) | Project Planning | Core | J2, J3, J10 |
-| [F24](./F24-agent-libraries.md) | Agent Libraries: MCP servers and Skills | Core | J1, J3, J6 |
+| [F24](./F24-harness-libraries.md) | Harness Libraries: MCP servers and Skills | Core | J1, J3, J6 |
 
 ## Specification template
 

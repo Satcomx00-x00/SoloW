@@ -1,7 +1,7 @@
 import {
-  agentCatalog,
-  agentProfile,
   executorProfile,
+  harnessCatalog,
+  harnessProfile,
   issue,
   repository,
   workspace,
@@ -11,7 +11,7 @@ import type { RequestContext } from "./context.js";
 
 /**
  * Shared DAL test fixtures. A Task sits at the end of a chain of foreign keys — workspace →
- * agent profile / executor profile / repository / issue — so every test that touches one has to
+ * harness profile / executor profile / repository / issue — so every test that touches one has to
  * build the whole graph. Kept here rather than copied into each suite.
  */
 export async function seedWorkspaceGraph(db: TestDb, name: string) {
@@ -22,7 +22,7 @@ export async function seedWorkspaceGraph(db: TestDb, name: string) {
   if (!ws) throw new Error("failed to seed workspace");
 
   const [catalogEntry] = await db
-    .insert(agentCatalog)
+    .insert(harnessCatalog)
     .values({
       workspaceId: ws.id,
       key: "claude_code",
@@ -33,10 +33,10 @@ export async function seedWorkspaceGraph(db: TestDb, name: string) {
       meteredEnvVar: "ANTHROPIC_API_KEY",
     })
     .returning();
-  if (!catalogEntry) throw new Error("failed to seed agent catalog");
+  if (!catalogEntry) throw new Error("failed to seed harness catalog");
 
-  const [agent] = await db
-    .insert(agentProfile)
+  const [harness] = await db
+    .insert(harnessProfile)
     .values({
       workspaceId: ws.id,
       name: "claude",
@@ -58,11 +58,11 @@ export async function seedWorkspaceGraph(db: TestDb, name: string) {
       location: "/srv/repos/solow",
     })
     .returning();
-  if (!agent || !executor || !repo) throw new Error("failed to seed profiles");
+  if (!harness || !executor || !repo) throw new Error("failed to seed profiles");
 
   return {
     workspaceId: ws.id,
-    agentProfileId: agent.id,
+    agentProfileId: harness.id,
     executorProfileId: executor.id,
     repositoryId: repo.id,
   };

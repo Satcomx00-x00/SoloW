@@ -1,5 +1,5 @@
 import { expect, type Page } from "@playwright/test";
-import { AGENT_PROFILE_NAME, EXECUTOR_PROFILE_NAME } from "./fixture.js";
+import { EXECUTOR_PROFILE_NAME, HARNESS_PROFILE_NAME } from "./fixture.js";
 
 /**
  * The user journeys the E2E suite drives, as one shared vocabulary.
@@ -53,7 +53,7 @@ export async function createTask(
     issueId: string;
     issue: string;
     repository: string;
-    agentProfile?: string;
+    harnessProfile?: string;
     /** Repositories ticked under Advanced → "Also works in": each gets its own worktree. */
     alsoWorksIn?: readonly string[];
   },
@@ -69,7 +69,7 @@ export async function createTask(
   // flow stays readable without the reader having to know what the preset does.
   await pickOption(page, "Repository", opts.repository);
   await pickOption(page, "Issue", opts.issue);
-  await pickOption(page, "Agent profile", opts.agentProfile ?? AGENT_PROFILE_NAME);
+  await pickOption(page, "Harness profile", opts.harnessProfile ?? HARNESS_PROFILE_NAME);
   await pickOption(page, "Executor", EXECUTOR_PROFILE_NAME);
   if (opts.alsoWorksIn && opts.alsoWorksIn.length > 0) {
     // A second repository is the exception, so the form folds it away — the disclosure has to
@@ -114,10 +114,10 @@ export async function launchTask(page: Page): Promise<void> {
 }
 
 /**
- * Open the review gate once the agent has declared it is finished.
+ * Open the review gate once the harness has declared it is finished.
  *
  * The click is the point, not a detour: a run finishing no longer moves the Task to review on
- * its own — the agent declares, the page shows "Open review", and the transition is the
+ * its own — the harness declares, the page shows "Open review", and the transition is the
  * operator's (Principle I is a gate a human opens, not a conveyor).
  */
 export async function openReview(page: Page): Promise<void> {
@@ -125,7 +125,7 @@ export async function openReview(page: Page): Promise<void> {
   await expect(page.locator('[data-task-state="review"]').first()).toBeVisible();
 }
 
-/** The whole run-up: launch, wait out the agent, open the gate. */
+/** The whole run-up: launch, wait out the harness, open the gate. */
 export async function launchToReview(page: Page): Promise<void> {
   await launchTask(page);
   await openReview(page);

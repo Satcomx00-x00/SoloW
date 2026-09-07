@@ -13,7 +13,7 @@ const schema = z.object({
   /**
    * What an ACP permission nobody answered decays to (issue #58, AC-4). Refusal unless a
    * deployment names the permissive posture — a deployment can widen its own posture on
-   * purpose, and none can widen it by leaving this unset. See `agent/permissions.ts`.
+   * purpose, and none can widen it by leaving this unset. See `harness/permissions.ts`.
    */
   SOLOW_ACP_UNATTENDED_PERMISSION: z.enum(["refuse", "allow_once"]).default("refuse"),
   /**
@@ -25,7 +25,7 @@ const schema = z.object({
   SOLOW_DOCKER_BIN: z.string().min(1).default("docker"),
   /**
    * How long the preflight lets `docker pull` run before giving up. Ten minutes because a cold
-   * pull of a multi-gigabyte agent image over a domestic link genuinely takes minutes, and a
+   * pull of a multi-gigabyte harness image over a domestic link genuinely takes minutes, and a
    * shorter ceiling would turn a slow network into a failed Task with an image the operator can
    * see is fine. Exceeding it is raised as an ordinary error — Inngest retries it — never as
    * "this executor is unavailable".
@@ -34,7 +34,7 @@ const schema = z.object({
   /**
    * `uid:gid` for the processes inside the container, overriding the orchestrator's own
    * `getuid()`/`getgid()`. Numeric on purpose: a username would be resolved against the
-   * *image's* `/etc/passwd`, while the entire reason the flag is passed is that files the agent
+   * *image's* `/etc/passwd`, while the entire reason the flag is passed is that files the harness
    * writes into the bind-mounted worktree must land owned by a uid the host can later remove —
    * root-owned files there make `git worktree remove --force` fail and leak the worktree after
    * the Task is already marked done.

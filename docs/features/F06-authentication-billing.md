@@ -4,10 +4,10 @@
 
 ## Summary
 
-SoloW lets each Agent be authenticated and billed in one of two ways, chosen per
-Agent Profile: on a personal **Subscription** (a Claude Pro/Max plan) or on a metered
-**API Key**. Subscription mode lets users run agents on a plan they already pay for, with no
-per-token charges. Because subscription plans have quota windows, SoloW makes agents
+SoloW lets each Harness be authenticated and billed in one of two ways, chosen per
+Harness Profile: on a personal **Subscription** (a Claude Pro/Max plan) or on a metered
+**API Key**. Subscription mode lets users run harnesses on a plan they already pay for, with no
+per-token charges. Because subscription plans have quota windows, SoloW makes harnesses
 quota-aware so parallel work never silently overruns a plan or unexpectedly switches to paid
 billing. This is a primary differentiator from comparable tools.
 
@@ -17,7 +17,7 @@ billing. This is a primary differentiator from comparable tools.
 
 ## User stories
 
-- As a Solo Power User, I want my agents to run on my existing Claude subscription, so I do
+- As a Solo Power User, I want my harnesses to run on my existing Claude subscription, so I do
   not pay per token.
 - As a user, I want to be sure that using my subscription never silently turns into a
   metered bill, so I trust the tool with my money.
@@ -28,18 +28,18 @@ billing. This is a primary differentiator from comparable tools.
 
 ## Functional requirements
 
-- **FR-1** An Agent Profile specifies its Authentication Mode: Subscription or API Key.
-- **FR-2** In **Subscription** mode, SoloW runs the Agent using a stored, portable
-  subscription credential so the Agent is billed against the user's plan, not per token.
-- **FR-3** SoloW guarantees that a Subscription-mode Agent is never run in a way that
+- **FR-1** A Harness Profile specifies its Authentication Mode: Subscription or API Key.
+- **FR-2** In **Subscription** mode, SoloW runs the Harness using a stored, portable
+  subscription credential so the Harness is billed against the user's plan, not per token.
+- **FR-3** SoloW guarantees that a Subscription-mode Harness is never run in a way that
   causes metered API billing; any conflicting credential in the environment is removed for
-  that Agent's run.
-- **FR-4** In **API Key** mode, SoloW runs the Agent using a stored API key credential.
+  that Harness's run.
+- **FR-4** In **API Key** mode, SoloW runs the Harness using a stored API key credential.
 - **FR-5** A user can provide a subscription credential once and reuse it across all
-  Subscription-mode Agents and all Executor types (local, container, remote, cloud).
-- **FR-6** An Agent Profile in Subscription mode has a configurable concurrency cap; the
+  Subscription-mode Harnesses and all Executor types (local, container, remote, cloud).
+- **FR-6** A Harness Profile in Subscription mode has a configurable concurrency cap; the
   cap defaults to a conservative value suited to subscription quota windows.
-- **FR-7** When a Subscription-mode Agent exhausts its quota window, its Task (or Workflow
+- **FR-7** When a Subscription-mode Harness exhausts its quota window, its Task (or Workflow
   Step) moves to **Parked**, preserving all work, and resumes automatically when the quota
   window resets or when the user acts.
 - **FR-8** When a subscription or API-key credential is expired or revoked, affected Tasks
@@ -61,14 +61,14 @@ billing. This is a primary differentiator from comparable tools.
 ## Non-functional requirements
 
 - **NFR-1** No configuration path results in unintended metered billing for a
-  Subscription-mode Agent (see product [NFR-10](../product/03-product-requirements.md)).
-- **NFR-2** Credentials are never exposed to the code an Agent runs.
+  Subscription-mode Harness (see product [NFR-10](../product/03-product-requirements.md)).
+- **NFR-2** Credentials are never exposed to the code a Harness runs.
 - **NFR-3** Parked work resumes without human intervention when its quota window resets,
   unless the user has intervened.
 
 ## States & rules
 
-- Authentication Mode is a property of the Agent Profile and applies to every Session that
+- Authentication Mode is a property of the Harness Profile and applies to every Session that
   Profile produces.
 - The Parked state is a first-class Task and Workflow-Step state (see
   [Domain Model](../product/04-domain-model.md)); it is recoverable, not a failure.
@@ -78,13 +78,13 @@ billing. This is a primary differentiator from comparable tools.
 ## Edge cases & failure handling
 
 - If both a subscription credential and an API key are present for a Subscription-mode
-  Agent, the subscription credential is used and the API key is excluded from that run.
+  Harness, the subscription credential is used and the API key is excluded from that run.
 - If a quota window resets while many Tasks are Parked, they resume in order and within the
   concurrency cap, not all at once.
 - If a subscription credential renewal is required, dependent Tasks stay safely paused until
   it is provided, and resume automatically — not manually, one at a time — the moment it is
   (FR-8b).
-- Credential-expiry classification comes only from the Agent's own authentication error
+- Credential-expiry classification comes only from the Harness's own authentication error
   (401/403, "unauthorized", "invalid api key", "token expired", …), never inferred from a
   generic run failure — misclassifying a network error as an expired credential would send
   the Owner to the wrong fix with confidence.
@@ -96,7 +96,7 @@ billing. This is a primary differentiator from comparable tools.
 
 ## Related
 
-- [F05 — Agent & Executor Profiles](./F05-agent-executor-profiles.md)
+- [F05 — Harness & Executor Profiles](./F05-harness-executor-profiles.md)
 - [F07 — Execution Environments](./F07-execution-environments.md)
 - [F17 — Security & Secrets](./F17-security-secrets.md)
 - [Decision 0005 — Subscription authentication via portable token](../decisions/0005-subscription-authentication.md)

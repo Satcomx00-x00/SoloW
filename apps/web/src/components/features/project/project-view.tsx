@@ -93,8 +93,8 @@ import { trpc } from "@/trpc/react";
  * that could disagree with what the address bar says — the same rule the Issues list follows.
  *
  * The rule that keeps this from becoming a second product: **a planning change starts nothing.**
- * Moving a row to "In progress" does not launch an agent. The Kanban stays what Decision 0006
- * made it — the runtime of agent work — and this decides what to do, not how it runs.
+ * Moving a row to "In progress" does not launch a harness. The Kanban stays what Decision 0006
+ * made it — the runtime of harness work — and this decides what to do, not how it runs.
  */
 
 /**
@@ -215,7 +215,7 @@ export function ProjectView({ projectId }: { projectId: string }) {
     { enabled: projectId !== null },
   );
   /**
-   * The agent runs on this project's Issues (F23 FR-14).
+   * The harness runs on this project's Issues (F23 FR-14).
    *
    * Scoped to the project, like everything else on this screen: an unscoped read would put the
    * whole Workspace's Tasks behind a project's rows, and a row would claim a run that belongs to
@@ -501,7 +501,7 @@ export function ProjectView({ projectId }: { projectId: string }) {
       };
       return { row };
     });
-    // `tasks.data` among them: without it the Agent runs column is computed once and never again,
+    // `tasks.data` among them: without it the Harness runs column is computed once and never again,
     // so a run that starts, finishes or fails leaves the badge showing what was true on first
     // paint — a stale answer that looks like a current one.
   }, [items.data, issues.data, tasks.data]);

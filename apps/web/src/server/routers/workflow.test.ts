@@ -3,7 +3,7 @@
 import { beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { CommonErrorCode, WorkflowErrorCode } from "@solow/contracts";
 import {
-  ensureDefaultAgentCatalog,
+  ensureDefaultHarnessCatalog,
   issue as issueTable,
   review as reviewTable,
   sessionEvent as sessionEventTable,
@@ -76,10 +76,10 @@ async function fixture(db: TestDb, name: string) {
   if (!ws) throw new Error("failed to seed workspace");
   const wsId = ws.id;
   const c = caller(db, wsId);
-  const agentCatalogId = await ensureDefaultAgentCatalog(db, wsId);
+  const agentCatalogId = await ensureDefaultHarnessCatalog(db, wsId);
   const { secret } = await c.secret.set({ name: "sub", kind: "subscription_token", value: "tok" });
 
-  const agent = async (profileName: string) =>
+  const harness = async (profileName: string) =>
     await c.profile.agent.create({
       name: profileName,
       agentCatalogId,
@@ -87,9 +87,9 @@ async function fixture(db: TestDb, name: string) {
       secretId: secret.id,
       concurrencyCap: 3,
     });
-  const planner = await agent("Opus");
-  const implementer = await agent("Copilot");
-  const reviewer = await agent("Codex");
+  const planner = await harness("Opus");
+  const implementer = await harness("Copilot");
+  const reviewer = await harness("Codex");
 
   const executor = await c.profile.executor.create({ name: "Local" });
   const repo = await c.repository.connect({
@@ -113,8 +113,8 @@ async function fixture(db: TestDb, name: string) {
     });
 
   /**
-   * The pipeline the issue is written around: one agent plans, another implements, a
-   * third reviews — three Steps, three different Agent Profiles, one Workflow.
+   * The pipeline the issue is written around: one harness plans, another implements, a
+   * third reviews — three Steps, three different Harness Profiles, one Workflow.
    */
   const newPipeline = async (
     workflowName: string,
@@ -204,7 +204,7 @@ describe("workflows", () => {
   });
 
   describe("AC-1 — designing a workflow of ordered steps", () => {
-    it("lists steps in the order they were added, each with its own agent profile", async () => {
+    it("lists steps in the order they were added, each with its own harness profile", async () => {
       const { c, planner, implementer, reviewer } = await fixture(db, "acme");
       const wf = await c.workflow.get({ id: (await c.workflow.create({ name: "Ship" })).id });
 
@@ -219,7 +219,7 @@ describe("workflows", () => {
       const after = await c.workflow.get({ id: wf.id });
       expect(after.steps.map((s) => s.name)).toEqual(["Plan", "Implement", "Review"]);
       expect(after.steps.map((s) => s.position)).toEqual([0, 1, 2]);
-      // AC-3, expressed in the model: one Task, three Steps, three different agents.
+      // AC-3, expressed in the model: one Task, three Steps, three different harnesses.
       expect(after.steps.map((s) => s.agentProfileId)).toEqual([
         planner.id,
         implementer.id,
@@ -367,7 +367,7 @@ describe("workflows", () => {
       expect(still.steps.map((s) => s.name)).toEqual(["Plan", "Implement", "Review"]);
     });
 
-    it("refuses a step naming another Workspace's agent profile before any row is written", async () => {
+    it("refuses a step naming another Workspace's harness profile before any row is written", async () => {
       const acme = await fixture(db, "acme");
       const other = await fixture(db, "other");
       const wf = await acme.c.workflow.create({ name: "Ship" });
@@ -443,7 +443,7 @@ describe("workflows", () => {
       ).toBe("Plan");
     });
 
-    it("refuses to attach a workflow to a task whose agent is already running", async () => {
+    it("refuses to attach a workflow to a task whose harness is already running", async () => {
       const { c, newTask, newPipeline } = await fixture(db, "acme");
       const wf = await newPipeline("Ship");
       const t = await newTask("Wire the latch");
@@ -596,7 +596,7 @@ describe("workflows", () => {
     });
 
     it("follows the branch its condition chooses — back to an earlier step, or to the end", async () => {
-      // The reviewer *agent* decides: asked whether the implementation needs another pass, its
+      // The reviewer *harness* decides: asked whether the implementation needs another pass, its
       // `DECISION: yes` sends the Task back to Implement and its `DECISION: no` ends the pipeline.
       // The end reached through a branch is the same end Principle I guards.
       const { wsId, c, newTask, newPipeline } = await fixture(db, "acme");
@@ -893,7 +893,7 @@ describe("workflows", () => {
       expect((await c.workflow.taskBinding({ taskId: t.id })).currentStep.name).toBe("Implement");
     });
 
-    it("keeps the agent's handoff when the gate holds, so the replay that moves the cursor still carries it", async () => {
+    it("keeps the harness's handoff when the gate holds, so the replay that moves the cursor still carries it", async () => {
       const { wsId, c, newTask, newPipeline } = await fixture(db, "acme");
       const wf = await newPipeline("Ship", "human");
       const t = await newTask("Wire the latch");
@@ -908,8 +908,8 @@ describe("workflows", () => {
       });
       expect(held.status).toBe("awaiting-decision");
 
-      // Whatever notices the decision replays the agent's signal, and it does not have the
-      // agent's words — the server kept them.
+      // Whatever notices the decision replays the harness's signal, and it does not have the
+      // harness's words — the server kept them.
       await recordDecision(db, wsId, t.id);
       const advanced = await c.workflow.advanceTask({
         taskId: t.id,
@@ -1038,7 +1038,7 @@ describe("workflows", () => {
   describe("the external MCP surface", () => {
     it("exposes the authoring tools, and never the one that drives a Task's own gates", () => {
       // `advanceTask` is the call that opens a gate, and the holder of an MCP token may be the
-      // agent the gate is for; the rest of the namespace is how an AI builds the pipeline it
+      // harness the gate is for; the rest of the namespace is how an AI builds the pipeline it
       // will not itself be allowed to advance (spec F03).
       const workflowTools = listMcpTools()
         .map((tool) => tool.name)

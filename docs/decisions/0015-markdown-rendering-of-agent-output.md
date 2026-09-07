@@ -1,16 +1,16 @@
-# 0015 — Render agent output as Markdown with react-markdown
+# 0015 — Render harness output as Markdown with react-markdown
 
 **Status:** Accepted · **Date:** 2026-08-21 · **Deciders:** Product, Engineering
 
 ## Context
 
-The Task terminal rendered the whole transcript as one pre-wrapped string. Agents do not write
+The Task terminal rendered the whole transcript as one pre-wrapped string. Harnesses do not write
 plain text: they write headings, lists, fenced code, tables and inline code, and a reviewer
 reading a run to decide whether to approve it was reading raw markup — the exact place where
 legibility matters most, because it is the human review gate Principle I depends on.
 
-The constraint that shapes the choice is that **agent output is untrusted input rendered in the
-operator's browser**. A transcript can contain anything an agent read from a repository, a web
+The constraint that shapes the choice is that **harness output is untrusted input rendered in the
+operator's browser**. A transcript can contain anything a harness read from a repository, a web
 page, or an issue body. Whatever renders it must fail safe by default rather than by
 configuration, because the failure mode is script execution in an authenticated session.
 

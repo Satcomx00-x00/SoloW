@@ -4,7 +4,7 @@ import { todoItemSchema } from "./events.js";
 import { reviewDto } from "./review.js";
 import { taskCompletionOutcomeSchema, widgetSchema } from "./widget.js";
 
-/** Read contracts for agent Sessions and their streamed event log (spec F09/F10). */
+/** Read contracts for harness Sessions and their streamed event log (spec F09/F10). */
 
 export const getTaskSessionsInput = z.object({ taskId: idSchema });
 export type GetTaskSessionsInput = z.infer<typeof getTaskSessionsInput>;
@@ -23,7 +23,7 @@ export const sessionDto = z.object({
 export type SessionDto = z.infer<typeof sessionDto>;
 
 /**
- * The change an agent is proposing (task TASK-022 diff view).
+ * The change a harness is proposing (task TASK-022 diff view).
  *
  * Captured by the orchestrator at the review gate and persisted to the session log, so it is
  * still readable after the worktree is torn down — an approved Task can show what was approved.
@@ -57,7 +57,7 @@ export const taskDiffDto = z.object({
 });
 export type TaskDiffDto = z.infer<typeof taskDiffDto>;
 
-/** One of the choices the agent offered when it asked for permission (issue #58, AC-4). */
+/** One of the choices the harness offered when it asked for permission (issue #58, AC-4). */
 const permissionOption = z.object({
   optionId: z.string().min(1),
   name: z.string(),
@@ -79,7 +79,7 @@ const permissionOption = z.object({
  * written before this union existed readable (see its comment).
  */
 export const sessionEventPayloadSchema = z.discriminatedUnion("kind", [
-  /** Something a human said to the agent — the Task brief, or steering from the terminal. */
+  /** Something a human said to the harness — the Task brief, or steering from the terminal. */
   z.object({ kind: z.literal("user_turn"), text: z.string() }),
   /**
    * Something the model said. `thinking` separates reasoning from the answer; it is a property
@@ -90,7 +90,7 @@ export const sessionEventPayloadSchema = z.discriminatedUnion("kind", [
   /** Machinery talking about itself: a mode switch, a stop reason, a run-level message. */
   z.object({ kind: z.literal("notice"), text: z.string() }),
   /**
-   * A tool the agent invoked.
+   * A tool the harness invoked.
    *
    * `input` was declared and deliberately unpopulated for a long time, because a tool call's raw
    * input can hold the contents of a file being written — exactly the class of value that must
@@ -167,15 +167,15 @@ export const sessionEventPayloadSchema = z.discriminatedUnion("kind", [
   /** The change captured at the review gate — the same shape `taskDiffDto` already described. */
   z.object({ kind: z.literal("diff"), ...taskDiffDto.shape }),
   /**
-   * Something the agent asked the frontend to draw rather than say (see `widget.ts`).
+   * Something the harness asked the frontend to draw rather than say (see `widget.ts`).
    *
-   * `widgetId` is this build's id for the emission, not the agent's: an agent may emit the same
+   * `widgetId` is this build's id for the emission, not the harness's: a harness may emit the same
    * widget twice, and the answer has to name one of them. It is what a `widget_response` refers
    * back to, exactly as `requestId` ties a permission to its resolution.
    */
   z.object({ kind: z.literal("widget"), widgetId: z.string().min(1), widget: widgetSchema }),
   /**
-   * The agent's own todo list, recorded instead of the `TodoWrite` call that carried it.
+   * The harness's own todo list, recorded instead of the `TodoWrite` call that carried it.
    *
    * The call itself was a contentless row: the argument allowlist admits none of `TodoWrite`'s
    * input, because the list is an array of objects and `tool_call.input` is bounded to a flat
@@ -189,15 +189,15 @@ export const sessionEventPayloadSchema = z.discriminatedUnion("kind", [
    */
   z.object({ kind: z.literal("todos"), items: z.array(todoItemSchema).max(100) }),
   /**
-   * The agent stopped, and it stopped having finished — recorded the instant it happens.
+   * The harness stopped, and it stopped having finished — recorded the instant it happens.
    *
    * This exists because of an ordering bug with real consequences. The orchestrator learns that a
    * run completed *in memory*, and used to record that fact only by acting on it: moving the Task
    * to `review`, two durable steps later. Anything that lost the run in between — a restart, a
    * dev-server hot reload, an engine that dropped an in-flight run — left nothing anywhere saying
-   * the agent had ever finished. The reclaim sweep then found a Task sitting in `running` with no
-   * agent, could not tell "died mid-work" from "died having finished", and did the safe thing:
-   * `failed`, with `interrupted`. A Task whose agent had done the work perfectly, and committed
+   * the harness had ever finished. The reclaim sweep then found a Task sitting in `running` with no
+   * harness, could not tell "died mid-work" from "died having finished", and did the safe thing:
+   * `failed`, with `interrupted`. A Task whose harness had done the work perfectly, and committed
    * it, ended up in the Failed column.
    *
    * Writing the fact *before* the fragile part is the whole of the fix. `branch` is what the
@@ -214,12 +214,12 @@ export const sessionEventPayloadSchema = z.discriminatedUnion("kind", [
     /** The primary worktree's branch — what a reviewer opens. */
     branch: z.string().min(1).max(400),
     /**
-     * What the agent itself said about stopping, when it said anything (see `task_complete` in
-     * `widget.ts`). Absent for every agent that just exits, which is all of them today and most
-     * of them always — the marker has to work without the agent's cooperation.
+     * What the harness itself said about stopping, when it said anything (see `task_complete` in
+     * `widget.ts`). Absent for every harness that just exits, which is all of them today and most
+     * of them always — the marker has to work without the harness's cooperation.
      */
     outcome: taskCompletionOutcomeSchema.optional(),
-    /** The agent's own words, when it left any. */
+    /** The harness's own words, when it left any. */
     summary: z.string().max(2000).optional(),
   }),
   /**
@@ -399,7 +399,7 @@ export const sessionDetailDto = z.object({
   events: z.array(sessionEventDto),
   review: reviewDto.nullable(),
   /**
-   * The primary Repository's change — the first entry of `diffs`, or null until the agent
+   * The primary Repository's change — the first entry of `diffs`, or null until the harness
    * reaches the review gate. Kept alongside `diffs` so a caller that only ever wanted "the
    * change" (the MCP surface, an external OpenAPI client) needs no change to keep working.
    */

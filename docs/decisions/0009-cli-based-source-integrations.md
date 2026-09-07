@@ -17,8 +17,8 @@ platforms offers an official command-line tool — **`gh`** for GitHub and **`gl
 GitLab — that already handles authentication (including device-flow login, credential
 storage, and enterprise/self-managed instances), stays current with the platform, and
 exposes the operations SoloW needs. This mirrors SoloW's existing pattern of
-driving official command-line tools rather than reimplementing their behaviour: agents are
-driven through their CLIs, and Claude subscription authentication is inherited from the agent
+driving official command-line tools rather than reimplementing their behaviour: harnesses are
+driven through their CLIs, and Claude subscription authentication is inherited from the harness
 CLI's login.
 
 ## Decision
@@ -36,7 +36,7 @@ is handled ([Decision 0005](./0005-subscription-authentication.md)).
   enterprise/self-managed handling, and keeps pace with two evolving platform APIs; more
   surface to build and maintain.
 - **Official CLIs `gh` and `glab` (chosen)** — reuse the platforms' own maintained tools for
-  auth and operations; consistent with the "drive the CLI" pattern already used for agents;
+  auth and operations; consistent with the "drive the CLI" pattern already used for harnesses;
   auth can be inherited from an existing login.
 - **A mix (CLI for auth, raw API for operations)** — Rejected: splits the integration across
   two mechanisms with two failure modes for no clear benefit.

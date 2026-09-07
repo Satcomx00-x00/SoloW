@@ -16,7 +16,7 @@ import { appRouter } from "./index.js";
  * What this proves that the DAL tests cannot: the router stops running Tasks through the
  * orchestrator *before* it deletes, and the DAL's own re-check is what decides the outcome —
  * so a stop that did not actually take effect (the unwired dev path, which logs and returns)
- * leaves the Issue intact rather than cascading over a live agent.
+ * leaves the Issue intact rather than cascading over a live harness.
  */
 
 function ctx(db: TestDb, workspaceId: string): BaseContext {
@@ -90,7 +90,7 @@ describe("issue.delete force", () => {
     });
     const made = await createTaskRecord(ctxFor(db, g.workspaceId), {
       issueId: created.id,
-      title: "Agent is alive",
+      title: "Harness is alive",
       agentProfileId: g.agentProfileId,
       executorProfileId: g.executorProfileId,
       repositories: [{ repositoryId: g.repositoryId }],
@@ -103,7 +103,7 @@ describe("issue.delete force", () => {
 
     // No SOLOW_ORCHESTRATOR_URL in the test env, so the stop hand-off fails outright.
     // That must abort the whole delete: cascading anyway would drop the `task` row while its
-    // agent kept running, with nothing left able to stop it. (The other half of this guard — a
+    // harness kept running, with nothing left able to stop it. (The other half of this guard — a
     // stop that was accepted but has not taken effect yet — is the DAL's own re-check, covered
     // by `dal/issue.test.ts`'s HasRunningTasks case.)
     await expect(api.issue.delete({ id: created.id, force: true })).rejects.toThrow(
@@ -157,7 +157,7 @@ describe("issue.delete force", () => {
   it("deletes nothing when the stop was accepted but the Task is still running", async () => {
     // Dev-owner mode with no orchestrator wired: `stopTaskRun` logs and returns successfully,
     // so the router proceeds — and the DAL's in-transaction re-check is then the only thing
-    // preventing a cascade over a live agent. This is the branch the previous test cannot
+    // preventing a cascade over a live harness. This is the branch the previous test cannot
     // reach, because there the stop never succeeds in the first place.
     process.env.SOLOW_DEV_OWNER = "on";
     const g = await seedWorkspaceGraph(db, "router-force-noop-stop");
@@ -169,7 +169,7 @@ describe("issue.delete force", () => {
     });
     const made = await createTaskRecord(ctxFor(db, g.workspaceId), {
       issueId: created.id,
-      title: "Agent is alive",
+      title: "Harness is alive",
       agentProfileId: g.agentProfileId,
       executorProfileId: g.executorProfileId,
       repositories: [{ repositoryId: g.repositoryId }],

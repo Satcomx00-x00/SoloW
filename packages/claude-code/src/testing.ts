@@ -106,7 +106,7 @@ export const FAKE_CLAUDE_MAIN = new URL("./fixtures/claude-main.ts", import.meta
  * SoloW puts its own flags first (`--print`, `--worktree`, …), so the fake cannot simply
  * be `bun run fixture.ts` — bun would try to interpret those as its own. A tiny shim swallows
  * the argument list and forwards it to the fixture, which picks out the JSON script and ignores
- * everything else. Returns the path to use as the agent command.
+ * everything else. Returns the path to use as the harness command.
  */
 export async function writeFakeClaudeBin(dir: string, script: FakeClaudeScript): Promise<string> {
   const binPath = `${dir}/claude`;

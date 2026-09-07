@@ -446,9 +446,9 @@ describe("a Task's own clone, against real git", () => {
     };
 
     const wt = await provisionWorktree(executor, params);
-    writeFileSync(join(wt.path, "work.txt"), "the agent's change\n");
+    writeFileSync(join(wt.path, "work.txt"), "the harness's change\n");
     await $`git -C ${wt.path} config user.email a@e.com`.quiet();
-    await $`git -C ${wt.path} config user.name Agent`.quiet();
+    await $`git -C ${wt.path} config user.name Harness`.quiet();
     await commitWorktree(executor, wt.path, "SoloW: task t-pub");
 
     // Before the review decision the shared repository has heard nothing at all — not the
@@ -469,7 +469,7 @@ describe("a Task's own clone, against real git", () => {
     const published = await $`git -C ${location} rev-parse ${wt.branch}`.quiet();
     expect(published.stdout.toString().trim()).toBe(tip);
     const content = await $`git -C ${location} show ${wt.branch}:work.txt`.quiet();
-    expect(content.stdout.toString()).toContain("the agent's change");
+    expect(content.stdout.toString()).toContain("the harness's change");
 
     // Publishing again is what a second review round does, and it must not need the branch to
     // have moved forward in a way git approves of.

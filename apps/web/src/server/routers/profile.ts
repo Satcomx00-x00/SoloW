@@ -1,30 +1,30 @@
 import "server-only";
 import {
-  agentCatalogEntryDto,
-  agentProbeReport,
-  agentProfileDto,
-  agentProfileListDto,
-  createAgentCatalogEntryInput,
-  createAgentProfileInput,
   createExecutorProfileInput,
-  deleteAgentProfileInput,
+  createHarnessCatalogEntryInput,
+  createHarnessProfileInput,
+  deleteHarnessProfileInput,
   executorProfileDto,
   executorProfileListDto,
+  harnessCatalogEntryDto,
+  harnessProbeReport,
+  harnessProfileDto,
+  harnessProfileListDto,
   listProfilesInput,
-  updateAgentProfileInput,
   updateExecutorProfileInput,
+  updateHarnessProfileInput,
 } from "@solow/contracts";
 import { z } from "zod";
 import {
-  createAgentCatalogEntry,
-  createAgentProfile,
   createExecutorProfile,
-  deleteAgentProfile,
-  listAgentCatalog,
-  listAgentProfiles,
+  createHarnessCatalogEntry,
+  createHarnessProfile,
+  deleteHarnessProfile,
   listExecutorProfiles,
-  updateAgentProfile,
+  listHarnessCatalog,
+  listHarnessProfiles,
   updateExecutorProfile,
+  updateHarnessProfile,
 } from "../dal/profile.js";
 import { orchestrator } from "../orchestrator-client.js";
 import { ownerProcedure, router, unwrap } from "../trpc.js";
@@ -39,12 +39,12 @@ export const profileRouter = router({
           tags: ["profile"],
           protect: true,
           summary:
-            "Create an Agent Profile: which catalog agent to run, its billing/auth mode, the Secret holding its credential, and its concurrency cap.",
+            "Create a Harness Profile: which catalog harness to run, its billing/auth mode, the Secret holding its credential, and its concurrency cap.",
         },
       })
-      .input(createAgentProfileInput)
-      .output(agentProfileDto)
-      .mutation(async ({ ctx, input }) => unwrap(await createAgentProfile(ctx.rctx, input))),
+      .input(createHarnessProfileInput)
+      .output(harnessProfileDto)
+      .mutation(async ({ ctx, input }) => unwrap(await createHarnessProfile(ctx.rctx, input))),
     list: ownerProcedure
       .meta({
         openapi: {
@@ -53,12 +53,12 @@ export const profileRouter = router({
           tags: ["profile"],
           protect: true,
           summary:
-            "List Agent Profiles available to bind to a Task, with how many Tasks, Workflow Steps and Sessions each is used by.",
+            "List Harness Profiles available to bind to a Task, with how many Tasks, Workflow Steps and Sessions each is used by.",
         },
       })
       .input(listProfilesInput)
-      .output(agentProfileListDto)
-      .query(async ({ ctx, input }) => unwrap(await listAgentProfiles(ctx.rctx, input))),
+      .output(harnessProfileListDto)
+      .query(async ({ ctx, input }) => unwrap(await listHarnessProfiles(ctx.rctx, input))),
     update: ownerProcedure
       .meta({
         openapi: {
@@ -67,12 +67,12 @@ export const profileRouter = router({
           tags: ["profile"],
           protect: true,
           summary:
-            "Edit an Agent Profile's name, concurrency cap or permission mode. The agent it runs and the credential it runs on are fixed at creation — changing those would rewrite what its finished runs meant.",
+            "Edit a Harness Profile's name, concurrency cap or permission mode. The harness it runs and the credential it runs on are fixed at creation — changing those would rewrite what its finished runs meant.",
         },
       })
-      .input(updateAgentProfileInput)
-      .output(agentProfileDto)
-      .mutation(async ({ ctx, input }) => unwrap(await updateAgentProfile(ctx.rctx, input))),
+      .input(updateHarnessProfileInput)
+      .output(harnessProfileDto)
+      .mutation(async ({ ctx, input }) => unwrap(await updateHarnessProfile(ctx.rctx, input))),
     delete: ownerProcedure
       .meta({
         openapi: {
@@ -81,14 +81,14 @@ export const profileRouter = router({
           tags: ["profile"],
           protect: true,
           summary:
-            "Delete an Agent Profile. Refused while a Task, a Workflow Step, or a Session's usage record still references it.",
+            "Delete a Harness Profile. Refused while a Task, a Workflow Step, or a Session's usage record still references it.",
         },
       })
-      .input(deleteAgentProfileInput)
-      .output(agentProfileDto)
-      .mutation(async ({ ctx, input }) => unwrap(await deleteAgentProfile(ctx.rctx, input))),
+      .input(deleteHarnessProfileInput)
+      .output(harnessProfileDto)
+      .mutation(async ({ ctx, input }) => unwrap(await deleteHarnessProfile(ctx.rctx, input))),
     /**
-     * Start this Profile's agent, ask it what it is, and stop it — before a Task depends on it.
+     * Start this Profile's harness, ask it what it is, and stop it — before a Task depends on it.
      *
      * A mutation rather than a query despite reading nothing: it spawns a process and refreshes
      * the catalog's capability cache, so it must never be retried or cached on a client's whim.
@@ -101,24 +101,24 @@ export const profileRouter = router({
           tags: ["profile"],
           protect: true,
           summary:
-            "Test an Agent Profile: launch its agent with its credential, complete the protocol handshake, and report whether it works and what models and modes it advertises.",
+            "Test a Harness Profile: launch its harness with its credential, complete the protocol handshake, and report whether it works and what models and modes it advertises.",
         },
       })
       .input(z.object({ agentProfileId: z.string().min(1) }))
-      .output(agentProbeReport)
+      .output(harnessProbeReport)
       .mutation(async ({ ctx, input }) =>
-        orchestrator.probeAgentProfile({
+        orchestrator.probeHarnessProfile({
           workspaceId: ctx.rctx.workspaceId,
           agentProfileId: input.agentProfileId,
         }),
       ),
   }),
   /**
-   * The agent catalog (issue #10) — every Workspace starts with one seeded row
+   * The harness catalog (issue #10) — every Workspace starts with one seeded row
    * (`claude_code`, `claude_code_stream_json`); `create` is what lets an Owner add another,
    * most importantly one on the `acp` protocol. ACP already has a full runner
    * (`acp-runner.ts`) implementing `session/request_permission` — the elicitation widget
-   * reads from it — but until a row exists to name it, no Agent Profile can ever point at it.
+   * reads from it — but until a row exists to name it, no Harness Profile can ever point at it.
    */
   agentCatalog: router({
     list: ownerProcedure
@@ -129,12 +129,12 @@ export const profileRouter = router({
           tags: ["profile"],
           protect: true,
           summary:
-            "List the agents this Workspace can run — the catalog an Agent Profile points at.",
+            "List the harnesses this Workspace can run — the catalog a Harness Profile points at.",
         },
       })
       .input(z.object({}))
-      .output(z.array(agentCatalogEntryDto))
-      .query(async ({ ctx }) => unwrap(await listAgentCatalog(ctx.rctx))),
+      .output(z.array(harnessCatalogEntryDto))
+      .query(async ({ ctx }) => unwrap(await listHarnessCatalog(ctx.rctx))),
     create: ownerProcedure
       .meta({
         openapi: {
@@ -143,12 +143,12 @@ export const profileRouter = router({
           tags: ["profile"],
           protect: true,
           summary:
-            "Declare a new agent this Workspace can run: which protocol it speaks, the command that starts it, and the two environment variables billing integrity depends on.",
+            "Declare a new harness this Workspace can run: which protocol it speaks, the command that starts it, and the two environment variables billing integrity depends on.",
         },
       })
-      .input(createAgentCatalogEntryInput)
-      .output(agentCatalogEntryDto)
-      .mutation(async ({ ctx, input }) => unwrap(await createAgentCatalogEntry(ctx.rctx, input))),
+      .input(createHarnessCatalogEntryInput)
+      .output(harnessCatalogEntryDto)
+      .mutation(async ({ ctx, input }) => unwrap(await createHarnessCatalogEntry(ctx.rctx, input))),
   }),
   executor: router({
     create: ownerProcedure
@@ -159,7 +159,7 @@ export const profileRouter = router({
           tags: ["profile"],
           protect: true,
           summary:
-            "Create an Executor Profile — where an agent runs, with per-kind typed configuration. Credentials are given as Secret references, never inline values.",
+            "Create an Executor Profile — where a harness runs, with per-kind typed configuration. Credentials are given as Secret references, never inline values.",
         },
       })
       .input(createExecutorProfileInput)

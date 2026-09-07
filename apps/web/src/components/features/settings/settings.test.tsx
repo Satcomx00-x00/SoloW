@@ -131,11 +131,11 @@ describe("the settings page", () => {
     params = new URLSearchParams("section=agent-profiles");
     renderWithTrpc(<Settings />, HANDLERS);
 
-    await screen.findByRole("heading", { name: "Agents", level: 1 });
-    // A Secret, then the Agent Profile that spends it, then somewhere to execute — the sequence
-    // the old single column was arranged to show, kept — and then what the agent is handed once
+    await screen.findByRole("heading", { name: "Harnesses", level: 1 });
+    // A Secret, then the Harness Profile that spends it, then somewhere to execute — the sequence
+    // the old single column was arranged to show, kept — and then what the harness is handed once
     // it runs: the MCP servers it can call and the Skills it reads (spec F24).
-    expect(settingsSectionsIn("Agents").map((s) => s.id)).toEqual([
+    expect(settingsSectionsIn("Harnesses").map((s) => s.id)).toEqual([
       "secrets",
       "agent-profiles",
       "executor-profiles",

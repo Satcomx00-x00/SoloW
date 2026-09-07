@@ -132,7 +132,7 @@ function fail(message) {
  * Is `git` on the PATH, and usable?
  *
  * Checked at start-up rather than left to the first Task, because that is the difference between
- * a sentence someone can act on and a failure buried in an agent run: every Repository is cloned
+ * a sentence someone can act on and a failure buried in a harness run: every Repository is cloned
  * with `git`, and every Task's worktree is a `git worktree add`. Without it nothing that makes
  * this a product works, but the web UI comes up perfectly, so the person who is missing it finds
  * out at the least convenient moment and with the least legible error.
@@ -523,9 +523,9 @@ async function main() {
 
   const migrated = spawnSync(bun, [join(DIST, "db", "migrate.js")], { env, stdio: "inherit" });
   if (migrated.status !== 0) fail("migrations failed — see the output above.");
-  // Every start, not only the first: this creates the Workspace and its agent catalog and
+  // Every start, not only the first: this creates the Workspace and its harness catalog and
   // nothing else, so it is a no-op once they exist — and an install upgraded from a build that
-  // never had a catalog gets one rather than a Settings page with an empty agent picker.
+  // never had a catalog gets one rather than a Settings page with an empty harness picker.
   const bootstrapped = spawnSync(bun, [join(DIST, "db", "bootstrap.js")], {
     env,
     stdio: "inherit",

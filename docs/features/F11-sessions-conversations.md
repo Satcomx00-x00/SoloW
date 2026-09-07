@@ -4,9 +4,9 @@
 
 ## Summary
 
-A Session is a single run of an Agent against a Task, and the Conversation is its recorded
+A Session is a single run of a Harness against a Task, and the Conversation is its recorded
 exchange. SoloW keeps Sessions and Conversations so users can understand what an
-Agent did, resume its work with full context, and revisit it later.
+Harness did, resume its work with full context, and revisit it later.
 
 ## Jobs served
 
@@ -14,19 +14,19 @@ Agent did, resume its work with full context, and revisit it later.
 
 ## User stories
 
-- As a user, I want to resume an agent's work where it left off, so I do not lose its
+- As a user, I want to resume a harness's work where it left off, so I do not lose its
   context or repeat work.
 - As a Reviewer, I want to read the full conversation behind a change, so I understand why
-  the agent did what it did.
+  the harness did what it did.
 - As a user, I want each attempt at a Task to be recorded, so I can compare or revisit them.
 
 ## Functional requirements
 
-- **FR-1** Launching an Agent on a Task creates a Session that records the Conversation, a
+- **FR-1** Launching a Harness on a Task creates a Session that records the Conversation, a
   stream of events, and the proposed Diff.
-- **FR-2** A user can read a Session's full Conversation, including the Agent's actions and
+- **FR-2** A user can read a Session's full Conversation, including the Harness's actions and
   any tool use.
-- **FR-3** A user can resume a resumable Session so the Agent continues with its prior
+- **FR-3** A user can resume a resumable Session so the Harness continues with its prior
   context (used by request-changes in [F10](./F10-review-approval.md)).
 - **FR-4** A Task may have multiple Sessions over its life; each is recorded and
   distinguishable.
@@ -45,7 +45,7 @@ Agent did, resume its work with full context, and revisit it later.
   if the history behind it has changed since it was issued. What it proves is a claim about the
   stored records — the hash covers the payload as written, including anything the current event
   types do not describe, and is scoped to the Session so no two can be confused.
-- **FR-10** No credential value reaches a recorded event. An agent that prints its own token has
+- **FR-10** No credential value reaches a recorded event. A harness that prints its own token has
   the value removed from the record and the line kept, so a reviewer can still see that it
   happened (Principle IV).
 
@@ -68,7 +68,7 @@ Agent did, resume its work with full context, and revisit it later.
 - A recorded state change is written once per transition. A step that is retried after recording
   one does not record it again: a Task that moved once must not read as having moved twice.
 - Conversations recorded before events were typed are read through a documented compatibility
-  mapping rather than rewritten in place. A line of agent output from that era is presented as an
+  mapping rather than rewritten in place. A line of harness output from that era is presented as an
   assistant turn — an approximation, because the era did not record which channel a line came in
   on — and anything the mapping does not recognise is presented as a notice rather than dropped.
 
@@ -85,7 +85,7 @@ Agent did, resume its work with full context, and revisit it later.
   and says the same thing every time it is produced; a written one can replace the text later
   without changing what a summary *is*.
 - Redaction beyond this run's own credential. A recorded event has the values SoloW itself
-  put in the agent's environment removed from it; a secret the agent learned somewhere else is a
+  put in the harness's environment removed from it; a secret the harness learned somewhere else is a
   question for the export rules in [F13](./F13-collaboration-sharing.md).
 - Capturing tool inputs and results. A tool call's raw input can hold the contents of a file
   being written, so it is deliberately not recorded until there is a redaction rule for it
@@ -93,6 +93,6 @@ Agent did, resume its work with full context, and revisit it later.
 
 ## Related
 
-- [F04 — Multi-Agent Orchestration](./F04-agent-orchestration.md)
+- [F04 — Multi-Harness Orchestration](./F04-harness-orchestration.md)
 - [F10 — Review & Approval](./F10-review-approval.md)
 - [F13 — Collaboration & Sharing](./F13-collaboration-sharing.md)

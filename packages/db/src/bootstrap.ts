@@ -1,4 +1,4 @@
-import { ensureDefaultAgentCatalog } from "./agent-catalog-defaults.js";
+import { ensureDefaultHarnessCatalog } from "./harness-catalog-defaults.js";
 import type { Db } from "./index.js";
 import { ensureDefaultLibraries } from "./library-defaults.js";
 import { workspace } from "./schema.js";
@@ -8,17 +8,17 @@ import { ensureDefaultWorkflows } from "./workflow-defaults.js";
  * Bring a database up to a usable *empty* Workspace (2026-08-28).
  *
  * What stood here was a fixture: two invented companies — Northwind Robotics and Harbor Freight
- * Automation — each with an invented credential, an Agent Profile pointing at it, an Executor
+ * Automation — each with an invented credential, a Harness Profile pointing at it, an Executor
  * and a Repository at a path that never existed. It made a fresh install look configured when it
  * was not, and it hid the gap it was standing in front of: a Workspace created by a real sign-up
- * has no Secret, no Agent Profile and no Executor, and its feature flags are off, so the core
+ * has no Secret, no Harness Profile and no Executor, and its feature flags are off, so the core
  * loop is disabled. Nobody saw that, because dev mode always landed on a Workspace where those
  * rows already existed and the flags were forced on.
  *
  * The setup checklist answers that question honestly now, from the rows that actually exist. So
  * the only things that must be true before anyone signs in are the two this creates: the
- * Workspace itself, and the agent catalog — reference data, not sample data, because without it
- * a brand-new Workspace could not name an agent at all.
+ * Workspace itself, and the harness catalog — reference data, not sample data, because without it
+ * a brand-new Workspace could not name a harness at all.
  *
  * Idempotent: a fixed id and `onConflictDoNothing`, so re-running changes nothing. It is
  * deliberately *not* a place to add "helpful" starter rows — anything invented here is something
@@ -44,7 +44,7 @@ export interface BootstrapResult {
 }
 
 /**
- * Ensure the local Workspace and its agent catalog exist. Safe to run on every start.
+ * Ensure the local Workspace and its harness catalog exist. Safe to run on every start.
  *
  * `ownerUserId` is a stand-in for the local single-Owner install, which has no sign-in: the
  * hosted path creates its Workspace in the sign-up hook instead, bound to a real account.
@@ -68,7 +68,7 @@ export async function bootstrapWorkspace(
     })
     .onConflictDoNothing();
 
-  await ensureDefaultAgentCatalog(db, LOCAL_WORKSPACE_ID);
+  await ensureDefaultHarnessCatalog(db, LOCAL_WORKSPACE_ID);
   // The libraries' and the designer's starting content (specs F24, F03). Each seeds only into a
   // Workspace that has nothing of its own yet, so this is safe to run on every start.
   await ensureDefaultLibraries(db, LOCAL_WORKSPACE_ID);

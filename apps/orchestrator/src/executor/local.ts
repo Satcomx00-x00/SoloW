@@ -16,7 +16,7 @@ import type {
 /**
  * The local executor (Foundation 3 / issue #1): the execution host is the orchestrator's own
  * machine. This is a **refactor with no behaviour change** — every direct-host call this file
- * makes replaces one that used to live inline in the worktree manager or the agent runner.
+ * makes replaces one that used to live inline in the worktree manager or the harness runner.
  *
  * This is the one module in the orchestrator allowed to touch `Bun.spawn`, `Bun.file`/`Bun.write`,
  * or the host filesystem directly; `scripts/audit-executor-boundary.ts` enforces that everything
@@ -124,9 +124,9 @@ export function createLocalExecutor(root: string): Executor {
     async baseEnv(): Promise<Record<string, string>> {
       // For the local driver the executor's host *is* this process, so the base is `process.env`
       // — minus the `undefined` values Node's typing admits and `SpawnOpts.env` cannot carry.
-      // This is deliberately the same drop `resolveAgentRunEnv` already performs on the base it
+      // This is deliberately the same drop `resolveHarnessRunEnv` already performs on the base it
       // is handed, so routing the call site through the interface changes nothing about the
-      // environment a locally-run agent receives.
+      // environment a locally-run harness receives.
       const env: Record<string, string> = {};
       for (const [key, value] of Object.entries(process.env)) {
         if (value !== undefined) env[key] = value;

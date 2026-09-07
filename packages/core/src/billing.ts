@@ -10,28 +10,28 @@ import {
 /**
  * Billing & credential shaping (constitution Principle IV — NON-NEGOTIABLE; spec F06).
  * Pure: takes an already-decrypted credential value and a base environment, returns the
- * environment for the agent process. The orchestrator decrypts and calls this.
+ * environment for the harness process. The orchestrator decrypts and calls this.
  *
  * Billing integrity: a subscription-mode run MUST NOT be able to cause metered API
- * billing, so the agent's metered-credential variable is stripped from the returned
+ * billing, so the harness's metered-credential variable is stripped from the returned
  * environment.
  *
  * Which two variables those are is a parameter, not a constant (issue #10): it used to be a
  * hardcoded `CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY` pair, which is Claude Code's own
- * naming and would have been silently wrong for the next agent's catalog row. Both names now
- * come from the running Agent Profile's `agent_catalog` row, so the guarantee holds for
- * whichever agent is actually running, not just the first one SoloW shipped.
+ * naming and would have been silently wrong for the next harness's catalog row. Both names now
+ * come from the running Harness Profile's `agent_catalog` row, so the guarantee holds for
+ * whichever harness is actually running, not just the first one SoloW shipped.
  */
 
 export interface ResolveEnvParams {
   authMode: AuthMode;
   /** Decrypted credential value: the OAuth token (subscription) or API key. */
   credentialValue: string | null;
-  /** The base environment the agent process would otherwise inherit. */
+  /** The base environment the harness process would otherwise inherit. */
   baseEnv: Readonly<Record<string, string | undefined>>;
-  /** From the running Agent's catalog row — see `agent-catalog.ts`. */
+  /** From the running Harness's catalog row — see `harness-catalog.ts`. */
   subscriptionEnvVar: string;
-  /** From the running Agent's catalog row — the variable that must never carry a value. */
+  /** From the running Harness's catalog row — the variable that must never carry a value. */
   meteredEnvVar: string;
   /**
    * Extra environment from the Task's Executor Profile (issue #73). Applied *over* the base
@@ -43,13 +43,13 @@ export interface ResolveEnvParams {
    * here would have to predate that check or bypass the API. It is dropped anyway: this is the
    * last point at which billing integrity is still enforceable — and since the guarded names are
    * catalog-driven (issue #10), not just the Claude Code pair the contract's static check knows
-   * about, this also strips `subscriptionEnvVar`/`meteredEnvVar` for whichever agent is actually
+   * about, this also strips `subscriptionEnvVar`/`meteredEnvVar` for whichever harness is actually
    * running, not only the two names the contract layer recognises.
    */
   profileEnv?: Readonly<Record<string, string>>;
 }
 
-export function resolveAgentRunEnv(
+export function resolveHarnessRunEnv(
   params: ResolveEnvParams,
 ): Result<Record<string, string>, typeof BillingErrorCode.MissingCredential> {
   const { authMode, credentialValue, baseEnv, subscriptionEnvVar, meteredEnvVar, profileEnv } =
@@ -77,7 +77,7 @@ export function resolveAgentRunEnv(
   return ok(env);
 }
 
-/** Enforce a per-Agent-Profile concurrency cap (spec FR-017). */
+/** Enforce a per-Harness-Profile concurrency cap (spec FR-017). */
 export function withinConcurrencyCap(cap: number, runningCount: number): boolean {
   return runningCount < cap;
 }
@@ -85,7 +85,7 @@ export function withinConcurrencyCap(cap: number, runningCount: number): boolean
 export type FailureClass = "fail" | "park" | "credential_expired" | "interrupted";
 
 /**
- * The `FailureClass` value a Task's `failureReason` holds when its Agent Profile's credential
+ * The `FailureClass` value a Task's `failureReason` holds when its Harness Profile's credential
  * was rejected or is missing (spec AC-013, issue #63).
  *
  * Exported as one constant rather than left as a string literal repeated at each of the three
@@ -97,10 +97,10 @@ export type FailureClass = "fail" | "park" | "credential_expired" | "interrupted
 export const CREDENTIAL_EXPIRED_REASON: FailureClass = "credential_expired";
 
 /**
- * The `failureReason` a Task carries when it was `running` with no agent process anywhere to
+ * The `failureReason` a Task carries when it was `running` with no harness process anywhere to
  * show for it — the orchestrator restarted (or crashed) mid-run and, unlike a review round's own
  * retry, nothing durable was left to redrive it (issue: reported directly by an Owner watching a
- * Task's input box answer "No agent is running" forever after a restart).
+ * Task's input box answer "No harness is running" forever after a restart).
  *
  * `classifyRunFailure` never produces this value — it comes only from the orchestrator's own
  * boot-time reconciliation (`apps/orchestrator/src/reconcile.ts`), which is the one place with
@@ -150,10 +150,10 @@ export function classifyRunFailure(signal: FailureSignal): FailureClass {
 }
 
 /**
- * Read a failure signal out of whatever the agent said as it died (its stderr, or the message
+ * Read a failure signal out of whatever the harness said as it died (its stderr, or the message
  * of the error that ended the run).
  *
- * The agent is an external CLI: it reports quota exhaustion and a rejected credential in prose,
+ * The harness is an external CLI: it reports quota exhaustion and a rejected credential in prose,
  * not in a status code, so without this every failure would classify as a hard `fail` and a
  * Task that should merely park until the quota window resets would go to Failed instead
  * (spec AC-013). Matching is deliberately narrow — a false "park" would strand a Task for

@@ -11,7 +11,7 @@ import {
 
 /**
  * The operator's side of AC-4. Two properties matter and neither is cosmetic: the dialog offers
- * exactly the options the agent offered — never one SoloW invented — and a question that
+ * exactly the options the harness offered — never one SoloW invented — and a question that
  * has already been settled never comes back.
  */
 
@@ -36,12 +36,12 @@ function request(over: Partial<PermissionRequest> = {}): PermissionRequest {
 }
 
 describe("PermissionRequestDialog", () => {
-  it("shows nothing while the agent is not asking anything", () => {
+  it("shows nothing while the harness is not asking anything", () => {
     render(<PermissionRequestDialog request={null} onChoose={() => {}} />);
     expect(screen.queryByRole("alertdialog")).toBeNull();
   });
 
-  it("renders one button per option the agent offered, and no others", () => {
+  it("renders one button per option the harness offered, and no others", () => {
     render(<PermissionRequestDialog request={request()} onChoose={() => {}} />);
     expect(screen.getByText(/Write \.env in the worktree/)).toBeDefined();
     expect(screen.getByRole("button", { name: "Allow once" })).toBeDefined();
@@ -51,7 +51,7 @@ describe("PermissionRequestDialog", () => {
     expect(screen.queryByRole("button", { name: /always/i })).toBeNull();
   });
 
-  it("reports the option the operator chose, by the agent's own id", () => {
+  it("reports the option the operator chose, by the harness's own id", () => {
     const chosen: Array<[string, string]> = [];
     render(
       <PermissionRequestDialog
@@ -64,7 +64,7 @@ describe("PermissionRequestDialog", () => {
     expect(chosen).toEqual([["req-1", "no"]]);
   });
 
-  it("says plainly when the agent offered nothing to choose from", () => {
+  it("says plainly when the harness offered nothing to choose from", () => {
     render(<PermissionRequestDialog request={request({ options: [] })} onChoose={() => {}} />);
     expect(screen.getByText(/offered no options/)).toBeDefined();
   });
@@ -111,7 +111,7 @@ describe("pendingPermission", () => {
 
   it("opens the dialog again for a later round that reused an earlier request id", () => {
     // The reproduction of the defect that made AC-4 hold for round one only. The stream spans
-    // every run of the Task, and an agent process numbers its requests from 1 each time it is
+    // every run of the Task, and a harness process numbers its requests from 1 each time it is
     // spawned, so a round-two question can legitimately arrive wearing a round-one id. Pairing
     // by id alone filtered it out and the operator was never asked; the deadline answered.
     const events: TaskEvent[] = [

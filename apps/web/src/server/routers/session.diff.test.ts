@@ -2,9 +2,9 @@
 
 import { beforeEach, describe, expect, it } from "bun:test";
 import {
-  agentProfile,
-  ensureDefaultAgentCatalog,
+  ensureDefaultHarnessCatalog,
   executorProfile,
+  harnessProfile,
   issue as issueTable,
   repository,
   secret,
@@ -43,13 +43,13 @@ async function fixture(db: TestDb) {
     .values({ name: "Acme", ownerUserId: "owner-1" })
     .returning();
   if (!ws) throw new Error("failed to seed workspace");
-  const catalogId = await ensureDefaultAgentCatalog(db, ws.id);
+  const catalogId = await ensureDefaultHarnessCatalog(db, ws.id);
   const [sec] = await db
     .insert(secret)
     .values({ workspaceId: ws.id, name: "token", kind: "subscription_token", ciphertext: "x" })
     .returning();
-  const [agent] = await db
-    .insert(agentProfile)
+  const [harness] = await db
+    .insert(harnessProfile)
     .values({
       workspaceId: ws.id,
       name: "claude",
@@ -81,7 +81,7 @@ async function fixture(db: TestDb) {
       issueId: issue?.id ?? "",
       title: "Cross-repository change",
       state: "review",
-      agentProfileId: agent?.id ?? "",
+      agentProfileId: harness?.id ?? "",
       executorProfileId: executor?.id ?? "",
     })
     .returning();
@@ -244,7 +244,7 @@ describe("session.get — the diff a reviewer is shown", () => {
     expect(detail.diff?.files[0]?.path).toBe("src/current.ts");
   });
 
-  it("has no diffs at all before the agent reaches the review gate", async () => {
+  it("has no diffs at all before the harness reaches the review gate", async () => {
     const fx = await fixture(db);
 
     const detail = await caller(db, fx.workspaceId).session.get({ sessionId: fx.sessionId });

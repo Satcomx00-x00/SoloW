@@ -29,7 +29,7 @@ const handlers = {
     ],
     nextCursor: null,
   }),
-  "profile.agent.list": () => ({ items: [{ id: "agent-1", name: "Claude" }], nextCursor: null }),
+  "profile.agent.list": () => ({ items: [{ id: "harness-1", name: "Claude" }], nextCursor: null }),
   "profile.executor.list": () => ({ items: [{ id: "exec-1", name: "Local" }], nextCursor: null }),
   "repository.list": () => ({
     items: [
@@ -139,7 +139,7 @@ describe("CreateTaskDialog — a caller's preset", () => {
 });
 
 /**
- * What the Owner can see of the Issue they are launching an agent against.
+ * What the Owner can see of the Issue they are launching a harness against.
  *
  * The picker is a Select, so it showed one truncated line and nothing else: the brief for a run
  * was being chosen from a fragment of itself. These pin the whole Issue being on screen, and the

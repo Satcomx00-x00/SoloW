@@ -213,10 +213,10 @@ describe("creation — the docker run line", () => {
       USER,
       "--tmpfs",
       "/run/solow:rw,mode=0700,uid=1000,gid=1000,size=1m",
-      // The agent's `HOME`, so a credential a tool caches there dies with the container instead
+      // The harness's `HOME`, so a credential a tool caches there dies with the container instead
       // of being written into the bind-mounted worktree on the host — see `CONTAINER_HOME`.
       // `exec` is named because Docker mounts a tmpfs `noexec` by default, which would break
-      // every agent CLI that installs a helper under `~/.local/bin`.
+      // every harness CLI that installs a helper under `~/.local/bin`.
       "--tmpfs",
       "/home/solow:rw,exec,mode=0700,uid=1000,gid=1000,size=64m",
       "--mount",
@@ -255,7 +255,7 @@ describe("creation — the docker run line", () => {
     expect(mkdirs.map((cmd) => cmd[2])).toEqual(["/srv/data", "/srv/repos/app", JAIL_ROOT]);
     // Every one of them *before* the run: `--mount type=bind` refuses a source that does not
     // exist, which is the loud failure we want for a path nobody knew about — where `-v` would
-    // silently create a root-owned directory and hand the agent an empty worktree instead. It is
+    // silently create a root-owned directory and hand the harness an empty worktree instead. It is
     // not the failure we want for the directories the driver could have made itself.
     for (const mkdir of mkdirs) expect(host.calls.indexOf(mkdir)).toBeLessThan(run);
   });
@@ -340,7 +340,7 @@ describe("creation — the docker run line", () => {
     ["/root", SRV, "root's home, which is not under a HOME_PARENT at all"],
     ["/root/.ssh", SRV, "and its keys"],
     /*
-     * The escape, from every layout. `/var/run/docker.sock` is not a leak: an agent that reaches
+     * The escape, from every layout. `/var/run/docker.sock` is not a leak: a harness that reaches
      * the socket starts a privileged container and owns the machine. The `VAR` row is the one the
      * old `dirname(worktreeRoot)` rule admitted — a deployment rooted at `/var/solow` made every
      * path under `/var/` mountable, which is the whole of `/var/run` with it.
@@ -373,7 +373,7 @@ describe("creation — the docker run line", () => {
      * are case-insensitive by default (APFS, HFS+). The guard shipped comparing `Library`
      * case-sensitively, so `~/library/Keychains` and `~/LIBRARY/Keychains` were mounted while
      * the row above was refused — three names for one directory, two of them a keychain handed
-     * to the agent. Nothing equivalent is needed for the dot half: case cannot hide a leading `.`.
+     * to the harness. Nothing equivalent is needed for the dot half: case cannot hide a leading `.`.
      */
     ["/Users/dev/library/Keychains", SRV, "…spelled lower-case, which opens the same directory"],
     ["/Users/dev/LIBRARY/Keychains", SRV, "…and upper-case, which opens it too"],
@@ -381,7 +381,7 @@ describe("creation — the docker run line", () => {
      * Not a path at all until `resolve()` has silently supplied the missing half from
      * `process.cwd()`. Both of these were *mounted*: the first as
      * `<the orchestrator's checkout>/relative/path`, the second as the checkout itself — so a
-     * Repository whose `location` is `"."` handed the agent SoloW's own source, its
+     * Repository whose `location` is `"."` handed the harness SoloW's own source, its
      * configuration and any `.env` beside it, read-write. The verdict must not depend on where
      * the test process was started either, which is the other half of why this is refused
      * outright rather than resolved.
@@ -423,7 +423,7 @@ describe("creation — the docker run line", () => {
    * The two sentences the guard refuses with, and nothing else counts as a refusal.
    *
    * Two, because the guard answers two different questions: whether the path is somewhere an
-   * agent may be given, and whether the path can be handed to the daemon at all without
+   * harness may be given, and whether the path can be handed to the daemon at all without
    * reopening the `--mount` value it is spliced into. An operator acts on those differently —
    * one is "register the Repository somewhere else", the other is "rename the directory" — so
    * they are separate sentences rather than one that covers both vaguely.
@@ -459,7 +459,7 @@ describe("creation — the docker run line", () => {
     expect(verdicts).toEqual(MOUNTABLE.map(([, , why]) => `${why} → mounted`));
   });
 
-  it("refuses every source that would hand the agent the host", async () => {
+  it("refuses every source that would hand the harness the host", async () => {
     const verdicts = await Promise.all(
       REFUSED.map(async ([source, roots, why]) => `${why} → ${await verdict(source, roots)}`),
     );
@@ -660,7 +660,7 @@ describe("creation — the docker run line", () => {
   it("tells the operator the rule the guard actually applies", async () => {
     /*
      * The one sentence an Owner ever reads about this, and it described the rule the rewrite
-     * replaced: it said an agent is given "paths inside <content areas> or a home directory",
+     * replaced: it said a harness is given "paths inside <content areas> or a home directory",
      * while a home directory's dot-half had become refused. So an Owner whose `local_path`
      * Repository is `~/.local/share/chezmoi` or `~/.dotfiles` was refused by a sentence telling
      * them home directories were allowed, and had nothing to act on. The docstring on
@@ -828,7 +828,7 @@ describe("a verdict always carries a reason", () => {
   });
 });
 
-describe("baseEnv — the environment the agent starts from", () => {
+describe("baseEnv — the environment the harness starts from", () => {
   /** The one `docker image inspect` the driver makes, answered with the image's declared env. */
   function withImageEnv(declared: string[]): FakeHost {
     return fakeHost(daemon([[/image inspect/, { stdout: `${JSON.stringify(declared)}\n` }]]));
@@ -837,8 +837,8 @@ describe("baseEnv — the environment the agent starts from", () => {
   it("puts HOME on the container's own tmpfs, never in the bind-mounted worktree", async () => {
     /*
      * The worktree is a host bind mount, so an image declaring no `HOME` — alpine, and most bun
-     * and node images — used to give the agent a `$HOME` *on the host*: `.gitconfig`, `.npmrc`,
-     * `~/.config/gh/hosts.yml` and an agent CLI's own token store were written there and
+     * and node images — used to give the harness a `$HOME` *on the host*: `.gitconfig`, `.npmrc`,
+     * `~/.config/gh/hosts.yml` and a harness CLI's own token store were written there and
      * outlived the container. The worktree is deliberately kept after a hard failure, so they
      * persisted precisely in the runs nobody goes back to look at.
      */
@@ -983,7 +983,7 @@ describe("spawn — the environment, and the signal", () => {
     await waitFor(() => host.calls.some((cmd) => cmd.includes("KILL")), "the KILL signal");
 
     // Signalled by pid, never by terminating the `docker exec` client: verified that killing the
-    // client leaves the inner process running — one leaked agent per stop — while the pid route
+    // client leaves the inner process running — one leaked harness per stop — while the pid route
     // makes the client exit 143 for TERM and 137 for KILL, which is what the ladder in
     // `packages/acp/src/session.ts` reads as "the polite signal was ignored".
     expect(host.calls).toContainEqual([

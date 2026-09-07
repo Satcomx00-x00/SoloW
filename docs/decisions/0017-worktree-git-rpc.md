@@ -25,9 +25,9 @@ which is a sub-second read a human is waiting on.
 The orchestrator serves three routes: `POST /events`, `/api/inngest`, and the WebSocket upgrade.
 None of them answers a question about a directory.
 
-There is a third fact that rules out the obvious shortcut. The panel has to work **when no agent
-is running** — that is the normal case for review, because the agent has finished by then. Any
-design that routes through the live agent handle covers the least important half of the feature.
+There is a third fact that rules out the obvious shortcut. The panel has to work **when no harness
+is running** — that is the normal case for review, because the harness has finished by then. Any
+design that routes through the live harness handle covers the least important half of the feature.
 
 ## Decision
 
@@ -67,7 +67,7 @@ public HTTP contract is the tRPC surface the browser talks to (Decision 0011).
   authorisation mechanism already in the repository, and behaviour that survives the executor
   becoming remote — because the call was always going through `Executor`.
 
-- **Extend the WebSocket hub.** Rejected. The hub routes to a *live agent handle*: it exists to
+- **Extend the WebSocket hub.** Rejected. The hub routes to a *live harness handle*: it exists to
   deliver an operator's steering or stop to a process that is running. Review happens when that
   process is gone, so this would need a second path for the case that matters most — and
   request/response over a broadcast stream means correlation ids, timeouts and a reply channel,
@@ -83,7 +83,7 @@ public HTTP contract is the tRPC surface the browser talks to (Decision 0011).
   answer, kept as the fallback. It is genuinely good for reading — it is how the captured diff
   already survives the worktree being deleted — but a status that arrives at turn boundaries
   cannot answer a click, and staging is a write with no event shape that makes sense as "the
-  agent said so".
+  harness said so".
 
 - **Request/reply through Inngest.** Rejected. The durable engine's guarantees — retries,
   replay, steps that survive a restart — are exactly wrong for a read a human is waiting 80ms
@@ -93,7 +93,7 @@ public HTTP contract is the tRPC surface the browser talks to (Decision 0011).
 ## Consequences
 
 - Positive: the panel works for a finished Task, a parked Task and a failed Task — every state
-  where someone actually reviews — because it does not depend on an agent being alive.
+  where someone actually reviews — because it does not depend on a harness being alive.
 - Positive: no new capability in `apps/web`. It gains a client, not a filesystem.
 - Positive: the same route serves the file tree (#68) and the read-only editor (#67) when they
   arrive. Both need "read something out of a worktree" and neither now needs its own answer.
@@ -104,8 +104,8 @@ public HTTP contract is the tRPC surface the browser talks to (Decision 0011).
 - Negative: the orchestrator becomes latency-sensitive. It was a background service; a slow or
   restarting orchestrator is now visible as a panel that will not load. `bun --hot` reloading it
   mid-review is no longer only the running Task's problem.
-- Negative: two callers can now write to one worktree — the panel and the agent. F22's rule that
-  the panel is read-only while the agent runs is what keeps that from being a race, and it is a
+- Negative: two callers can now write to one worktree — the panel and the harness. F22's rule that
+  the panel is read-only while the harness runs is what keeps that from being a race, and it is a
   rule enforced in code, not a convention.
 - The ticket's 60-second TTL means a panel left open re-signs before each call rather than
   holding a long-lived credential. That is deliberate and matches the stream's behaviour.

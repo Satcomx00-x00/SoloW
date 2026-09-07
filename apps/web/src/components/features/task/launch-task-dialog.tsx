@@ -19,7 +19,7 @@ import { trpc } from "@/trpc/react";
  *
  * A Task is bound to a pipeline by `workflow.attachTask`, which the designer offers from its own
  * page — but the moment somebody actually decides is the moment they press Launch, and a launch
- * that silently ran a Task as a single agent because nobody had visited the designer was the
+ * that silently ran a Task as a single harness because nobody had visited the designer was the
  * common case. So the launch asks. The answer is written first (attach, or detach when "no
  * workflow" is chosen on a bound Task) and the caller's own launch runs after, so every refusal
  * a launch can meet still lands on the caller's banner.
@@ -86,7 +86,7 @@ export function LaunchTaskDialog({
         <DialogHeader>
           <DialogTitle>Launch {task?.title ?? "the task"}</DialogTitle>
           <DialogDescription>
-            Through a Workflow — one agent per Step, with its gates — or as a single agent run.
+            Through a Workflow — one harness per Step, with its gates — or as a single harness run.
           </DialogDescription>
         </DialogHeader>
         <div role="radiogroup" aria-label="Workflow" className="grid gap-1.5">
@@ -95,7 +95,7 @@ export function LaunchTaskDialog({
             onSelect={() => setChoice(NONE)}
             icon={<Sparkles aria-hidden className="size-3.5" />}
             title="No workflow"
-            detail="One agent, one run, then the review gate."
+            detail="One harness, one run, then the review gate."
           />
           {workflows.map((w) => (
             <Choice

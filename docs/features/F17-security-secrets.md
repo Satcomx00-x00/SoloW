@@ -5,8 +5,8 @@
 ## Summary
 
 SoloW handles sensitive credentials — subscription tokens, API keys, and integration
-credentials — and runs untrusted agent activity. This feature defines how those secrets are
-protected and how the boundary between agents and credentials is kept safe.
+credentials — and runs untrusted harness activity. This feature defines how those secrets are
+protected and how the boundary between harnesses and credentials is kept safe.
 
 ## Jobs served
 
@@ -16,8 +16,8 @@ protected and how the boundary between agents and credentials is kept safe.
 ## User stories
 
 - As a user, I want my credentials stored safely and never shown again, so they cannot leak.
-- As an Operator, I want to be sure agent-run code cannot read the credentials it uses, so a
-  misbehaving agent cannot exfiltrate them.
+- As an Operator, I want to be sure harness-run code cannot read the credentials it uses, so a
+  misbehaving harness cannot exfiltrate them.
 - As a Team Lead, I want secrets scoped to a Workspace, so they are not shared beyond their
   intended reach.
 
@@ -28,10 +28,10 @@ protected and how the boundary between agents and credentials is kept safe.
 - **FR-2** A secret is never displayed after it is entered; it can be replaced but not read
   back.
 - **FR-3** Secrets are scoped to a Workspace and reused only within it.
-- **FR-4** Credentials are supplied to Agents without being exposed to the code an Agent runs
+- **FR-4** Credentials are supplied to Harnesses without being exposed to the code a Harness runs
   (product [NFR-7](../product/03-product-requirements.md)).
-- **FR-5** For Subscription-mode Agents, SoloW removes any conflicting credential from
-  the Agent's run environment so billing cannot be diverted (see [F06](./F06-authentication-billing.md)).
+- **FR-5** For Subscription-mode Harnesses, SoloW removes any conflicting credential from
+  the Harness's run environment so billing cannot be diverted (see [F06](./F06-authentication-billing.md)).
 - **FR-6** Destructive actions on secrets (rotation, deletion) require confirmation and are
   recorded.
 - **FR-7** Shared exports are redacted so secrets never appear in them (see [F13](./F13-collaboration-sharing.md)).
@@ -48,7 +48,7 @@ protected and how the boundary between agents and credentials is kept safe.
 ## States & rules
 
 - Secrets are Workspace-scoped resources.
-- The boundary rule is absolute: agent-run code never has access to raw credentials.
+- The boundary rule is absolute: harness-run code never has access to raw credentials.
 - Subscription and API-key credentials use the same secure storage and handling.
 
 ## Edge cases & failure handling

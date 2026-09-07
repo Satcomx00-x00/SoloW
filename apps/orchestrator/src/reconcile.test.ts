@@ -1,10 +1,10 @@
 import { beforeAll, describe, expect, it } from "bun:test";
 import { STRANDED_REVIEW_REASON } from "@solow/core";
 import {
-  agentCatalog,
-  agentProfile,
   encryptSecret,
   executorProfile,
+  harnessCatalog,
+  harnessProfile,
   issue,
   review,
   secret,
@@ -30,7 +30,7 @@ import {
 /**
  * Reclaim a Task left `running` by a process that is provably gone (see `reconcile.ts`'s own
  * doc comment for the full incident this answers: an Owner watching a Task's input box answer
- * "No agent is running" forever after an orchestrator restart, because the Inngest Dev Server
+ * "No harness is running" forever after an orchestrator restart, because the Inngest Dev Server
  * that would otherwise redrive the workflow had itself lost the in-flight run).
  */
 
@@ -87,7 +87,7 @@ async function seedTask(
       kind: "subscription_token",
       ciphertext,
     });
-    await db.insert(agentCatalog).values({
+    await db.insert(harnessCatalog).values({
       id: `cat-${workspaceId}`,
       workspaceId,
       key: "claude_code",
@@ -97,7 +97,7 @@ async function seedTask(
       subscriptionEnvVar: "CLAUDE_CODE_OAUTH_TOKEN",
       meteredEnvVar: "ANTHROPIC_API_KEY",
     });
-    await db.insert(agentProfile).values({
+    await db.insert(harnessProfile).values({
       id: `ap-${workspaceId}`,
       workspaceId,
       name: "Default Claude",
@@ -151,7 +151,7 @@ function fakeHub() {
 }
 
 describe("reclaimOrphanedRuns", () => {
-  it("fails a running Task with no live agent, closing its Session", async () => {
+  it("fails a running Task with no live harness, closing its Session", async () => {
     const db = createTestDb();
     const { sessionId } = await seedTask(db, { taskId: "task-1" });
 
@@ -203,7 +203,7 @@ describe("reclaimOrphanedRuns", () => {
     });
   });
 
-  it("leaves a running Task alone when the registry still has its agent", async () => {
+  it("leaves a running Task alone when the registry still has its harness", async () => {
     const db = createTestDb();
     await seedTask(db, { taskId: "task-1" });
     const registry = fakeRegistry(new Set([`${WS}:task-1`]));
@@ -246,7 +246,7 @@ describe("reclaimOrphanedRuns", () => {
  * did its job at 11:52:37 — it looked at a `running` Task, found the run genuinely alive and
  * registered, and correctly left it alone. That run died at 13:54 with its work committed and its
  * last turn written, and nothing ever looked again: the Task sat in `running`, its input box
- * answering "No agent is running", until an Owner asked why. Running on a timer is the fix, and a
+ * answering "No harness is running", until an Owner asked why. Running on a timer is the fix, and a
  * timer needs a second signal — the registry is empty in the short gaps between durable steps
  * too, and a sweep that fired in one of those would kill a run that was about to finish.
  */
@@ -281,7 +281,7 @@ describe("reclaimOrphanedRuns staleness", () => {
   });
 
   it("measures the quiet from the newest event, not from when the Session opened", async () => {
-    // A run that has been going for hours is not stale — a long Session whose agent is still
+    // A run that has been going for hours is not stale — a long Session whose harness is still
     // talking is the *most* alive thing on the board, and keying off the Session's start would
     // reclaim it on the sweep after its first ten minutes.
     const db = createTestDb();
@@ -311,15 +311,15 @@ describe("reclaimOrphanedRuns staleness", () => {
 /**
  * A run that finished and was then lost, which is the case that filled the Failed column.
  *
- * The agent did the work, wrote its last turn and committed. The step that would have moved the
+ * The harness did the work, wrote its last turn and committed. The step that would have moved the
  * Task to review never ran — a restart, a `bun --hot` reload, an engine that dropped the run —
- * and nothing anywhere recorded that the agent had ever finished. This sweep found a `running`
- * Task with no agent and did the only safe thing available to it: `failed`, `interrupted`. Work
+ * and nothing anywhere recorded that the harness had ever finished. This sweep found a `running`
+ * Task with no harness and did the only safe thing available to it: `failed`, `interrupted`. Work
  * that was done, and committed, filed as a failure.
  *
  * `agent_done` is what makes the two distinguishable, so these are the two halves of one rule.
  */
-describe("reclaimOrphanedRuns after the agent finished", () => {
+describe("reclaimOrphanedRuns after the harness finished", () => {
   async function seedWithMarker(db: TestDb, taskId: string, branch: string) {
     const { sessionId } = await seedTask(db, { taskId });
     await db.insert(sessionEvent).values({
@@ -400,8 +400,8 @@ describe("reclaimOrphanedRuns after the agent finished", () => {
   });
 
   it("sends a run that produced a change back to ready, never to failed", async () => {
-    // The case that buried real work: an agent edits a file, the orchestrator captures the diff
-    // at a turn boundary, then the run is lost before the agent declares anything. The work is
+    // The case that buried real work: a harness edits a file, the orchestrator captures the diff
+    // at a turn boundary, then the run is lost before the harness declares anything. The work is
     // on disk and described in the log; filing it as a failure is what made it invisible.
     const db = createTestDb();
     const { sessionId } = await seedTask(db, { taskId: "task-produced" });

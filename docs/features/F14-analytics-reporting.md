@@ -5,7 +5,7 @@
 ## Summary
 
 SoloW reports on how much work is getting done and how, so users and operators can
-understand throughput, agent activity, and the balance between subscription and metered
+understand throughput, harness activity, and the balance between subscription and metered
 billing.
 
 ## Jobs served
@@ -16,7 +16,7 @@ billing.
 
 - As a Team Lead, I want to see how many Tasks we complete and how, so I understand our
   throughput.
-- As an Operator, I want to see how agents split between subscription and API-key billing,
+- As an Operator, I want to see how harnesses split between subscription and API-key billing,
   so I manage cost.
 - As a user, I want to see how much parallel work ran without collisions, so I trust the
   isolation.
@@ -24,15 +24,15 @@ billing.
 ## Functional requirements
 
 - **FR-1** SoloW reports completed Tasks over time, per Workspace.
-- **FR-2** SoloW reports agent activity: number of Sessions, agent turns, and Workflow
+- **FR-2** SoloW reports harness activity: number of Sessions, harness turns, and Workflow
   Runs completed.
-- **FR-3** SoloW reports the split of Agent activity between Subscription and API-key
+- **FR-3** SoloW reports the split of Harness activity between Subscription and API-key
   billing modes.
 - **FR-4** SoloW reports concurrency: how many Tasks ran in parallel and how often work
   was Parked or queued.
 - **FR-5** SoloW reports Workflow Run outcomes, including Runs successfully resumed
   after interruption.
-- **FR-6** Reports can be scoped and filtered by Issue, Agent Profile, Executor Profile, and
+- **FR-6** Reports can be scoped and filtered by Issue, Harness Profile, Executor Profile, and
   time range.
 
 ## Non-functional requirements

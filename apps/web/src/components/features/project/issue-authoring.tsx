@@ -3,7 +3,7 @@
 import type { RepositoryLabelDto } from "@solow/contracts";
 import { Bold, Code, Heading, Italic, Link2, List, ListChecks, Quote } from "lucide-react";
 import { useRef } from "react";
-import { AgentMarkdown } from "@/components/features/task/markdown";
+import { HarnessMarkdown } from "@/components/features/task/markdown";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
@@ -90,7 +90,7 @@ export function groupLabelsByCategory(labels: readonly RepositoryLabelDto[]): La
  * The description editor — Markdown, written or previewed (request 2026-08-30).
  *
  * **Write** is a plain textarea with a formatting toolbar; **Preview** renders the same text
- * through `AgentMarkdown`, the very renderer `IssueBody` shows a saved description with, so what a
+ * through `HarnessMarkdown`, the very renderer `IssueBody` shows a saved description with, so what a
  * person previews here is what the issue will read as. The toolbar acts on the live selection —
  * the textarea is reached through the container rather than a `ref`, because the shared `Textarea`
  * does not forward one — and every action is a pure string transform, so it is inert (guarded) when
@@ -187,7 +187,7 @@ export function MarkdownField({
         <TabsContent value="preview" className="mt-2">
           <div className="min-h-[12rem] rounded-md border bg-muted/20 px-3 py-2">
             {value.trim() ? (
-              <AgentMarkdown text={value} />
+              <HarnessMarkdown text={value} />
             ) : (
               <p className="text-muted-foreground text-sm italic">Nothing to preview.</p>
             )}

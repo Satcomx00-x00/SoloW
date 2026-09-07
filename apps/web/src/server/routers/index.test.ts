@@ -3,7 +3,7 @@
 import { beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { taskCheckoutBranch } from "@solow/core";
 import { verifyStreamTicket } from "@solow/core/stream";
-import { ensureDefaultAgentCatalog, issue as issueTable, workspace } from "@solow/db";
+import { ensureDefaultHarnessCatalog, issue as issueTable, workspace } from "@solow/db";
 import { createTestDb, type TestDb } from "@solow/db/testing";
 import { RATE_LIMITS, resetRateLimits } from "../rate-limit.js";
 import type { BaseContext } from "../trpc.js";
@@ -55,12 +55,12 @@ async function errCode(fn: () => Promise<unknown>): Promise<string> {
   }
 }
 
-/** Full fixture chain for a task: secret → agent catalog → agent/executor profile → repo → issue. */
+/** Full fixture chain for a task: secret → harness catalog → harness/executor profile → repo → issue. */
 async function taskFixtures(db: TestDb, wsId: string) {
   const c = caller(db, wsId);
-  const agentCatalogId = await ensureDefaultAgentCatalog(db, wsId);
+  const agentCatalogId = await ensureDefaultHarnessCatalog(db, wsId);
   const { secret } = await c.secret.set({ name: "sub", kind: "subscription_token", value: "tok" });
-  const agent = await c.profile.agent.create({
+  const harness = await c.profile.agent.create({
     name: "Claude",
     agentCatalogId,
     authMode: "subscription",
@@ -80,7 +80,7 @@ async function taskFixtures(db: TestDb, wsId: string) {
     .values({ workspaceId: wsId, title: "Fix latch" })
     .returning();
   if (!issue) throw new Error("failed to seed issue");
-  return { c, agentId: agent.id, executorId: executor.id, repoId: repo.id, issueId: issue.id };
+  return { c, harnessId: harness.id, executorId: executor.id, repoId: repo.id, issueId: issue.id };
 }
 
 describe("tRPC router integration", () => {
@@ -172,12 +172,12 @@ describe("tRPC router integration", () => {
 
   it("creates a task and moves it through legal transitions, rejecting illegal ones", async () => {
     const wsId = await seedWs(db, "acme");
-    const { c, agentId, executorId, repoId, issueId } = await taskFixtures(db, wsId);
+    const { c, harnessId, executorId, repoId, issueId } = await taskFixtures(db, wsId);
 
     const task = await c.task.create({
       issueId,
       title: "Investigate latch",
-      agentProfileId: agentId,
+      agentProfileId: harnessId,
       executorProfileId: executorId,
       repositories: [{ repositoryId: repoId }],
     });
@@ -211,7 +211,7 @@ describe("tRPC router integration", () => {
     const taskA = await fx.c.task.create({
       issueId: fx.issueId,
       title: "A's task",
-      agentProfileId: fx.agentId,
+      agentProfileId: fx.harnessId,
       executorProfileId: fx.executorId,
       repositories: [{ repositoryId: fx.repoId }],
     });
@@ -233,7 +233,7 @@ describe("tRPC router integration", () => {
         b.c.task.create({
           issueId: fx.issueId, // A's issue
           title: "cross-tenant",
-          agentProfileId: b.agentId,
+          agentProfileId: b.harnessId,
           executorProfileId: b.executorId,
           repositories: [{ repositoryId: b.repoId }],
         }),
@@ -259,7 +259,7 @@ describe("tRPC router integration", () => {
       const task = await fx.c.task.create({
         issueId: fx.issueId,
         title: "Cross-repository change",
-        agentProfileId: fx.agentId,
+        agentProfileId: fx.harnessId,
         executorProfileId: fx.executorId,
         repositories: [
           { repositoryId: fx.repoId, baseRef: "main" },
@@ -285,7 +285,7 @@ describe("tRPC router integration", () => {
           b.c.task.create({
             issueId: b.issueId,
             title: "cross-tenant repository",
-            agentProfileId: b.agentId,
+            agentProfileId: b.harnessId,
             executorProfileId: b.executorId,
             repositories: [{ repositoryId: b.repoId }, { repositoryId: fx.repoId }],
           }),
@@ -305,7 +305,7 @@ describe("tRPC router integration", () => {
       const task = await fx.c.task.create({
         issueId: fx.issueId,
         title: "Repointed",
-        agentProfileId: fx.agentId,
+        agentProfileId: fx.harnessId,
         executorProfileId: fx.executorId,
         repositories: [{ repositoryId: fx.repoId }],
       });
@@ -326,7 +326,7 @@ describe("tRPC router integration", () => {
       const task = await fx.c.task.create({
         issueId: fx.issueId,
         title: "Running",
-        agentProfileId: fx.agentId,
+        agentProfileId: fx.harnessId,
         executorProfileId: fx.executorId,
         repositories: [{ repositoryId: fx.repoId }],
       });
@@ -353,7 +353,7 @@ describe("tRPC router integration", () => {
       const task = await fx.c.task.create({
         issueId: fx.issueId,
         title: "Repointed",
-        agentProfileId: fx.agentId,
+        agentProfileId: fx.harnessId,
         executorProfileId: fx.executorId,
         repositories: [{ repositoryId: fx.repoId }],
       });
@@ -381,7 +381,7 @@ describe("tRPC router integration", () => {
       const task = await b.c.task.create({
         issueId: b.issueId,
         title: "B's task",
-        agentProfileId: b.agentId,
+        agentProfileId: b.harnessId,
         executorProfileId: b.executorId,
         repositories: [{ repositoryId: b.repoId }],
       });

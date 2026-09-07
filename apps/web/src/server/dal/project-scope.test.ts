@@ -155,7 +155,7 @@ describe("listTasks, scoped to a project", () => {
       issueId,
       title,
       state: "backlog",
-      agentProfileId: (await ctxFor(db, acme).db.query.agentProfile.findFirst())?.id ?? "",
+      agentProfileId: (await ctxFor(db, acme).db.query.harnessProfile.findFirst())?.id ?? "",
       executorProfileId: (await ctxFor(db, acme).db.query.executorProfile.findFirst())?.id ?? "",
     });
   }

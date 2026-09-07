@@ -157,7 +157,7 @@ describe("validateWidgetResponse", () => {
 /**
  * Length limits clip the text they bound; they no longer delete the widget it was in.
  *
- * The bug: an agent asked a five-option question whose longest option label ran to 240
+ * The bug: a harness asked a five-option question whose longest option label ran to 240
  * characters against a 200-character cap. The whole widget failed its schema, degraded to
  * `unsupported`, and the run sat blocked on an answer the operator had no way to give — the card
  * on screen offered nothing to click. A bound meant to keep the log readable had deleted the
@@ -173,7 +173,7 @@ describe("display text", () => {
     expect(widget.options[0]?.label.endsWith("…")).toBe(true);
   });
 
-  it("leaves a label that fits exactly as the agent wrote it", () => {
+  it("leaves a label that fits exactly as the harness wrote it", () => {
     const label = "Rewrite the file from the actual imports";
     const widget = ask({ options: [{ id: "a", label }] }) as Widget & {
       options: Array<{ label: string }>;

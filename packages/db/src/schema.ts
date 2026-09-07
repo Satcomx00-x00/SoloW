@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
 import type {
-  AgentCapabilities,
-  AgentPermissionMode,
-  AgentProtocol,
   AuthMode,
   ChangeRequestState,
   ExecutorConfig,
   ExecutorKind,
+  HarnessCapabilities,
+  HarnessPermissionMode,
+  HarnessProtocol,
   IssueMilestone,
   IssueSource,
   IssueStatus,
@@ -150,7 +150,7 @@ export const issue = sqliteTable(
      * provider's own answer to that question, and it belongs to the issue it answers for.
      *
      * Deliberately **not** the branch a Task produced either (issue #104): provider-linked and
-     * agent-produced are two different facts, and one column holding both would answer neither.
+     * harness-produced are two different facts, and one column holding both would answer neither.
      */
     linkedChangeRequests: text("linked_change_requests", { mode: "json" })
       .$type<LinkedChangeRequest[]>()
@@ -237,20 +237,20 @@ export const issue = sqliteTable(
 );
 
 /**
- * Agent catalog (issue #10, spec F05). Agent identity as data: adding a supported agent is a
- * seed row plus an Agent Profile pointing at it, not a change to `agent_profile.agentKind` and
+ * Harness catalog (issue #10, spec F05). Harness identity as data: adding a supported harness is a
+ * seed row plus a Harness Profile pointing at it, not a change to `agent_profile.agentKind` and
  * every place that used to switch on it.
  *
  * Workspace-scoped like every other tenant-owned table (Principle V) — a self-hoster who wires
- * up a custom agent CLI does it for their own Workspace.
+ * up a custom harness CLI does it for their own Workspace.
  *
  * `subscriptionEnvVar` / `meteredEnvVar` are why this is a table and not a JSON blob: the
- * billing strip (`resolveAgentRunEnv`) used to hardcode Claude Code's two variable names. That
+ * billing strip (`resolveHarnessRunEnv`) used to hardcode Claude Code's two variable names. That
  * guarantee is SoloW's headline differentiator, and it must not silently stop holding the
- * moment a second agent's row is added — so which variables to strip is read off this row, not
+ * moment a second harness's row is added — so which variables to strip is read off this row, not
  * assumed.
  */
-export const agentCatalog = sqliteTable(
+export const harnessCatalog = sqliteTable(
   "agent_catalog",
   {
     id: id(),
@@ -259,7 +259,7 @@ export const agentCatalog = sqliteTable(
       .references(() => workspace.id),
     key: text("key").notNull(),
     displayName: text("display_name").notNull(),
-    protocol: text("protocol").$type<AgentProtocol>().notNull(),
+    protocol: text("protocol").$type<HarnessProtocol>().notNull(),
     command: text("command").notNull(),
     argsTemplate: text("args_template", { mode: "json" })
       .$type<string[]>()
@@ -268,9 +268,9 @@ export const agentCatalog = sqliteTable(
     installHint: text("install_hint"),
     subscriptionEnvVar: text("subscription_env_var").notNull(),
     meteredEnvVar: text("metered_env_var").notNull(),
-    /** A cache of the agent's last advertised models/modes — see `AgentCapabilities`. */
+    /** A cache of the harness's last advertised models/modes — see `HarnessCapabilities`. */
     capabilities: text("capabilities", { mode: "json" })
-      .$type<AgentCapabilities>()
+      .$type<HarnessCapabilities>()
       .notNull()
       .default(sql`'{"models":[],"modes":[]}'`),
     createdAt: createdAt(),
@@ -282,7 +282,7 @@ export const agentCatalog = sqliteTable(
   }),
 );
 
-export const agentProfile = sqliteTable(
+export const harnessProfile = sqliteTable(
   "agent_profile",
   {
     id: id(),
@@ -292,23 +292,23 @@ export const agentProfile = sqliteTable(
     name: text("name").notNull(),
     agentCatalogId: text("agent_catalog_id")
       .notNull()
-      .references(() => agentCatalog.id),
+      .references(() => harnessCatalog.id),
     authMode: text("auth_mode").$type<AuthMode>().notNull(),
     secretId: text("secret_id").notNull(),
     concurrencyCap: integer("concurrency_cap").notNull().default(3),
     /**
-     * How much the agent may do without asking (spec F05). Defaults to the value every Profile
+     * How much the harness may do without asking (spec F05). Defaults to the value every Profile
      * effectively ran as before the column existed, so an existing row's behaviour is unchanged
      * by the migration that added it.
      */
     permissionMode: text("permission_mode")
-      .$type<AgentPermissionMode>()
+      .$type<HarnessPermissionMode>()
       .notNull()
       .default("acceptEdits"),
     /**
-     * Which model and mode this Profile launches its agent with (issue #94).
+     * Which model and mode this Profile launches its harness with (issue #94).
      *
-     * Nullable, and null is the ordinary value: it means "whatever the agent chooses". A default
+     * Nullable, and null is the ordinary value: it means "whatever the harness chooses". A default
      * written here would be a model id that rots the first time a provider retires one, and a
      * stale pin fails at launch rather than at the moment somebody could have fixed it.
      */
@@ -392,7 +392,7 @@ export const repository = sqliteTable(
     syncStaleReason: text("sync_stale_reason"),
     /**
      * Repository-relative globs for files copied into each new worktree (issue #52) — a `.env`
-     * the agent needs to run the test suite, not a general "copy what git ignores".
+     * the harness needs to run the test suite, not a general "copy what git ignores".
      *
      * Stored as a list rather than a single joined string so a pattern containing a separator
      * cannot silently become two, and so the maximum length is a property of the list.
@@ -529,13 +529,13 @@ export const task = sqliteTable(
     state: text("state").$type<TaskState>().notNull().default("backlog"),
     agentProfileId: text("agent_profile_id")
       .notNull()
-      .references(() => agentProfile.id),
+      .references(() => harnessProfile.id),
     executorProfileId: text("executor_profile_id")
       .notNull()
       .references(() => executorProfile.id),
     failureReason: text("failure_reason"),
     /**
-     * What the agent said about how its run ended, and when it said it (spec F22 / the
+     * What the harness said about how its run ended, and when it said it (spec F22 / the
      * completion gate).
      *
      * Columns rather than a read of the session log, because the board asks this question once
@@ -543,19 +543,19 @@ export const task = sqliteTable(
      * answering it by scanning each Task's events would put a subquery per tile on the one
      * screen that has to stay fast.
      *
-     * Null means the agent has not declared anything — which is *not* the same as failing.
+     * Null means the harness has not declared anything — which is *not* the same as failing.
      * Nothing here moves the Task: the declaration is a report, and the person decides
-     * (Principle I). `completedOutcome` is the agent's own word from `task_complete`, so a run
+     * (Principle I). `completedOutcome` is the harness's own word from `task_complete`, so a run
      * that finished having changed nothing is distinguishable from one that produced work.
      */
     completedAt: text("completed_at"),
     completedOutcome: text("completed_outcome").$type<TaskCompletionOutcome>(),
-    /** What the agent wants read before the diff is opened. Shown on the card and in the header. */
+    /** What the harness wants read before the diff is opened. Shown on the card and in the header. */
     completedSummary: text("completed_summary"),
     /**
      * The Workflow this Task follows, and where it has got to (issue #5). All four are nullable
      * and every Task that exists today has them null, which is exactly "this Task follows no
-     * Workflow" — `task.agent_profile_id` remains the agent for a Task that has none.
+     * Workflow" — `task.agent_profile_id` remains the harness for a Task that has none.
      *
      * The cursor is a Step *id* rather than an ordinal on purpose: an ordinal is invalidated by
      * the next Step inserted above it, so a restart would resume a Task at whatever now sits at
@@ -577,7 +577,7 @@ export const task = sqliteTable(
      * Two columns rather than one because a Step reports it has finished before it is allowed to
      * move: an `agent-signal` Step behind a `human` gate hands over its summary, waits for the
      * decision, and is then replayed by whatever noticed the decision — a caller that no longer
-     * has the agent's words. Writing the summary into `workflow_handoff` immediately would
+     * has the harness's words. Writing the summary into `workflow_handoff` immediately would
      * instead corrupt the brief of the Step still running, which is built from the *previous*
      * Step's handoff.
      */
@@ -628,9 +628,9 @@ export const task = sqliteTable(
 );
 
 /**
- * A Workflow — a repeatable pipeline of Steps, each run by its own Agent Profile (issue #5,
+ * A Workflow — a repeatable pipeline of Steps, each run by its own Harness Profile (issue #5,
  * spec F03). The example the issue is written around is one row here with three Steps:
- * one agent plans, another implements, a third reviews.
+ * one harness plans, another implements, a third reviews.
  *
  * `version` is bumped by every Step write and recorded on a Task when it attaches, so editing a
  * definition underneath a running Task is *detectable* rather than silently applied. It is not
@@ -663,9 +663,9 @@ export const workflow = sqliteTable(
 /**
  * One Step of a Workflow.
  *
- * `agent_profile_id` is a foreign key to the Agent Profile catalog (issue #10) rather than a
- * second way of naming an agent. That is what AC-3 actually asks for: a Task using different
- * agents across Steps is this column differing between two rows, not a parallel agent registry
+ * `agent_profile_id` is a foreign key to the Harness Profile catalog (issue #10) rather than a
+ * second way of naming a harness. That is what AC-3 actually asks for: a Task using different
+ * harnesses across Steps is this column differing between two rows, not a parallel harness registry
  * that would have to be kept in step with the first.
  *
  * `rank` is a lexicographic string, not an integer position — see `rankBetween` in
@@ -686,7 +686,7 @@ export const workflowStep = sqliteTable(
     name: text("name").notNull(),
     agentProfileId: text("agent_profile_id")
       .notNull()
-      .references(() => agentProfile.id),
+      .references(() => harnessProfile.id),
     promptTemplate: text("prompt_template").notNull().default(""),
     gate: text("gate").$type<WorkflowStepGate>().notNull().default("human"),
     advanceOn: text("advance_on").$type<WorkflowAdvanceOn>().notNull().default("review"),
@@ -1174,8 +1174,8 @@ export const sessionEvent = sqliteTable(
  *
  * A separate table rather than a summary *event*, for a concrete reason: `seq` inside a live run
  * is an in-memory counter held for the life of the durable step, so a compactor inserting into
- * the same sequence would collide with the agent still writing to it. Keeping summaries out of
- * `session_event` also keeps that table exactly what it claims to be — what the agent produced,
+ * the same sequence would collide with the harness still writing to it. Keeping summaries out of
+ * `session_event` also keeps that table exactly what it claims to be — what the harness produced,
  * with nothing derived mixed in.
  *
  * Compaction can only ever insert here. There is no code path that deletes or updates a
@@ -1215,7 +1215,7 @@ export const sessionSummary = sqliteTable(
  * Per-turn token usage (issue #14).
  *
  * Written at the moment a turn completes, because this is the one record in the product that
- * cannot be reconstructed later: the agent reports usage once, in its own event stream, and
+ * cannot be reconstructed later: the harness reports usage once, in its own event stream, and
  * SoloW is the only thing watching. A run that happens before this table exists is
  * permanently unmeasurable.
  *
@@ -1224,7 +1224,7 @@ export const sessionSummary = sqliteTable(
  *  - **No monetary column.** Counts and model are facts; price is a moving external opinion.
  *    Cost is derived at query time (`deriveCostUsd` in `@solow/core`) so a price change
  *    never rewrites what was recorded.
- *  - **`reported` marks coverage.** A turn whose agent said nothing about usage is still
+ *  - **`reported` marks coverage.** A turn whose harness said nothing about usage is still
  *    inserted, with `reported: false` and zero counts, so a gap in coverage is visible instead
  *    of being indistinguishable from a turn that genuinely cost nothing.
  *  - **No content, ever.** Prompts and completions are not usage data (Principle IV).
@@ -1243,17 +1243,17 @@ export const sessionUsage = sqliteTable(
       .notNull()
       .references(() => task.id),
     /**
-     * The Agent Profile the turn ran under — the attribution key for "what did this profile
-     * cost". Issue #14 names an agent-catalog reference; the catalog is issue #10 and does not
+     * The Harness Profile the turn ran under — the attribution key for "what did this profile
+     * cost". Issue #14 names a harness-catalog reference; the catalog is issue #10 and does not
      * exist yet, and the profile reaches it once it does.
      */
     agentProfileId: text("agent_profile_id")
       .notNull()
-      .references(() => agentProfile.id),
+      .references(() => harnessProfile.id),
     /**
      * Identifies the assistant turn, and is what makes a row unique within a Session.
      *
-     * The agent CLI emits one stream event per content block of a turn and repeats the whole
+     * The harness CLI emits one stream event per content block of a turn and repeats the whole
      * turn's usage on each, so a row per event would multiply a turn's counts by its block
      * count. Keying on the turn instead makes that impossible by construction — and makes a
      * durable step's replay a no-op for free, which a sequence number could not (Principle III).
@@ -1261,13 +1261,13 @@ export const sessionUsage = sqliteTable(
     messageId: text("message_id").notNull(),
     /** Ordering within the Session. Not unique — the turn id carries identity. */
     seq: integer("seq").notNull(),
-    /** Whatever the agent called the model. Null when it did not say. */
+    /** Whatever the harness called the model. Null when it did not say. */
     model: text("model"),
     inputTokens: integer("input_tokens").notNull().default(0),
     outputTokens: integer("output_tokens").notNull().default(0),
     cacheReadTokens: integer("cache_read_tokens").notNull().default(0),
     cacheWriteTokens: integer("cache_write_tokens").notNull().default(0),
-    /** False when the agent reported no usage for this turn — a visible coverage gap. */
+    /** False when the harness reported no usage for this turn — a visible coverage gap. */
     reported: integer("reported", { mode: "boolean" }).notNull().default(true),
     at: createdAt(),
   },
@@ -1447,11 +1447,11 @@ export const providerIdentity = sqliteTable(
  * `tables.ts` — kept in separate files because drizzle-kit reads each schema file standalone.
  */
 /**
- * The agent libraries (spec F24): MCP servers and Skills, one row each, Workspace-scoped.
+ * The harness libraries (spec F24): MCP servers and Skills, one row each, Workspace-scoped.
  *
- * `enabled` is the Workspace-wide switch — loaded into every agent run — and a Workflow Step
+ * `enabled` is the Workspace-wide switch — loaded into every harness run — and a Workflow Step
  * names further items by id (`workflow_step.mcp_server_ids` / `skill_ids`). `name` is unique per
- * Workspace because it is the key the agent sees: two rows with one name would be one MCP entry
+ * Workspace because it is the key the harness sees: two rows with one name would be one MCP entry
  * or one Skill directory, decided by whichever was written last.
  *
  * `transport` and `source` are JSON: their shape is a discriminated union the contract owns, and
@@ -1502,8 +1502,8 @@ export const schema = {
   workspace,
   integration,
   issue,
-  agentCatalog,
-  agentProfile,
+  harnessCatalog,
+  harnessProfile,
   executorProfile,
   repository,
   repositoryBranch,

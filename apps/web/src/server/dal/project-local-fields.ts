@@ -14,7 +14,7 @@ import type {
  * 2026-08-28).
  *
  * A local Project has no provider board to read `project_field` rows from — FR-21 is explicit
- * that it never carries any — so a table with only its five built-in columns (Title, Agent runs,
+ * that it never carries any — so a table with only its five built-in columns (Title, Harness runs,
  * Linked changes, Labels, Sub-issues) was the honest consequence of that, but not a useful one:
  * the Issues underneath it already carry a Status, a Priority, a Size, an Assignee, a Milestone —
  * GitLab's own scoped-label convention (`status::doing`) or SoloW's own seeded taxonomy

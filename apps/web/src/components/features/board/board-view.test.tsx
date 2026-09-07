@@ -17,7 +17,7 @@ function makeTask(over: Partial<TaskDto> & { id: string; state: TaskState }): Ta
   return {
     issueId: "issue-1",
     title: `Task ${over.id}`,
-    agentProfileId: "agent-1",
+    agentProfileId: "harness-1",
     executorProfileId: "exec-1",
     repositories: [
       {
@@ -89,7 +89,7 @@ describe("BoardView", () => {
     expect(screen.queryByText("credential_expired")).toBeNull();
   });
 
-  it("shows a Task the orchestrator reclaimed after a restart distinctly (issue: input answered 'no agent running' forever)", () => {
+  it("shows a Task the orchestrator reclaimed after a restart distinctly (issue: input answered 'no harness running' forever)", () => {
     render(
       <BoardView tasks={[makeTask({ id: "3c", state: "failed", failureReason: "interrupted" })]} />,
     );

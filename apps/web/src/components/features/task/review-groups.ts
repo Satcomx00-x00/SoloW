@@ -34,7 +34,7 @@ export interface ReviewGroup {
   baseRef: string | null;
   fileCount: number;
   /**
-   * The captured change, or null for a repository the agent never touched.
+   * The captured change, or null for a repository the harness never touched.
    *
    * Null is not "missing data" — it is a consequence worth stating. Approving a Task still
    * records a result branch for that attachment, and a reviewer who assumed every attached
@@ -128,7 +128,7 @@ export function groupChanges(
  * will not happen — the exact failure this summary exists to prevent, pointed the other way.
  */
 export function summariseConsequences(groups: readonly ReviewGroup[]): string {
-  if (groups.length === 0) return "Nothing to integrate — the agent proposed no changes.";
+  if (groups.length === 0) return "Nothing to integrate — the harness proposed no changes.";
 
   const repositories = new Set(groups.map((g) => g.repositoryId ?? g.key)).size;
   const branches = new Set(groups.map((g) => g.branch).filter((b): b is string => b !== null)).size;
@@ -154,7 +154,7 @@ function count(n: number, one: string, many: string): string {
  * What approving this group does, in a sentence (AC-2).
  *
  * Stated per group rather than once for the Task, because the answer genuinely differs: a
- * repository the agent never touched gets a branch recorded and no commit, and that is a
+ * repository the harness never touched gets a branch recorded and no commit, and that is a
  * different consequence from the one beside it.
  */
 export function describeTarget(group: ReviewGroup, captured = true): string {
@@ -168,8 +168,8 @@ export function describeTarget(group: ReviewGroup, captured = true): string {
    *
    * A change is captured once, when the run reaches its review gate — so for the whole of a run,
    * and for a Task that has never run at all, every group legitimately has no diff. Saying "no
-   * changes" there is a claim nobody has checked, and it was on screen while the agent was
-   * visibly editing files: the panel read "The agent made no changes in this repository" beside
+   * changes" there is a claim nobody has checked, and it was on screen while the harness was
+   * visibly editing files: the panel read "The harness made no changes in this repository" beside
    * a transcript of it changing them.
    *
    * The same sentence is also a promise about what an approval will do, which is premature on a

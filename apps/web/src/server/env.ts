@@ -6,8 +6,8 @@ import { z } from "zod";
  * No other module in apps/web reads process.env directly.
  *
  * Credential-isolation note (finding C1, carried as a documented v1 limitation): the web
- * layer never reads agent credentials. Agent credentials are decrypted only in the
- * orchestrator and injected into a single agent process's env — the web env never
+ * layer never reads harness credentials. Harness credentials are decrypted only in the
+ * orchestrator and injected into a single harness process's env — the web env never
  * contains them.
  */
 const webEnvSchema = z.object({

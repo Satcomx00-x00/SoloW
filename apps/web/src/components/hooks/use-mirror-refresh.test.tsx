@@ -103,7 +103,7 @@ describe("useMirrorRefresh", () => {
     });
 
     // A Task advancing is somebody else's business on this channel; the board handles it. This
-    // hook must not turn every agent state change into four extra reads.
+    // hook must not turn every harness state change into four extra reads.
     await new Promise((r) => setTimeout(r, 250));
     expect(countOf(log, "issue.list")).toBe(1);
     expect(countOf(log, "issue.labelColors")).toBe(1);

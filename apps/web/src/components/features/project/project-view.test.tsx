@@ -522,7 +522,10 @@ describe("starting a task from a row", () => {
       items: [{ id: "repo-1", name: "api", source: "local_path", location: "/srv/api" }],
       nextCursor: null,
     }),
-    "profile.agent.list": () => ({ items: [{ id: "agent-1", name: "Claude" }], nextCursor: null }),
+    "profile.agent.list": () => ({
+      items: [{ id: "harness-1", name: "Claude" }],
+      nextCursor: null,
+    }),
     "profile.executor.list": () => ({ items: [{ id: "exec-1", name: "Local" }], nextCursor: null }),
   };
 

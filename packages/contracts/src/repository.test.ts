@@ -8,7 +8,7 @@ import { connectRepositoryInput } from "./repository.js";
  * corpus; this file is about the `local_path` half, which was unconstrained beyond a length
  * bound and reached the Docker executor as a bind source. A relative one is completed from the
  * orchestrator's own working directory, so `"."` named SoloW's own checkout — its source, its
- * configuration and any `.env` beside it — and it was bind-mounted read-write into the agent's
+ * configuration and any `.env` beside it — and it was bind-mounted read-write into the harness's
  * container. The guard in `docker.ts` is what actually refuses it; this is the Owner-facing
  * half, so the error lands on the field they typed into.
  */

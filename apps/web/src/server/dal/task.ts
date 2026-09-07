@@ -25,7 +25,7 @@ import {
   taskCheckoutBranch,
 } from "@solow/core";
 import {
-  agentProfile,
+  harnessProfile,
   projectItem,
   session,
   task,
@@ -161,7 +161,7 @@ export async function listTasks(
  * The attachment rows for one Task, from the input the Owner supplied (issue #7).
  *
  * `position` comes from array order — the Owner said which Repository matters most by listing it
- * first, and position 0 is what "the worktree the agent is started in" means. `checkoutBranch`
+ * first, and position 0 is what "the worktree the harness is started in" means. `checkoutBranch`
  * falls back to the deterministic name `taskCheckoutBranch` derives, which is the same string
  * the orchestrator would have asked git for anyway; it is never left null, because a nullable
  * branch would make the `(task, repository, branch)` unique index enforce nothing.
@@ -226,7 +226,7 @@ export async function createTaskRecord(
  *
  * Refused once the Task has left `backlog`/`ready`: re-pointing a Task whose worktrees are
  * already live would orphan directories that nothing else knows how to find, and the running
- * agent would carry on working in a repository the Task no longer claims (Principle II).
+ * harness would carry on working in a repository the Task no longer claims (Principle II).
  *
  * Delete-then-insert inside one transaction rather than a diff of the two sets. The Owner sent a
  * state of the world, and reconciling it row by row would have to decide what happens to a
@@ -283,7 +283,7 @@ export async function updateTaskState(
       //
       // It used to persist: the column was only written when a caller passed it, so a Task
       // dragged out of Failed kept the old reason and carried it into `running` — a card that
-      // reads "interrupted" while its agent is working, and a stale explanation attached to
+      // reads "interrupted" while its harness is working, and a stale explanation attached to
       // whatever happens next. A reason describes the failure it belongs to, and that failure is
       // over.
       ...(extra?.failureReason !== undefined
@@ -301,9 +301,9 @@ export async function updateTaskState(
 }
 
 /** Count a profile's Tasks currently in `running` (for the concurrency cap). */
-export async function countRunningForAgentProfile(
+export async function countRunningForHarnessProfile(
   ctx: RequestContext,
-  agentProfileId: string,
+  harnessProfileId: string,
 ): Promise<number> {
   const rows = await ctx.db
     .select({ id: task.id })
@@ -311,7 +311,7 @@ export async function countRunningForAgentProfile(
     .where(
       and(
         eq(task.workspaceId, ctx.workspaceId),
-        eq(task.agentProfileId, agentProfileId),
+        eq(task.agentProfileId, harnessProfileId),
         eq(task.state, "running"),
       ),
     );
@@ -441,7 +441,7 @@ export async function removeTaskDependencyEdge(
  *   Session is a row nothing will ever update again — its run died without reconciling — and
  *   that is precisely the wreckage an operator is trying to clear. Keying on the state instead
  *   made every such Task permanently undeletable from the UI, with no way out but SQL, and left
- *   it holding its Agent Profile's concurrency slot forever.
+ *   it holding its Harness Profile's concurrency slot forever.
  *
  *   Why an accepted stop is enough even when the row still says `running`: cancellation is
  *   asynchronous (Inngest cancels between steps), so the state read here is stale by
@@ -574,11 +574,11 @@ export async function activeSessionForTask(
 }
 
 /**
- * Failed Tasks blocked on this Secret — the credential their Agent Profile spends (spec AC-013,
+ * Failed Tasks blocked on this Secret — the credential their Harness Profile spends (spec AC-013,
  * issue #63).
  *
  * Joined through `agent_profile` rather than trusted from `failureReason` alone: the reason
- * names a *class* of failure, not which credential caused it, and two Agent Profiles can hold
+ * names a *class* of failure, not which credential caused it, and two Harness Profiles can hold
  * two different Secrets. A Task only belongs on this list when both are true — it failed on a
  * credential, and the credential that failed is the one an Owner just replaced. Called after a
  * Secret is (re)written, so its caller can resume every Task this unblocks without the Owner
@@ -591,13 +591,13 @@ export async function taskIdsBlockedByCredential(
   const rows = await ctx.db
     .select({ id: task.id })
     .from(task)
-    .innerJoin(agentProfile, eq(agentProfile.id, task.agentProfileId))
+    .innerJoin(harnessProfile, eq(harnessProfile.id, task.agentProfileId))
     .where(
       and(
         eq(task.workspaceId, ctx.workspaceId),
         eq(task.state, "failed"),
         eq(task.failureReason, CREDENTIAL_EXPIRED_REASON),
-        eq(agentProfile.secretId, secretId),
+        eq(harnessProfile.secretId, secretId),
       ),
     );
   return rows.map((row) => row.id);

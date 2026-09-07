@@ -1,14 +1,14 @@
 import { rankBetween } from "@solow/core";
 import { asc, eq } from "drizzle-orm";
 import type { Db } from "./index.js";
-import { agentProfile, workflow, workflowStep } from "./schema.js";
+import { harnessProfile, workflow, workflowStep } from "./schema.js";
 
 /**
  * The Workflows a Workspace starts with (spec F03): three pipelines that show what a Step, a
- * gate and an agent-decided branch are for, ready to attach a Task to. Seeded only when the
+ * gate and a harness-decided branch are for, ready to attach a Task to. Seeded only when the
  * Workspace has **no** Workflow yet — a pipeline the operator deleted stays deleted — and only
- * once an Agent Profile exists, because a Step has to name the agent that runs it; a fresh
- * install therefore gets them the moment its first Profile is created (`createAgentProfile`
+ * once a Harness Profile exists, because a Step has to name the harness that runs it; a fresh
+ * install therefore gets them the moment its first Profile is created (`createHarnessProfile`
  * calls this too), and never before.
  */
 
@@ -17,8 +17,8 @@ type StepSeed = {
   prompt: string;
   gate: "human" | "auto" | "auto-unless-changes";
   advanceOn: "agent-signal" | "review";
-  /** A branch on the agent's answer: yes goes back to the named Step, no ends the pipeline. */
-  askAgent?: { question: string; yesGoesTo: string };
+  /** A branch on the harness's answer: yes goes back to the named Step, no ends the pipeline. */
+  askHarness?: { question: string; yesGoesTo: string };
 };
 
 type WorkflowSeed = { name: string; description: string; steps: StepSeed[] };
@@ -27,7 +27,7 @@ export const DEFAULT_WORKFLOWS: readonly WorkflowSeed[] = [
   {
     name: "Implement & review",
     description:
-      "Implement the issue, then a reviewer agent decides whether it needs another pass.",
+      "Implement the issue, then a reviewer harness decides whether it needs another pass.",
     steps: [
       {
         name: "Implement",
@@ -42,7 +42,7 @@ export const DEFAULT_WORKFLOWS: readonly WorkflowSeed[] = [
         advanceOn: "agent-signal",
         prompt:
           "Review the previous step's implementation against the issue: correctness, tests, and consistency with the codebase. Do not modify any file. Name every defect precisely in your summary.",
-        askAgent: {
+        askHarness: {
           question: "Does the implementation need another pass before it can be merged?",
           yesGoesTo: "Implement",
         },
@@ -93,7 +93,7 @@ export const DEFAULT_WORKFLOWS: readonly WorkflowSeed[] = [
         advanceOn: "agent-signal",
         prompt:
           "Re-run the reproduction and the test suite. Do not modify any file. Report what passed and what did not.",
-        askAgent: {
+        askHarness: {
           question: "Does the bug still reproduce, or did the fix break a test?",
           yesGoesTo: "Fix",
         },
@@ -113,10 +113,10 @@ export async function ensureDefaultWorkflows(
     .limit(1);
   if (existing.length > 0) return { seeded: 0 };
   const [profile] = await db
-    .select({ id: agentProfile.id })
-    .from(agentProfile)
-    .where(eq(agentProfile.workspaceId, workspaceId))
-    .orderBy(asc(agentProfile.createdAt))
+    .select({ id: harnessProfile.id })
+    .from(harnessProfile)
+    .where(eq(harnessProfile.workspaceId, workspaceId))
+    .orderBy(asc(harnessProfile.createdAt))
     .limit(1);
   if (!profile) return { seeded: 0 };
 
@@ -153,15 +153,15 @@ export async function ensureDefaultWorkflows(
     }
     // Branches last, once every target has an id: yes loops back, no lets the pipeline end.
     for (const step of seed.steps) {
-      if (!step.askAgent) continue;
+      if (!step.askHarness) continue;
       const self = ids.get(step.name);
-      const target = ids.get(step.askAgent.yesGoesTo);
-      if (!self || !target) throw new Error(`branch target ${step.askAgent.yesGoesTo} missing`);
+      const target = ids.get(step.askHarness.yesGoesTo);
+      if (!self || !target) throw new Error(`branch target ${step.askHarness.yesGoesTo} missing`);
       await db
         .update(workflowStep)
         .set({
           branch: {
-            when: { kind: "agent-decides", question: step.askAgent.question },
+            when: { kind: "agent-decides", question: step.askHarness.question },
             thenStepId: target,
             elseStepId: null,
           },

@@ -10,9 +10,9 @@ type UnsupportedWidgetPayload = z.infer<typeof unsupportedWidget>;
 /**
  * A widget this build cannot draw.
  *
- * It exists so that an agent's emission is never silently swallowed: a catalogued widget nobody
+ * It exists so that a harness's emission is never silently swallowed: a catalogued widget nobody
  * has implemented yet, and a payload that failed its schema, both land here with the reason
- * attached. Without it the failure mode is the worst one available — the agent believes it
+ * attached. Without it the failure mode is the worst one available — the harness believes it
  * showed you something, and you never saw anything at all.
  */
 export function UnsupportedWidget({ widget }: WidgetRendererProps<UnsupportedWidgetPayload>) {
@@ -24,8 +24,9 @@ export function UnsupportedWidget({ widget }: WidgetRendererProps<UnsupportedWid
     >
       <PackageOpen aria-hidden className="mt-px size-3.5 shrink-0 text-muted-foreground" />
       <p className="min-w-0 text-muted-foreground leading-relaxed">
-        The agent asked for a <span className="font-mono text-foreground">{widget.requested}</span>{" "}
-        widget. {widget.reason}
+        The harness asked for a{" "}
+        <span className="font-mono text-foreground">{widget.requested}</span> widget.{" "}
+        {widget.reason}
       </p>
     </div>
   );

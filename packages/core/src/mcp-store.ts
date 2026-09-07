@@ -6,7 +6,7 @@ import type { McpServerTransport } from "@solow/contracts";
  * of those are credentials — not a row: installing one asks for the Secrets it needs and writes
  * an ordinary MCP server the operator can edit or remove like any other.
  *
- * Curated by hand, not fetched: what this list says is loaded into an agent with the run's
+ * Curated by hand, not fetched: what this list says is loaded into a harness with the run's
  * credentials, so its contents are reviewed in a pull request rather than taken from a registry
  * at run time. Package names and endpoints are the ones each vendor publishes; a `homepage` on
  * every entry is where to check them.
@@ -40,7 +40,7 @@ export type McpStoreInput = {
 
 export type McpStoreEntry = {
   id: string;
-  /** The library name the install writes, and what the agent sees the server as. */
+  /** The library name the install writes, and what the harness sees the server as. */
   name: string;
   title: string;
   description: string;
@@ -103,7 +103,7 @@ export const MCP_STORE: readonly McpStoreEntry[] = [
         bearer(
           "GitHub personal access token",
           true,
-          "A fine-grained or classic PAT with the scopes the agent needs.",
+          "A fine-grained or classic PAT with the scopes the harness needs.",
         ),
       ],
     },
@@ -153,7 +153,7 @@ export const MCP_STORE: readonly McpStoreEntry[] = [
     name: "git",
     title: "Git",
     description:
-      "Read and search the history, diffs and branches of the repositories the agent works in.",
+      "Read and search the history, diffs and branches of the repositories the harness works in.",
     category: "source-control",
     vendor: "Model Context Protocol",
     homepage: "https://github.com/modelcontextprotocol/servers/tree/main/src/git",
@@ -167,7 +167,7 @@ export const MCP_STORE: readonly McpStoreEntry[] = [
     name: "memory",
     title: "Memory",
     description:
-      "A knowledge-graph memory the agent reads and writes across runs, kept in a local file.",
+      "A knowledge-graph memory the harness reads and writes across runs, kept in a local file.",
     category: "local",
     vendor: "Model Context Protocol",
     homepage: "https://github.com/modelcontextprotocol/servers/tree/main/src/memory",
@@ -178,7 +178,7 @@ export const MCP_STORE: readonly McpStoreEntry[] = [
     id: "filesystem",
     name: "filesystem",
     title: "Filesystem",
-    description: "Read, write and search files under the directory the agent runs in.",
+    description: "Read, write and search files under the directory the harness runs in.",
     category: "local",
     vendor: "Model Context Protocol",
     homepage: "https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem",
@@ -219,7 +219,7 @@ export const MCP_STORE: readonly McpStoreEntry[] = [
     id: "fetch",
     name: "fetch",
     title: "Fetch",
-    description: "Fetch a web page and hand it to the agent as markdown.",
+    description: "Fetch a web page and hand it to the harness as markdown.",
     category: "local",
     vendor: "Model Context Protocol",
     homepage: "https://github.com/modelcontextprotocol/servers/tree/main/src/fetch",
@@ -466,7 +466,7 @@ export const MCP_STORE: readonly McpStoreEntry[] = [
         bearer(
           "Sentry access token",
           false,
-          "Optional: without it the agent's runtime signs in with OAuth.",
+          "Optional: without it the harness signs in with OAuth.",
         ),
       ],
     },
@@ -519,11 +519,7 @@ export const MCP_STORE: readonly McpStoreEntry[] = [
       kind: "http",
       url: "https://mcp.linear.app/mcp",
       inputs: [
-        bearer(
-          "Linear API key",
-          false,
-          "Optional: without it the agent's runtime signs in with OAuth.",
-        ),
+        bearer("Linear API key", false, "Optional: without it the harness signs in with OAuth."),
       ],
     },
   },
@@ -565,7 +561,7 @@ export const MCP_STORE: readonly McpStoreEntry[] = [
         token(
           "STRIPE_SECRET_KEY",
           "Stripe secret key",
-          "A restricted key with only the permissions the agent needs.",
+          "A restricted key with only the permissions the harness needs.",
         ),
       ],
     },

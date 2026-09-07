@@ -5,9 +5,9 @@ import type { Executor } from "../executor/types.js";
  * Setup files: the per-Repository allowlist of files copied into each new worktree (issue #52 /
  * parity row 52).
  *
- * A fresh worktree carries only what is committed, so it has no `.env` — and an agent without
+ * A fresh worktree carries only what is committed, so it has no `.env` — and a harness without
  * one cannot run the test suite or start the dev server, and spends its first turns discovering
- * that. Copying a named handful of files is the difference between an agent that can verify its
+ * that. Copying a named handful of files is the difference between a harness that can verify its
  * own work and one that can only guess.
  *
  * This moves secrets by design, so three things are deliberate:
@@ -23,14 +23,14 @@ import type { Executor } from "../executor/types.js";
  *   the repository root anyway (AC-6).
  *
  * Copied files are excluded from the review diff by `diffWorktree`, which takes the same
- * patterns: they were not authored by the agent, and showing them would put secrets in front of
+ * patterns: they were not authored by the harness, and showing them would put secrets in front of
  * the review UI and into any shareable snapshot (AC-4, row 16).
  */
 
 export interface SeedSetupFilesParams {
   /** The repository the worktree was created from; the source of every copied file. */
   repoPath: string;
-  /** The worktree the agent is working in; the destination. */
+  /** The worktree the harness is working in; the destination. */
   worktreePath: string;
   /** Repository-relative globs, already validated by `setupFilePatternSchema`. */
   patterns: string[];
@@ -103,7 +103,7 @@ function withinRoot(root: string, relativePath: string): boolean {
  *
  * Never throws. A missing file, an unreadable one, a pattern that matches nothing — none of them
  * should fail a Task that would otherwise run: a repository configured on a machine that lacks
- * one of the files should still work, just with less for the agent to go on (AC-5).
+ * one of the files should still work, just with less for the harness to go on (AC-5).
  */
 export async function seedSetupFiles(
   executor: Executor,
@@ -156,7 +156,7 @@ export async function seedSetupFiles(
  *
  * Expressed as the patterns themselves rather than as the resolved paths, so nothing has to
  * carry a list of secret-bearing filenames from the copy step to the diff step — the exclusion
- * is recomputed from configuration each time, and is correct even for a file the agent created
+ * is recomputed from configuration each time, and is correct even for a file the harness created
  * at a path the allowlist covers.
  */
 export function setupFileExclusions(patterns: string[]): string[] {

@@ -9,7 +9,7 @@ import type { WidgetRendererProps } from "./registry";
 type ShowWidgetWidget = z.infer<typeof showWidgetWidget>;
 
 /**
- * Markup the agent produced, drawn in a sandboxed frame (`show_widget`).
+ * Markup the harness produced, drawn in a sandboxed frame (`show_widget`).
  *
  * This is the one widget whose payload is *code*, so it is the one place where being careless
  * would matter. Three rules, none of them negotiable:
@@ -44,10 +44,10 @@ export function ShowWidget({ widget }: WidgetRendererProps<ShowWidgetWidget>) {
         </figcaption>
       )}
       <iframe
-        title={widget.title ?? `Agent ${widget.module.replace("_", " ")}`}
+        title={widget.title ?? `Harness ${widget.module.replace("_", " ")}`}
         aria-labelledby={widget.title ? titleId : undefined}
         // `srcDoc` and not `src`: the content never becomes a URL, so nothing about it is fetched,
-        // cached or shareable. The document is exactly the string the agent emitted.
+        // cached or shareable. The document is exactly the string the harness emitted.
         srcDoc={frameDocument(widget)}
         sandbox={scripted ? "allow-scripts" : ""}
         // Referrer and permission policies are belt to the sandbox's braces: a frame with no

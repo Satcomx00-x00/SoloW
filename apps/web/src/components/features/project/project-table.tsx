@@ -91,7 +91,7 @@ export interface ProjectRow {
    * Not a project field, so not a column the provider reports: it hangs off the Issue, the same
    * way the title does, and is resolved the same way. And not the branch a SoloW Task
    * produced (issue #104) — that is a different fact and gets a different column, or a reader
-   * cannot tell what the provider knows from what an agent did here.
+   * cannot tell what the provider knows from what a harness did here.
    */
   linkedChangeRequests: LinkedChangeRequest[];
   /**
@@ -115,10 +115,10 @@ export interface ProjectRow {
    */
   priority: DerivedPriority | null;
   /**
-   * What the agent runs on this Issue amount to (F23 FR-14, Decision 0006).
+   * What the harness runs on this Issue amount to (F23 FR-14, Decision 0006).
    *
    * The planning table sits above execution, and this is the one cell that looks down: it says
-   * whether an agent is on the row, waiting for a person, or has failed. Null for a row with no
+   * whether a harness is on the row, waiting for a person, or has failed. Null for a row with no
    * Tasks — which is not the same as a row whose Tasks are all done, and the cell draws them
    * differently.
    */
@@ -264,14 +264,14 @@ export const AUTO_COLUMN_MAX_WIDTH = 260;
 export const AUTO_COLUMN_MIN_WIDTH = 72;
 
 /**
- * The agent runs on a row, as one badge.
+ * The harness runs on a row, as one badge.
  *
  * The badge shows the state that most demands a person rather than the newest run — see
  * `summariseRowTasks`, where that rule and its reason live. The count sits beside it when there
  * is more than one, because a single badge over three Tasks would read as one Task.
  */
 function RowTasks({ row }: { row: ProjectRow }) {
-  // An empty cell, not a hidden column: "no agent has touched this" is an answer a planner came
+  // An empty cell, not a hidden column: "no harness has touched this" is an answer a planner came
   // for, and it is different from a row whose runs are finished.
   if (!row.tasks) return <span className="text-muted-foreground/40">—</span>;
   return (
@@ -410,7 +410,7 @@ function RowLabels({
  * the only door to one. A menu holding the sole way to do something is a menu that hides it.
  *
  * The one action that changes state is starting a Task, and it is offered only where it can
- * actually run: a row with no provider issue behind it has nothing for an agent to work on.
+ * actually run: a row with no provider issue behind it has nothing for a harness to work on.
  */
 function RowMenu({
   row,
@@ -1083,7 +1083,7 @@ export function ProjectTable({
    * honest fix: neither column is wrong, and hiding either would lose a fact.
    */
   const ownColumnNames = useMemo(
-    () => new Set(["Title", "Agent runs", "Linked changes", "Labels", "Sub-issues"]),
+    () => new Set(["Title", "Harness runs", "Linked changes", "Labels", "Sub-issues"]),
     [],
   );
 
@@ -1303,7 +1303,7 @@ export function ProjectTable({
                   fields: both are facts about the Issue rather than columns the project defines,
                   so their position is ours to decide rather than the provider's. */}
               <TableHead className="px-3" style={{ height: COLUMN_HEADER_HEIGHT }}>
-                Agent runs
+                Harness runs
               </TableHead>
               <TableHead className="px-3" style={{ height: COLUMN_HEADER_HEIGHT }}>
                 Linked changes

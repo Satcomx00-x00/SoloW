@@ -90,7 +90,7 @@ export const STATE_STYLE: Record<TaskState, StateStyle> = {
     badgeClassName: "badge-soft [--badge-color:var(--state-running)]",
     textClassName: "text-state-running",
     barClassName: "bg-state-running",
-    hint: "An agent is working",
+    hint: "A harness is working",
   },
   review: {
     icon: Eye,

@@ -76,7 +76,7 @@ export const workflowRouter = router({
         tags: ["workflow"],
         protect: true,
         summary:
-          "List this Workspace's Workflows — repeatable pipelines of Steps, each Step run by its own Agent Profile. Returns the definition version and how many Steps each has, not the Steps themselves.",
+          "List this Workspace's Workflows — repeatable pipelines of Steps, each Step run by its own Harness Profile. Returns the definition version and how many Steps each has, not the Steps themselves.",
       },
     })
     .input(listWorkflowsInput)
@@ -152,7 +152,7 @@ export const workflowRouter = router({
         tags: ["workflow"],
         protect: true,
         summary:
-          "Add a Step to a Workflow, bound to an Agent Profile with its own prompt template and gate rule. Appends unless afterStepId names the Step it should follow, or is null to put it at the head; inserting anywhere writes one row and reorders nothing. An optional branch makes the Step conditional: when its condition holds the Task goes to thenStepId, otherwise to elseStepId — either may be null to end the pipeline, and either may name an earlier Step.",
+          "Add a Step to a Workflow, bound to a Harness Profile with its own prompt template and gate rule. Appends unless afterStepId names the Step it should follow, or is null to put it at the head; inserting anywhere writes one row and reorders nothing. An optional branch makes the Step conditional: when its condition holds the Task goes to thenStepId, otherwise to elseStepId — either may be null to end the pipeline, and either may name an earlier Step.",
       },
     })
     .input(addWorkflowStepInput)
@@ -167,7 +167,7 @@ export const workflowRouter = router({
         tags: ["workflow"],
         protect: true,
         summary:
-          "Change a Step's name, Agent Profile, prompt template, gate, advance rule, branch, or the MCP servers and Skills it loads on top of the Workspace-wide ones. A branch's targets must be Steps of the same Workflow and never the Step itself; null removes the branch. Bumps the Workflow's definition version, so an attached Task reports the drift.",
+          "Change a Step's name, Harness Profile, prompt template, gate, advance rule, branch, or the MCP servers and Skills it loads on top of the Workspace-wide ones. A branch's targets must be Steps of the same Workflow and never the Step itself; null removes the branch. Bumps the Workflow's definition version, so an attached Task reports the drift.",
       },
     })
     .input(updateWorkflowStepInput)
@@ -245,7 +245,7 @@ export const workflowRouter = router({
         tags: ["workflow"],
         protect: true,
         summary:
-          "Where a Task is in its Workflow: the current Step with its Agent Profile, the whole Step list, the carried handoff, and the brief the current Step's agent should be given.",
+          "Where a Task is in its Workflow: the current Step with its Harness Profile, the whole Step list, the carried handoff, and the brief the current Step's harness should be given.",
       },
     })
     .input(getTaskWorkflowInput)

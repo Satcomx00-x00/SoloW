@@ -18,7 +18,7 @@ import { Label } from "@/components/ui/label";
  * what it is for, the one line of detail that identifies it, and the Workspace-wide switch.
  * That switch is a Checkbox in a labelled pill, not a Switch primitive — none exists in
  * `components/ui` and issue #76 owns adding one (see flags-section.tsx) — but the pill lights
- * up when checked so the rows that reach every agent stand out in a list of ones that do not.
+ * up when checked so the rows that reach every harness stand out in a list of ones that do not.
  */
 
 /** What a library section says when its flag is off, or its list failed. */
@@ -28,8 +28,8 @@ export function LibraryQueryState({ error }: { error: { message: string } | null
     return (
       <div className="space-y-2" role="alert">
         <p className="text-muted-foreground text-sm leading-relaxed">
-          Agent libraries are not enabled here. Feature flags ship off — enable it from the machine
-          running this instance:
+          Harness libraries are not enabled here. Feature flags ship off — enable it from the
+          machine running this instance:
         </p>
         <pre className="w-fit rounded-lg border bg-card px-3 py-2 font-mono text-xs">
           bun run flag enable ff-agent-libraries
@@ -45,8 +45,8 @@ export function LibraryQueryState({ error }: { error: { message: string } | null
   );
 }
 
-/** The Workspace-wide switch on a row: on, the item is loaded into every agent that runs. */
-export function EveryAgentToggle({
+/** The Workspace-wide switch on a row: on, the item is loaded into every harness that runs. */
+export function EveryHarnessToggle({
   name,
   checked,
   onChange,
@@ -64,12 +64,12 @@ export function EveryAgentToggle({
     >
       <Checkbox
         id={id}
-        aria-label={`Load ${name} in every agent`}
+        aria-label={`Load ${name} in every harness`}
         checked={checked}
         onCheckedChange={(next) => onChange(next === true)}
       />
       <Label htmlFor={id} className="cursor-pointer select-none font-normal text-xs">
-        Every agent
+        Every harness
       </Label>
     </div>
   );
@@ -122,7 +122,7 @@ export function LibraryRow({
           </p>
         )}
       </div>
-      <EveryAgentToggle name={name} checked={enabled} onChange={onEnabled} />
+      <EveryHarnessToggle name={name} checked={enabled} onChange={onEnabled} />
       <ConfirmAction
         title={removeTitle}
         description={removeDescription}

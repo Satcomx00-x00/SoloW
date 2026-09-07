@@ -4,9 +4,9 @@ import { beforeEach, describe, expect, it } from "bun:test";
 import type { TaskEvent } from "@solow/contracts";
 import { signStreamTicket } from "@solow/core/stream";
 import {
-  agentCatalog,
-  agentProfile,
   executorProfile,
+  harnessCatalog,
+  harnessProfile,
   issue,
   repository,
   session,
@@ -16,8 +16,8 @@ import {
   workspace,
 } from "@solow/db";
 import { createTestDb, type TestDb } from "@solow/db/testing";
-import { AgentRegistry } from "../agent/registry.js";
-import type { AgentHandle, PermissionAnswer } from "../agent/runner.js";
+import { HarnessRegistry } from "../harness/registry.js";
+import type { HarnessHandle, PermissionAnswer } from "../harness/runner.js";
 import { attachSubscriber, authorizeUpgrade, handleClientFrame } from "../index.js";
 import { hub } from "./hub.js";
 
@@ -90,7 +90,7 @@ describe("attachSubscriber (reconnect replay)", () => {
   async function seedEvents(workspaceId: string, taskId: string, count: number): Promise<void> {
     const suffix = `${workspaceId}-${taskId}`;
     await db.insert(issue).values({ id: `issue-${suffix}`, workspaceId, title: "Issue" });
-    await db.insert(agentCatalog).values({
+    await db.insert(harnessCatalog).values({
       id: `catalog-${suffix}`,
       workspaceId,
       key: "claude_code",
@@ -100,8 +100,8 @@ describe("attachSubscriber (reconnect replay)", () => {
       subscriptionEnvVar: "CLAUDE_CODE_OAUTH_TOKEN",
       meteredEnvVar: "ANTHROPIC_API_KEY",
     });
-    await db.insert(agentProfile).values({
-      id: `agent-${suffix}`,
+    await db.insert(harnessProfile).values({
+      id: `harness-${suffix}`,
       workspaceId,
       name: "Claude",
       agentCatalogId: `catalog-${suffix}`,
@@ -124,7 +124,7 @@ describe("attachSubscriber (reconnect replay)", () => {
       issueId: `issue-${suffix}`,
       title: "Task",
       state: "running",
-      agentProfileId: `agent-${suffix}`,
+      agentProfileId: `harness-${suffix}`,
       executorProfileId: `exec-${suffix}`,
     });
     await db.insert(taskRepository).values({
@@ -242,7 +242,7 @@ describe("handleClientFrame (operator input and stop)", () => {
     ...over,
   });
 
-  function liveAgent() {
+  function liveHarness() {
     const state = {
       inputs: [] as string[],
       stopped: false,
@@ -256,18 +256,18 @@ describe("handleClientFrame (operator input and stop)", () => {
         state.stopped = true;
       },
     };
-    return state satisfies AgentHandle;
+    return state satisfies HarnessHandle;
   }
 
-  function withAgent(workspaceId: string, taskId: string) {
-    const registry = new AgentRegistry();
-    const handle = liveAgent();
+  function withHarness(workspaceId: string, taskId: string) {
+    const registry = new HarnessRegistry();
+    const handle = liveHarness();
     registry.register(workspaceId, { taskId, sessionId: "sess-1", handle });
     return { registry, handle };
   }
 
-  it("delivers input to the agent of the Task the ticket authorized", async () => {
-    const { registry, handle } = withAgent("ws-a", "task-1");
+  it("delivers input to the harness of the Task the ticket authorized", async () => {
+    const { registry, handle } = withHarness("ws-a", "task-1");
     const result = await handleClientFrame(
       { registry },
       claims(),
@@ -277,8 +277,8 @@ describe("handleClientFrame (operator input and stop)", () => {
     expect(handle.inputs).toEqual(["also add a test"]);
   });
 
-  it("stops the agent of the Task the ticket authorized", async () => {
-    const { registry, handle } = withAgent("ws-a", "task-1");
+  it("stops the harness of the Task the ticket authorized", async () => {
+    const { registry, handle } = withHarness("ws-a", "task-1");
     const result = await handleClientFrame(
       { registry },
       claims(),
@@ -290,8 +290,8 @@ describe("handleClientFrame (operator input and stop)", () => {
 
   it("refuses a frame naming a Task the ticket does not cover (Principle V)", async () => {
     // The ticket authorizes task-1; the frame asks to steer task-9. The channel a client may
-    // *read* and the agent it may *steer* have to be the same one.
-    const { registry, handle } = withAgent("ws-a", "task-9");
+    // *read* and the harness it may *steer* have to be the same one.
+    const { registry, handle } = withHarness("ws-a", "task-9");
     const result = await handleClientFrame(
       { registry },
       claims(),
@@ -302,7 +302,7 @@ describe("handleClientFrame (operator input and stop)", () => {
   });
 
   it("refuses steering from a board subscription, which names no Task at all", async () => {
-    const { registry, handle } = withAgent("ws-a", "task-1");
+    const { registry, handle } = withHarness("ws-a", "task-1");
     const result = await handleClientFrame(
       { registry },
       claims({ taskId: null }),
@@ -312,8 +312,8 @@ describe("handleClientFrame (operator input and stop)", () => {
     expect(handle.stopped).toBe(false);
   });
 
-  it("cannot reach another Workspace's agent that shares the Task id", async () => {
-    const { registry, handle } = withAgent("ws-b", "task-1");
+  it("cannot reach another Workspace's harness that shares the Task id", async () => {
+    const { registry, handle } = withHarness("ws-b", "task-1");
     const result = await handleClientFrame(
       { registry },
       claims(),
@@ -323,9 +323,9 @@ describe("handleClientFrame (operator input and stop)", () => {
     expect(handle.inputs).toEqual([]);
   });
 
-  it("says so when no agent is running, rather than pretending the input landed", async () => {
+  it("says so when no harness is running, rather than pretending the input landed", async () => {
     const result = await handleClientFrame(
-      { registry: new AgentRegistry() },
+      { registry: new HarnessRegistry() },
       claims(),
       JSON.stringify({ kind: "input", taskId: "task-1", data: "anyone there?" }),
     );
@@ -333,7 +333,7 @@ describe("handleClientFrame (operator input and stop)", () => {
   });
 
   it("rejects a malformed frame without throwing", async () => {
-    const registry = new AgentRegistry();
+    const registry = new HarnessRegistry();
     for (const raw of ["not json", JSON.stringify({ kind: "delete-everything" }), "", null]) {
       expect(await handleClientFrame({ registry }, claims(), raw)).toEqual({
         ok: false,
@@ -355,9 +355,9 @@ describe("handleClientFrame (permission answers)", () => {
     ...over,
   });
 
-  function permissionAgent(answer: PermissionAnswer = "answered") {
+  function permissionHarness(answer: PermissionAnswer = "answered") {
     const answers: Array<{ requestId: string; optionId: string }> = [];
-    const handle: AgentHandle = {
+    const handle: HarnessHandle = {
       outcome: Promise.resolve({ kind: "completed" as const }),
       workspacePath: Promise.resolve<string | null>("/wt/solow-task-1"),
       async send() {
@@ -372,9 +372,9 @@ describe("handleClientFrame (permission answers)", () => {
     return { handle, answers };
   }
 
-  it("delivers the operator's choice to the agent of the Task the ticket authorized", async () => {
-    const registry = new AgentRegistry();
-    const { handle, answers } = permissionAgent();
+  it("delivers the operator's choice to the harness of the Task the ticket authorized", async () => {
+    const registry = new HarnessRegistry();
+    const { handle, answers } = permissionHarness();
     registry.register("ws-a", { taskId: "task-1", sessionId: "sess-1", handle });
 
     const result = await handleClientFrame(
@@ -393,8 +393,8 @@ describe("handleClientFrame (permission answers)", () => {
   });
 
   it("refuses to answer a permission for a Task the ticket does not cover (Principle V)", async () => {
-    const registry = new AgentRegistry();
-    const { handle, answers } = permissionAgent();
+    const registry = new HarnessRegistry();
+    const { handle, answers } = permissionHarness();
     registry.register("ws-a", { taskId: "task-9", sessionId: "sess-9", handle });
 
     const result = await handleClientFrame(
@@ -412,10 +412,10 @@ describe("handleClientFrame (permission answers)", () => {
     expect(answers).toEqual([]);
   });
 
-  it("tells the operator when their answer reached no running agent", async () => {
+  it("tells the operator when their answer reached no running harness", async () => {
     // A dialog left open across the end of a run must not look as though it were answered.
     const result = await handleClientFrame(
-      { registry: new AgentRegistry() },
+      { registry: new HarnessRegistry() },
       claims(),
       JSON.stringify({
         kind: "permission",
@@ -427,12 +427,12 @@ describe("handleClientFrame (permission answers)", () => {
     expect(result).toEqual({ ok: false, error: "agent_not_running" });
   });
 
-  it("does not call a running agent absent just because its question was already settled", async () => {
+  it("does not call a running harness absent just because its question was already settled", async () => {
     // The operator's dialog sat open past the deadline and the policy answered for them. The
-    // agent is mid-turn, streaming into the terminal they are looking at; reporting it as gone
+    // harness is mid-turn, streaming into the terminal they are looking at; reporting it as gone
     // is a statement they can see is false, and it hides the thing that actually happened.
-    const registry = new AgentRegistry();
-    const { handle } = permissionAgent("not_pending");
+    const registry = new HarnessRegistry();
+    const { handle } = permissionHarness("not_pending");
     registry.register("ws-a", { taskId: "task-1", sessionId: "sess-1", handle });
 
     const result = await handleClientFrame(
@@ -449,9 +449,9 @@ describe("handleClientFrame (permission answers)", () => {
     expect(result).toEqual({ ok: false, error: "permission_not_pending" });
   });
 
-  it("says so when the option clicked is not one the agent offered", async () => {
-    const registry = new AgentRegistry();
-    const { handle } = permissionAgent("option_not_offered");
+  it("says so when the option clicked is not one the harness offered", async () => {
+    const registry = new HarnessRegistry();
+    const { handle } = permissionHarness("option_not_offered");
     registry.register("ws-a", { taskId: "task-1", sessionId: "sess-1", handle });
 
     const result = await handleClientFrame(
@@ -468,8 +468,8 @@ describe("handleClientFrame (permission answers)", () => {
     expect(result).toEqual({ ok: false, error: "permission_option_unknown" });
   });
 
-  it("says so when the agent's protocol has no permission channel at all", async () => {
-    const registry = new AgentRegistry();
+  it("says so when the harness's protocol has no permission channel at all", async () => {
+    const registry = new HarnessRegistry();
     registry.register("ws-a", {
       taskId: "task-1",
       sessionId: "sess-1",

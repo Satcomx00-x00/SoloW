@@ -29,11 +29,11 @@ import { LibraryEmpty, LibraryForm, LibraryQueryState, LibraryRow } from "./libr
 import { McpStoreDialog } from "./mcp-store-dialog";
 
 /**
- * The MCP server library (spec F24): what an agent can be handed to call, kept in one place.
+ * The MCP server library (spec F24): what a harness can be handed to call, kept in one place.
  *
  * The list is the point of the page and the switch on each row is the point of the list: *Every
- * agent* is what makes a server part of every run in the Workspace; a server left off is loaded
- * only by the Workflow Steps that name it. The form adds one — a command the agent spawns, or an
+ * harness* is what makes a server part of every run in the Workspace; a server left off is loaded
+ * only by the Workflow Steps that name it. The form adds one — a command the harness spawns, or an
  * endpoint it connects to — with each env variable or header either typed in or pointed at a
  * Secret, because a token pasted into a config is a token the API would then return to every
  * reader (Principle IV).
@@ -192,7 +192,7 @@ function ValueRows({
   );
 }
 
-/** One line that says what the agent will be told, without the values. */
+/** One line that says what the harness will be told, without the values. */
 function describeTransport(transport: McpServerTransport): string {
   if (transport.kind === "stdio") {
     const env = Object.keys(transport.env);
@@ -252,8 +252,8 @@ export function McpServersSection() {
       <CardHeader>
         <CardTitle>MCP servers</CardTitle>
         <CardDescription>
-          Tools an agent can call. <em>Every agent</em> loads one into every run; otherwise only the
-          Workflow Steps that name it do.
+          Tools a harness can call. <em>Every harness</em> loads one into every run; otherwise only
+          the Workflow Steps that name it do.
         </CardDescription>
         {usable && !adding && (
           <CardAction className="flex items-center gap-2">
@@ -296,7 +296,7 @@ export function McpServersSection() {
                 enabled={server.enabled}
                 onEnabled={(on) => update.mutate({ id: server.id, enabled: on })}
                 removeTitle={`Remove "${server.name}"?`}
-                removeDescription="Agents stop being handed it on their next run. Refused while a Workflow Step still names it."
+                removeDescription="Harnesses stop being handed it on their next run. Refused while a Workflow Step still names it."
                 removeLabel="Remove server"
                 onRemove={() => remove.mutate({ id: server.id })}
               />
@@ -307,7 +307,7 @@ export function McpServersSection() {
           <LibraryEmpty
             icon={Plug}
             title="No MCP servers yet"
-            hint="Install one from the store, or add a command the agent spawns or a URL it connects to — then switch it on for every agent or name it from a Workflow Step."
+            hint="Install one from the store, or add a command the harness spawns or a URL it connects to — then switch it on for every harness or name it from a Workflow Step."
             action="New MCP server"
             onAdd={() => setAdding(true)}
             secondary={
@@ -380,7 +380,7 @@ export function McpServersSection() {
               <Label htmlFor="mcp-description">Description</Label>
               <Input
                 id="mcp-description"
-                placeholder="What it gives the agent"
+                placeholder="What it gives the harness"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
               />
@@ -448,7 +448,7 @@ export function McpServersSection() {
                   checked={enabled}
                   onCheckedChange={(checked) => setEnabled(checked === true)}
                 />
-                <Label htmlFor="mcp-enabled">Load in every agent</Label>
+                <Label htmlFor="mcp-enabled">Load in every harness</Label>
               </div>
               <Button type="submit" loading={create.isPending} disabled={commandError !== null}>
                 Add MCP server

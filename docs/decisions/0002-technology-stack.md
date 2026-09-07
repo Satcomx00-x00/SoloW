@@ -4,21 +4,21 @@
 
 ## Context
 
-Agents are external, long-running command-line processes that must be held open,
+Harnesses are external, long-running command-line processes that must be held open,
 supervised, and streamed back to the user. A purely request/response surface cannot hold a
-live agent process open across minutes of work. The product must also run both locally for
+live harness process open across minutes of work. The product must also run both locally for
 one user and hosted for a team.
 
 ## Decision
 
 Structure SoloW as **two collaborating parts**: an **interactive application** for the
 user-facing surfaces and data, and a **separate long-lived orchestration component** that
-launches and supervises agents, manages working copies, and streams activity. Target
+launches and supervises harnesses, manages working copies, and streams activity. Target
 **local-first** operation now, with the **same product** able to run hosted later.
 
 ## Considered options
 
-- **Single request/response application** — Rejected: cannot hold long-lived agent processes
+- **Single request/response application** — Rejected: cannot hold long-lived harness processes
   or stream them (constraint C-7).
 - **Application + long-lived orchestrator (chosen)** — separates interactive concerns from
   durable, long-lived work; runs both together locally and separately when hosted.
@@ -28,7 +28,7 @@ launches and supervises agents, manages working copies, and streams activity. Ta
 
 ## Consequences
 
-- Positive: long-lived agents are supported; the same codebase serves local and hosted; the
+- Positive: long-lived harnesses are supported; the same codebase serves local and hosted; the
   orchestrator can scale independently when hosted.
 - Negative: two parts to run and coordinate; more configuration surface (see risk R-6).
 - Drives the [building block view](../architecture/05-building-blocks.md) and the

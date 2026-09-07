@@ -12,7 +12,7 @@ import {
 import { type AcpScript, scriptedAcpPeer } from "./testing.js";
 
 /**
- * ACP protocol conformance, against the scripted peer rather than a live agent (Principle VI).
+ * ACP protocol conformance, against the scripted peer rather than a live harness (Principle VI).
  *
  * The peer speaks the real wire protocol, so what is exercised here is SoloW's own
  * framing, handshake, permission and cancellation paths — not a stub standing in for them.

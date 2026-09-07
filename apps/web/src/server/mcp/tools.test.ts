@@ -17,7 +17,7 @@ const names = () => listMcpTools().map((t) => t.name);
 describe("the MCP surface", () => {
   it("does not offer the review gate", () => {
     // A token that can approve is a token that can approve its own work. The orchestrator hands
-    // its agents no MCP configuration today, so nothing has ever reached this — which is exactly
+    // its harnesses no MCP configuration today, so nothing has ever reached this — which is exactly
     // why the rule belongs here now, before issue #75's task-scoped surface makes it reachable.
     expect(names()).not.toContain("review_decide");
     expect(findMcpTool("review_decide")).toBeUndefined();
@@ -33,7 +33,7 @@ describe("the MCP surface", () => {
     }
   });
 
-  it("lets a token build a pipeline, but never advance one or hand an agent a server", () => {
+  it("lets a token build a pipeline, but never advance one or hand a harness a server", () => {
     const exposed = names();
     // Authoring (spec F03): a builder can read the rules, make the pipeline and bind a Task to it.
     for (const tool of [

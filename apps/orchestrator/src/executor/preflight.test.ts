@@ -220,7 +220,7 @@ describe("a verdict takes its container with it", () => {
 
     expect(await probeExecutor(host.executor, CONFIG, IDS, opts())).toEqual({
       ok: true,
-      agentCommands: [],
+      harnessCommands: [],
     });
     expect(host.calls).not.toContainEqual(["docker", "rm", "-f", NAME]);
   });
@@ -264,7 +264,7 @@ describe("the mount guard's host utility is asked about the host, not about a pa
     const host = fakeHost();
     expect(await probeExecutor(host.executor, CONFIG, IDS, opts())).toEqual({
       ok: true,
-      agentCommands: [],
+      harnessCommands: [],
     });
 
     const probe = host.calls.find((cmd) => cmd[0] === "realpath");

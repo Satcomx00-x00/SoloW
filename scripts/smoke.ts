@@ -12,10 +12,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BillingErrorCode } from "@solow/contracts";
 import {
-  agentCatalog,
-  agentProfile,
   encryptSecret,
   executorProfile,
+  harnessCatalog,
+  harnessProfile,
   issue,
   repository,
   secret,
@@ -26,14 +26,14 @@ import {
 } from "@solow/db";
 import { createTestDb } from "@solow/db/testing";
 import { $ } from "bun";
-import { FakeAgentRunner } from "../apps/orchestrator/src/agent/runner.js";
-import { prepareAgentEnv } from "../apps/orchestrator/src/billing/guard.js";
+import { prepareHarnessEnv } from "../apps/orchestrator/src/billing/guard.js";
 import {
   loadTaskRunContext,
   setTaskRepositoryResultBranch,
   setTaskState,
 } from "../apps/orchestrator/src/data.js";
 import { createLocalExecutor } from "../apps/orchestrator/src/executor/local.js";
+import { FakeHarnessRunner } from "../apps/orchestrator/src/harness/runner.js";
 import {
   cleanupWorktree,
   commitWorktree,
@@ -84,7 +84,7 @@ async function main(): Promise<void> {
     assert(sec, "secret insert returned a row");
 
     const [cat] = await db
-      .insert(agentCatalog)
+      .insert(harnessCatalog)
       .values({
         workspaceId,
         key: "claude_code",
@@ -95,10 +95,10 @@ async function main(): Promise<void> {
         meteredEnvVar: "ANTHROPIC_API_KEY",
       })
       .returning();
-    assert(cat, "agentCatalog insert returned a row");
+    assert(cat, "harnessCatalog insert returned a row");
 
     const [ap] = await db
-      .insert(agentProfile)
+      .insert(harnessProfile)
       .values({
         workspaceId,
         name: "Claude (API key)",
@@ -108,7 +108,7 @@ async function main(): Promise<void> {
         concurrencyCap: 3,
       })
       .returning();
-    assert(ap, "agentProfile insert returned a row");
+    assert(ap, "harnessProfile insert returned a row");
 
     const [ep] = await db
       .insert(executorProfile)
@@ -168,7 +168,7 @@ async function main(): Promise<void> {
     // 4. Load the composed run context the orchestrator would use to launch a run.
     const ctx = await loadTaskRunContext(db, workspaceId, taskId);
     assert(ctx.task.id === taskId, "run context resolved the task");
-    assert(ctx.agentProfile.id === ap.id, "run context resolved the agent profile");
+    assert(ctx.harnessProfile.id === ap.id, "run context resolved the harness profile");
     assert(ctx.repositories.length === 1, "run context resolved one attached repository");
     assert(
       ctx.repositories[0]?.repository.location === repoDir,
@@ -178,31 +178,31 @@ async function main(): Promise<void> {
 
     // 5. Billing/credential guard: api_key mode must inject ANTHROPIC_API_KEY and
     //    must NOT carry a subscription OAuth token (Principle IV billing integrity).
-    const envResult = prepareAgentEnv({
-      authMode: ctx.agentProfile.authMode,
+    const envResult = prepareHarnessEnv({
+      authMode: ctx.harnessProfile.authMode,
       secretCiphertext: ctx.secretCiphertext,
       baseEnv: process.env,
-      subscriptionEnvVar: ctx.agentCatalog.subscriptionEnvVar,
-      meteredEnvVar: ctx.agentCatalog.meteredEnvVar,
+      subscriptionEnvVar: ctx.harnessCatalog.subscriptionEnvVar,
+      meteredEnvVar: ctx.harnessCatalog.meteredEnvVar,
     });
-    assert(envResult.ok, "prepareAgentEnv returned ok");
+    assert(envResult.ok, "prepareHarnessEnv returned ok");
     assert(
       envResult.data.ANTHROPIC_API_KEY === "sk-ant-api-key",
-      "agent env carries the decrypted ANTHROPIC_API_KEY",
+      "harness env carries the decrypted ANTHROPIC_API_KEY",
     );
     assert(
       !("CLAUDE_CODE_OAUTH_TOKEN" in envResult.data),
-      "agent env must NOT carry CLAUDE_CODE_OAUTH_TOKEN in api_key mode",
+      "harness env must NOT carry CLAUDE_CODE_OAUTH_TOKEN in api_key mode",
     );
-    const agentEnv = envResult.data;
+    const harnessEnv = envResult.data;
 
     // A missing credential must be reported as a MissingCredential error, not thrown.
-    const noCred = prepareAgentEnv({
+    const noCred = prepareHarnessEnv({
       authMode: "api_key",
       secretCiphertext: null,
       baseEnv: process.env,
     });
-    assert(!noCred.ok, "prepareAgentEnv fails without a credential");
+    assert(!noCred.ok, "prepareHarnessEnv fails without a credential");
     assert(
       !noCred.ok && noCred.error === BillingErrorCode.MissingCredential,
       "missing credential is reported as MissingCredential",
@@ -228,10 +228,10 @@ async function main(): Promise<void> {
     assert(!(await hasChanges(executor, wt.path)), "worktree starts clean");
 
     // 7. Demonstrate the runner interface with the deterministic fake, then simulate the
-    //    agent's real effect: an edit written into the worktree (where a real Claude Code
+    //    harness's real effect: an edit written into the worktree (where a real Claude Code
     //    run over ACP would mutate the working tree).
     const events: string[] = [];
-    const runner = new FakeAgentRunner([
+    const runner = new FakeHarnessRunner([
       { kind: "tool_use", name: "edit_file" },
       { kind: "stdout", channel: "assistant", text: "applied change" },
     ]);
@@ -239,18 +239,18 @@ async function main(): Promise<void> {
       command: "claude",
       args: ["--task", taskId],
       cwd: wt.path,
-      env: agentEnv,
+      env: harnessEnv,
       prompt: `Smoke task ${taskId}`,
       onEvent: (e) => events.push(e.kind),
     });
     const outcome = await handle.outcome;
-    assert(outcome.kind === "completed", "fake agent run completed");
+    assert(outcome.kind === "completed", "fake harness run completed");
     assert(events.includes("tool_use") && events.includes("stdout"), "runner streamed events");
 
     writeFileSync(join(wt.path, "SMOKE_CHANGE.txt"), `edited by smoke run for task ${taskId}\n`);
 
     // 8. The edit must show up as a diff, then get committed onto the task branch.
-    assert(await hasChanges(executor, wt.path), "worktree has the agent's uncommitted changes");
+    assert(await hasChanges(executor, wt.path), "worktree has the harness's uncommitted changes");
     await commitWorktree(executor, wt.path, "SoloW smoke");
     assert(!(await hasChanges(executor, wt.path)), "changes committed; worktree clean again");
 

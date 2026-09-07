@@ -4,7 +4,7 @@
 
 ## Summary
 
-SoloW has a board of Tasks — the *execution* layer, where an agent's run advances one
+SoloW has a board of Tasks — the *execution* layer, where a harness's run advances one
 Issue. What it has never had is the layer above: the table a team plans in. Which issues exist,
 what state they are in, who holds them, how big they are, which iteration they belong to, which
 epic they roll up into, and which pull request will close them.
@@ -19,7 +19,7 @@ pretending to be GitHub".
 Two things this feature is deliberately **not**. It is not a second Issue model: it is a
 projection over the Issues [F01](./F01-issue-management.md) already imports. And it is not a
 second board: the Kanban stays what [Decision 0006](../decisions/0006-kanban-scoped-to-issues.md)
-made it — the runtime of agent work, under an Issue. Planning decides what to do; the board runs
+made it — the runtime of harness work, under an Issue. Planning decides what to do; the board runs
 it.
 
 Nothing here is imported by hand. An issue that exists on a connected repository appears in the
@@ -27,7 +27,7 @@ table because it exists, not because someone pressed a button.
 
 ## Jobs served
 
-- **J2 — Organise agent work around issues.**
+- **J2 — Organise harness work around issues.**
 - **J3 — Design a repeatable process.**
 - **J10 — Operate with confidence.**
 
@@ -169,9 +169,9 @@ table because it exists, not because someone pressed a button.
   behind the review gate — and it is not the branch a SoloW Task produced either
   ([Decision 0006](../decisions/0006-kanban-scoped-to-issues.md)'s execution layer, recorded on
   the Task). Two different facts, two different columns: one says what the provider knows, the
-  other what an agent did here, and merging them would answer neither question.
+  other what a harness did here, and merging them would answer neither question.
 - Planning changes nothing about execution: moving a row to "In progress" does not start an
-  agent, and a Task reaching Done does not move a row. The two layers are linked, not fused.
+  harness, and a Task reaching Done does not move a row. The two layers are linked, not fused.
 - A saved view is a **configuration over the Project's items, never a copy of them**: a name, a
   layout, a filter, a grouping, a sort and a visible column set. Every tab reads the same rows,
   which is why a value edited under `In review` is edited under `Prioritized backlog` too.

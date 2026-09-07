@@ -859,7 +859,7 @@ describe("sorting from the column header", () => {
   });
 });
 
-describe("the Agent runs column", () => {
+describe("the Harness runs column", () => {
   // `status()` is scoped to the hierarchy suite; this one builds its own single-select field.
   const status = () => field({ id: "f1", name: "Status" });
 
@@ -867,7 +867,7 @@ describe("the Agent runs column", () => {
    * F23 FR-14 and Decision 0006: the planning table sits above execution, and this is the one
    * cell that looks down. Which state it shows is decided in `row-tasks.ts` and tested there;
    * what is asserted here is that the cell draws it, and that "no run" and "a finished run" are
-   * drawn differently — conflating them would say an agent had finished work nobody started.
+   * drawn differently — conflating them would say a harness had finished work nobody started.
    */
   it("shows the summarised state, with a count when there is more than one run", () => {
     render(
@@ -878,7 +878,7 @@ describe("the Agent runs column", () => {
       />,
     );
 
-    expect(screen.getByRole("columnheader", { name: /agent runs/i })).toBeDefined();
+    expect(screen.getByRole("columnheader", { name: /harness runs/i })).toBeDefined();
     // The badge carries the state on a data attribute — the same hook the E2E suite reads.
     expect(document.querySelector('[data-task-state="review"]')).not.toBeNull();
     expect(screen.getByText("3")).toBeDefined();

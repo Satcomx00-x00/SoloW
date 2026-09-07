@@ -63,7 +63,7 @@ export const repositoryRouter = router({
         tags: ["repository"],
         protect: true,
         summary:
-          "Replace the allowlist of files copied from the Repository into every new worktree, such as a .env the agent needs to run the test suite.",
+          "Replace the allowlist of files copied from the Repository into every new worktree, such as a .env the harness needs to run the test suite.",
       },
     })
     .input(updateRepositorySetupInput)

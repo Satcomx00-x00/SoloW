@@ -10,7 +10,7 @@
 export const WORKFLOW_AUTHORING_GUIDE = `# Building a Workflow in SoloW
 
 A Workflow is an ordered pipeline of Steps. A Task attached to it runs one Step at a time, each
-Step on its own agent session, and the handoff (summary, diff, decision) travels to the next.
+Step on its own harness session, and the handoff (summary, diff, decision) travels to the next.
 
 ## The tools, in the order you use them
 
@@ -20,18 +20,18 @@ Step on its own agent session, and the handoff (summary, diff, decision) travels
 3. \`workflow_addStep\` — one call per Step, in pipeline order. Omit \`afterStepId\` to append.
    Fields:
    - \`name\` — short, imperative ("Implement", "Review", "Verify").
-   - \`agentProfileId\` — an Agent Profile of this Workspace (\`profile_list\`).
-   - \`promptTemplate\` — what the agent is told for this Step. Write it for an agent that has
+   - \`agentProfileId\` — a Harness Profile of this Workspace (\`profile_list\`).
+   - \`promptTemplate\` — what the harness is told for this Step. Write it for a harness that has
      just read the issue and the handoff of the previous Step; say what to do, what not to touch,
      and what its summary must report.
    - \`gate\` — \`"auto"\` (advance on its own), \`"human"\` (a person approves before advancing),
      \`"auto-unless-changes"\` (automatic unless the Step produced a diff).
-   - \`advanceOn\` — \`"agent-signal"\` (the agent says it is done) or \`"review"\` (a review lands).
+   - \`advanceOn\` — \`"agent-signal"\` (the harness says it is done) or \`"review"\` (a review lands).
    - \`mcpServerIds\` / \`skillIds\` — library items loaded for this Step on top of the
      Workspace-wide ones (\`library_mcp_list\`, \`library_skill_list\`). Additive; ids only.
 4. \`workflow_updateStep\` with \`branch\` — after every Step exists, add the conditions:
    \`{ when, thenStepId, elseStepId }\`, where \`when\` is either
-   \`{ kind: "agent-decides", question: "…?" }\` (the Step's agent answers yes or no at the end of
+   \`{ kind: "agent-decides", question: "…?" }\` (the Step's harness answers yes or no at the end of
    its run) or \`{ kind: "produced-changes" }\` (the Step left a diff). \`thenStepId\` and
    \`elseStepId\` are Step ids of this Workflow, or \`null\` for "the pipeline ends". A backward
    target makes a loop; the run loop bounds loops, so a "needs another pass?" → back to

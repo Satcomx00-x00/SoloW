@@ -12,11 +12,11 @@ store choice.
 - The Interactive Application, the Orchestration Component, and the State Store all run on
   one machine.
 - The State Store is a lightweight embedded store; work and working copies are kept locally.
-- Agents run in local, container, or remote Executors as configured.
+- Harnesses run in local, container, or remote Executors as configured.
 - Nothing is required from any external service, and no telemetry is sent.
 
 > **Local shape:** one machine hosts the application, the orchestrator, and the embedded
-> store; agents run in the chosen Executors; the user works entirely on their own hardware.
+> store; harnesses run in the chosen Executors; the user works entirely on their own hardware.
 
 > **Implementation note (2026-08-20):** the durable-execution engine [Decision 0004](../decisions/0004-durable-orchestration-engine.md)
 > chose (Inngest) runs locally as its own Dev Server process, polled by and forwarding runs
@@ -37,7 +37,7 @@ launcher is the published `bin` of the npm package; it resolves a Bun runtime, b
 local processes named above, and prints the URL to open.
 
 **Everything it creates lives in one directory** — `~/.solow` by default, `$SOLOW_HOME` or
-`--data-dir` otherwise. That is the embedded database, the worktrees and repository clones agents
+`--data-dir` otherwise. That is the embedded database, the worktrees and repository clones harnesses
 work in, and the three generated keys (data encryption, session signing, stream signing). Deleting
 that directory is a full uninstall; copying it is a full backup. Nothing is written outside it and
 nothing leaves the machine.
@@ -45,7 +45,7 @@ nothing leaves the machine.
 **Restarting is safe and is the upgrade path.** Migrations run on every start rather than only the
 first — already-applied ones are skipped, so it is cheap, and without it an upgraded launcher would
 open an old database and fail on tables that do not exist yet. Workspace bootstrap is idempotent
-for the same reason: an install upgraded from a build that had no agent catalog gets one, instead
+for the same reason: an install upgraded from a build that had no harness catalog gets one, instead
 of a Settings page with an empty picker. Seeding is first-run only, so a restart never disturbs
 existing work.
 
@@ -74,11 +74,11 @@ Ctrl-C, or any termination signal, takes the whole stack down with it.
   multiple users connect to it.
 - The State Store is a shared database supporting many users and Workspaces.
 - Work is isolated per Workspace, which is the tenancy and access boundary.
-- Agents run in container, remote, or cloud Executors; Executors can scale independently of
+- Harnesses run in container, remote, or cloud Executors; Executors can scale independently of
   the application.
 
 > **Hosted shape:** a shared application and orchestrator back a shared database; many users
-> across many Workspaces connect; Executors run agents on separate compute.
+> across many Workspaces connect; Executors run harnesses on separate compute.
 
 ## What stays the same across modes
 

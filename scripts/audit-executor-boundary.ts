@@ -466,7 +466,7 @@ if (import.meta.main) {
       `\nHost access (spawn, files, shell) belongs in ${HOST_DRIVER}. Talking to a Docker daemon ` +
         `belongs in ${EXECUTOR_MODULE} — the whole module, because reap.ts and preflight.ts compose ` +
         "their own docker argv on purpose; everywhere else reaches the host through an Executor. " +
-        "If this genuinely is not agent-execution-host code (a test, fixture, or build script), " +
+        "If this genuinely is not harness-execution-host code (a test, fixture, or build script), " +
         "add a narrowly-scoped exemption above with the reason.",
     );
     process.exit(1);

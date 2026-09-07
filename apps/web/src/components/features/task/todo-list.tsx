@@ -5,18 +5,18 @@ import { LoaderCircle, Square, SquareCheckBig } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
- * The agent's own todo list, drawn as a checklist.
+ * The harness's own todo list, drawn as a checklist.
  *
- * The list is the one artefact in a run that says what the agent thinks it is *going* to do,
+ * The list is the one artefact in a run that says what the harness thinks it is *going* to do,
  * which is the question a reviewer watching a long run keeps asking and which the transcript
  * answers only in retrospect. It sits beside the Changes panel for that reason: plan on one
  * side, result on the other.
  *
  * **Nothing here is a control.** No `<input>`, no button, no pointer affordance — deliberately,
  * and this is the whole reason the component draws boxes by hand instead of reaching for
- * `ui/checkbox`. The list belongs to the agent, which rewrites it wholesale on its own schedule;
+ * `ui/checkbox`. The list belongs to the harness, which rewrites it wholesale on its own schedule;
  * a box a person could tick would either be overwritten by the next `TodoWrite` a second later
- * or, worse, leave the reader believing they had recorded something about work only the agent
+ * or, worse, leave the reader believing they had recorded something about work only the harness
  * can do. A checkbox that lies about who owns the state is worse than a glyph that cannot be
  * clicked, so these are glyphs.
  *
@@ -76,14 +76,14 @@ export function TodoList({ items }: { items: readonly TodoItem[] }) {
         <tbody>
           {items.map((item, index) => {
             const state = STATE[item.status];
-            // `activeForm` is the present-tense sentence the agent writes for exactly this
+            // `activeForm` is the present-tense sentence the harness writes for exactly this
             // moment ("Writing the tests"); it exists only while the item is the live one, and
             // older lists predate the field, so `content` is always the fallback.
             const text =
               item.status === "in_progress" ? (item.activeForm ?? item.content) : item.content;
             return (
               <tr
-                // biome-ignore lint/suspicious/noArrayIndexKey: a todo item carries no id, and the agent republishes the list whole and in order rather than splicing it — position is the only identity there is, and these rows hold no state a reused key could strand.
+                // biome-ignore lint/suspicious/noArrayIndexKey: a todo item carries no id, and the harness republishes the list whole and in order rather than splicing it — position is the only identity there is, and these rows hold no state a reused key could strand.
                 key={index}
                 data-todo-status={item.status}
                 className="border-b align-top last:border-b-0"
@@ -111,7 +111,7 @@ export function TodoList({ items }: { items: readonly TodoItem[] }) {
  * A scan backwards rather than a fold forwards, because `TodoWrite` always sends the complete
  * list: every `todos` event supersedes the one before it outright, so the last one wins and the
  * earlier ones are only history. Reducing over them would produce the same answer at more cost,
- * and merging them would invent a list the agent never held.
+ * and merging them would invent a list the harness never held.
  */
 export function latestTodos(events: readonly SessionEventDto[]): TodoItem[] {
   for (let i = events.length - 1; i >= 0; i--) {

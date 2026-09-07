@@ -1,7 +1,7 @@
 import "server-only";
 import { router } from "../trpc.js";
-import { libraryRouter } from "./agent-library.js";
 import { flagRouter } from "./flag.js";
+import { libraryRouter } from "./harness-library.js";
 import { identityRouter } from "./identity.js";
 import { integrationRouter } from "./integration.js";
 import { issueRouter } from "./issue.js";

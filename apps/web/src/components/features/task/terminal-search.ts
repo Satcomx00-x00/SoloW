@@ -8,7 +8,7 @@ import type { TranscriptRow } from "./transcript";
  *
  * The searchable text of a row is *what the row is about*, not what it happens to draw. A tool
  * call renders as a compact chip, but what someone searching for "pip" wants is the row where
- * the agent ran pip — so a tool row's text is its name and the arguments it was given. Rows that
+ * the harness ran pip — so a tool row's text is its name and the arguments it was given. Rows that
  * cannot show a highlighted substring (a tool call, a widget, a permission card) still match and
  * are still jumped to; they light up as a row rather than character by character. That asymmetry
  * is deliberate: refusing to match them would make search quietly wrong.
@@ -56,7 +56,7 @@ function widgetText(widget: WidgetLike): string {
     case "task_complete":
       return [widget.outcome, widget.summary ?? ""].join(" ");
     case "show_widget":
-      // Never the content: that is markup the agent wrote, and matching inside it would send a
+      // Never the content: that is markup the harness wrote, and matching inside it would send a
       // search for "div" to every diagram in the run.
       return [widget.title ?? "", widget.module].join(" ");
     case "unsupported":

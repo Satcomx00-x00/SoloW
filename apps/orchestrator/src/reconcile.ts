@@ -3,7 +3,6 @@ import { parseSessionEventPayload } from "@solow/contracts";
 import { INTERRUPTED_REASON, STRANDED_REVIEW_REASON } from "@solow/core";
 import { type Db, review, session, sessionEvent, task } from "@solow/db";
 import { and, desc, eq, isNull, ne } from "drizzle-orm";
-import type { AgentRegistry } from "./agent/registry.js";
 import {
   appendSessionEvent,
   nextSessionEventSeq,
@@ -11,16 +10,17 @@ import {
   setSessionState,
   setTaskState,
 } from "./data.js";
+import type { HarnessRegistry } from "./harness/registry.js";
 import type { EventHub } from "./ws/hub.js";
 
 /**
  * Reclaim a Task left `running` by a process that is provably gone (reported directly: an Owner
- * watching a Task's input answer "No agent is running" forever after an orchestrator restart).
+ * watching a Task's input answer "No harness is running" forever after an orchestrator restart).
  *
  * `running` is *supposed* to mean "the durable workflow's `agent-run` step is either executing or
  * about to be redriven" — Inngest retries an incomplete step from the top, so a genuine restart
  * ordinarily heals itself the moment the workflow resumes and registers again with
- * `agentRegistry` (see that module's own doc comment). This function exists for the case that
+ * `harnessRegistry` (see that module's own doc comment). This function exists for the case that
  * doesn't heal: the Inngest server itself lost the in-flight run (its dev server is in-memory
  * only, and a hosted deployment can still drop a run past its retry budget), and nothing will
  * ever redrive it. Left alone, the Task stays `running` — and every input the Owner sends
@@ -32,14 +32,14 @@ import type { EventHub } from "./ws/hub.js";
  * process. A Task orphaned *later* was never looked at again. That is what happened: an
  * orchestrator booted at 11:52, swept at 11:52:37 and correctly left a Task alone because its run
  * was genuinely alive and registered; that run then died at 13:54 with its last turn written and
- * its work committed, and the Task sat in `running` — its input box answering "No agent is
+ * its work committed, and the Task sat in `running` — its input box answering "No harness is
  * running" — for the hour and a half until an Owner came asking. The net was real, and it had
  * already been used up before the fall.
  *
  * Two independent signals have to agree before anything is reclaimed, because a periodic sweep
  * can catch a healthy run in a way a boot-time one cannot:
  *
- * 1. **Not in `agentRegistry`.** Registration spans the whole `agent-run` step, so a live agent —
+ * 1. **Not in `harnessRegistry`.** Registration spans the whole `agent-run` step, so a live harness —
  *    including one sitting inside a twenty-minute build — is always present. This is conclusive
  *    when it is true.
  * 2. **Silent for `RECLAIM_STALE_MS`.** The registry is empty in the gaps *between* durable steps
@@ -65,7 +65,7 @@ import type { EventHub } from "./ws/hub.js";
 export const RECLAIM_STALE_MS = 10 * 60 * 1000;
 export async function reclaimOrphanedRuns(
   db: Db,
-  registry: Pick<AgentRegistry, "get">,
+  registry: Pick<HarnessRegistry, "get">,
   hub: Pick<EventHub, "publish" | "boardChannel" | "taskChannel">,
   now: () => Date = () => new Date(),
 ): Promise<number> {
@@ -109,7 +109,7 @@ export async function reclaimOrphanedRuns(
     const evidenceIn = live?.id ?? newest?.id ?? null;
 
     // The second signal. `lastSpoke` falls back through what is available: the newest event this
-    // run produced, else the Session's own start (a launch that hung before the agent's first
+    // run produced, else the Session's own start (a launch that hung before the harness's first
     // word has produced nothing, and its Session's age is the honest measure of how long), else
     // the Task's last write for a `running` Task carrying no Session at all — which should not
     // happen, and if it does the Task is orphaned by definition.
@@ -121,15 +121,15 @@ export async function reclaimOrphanedRuns(
      * real work it never got to declare.
      *
      * The sweep used to answer this from one signal, the `agent_done` marker, and file anything
-     * without it as a failure. That was wrong in the most common case there is: an agent that
+     * without it as a failure. That was wrong in the most common case there is: a harness that
      * finishes its turn and waits for the operator has not ended its process, so it writes no
      * marker, and a `bun --hot` reload or a restart then buried real work in the Failed column.
      *
      * So it now reads the evidence in order of strength:
      *
-     *   1. `agent_done`      — the agent said it finished. Record the declaration; a person opens
+     *   1. `agent_done`      — the harness said it finished. Record the declaration; a person opens
      *                          the gate (the run itself no longer moves a Task to review either).
-     *   2. a captured `diff` — the agent produced a change at some turn boundary. The work exists
+     *   2. a captured `diff` — the harness produced a change at some turn boundary. The work exists
      *                          and is described; the Task goes back to `ready` to be resumed, and
      *                          nothing is filed as a failure.
      *   3. nothing at all    — no marker, no change, no evidence the run achieved anything. This
@@ -224,7 +224,7 @@ export async function reclaimOrphanedRuns(
  */
 export async function reportStrandedReviews(
   db: Db,
-  registry: Pick<AgentRegistry, "get">,
+  registry: Pick<HarnessRegistry, "get">,
   hub: Pick<EventHub, "publish" | "boardChannel" | "taskChannel">,
   now: () => Date = () => new Date(),
 ): Promise<number> {
@@ -363,7 +363,7 @@ export const PARK_WINDOW_MS = 5 * 60 * 60 * 1000;
  * **What tells "lost" from "legitimately asleep" is the clock, and nothing but the clock**, which
  * is why three things have to agree before anything is named:
  *
- * 1. **Not in `agentRegistry`.** Conclusive when it answers: registration spans the whole
+ * 1. **Not in `harnessRegistry`.** Conclusive when it answers: registration spans the whole
  *    `agent-run` step, so a run that woke and is working is always present. It matters more here
  *    than in either neighbour, because the park step moves the Task out of `running` and nothing
  *    ever moves it back — a woken run does its next round with the row still reading `parked`.
@@ -415,8 +415,8 @@ export const PARK_WINDOW_MS = 5 * 60 * 60 * 1000;
  * `RECLAIM_STALE_MS` quiet window from a Task row's own last write rather than from what that row
  * says. What is left is a wake-up whose clearing write never lands at all: the process dies
  * between the sleep returning and that step committing. Covering it means the run lifecycle
- * publishing a container's existence before an agent exists to own it, since the container is
- * built inside `executor-preflight`, a durable step that holds no `AgentHandle` to register: a
+ * publishing a container's existence before a harness exists to own it, since the container is
+ * built inside `executor-preflight`, a durable step that holds no `HarnessHandle` to register: a
  * change to the run lifecycle, and not one any sweep can make.
  *
  * Like its twin this names the condition and does not act on it: the Task stays `parked`, so the
@@ -425,7 +425,7 @@ export const PARK_WINDOW_MS = 5 * 60 * 60 * 1000;
  */
 export async function reportStrandedParks(
   db: Db,
-  registry: Pick<AgentRegistry, "get">,
+  registry: Pick<HarnessRegistry, "get">,
   hub: Pick<EventHub, "publish" | "boardChannel" | "taskChannel">,
   now: () => Date = () => new Date(),
 ): Promise<number> {
@@ -446,7 +446,7 @@ export async function reportStrandedParks(
       .limit(1);
 
     // The newest sign of life from either half of the pair, because they record different halves
-    // of the same round: the Session carries everything the agent said, and the Task row carries
+    // of the same round: the Session carries everything the harness said, and the Task row carries
     // the park itself. Taking only one of them would read a run that had just parked, or one
     // mid-round in a Session that has not spoken for a while, as older than it is.
     const spokeAt = newest ? await latestActivity(db, newest.id, newest.startedAt) : row.updatedAt;
@@ -499,9 +499,9 @@ export const RECOVERED_REASON = "recovered_after_restart";
 /**
  * The `agent_done` this Session ended on, if it ended on one.
  *
- * Read as "the newest marker in the log", not "the last event is a marker": an agent's final turn
- * and the compaction step both land after it, and neither of them means the agent did not finish.
- * There is no ambiguity to resolve — a marker is only ever written once the agent has stopped
+ * Read as "the newest marker in the log", not "the last event is a marker": a harness's final turn
+ * and the compaction step both land after it, and neither of them means the harness did not finish.
+ * There is no ambiguity to resolve — a marker is only ever written once the harness has stopped
  * having completed, so its presence is the fact, whatever came afterwards.
  */
 async function completionMarker(
@@ -532,7 +532,7 @@ async function completionMarker(
  * Whether this Session produced a change anyone can still read.
  *
  * The second-strongest evidence there is, and the one that decides between "interrupted" and
- * "failed". A `diff` record means the agent edited something and the orchestrator captured it —
+ * "failed". A `diff` record means the harness edited something and the orchestrator captured it —
  * at a turn boundary during the run, or at the gate. Work that is described in the log is work
  * that survives the run being lost, and filing it as a failure is what buried it.
  */

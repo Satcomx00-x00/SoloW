@@ -3,8 +3,8 @@
 import { describe, expect, it } from "bun:test";
 import type { SessionEventDto, TaskEvent } from "@solow/contracts";
 import {
-  agentActivity,
   buildTranscript,
+  harnessActivity,
   openPermission,
   type TextRow,
   type ToolRow,
@@ -209,13 +209,13 @@ describe("buildTranscript", () => {
   });
 });
 
-describe("agentActivity", () => {
-  const running = (rows: Parameters<typeof agentActivity>[0]) => agentActivity(rows, true);
+describe("harnessActivity", () => {
+  const running = (rows: Parameters<typeof harnessActivity>[0]) => harnessActivity(rows, true);
 
-  it("says nothing at all when no agent is running", () => {
-    // A finished run is a record. A line under it claiming the agent is thinking would be false,
+  it("says nothing at all when no harness is running", () => {
+    // A finished run is a record. A line under it claiming the harness is thinking would be false,
     // and it would be false under every finished run in the product.
-    expect(agentActivity(buildTranscript([], [liveText(0, "done")]), false)).toBeNull();
+    expect(harnessActivity(buildTranscript([], [liveText(0, "done")]), false)).toBeNull();
   });
 
   it("reports the launch while a running task has produced nothing", () => {
@@ -225,7 +225,7 @@ describe("agentActivity", () => {
   });
 
   it("names the tool a call is still inside", () => {
-    // "Working…" would not tell an operator that the agent has been in Bash for ninety seconds,
+    // "Working…" would not tell an operator that the harness has been in Bash for ninety seconds,
     // which is the thing worth knowing.
     const rows = buildTranscript(
       [persisted(0, { kind: "tool_call", name: "Bash", callId: "c1", input: null })],
@@ -254,8 +254,8 @@ describe("agentActivity", () => {
     });
   });
 
-  it("goes quiet while the agent is blocked on a question", () => {
-    // The permission card already says what is happening, and the agent is not thinking — it is
+  it("goes quiet while the harness is blocked on a question", () => {
+    // The permission card already says what is happening, and the harness is not thinking — it is
     // waiting for a human. Two different claims, and only one of them is true.
     const rows = buildTranscript(
       [

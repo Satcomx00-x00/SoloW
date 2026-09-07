@@ -153,7 +153,7 @@ export function rankForMove<T extends RankedStep>(
  *
  * A null cursor is a Task that has not started its Workflow, so it starts at the first Step. A
  * cursor naming a Step that no longer exists is an *error* and never a silent restart: quietly
- * resuming at Step one would re-run work the Owner has already paid an agent for, and would do
+ * resuming at Step one would re-run work the Owner has already paid a harness for, and would do
  * it at the exact moment the operator is least able to notice.
  */
 export function resumeWorkflowCursor<T extends RankedStep>(
@@ -178,7 +178,7 @@ export interface WorkflowStepRule extends RankedStep {
 
 /** What actually happened on the Step that just reported in. */
 export interface WorkflowStepOutcome {
-  /** Which signal arrived — an agent saying it is done, or a review landing. */
+  /** Which signal arrived — a harness saying it is done, or a review landing. */
   signal: WorkflowAdvanceOn;
   /**
    * Did the Step leave changes behind? Read only by an `auto-unless-changes` gate.
@@ -224,7 +224,7 @@ export interface WorkflowStepOutcome {
    */
   approvalAlreadySpent: boolean;
   /**
-   * What the Step reported — the summary the next Step is briefed with, and where an agent's
+   * What the Step reported — the summary the next Step is briefed with, and where a harness's
    * answer to an `agent-decides` question is read from. Null when the Step said nothing, which
    * no answer can be found in.
    */
@@ -232,21 +232,21 @@ export interface WorkflowStepOutcome {
 }
 
 /**
- * The line an agent answers a branch question on. One constant, used to *ask* (in the brief)
+ * The line a harness answers a branch question on. One constant, used to *ask* (in the brief)
  * and to *read* (off the handoff), so the two cannot drift into asking for one thing and
  * looking for another.
  */
 export const DECISION_MARKER = "DECISION:";
 
 /**
- * The agent's answer to its Step's question, or null when it gave none.
+ * The harness's answer to its Step's question, or null when it gave none.
  *
- * The *last* `DECISION:` line wins: an agent that reasons its way to an answer may write the
+ * The *last* `DECISION:` line wins: a harness that reasons its way to an answer may write the
  * word more than once, and the one it finished on is the one it meant. Case-insensitive on both
  * the marker and the word — `Decision: Yes` is an answer, not a typo — and anchored to a line so
  * a sentence *about* the decision ("the DECISION: yes/no format …") is not read as one.
  */
-export function readAgentDecision(handoff: string | null): "yes" | "no" | null {
+export function readHarnessDecision(handoff: string | null): "yes" | "no" | null {
   if (!handoff) return null;
   let answer: "yes" | "no" | null = null;
   for (const line of handoff.split(/\r?\n/)) {
@@ -257,21 +257,21 @@ export function readAgentDecision(handoff: string | null): "yes" | "no" | null {
 }
 
 /**
- * The summary the next Step is briefed with, with the agent's answer in it.
+ * The summary the next Step is briefed with, with the harness's answer in it.
  *
  * Measured on the first live run: the reviewer wrote `DECISION: no` exactly as asked — at the
  * end of its final message — and reported through its `task_complete` widget with a summary
  * that did not repeat it. The summary is what travels as the handoff, so the answer was lost and
- * the branch fell back to "no answer". An agent's final message is as much its report as the
+ * the branch fell back to "no answer". A harness's final message is as much its report as the
  * widget's summary, so an answer found there is carried over when the summary has none. The
  * summary's own line wins when both exist: it was written last, as the report of record.
  */
-export function carryAgentDecision(
+export function carryHarnessDecision(
   summary: string | null,
   finalText: string | null,
 ): string | null {
-  if (readAgentDecision(summary) !== null) return summary;
-  const answer = readAgentDecision(finalText);
+  if (readHarnessDecision(summary) !== null) return summary;
+  const answer = readHarnessDecision(finalText);
   if (answer === null) return summary;
   const line = `${DECISION_MARKER} ${answer}`;
   return summary ? `${summary.trimEnd()}\n\n${line}` : line;
@@ -282,9 +282,9 @@ export function carryAgentDecision(
  *
  * Both questions are answered from the outcome alone, which is what keeps a Condition from
  * becoming a second rules engine: nothing here is fetched, and the facts consulted are the ones
- * the advance already had in hand for the gate. For `agent-decides` the fact is the agent's own
- * answer; an agent that did not answer has not affirmed the condition, so the `no` branch is
- * taken — the brief says so, and a silent default the agent was not told about would be a rule
+ * the advance already had in hand for the gate. For `agent-decides` the fact is the harness's own
+ * answer; a harness that did not answer has not affirmed the condition, so the `no` branch is
+ * taken — the brief says so, and a silent default the harness was not told about would be a rule
  * nobody wrote.
  */
 export function evaluateStepCondition(
@@ -293,7 +293,7 @@ export function evaluateStepCondition(
 ): boolean {
   switch (condition.kind) {
     case "agent-decides":
-      return readAgentDecision(outcome.handoff) === "yes";
+      return readHarnessDecision(outcome.handoff) === "yes";
     case "produced-changes":
       return outcome.producedChanges;
   }
@@ -421,7 +421,7 @@ export interface WorkflowAdvance {
    * that distinction was a Principle I hole reachable by configuration alone: Step 1 `gate: "auto"`
    * with `advanceOn: "review"`, a last Step with `advanceOn: "agent-signal"`. A reviewer approves
    * the *plan*; the advance needs no approval, so on the narrow reading nothing is spent; the last
-   * Step's agent then signals, finds that same approval unspent, and the implementation is
+   * Step's harness then signals, finds that same approval unspent, and the implementation is
    * integrated with nobody having seen its diff. An approval buys the move it caused and no other.
    */
   consumedApproval: boolean;
@@ -445,7 +445,7 @@ function gateNeedsApproval(gate: WorkflowStepGate, outcome: WorkflowStepOutcome)
  * move between Steps without a human; it never buys the right to finish without one.
  *
  * `held` rather than an error when the signal is not the one the Step advances on: a review
- * landing on a Step that advances on the agent's own signal is ordinary, not a fault.
+ * landing on a Step that advances on the harness's own signal is ordinary, not a fault.
  *
  * Every branch that leans on the approval says so in `consumedApproval`, so the caller can mark
  * it spent. Without that, one approval opens every gate the Task has left — which is the same
@@ -523,18 +523,18 @@ export interface WorkflowStepBriefSource {
 }
 
 /**
- * The prompt the current Step's agent is actually given (AC-2's "carrying the handoff context",
+ * The prompt the current Step's harness is actually given (AC-2's "carrying the handoff context",
  * issue #82).
  *
  * Built here rather than in the runner so that the API, the UI's preview and whatever eventually
- * spawns the agent all read one string. The handoff leads because it is the context the template
+ * spawns the harness all read one string. The handoff leads because it is the context the template
  * is written against — a template that says "review the plan" is unusable if the plan arrives
  * underneath it.
  *
- * A Step whose branch is decided by the agent has the question appended, with the exact line to
+ * A Step whose branch is decided by the harness has the question appended, with the exact line to
  * answer on and what each answer leads to. Appended by *this* function rather than typed into
- * the template by the operator, so the question the agent is asked is the one the branch will
- * read — and so the marker the agent is told to write is `DECISION_MARKER`, not a paraphrase of
+ * the template by the operator, so the question the harness is asked is the one the branch will
+ * read — and so the marker the harness is told to write is `DECISION_MARKER`, not a paraphrase of
  * it. `steps` is what the two targets are named from; a target outside it, or null, is named as
  * the end of the pipeline.
  */

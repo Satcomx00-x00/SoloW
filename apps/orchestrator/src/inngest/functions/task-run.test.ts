@@ -7,18 +7,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Writable } from "node:stream";
 import {
-  type AgentProtocol,
   type ExecutorConfig,
+  type HarnessProtocol,
   type RepositorySource,
   TaskErrorCode,
   WIDGET_ANSWER_PREFIX,
 } from "@solow/contracts";
 import { CREDENTIAL_EXPIRED_REASON } from "@solow/core";
 import {
-  agentCatalog,
-  agentProfile,
   encryptSecret,
   executorProfile,
+  harnessCatalog,
+  harnessProfile,
   issue,
   mcpServer,
   repository,
@@ -39,19 +39,19 @@ import {
 import { createTestDb, type TestDb } from "@solow/db/testing";
 import { createLogger } from "@solow/observability";
 import { asc, eq } from "drizzle-orm";
-import { worktreeNameForTask } from "../../agent/claude-code-runner.js";
-import { AgentRegistry } from "../../agent/registry.js";
-import type {
-  AgentHandle,
-  AgentOutcome,
-  AgentRunner,
-  AgentStartOpts,
-  AgentStreamEvent,
-} from "../../agent/runner.js";
-import type { AgentLaunchSettings } from "../../agent/runners.js";
 import { listTaskEventsSince, setTaskState } from "../../data.js";
 import type { ExecutorFactoryOpts } from "../../executor/factory.js";
 import type { Executor } from "../../executor/types.js";
+import { worktreeNameForTask } from "../../harness/claude-code-runner.js";
+import { HarnessRegistry } from "../../harness/registry.js";
+import type {
+  HarnessHandle,
+  HarnessOutcome,
+  HarnessRunner,
+  HarnessStartOpts,
+  HarnessStreamEvent,
+} from "../../harness/runner.js";
+import type { HarnessLaunchSettings } from "../../harness/runners.js";
 import { STRANDED_PARK_REASON } from "../../reconcile.js";
 import { RepositoryUnusableError, worktreePath } from "../../worktree/manager.js";
 import {
@@ -111,12 +111,12 @@ async function seedRun(
   db: TestDb,
   ids: Ids,
   opts: {
-    agentProtocol?: AgentProtocol;
+    agentProtocol?: HarnessProtocol;
     executorConfig?: ExecutorConfig;
     setupFilePatterns?: string[];
     /**
      * A base ref on the *primary* attachment. Left unset by default, which is the ordinary case
-     * and the one where a `--worktree` agent is still allowed to make its own worktree; a test
+     * and the one where a `--worktree` harness is still allowed to make its own worktree; a test
      * that wants SoloW to branch the primary itself names one.
      */
     baseRef?: string;
@@ -142,7 +142,7 @@ async function seedRun(
     ciphertext: encryptSecret("oauth-token"),
   });
   const catalogId = `catalog-${ids.taskId}`;
-  await db.insert(agentCatalog).values({
+  await db.insert(harnessCatalog).values({
     id: catalogId,
     workspaceId: ids.workspaceId,
     key: "claude_code",
@@ -152,9 +152,9 @@ async function seedRun(
     subscriptionEnvVar: "CLAUDE_CODE_OAUTH_TOKEN",
     meteredEnvVar: "ANTHROPIC_API_KEY",
   });
-  const agentId = `agent-${ids.taskId}`;
-  await db.insert(agentProfile).values({
-    id: agentId,
+  const harnessId = `harness-${ids.taskId}`;
+  await db.insert(harnessProfile).values({
+    id: harnessId,
     workspaceId: ids.workspaceId,
     name: "Claude",
     agentCatalogId: catalogId,
@@ -188,7 +188,7 @@ async function seedRun(
     issueId,
     title: "Task",
     state: "running",
-    agentProfileId: agentId,
+    agentProfileId: harnessId,
     executorProfileId: executorId,
   });
   await db.insert(taskRepository).values({
@@ -276,10 +276,10 @@ function retryingStep(decisions: ScriptedDecision[], retryStepId: string): StepL
   };
 }
 
-/** Fake agent runner returning queued outcomes; records how many times it started. */
+/** Fake harness runner returning queued outcomes; records how many times it started. */
 /**
- * An agent that declares itself finished and then **does not exit** — the real behaviour of a
- * CLI agent that waits for whatever the operator wants next.
+ * A harness that declares itself finished and then **does not exit** — the real behaviour of a
+ * CLI harness that waits for whatever the operator wants next.
  *
  * Its `outcome` only resolves once `stop()` is called, which is exactly the contract the
  * lifecycle now relies on: the declaration ends the round, the runner is torn down, and the
@@ -287,19 +287,19 @@ function retryingStep(decisions: ScriptedDecision[], retryStepId: string): StepL
  * going to leave, the request outlived Inngest's execution budget, and the run was retried from
  * the top for ever — so the review gate below it never ran.
  */
-class DeclaringRunner implements AgentRunner {
+class DeclaringRunner implements HarnessRunner {
   starts = 0;
   stops = 0;
-  start(opts: AgentStartOpts): AgentHandle {
+  start(opts: HarnessStartOpts): HarnessHandle {
     this.starts += 1;
-    // The declaration, as a fenced widget in the model's own prose — the path a real agent takes.
+    // The declaration, as a fenced widget in the model's own prose — the path a real harness takes.
     opts.onEvent({
       kind: "stdout",
       channel: "assistant",
       text: '```solow:widget\n{"kind":"task_complete","outcome":"changes_ready","summary":"done"}\n```\n',
     });
-    let settle: (outcome: AgentOutcome) => void = () => {};
-    const outcome = new Promise<AgentOutcome>((resolve) => {
+    let settle: (outcome: HarnessOutcome) => void = () => {};
+    const outcome = new Promise<HarnessOutcome>((resolve) => {
       settle = resolve;
     });
     return {
@@ -316,7 +316,7 @@ class DeclaringRunner implements AgentRunner {
   }
 }
 
-class ScriptedRunner implements AgentRunner {
+class ScriptedRunner implements HarnessRunner {
   starts = 0;
   /** How many times the lifecycle asked this run to stop — asserted by the abandon path. */
   stops = 0;
@@ -330,13 +330,13 @@ class ScriptedRunner implements AgentRunner {
   readonly cwds: string[] = [];
   readonly worktreeNames: (string | null)[] = [];
   constructor(
-    private readonly outcomes: AgentOutcome[],
-    /** Events each run emits, so a test can script an agent asking for a permission (#58). */
-    private readonly events: AgentStreamEvent[] = [
+    private readonly outcomes: HarnessOutcome[],
+    /** Events each run emits, so a test can script a harness asking for a permission (#58). */
+    private readonly events: HarnessStreamEvent[] = [
       { kind: "stdout", channel: "assistant", text: "working" },
     ],
   ) {}
-  start(opts: AgentStartOpts): AgentHandle {
+  start(opts: HarnessStartOpts): HarnessHandle {
     this.starts += 1;
     this.prompts.push(opts.prompt);
     this.commands.push(opts.command);
@@ -347,7 +347,7 @@ class ScriptedRunner implements AgentRunner {
     const outcome = this.outcomes.shift() ?? { kind: "completed" };
     return {
       outcome: Promise.resolve(outcome),
-      // The worktree the agent reports: the one it was asked to create, or — when resuming —
+      // The worktree the harness reports: the one it was asked to create, or — when resuming —
       // the one it is already running in.
       workspacePath: Promise.resolve<string | null>(
         opts.worktreeName ? `/wt/${opts.worktreeName}` : opts.cwd,
@@ -367,7 +367,7 @@ interface Spies {
   published: Array<{ channel: string; event: Record<string, unknown> }>;
   /** Every setup-file copy the lifecycle asked for (issue #52), in order. */
   seeded: Array<{ repoPath: string; worktreePath: string; patterns: string[] }>;
-  /** Worktrees SoloW created itself, for a protocol whose agent cannot (issue #58). */
+  /** Worktrees SoloW created itself, for a protocol whose harness cannot (issue #58). */
   provisioned: string[];
   /** What each of those was asked to branch, and from where (issue #7 AC-1). */
   provisionedFrom: Array<{ path: string; baseRef: string | null; checkoutBranch: string | null }>;
@@ -385,7 +385,7 @@ interface Spies {
 /**
  * A stand-in for the executor the lifecycle now builds per run (issue #96).
  *
- * `baseEnv` answers what the local driver answers, because that is what the agent environment
+ * `baseEnv` answers what the local driver answers, because that is what the harness environment
  * was shaped from before the seam existed and none of these tests are about the change. Only
  * `dispose` is observed: it is the one member the lifecycle itself calls, and the `finally` that
  * calls it is new behaviour worth pinning.
@@ -421,7 +421,7 @@ function fakeExecutor(): Executor & { disposed: number } {
 
 function makeDeps(
   db: TestDb,
-  runner: AgentRunner,
+  runner: HarnessRunner,
   logStream: NodeJS.WritableStream,
 ): {
   deps: TaskRunDeps;
@@ -469,9 +469,9 @@ function makeDeps(
         repoPath: p.attachmentId ? `/repo/${p.taskId}--${p.attachmentId}` : `/repo/${p.taskId}`,
       };
     },
-    // Stands in for git confirming the agent's worktree really belongs to the repository.
+    // Stands in for git confirming the harness's worktree really belongs to the repository.
     adopt: async (repoPath, reported) => {
-      if (!reported) throw new Error("agent did not report a workspace");
+      if (!reported) throw new Error("harness did not report a workspace");
       // `claude --worktree <name>` names the branch after the worktree, and the real `adopt`
       // reads whatever git reports; the fake mirrors that shape.
       return { path: reported, branch: reported.split("/").pop() ?? "", repoPath };
@@ -517,7 +517,7 @@ function makeDeps(
     executorFor: () => executor,
     // A host that is ready. The failure path is driven by the tests that override this — nothing
     // here should reach a daemon.
-    preflight: async () => ({ ok: true, agentCommands: [] }),
+    preflight: async () => ({ ok: true, harnessCommands: [] }),
     worktreeRoot: "/wt",
     repoCacheRoot: "/cache",
     logger: createLogger({ service: "orchestrator", destination: logStream }),
@@ -528,7 +528,7 @@ function makeDeps(
       publish: (channel, event) =>
         spies.published.push({ channel, event: event as Record<string, unknown> }),
     },
-    registry: new AgentRegistry(),
+    registry: new HarnessRegistry(),
   };
   return { deps, spies, ops, executor };
 }
@@ -583,7 +583,7 @@ describe("runTaskLifecycle (integration)", () => {
     expect(spies.commit).toBe(0);
   });
 
-  it("request_changes loops the agent, then approve completes it", async () => {
+  it("request_changes loops the harness, then approve completes it", async () => {
     const ids = freshIds();
     await seedRun(db, ids);
     const runner = new ScriptedRunner([{ kind: "completed" }, { kind: "completed" }]);
@@ -654,11 +654,11 @@ describe("runTaskLifecycle (integration)", () => {
       },
     };
 
-    // Read at the moment each round's agent is started, because *when* the row is clean is the
+    // Read at the moment each round's harness is started, because *when* the row is clean is the
     // whole property: a clear that landed after the executor had built its container would leave
     // the window this closes exactly as wide as it was.
     const atStart: Array<Promise<string>> = [];
-    const watched: AgentRunner = {
+    const watched: HarnessRunner = {
       start: (opts) => {
         atStart.push(taskFailureReason(db, ids.taskId));
         return runner.start(opts);
@@ -746,7 +746,7 @@ describe("runTaskLifecycle (integration)", () => {
     // Read where the round actually begins, for the same reason the case above does: a revert
     // that landed and was corrected later would still have raced whatever the operator did next.
     const atStart: Array<Promise<string>> = [];
-    const watched: AgentRunner = {
+    const watched: HarnessRunner = {
       start: (opts) => {
         atStart.push(taskState(db, ids.taskId));
         return runner.start(opts);
@@ -806,14 +806,14 @@ describe("runTaskLifecycle (integration)", () => {
     expect(await taskState(db, b.taskId)).toBe("failed");
   });
 
-  it("persists streamed agent events so a reconnecting client can replay them (TASK-018)", async () => {
+  it("persists streamed harness events so a reconnecting client can replay them (TASK-018)", async () => {
     const ids = freshIds();
     await seedRun(db, ids);
     const { deps } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
 
     await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
-    // Filtered to the agent's own turns: the log also carries the diff captured at the review
+    // Filtered to the harness's own turns: the log also carries the diff captured at the review
     // gate and the state transitions the run announced.
     const logged = (
       await db.select().from(sessionEvent).where(eq(sessionEvent.sessionId, ids.sessionId))
@@ -873,7 +873,7 @@ describe("runTaskLifecycle (integration)", () => {
 
   it("announces a state change to the Task's own channel as well as the board", async () => {
     // The bug: it went to the board alone, so the Task page — the one place dedicated to this
-    // very Task — kept saying the agent was writing until somebody reloaded. Every `diff` already
+    // very Task — kept saying the harness was writing until somebody reloaded. Every `diff` already
     // went to both; the status was the one that did not.
     const ids = freshIds();
     await seedRun(db, ids);
@@ -897,7 +897,7 @@ describe("runTaskLifecycle (integration)", () => {
 
     await runTaskLifecycle(deps, { event: { data: a }, step: scriptedStep(["approve"]) });
 
-    // One agent turn, the marker saying it finished, the diff captured at the gate, and the one
+    // One harness turn, the marker saying it finished, the diff captured at the gate, and the one
     // transition the run still records — `review → done` on approval. It no longer writes a
     // `running → review`, because entering review is the operator's move now.
     expect(await listTaskEventsSince(db, a.workspaceId, a.taskId, -1)).toHaveLength(4);
@@ -931,7 +931,7 @@ describe("runTaskLifecycle (integration)", () => {
    * what it publishes: the record is what a snapshot carries, what redaction reads, and what a
    * reviewer sees after the socket is gone.
    */
-  it("records an assistant turn, a user turn and a notice from the channels the agent reported", async () => {
+  it("records an assistant turn, a user turn and a notice from the channels the harness reported", async () => {
     const ids = freshIds();
     await seedRun(db, ids);
     const runner = new ScriptedRunner(
@@ -984,7 +984,7 @@ describe("runTaskLifecycle (integration)", () => {
       truncated: false,
     });
     // The presentation marker is applied on the way to the wire and never stored, so what #16
-    // and #84 read back is the agent's own text.
+    // and #84 read back is the harness's own text.
     expect(JSON.stringify(logged)).not.toContain("· considering");
   });
 
@@ -1036,7 +1036,7 @@ describe("runTaskLifecycle (integration)", () => {
      *
      * Completion used to exist only as the run function's return value — real, in memory, and
      * recorded nowhere until `to-review` acted on it two steps later. Anything that lost the run
-     * in between left no evidence the agent had ever finished, and the reclaim sweep, unable to
+     * in between left no evidence the harness had ever finished, and the reclaim sweep, unable to
      * tell that from dying mid-work, filed it as a failure. The marker has to be in the log
      * *before* the transition, or it is not worth having.
      */
@@ -1057,7 +1057,7 @@ describe("runTaskLifecycle (integration)", () => {
     const diffAt = payloads.findIndex((p) => p.kind === "diff");
     expect(doneAt).toBeGreaterThanOrEqual(0);
     // Strictly before the gate step's own work, which is the whole property: the marker is
-    // written inside the step that learned the agent finished, not two steps later where a
+    // written inside the step that learned the harness finished, not two steps later where a
     // restart could lose it.
     expect(doneAt).toBeLessThan(diffAt);
     // And it carries the branch, because that is what a sweep would need to finish the job.
@@ -1109,11 +1109,11 @@ describe("runTaskLifecycle (integration)", () => {
     expect(transitions).toEqual([{ kind: "state", from: "review", to: "done" }]);
   });
 
-  it("redacts a credential the agent printed instead of storing it in a payload (Principle IV)", async () => {
+  it("redacts a credential the harness printed instead of storing it in a payload (Principle IV)", async () => {
     // The log is the one record that outlives the run and travels — into a snapshot (#16), into
-    // an agent's context (#84). A secret that reaches a payload is a secret that leaves with it,
-    // and the realistic way one gets there is the agent echoing its own environment. So the
-    // agent is scripted doing exactly that, in the two places a value can hide: a line of
+    // a harness's context (#84). A secret that reaches a payload is a secret that leaves with it,
+    // and the realistic way one gets there is the harness echoing its own environment. So the
+    // harness is scripted doing exactly that, in the two places a value can hide: a line of
     // output, and a tool name.
     const ids = freshIds();
     await seedRun(db, ids);
@@ -1149,7 +1149,7 @@ describe("runTaskLifecycle (integration)", () => {
     expect(payloads).not.toContain("oauth-token");
     expect(payloads).not.toContain(ciphertext);
     // The line is kept, minus the value: a transcript with the sentence removed would hide from
-    // a reviewer that the agent printed its token at all.
+    // a reviewer that the harness printed its token at all.
     expect(payloads).toContain("[redacted]");
     // The variable's *name* is not a secret, and redacting it would tell a reviewer less.
     expect(payloads).toContain("CLAUDE_CODE_OAUTH_TOKEN");
@@ -1197,7 +1197,7 @@ describe("runTaskLifecycle (integration)", () => {
     await seedRun(db, ids);
     // A round long enough to cross the compaction threshold. Anything shorter proves only that
     // the step ran, not that it did the thing.
-    const chatter: AgentStreamEvent[] = Array.from({ length: 520 }, (_, i) => ({
+    const chatter: HarnessStreamEvent[] = Array.from({ length: 520 }, (_, i) => ({
       kind: "stdout" as const,
       channel: "assistant" as const,
       text: `line ${i}\n`,
@@ -1230,7 +1230,7 @@ describe("runTaskLifecycle (integration)", () => {
   });
 });
 
-describe("the brief the agent is given", () => {
+describe("the brief the harness is given", () => {
   let db: TestDb;
 
   beforeAll(() => {
@@ -1255,16 +1255,16 @@ describe("the brief the agent is given", () => {
     });
 
     expect(runner.prompts).toHaveLength(2);
-    // Without this the second round repeats the first brief verbatim and the agent has no
+    // Without this the second round repeats the first brief verbatim and the harness has no
     // reason to produce anything different — request-changes would be a no-op loop.
     expect(runner.prompts[0]).not.toContain("Add a regression test");
     expect(runner.prompts[1]).toContain("Add a regression test for the latch.");
   });
 
-  it("tells the agent the round is a redo even when the reviewer wrote nothing", async () => {
+  it("tells the harness the round is a redo even when the reviewer wrote nothing", async () => {
     // The review gate no longer collects feedback, so this is now the ordinary shape of a
     // Request changes. Each round is a fresh process with no memory of the last, so a brief
-    // identical to round one's hands the agent the original instructions in a worktree that
+    // identical to round one's hands the harness the original instructions in a worktree that
     // already holds its own rejected work, with nothing anywhere saying it was turned down.
     const ids = freshIds();
     await seedRun(db, ids);
@@ -1280,7 +1280,7 @@ describe("the brief the agent is given", () => {
     expect(runner.prompts[1]).toContain("Your previous attempt was not accepted.");
   });
 
-  it("describes the Task and its Issue so the agent knows what to do", async () => {
+  it("describes the Task and its Issue so the harness knows what to do", async () => {
     const ids = freshIds();
     await seedRun(db, ids);
     const runner = new ScriptedRunner([{ kind: "completed" }]);
@@ -1292,17 +1292,17 @@ describe("the brief the agent is given", () => {
     expect(runner.prompts[0]).toContain("Issue");
   });
 
-  it("publishes the running agent so the terminal can steer it, and withdraws it after", async () => {
+  it("publishes the running harness so the terminal can steer it, and withdraws it after", async () => {
     const ids = freshIds();
     await seedRun(db, ids);
-    const registry = new AgentRegistry();
+    const registry = new HarnessRegistry();
     const seen: boolean[] = [];
     // A runner that checks, from inside the run, whether the hub could have found it.
-    const runner: AgentRunner = {
-      start(opts: AgentStartOpts): AgentHandle {
+    const runner: HarnessRunner = {
+      start(opts: HarnessStartOpts): HarnessHandle {
         opts.onEvent({ kind: "stdout", channel: "assistant", text: "working" });
         return {
-          outcome: Promise.resolve({ kind: "completed" } as AgentOutcome).then((o) => {
+          outcome: Promise.resolve({ kind: "completed" } as HarnessOutcome).then((o) => {
             seen.push(registry.get(ids.workspaceId, ids.taskId) !== undefined);
             return o;
           }),
@@ -1325,14 +1325,14 @@ describe("the brief the agent is given", () => {
     );
 
     expect(seen).toEqual([true]);
-    // Once the run is over there is no agent to steer, and a stale handle would let the
+    // Once the run is over there is no harness to steer, and a stale handle would let the
     // terminal appear to send input into a dead process.
     expect(registry.get(ids.workspaceId, ids.taskId)).toBeUndefined();
   });
 });
 
 /** One completed turn, which is what the mid-run diff capture keys off. */
-function usageEvent(messageId: string): AgentStreamEvent {
+function usageEvent(messageId: string): HarnessStreamEvent {
   return {
     kind: "usage",
     messageId,
@@ -1390,7 +1390,7 @@ describe("the diff a reviewer is shown", () => {
   });
 
   it("is captured at a turn boundary too, so a live run can be watched", async () => {
-    // The reason this exists: an agent that finishes a turn by asking "shall I commit this?"
+    // The reason this exists: a harness that finishes a turn by asking "shall I commit this?"
     // has real work in its worktree and, with only the gate capturing, nothing in the log for
     // the Changes panel to render. The operator answered blind.
     const ids = freshIds();
@@ -1414,7 +1414,7 @@ describe("the diff a reviewer is shown", () => {
       diffRef: `solow-task-${ids.taskId}`,
       files: [{ path: "src/latch.ts", status: "modified", additions: 4, deletions: 1 }],
     });
-    // Before the marker that says the agent finished — which is the whole point: the record
+    // Before the marker that says the harness finished — which is the whole point: the record
     // existed while the run was still open.
     expect(finished).toBeDefined();
     expect(firstDiff?.seq).toBeLessThan(finished?.seq ?? -1);
@@ -1509,7 +1509,7 @@ describe("the diff a reviewer is shown", () => {
      * read — and the answer to it is no longer "refuse" but "build the executor the profile
      * names". So the first half now pins *which* executor the run was given, and the second
      * keeps the guarantee that mattered: a container that cannot be provided fails the Task,
-     * legibly, before the agent starts.
+     * legibly, before the harness starts.
      */
     it("builds the executor from the Task's own profile, mounted for the work ahead (#96)", async () => {
       const ids = freshIds();
@@ -1681,7 +1681,7 @@ describe("the diff a reviewer is shown", () => {
 
       expect(result.result).toBe("failed");
       expect(await taskState(db, ids.taskId)).toBe("failed");
-      // The user asked for a container. Running the agent anywhere else and reporting success
+      // The user asked for a container. Running the harness anywhere else and reporting success
       // would be the product silently ignoring the isolation it was asked for.
       expect(runner.starts).toBe(0);
       expect(spies.commit).toBe(0);
@@ -1699,7 +1699,7 @@ describe("the diff a reviewer is shown", () => {
       expect(states).toHaveLength(1);
     });
 
-    it("hands the profile's environment to the agent process", async () => {
+    it("hands the profile's environment to the harness process", async () => {
       const ids = freshIds();
       await seedRun(db, ids, {
         executorConfig: { kind: "local", env: { BUILD_FLAVOUR: "debug" } },
@@ -1799,8 +1799,8 @@ describe("resuming a Task that has become blocked (issue #6)", () => {
 
     expect(result.result).toBe("blocked_by_dependency");
     expect(await taskState(db, ids.taskId)).toBe("failed");
-    // The agent must not have been started a second time — a refused resume that still ran the
-    // agent would be the gate reporting a refusal it did not actually apply.
+    // The harness must not have been started a second time — a refused resume that still ran the
+    // harness would be the gate reporting a refusal it did not actually apply.
     expect(runner.starts).toBe(1);
   });
 
@@ -1845,7 +1845,7 @@ describe("resuming a Task that has become blocked (issue #6)", () => {
   });
 });
 
-describe("setup files copied into the agent's worktree (issue #52)", () => {
+describe("setup files copied into the harness's worktree (issue #52)", () => {
   let db: TestDb;
 
   beforeAll(() => {
@@ -1855,7 +1855,7 @@ describe("setup files copied into the agent's worktree (issue #52)", () => {
     db = createTestDb();
   });
 
-  it("copies them into the worktree the agent reported, from the Repository the Owner has", async () => {
+  it("copies them into the worktree the harness reported, from the Repository the Owner has", async () => {
     const ids = freshIds();
     await seedRun(db, ids, { setupFilePatterns: [".env", "config/local.json"] });
     const { deps, spies } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
@@ -1953,13 +1953,13 @@ describe("the worktree a Task runs in", () => {
   });
 
   /** Records what each round was asked to do about its worktree. */
-  class WorktreeRecordingRunner implements AgentRunner {
+  class WorktreeRecordingRunner implements HarnessRunner {
     readonly asked: Array<{ cwd: string; worktreeName: string | null }> = [];
-    start(opts: AgentStartOpts): AgentHandle {
+    start(opts: HarnessStartOpts): HarnessHandle {
       this.asked.push({ cwd: opts.cwd, worktreeName: opts.worktreeName });
       opts.onEvent({ kind: "stdout", channel: "assistant", text: "working" });
       return {
-        outcome: Promise.resolve<AgentOutcome>({ kind: "completed" }),
+        outcome: Promise.resolve<HarnessOutcome>({ kind: "completed" }),
         workspacePath: Promise.resolve<string | null>(
           opts.worktreeName ? `/wt/${opts.worktreeName}` : opts.cwd,
         ),
@@ -1977,7 +1977,7 @@ describe("the worktree a Task runs in", () => {
    * whatever was on disk. Only the tests ever inserted a row, which is why nothing caught it.
    */
   describe("the row that says the directory exists", () => {
-    it("is written for the worktree the agent made and SoloW adopted", async () => {
+    it("is written for the worktree the harness made and SoloW adopted", async () => {
       const ids = freshIds();
       await seedRun(db, ids);
       // A hard failure preserves the worktree, so the row can be observed still active.
@@ -2048,7 +2048,7 @@ describe("the worktree a Task runs in", () => {
     });
   });
 
-  it("asks the agent to create one worktree, named after the Task", async () => {
+  it("asks the harness to create one worktree, named after the Task", async () => {
     const ids = freshIds();
     await seedRun(db, ids);
     const runner = new WorktreeRecordingRunner();
@@ -2083,16 +2083,16 @@ describe("the worktree a Task runs in", () => {
     });
   });
 
-  it("fails the Task when the agent never reports a workspace", async () => {
-    // No reported workspace means nothing confirmed the agent was isolated. Committing from
+  it("fails the Task when the harness never reports a workspace", async () => {
+    // No reported workspace means nothing confirmed the harness was isolated. Committing from
     // wherever it happened to be pointing would be worse than failing.
     const ids = freshIds();
     await seedRun(db, ids);
-    const runner: AgentRunner = {
-      start(opts: AgentStartOpts): AgentHandle {
+    const runner: HarnessRunner = {
+      start(opts: HarnessStartOpts): HarnessHandle {
         opts.onEvent({ kind: "stdout", channel: "assistant", text: "working" });
         return {
-          outcome: Promise.resolve<AgentOutcome>({ kind: "completed" }),
+          outcome: Promise.resolve<HarnessOutcome>({ kind: "completed" }),
           workspacePath: Promise.resolve<string | null>(null),
           send: async () => true,
           stop: async () => {},
@@ -2110,7 +2110,7 @@ describe("the worktree a Task runs in", () => {
     expect(await taskState(db, ids.taskId)).toBe("failed");
   });
 
-  it("cleans up the worktree the agent made, not one SoloW guessed at", async () => {
+  it("cleans up the worktree the harness made, not one SoloW guessed at", async () => {
     const ids = freshIds();
     await seedRun(db, ids);
     const runner = new WorktreeRecordingRunner();
@@ -2134,8 +2134,8 @@ describe("the worktree a Task runs in", () => {
     expect(spies.commit).toBe(1);
   });
 
-  describe("agent catalog (issue #10)", () => {
-    it("fails a Task whose Agent catalog protocol has no runner, rather than crashing inside one", async () => {
+  describe("harness catalog (issue #10)", () => {
+    it("fails a Task whose Harness catalog protocol has no runner, rather than crashing inside one", async () => {
       const ids = freshIds();
       /*
        * Every protocol the enum names now has a driver (#21's passthrough was the last, 2026-08-28),
@@ -2145,11 +2145,11 @@ describe("the worktree a Task runs in", () => {
        * build that shipped a fourth protocol still opens in one that did not, exactly the orphan
        * degradation F21 describes for provider ids.
        *
-       * The guarantee is unchanged and is the whole point: fail before an agent is started, with
+       * The guarantee is unchanged and is the whole point: fail before a harness is started, with
        * the protocol named, rather than crashing inside a runner or falling through to whichever
        * one the switch happened to reach.
        */
-      await seedRun(db, ids, { agentProtocol: "protocol_from_a_newer_build" as AgentProtocol });
+      await seedRun(db, ids, { agentProtocol: "protocol_from_a_newer_build" as HarnessProtocol });
       const runner = new ScriptedRunner([{ kind: "completed" }]);
       const { deps, spies } = makeDeps(db, runner, nullStream());
 
@@ -2166,7 +2166,7 @@ describe("the worktree a Task runs in", () => {
       expect(row?.failureReason).toContain("protocol_from_a_newer_build");
     });
 
-    it("launches the agent with the command the catalog row declares, not a global env var", async () => {
+    it("launches the harness with the command the catalog row declares, not a global env var", async () => {
       const ids = freshIds();
       await seedRun(db, ids);
       const runner = new ScriptedRunner([{ kind: "completed" }]);
@@ -2196,7 +2196,7 @@ describe("the worktree a Task runs in", () => {
 /**
  * The lifecycle over ACP (issue #58). What changes between the two protocols is exactly one
  * thing — who creates the worktree — and these pin that down along with the two consequences
- * that matter downstream: the same credential shaping applies, and a permission the agent asks
+ * that matter downstream: the same credential shaping applies, and a permission the harness asks
  * for reaches both the live stream and the durable session log.
  */
 describe("a Task driven over ACP (issue #58)", () => {
@@ -2226,7 +2226,7 @@ describe("a Task driven over ACP (issue #58)", () => {
     expect(spies.commit).toBe(1);
   });
 
-  it("provisions the worktree itself and asks the agent to make none", async () => {
+  it("provisions the worktree itself and asks the harness to make none", async () => {
     // An ACP agent has no `--worktree`: it works where it is told. The isolation guarantee is
     // unchanged (Principle II) — only who runs `git worktree add` moves.
     const ids = freshIds();
@@ -2254,7 +2254,7 @@ describe("a Task driven over ACP (issue #58)", () => {
     expect(runner.cwds).toEqual([`/repo/${ids.taskId}`]);
   });
 
-  it("still hands the agent only the credential the billing guard shaped (AC-5)", async () => {
+  it("still hands the harness only the credential the billing guard shaped (AC-5)", async () => {
     const ids = freshIds();
     await seedRun(db, ids, {
       agentProtocol: "acp",
@@ -2361,7 +2361,7 @@ describe("a Task driven over ACP (issue #58)", () => {
     expect(result.result).toBe("worktree_unavailable");
     expect(await taskState(db, ids.taskId)).toBe("failed");
     expect(await taskFailureReason(db, ids.taskId)).toContain("worktree");
-    // No agent was started, and the board heard about the failure.
+    // No harness was started, and the board heard about the failure.
     expect(runner.starts).toBe(0);
     expect(spies.published.some((p) => p.event["state"] === "failed")).toBe(true);
   });
@@ -2386,7 +2386,7 @@ describe("a Task driven over ACP (issue #58)", () => {
 /**
  * Multi-repository Tasks (issue #7). What changes between one Repository and several is plural
  * iteration — provisioning, diff capture, commit, discard, cleanup — plus one thing that does
- * *not* go plural and is stated here rather than assumed: the agent runs in exactly one working
+ * *not* go plural and is stated here rather than assumed: the harness runs in exactly one working
  * directory, and the others are named to it in the brief.
  */
 describe("a Task spanning several Repositories (issue #7)", () => {
@@ -2417,7 +2417,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
     expect(new Set(spies.provisioned).size).toBe(2);
   });
 
-  it("AC-2: still lets the Claude Code agent make its own primary, and makes the rest itself", async () => {
+  it("AC-2: still lets the Claude Code harness make its own primary, and makes the rest itself", async () => {
     const ids = freshIds();
     await seedRun(db, ids, twoRepositories);
     const runner = new ScriptedRunner([{ kind: "completed" }]);
@@ -2425,7 +2425,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
 
     await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
-    // Only the secondary is provisioned by SoloW; the agent is still asked for its own.
+    // Only the secondary is provisioned by SoloW; the harness is still asked for its own.
     expect(spies.provisioned).toEqual([
       `/wt/solow-task-${ids.taskId}--${attachmentId(ids.taskId, "lib")}`,
     ]);
@@ -2486,7 +2486,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
     expect(notice).toContain("index.lock exists");
   });
 
-  it("AC-3: fails the Task naming the Repository it could not prepare, before any agent starts", async () => {
+  it("AC-3: fails the Task naming the Repository it could not prepare, before any harness starts", async () => {
     const ids = freshIds();
     await seedRun(db, ids, twoRepositories);
     const runner = new ScriptedRunner([{ kind: "completed" }]);
@@ -2553,7 +2553,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
         checkoutBranch: `solow/task-${ids.taskId}`,
       },
     ]);
-    // The agent is started inside the worktree SoloW made, and asked for none of its own.
+    // The harness is started inside the worktree SoloW made, and asked for none of its own.
     expect(runner.cwds).toEqual([`/wt/solow-task-${ids.taskId}`]);
     expect(runner.worktreeNames).toEqual([null]);
   });
@@ -2576,9 +2576,9 @@ describe("a Task spanning several Repositories (issue #7)", () => {
     expect(runner.worktreeNames).toEqual([null]);
   });
 
-  it("names in the brief the branch the agent is on, not the one the attachment stores", async () => {
-    // The brief is the *only* mechanism by which a multi-repository agent learns its layout, so
-    // a branch line it cannot act on is worse than none. A `--worktree` agent names its own
+  it("names in the brief the branch the harness is on, not the one the attachment stores", async () => {
+    // The brief is the *only* mechanism by which a multi-repository harness learns its layout, so
+    // a branch line it cannot act on is worse than none. A `--worktree` harness names its own
     // branch (`solow-task-<id>`), which the attachment's `solow/task-<id>` is not.
     const ids = freshIds();
     await seedRun(db, ids, {
@@ -2810,8 +2810,8 @@ describe("a Task spanning several Repositories (issue #7)", () => {
     expect(seededByPatterns[".env"]).not.toBe(seededByPatterns["config/local.json"]);
   });
 
-  it("the stated limitation: the agent runs in the primary worktree and is told where the others are", async () => {
-    // This is the one thing that does not go plural. An agent process gets one `cwd`, so the
+  it("the stated limitation: the harness runs in the primary worktree and is told where the others are", async () => {
+    // This is the one thing that does not go plural. A harness process gets one `cwd`, so the
     // only way it can reach a second repository is by being told the absolute path — which is
     // why this is a test with a name rather than an assumption behind an index.
     const ids = freshIds();
@@ -2840,7 +2840,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
     expect(runner.prompts[0]).not.toContain("# Repositories");
   });
 
-  it("starts the agent in the position-0 attachment, whatever order the rows were written in", async () => {
+  it("starts the harness in the position-0 attachment, whatever order the rows were written in", async () => {
     const ids = freshIds();
     await seedRun(db, ids, { agentProtocol: "acp", ...twoRepositories });
     // Swap the positions, via a spare slot: `(task_id, position)` is unique precisely so that
@@ -2889,9 +2889,9 @@ describe("a Task spanning several Repositories (issue #7)", () => {
 });
 
 /**
- * Approving a Task whose agent only touched some of its Repositories (issue #7).
+ * Approving a Task whose harness only touched some of its Repositories (issue #7).
  *
- * This is the ordinary case, not an exotic one: the agent runs in exactly one working
+ * This is the ordinary case, not an exotic one: the harness runs in exactly one working
  * directory, so a Task spanning three repositories routinely reaches the gate having changed
  * one of them.
  */
@@ -2916,7 +2916,7 @@ describe("approving a multi-Repository Task that changed only some of them", () 
       new ScriptedRunner([{ kind: "completed" }]),
       nullStream(),
     );
-    // The agent worked in the primary and never went near the secondary.
+    // The harness worked in the primary and never went near the secondary.
     ops.hasChanges = async (path) => !path.includes("--");
 
     const result = await runTaskLifecycle(deps, {
@@ -2942,7 +2942,7 @@ describe("approving a multi-Repository Task that changed only some of them", () 
 });
 
 /**
- * Agent widgets (`ff-agent-widgets`): the run teaches the agent the fence, lifts what it emits
+ * Harness widgets (`ff-agent-widgets`): the run teaches the harness the fence, lifts what it emits
  * out of the prose, and records it as its own event — so a client can draw the thing rather than
  * printing the JSON that described it.
  */
@@ -2952,20 +2952,20 @@ describe("task-run permission mode", () => {
     db = createTestDb();
   });
 
-  it("builds the runner with the Agent Profile's own permission mode", async () => {
+  it("builds the runner with the Harness Profile's own permission mode", async () => {
     const ids = freshIds();
     await seedRun(db, ids);
     await db
-      .update(agentProfile)
+      .update(harnessProfile)
       .set({ permissionMode: "bypassPermissions" })
-      .where(eq(agentProfile.id, (await seededProfileId(db, ids)) ?? ""));
+      .where(eq(harnessProfile.id, (await seededProfileId(db, ids)) ?? ""));
 
     const runner = new ScriptedRunner([{ kind: "completed" }]);
     const { deps } = makeDeps(db, runner, nullStream());
     const asked: Array<string | undefined> = [];
     const wrapped = {
       ...deps,
-      runner: (protocol: AgentProtocol, settings: AgentLaunchSettings, executor: Executor) => {
+      runner: (protocol: HarnessProtocol, settings: HarnessLaunchSettings, executor: Executor) => {
         asked.push(settings.permissionMode);
         return deps.runner(protocol, settings, executor);
       },
@@ -2986,7 +2986,7 @@ describe("task-run permission mode", () => {
     const asked: Array<string | undefined> = [];
     const wrapped = {
       ...deps,
-      runner: (protocol: AgentProtocol, settings: AgentLaunchSettings, executor: Executor) => {
+      runner: (protocol: HarnessProtocol, settings: HarnessLaunchSettings, executor: Executor) => {
         asked.push(settings.permissionMode);
         return deps.runner(protocol, settings, executor);
       },
@@ -2997,7 +2997,7 @@ describe("task-run permission mode", () => {
   });
 });
 
-/** The Agent Profile `seedRun` created for this run. */
+/** The Harness Profile `seedRun` created for this run. */
 async function seededProfileId(db: TestDb, ids: { taskId: string }): Promise<string | undefined> {
   const [row] = await db
     .select({ id: task.agentProfileId })
@@ -3023,9 +3023,9 @@ describe("task-run widgets", () => {
       .where(eq(workspace.id, ids.workspaceId));
   }
 
-  it("records what the agent said about stopping, when it said anything", async () => {
+  it("records what the harness said about stopping, when it said anything", async () => {
     // Without a `task_complete` the marker still gets written — the fix must not depend on an
-    // agent knowing SoloW exists — so this is about the enrichment, not the mechanism.
+    // harness knowing SoloW exists — so this is about the enrichment, not the mechanism.
     const ids = freshIds();
     await seedRun(db, ids);
     await enableWidgets(ids);
@@ -3174,12 +3174,12 @@ describe("task-run widgets", () => {
 });
 
 /**
- * A Task deleted while its agent is still streaming (observed in a dev run: one
+ * A Task deleted while its harness is still streaming (observed in a dev run: one
  * `FOREIGN KEY constraint failed` per chunk of output, at `session-event-append`).
  *
- * Cancellation happens between Inngest steps and stopping an agent is a request rather than an
+ * Cancellation happens between Inngest steps and stopping a harness is a request rather than an
  * instant, so this window is real by design. What is not acceptable is what the window used to
- * cost: a stack trace per event, an agent left running for a review nobody will ever hold, and a
+ * cost: a stack trace per event, a harness left running for a review nobody will ever hold, and a
  * round that carries on writing to rows that are gone.
  */
 describe("task-run when its Session is deleted mid-run", () => {
@@ -3188,7 +3188,7 @@ describe("task-run when its Session is deleted mid-run", () => {
     db = createTestDb();
   });
 
-  it("stops the agent and abandons the round instead of failing per event", async () => {
+  it("stops the harness and abandons the round instead of failing per event", async () => {
     const ids = freshIds();
     await seedRun(db, ids);
     // Exactly what `cascadeDeleteTasks` does when the Task is force-deleted underneath the run.
@@ -3210,7 +3210,7 @@ describe("task-run when its Session is deleted mid-run", () => {
 
     // The run ends by saying what happened, rather than throwing its way through the review gate.
     expect(result).toEqual({ taskId: ids.taskId, result: "abandoned" });
-    // And the agent is not left burning tokens for a Task that no longer exists.
+    // And the harness is not left burning tokens for a Task that no longer exists.
     expect(runner.stops).toBe(1);
 
     // Nothing was written, because there was nowhere to write it.
@@ -3233,7 +3233,7 @@ describe("task-run when its Session is deleted mid-run", () => {
     });
 
     // The latch is only ever tripped by a missing parent row: a healthy run still reviews,
-    // still records, and never stops its own agent early.
+    // still records, and never stops its own harness early.
     expect(result.result).not.toBe("abandoned");
     expect(runner.stops).toBe(0);
   });
@@ -3256,16 +3256,16 @@ describe("widgetAnswerMessage", () => {
     expect(message.startsWith(WIDGET_ANSWER_PREFIX)).toBe(true);
   });
 
-  it("says the labels the agent wrote, and the ids it defined", () => {
+  it("says the labels the harness wrote, and the ids it defined", () => {
     const message = widgetAnswerMessage(ask, { widgetId: "w-1", values: ["sqlite"], text: null });
     expect(message).toContain("SQLite");
     expect(message).toContain("ids: sqlite");
-    // Quoted back because an agent can have more than one widget outstanding.
+    // Quoted back because a harness can have more than one widget outstanding.
     expect(message).toContain('"Which database?"');
   });
 
   it("never names this build's own widget id", () => {
-    // The id is generated after the emission, so the agent has never seen it — naming it told
+    // The id is generated after the emission, so the harness has never seen it — naming it told
     // nobody anything and was most of what made the echoed line unreadable.
     const message = widgetAnswerMessage(ask, {
       widgetId: "44ea64d3-ddf4-45ef-b3d8-c87d7d8987e4",
@@ -3288,12 +3288,12 @@ describe("widgetAnswerMessage", () => {
 /**
  * The completion gate's live half (F22 / the completion gate).
  *
- * The declaration used to reach the Task row only when the agent's *process* exited — and an
- * agent that declares and then waits for the operator does not exit. A run could sit for minutes
+ * The declaration used to reach the Task row only when the harness's *process* exited — and an
+ * harness that declares and then waits for the operator does not exit. A run could sit for minutes
  * having said `changes_ready` with the board still drawing it as working, and refreshing the page
  * would not have helped: there was nothing to fetch.
  */
-describe("the agent's completion declaration", () => {
+describe("the harness's completion declaration", () => {
   let db: TestDb;
 
   beforeAll(() => {
@@ -3311,7 +3311,7 @@ describe("the agent's completion declaration", () => {
       .where(eq(workspace.id, ids.workspaceId));
   }
 
-  const declaration = (outcome: string, summary?: string): AgentStreamEvent => ({
+  const declaration = (outcome: string, summary?: string): HarnessStreamEvent => ({
     kind: "stdout",
     channel: "assistant",
     text: [
@@ -3321,7 +3321,7 @@ describe("the agent's completion declaration", () => {
     ].join("\n"),
   });
 
-  it("reaches the Task row while the agent is still running", async () => {
+  it("reaches the Task row while the harness is still running", async () => {
     const ids = freshIds();
     await seedRun(db, ids);
     await enableWidgets(ids);
@@ -3353,8 +3353,8 @@ describe("the agent's completion declaration", () => {
     expect(statuses.some((p) => p.event["state"] === "running")).toBe(true);
   });
 
-  it("keeps the last declaration when an agent declares twice", async () => {
-    // An agent can say it is done and then keep working; what counts is the last one standing.
+  it("keeps the last declaration when a harness declares twice", async () => {
+    // A harness can say it is done and then keep working; what counts is the last one standing.
     const ids = freshIds();
     await seedRun(db, ids);
     await enableWidgets(ids);
@@ -3386,19 +3386,19 @@ describe("the agent's completion declaration", () => {
 });
 
 /**
- * An agent that declares itself finished and stays alive (issue observed end to end 2026-08-27).
+ * A harness that declares itself finished and stays alive (issue observed end to end 2026-08-27).
  *
  * This is the defect that made the whole nominal path unreachable, and it is worth stating
  * plainly because every symptom pointed somewhere else. `await handle.outcome` waits for the
- * agent **process** to exit. A CLI agent that says "changes_ready" does not exit — it waits for
+ * harness **process** to exit. A CLI harness that says "changes_ready" does not exit — it waits for
  * the operator. So the `agent-run` step never returned, Inngest never checkpointed it, the
  * platform killed the request after its execution budget, and the run was retried from the top
  * for ever. Every step below it — the review gate, `waitForEvent`, the commit — was unreachable,
- * while the agent's own side effects (its edits, its transcript, its declaration) all landed
+ * while the harness's own side effects (its edits, its transcript, its declaration) all landed
  * normally. The product looked like it was working right up to the moment approving a change
  * did nothing.
  */
-describe("an agent that declares it is finished and does not exit", () => {
+describe("a harness that declares it is finished and does not exit", () => {
   let db: TestDb;
 
   beforeAll(() => {
@@ -3428,7 +3428,7 @@ describe("an agent that declares it is finished and does not exit", () => {
       step: scriptedStep(["approve"]),
     });
 
-    // It got past the agent step at all — which is the whole claim.
+    // It got past the harness step at all — which is the whole claim.
     expect(runner.stops).toBe(1);
     expect(result.result).toBe("done");
     expect(await taskState(db, ids.taskId)).toBe("done");
@@ -3457,11 +3457,11 @@ describe("an agent that declares it is finished and does not exit", () => {
  * A Profile's launch settings reach the run it launches (issue #94, AC-1 / AC-4).
  *
  * Model and mode used to be unexpressible: every run used whatever the CLI defaulted to, and the
- * one thing a Profile could say about *how* its agent starts was the permission mode. The
+ * one thing a Profile could say about *how* its harness starts was the permission mode. The
  * canonical example — "Opus to design a plan, Sonnet to implement it, GPT to review" — is three
  * model choices, none of which had anywhere to live.
  */
-describe("an Agent Profile's launch settings", () => {
+describe("a Harness Profile's launch settings", () => {
   let db: TestDb;
 
   beforeAll(() => {
@@ -3473,12 +3473,12 @@ describe("an Agent Profile's launch settings", () => {
   });
 
   /** What the lifecycle asked the runner factory to build. */
-  async function settingsFor(ids: Ids): Promise<AgentLaunchSettings[]> {
+  async function settingsFor(ids: Ids): Promise<HarnessLaunchSettings[]> {
     const { deps } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
-    const asked: AgentLaunchSettings[] = [];
+    const asked: HarnessLaunchSettings[] = [];
     const wrapped = {
       ...deps,
-      runner: (protocol: AgentProtocol, settings: AgentLaunchSettings, executor: Executor) => {
+      runner: (protocol: HarnessProtocol, settings: HarnessLaunchSettings, executor: Executor) => {
         asked.push(settings);
         return deps.runner(protocol, settings, executor);
       },
@@ -3491,9 +3491,9 @@ describe("an Agent Profile's launch settings", () => {
     const ids = freshIds();
     await seedRun(db, ids);
     await db
-      .update(agentProfile)
+      .update(harnessProfile)
       .set({ model: "claude-opus-4", modeId: "plan" })
-      .where(eq(agentProfile.id, `agent-${ids.taskId}`));
+      .where(eq(harnessProfile.id, `harness-${ids.taskId}`));
 
     expect(await settingsFor(ids)).toEqual([
       { permissionMode: "acceptEdits", model: "claude-opus-4", modeId: "plan" },
@@ -3501,7 +3501,7 @@ describe("an Agent Profile's launch settings", () => {
   });
 
   it("pins nothing when the Profile pinned nothing", async () => {
-    // Null is the ordinary value and means "whatever the agent chooses". A default written into
+    // Null is the ordinary value and means "whatever the harness chooses". A default written into
     // the code would be a model id that rots the first time a provider retires one.
     const ids = freshIds();
     await seedRun(db, ids);
@@ -3516,9 +3516,9 @@ describe("an Agent Profile's launch settings", () => {
     const ids = freshIds();
     await seedRun(db, ids, { agentProtocol: "cli_passthrough" });
     await db
-      .update(agentProfile)
+      .update(harnessProfile)
       .set({ model: "claude-opus-4" })
-      .where(eq(agentProfile.id, `agent-${ids.taskId}`));
+      .where(eq(harnessProfile.id, `harness-${ids.taskId}`));
 
     await settingsFor(ids);
 
@@ -3535,12 +3535,12 @@ describe("an Agent Profile's launch settings", () => {
 /**
  * The catalog's capability cache is fed by the runs themselves (issue #94 AC-2).
  *
- * The cache existed from the start — `agent_catalog.capabilities`, "a cache of the agent's last
+ * The cache existed from the start — `agent_catalog.capabilities`, "a cache of the harness's last
  * advertised models/modes" — but nothing ever wrote it: the handshake parsed the lists and threw
  * them away, so the fallback every picker was told to rely on was permanently empty. The first
- * launch of an agent is what teaches the catalog what it offers.
+ * launch of a harness is what teaches the catalog what it offers.
  */
-describe("caching what an agent advertises", () => {
+describe("caching what a harness advertises", () => {
   let db: TestDb;
 
   beforeAll(() => {
@@ -3554,8 +3554,8 @@ describe("caching what an agent advertises", () => {
   const capabilitiesOf = async (taskId: string) => {
     const [row] = await db
       .select()
-      .from(agentCatalog)
-      .where(eq(agentCatalog.id, `catalog-${taskId}`))
+      .from(harnessCatalog)
+      .where(eq(harnessCatalog.id, `catalog-${taskId}`))
       .limit(1);
     return row?.capabilities;
   };
@@ -3581,14 +3581,14 @@ describe("caching what an agent advertises", () => {
   });
 
   it("replaces the cache whole, so a retired model actually leaves it", async () => {
-    // Merged instead of replaced, a model the agent no longer lists would sit in the cache for
+    // Merged instead of replaced, a model the harness no longer lists would sit in the cache for
     // ever — and the stale-pin warning reads the cache to notice exactly that retirement.
     const ids = freshIds();
     await seedRun(db, ids, { agentProtocol: "acp" });
     await db
-      .update(agentCatalog)
+      .update(harnessCatalog)
       .set({ capabilities: { models: ["retired-model"], modes: ["old"] } })
-      .where(eq(agentCatalog.id, `catalog-${ids.taskId}`));
+      .where(eq(harnessCatalog.id, `catalog-${ids.taskId}`));
     const runner = new ScriptedRunner(
       [{ kind: "completed" }],
       [{ kind: "capabilities", models: ["claude-opus-4"], modes: [] }],
@@ -3601,14 +3601,14 @@ describe("caching what an agent advertises", () => {
   });
 
   it("leaves the cache alone when the run advertised nothing", async () => {
-    // The ACP client only emits the update when the agent said anything, so "no event" is the
+    // The ACP client only emits the update when the harness said anything, so "no event" is the
     // silence case — and silence must not blank a cache an earlier run filled.
     const ids = freshIds();
     await seedRun(db, ids, { agentProtocol: "acp" });
     await db
-      .update(agentCatalog)
+      .update(harnessCatalog)
       .set({ capabilities: { models: ["claude-opus-4"], modes: ["plan"] } })
-      .where(eq(agentCatalog.id, `catalog-${ids.taskId}`));
+      .where(eq(harnessCatalog.id, `catalog-${ids.taskId}`));
     const { deps } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
 
     await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
@@ -3623,11 +3623,11 @@ describe("caching what an agent advertises", () => {
 /**
  * Walking a Workflow's Steps (issue #5, AC-2/AC-3/AC-5).
  *
- * Everything here asserts against the **database and the next agent's launch options**, never
+ * Everything here asserts against the **database and the next harness's launch options**, never
  * against what the lifecycle returned: the defects this loop can have are the ones where the code
  * decided one thing and the row said another, and a test that reads back the value the code just
  * computed agrees with the bug. So the cursor, the handoff and the spent decision are read off
- * the `task` row, and "the next Step actually ran" is read off `AgentStartOpts`.
+ * the `task` row, and "the next Step actually ran" is read off `HarnessStartOpts`.
  */
 describe("a Task following a Workflow", () => {
   let db: TestDb;
@@ -3639,14 +3639,14 @@ describe("a Task following a Workflow", () => {
     db = createTestDb();
   });
 
-  /** One Step, as a fixture seeds it: its own Agent Profile, catalog row and launch command. */
+  /** One Step, as a fixture seeds it: its own Harness Profile, catalog row and launch command. */
   interface WorkflowStepSeed {
     /** Suffix for this Step's ids, and the name it is given. */
     key: string;
     promptTemplate: string;
     gate?: "human" | "auto" | "auto-unless-changes";
     advanceOn?: "agent-signal" | "review";
-    /** The binary this Step's agent launches — how AC-3 becomes observable in `AgentStartOpts`. */
+    /** The binary this Step's harness launches — how AC-3 becomes observable in `HarnessStartOpts`. */
     command: string;
     /**
      * Distinct per Step, and the reason is mechanical: `deps.runner` is handed the protocol and
@@ -3681,18 +3681,18 @@ describe("a Task following a Workflow", () => {
     const stepIds: string[] = [];
     for (const [index, seed] of steps.entries()) {
       const catalogId = `catalog-${ids.taskId}-${key}-${seed.key}`;
-      await db.insert(agentCatalog).values({
+      await db.insert(harnessCatalog).values({
         id: catalogId,
         workspaceId: ids.workspaceId,
-        key: `agent_${key}_${seed.key}`,
+        key: `harness_${key}_${seed.key}`,
         displayName: seed.key,
         protocol: "acp",
         command: seed.command,
         subscriptionEnvVar: "CLAUDE_CODE_OAUTH_TOKEN",
         meteredEnvVar: "ANTHROPIC_API_KEY",
       });
-      const profileId = `agent-${ids.taskId}-${key}-${seed.key}`;
-      await db.insert(agentProfile).values({
+      const profileId = `harness-${ids.taskId}-${key}-${seed.key}`;
+      await db.insert(harnessProfile).values({
         id: profileId,
         workspaceId: ids.workspaceId,
         name: `${key}-${seed.key}`,
@@ -3723,15 +3723,15 @@ describe("a Task following a Workflow", () => {
     }
     await db
       .update(workspace)
-      // The widget flag is on because a Step's *handoff* is the agent's own summary, and the
-      // completion widget is the only channel an agent has for saying one.
+      // The widget flag is on because a Step's *handoff* is the harness's own summary, and the
+      // completion widget is the only channel a harness has for saying one.
       .set({ enabledFlags: { "ff-workflows": opts.enabled !== false, "ff-agent-widgets": true } })
       .where(eq(workspace.id, ids.workspaceId));
     return stepIds;
   }
 
-  /** The agent's completion declaration, as the fenced widget a real agent emits. */
-  const declares = (summary: string, outcome = "changes_ready"): AgentStreamEvent => ({
+  /** The harness's completion declaration, as the fenced widget a real harness emits. */
+  const declares = (summary: string, outcome = "changes_ready"): HarnessStreamEvent => ({
     kind: "stdout",
     channel: "assistant",
     text: [
@@ -3743,8 +3743,8 @@ describe("a Task following a Workflow", () => {
 
   /** A runner per Step, dispatched on the permission mode each Step's Profile carries. */
   function runnersByMode(
-    entries: Record<string, AgentRunner>,
-  ): (protocol: AgentProtocol, settings: AgentLaunchSettings) => AgentRunner | null {
+    entries: Record<string, HarnessRunner>,
+  ): (protocol: HarnessProtocol, settings: HarnessLaunchSettings) => HarnessRunner | null {
     return (_protocol, settings) => entries[settings.permissionMode] ?? null;
   }
 
@@ -3824,7 +3824,7 @@ describe("a Task following a Workflow", () => {
      *
      * Two runs. The first walks Step 1 and advances; the second is a genuine cold restart — a
      * fresh step with no journal and fresh runners — and it has to pick up on Step 2 with Step 2's
-     * agent and Step 1's words, without re-running Step 1.
+     * harness and Step 1's words, without re-running Step 1.
      */
     const ids = freshIds();
     await seedRun(db, ids);
@@ -3876,7 +3876,7 @@ describe("a Task following a Workflow", () => {
 
     // Completed Steps are never re-run — that is what "resume at the last completed Step" means.
     expect(plannerAgain.starts).toBe(0);
-    // AC-3: the Step's *own* Agent Profile, observed where the agent is actually launched.
+    // AC-3: the Step's *own* Harness Profile, observed where the harness is actually launched.
     expect(builderAgain.commands[0]).toBe("builder");
     // AC-2: and carrying the handoff. Asserted as an ordering, not a substring soup — the handoff
     // heading leads, Step 1's words follow it, and Step 2's own template comes after both.
@@ -3888,7 +3888,7 @@ describe("a Task following a Workflow", () => {
     expect(carried).toBeGreaterThan(heading);
     expect(template).toBeGreaterThan(carried);
     // The Step never replaces the Task's own brief: a Step's prompt template is Owner-authored
-    // text becoming an agent prompt, and one that could stand alone could repurpose the run.
+    // text becoming a harness prompt, and one that could stand alone could repurpose the run.
     expect(prompt).toContain("# Task\nTask");
     expect(step1).toBeTruthy();
   });
@@ -3897,7 +3897,7 @@ describe("a Task following a Workflow", () => {
     /*
      * THE GATE-BYPASS TEST, first half (Definition of Done, AC-4).
      *
-     * Every gate `auto`, every Step advancing on the agent's own signal, and not one `review` row
+     * Every gate `auto`, every Step advancing on the harness's own signal, and not one `review` row
      * anywhere. The pipeline walks itself to the last Step and stops there. Nothing is committed,
      * nothing is published, no result branch is written, and the Task is not done.
      */
@@ -3927,7 +3927,7 @@ describe("a Task following a Workflow", () => {
       step: decidingStep(ids, []),
     });
 
-    // All three agents ran, so the pipeline really did walk itself.
+    // All three harnesses ran, so the pipeline really did walk itself.
     expect([a.starts, b.starts, c.starts]).toEqual([1, 1, 1]);
     // And nothing was integrated by any of it.
     expect(spies.commit).toBe(0);
@@ -3949,7 +3949,7 @@ describe("a Task following a Workflow", () => {
      *
      * The reachable bypass in this file is not "no decision exists", which the review gate itself
      * makes impossible; it is a decision that exists and has *already been spent*. Here the
-     * agent's own signal reaches the last Step, finds the standing approval unspent, reports
+     * harness's own signal reaches the last Step, finds the standing approval unspent, reports
      * `completed` and marks it spent. The review event that follows carries no new `review` row —
      * a redelivery, or a second click — so by the time the approve branch reports the Step
      * finished there is nothing left to spend, and nothing may be integrated.
@@ -4004,7 +4004,7 @@ describe("a Task following a Workflow", () => {
      * THE DEADLOCK TEST.
      *
      * The last Step advances on `agent-signal` and sits behind a `human` gate — an ordinary
-     * configuration. Reaching the approve branch means both facts are true: the agent finished
+     * configuration. Reaching the approve branch means both facts are true: the harness finished
      * (we are past `to-review`) and a person approved. Sending the literal `"review"` there makes
      * `advanceWorkflowStep` return `held`, the cursor never moves, the approval is never spent,
      * and the run stops with no error anywhere.
@@ -4128,7 +4128,7 @@ describe("a Task following a Workflow", () => {
     ]);
 
     const planner = new ScriptedRunner([{ kind: "completed" }], [declares("planned")]);
-    // The second Step's agent dies, which ends the run right after the advance — the only moment
+    // The second Step's harness dies, which ends the run right after the advance — the only moment
     // at which "the session is active again" is observable before `to-review` moves it on.
     const builder = new ScriptedRunner([{ kind: "failed", signal: {} }]);
     const { deps } = makeDeps(db, planner, nullStream());
@@ -4161,7 +4161,7 @@ describe("a Task following a Workflow", () => {
   it("fails legibly when the cursor names a Step this Workflow does not contain", async () => {
     /*
      * `resumeWorkflowCursor` refuses a cursor it cannot place, and this side must not undo it:
-     * a silent restart at Step one would re-run work an Owner has already paid an agent for.
+     * a silent restart at Step one would re-run work an Owner has already paid a harness for.
      *
      * The cursor is pointed at a Step of a *second* Workflow rather than at a deleted one because
      * `task.workflow_step_id` is a foreign key and SQLite refuses to delete a Step a live cursor
@@ -4196,21 +4196,21 @@ describe("a Task following a Workflow", () => {
     expect(result.result).toBe("workflow_unresumable");
     expect(await taskState(db, ids.taskId)).toBe("failed");
     expect(await taskFailureReason(db, ids.taskId)).toBe("workflow_unresumable");
-    // Nothing was started, and nothing was cloned: the refusal is before the agent and before the
+    // Nothing was started, and nothing was cloned: the refusal is before the harness and before the
     // repository.
     expect(runner.starts).toBe(0);
   });
 
   it("refuses a Workflow longer than the bound rather than running part of it", async () => {
     // Truncating would silently drop the Owner's last Steps and report the Task done. The
-    // refusal is by name, before the clone and before any agent.
+    // refusal is by name, before the clone and before any harness.
     const ids = freshIds();
     await seedRun(db, ids);
     await seedWorkflow(
       ids,
       Array.from({ length: 21 }, (_, index) => ({
         key: `s${index}`,
-        command: `agent-${index}`,
+        command: `harness-${index}`,
         permissionMode: "plan" as const,
         promptTemplate: `Step ${index}.`,
       })),
@@ -4229,12 +4229,12 @@ describe("a Task following a Workflow", () => {
     expect(runner.starts).toBe(0);
   });
 
-  it("fails by name when a Step's Agent Profile cannot be resolved in this Workspace", async () => {
+  it("fails by name when a Step's Harness Profile cannot be resolved in this Workspace", async () => {
     /*
      * The Profile is pointed at another tenant's row — `workflow_step.agent_profile_id` is a
      * foreign key to `agent_profile.id` and nothing in the schema confines it to one Workspace,
      * so this is the reachable shape of "the Profile is gone". Resolving it would run the Step
-     * under another tenant's agent (Principle V); the alternative to refusing is worse than the
+     * under another tenant's harness (Principle V); the alternative to refusing is worse than the
      * refusal.
      */
     const ids = freshIds();
@@ -4246,7 +4246,7 @@ describe("a Task following a Workflow", () => {
     ]);
     await db
       .update(workflowStep)
-      .set({ agentProfileId: `agent-${other.taskId}` })
+      .set({ agentProfileId: `harness-${other.taskId}` })
       .where(eq(workflowStep.id, `wf-${ids.taskId}-step-a`));
 
     const runner = new ScriptedRunner([{ kind: "completed" }]);
@@ -4266,7 +4266,7 @@ describe("a Task following a Workflow", () => {
     /*
      * THE FLAG-OFF TEST. `ff-workflows` default OFF is the Definition of Done, and a Task that
      * happens to carry a `workflowId` in a Workspace with the flag off must behave exactly as a
-     * Task with none: its own Agent Profile, integration on the first approve, and a cursor
+     * Task with none: its own Harness Profile, integration on the first approve, and a cursor
      * nothing writes to.
      */
     const ids = freshIds();
@@ -4308,7 +4308,7 @@ describe("a Task following a Workflow", () => {
      *
      * Red under dropping `fromStepId` from the advance call — modelled by re-reading the live
      * cursor and passing *that*, which is what a payload naming only the Task amounts to: the
-     * retried body advances a second time, Step 2 is skipped whole, and its agent never runs.
+     * retried body advances a second time, Step 2 is skipped whole, and its harness never runs.
      */
     const ids = freshIds();
     await seedRun(db, ids);
@@ -4336,7 +4336,7 @@ describe("a Task following a Workflow", () => {
       step: retryingStep([], "workflow-signal-0"),
     });
 
-    // Step 2's agent ran, which is the observable form of "the retry skipped no Step". The
+    // Step 2's harness ran, which is the observable form of "the retry skipped no Step". The
     // cursor's final position cannot say it: a double advance ends on Step 3 as well, having
     // walked straight past Step 2 without running it.
     expect(b.starts).toBe(1);
@@ -4401,7 +4401,7 @@ describe("a Task following a Workflow", () => {
     expect(spies.commit).toBe(1);
   });
 
-  it("re-walks a memoized journal without re-running the agent or advancing twice", async () => {
+  it("re-walks a memoized journal without re-running the harness or advancing twice", async () => {
     /*
      * THE MEMOIZED-REPLAY TEST. A process that died and came back with its journal intact replays
      * every completed step from the recorded value and executes no body. Every branch this loop
@@ -4450,7 +4450,7 @@ describe("a Task following a Workflow", () => {
     expect(replayed).not.toContain("agent-run-0");
     expect(replayed).not.toContain("workflow-signal-0");
     expect(replayed).not.toContain("workflow-resume");
-    // Two runs, one advance: the agents each started exactly once across both.
+    // Two runs, one advance: the harnesses each started exactly once across both.
     expect([a.starts, b.starts]).toEqual([1, 1]);
     expect((await taskRow(ids.taskId))?.workflowStepId).toBe(step2 as string);
   });
@@ -4555,7 +4555,7 @@ describe("a Task on no Workflow", () => {
   });
 });
 
-describe("the agent libraries a run is handed (spec F24)", () => {
+describe("the harness libraries a run is handed (spec F24)", () => {
   let db: TestDb;
   let root: string;
   beforeAll(() => {
@@ -4587,7 +4587,7 @@ describe("the agent libraries a run is handed (spec F24)", () => {
     });
   }
 
-  it("hands a Claude Code agent the enabled items by argument, and says so in the transcript", async () => {
+  it("hands a Claude Code harness the enabled items by argument, and says so in the transcript", async () => {
     const ids = freshIds();
     await seedRun(db, ids);
     await db
@@ -4598,7 +4598,7 @@ describe("the agent libraries a run is handed (spec F24)", () => {
 
     const runner = new ScriptedRunner([{ kind: "completed" }]);
     const { deps } = makeDeps(db, runner, nullStream());
-    const started: AgentStartOpts[] = [];
+    const started: HarnessStartOpts[] = [];
     const wrapped: TaskRunDeps = {
       ...deps,
       // A real directory: the run writes the config where the Task's own directory is.
@@ -4646,14 +4646,14 @@ describe("the agent libraries a run is handed (spec F24)", () => {
     );
   });
 
-  it("hands the agent nothing while the flag is off, whatever the library rows say", async () => {
+  it("hands the harness nothing while the flag is off, whatever the library rows say", async () => {
     const ids = freshIds();
     await seedRun(db, ids);
     await seedLibraries(ids.workspaceId, true);
 
     const runner = new ScriptedRunner([{ kind: "completed" }]);
     const { deps } = makeDeps(db, runner, nullStream());
-    const started: AgentStartOpts[] = [];
+    const started: HarnessStartOpts[] = [];
     const wrapped: TaskRunDeps = {
       ...deps,
       worktreeRoot: root,

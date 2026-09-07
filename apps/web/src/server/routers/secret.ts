@@ -56,7 +56,7 @@ export const secretRouter = router({
     .query(async ({ ctx }) => unwrap(await listSecretRefs(ctx.rctx))),
 
   /**
-   * Delete a Secret. Refused with `SECRET_IN_USE` while an Integration or Agent Profile still
+   * Delete a Secret. Refused with `SECRET_IN_USE` while an Integration or Harness Profile still
    * references it — the stored value is unrecoverable, so this is not a mistake a user can undo
    * by re-entering it (spec F17 FR-6). Returns the metadata of the row that was removed.
    */
@@ -68,7 +68,7 @@ export const secretRouter = router({
         tags: ["secret"],
         protect: true,
         summary:
-          "Delete a Secret. Refused while an Integration or Agent Profile still references it.",
+          "Delete a Secret. Refused while an Integration or Harness Profile still references it.",
       },
     })
     .input(deleteSecretInput)

@@ -22,7 +22,7 @@ import type { Executor } from "./types.js";
  * Called from **one** `step.run("executor-preflight")` placed immediately after the `hasDriver`
  * gate and therefore **before `prepare-repository` clones anything**. That placement is what
  * actually satisfies F07's "if a Container cannot be provisioned, the Task fails before starting
- * the Agent, with an actionable message": a probe that ran after the clone would have already
+ * the Harness, with an actionable message": a probe that ran after the clone would have already
  * spent a minute of an operator's time proving the image does not exist.
  *
  * Every `ok: false` reason below is the literal `failureReason` an operator reads on the board,
@@ -40,15 +40,17 @@ export interface PreflightOpts extends DockerExecutorOpts {
   /** `SOLOW_REPO_CACHE_ROOT`. Checked for absoluteness alongside the worktree root (rung 0). */
   repoCacheRoot: string;
   /**
-   * The commands this Task is going to `spawn` — the agent's own launch command. Probed once
+   * The commands this Task is going to `spawn` — the harness's own launch command. Probed once
    * here so `spawn` can throw synchronously for a missing binary; see `CommandProbes`.
    */
-  agentCommands?: readonly string[];
+  harnessCommands?: readonly string[];
   /** `SOLOW_DOCKER_PULL_TIMEOUT_MS`. */
   pullTimeoutMs?: number;
 }
 
-export type PreflightResult = { ok: true; agentCommands: string[] } | { ok: false; reason: string };
+export type PreflightResult =
+  | { ok: true; harnessCommands: string[] }
+  | { ok: false; reason: string };
 
 export async function probeExecutor(
   host: Executor,
@@ -65,7 +67,7 @@ export async function probeExecutor(
    * `resolve()` here would not be enough, because the mount has to match what *every other*
    * module puts in argv: `manager.ts`, `scm-ops.ts` and `setup-files.ts` all pass paths straight
    * through. A relative root resolves against the orchestrator's cwd on the host and against the
-   * image's `WORKDIR` in the container, and the worktree would simply not be where the agent
+   * image's `WORKDIR` in the container, and the worktree would simply not be where the harness
    * looks. The default is `.solow/worktrees` (env.ts), so this is the common misconfiguration
    * rather than an exotic one.
    */
@@ -242,18 +244,18 @@ export async function probeExecutor(
     /*
      * Rung 10 — what the Task is about to spawn, recorded rather than judged.
      *
-     * A missing agent binary is not failed here. `spawn` throwing `"claude": not found in the
+     * A missing harness binary is not failed here. `spawn` throwing `"claude": not found in the
      * executor image` lands on the line `probe.ts` and `claude-code-runner.ts` already guard,
      * which produces the same operator-facing failure with the run's own context attached — and
-     * it keeps this rung from failing a Task whose agent command the catalog spells in a way this
+     * it keeps this rung from failing a Task whose harness command the catalog spells in a way this
      * probe cannot resolve.
      */
-    const agentCommands = (opts.agentCommands ?? []).filter(Boolean);
+    const harnessCommands = (opts.harnessCommands ?? []).filter(Boolean);
     const probes: CommandProbes = opts.probedCommands ?? new Map();
-    for (const [command, found] of await probeCommands(host, name, agentCommands, opts)) {
+    for (const [command, found] of await probeCommands(host, name, harnessCommands, opts)) {
       probes.set(command, found);
     }
-    return { ok: true, agentCommands: agentCommands.filter((c) => probes.get(c) === true) };
+    return { ok: true, harnessCommands: harnessCommands.filter((c) => probes.get(c) === true) };
   } catch (cause) {
     // A verdict the driver already phrased for an operator (an unsafe mount source, a container
     // that exited immediately) — passed through rather than re-worded here, so the failure text

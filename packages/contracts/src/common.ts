@@ -35,7 +35,7 @@ export type IssueStatus = z.infer<typeof issueStatusSchema>;
 export const sessionStateSchema = z.enum(["active", "awaiting_review", "resumable", "closed"]);
 export type SessionState = z.infer<typeof sessionStateSchema>;
 
-/** Agent authentication / billing mode (spec F06). */
+/** Harness authentication / billing mode (spec F06). */
 export const authModeSchema = z.enum(["subscription", "api_key"]);
 export type AuthMode = z.infer<typeof authModeSchema>;
 
@@ -53,8 +53,8 @@ export type RepositorySource = z.infer<typeof repositorySourceSchema>;
  */
 
 /**
- * Agent identity lives in `agent-catalog.ts` (issue #10) as a data row rather than an enum here
- * — the whole point of that change was that adding an agent stops being a schema edit.
+ * Harness identity lives in `harness-catalog.ts` (issue #10) as a data row rather than an enum here
+ * — the whole point of that change was that adding a harness stops being a schema edit.
  */
 
 /**

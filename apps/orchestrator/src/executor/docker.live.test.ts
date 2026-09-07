@@ -26,7 +26,7 @@ import type { Executor } from "./types.js";
  * `docker.test.ts` proves the driver composes the argv it means to; only this file proves that
  * argv does what the brief says it does. Every mechanism the driver rests on is a claim about
  * how the Docker CLI and a busybox shell actually behave — that `IFS= read -r` does not
- * over-consume the pipe and the agent's own stdin arrives intact, that `env -i` is what makes
+ * over-consume the pipe and the harness's own stdin arrives intact, that `env -i` is what makes
  * `SpawnOpts.env` mean *replace*, that signalling the pid inside the container settles `exited`
  * where killing the client would not — and a fake host executor cannot contradict any of them.
  *
@@ -80,7 +80,7 @@ async function liveHarness() {
    * `spawn` is synchronous by the interface, so it can only *kick* creation and hand back a
    * handle — and a `docker exec` that reaches the daemon first answers "No such container" on
    * stderr with an empty stdout. In a real run `step.run("executor-preflight")` has already
-   * created it in its own durable step long before an agent is spawned; this one cheap `exec`
+   * created it in its own durable step long before a harness is spawned; this one cheap `exec`
    * stands in for that step, rather than the contract quietly depending on a race.
    */
   const warm = await executor.exec(["true"]);

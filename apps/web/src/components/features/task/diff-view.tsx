@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 import { PatchView } from "./patch-view";
 
 /**
- * The change an agent is proposing, file by file (task TASK-022).
+ * The change a harness is proposing, file by file (task TASK-022).
  *
  * Until now the Changes tab named the branch and stopped there, which asked a reviewer to
  * approve work they could not see. Approving is the one irreversible step in the loop
@@ -91,7 +91,7 @@ export function DiffView({ diff, branch }: { diff: TaskDiffDto | null; branch: s
         </div>
         {diff.files.length === 0 ? (
           <p className="px-3 py-4 text-muted-foreground text-sm">
-            The agent finished without changing any files.
+            The harness finished without changing any files.
           </p>
         ) : (
           <ul aria-label="Changed files" className="max-h-56 divide-y overflow-y-auto">

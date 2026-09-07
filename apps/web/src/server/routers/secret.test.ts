@@ -2,7 +2,7 @@
 
 import { beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { CREDENTIAL_EXPIRED_REASON } from "@solow/core";
-import { ensureDefaultAgentCatalog, issue as issueTable, workspace } from "@solow/db";
+import { ensureDefaultHarnessCatalog, issue as issueTable, workspace } from "@solow/db";
 import { createTestDb, type TestDb } from "@solow/db/testing";
 import { updateTaskState } from "../dal/task.js";
 import { resetRateLimits } from "../rate-limit.js";
@@ -38,12 +38,12 @@ function caller(db: TestDb, workspaceId: string) {
   return appRouter.createCaller(ctx(db, workspaceId));
 }
 
-/** A Task whose Agent Profile spends a named Secret, created entirely through the router. */
+/** A Task whose Harness Profile spends a named Secret, created entirely through the router. */
 async function taskOnCredential(db: TestDb, wsId: string, secretName: string) {
   const c = caller(db, wsId);
-  const agentCatalogId = await ensureDefaultAgentCatalog(db, wsId);
+  const agentCatalogId = await ensureDefaultHarnessCatalog(db, wsId);
   const { secret } = await c.secret.set({ name: secretName, kind: "api_key", value: "v1" });
-  const agent = await c.profile.agent.create({
+  const harness = await c.profile.agent.create({
     name: "Claude",
     agentCatalogId,
     authMode: "api_key",
@@ -64,7 +64,7 @@ async function taskOnCredential(db: TestDb, wsId: string, secretName: string) {
   const task = await c.task.create({
     issueId: issue.id,
     title: "Stuck on a credential",
-    agentProfileId: agent.id,
+    agentProfileId: harness.id,
     executorProfileId: executor.id,
     repositories: [{ repositoryId: repo.id }],
   });
@@ -149,10 +149,10 @@ describe("secret.set — resuming Tasks after a credential is replaced", () => {
     await updateTaskState({ db, workspaceId: wsId, userId: "user-1" }, firstTaskId, "failed", {
       failureReason: CREDENTIAL_EXPIRED_REASON,
     });
-    // A second Task under the same Agent Profile, so it spends the same Secret.
-    const agents = await c.profile.agent.list({});
-    const agent = agents.items.find((a) => a.secretId === secretId);
-    if (!agent) throw new Error("seed failed");
+    // A second Task under the same Harness Profile, so it spends the same Secret.
+    const harnesses = await c.profile.agent.list({});
+    const harness = harnesses.items.find((a) => a.secretId === secretId);
+    if (!harness) throw new Error("seed failed");
     const executors = (await c.profile.executor.list({})).items;
     const repos = (await c.repository.list({})).items;
     const [issue] = await db
@@ -163,7 +163,7 @@ describe("secret.set — resuming Tasks after a credential is replaced", () => {
     const secondTask = await c.task.create({
       issueId: issue.id,
       title: "Also stuck",
-      agentProfileId: agent.id,
+      agentProfileId: harness.id,
       executorProfileId: executors[0].id,
       repositories: [{ repositoryId: repos[0].id }],
     });

@@ -75,9 +75,9 @@ describe("TaskAdvance", () => {
     );
   });
 
-  it("offers no direction at all while an agent is running", () => {
+  it("offers no direction at all while a harness is running", () => {
     // Both exits from Running belong to the run: it has nowhere to retreat to, and the state it
-    // advances into is the one the orchestrator announces when the agent stops. Writing `review`
+    // advances into is the one the orchestrator announces when the harness stops. Writing `review`
     // by hand opens the gate before the workflow is waiting on it, and the Approve pressed there
     // is published into nothing.
     render(<TaskAdvance state="running" onMove={record} />);

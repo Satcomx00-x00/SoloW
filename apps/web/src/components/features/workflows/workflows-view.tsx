@@ -10,8 +10,8 @@ import { WorkflowCanvas } from "./workflow-canvas";
 /**
  * The Workflows surface (issue #5, spec F03).
  *
- * A Workflow is the thing that makes "multi-agent orchestration" mean more than several
- * single-agent Tasks running at once: an ordered pipeline whose Steps each name their own agent.
+ * A Workflow is the thing that makes "multi-harness orchestration" mean more than several
+ * single-harness Tasks running at once: an ordered pipeline whose Steps each name their own harness.
  *
  * **This surface is now the canvas and nothing else.** It used to be a three-column page — a
  * create form and a list in a 16rem column, the graph in the rest, all inside a `max-w-7xl` with
@@ -80,7 +80,7 @@ export function WorkflowsView({ workflowId }: { workflowId?: string | undefined 
           ? "Loading steps…"
           : workflows.isLoading
             ? "Loading workflows…"
-            : "No workflows yet. A workflow chains agents: one plans, another implements, a third reviews."}
+            : "No workflows yet. A workflow chains harnesses: one plans, another implements, a third reviews."}
       </p>
       {!selected && !workflows.isLoading && (
         <p className="text-muted-foreground/70 text-xs">Create one from the sidebar.</p>

@@ -39,7 +39,7 @@ describe("repository DAL — listRepositoryLabels against a real provider (isola
 
 /**
  * The setup-file allowlist (issue #52) decides which files are copied out of a Repository and
- * into an agent's worktree. It is a security-relevant list, so the tests that matter are the
+ * into a harness's worktree. It is a security-relevant list, so the tests that matter are the
  * ones about who may change it and what a Repository starts with.
  */
 describe("repository setup files", () => {

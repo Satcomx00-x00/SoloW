@@ -8,11 +8,11 @@ import { type ClaudeUpdate, encodeUserTurn, parseStreamLine, toUpdates } from ".
  * tool call and result arrives as a parseable event rather than as terminal text to scrape.
  *
  * **`--worktree` is not optional.** Several Tasks run against one repository at the same time,
- * and two agents editing one working tree would corrupt each other's changes (Principle II).
+ * and two harnesses editing one working tree would corrupt each other's changes (Principle II).
  * The flag is added by `buildArgs`, not by the caller, so no call site can leave it off.
  *
  * This module never spawns the process itself — the caller supplies `spawn` (issue #1's
- * `Executor.spawn` in the orchestrator). That keeps this package agent-protocol-only and leaves
+ * `Executor.spawn` in the orchestrator). That keeps this package harness-protocol-only and leaves
  * exactly one place in the orchestrator allowed to touch the execution host.
  */
 
@@ -53,7 +53,7 @@ export interface ClaudeSessionOptions {
    * repository root — *not* a worktree SoloW made, which would nest one inside another.
    */
   cwd: string;
-  /** Environment for the agent process. Replaces, never extends (Principle IV). */
+  /** Environment for the harness process. Replaces, never extends (Principle IV). */
   env: Record<string, string>;
   /** Launches the CLI process — the orchestrator's `Executor.spawn`. */
   spawn: SpawnFn;
@@ -100,7 +100,7 @@ export function buildArgs(options: {
     "--permission-mode",
     options.permissionMode,
     /*
-     * The model the Agent Profile pinned (issue #94), or nothing at all.
+     * The model the Harness Profile pinned (issue #94), or nothing at all.
      *
      * Absent rather than a default: which models exist is the provider's business and changes on
      * its schedule, so a value written down here would become a launch failure the first time one
@@ -115,7 +115,7 @@ export function buildArgs(options: {
 export interface ClaudeSession {
   outcome: Promise<ClaudeOutcome>;
   /**
-   * The directory the agent is actually working in — the worktree Claude Code created, read
+   * The directory the harness is actually working in — the worktree Claude Code created, read
    * from the session's own init event. Resolves null if the CLI never reported one, which the
    * caller must treat as a failure to establish an isolated workspace rather than ignore.
    */
@@ -172,7 +172,7 @@ export function startClaudeSession(
   };
 
   // The opening turn. Sent as stream-json like every later one, so there is a single path for
-  // "give the agent something to do".
+  // "give the harness something to do".
   void write(encodeUserTurn(prompt));
 
   const outcome: Promise<ClaudeOutcome> = (async () => {

@@ -117,8 +117,8 @@ function BoardEmpty() {
     <div className="flex flex-col items-start gap-2 px-6 py-16">
       <h2 className="font-medium text-sm">No tasks yet</h2>
       <p className="max-w-md text-muted-foreground text-sm leading-relaxed">
-        Create an issue to describe the work, then a task to hand a slice of it to an agent. It runs
-        in its own worktree and comes back here for your review.
+        Create an issue to describe the work, then a task to hand a slice of it to a harness. It
+        runs in its own worktree and comes back here for your review.
       </p>
     </div>
   );
@@ -161,7 +161,7 @@ export function Board({
   // issue #63). Both queries are already fetched elsewhere in the app with this same empty
   // input (`create-task-dialog.tsx`, `secrets-section.tsx`), so React Query serves this from
   // its existing cache far more often than it issues a new request.
-  const agentProfilesQuery = trpc.profile.agent.list.useQuery({ ...WHOLE_PAGE });
+  const harnessProfilesQuery = trpc.profile.agent.list.useQuery({ ...WHOLE_PAGE });
   const secretsQuery = trpc.secret.list.useQuery({});
   /**
    * The names behind the ids a card carries: which Repository its branch is in, and which Issue
@@ -198,7 +198,7 @@ export function Board({
   };
   const retry = trpc.task.retry.useMutation({ onSuccess: refresh });
   // The card's green control. A mutation of its own rather than `move`, because it asserts the
-  // work is ready to judge and is refused when the agent has not said so — dragging a card and
+  // work is ready to judge and is refused when the harness has not said so — dragging a card and
   // opening the gate are two different acts.
   const submitForReview = trpc.task.submitForReview.useMutation({ onSuccess: refresh });
   const [dragError, setDragError] = useState<string | null>(null);
@@ -313,11 +313,11 @@ export function Board({
   const blockersFor = (taskId: string) => blockersByTask.get(taskId);
   const outstandingFor = (taskId: string) => unsatisfiedDependencies(blockersFor(taskId) ?? []);
 
-  // Agent Profile → the name of the Secret it spends, so the Renew link can say which
+  // Harness Profile → the name of the Secret it spends, so the Renew link can say which
   // credential it is about to open rather than sending the Owner to a bare form.
   const secretNameById = new Map((secretsQuery.data ?? []).map((s) => [s.id, s.name]));
   const credentialNameByProfile = new Map(
-    (agentProfilesQuery.data?.items ?? []).map((p) => [
+    (harnessProfilesQuery.data?.items ?? []).map((p) => [
       p.id,
       secretNameById.get(p.secretId) ?? null,
     ]),
@@ -340,7 +340,7 @@ export function Board({
       return;
     }
     setDragError(null);
-    // Dragging a Task out of Review abandons the agent's proposed changes and leaves no review
+    // Dragging a Task out of Review abandons the harness's proposed changes and leaves no review
     // decision behind, so it is confirmed like any other discard (TASK-022).
     if (from === "review") {
       setPendingMove({ taskId, to });
@@ -408,7 +408,7 @@ export function Board({
    * This is also how an Owner recovers a Task `INTERRUPTED_REASON`'d by the orchestrator's own
    * boot-time reconciliation (an orchestrator restart mid-run with nothing left to redrive it —
    * see `apps/orchestrator/src/reconcile.ts`): the worktree and its commits are untouched, so a
-   * retry here is a fresh agent process picking the same work back up, not a restart from zero.
+   * retry here is a fresh harness process picking the same work back up, not a restart from zero.
    */
   const retryAction = (task: TaskDto): ReactNode => {
     if (task.state !== "failed" || task.failureReason === CREDENTIAL_EXPIRED_REASON) return null;
@@ -560,7 +560,7 @@ export function Board({
           if (!open) setPendingMove(null);
         }}
         title="Move this task out of review?"
-        description="The agent's proposed changes are left behind and no review decision is recorded. To reject the work properly, and keep the audit trail, open the task and use Reject."
+        description="The harness's proposed changes are left behind and no review decision is recorded. To reject the work properly, and keep the audit trail, open the task and use Reject."
         confirmLabel="Move it anyway"
         onConfirm={() => {
           if (pendingMove) move.mutate({ id: pendingMove.taskId, to: pendingMove.to });

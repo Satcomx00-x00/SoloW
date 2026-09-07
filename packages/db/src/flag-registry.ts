@@ -30,7 +30,7 @@ export interface FlagDefinition {
 export const FLAGS: Record<FlagKey, FlagDefinition> = {
   "ff-core-program": {
     key: "ff-core-program",
-    description: "Core end-to-end Task loop (Issue → run agent → review → approve).",
+    description: "Core end-to-end Task loop (Issue → run harness → review → approve).",
     default: false,
     granularity: "workspace",
   },
@@ -51,21 +51,21 @@ export const FLAGS: Record<FlagKey, FlagDefinition> = {
   "ff-workflows": {
     key: "ff-workflows",
     description:
-      "Agentic workflows — multi-step pipelines with a different agent per Step (issue #5).",
+      "Agentic workflows — multi-step pipelines with a different harness per Step (issue #5).",
     default: false,
     granularity: "workspace",
   },
   "ff-agent-widgets": {
     key: "ff-agent-widgets",
     description:
-      "Agent widgets — teach the agent to emit tappable questions, diagrams and checklists, and draw them in the transcript.",
+      "Harness widgets — teach the harness to emit tappable questions, diagrams and checklists, and draw them in the transcript.",
     default: false,
     granularity: "workspace",
   },
   "ff-agent-libraries": {
     key: "ff-agent-libraries",
     description:
-      "Agent libraries — MCP servers and Skills kept in one place, loaded into every agent or into the Workflow Steps that name them (spec F24).",
+      "Harness libraries — MCP servers and Skills kept in one place, loaded into every harness or into the Workflow Steps that name them (spec F24).",
     default: false,
     granularity: "workspace",
   },

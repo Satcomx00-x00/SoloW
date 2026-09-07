@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it } from "bun:test";
 // so setting it before the first encryptSecret call is sufficient. 32 bytes, base64.
 process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 7).toString("base64");
 
-import { agentProfile, integration, secret } from "@solow/db";
+import { harnessProfile, integration, secret } from "@solow/db";
 import { createTestDb, type TestDb } from "@solow/db/testing";
 import { eq } from "drizzle-orm";
 import { deleteSecret, listSecretRefs, setSecret } from "./secret.js";
@@ -69,13 +69,13 @@ describe("deleteSecret", () => {
     expect(rows).toHaveLength(1);
   });
 
-  it("refuses while an Agent Profile holds it", async () => {
+  it("refuses while a Harness Profile holds it", async () => {
     const ctx = ctxFor(db, workspaceId);
     const ref = await storeSecret(workspaceId, "anthropic-key");
     await db
-      .update(agentProfile)
+      .update(harnessProfile)
       .set({ secretId: ref.id })
-      .where(eq(agentProfile.id, agentProfileId));
+      .where(eq(harnessProfile.id, agentProfileId));
 
     expect(await deleteSecret(ctx, { id: ref.id })).toEqual({ ok: false, error: "SECRET_IN_USE" });
   });
@@ -124,9 +124,9 @@ describe("listSecretRefs", () => {
       .insert(integration)
       .values({ workspaceId, provider: "github", secretId: pat.id, baseUrl: null });
     await db
-      .update(agentProfile)
+      .update(harnessProfile)
       .set({ secretId: pat.id })
-      .where(eq(agentProfile.id, agentProfileId));
+      .where(eq(harnessProfile.id, agentProfileId));
 
     const result = await listSecretRefs(ctx);
     expect(result.ok).toBe(true);

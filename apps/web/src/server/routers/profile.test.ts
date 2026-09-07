@@ -11,7 +11,7 @@ import { appRouter } from "./index.js";
  * The business rules — refuse a duplicate key, scope by Workspace — are proved at the DAL layer
  * (`dal/profile.test.ts`); what this file proves is the layer above it: the mutation is reachable
  * at all, requires auth like every other write here, and its output actually satisfies
- * `agentCatalogEntryDto` end to end through tRPC's own validation.
+ * `harnessCatalogEntryDto` end to end through tRPC's own validation.
  */
 
 async function seedWs(db: TestDb, name: string): Promise<string> {
@@ -41,7 +41,7 @@ describe("profile.agentCatalog.create", () => {
     db = createTestDb();
   });
 
-  it("declares a new agent this Workspace can run, on the ACP protocol", async () => {
+  it("declares a new harness this Workspace can run, on the ACP protocol", async () => {
     const wsId = await seedWs(db, "acme");
     const c = caller(db, wsId);
 

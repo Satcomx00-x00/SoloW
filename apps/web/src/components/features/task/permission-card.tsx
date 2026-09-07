@@ -15,7 +15,7 @@ import type { PermissionRow } from "./transcript";
  * anyway. Inline, the question sits where the run reached it and the transcript stays readable.
  *
  * What is *not* reinvented here is the wording and the two rules behind it, both lifted from the
- * dialog: only the agent's own options are offered, in the order it listed them — SoloW
+ * dialog: only the harness's own options are offered, in the order it listed them — SoloW
  * never invents an "always allow" — and there is no dismiss, because a card that could be waved
  * away would leave an operator believing they had declined while the run went on waiting.
  *
@@ -54,7 +54,7 @@ export function PermissionCard({
     >
       <p className="flex items-center gap-2 font-medium text-sm">
         <ShieldQuestion className="size-4 shrink-0 text-state-review" aria-hidden />
-        The agent is asking for permission
+        The harness is asking for permission
       </p>
 
       <div className="space-y-1">
@@ -80,7 +80,7 @@ export function PermissionCard({
       </p>
 
       {row.options.length > 0 ? (
-        // Plain buttons in the agent's own order: the first option an agent lists is the one it
+        // Plain buttons in the harness's own order: the first option a harness lists is the one it
         // considers the ordinary answer, and reordering them would be SoloW editing the
         // question. DOM order is the tab order, so that ordering is what keyboard users get.
         <div className="flex flex-wrap gap-2 pt-0.5">
@@ -98,7 +98,7 @@ export function PermissionCard({
         </div>
       ) : (
         <p className="text-muted-foreground text-xs">
-          The agent offered no options to choose from. The run will continue once its own timeout
+          The harness offered no options to choose from. The run will continue once its own timeout
           passes.
         </p>
       )}
@@ -120,7 +120,7 @@ function SettledCard({
   row: PermissionRow;
   resolution: NonNullable<PermissionRow["resolution"]>;
 }) {
-  // Resolve the id back to the agent's own wording where we can. A resolution can name an option
+  // Resolve the id back to the harness's own wording where we can. A resolution can name an option
   // this client never saw — the deadline policy answers by id, and a reconnect can land the
   // resolution while the request itself sits in a compacted range — so the raw id is the
   // fallback rather than a blank. A null id is a refusal with nothing chosen at all.

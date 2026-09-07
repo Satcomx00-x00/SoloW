@@ -13,9 +13,9 @@ import type { Executor } from "./types.js";
 
 /**
  * Executor Profile → driver (issue #96, spec F07 AC-5). The one switch that turns a stored
- * configuration into somewhere an agent can actually run.
+ * configuration into somewhere a harness can actually run.
  *
- * Shaped exactly like `createAgentRunner`'s protocol switch, and for the same reason: an
+ * Shaped exactly like `createHarnessRunner`'s protocol switch, and for the same reason: an
  * exhaustive `switch` over the discriminated union makes a fifth Executor kind a **compile
  * error** here rather than a silent fall-through to local — which would be the precise failure
  * `drivers.ts` exists to prevent, an operator asking for isolation, not getting it, and being
@@ -45,8 +45,8 @@ export interface ExecutorFactoryOpts {
   repoCacheRoot: string;
   /** Host directories bind-mounted at their own path: the Task's worktrees and repositories. */
   bindPaths?: string[];
-  /** What this Task will `spawn`, so the preflight can prove it exists before the agent starts. */
-  agentCommands?: readonly string[];
+  /** What this Task will `spawn`, so the preflight can prove it exists before the harness starts. */
+  harnessCommands?: readonly string[];
   /**
    * Filled by the preflight, read synchronously by `spawn`.
    *
@@ -123,7 +123,7 @@ export async function probeExecutorFor(
   opts: ExecutorFactoryOpts,
 ): Promise<PreflightResult> {
   const config = profile.config;
-  if (config.kind !== "docker") return { ok: true, agentCommands: [] };
+  if (config.kind !== "docker") return { ok: true, harnessCommands: [] };
   return probeExecutor(dockerHost(opts), config, opts.ids, dockerOpts(opts));
 }
 
@@ -157,7 +157,7 @@ export function dockerOpts(opts: ExecutorFactoryOpts): PreflightOpts {
     dockerBin: env.SOLOW_DOCKER_BIN,
     user: env.SOLOW_DOCKER_USER ?? defaultContainerUser(),
     pullTimeoutMs: env.SOLOW_DOCKER_PULL_TIMEOUT_MS,
-    ...(opts.agentCommands ? { agentCommands: opts.agentCommands } : {}),
+    ...(opts.harnessCommands ? { harnessCommands: opts.harnessCommands } : {}),
     ...(opts.probedCommands ? { probedCommands: opts.probedCommands } : {}),
   };
 }

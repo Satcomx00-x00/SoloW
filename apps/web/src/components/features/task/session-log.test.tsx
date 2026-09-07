@@ -50,7 +50,7 @@ describe("SessionLog", () => {
     expect(mine?.getAttribute("data-event-kind")).toBe("user_turn");
     expect(theirs?.getAttribute("data-event-kind")).toBe("assistant_turn");
     expect(within(mine as HTMLElement).getByText("You")).toBeDefined();
-    expect(within(theirs as HTMLElement).getByText("Agent")).toBeDefined();
+    expect(within(theirs as HTMLElement).getByText("Harness")).toBeDefined();
   });
 
   it("shows a tool call as the tool that ran, not as a line of text", () => {
@@ -68,7 +68,7 @@ describe("SessionLog", () => {
   it("says where the plan stood, rather than rendering a blank row for it", () => {
     // A kind with no case in the body switch renders as nothing at all, and the type checker
     // cannot see it: the row keeps its gutter label and loses its content. `todos` reached this
-    // view that way — the log holding the agent's whole plan while the tab whose job is to show
+    // view that way — the log holding the harness's whole plan while the tab whose job is to show
     // the log said nothing about it, which is the contentless row the capture existed to remove.
     render(
       <SessionLog

@@ -3,9 +3,9 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import { STRANDED_REVIEW_REASON } from "@solow/core";
 import {
-  agentProfile,
-  ensureDefaultAgentCatalog,
+  ensureDefaultHarnessCatalog,
   executorProfile,
+  harnessProfile,
   issue as issueTable,
   secret,
   session as sessionTable,
@@ -20,7 +20,7 @@ import { appRouter } from "./index.js";
 /**
  * An approval the API cannot integrate must not be reported as one that was.
  *
- * Observed end to end on 2026-08-27, driving the real app: an agent edited a file, the reviewer
+ * Observed end to end on 2026-08-27, driving the real app: a harness edited a file, the reviewer
  * approved, the Task went **Done**, and the branch still pointed at the commit before the run.
  * The change sat uncommitted in a worktree nothing would clean up, and there was no error
  * anywhere on screen. That is the worst shape a review gate can fail in — indistinguishable from
@@ -65,13 +65,13 @@ async function strandedFixture(db: TestDb, sessionState: "active" | "awaiting_re
     .values({ name: "Acme", ownerUserId: "owner-1" })
     .returning();
   if (!ws) throw new Error("failed to seed workspace");
-  const catalogId = await ensureDefaultAgentCatalog(db, ws.id);
+  const catalogId = await ensureDefaultHarnessCatalog(db, ws.id);
   const [sec] = await db
     .insert(secret)
     .values({ workspaceId: ws.id, name: "token", kind: "subscription_token", ciphertext: "x" })
     .returning();
-  const [agent] = await db
-    .insert(agentProfile)
+  const [harness] = await db
+    .insert(harnessProfile)
     .values({
       workspaceId: ws.id,
       name: "claude",
@@ -95,7 +95,7 @@ async function strandedFixture(db: TestDb, sessionState: "active" | "awaiting_re
       issueId: issue?.id ?? "",
       title: "Add farewell()",
       state: "review",
-      agentProfileId: agent?.id ?? "",
+      agentProfileId: harness?.id ?? "",
       executorProfileId: executor?.id ?? "",
     })
     .returning();
@@ -148,11 +148,11 @@ describe("review.decide when no run is parked to apply it", () => {
     expect(review.decision).toBe("approve");
   });
 
-  it("does NOT mark the Task running on request_changes — no process here starts an agent", async () => {
+  it("does NOT mark the Task running on request_changes — no process here starts a harness", async () => {
     /*
-     * The sibling defect. The durable path resumes the agent because the parked run consumes
+     * The sibling defect. The durable path resumes the harness because the parked run consumes
      * `review.decided`; on this path nothing does. Writing `running` produced a Task that said
-     * an agent was working while no process existed anywhere — the input box answered "No agent
+     * a harness was working while no process existed anywhere — the input box answered "No harness
      * is running" until the orchestrator's next boot-time reconcile happened to sweep it.
      */
     const fx = await strandedFixture(db);

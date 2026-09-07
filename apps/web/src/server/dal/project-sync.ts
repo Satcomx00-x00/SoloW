@@ -323,7 +323,7 @@ function issueKey(repositoryId: string, externalId: string): string {
  * Two properties this must keep:
  *
  *  - **Nothing is invented.** A repository is created only from what the provider itself reports
- *    through the `repositories` capability — its clone URL above all, which is what an agent will
+ *    through the `repositories` capability — its clone URL above all, which is what a harness will
  *    later clone. A row whose issue arrives without a repository name is left waiting, exactly as
  *    before.
  *  - **Nothing is silent.** Every repository connected here is named in the return value and

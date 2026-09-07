@@ -18,7 +18,7 @@ function makeTask(over: Partial<TaskDto> & { id: string; state: TaskState }): Ta
   return {
     issueId: "issue-1",
     title: `Task ${over.id}`,
-    agentProfileId: "agent-1",
+    agentProfileId: "harness-1",
     executorProfileId: "exec-1",
     repositories: [
       {
@@ -244,7 +244,7 @@ describe("Board (wired)", () => {
       }),
       "task.dependencies": () => [],
       "profile.agent.list": () => ({
-        items: [{ id: "agent-1", secretId: "secret-1", name: "Claude", agentCatalogId: "cat-1" }],
+        items: [{ id: "harness-1", secretId: "secret-1", name: "Claude", agentCatalogId: "cat-1" }],
         nextCursor: null,
       }),
       "secret.list": () => [
@@ -306,7 +306,7 @@ describe("Board (wired)", () => {
           "task.list": () => ({
             items: [
               // The exact reason an orchestrator restart leaves behind (issue: an Owner reported a
-              // Task's input box answering "No agent is running" forever after a restart) — Retry is
+              // Task's input box answering "No harness is running" forever after a restart) — Retry is
               // how it comes back, since the worktree and its commits were never touched.
               makeTask({
                 id: "int-1",

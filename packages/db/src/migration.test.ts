@@ -146,7 +146,7 @@ describe("migrating a populated database to the (repository, branch) join (issue
   });
 
   it("keeps a finished Task pointing at the branch its work is actually on", () => {
-    // A Task that finished under `claude_code` sits on a branch the *agent* named, which is not
+    // A Task that finished under `claude_code` sits on a branch the *harness* named, which is not
     // the one SoloW derives. Preferring the recorded result branch is what keeps the
     // attachment pointing at something a reviewer can fetch.
     insertLegacyTask(db, {

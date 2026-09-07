@@ -94,7 +94,7 @@ export interface ProvisionParams {
    * (issue #96 round 2, Principle II).
    *
    * Set when the Task runs somewhere the shared repository must not be reachable from — today
-   * that means a container, whose mounts are the whole of what the agent can touch. Every git
+   * that means a container, whose mounts are the whole of what the harness can touch. Every git
    * command below then acts on `taskRepositoryPath` rather than on the clone two Tasks on one
    * Repository would otherwise share, which is what makes the container's mount set contain
    * nothing but this Task's own directories.
@@ -187,7 +187,7 @@ async function upstreamRepoPath(executor: Executor, params: ProvisionParams): Pr
  *    one. `init` and `fetch` are both idempotent *in place*, so a retry finishes the job.
  *  - `clone` from a local path **hardlinks** the object files by default, so the Task's objects
  *    and the shared repository's would be the same inodes — and the container owns them (it runs
- *    as the orchestrator's uid), so an agent could `chmod +w` and rewrite the shared
+ *    as the orchestrator's uid), so a harness could `chmod +w` and rewrite the shared
  *    repository's history through a file inside its own private clone. Verified: a hardlinked
  *    object rewritten from inside a container changed the source repository's copy. A fetch
  *    transfers a pack, so no inode is ever shared.
@@ -208,7 +208,7 @@ async function upstreamRepoPath(executor: Executor, params: ProvisionParams): Pr
  * the checkout have finished, so an interrupted attempt is redone rather than adopted half-made.
  * No `origin` remote is configured — the shared repository is not reachable from where this runs
  * (that is the point), and a remote pointing at a path the container has no mount for would turn
- * an agent's `git fetch` into a confusing error instead of an honest one.
+ * a harness's `git fetch` into a confusing error instead of an honest one.
  */
 async function ensureTaskClone(
   executor: Executor,
@@ -230,7 +230,7 @@ async function ensureTaskClone(
     "+refs/heads/*:refs/heads/*",
     "+refs/tags/*:refs/tags/*",
   ]);
-  // Check out what the shared repository has checked out, so an agent whose protocol starts it
+  // Check out what the shared repository has checked out, so a harness whose protocol starts it
   // *in the repository* (`claude --worktree`) finds the working tree it expects. Best-effort in
   // both directions: a repository with no commits yet, or one left on a detached HEAD, has
   // nothing to name here, and it is `worktree add` below that owes the caller the error.
@@ -348,13 +348,13 @@ export function isRepositoryUnusable(cause: unknown): boolean {
 }
 
 /**
- * Make the repository ready for an agent to run in, without creating the Task's worktree.
+ * Make the repository ready for a harness to run in, without creating the Task's worktree.
  *
  * Claude Code creates that itself (`--worktree`), which is what lets several Tasks share one
  * repository at a time. SoloW still has to resolve *which* repository — a local path is
- * used as-is, a remote URL is cloned into the cache once — and to fail here, before any agent
+ * used as-is, a remote URL is cloned into the cache once — and to fail here, before any harness
  * starts, when the repository is unusable (TASK-015: an invalid location fails the Task rather
- * than producing a confusing agent error later).
+ * than producing a confusing harness error later).
  */
 export async function prepareRepository(
   executor: Executor,
@@ -381,7 +381,7 @@ export interface WorktreeRecord {
 /**
  * Every worktree attached to a repository, as git sees them.
  *
- * Read from git rather than from a naming convention: the agent creates the worktree, and where
+ * Read from git rather than from a naming convention: the harness creates the worktree, and where
  * it puts it and what it calls the branch are its business. Asking git means the adoption works
  * whatever the CLI decides to do.
  */
@@ -410,10 +410,10 @@ export async function listWorktrees(
 }
 
 /**
- * The worktree the agent created, confirmed against git.
+ * The worktree the harness created, confirmed against git.
  *
- * The agent reports where it is working; this checks that git agrees the path really is a
- * worktree of this repository, and returns its branch. An agent that reported a path outside
+ * The harness reports where it is working; this checks that git agrees the path really is a
+ * worktree of this repository, and returns its branch. A harness that reported a path outside
  * the repository — or none at all — has not given the Task an isolated workspace, and the
  * caller must fail rather than commit from wherever it happens to be pointing (Principle II).
  */
@@ -423,13 +423,13 @@ export async function adoptWorktree(
   reportedPath: string | null,
 ): Promise<Worktree> {
   if (!reportedPath) {
-    throw new Error("agent did not report a workspace; cannot confirm an isolated worktree");
+    throw new Error("harness did not report a workspace; cannot confirm an isolated worktree");
   }
   const known = await listWorktrees(executor, repoPath);
   const match = known.find((w) => samePath(w.path, reportedPath));
   if (!match) {
     throw new Error(
-      `agent reported ${reportedPath}, which is not a worktree of ${repoPath}; refusing to use it`,
+      `harness reported ${reportedPath}, which is not a worktree of ${repoPath}; refusing to use it`,
     );
   }
   return { path: match.path, branch: match.branch ?? "", repoPath };
@@ -442,10 +442,10 @@ function samePath(a: string, b: string): boolean {
 }
 
 /**
- * True when the worktree has uncommitted changes (i.e. the agent produced a diff).
+ * True when the worktree has uncommitted changes (i.e. the harness produced a diff).
  *
  * `setupFilePatterns` are subtracted for the same reason they are subtracted from the diff: a
- * copied `.env` is not work the agent did, and counting it would send a Task that changed
+ * copied `.env` is not work the harness did, and counting it would send a Task that changed
  * nothing to review with an empty patch (issue #52 AC-4).
  */
 export async function hasChanges(
@@ -467,7 +467,7 @@ export async function hasChanges(
 }
 
 /**
- * Commit the agent's changes onto the Task's new local branch (no push/PR — spec FR-009).
+ * Commit the harness's changes onto the Task's new local branch (no push/PR — spec FR-009).
  *
  * `setupFilePatterns` are excluded from the `add` — the one place in the lifecycle where the
  * exclusion is about more than presentation. A copied `.env` is usually git-ignored and would
@@ -505,7 +505,7 @@ export async function commitWorktree(
  *
  * It runs where the orchestrator runs, never in the Task's execution host, and that is the shape
  * of the guarantee rather than an implementation detail: the shared repository is not mounted
- * into the container at all, so the agent has no path to it, and what reaches it is one refspec
+ * into the container at all, so the harness has no path to it, and what reaches it is one refspec
  * this code wrote naming this Task's own branch. A container that could write to the shared
  * repository is precisely how a peer Task's result branch got rewritten (G4).
  *
@@ -545,11 +545,11 @@ export async function discardWorktreeChanges(executor: Executor, path: string): 
  * Remove the worktree when the Task completes or is discarded.
  *
  * `--force` twice, which is git's documented way to remove a *locked* worktree — and the
- * agent's worktree is routinely locked. Claude Code creates its own under `.claude/worktrees`
+ * harness's worktree is routinely locked. Claude Code creates its own under `.claude/worktrees`
  * and locks it with its session pid, then does not unlock it when it exits, so by the time a
  * finished Task gets here the lock is held by a process that no longer exists. A single
  * `--force` covers uncommitted changes but refuses a lock outright, which failed the teardown
- * of every run the agent had worktreed for itself.
+ * of every run the harness had worktreed for itself.
  *
  * Blanket rather than escalating on failure, because the alternative is reading git's error
  * text to decide — and that text is localized (the report this came from said "impossible de
@@ -598,7 +598,7 @@ export interface CleanupOpts {
 }
 
 /**
- * Per-file summary of what the agent changed, plus the patch itself (TASK-022 diff view).
+ * Per-file summary of what the harness changed, plus the patch itself (TASK-022 diff view).
  *
  * Captured in the orchestrator because it is the only process that has the worktree: the web app
  * must never shell out to git, and in a hosted deployment the worktree is not even on its
@@ -652,12 +652,12 @@ function parseNumstat(out: string): Map<string, { additions: number; deletions: 
 }
 
 /**
- * The agent's uncommitted work, as a diff against the commit the worktree started from.
+ * The harness's uncommitted work, as a diff against the commit the worktree started from.
  *
  * Two details, both load-bearing:
  *
- * `git add -N` first, so files the agent *created* appear at all — an untracked file is
- * invisible to `git diff`, and "the agent wrote a new module" is exactly the change a reviewer
+ * `git add -N` first, so files the harness *created* appear at all — an untracked file is
+ * invisible to `git diff`, and "the harness wrote a new module" is exactly the change a reviewer
  * most needs to see. Intent-to-add stages no content, so the later commit or discard is
  * unaffected.
  *
@@ -671,7 +671,7 @@ export async function diffWorktree(
   setupFilePatterns: string[] = [],
 ): Promise<WorktreeDiff> {
   // Files copied in by the setup-file allowlist are subtracted from every one of these commands
-  // (issue #52 AC-4). They were not authored by the agent, and a reviewer being shown the
+  // (issue #52 AC-4). They were not authored by the harness, and a reviewer being shown the
   // contents of a `.env` would put a secret on screen — and into any snapshot taken of it.
   const only = ["--", ".", ...setupFileExclusions(setupFilePatterns)];
   await executor.exec(["git", "-C", path, "add", "-N", ...only]);

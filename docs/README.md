@@ -1,7 +1,7 @@
 # SoloW — Documentation
 
 SoloW is an open-source, self-hostable platform for orchestrating many AI
-coding-agent CLIs (Claude Code, Codex, Gemini CLI, and 25+ others) in parallel,
+coding-harness CLIs (Claude Code, Codex, Gemini CLI, and 25+ others) in parallel,
 with a review-first workflow. It is a business-level alternative to
 comparable tools in the category.
 

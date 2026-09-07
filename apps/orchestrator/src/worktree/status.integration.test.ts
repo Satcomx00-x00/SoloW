@@ -55,7 +55,7 @@ beforeAll(async () => {
   await $`git -C ${repoDir} mv old/path.ts new-path.ts`.quiet();
   await $`git -C ${repoDir} rm -q src/deleted.ts`.quiet();
   writeFileSync(join(repoDir, "untracked.txt"), "hello\n");
-  writeFileSync(join(repoDir, ".env"), "SECRET=changed-since-the-agent-ran\n");
+  writeFileSync(join(repoDir, ".env"), "SECRET=changed-since-the-harness-ran\n");
 });
 
 afterAll(() => {
@@ -93,9 +93,9 @@ describe("readScmStatus against real git", () => {
     expect(status.files.find((f) => f.path === "new-path.ts")?.originalPath).toBe("old/path.ts");
   });
 
-  it("keeps a setup file out of the panel even after the agent changed it (issue #52)", async () => {
-    // The `.env` was copied in for the agent and has been modified since. It is not part of what
-    // the agent proposed, and putting it on screen would put a secret on screen (Principle IV).
+  it("keeps a setup file out of the panel even after the harness changed it (issue #52)", async () => {
+    // The `.env` was copied in for the harness and has been modified since. It is not part of what
+    // the harness proposed, and putting it on screen would put a secret on screen (Principle IV).
     const status = await readScmStatus(executor, repoDir, [".env"]);
     expect(status.files.some((f) => f.path === ".env")).toBe(false);
     // ...and it *is* a change git would otherwise report, so the exclusion is doing the work.

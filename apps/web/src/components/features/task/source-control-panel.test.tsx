@@ -92,7 +92,7 @@ describe("SourceControlPanel", () => {
 
   it("has no commit button — the review gate is the commit (FR-7)", () => {
     // The single most important assertion in this file. A commit here would be a path from
-    // agent output to a branch with no recorded decision (Principle I).
+    // harness output to a branch with no recorded decision (Principle I).
     renderPanel();
 
     expect(screen.queryByRole("button", { name: /commit/i })).toBeNull();
@@ -137,7 +137,7 @@ describe("SourceControlPanel", () => {
   });
 
   it("offers no writes at all when the server says the worktree is read-only", () => {
-    const reason = "The agent is still working. Changes can be staged once it reaches review.";
+    const reason = "The harness is still working. Changes can be staged once it reaches review.";
     renderPanel({ writable: false, readOnlyReason: reason });
 
     expect(screen.getByText(reason)).toBeDefined();

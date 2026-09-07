@@ -20,8 +20,8 @@ import { appRouter } from "../routers/index.js";
  *
  * - `secret` — an MCP token is held by software running outside SoloW, and Principle IV
  *   keeps credentials on a narrower path than ordinary data. A read_write token is a grant to
- *   manage work, not a grant to plant a credential the orchestrator will later inject into an
- *   agent process. Secrets stay a first-party, signed-in action.
+ *   manage work, not a grant to plant a credential the orchestrator will later inject into a
+ *   harness process. Secrets stay a first-party, signed-in action.
  * - `stream` — issues a WebSocket ticket for the SPA's live channel. An MCP client has no such
  *   channel, so the tool would be an unusable one that only widens the surface.
  * - `mcpToken` — token administration. Being behind `mcpProcedure` is *not* protection here:
@@ -33,7 +33,7 @@ import { appRouter } from "../routers/index.js";
  *   human's shell, which is not work management by any reading.
  * - `workflow.advanceTask` and `workflow.acknowledgeDrift` — the Step cursor of a Task following
  *   a Workflow (issue #5). `advanceTask` is the call that opens a Task's gates, and the party
- *   holding an MCP token may be the agent whose work those gates exist to hold: letting it report
+ *   holding an MCP token may be the harness whose work those gates exist to hold: letting it report
  *   its own Step finished, and claim its own Step produced nothing to look at, is asking the
  *   subject of a review to sign it off. `acknowledgeDrift` lowers the warning that says a running
  *   Task no longer matches its pipeline — the operator's call, for the same reason.
@@ -46,15 +46,15 @@ import { appRouter } from "../routers/index.js";
  *   namespace; the two procedures still withheld are the two that reasoning was about.
  * - `review` — its only procedure is `decide`, which is the review gate itself. The paragraph
  *   above rejected `workflow.advanceTask` for letting a token sign off its own Step; this is the
- *   same act, one level down and more directly: approving the change an agent just wrote. The
+ *   same act, one level down and more directly: approving the change a harness just wrote. The
  *   gate exists because the party that did the work is not the party that rules on it
  *   (Principle I), and a gate the subject can open is not a gate.
  *
- *   Withheld now, while it is still only latent — the orchestrator hands its agents no MCP
+ *   Withheld now, while it is still only latent — the orchestrator hands its harnesses no MCP
  *   configuration at all today (`packages/acp/src/session.ts` sends `mcpServers: []`), so nothing
  *   has ever been able to reach this. Issue #75's task-scoped surface is the change that would
  *   make it reachable, and a rule added *with* that surface is a rule written after the fact. An
- *   agent may now report how its run ended — `task_complete` in `widget.ts` — which is the half
+ *   harness may now report how its run ended — `task_complete` in `widget.ts` — which is the half
  *   of this it should have. `task` stays exposed: `task.create`, `task.list` and `task.launch`
  *   are the work management this surface exists for, and withholding the namespace to reach
  *   `task.move` would take all of it.
@@ -65,8 +65,8 @@ const WITHHELD_NAMESPACES = new Set([
   "mcpToken",
   "preference",
   "review",
-  // `library` — the MCP servers and Skills every agent is started with, and the Secrets they
-  // reference (spec F24). A token held by an agent must not be able to hand that agent a new
+  // `library` — the MCP servers and Skills every harness is started with, and the Secrets they
+  // reference (spec F24). A token held by a harness must not be able to hand that harness a new
   // server, or point an existing one at a different credential. The two *lists* are let through
   // below: a Step names library items by id, so a builder has to be able to read the ids — and
   // a listing carries commands, URLs and Secret *references*, never a Secret's value.
@@ -129,7 +129,7 @@ function inputSchemaFor(inputs: unknown[]): Record<string, unknown> {
 }
 
 /**
- * A description an agent can actually choose from. Prefers the procedure's own OpenAPI
+ * A description a harness can actually choose from. Prefers the procedure's own OpenAPI
  * `summary`/`description` so the text lives with the contract; falls back to naming the
  * operation rather than inventing behaviour it might not have.
  */

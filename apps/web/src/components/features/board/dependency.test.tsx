@@ -20,7 +20,7 @@ function makeTask(over: Partial<TaskDto> & { id: string; state: TaskState }): Ta
   return {
     issueId: "issue-1",
     title: `Task ${over.id}`,
-    agentProfileId: "agent-1",
+    agentProfileId: "harness-1",
     executorProfileId: "exec-1",
     repositories: [
       {

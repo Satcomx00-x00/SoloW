@@ -12,12 +12,12 @@ import {
   type WorkspaceSetupDto,
 } from "@solow/contracts";
 import {
-  agentCatalog,
-  agentProfile,
   type Db,
   executorProfile,
   FLAGS,
   type FlagKey,
+  harnessCatalog,
+  harnessProfile,
   repository,
   secret,
   workspace,
@@ -190,7 +190,7 @@ export async function renameWorkspace(
 /** How many rows of one kind this Workspace has. */
 async function tally(
   ctx: RequestContext,
-  table: typeof secret | typeof agentProfile | typeof executorProfile | typeof repository,
+  table: typeof secret | typeof harnessProfile | typeof executorProfile | typeof repository,
 ): Promise<number> {
   const [row] = await ctx.db
     .select({ n: count() })
@@ -205,7 +205,7 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
  * What this Workspace still needs, read from what it actually has (2026-08-28).
  *
  * This replaced a fixture. A local install used to arrive with two invented companies, each
- * already holding a credential, an Agent Profile, an Executor and a repository — so the product
+ * already holding a credential, a Harness Profile, an Executor and a repository — so the product
  * looked configured on first launch and the real gap stayed invisible: a Workspace made by a
  * genuine sign-up has none of those, and its feature flags are off, so the core loop is
  * disabled. The honest version is to ask the database.
@@ -220,13 +220,13 @@ export async function getWorkspaceSetup(ctx: RequestContext): Promise<Result<Wor
 
   const [catalog] = await ctx.db
     .select({ n: count() })
-    .from(agentCatalog)
-    .where(eq(agentCatalog.workspaceId, ctx.workspaceId));
-  const agents = catalog?.n ?? 0;
+    .from(harnessCatalog)
+    .where(eq(harnessCatalog.workspaceId, ctx.workspaceId));
+  const harnesses = catalog?.n ?? 0;
 
   const [secrets, profiles, executors, repositories] = await Promise.all([
     tally(ctx, secret),
-    tally(ctx, agentProfile),
+    tally(ctx, harnessProfile),
     tally(ctx, executorProfile),
     tally(ctx, repository),
   ]);
@@ -240,8 +240,8 @@ export async function getWorkspaceSetup(ctx: RequestContext): Promise<Result<Wor
     { key: "workspace", done: true, detail: found.data.name, blockedBy: null },
     {
       key: "agents",
-      done: agents > 0,
-      detail: agents > 0 ? plural(agents, "agent") : "",
+      done: harnesses > 0,
+      detail: harnesses > 0 ? plural(harnesses, "harness") : "",
       blockedBy: null,
     },
     {
@@ -254,7 +254,7 @@ export async function getWorkspaceSetup(ctx: RequestContext): Promise<Result<Wor
       key: "agent-profile",
       done: profiles > 0,
       detail: profiles > 0 ? plural(profiles, "profile") : "",
-      // A Profile binds an agent to a credential, so offering the form before one exists would
+      // A Profile binds a harness to a credential, so offering the form before one exists would
       // open it on an empty picker — a worse answer than naming what is missing.
       blockedBy: profiles === 0 && secrets === 0 ? "secret" : null,
     },

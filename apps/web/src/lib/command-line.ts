@@ -7,7 +7,7 @@
  * the line and this does the splitting, with the three rules a shell applies that matter for
  * an argument list: whitespace separates, `'…'` and `"…"` keep a space inside one argument, and
  * a backslash outside single quotes escapes the next character. No variable expansion, no
- * globbing — the agent runtime spawns the command without a shell, so none of that would have
+ * globbing — the harness runtime spawns the command without a shell, so none of that would have
  * happened anyway, and a `$HOME` typed here should reach the server as typed.
  */
 export type CommandLine = { command: string; args: string[] };

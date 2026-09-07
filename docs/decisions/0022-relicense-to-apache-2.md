@@ -32,7 +32,7 @@ would not.
 
 Apache-2.0 rather than MIT because of what it adds beyond permissiveness: an **express patent
 grant** from contributors, and termination of that grant for anyone who brings a patent claim.
-For a tool that orchestrates agents and may be evaluated inside companies, that is the clause their
+For a tool that orchestrates harnesses and may be evaluated inside companies, that is the clause their
 review will look for, and MIT is silent on it.
 
 ### What this does not relicense

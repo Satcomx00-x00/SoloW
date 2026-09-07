@@ -1,6 +1,6 @@
 "use client";
 
-import { AgentLibraryErrorCode, type McpServerDto } from "@solow/contracts";
+import { HarnessLibraryErrorCode, type McpServerDto } from "@solow/contracts";
 import {
   MCP_STORE,
   MCP_STORE_CATEGORIES,
@@ -292,7 +292,7 @@ function StoreCard({
       )}
       {create.error && (
         <p className="text-state-failed text-xs" role="alert">
-          {create.error.message === AgentLibraryErrorCode.NameTaken
+          {create.error.message === HarnessLibraryErrorCode.NameTaken
             ? `A server named ${entry.name} is already in the library.`
             : create.error.message}
         </p>

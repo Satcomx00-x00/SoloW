@@ -10,7 +10,7 @@ import {
   type SecretUsageDto,
   type SetSecretInput,
 } from "@solow/contracts";
-import { agentProfile, encryptSecret, integration, secret } from "@solow/db";
+import { encryptSecret, harnessProfile, integration, secret } from "@solow/db";
 import { and, desc, eq } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
 import { secretToRef } from "./mappers.js";
@@ -30,9 +30,9 @@ async function loadSecretUsage(ctx: RequestContext): Promise<Map<string, SecretU
       .from(integration)
       .where(eq(integration.workspaceId, ctx.workspaceId)),
     ctx.db
-      .select({ secretId: agentProfile.secretId, name: agentProfile.name })
-      .from(agentProfile)
-      .where(eq(agentProfile.workspaceId, ctx.workspaceId)),
+      .select({ secretId: harnessProfile.secretId, name: harnessProfile.name })
+      .from(harnessProfile)
+      .where(eq(harnessProfile.workspaceId, ctx.workspaceId)),
   ]);
 
   const usage = new Map<string, SecretUsageDto[]>();
@@ -98,9 +98,9 @@ export async function setSecret(
  * Delete a Secret, refusing while anything still holds it (spec F17 FR-6).
  *
  * The refusal is the point. SoloW keeps the only copy of the value, so deleting one an
- * Integration or Agent Profile points at cannot be undone by re-entering it — that holder would
+ * Integration or Harness Profile points at cannot be undone by re-entering it — that holder would
  * keep a `secret_id` naming a row that no longer exists, and say nothing about it until its next
- * sync or agent run failed to authenticate. The returned metadata is the row as it was, so a
+ * sync or harness run failed to authenticate. The returned metadata is the row as it was, so a
  * caller can report what it removed.
  */
 export async function deleteSecret(
@@ -125,10 +125,10 @@ export async function deleteSecret(
 
 /**
  * ORCHESTRATOR-ONLY. Returns the encrypted ciphertext for a Secret so the orchestrator
- * can decrypt it (via `decryptForAgentRun`) and inject a single credential into an agent
+ * can decrypt it (via `decryptForHarnessRun`) and inject a single credential into a harness
  * process. NOT for the web/API layer, and never mapped into a DTO. (Finding C1.)
  */
-export async function getSecretCiphertextForAgentRun(
+export async function getSecretCiphertextForHarnessRun(
   ctx: RequestContext,
   secretId: string,
 ): Promise<Result<string, typeof CommonErrorCode.NotFound>> {

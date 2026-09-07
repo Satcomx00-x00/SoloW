@@ -49,7 +49,7 @@ const VARIANTS: Array<[string, SessionEventPayload]> = [
     { kind: "permission_resolved", requestId: "req-1", optionId: "allow", decidedBy: "operator" },
   ],
   [
-    "the agent's todo list",
+    "the harness's todo list",
     {
       kind: "todos",
       items: [

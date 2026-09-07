@@ -3,7 +3,7 @@
 import type { IssueCommentDto } from "@solow/contracts";
 import { Loader2, MessageSquare, Send } from "lucide-react";
 import { useState } from "react";
-import { AgentMarkdown } from "@/components/features/task/markdown";
+import { HarnessMarkdown } from "@/components/features/task/markdown";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -57,7 +57,7 @@ function Comment({ comment }: { comment: IssueCommentDto }) {
         )}
       </header>
       <div className="px-4 py-3">
-        <AgentMarkdown text={comment.body} />
+        <HarnessMarkdown text={comment.body} />
       </div>
     </article>
   );
@@ -132,7 +132,7 @@ export function IssueComments({ issueId }: { issueId: string }) {
           <TabsContent value="preview">
             <div className="min-h-[92px] rounded-lg border bg-card/40 px-4 py-3">
               {draft.trim() ? (
-                <AgentMarkdown text={draft} />
+                <HarnessMarkdown text={draft} />
               ) : (
                 <p className="text-muted-foreground text-xs italic">Nothing to preview yet.</p>
               )}

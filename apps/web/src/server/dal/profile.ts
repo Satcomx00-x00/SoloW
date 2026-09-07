@@ -1,30 +1,30 @@
 import "server-only";
 import {
-  type AgentCatalogEntryDto,
-  AgentCatalogErrorCode,
-  type AgentProfileDto,
-  AgentProfileErrorCode,
-  type AgentProfileListDto,
-  type AgentProfileUsageDto,
   CommonErrorCode,
-  type CreateAgentCatalogEntryInput,
-  type CreateAgentProfileInput,
   type CreateExecutorProfileInput,
-  type DeleteAgentProfileInput,
+  type CreateHarnessCatalogEntryInput,
+  type CreateHarnessProfileInput,
+  type DeleteHarnessProfileInput,
   type ExecutorProfileDto,
   type ExecutorProfileListDto,
   err,
+  type HarnessCatalogEntryDto,
+  HarnessCatalogErrorCode,
+  type HarnessProfileDto,
+  HarnessProfileErrorCode,
+  type HarnessProfileListDto,
+  type HarnessProfileUsageDto,
   type ListProfilesInput,
   ok,
   type Result,
-  type UpdateAgentProfileInput,
   type UpdateExecutorProfileInput,
+  type UpdateHarnessProfileInput,
 } from "@solow/contracts";
 import {
-  agentCatalog,
-  agentProfile,
   ensureDefaultWorkflows,
   executorProfile,
+  harnessCatalog,
+  harnessProfile,
   sessionUsage,
   task,
   workflowStep,
@@ -33,48 +33,48 @@ import { and, desc, eq } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
 import { pageAfter, pageLimit, pageOrder, pageProbe, toPage } from "./page.js";
 
-export async function listAgentCatalog(
+export async function listHarnessCatalog(
   ctx: RequestContext,
-): Promise<Result<AgentCatalogEntryDto[]>> {
+): Promise<Result<HarnessCatalogEntryDto[]>> {
   const rows = await ctx.db
     .select()
-    .from(agentCatalog)
-    .where(eq(agentCatalog.workspaceId, ctx.workspaceId))
-    .orderBy(desc(agentCatalog.createdAt));
+    .from(harnessCatalog)
+    .where(eq(harnessCatalog.workspaceId, ctx.workspaceId))
+    .orderBy(desc(harnessCatalog.createdAt));
   return ok(rows);
 }
 
 /**
- * Declare a new agent this Workspace can run (spec F05 AC-1, issue #10/#58).
+ * Declare a new harness this Workspace can run (spec F05 AC-1, issue #10/#58).
  *
  * Every Workspace is seeded with exactly one row — `claude_code`, `claude_code_stream_json` —
- * by `ensureDefaultAgentCatalog`, and until now that was the only one that could ever exist:
+ * by `ensureDefaultHarnessCatalog`, and until now that was the only one that could ever exist:
  * nothing wrote a second row. That mattered beyond convenience — `acp` already has a real
  * runner (`acp-runner.ts`) implementing the full `session/request_permission` round trip an
- * elicitation widget needs, but with no way to add an `acp`-protocol row, no Agent Profile could
+ * elicitation widget needs, but with no way to add an `acp`-protocol row, no Harness Profile could
  * ever point at it, so the runner it already has could never actually run.
  *
  * `key` is checked for uniqueness explicitly rather than left to the `(workspace_id, key)`
  * index: the raw constraint error names a column, not the row the Owner was trying to add.
  */
-export async function createAgentCatalogEntry(
+export async function createHarnessCatalogEntry(
   ctx: RequestContext,
-  input: CreateAgentCatalogEntryInput,
+  input: CreateHarnessCatalogEntryInput,
 ): Promise<
   Result<
-    AgentCatalogEntryDto,
-    typeof AgentCatalogErrorCode.KeyTaken | typeof CommonErrorCode.ValidationFailed
+    HarnessCatalogEntryDto,
+    typeof HarnessCatalogErrorCode.KeyTaken | typeof CommonErrorCode.ValidationFailed
   >
 > {
   const [existing] = await ctx.db
-    .select({ id: agentCatalog.id })
-    .from(agentCatalog)
-    .where(and(eq(agentCatalog.workspaceId, ctx.workspaceId), eq(agentCatalog.key, input.key)))
+    .select({ id: harnessCatalog.id })
+    .from(harnessCatalog)
+    .where(and(eq(harnessCatalog.workspaceId, ctx.workspaceId), eq(harnessCatalog.key, input.key)))
     .limit(1);
-  if (existing) return err(AgentCatalogErrorCode.KeyTaken);
+  if (existing) return err(HarnessCatalogErrorCode.KeyTaken);
 
   const [row] = await ctx.db
-    .insert(agentCatalog)
+    .insert(harnessCatalog)
     .values({
       workspaceId: ctx.workspaceId,
       key: input.key,
@@ -91,24 +91,27 @@ export async function createAgentCatalogEntry(
   return row ? ok(row) : err(CommonErrorCode.ValidationFailed);
 }
 
-export async function createAgentProfile(
+export async function createHarnessProfile(
   ctx: RequestContext,
-  input: CreateAgentProfileInput,
-): Promise<Result<AgentProfileDto>> {
+  input: CreateHarnessProfileInput,
+): Promise<Result<HarnessProfileDto>> {
   // The FK alone only proves the catalog row exists *somewhere* — without this check, an
-  // Agent Profile could point at another Workspace's catalog entry and inherit its launch
+  // Harness Profile could point at another Workspace's catalog entry and inherit its launch
   // command and billing variable names (Principle V).
   const [entry] = await ctx.db
-    .select({ id: agentCatalog.id })
-    .from(agentCatalog)
+    .select({ id: harnessCatalog.id })
+    .from(harnessCatalog)
     .where(
-      and(eq(agentCatalog.workspaceId, ctx.workspaceId), eq(agentCatalog.id, input.agentCatalogId)),
+      and(
+        eq(harnessCatalog.workspaceId, ctx.workspaceId),
+        eq(harnessCatalog.id, input.agentCatalogId),
+      ),
     )
     .limit(1);
   if (!entry) return err(CommonErrorCode.ValidationFailed);
 
   const [row] = await ctx.db
-    .insert(agentProfile)
+    .insert(harnessProfile)
     .values({
       workspaceId: ctx.workspaceId,
       name: input.name,
@@ -122,22 +125,22 @@ export async function createAgentProfile(
     })
     .returning();
   // The Workspace's first Profile is what the default Workflows were waiting for: a Step has to
-  // name the agent that runs it, so they could not be seeded before one existed (spec F03).
+  // name the harness that runs it, so they could not be seeded before one existed (spec F03).
   if (row) await ensureDefaultWorkflows(ctx.db, ctx.workspaceId);
   // A Profile just created cannot be referenced by anything yet — nothing existed a statement
   // ago that could point at this id.
   return row ? ok({ ...row, usage: EMPTY_USAGE }) : err(CommonErrorCode.ValidationFailed);
 }
 
-/** An Agent Profile referenced by nothing yet — every count zero, computed rather than guessed. */
-const EMPTY_USAGE: AgentProfileUsageDto = {
+/** A Harness Profile referenced by nothing yet — every count zero, computed rather than guessed. */
+const EMPTY_USAGE: HarnessProfileUsageDto = {
   taskCount: 0,
   workflowStepCount: 0,
   sessionUsageCount: 0,
 };
 
 /**
- * How many Tasks, Workflow Steps, and Session usage records reference each Agent Profile in this
+ * How many Tasks, Workflow Steps, and Session usage records reference each Harness Profile in this
  * Workspace, batched into one pass per table rather than one query per Profile (the list view
  * renders every Profile at once, so an N+1 here would be one query per row on every Settings
  * load).
@@ -147,9 +150,9 @@ const EMPTY_USAGE: AgentProfileUsageDto = {
  * the bare ids and reduces them in a `Map` (see `taskStatesByIssue`, `attachmentsForTasks`), and
  * a Workspace's own Profile list is never large enough for that difference to matter.
  */
-async function loadAgentProfileUsage(
+async function loadHarnessProfileUsage(
   ctx: RequestContext,
-): Promise<Map<string, AgentProfileUsageDto>> {
+): Promise<Map<string, HarnessProfileUsageDto>> {
   const [tasks, steps, usages] = await Promise.all([
     ctx.db
       .select({ agentProfileId: task.agentProfileId })
@@ -165,8 +168,8 @@ async function loadAgentProfileUsage(
       .where(eq(sessionUsage.workspaceId, ctx.workspaceId)),
   ]);
 
-  const usage = new Map<string, AgentProfileUsageDto>();
-  const bump = (id: string, key: keyof AgentProfileUsageDto) => {
+  const usage = new Map<string, HarnessProfileUsageDto>();
+  const bump = (id: string, key: keyof HarnessProfileUsageDto) => {
     const existing = usage.get(id) ?? { ...EMPTY_USAGE };
     existing[key] += 1;
     usage.set(id, existing);
@@ -177,19 +180,19 @@ async function loadAgentProfileUsage(
   return usage;
 }
 
-export async function listAgentProfiles(
+export async function listHarnessProfiles(
   ctx: RequestContext,
   input: ListProfilesInput,
-): Promise<Result<AgentProfileListDto>> {
-  const after = pageAfter(input.cursor, agentProfile.createdAt, agentProfile.id);
+): Promise<Result<HarnessProfileListDto>> {
+  const after = pageAfter(input.cursor, harnessProfile.createdAt, harnessProfile.id);
   const [rows, usage] = await Promise.all([
     ctx.db
       .select()
-      .from(agentProfile)
-      .where(and(eq(agentProfile.workspaceId, ctx.workspaceId), ...(after ? [after] : [])))
-      .orderBy(...pageOrder(agentProfile.createdAt, agentProfile.id))
+      .from(harnessProfile)
+      .where(and(eq(harnessProfile.workspaceId, ctx.workspaceId), ...(after ? [after] : [])))
+      .orderBy(...pageOrder(harnessProfile.createdAt, harnessProfile.id))
       .limit(pageProbe(pageLimit(input.limit))),
-    loadAgentProfileUsage(ctx),
+    loadHarnessProfileUsage(ctx),
   ]);
   const page = toPage(rows, pageLimit(input.limit), (row) => ({
     createdAt: row.createdAt,
@@ -201,22 +204,22 @@ export async function listAgentProfiles(
   });
 }
 
-export async function getAgentProfile(
+export async function getHarnessProfile(
   ctx: RequestContext,
   id: string,
-): Promise<Result<AgentProfileDto, typeof CommonErrorCode.NotFound>> {
+): Promise<Result<HarnessProfileDto, typeof CommonErrorCode.NotFound>> {
   const [row] = await ctx.db
     .select()
-    .from(agentProfile)
-    .where(and(eq(agentProfile.workspaceId, ctx.workspaceId), eq(agentProfile.id, id)))
+    .from(harnessProfile)
+    .where(and(eq(harnessProfile.workspaceId, ctx.workspaceId), eq(harnessProfile.id, id)))
     .limit(1);
   if (!row) return err(CommonErrorCode.NotFound);
-  const usage = await loadAgentProfileUsage(ctx);
+  const usage = await loadHarnessProfileUsage(ctx);
   return ok({ ...row, usage: usage.get(row.id) ?? EMPTY_USAGE });
 }
 
 /**
- * Delete an Agent Profile, refused while a Task, a Workflow Step, or a Session usage record
+ * Delete a Harness Profile, refused while a Task, a Workflow Step, or a Session usage record
  * still references it (spec F05/F06). All three are NOT NULL foreign keys — unlike a Secret's
  * `secret_id`, a plain column — so an unrefused delete would not silently orphan anything; it
  * would throw a raw SQLite constraint error from deep inside the delete statement. Checking
@@ -226,57 +229,57 @@ export async function getAgentProfile(
  * Edit a Profile's name, concurrency cap or permission mode.
  *
  * Deliberately not a general update: `agentCatalogId`, `authMode` and `secretId` are what a
- * Profile *is*, and every Task that ran under it was launched with them. Changing which agent it
+ * Profile *is*, and every Task that ran under it was launched with them. Changing which harness it
  * runs, or which credential it runs on, would rewrite what a finished run meant.
  *
  * The permission mode is different — it applies to the *next* launch and nothing already
  * recorded, which is exactly why it is editable at all: the Owner who discovers mid-project that
- * their agent cannot reach the shell should not have to delete the Profile (and orphan its
+ * their harness cannot reach the shell should not have to delete the Profile (and orphan its
  * history) to fix it.
  */
-export async function updateAgentProfile(
+export async function updateHarnessProfile(
   ctx: RequestContext,
-  input: UpdateAgentProfileInput,
-): Promise<Result<AgentProfileDto, typeof CommonErrorCode.NotFound>> {
+  input: UpdateHarnessProfileInput,
+): Promise<Result<HarnessProfileDto, typeof CommonErrorCode.NotFound>> {
   const [row] = await ctx.db
-    .update(agentProfile)
+    .update(harnessProfile)
     .set({
       ...(input.name !== undefined ? { name: input.name } : {}),
       ...(input.concurrencyCap !== undefined ? { concurrencyCap: input.concurrencyCap } : {}),
       ...(input.permissionMode !== undefined ? { permissionMode: input.permissionMode } : {}),
-      // Absent leaves the pin alone; null clears it back to "whatever the agent chooses".
+      // Absent leaves the pin alone; null clears it back to "whatever the harness chooses".
       ...(input.model !== undefined ? { model: input.model } : {}),
       ...(input.modeId !== undefined ? { modeId: input.modeId } : {}),
       updatedAt: new Date().toISOString(),
     })
-    .where(and(eq(agentProfile.workspaceId, ctx.workspaceId), eq(agentProfile.id, input.id)))
+    .where(and(eq(harnessProfile.workspaceId, ctx.workspaceId), eq(harnessProfile.id, input.id)))
     .returning();
   if (!row) return err(CommonErrorCode.NotFound);
-  const usage = await loadAgentProfileUsage(ctx);
+  const usage = await loadHarnessProfileUsage(ctx);
   return ok({ ...row, usage: usage.get(row.id) ?? EMPTY_USAGE });
 }
 
-export async function deleteAgentProfile(
+export async function deleteHarnessProfile(
   ctx: RequestContext,
-  input: DeleteAgentProfileInput,
+  input: DeleteHarnessProfileInput,
 ): Promise<
-  Result<AgentProfileDto, typeof CommonErrorCode.NotFound | typeof AgentProfileErrorCode.InUse>
+  Result<HarnessProfileDto, typeof CommonErrorCode.NotFound | typeof HarnessProfileErrorCode.InUse>
 > {
   const [row] = await ctx.db
     .select()
-    .from(agentProfile)
-    .where(and(eq(agentProfile.workspaceId, ctx.workspaceId), eq(agentProfile.id, input.id)))
+    .from(harnessProfile)
+    .where(and(eq(harnessProfile.workspaceId, ctx.workspaceId), eq(harnessProfile.id, input.id)))
     .limit(1);
   if (!row) return err(CommonErrorCode.NotFound);
 
-  const usage = (await loadAgentProfileUsage(ctx)).get(row.id) ?? EMPTY_USAGE;
+  const usage = (await loadHarnessProfileUsage(ctx)).get(row.id) ?? EMPTY_USAGE;
   if (usage.taskCount > 0 || usage.workflowStepCount > 0 || usage.sessionUsageCount > 0) {
-    return err(AgentProfileErrorCode.InUse);
+    return err(HarnessProfileErrorCode.InUse);
   }
 
   await ctx.db
-    .delete(agentProfile)
-    .where(and(eq(agentProfile.workspaceId, ctx.workspaceId), eq(agentProfile.id, row.id)));
+    .delete(harnessProfile)
+    .where(and(eq(harnessProfile.workspaceId, ctx.workspaceId), eq(harnessProfile.id, row.id)));
   return ok({ ...row, usage: EMPTY_USAGE });
 }
 

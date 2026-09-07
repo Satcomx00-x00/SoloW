@@ -24,7 +24,7 @@ import {
  *
  * `initialize` → `session/new` → `session/prompt` → `session/update` → `session/cancel`, framed
  * as newline-delimited JSON-RPC 2.0. Deliberately shaped as a mirror of `startClaudeSession` so
- * the two adapters behind `AgentRunner` read the same way and diverge only where the protocols
+ * the two adapters behind `HarnessRunner` read the same way and diverge only where the protocols
  * genuinely do.
  *
  * They genuinely do in two places, both of which get a comment where they bite:
@@ -465,7 +465,7 @@ export function startAcpSession(options: AcpSessionOptions, prompt: string): Acp
       }
       if (!ready || finished || stopped) return false;
       // Queued, not interleaved: ACP v1 has no way to type into a running turn, so the
-      // operator's message becomes the *next* `session/prompt`. The `AgentHandle.send`
+      // operator's message becomes the *next* `session/prompt`. The `HarnessHandle.send`
       // contract already means "accepted", not "delivered to the model now".
       queue.push(text);
       return true;

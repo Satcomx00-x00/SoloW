@@ -24,9 +24,9 @@ experience:
   [Decision 0010](./0010-spa-interactive-application.md)).
 - **tRPC** queries/mutations and the generated **`openapi.json`** are served through Next.js
   Route Handlers ([Decision 0011](./0011-frontend-backend-protocol.md)).
-- The **WebSocket** realtime channel and the long-lived agent orchestration run in a
+- The **WebSocket** realtime channel and the long-lived harness orchestration run in a
   **separate always-on service**, since serverless-style Next.js does not host long-lived
-  connections or agent processes well — preserving the application/orchestrator split of
+  connections or harness processes well — preserving the application/orchestrator split of
   [Decision 0002](./0002-technology-stack.md).
 
 This supersedes [Decision 0012](./0012-spa-build-stack.md); SoloW uses Next.js, not

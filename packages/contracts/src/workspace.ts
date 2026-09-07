@@ -45,7 +45,7 @@ export const setupStepDto = z.object({
   detail: z.string(),
   /**
    * Why this step cannot be started yet, or null when it can. A step gated on an earlier one
-   * says so instead of offering an action that would fail — an Agent Profile needs a Secret to
+   * says so instead of offering an action that would fail — a Harness Profile needs a Secret to
    * point at, and a button that opens a form with an empty picker is a worse answer than a
    * sentence naming what is missing.
    */

@@ -4,7 +4,7 @@ import "server-only";
  * In-memory fixed-window rate limiter (plan §12 / task TASK-011). v1 is local single-user, so
  * an in-process counter keyed by `${procedure}:${workspaceId}` is sufficient; the hosted path
  * would swap this for a shared store. Applied to the sensitive writes `secret.set` and
- * `task.launch` (Principle IV — bound credential writes and agent launches per Owner).
+ * `task.launch` (Principle IV — bound credential writes and harness launches per Owner).
  */
 
 export interface RateLimitRule {

@@ -10,7 +10,7 @@ const AT = "2026-08-20T00:00:00.000Z";
 afterEach(cleanup);
 
 describe("SkillsSection", () => {
-  it("adds a skill written here, off for every agent unless asked", async () => {
+  it("adds a skill written here, off for every harness unless asked", async () => {
     const { log } = renderWithTrpc(<SkillsSection />, {
       "library.skill.list": () => [],
       "library.skill.create": () => ({}),

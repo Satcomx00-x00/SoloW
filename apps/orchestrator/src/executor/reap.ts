@@ -2,8 +2,8 @@ import type { TaskState } from "@solow/contracts";
 import { STRANDED_REVIEW_REASON } from "@solow/core";
 import { type Db, session, task } from "@solow/db";
 import { and, desc, eq } from "drizzle-orm";
-import type { AgentRegistry } from "../agent/registry.js";
 import { orchestratorEnv } from "../env.js";
+import type { HarnessRegistry } from "../harness/registry.js";
 import { RECLAIM_STALE_MS, STRANDED_PARK_REASON } from "../reconcile.js";
 import { CONTAINER_OWNER_PATH, deploymentId, ORCHESTRATOR_EPOCH } from "./docker.js";
 import type { Executor } from "./types.js";
@@ -22,7 +22,7 @@ import type { Executor } from "./types.js";
  * **The direction of inference is inverted from the sweeps beside it, and that is the trap.**
  * `reclaimOrphanedRuns` starts from database rows and asks "is this run still alive". This starts
  * from the *host* and asks "does this container still belong to something" — so the Task table,
- * the agent registry and the container's own claim (`ORCHESTRATOR_EPOCH`) are consulted as
+ * the harness registry and the container's own claim (`ORCHESTRATOR_EPOCH`) are consulted as
  * **evidence of life**, never as a list of things to kill. A reaper that read them the other way
  * round would remove a container the moment a row was missing for any reason, including the ones
  * that have nothing to do with the container.
@@ -96,7 +96,7 @@ interface ManagedContainer {
 export async function reapOrphanedContainers(
   host: Executor,
   db: Db,
-  registry: Pick<AgentRegistry, "get">,
+  registry: Pick<HarnessRegistry, "get">,
   now: () => Date = () => new Date(),
 ): Promise<number> {
   if (noDockerBinary.has(host)) return 0;
@@ -165,7 +165,7 @@ export async function reapOrphanedContainers(
     //    `to-review` commits, the whole of `executor-preflight` (which is where the daemon
     //    handshake, the pull and the prepare script actually happen — see the step's own comment
     //    in task-run.ts), and, on a run woken from a park, the one gap between the sleep returning
-    //    and the next agent starting. So a Task whose row was written recently is left alone until
+    //    and the next harness starting. So a Task whose row was written recently is left alone until
     //    it has also gone silent for long enough that no ordinary gap explains it.
     //
     //    **The cushion is measured from the row's own last write and asks nothing about its
@@ -187,7 +187,7 @@ export async function reapOrphanedContainers(
     //    down exactly as before; and even inside the window nothing here takes back the `failed`
     //    the reclaim sweep wrote, so the operator still sees a Task that died while its run was
     //    alive. The only thing that closes either is the run lifecycle publishing a container's
-    //    existence before an agent exists to own it — the registration `heldByRun` names below —
+    //    existence before a harness exists to own it — the registration `heldByRun` names below —
     //    which is a change to the lifecycle and not to a reaper.
     //
     //    What removal costs when it is wrong is worth stating plainly, because it is not always
@@ -250,7 +250,7 @@ export async function reapOrphanedContainers(
  * by the next one after `reportStrandedParks` had spoken.
  *
  * Paired with the state rather than read on its own, because the review reason is not cleared when
- * a late redrive resumes the Task for another round: an agent working inside that container must
+ * a late redrive resumes the Task for another round: a harness working inside that container must
  * not be reaped on the strength of a verdict that has been overtaken. For `review` the pairing is
  * complete cover, and for a reason worth stating — the resume path moves the Task to `running`
  * (`resume-` in task-run.ts), where this function is unconditionally true, so the stamp becomes
@@ -272,10 +272,10 @@ export async function reapOrphanedContainers(
  * **What the registry does and does not cover here, stated exactly, because the first draft of
  * this comment got it backwards.** `deps.registry.register` is reached on the same synchronous
  * tick as `runner.start` — there is no `await` between them in task-run.ts, and `start` returns a
- * handle rather than awaiting anything — so a container built lazily by the agent's own first
+ * handle rather than awaiting anything — so a container built lazily by the harness's own first
  * `spawn` is registered long before any `docker` call it triggered can return. The window filter 2
  * genuinely cannot see is the other one: `executor-preflight` is a durable step of its own, before
- * the round loop, and it is where a container is created and prepared with no agent registered at
+ * the round loop, and it is where a container is created and prepared with no harness registered at
  * all.
  *
  * The residual risk, then, is any verdict that has been stale for more than `RECLAIM_STALE_MS`
@@ -285,8 +285,8 @@ export async function reapOrphanedContainers(
  * `failed` over a run that is still pulling an image and this function then reads it as empty.
  * Nothing here can see into either window; a container is only ever as alive as the last thing
  * that wrote about it. Closing them properly means the run lifecycle publishing a container's
- * existence before an agent exists to own it — a second kind of registry entry, since today's is
- * built around an `AgentHandle` that `executor-preflight` does not have — which is a change to the
+ * existence before a harness exists to own it — a second kind of registry entry, since today's is
+ * built around an `HarnessHandle` that `executor-preflight` does not have — which is a change to the
  * run lifecycle and not to a reaper.
  */
 function heldByRun(row: { state: TaskState; failureReason: string | null }): boolean {
