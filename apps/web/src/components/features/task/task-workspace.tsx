@@ -4,6 +4,7 @@ import type {
   SessionEventDto,
   SessionSummaryDto,
   TaskDiffDto,
+  TaskDto,
   TaskEvent,
   TaskInputAck,
   TaskRepositoryDto,
@@ -41,6 +42,7 @@ import { trpc } from "@/trpc/react";
 import { AgentComposer } from "./agent-composer";
 import { ChangesPanel } from "./changes-panel";
 import { DeleteTaskAction } from "./delete-task-action";
+import { LaunchTaskDialog, useWorkflowChoices } from "./launch-task-dialog";
 import { type PermissionRequest, PermissionRequestDialog } from "./permission-request-dialog";
 import { groupChanges, summariseConsequences } from "./review-groups";
 import { SessionLog } from "./session-log";
@@ -294,6 +296,9 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
     },
   });
   const [pendingMove, setPendingMove] = useState<TaskState | null>(null);
+  // The forward arrow on a Ready Task asks which Workflow first, when there is one (spec F03).
+  const workflowChoices = useWorkflowChoices();
+  const [launching, setLaunching] = useState<TaskDto | null>(null);
 
   /**
    * Every group this one decision covers (issue #70).
@@ -382,7 +387,8 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
    */
   const requestMove = (to: TaskState) => {
     if (to === "running" && t.state === "ready") {
-      launch.mutate({ id: t.id });
+      if (workflowChoices.available) setLaunching(t);
+      else launch.mutate({ id: t.id });
       return;
     }
     if (t.state === "review") {
@@ -424,6 +430,13 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
         the approve step: `task.move` writes the state and nothing else, so the agent's branch is
         never committed and the run is left waiting at a gate no decision ever reaches.
       */}
+      <LaunchTaskDialog
+        task={launching}
+        onOpenChange={(open) => {
+          if (!open) setLaunching(null);
+        }}
+        onLaunch={(task) => launch.mutate({ id: task.id })}
+      />
       <ConfirmDialog
         open={pendingMove !== null}
         onOpenChange={(open) => {

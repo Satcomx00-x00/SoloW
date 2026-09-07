@@ -30,6 +30,7 @@ import { taskActionMessage } from "@/lib/task-errors";
 import { BOARD_COLUMNS, CREDENTIAL_EXPIRED_REASON } from "@/lib/task-states";
 import { useWorkspaceEvents } from "@/lib/workspace-events";
 import { trpc } from "@/trpc/react";
+import { LaunchTaskDialog, useWorkflowChoices } from "../task/launch-task-dialog";
 import { BlockedByDialog } from "./blocked-by-dialog";
 import { moveRefusal, stepMoveRefusal, waitingOn } from "./blockers";
 import { type BoardReferences, BoardReferencesProvider } from "./board-references";
@@ -187,6 +188,14 @@ export function Board({
   };
   const move = trpc.task.move.useMutation({ onSuccess: refresh });
   const launch = trpc.task.launch.useMutation({ onSuccess: refresh });
+  // Launch asks which Workflow first, when there is one to choose (spec F03); with none, or the
+  // flag off, the button does what it always did.
+  const workflowChoices = useWorkflowChoices();
+  const [launching, setLaunching] = useState<TaskDto | null>(null);
+  const requestLaunch = (task: TaskDto) => {
+    if (workflowChoices.available) setLaunching(task);
+    else launch.mutate({ id: task.id });
+  };
   const retry = trpc.task.retry.useMutation({ onSuccess: refresh });
   // The card's green control. A mutation of its own rather than `move`, because it asserts the
   // work is ready to judge and is refused when the agent has not said so — dragging a card and
@@ -466,7 +475,7 @@ export function Board({
             size="xs"
             disabled={busy}
             loading={pendingOn(task.id)}
-            onClick={() => launch.mutate({ id: task.id })}
+            onClick={() => requestLaunch(task)}
           >
             <Play /> Launch
           </Button>
@@ -557,6 +566,13 @@ export function Board({
           if (pendingMove) move.mutate({ id: pendingMove.taskId, to: pendingMove.to });
           setPendingMove(null);
         }}
+      />
+      <LaunchTaskDialog
+        task={launching}
+        onOpenChange={(open) => {
+          if (!open) setLaunching(null);
+        }}
+        onLaunch={(task) => launch.mutate({ id: task.id })}
       />
       <BlockedByDialog
         task={editingBlockersFor}

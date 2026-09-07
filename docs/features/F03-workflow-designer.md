@@ -122,6 +122,10 @@ it is how an operator gets from one shape to the next.
 
 ## What ships in v1
 
+- **Launch asks which Workflow.** Pressing *Launch* on a Ready Task (board or Task page) opens a
+  choice — *No workflow* (one agent run) or any pipeline of the Workspace, preselected to what the
+  Task is bound to — writes the binding, then launches. With no Workflow in the Workspace, or the
+  flag off, the launch goes straight through as before.
 - **Built through the SoloW MCP too** — the `workflow.*` authoring procedures (create, add /
   update / reorder / delete Steps, attach and detach a Task) are exposed as MCP tools, with
   `workflow.authoringGuide` returning the rules and the tool sequence so an AI holding a token
