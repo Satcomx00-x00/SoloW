@@ -1036,12 +1036,18 @@ describe("workflows", () => {
   });
 
   describe("the external MCP surface", () => {
-    it("exposes no workflow tool, so a token cannot drive a Task's own gates", () => {
-      // The namespace is withheld by decision rather than admitted by omission: `advanceTask` is
-      // the call that opens a gate, and the holder of an MCP token is the agent the gate is for.
-      expect(listMcpTools().filter((tool) => tool.name.startsWith("workflow_"))).toEqual([]);
+    it("exposes the authoring tools, and never the one that drives a Task's own gates", () => {
+      // `advanceTask` is the call that opens a gate, and the holder of an MCP token may be the
+      // agent the gate is for; the rest of the namespace is how an AI builds the pipeline it
+      // will not itself be allowed to advance (spec F03).
+      const workflowTools = listMcpTools()
+        .map((tool) => tool.name)
+        .filter((n) => n.startsWith("workflow_"));
+      expect(workflowTools).toContain("workflow_create");
+      expect(workflowTools).toContain("workflow_addStep");
+      expect(workflowTools).toContain("workflow_authoringGuide");
       expect(findMcpTool("workflow_advanceTask")).toBeUndefined();
-      expect(findMcpTool("workflow_delete")).toBeUndefined();
+      expect(findMcpTool("workflow_acknowledgeDrift")).toBeUndefined();
     });
   });
 

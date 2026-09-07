@@ -16,11 +16,14 @@ import {
   taskWorkflowBindingDto,
   updateWorkflowStepInput,
   workflowAdvanceDto,
+  workflowAuthoringGuideDto,
   workflowDetachDto,
   workflowDto,
   workflowListDto,
   workflowWithStepsDto,
 } from "@solow/contracts";
+import { WORKFLOW_AUTHORING_GUIDE } from "@solow/core";
+import { z } from "zod";
 import {
   acknowledgeTaskWorkflowDrift,
   addWorkflowStep,
@@ -50,6 +53,21 @@ import { router, unwrap, workflowProcedure } from "../trpc.js";
  * `Result` error to an HTTP status, which is what `unwrap` does.
  */
 export const workflowRouter = router({
+  authoringGuide: workflowProcedure
+    .meta({
+      openapi: {
+        method: "GET",
+        path: "/workflow.authoringGuide",
+        tags: ["workflow"],
+        protect: true,
+        summary:
+          "How to build a Workflow through this API: the tools in order, every Step field, the branch shape, and the graph rules the API enforces. Read this first when asked to design or change a pipeline.",
+      },
+    })
+    .input(z.object({}))
+    .output(workflowAuthoringGuideDto)
+    .query(() => ({ markdown: WORKFLOW_AUTHORING_GUIDE })),
+
   list: workflowProcedure
     .meta({
       openapi: {

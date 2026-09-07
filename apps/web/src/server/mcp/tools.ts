@@ -31,17 +31,19 @@ import { appRouter } from "../routers/index.js";
  * - `preference` — one person's arrangement of their own interface (issue #3). A token is held
  *   by software, which has no interface to arrange; exposing it would let a tool rearrange a
  *   human's shell, which is not work management by any reading.
- * - `workflow` — the Workflow definition *and* the Step cursor of every Task following one
- *   (issue #5). `workflow.advanceTask` is the call that opens a Task's gates, and the party
- *   holding an MCP token is the agent whose work those gates exist to hold: letting it report its
- *   own Step finished, and claim its own Step produced nothing to look at, is asking the subject
- *   of a review to sign it off. `workflow.delete` and `workflow.deleteStep` are on the same
- *   surface and would let a token rewrite the pipeline rather than run it.
+ * - `workflow.advanceTask` and `workflow.acknowledgeDrift` — the Step cursor of a Task following
+ *   a Workflow (issue #5). `advanceTask` is the call that opens a Task's gates, and the party
+ *   holding an MCP token may be the agent whose work those gates exist to hold: letting it report
+ *   its own Step finished, and claim its own Step produced nothing to look at, is asking the
+ *   subject of a review to sign it off. `acknowledgeDrift` lowers the warning that says a running
+ *   Task no longer matches its pipeline — the operator's call, for the same reason.
  *
- *   This is not "MCP never drives a Workflow" — issue #86 is exactly that, and it needs the run
- *   loop that produces one Session per Step, so a completion report can be attributed to the Step
- *   it came from and checked against it. Until then the namespace is withheld by decision rather
- *   than admitted by omission, which is what the rest of this list records.
+ *   The rest of the namespace — creating a Workflow, adding, editing, reordering and deleting
+ *   Steps, attaching a Task to a pipeline — *is* exposed (spec F03): building a pipeline is work
+ *   management, the thing a read_write token is a grant for, and an AI holding one can design
+ *   the pipeline it will not itself be allowed to advance. `workflow.authoringGuide` is the
+ *   read that tells it the rules. This replaces an earlier decision to withhold the whole
+ *   namespace; the two procedures still withheld are the two that reasoning was about.
  * - `review` — its only procedure is `decide`, which is the review gate itself. The paragraph
  *   above rejected `workflow.advanceTask` for letting a token sign off its own Step; this is the
  *   same act, one level down and more directly: approving the change an agent just wrote. The
@@ -62,13 +64,26 @@ const WITHHELD_NAMESPACES = new Set([
   "stream",
   "mcpToken",
   "preference",
-  "workflow",
   "review",
   // `library` — the MCP servers and Skills every agent is started with, and the Secrets they
   // reference (spec F24). A token held by an agent must not be able to hand that agent a new
-  // server, or point an existing one at a different credential.
+  // server, or point an existing one at a different credential. The two *lists* are let through
+  // below: a Step names library items by id, so a builder has to be able to read the ids — and
+  // a listing carries commands, URLs and Secret *references*, never a Secret's value.
   "library",
 ]);
+
+/** Withheld one procedure at a time, inside a namespace that is otherwise exposed. */
+const WITHHELD_PROCEDURES = new Set(["workflow.advanceTask", "workflow.acknowledgeDrift"]);
+
+/** Exposed one procedure at a time, inside a namespace that is otherwise withheld. */
+const EXPOSED_PROCEDURES = new Set(["library.mcp.list", "library.skill.list"]);
+
+function exposed(path: string): boolean {
+  if (EXPOSED_PROCEDURES.has(path)) return true;
+  if (WITHHELD_PROCEDURES.has(path)) return false;
+  return !WITHHELD_NAMESPACES.has(path.split(".")[0] ?? "");
+}
 
 export interface McpToolDefinition {
   /** MCP tool name — the tRPC path with `.` swapped for `_` (`issue.get` → `issue_get`). */
@@ -132,7 +147,7 @@ export function listMcpTools(): McpToolDefinition[] {
   )._def.procedures;
 
   return Object.entries(procedures)
-    .filter(([path]) => !WITHHELD_NAMESPACES.has(path.split(".")[0] ?? ""))
+    .filter(([path]) => exposed(path))
     .filter(([, proc]) => proc._def?.type === "query" || proc._def?.type === "mutation")
     .map(([path, proc]) => ({
       name: toolNameFor(path),

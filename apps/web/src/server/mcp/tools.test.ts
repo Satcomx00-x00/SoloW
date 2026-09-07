@@ -33,9 +33,39 @@ describe("the MCP surface", () => {
     }
   });
 
-  it("keeps withholding the four that were withheld before", () => {
+  it("lets a token build a pipeline, but never advance one or hand an agent a server", () => {
     const exposed = names();
-    for (const withheld of ["secret_create", "secret_list", "mcpToken_issue", "workflow_delete"]) {
+    // Authoring (spec F03): a builder can read the rules, make the pipeline and bind a Task to it.
+    for (const tool of [
+      "workflow_authoringGuide",
+      "workflow_create",
+      "workflow_addStep",
+      "workflow_updateStep",
+      "workflow_reorderStep",
+      "workflow_deleteStep",
+      "workflow_delete",
+      "workflow_attachTask",
+      "workflow_get",
+      "library_mcp_list",
+      "library_skill_list",
+    ]) {
+      expect(exposed).toContain(tool);
+    }
+    // Running: the gates stay a person's to open, and the libraries stay a signed-in write.
+    for (const withheld of [
+      "workflow_advanceTask",
+      "workflow_acknowledgeDrift",
+      "library_mcp_create",
+      "library_skill_create",
+      "library_skill_import",
+    ]) {
+      expect(exposed).not.toContain(withheld);
+    }
+  });
+
+  it("keeps withholding the ones that were withheld before", () => {
+    const exposed = names();
+    for (const withheld of ["secret_create", "secret_list", "mcpToken_issue", "review_decide"]) {
       expect(exposed).not.toContain(withheld);
     }
     // Nothing from a withheld namespace leaks under a different name either.

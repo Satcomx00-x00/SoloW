@@ -395,3 +395,7 @@ export const workflowAdvanceDto = z.object({
   brief: z.string(),
 });
 export type WorkflowAdvanceDto = z.infer<typeof workflowAdvanceDto>;
+
+/** What `workflow.authoringGuide` returns: the rules and the tool sequence, as markdown. */
+export const workflowAuthoringGuideDto = z.object({ markdown: z.string() });
+export type WorkflowAuthoringGuideDto = z.infer<typeof workflowAuthoringGuideDto>;
