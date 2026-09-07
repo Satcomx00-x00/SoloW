@@ -284,7 +284,7 @@ export function TerminalView({
           <>
             {elided > 0 && (
               <p className="border-b px-4 py-2 font-mono text-2xs text-muted-foreground/70">
-                … {elided} earlier events summarised — see the Conversation tab
+                … {elided} earlier events summarised
               </p>
             )}
             <Transcript

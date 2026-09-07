@@ -2,7 +2,6 @@
 
 import type {
   SessionEventDto,
-  SessionSummaryDto,
   TaskDiffDto,
   TaskDto,
   TaskEvent,
@@ -18,9 +17,7 @@ import {
   CheckCircle2,
   GitBranch,
   ListChecks,
-  MessageSquare,
   RotateCcw,
-  Terminal,
   Trash2,
   TriangleAlert,
   X,
@@ -34,7 +31,6 @@ import { useBackToProject } from "@/components/features/shared/back-to-project";
 import { useTaskStream } from "@/components/hooks/use-task-stream";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { WHOLE_PAGE } from "@/lib/paged";
 import { taskActionMessage } from "@/lib/task-errors";
 import { cn } from "@/lib/utils";
@@ -43,14 +39,13 @@ import { ChangesPanel } from "./changes-panel";
 import { DeleteTaskAction } from "./delete-task-action";
 import { HarnessComposer } from "./harness-composer";
 import { LaunchTaskDialog, useWorkflowChoices } from "./launch-task-dialog";
-import { type PermissionRequest, PermissionRequestDialog } from "./permission-request-dialog";
 import { groupChanges, summariseConsequences } from "./review-groups";
-import { SessionLog } from "./session-log";
 import { SplitPane } from "./split-pane";
 import { TaskAdvance } from "./task-advance";
 import { TerminalView } from "./terminal-view";
 import { latestTodos, TodoList } from "./todo-list";
-import { buildTranscript, openPermission, type PermissionRow } from "./transcript";
+import { buildTranscript } from "./transcript";
+import { WorkflowSteps } from "./workflow-steps";
 
 /** Shared empty array, so "no events yet" keeps a stable identity across renders. */
 /**
@@ -117,7 +112,7 @@ function StreamIndicator({ status }: { status: string }) {
   );
 }
 
-/** The IDE-like Task workspace: harness terminal + git changes + conversation + review gate. */
+/** The IDE-like Task workspace: harness terminal + git changes + review gate. */
 export function TaskWorkspace({ taskId }: { taskId: string }) {
   const utils = trpc.useUtils();
   const task = trpc.task.get.useQuery({ id: taskId });
@@ -162,7 +157,6 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
     },
     [utils, taskId],
   );
-  const [tab, setTab] = useState("terminal");
   const [ack, setAck] = useState<TaskInputAck | null>(null);
   const onAck = useCallback((next: TaskInputAck) => setAck(next), []);
   const live = useTaskStream(taskId, { onEvent: onLive, onAck });
@@ -227,19 +221,6 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
     }
     return latestTodos(events);
   }, [events, live.events, liveSessionId]);
-
-  // Read one summarised range back when an operator opens it (issue #2, AC-3). `session.get`
-  // leaves those events out — that is what compaction buys — and this is how they come back,
-  // one range at a time instead of on every load of the workspace.
-  const loadRange = useCallback(
-    (summary: SessionSummaryDto) =>
-      utils.session.eventRange.fetch({
-        sessionId: summary.sessionId,
-        fromSeq: summary.fromSeq,
-        toSeq: summary.toSeq,
-      }),
-    [utils],
-  );
 
   const [input, setInput] = useState("");
   const decide = trpc.review.decide.useMutation({
@@ -344,8 +325,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   const summaries = detail.data?.summaries ?? [];
   // Persisted history first, then anything that arrived live since this view mounted. A
   // compacted Session no longer ships the events its summaries stand in for, so the terminal
-  // says what it is missing rather than quietly starting mid-run; the Conversation tab is where
-  // a collapsed range can be opened back up.
+  // says what it is missing rather than quietly starting mid-run.
   const elided = summaries.reduce((n, s) => n + s.eventCount, 0);
   const inReview = t.state === "review";
   const canDecide = inReview && !decide.isPending;
@@ -359,18 +339,6 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   const primary = t.repositories.length > 0 ? primaryTaskRepository(t.repositories) : null;
   const branch = primary?.resultBranch ?? latest?.diffRef ?? null;
   const diffs = capturedDiffs;
-  // Derived from the transcript rather than held in state, so a reconnect replay reopens a
-  // question that is still outstanding and never reopens one already settled (issue #58, AC-4).
-  // It reads the built rows instead of rescanning `live.events` on every render, and it sees the
-  // persisted history too — a question asked before this view mounted is now found as well.
-  const permission = openPermission(rows);
-
-  // The inline card in the transcript is the primary surface for a permission: the modal traps
-  // focus, so with it open an operator cannot read the tool call they are being asked about.
-  // The modal is kept only as the escalation — when the question is on a panel the operator is
-  // not looking at, something has to interrupt them, because a harness is blocked on the answer.
-  const permissionOutOfView = permission !== null && tab !== "terminal";
-
   const runDecision = (decision: "approve" | "reject" | "request_changes") => {
     if (!latest?.id) return;
     decide.mutate({ sessionId: latest.id, decision });
@@ -411,15 +379,6 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
 
   return (
     <div className="flex h-full flex-col">
-      {/* The harness asking for something it cannot decide alone (issue #58, AC-4). */}
-      <PermissionRequestDialog
-        request={permissionOutOfView && permission ? toDialogRequest(permission) : null}
-        onChoose={(requestId, optionId) => {
-          setAck(null);
-          live.respondPermission(requestId, optionId);
-        }}
-      />
-
       {/*
         Leaving Review, asked in the terms of the direction being taken.
 
@@ -544,6 +503,9 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
         </div>
       </div>
 
+      {/* Which Step of its Workflow the run is on, when it is on one (spec F03). */}
+      <WorkflowSteps task={t} />
+
       {moveMessage ? (
         <p
           className="mx-4 mt-3 flex items-center gap-2 rounded-lg border border-state-failed/30 bg-state-failed/10 px-3 py-2 text-state-failed text-sm"
@@ -558,55 +520,36 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
       <SplitPane
         collapsed={pane.changesCollapsed}
         left={
-          <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col gap-0">
-            <TabsList className="mx-4 mt-3 self-start">
-              <TabsTrigger value="terminal">
-                <Terminal className="size-3.5" /> Terminal
-              </TabsTrigger>
-              <TabsTrigger value="conversation">
-                <MessageSquare className="size-3.5" /> Conversation
-              </TabsTrigger>
-            </TabsList>
+          <div className="flex min-h-0 flex-1 flex-col gap-2 p-4">
+            <TerminalView
+              rows={rows}
+              elided={elided}
+              // What lets the panel say "launching" over an empty terminal and name what the
+              // harness is doing under a quiet one — both are only true while a run is alive.
+              isRunning={isRunning}
+              onRespondPermission={live.respondPermission}
+              // Answering means reaching a live harness, so the control is offered only while
+              // there is one: a finished run keeps its widgets as a record.
+              {...(isRunning ? { onRespondWidget: live.respondWidget } : {})}
+            />
 
-            <TabsContent value="terminal" className="flex min-h-0 flex-1 flex-col gap-2 p-4">
-              <TerminalView
-                rows={rows}
-                elided={elided}
-                // What lets the panel say "launching" over an empty terminal and name what the
-                // harness is doing under a quiet one — both are only true while a run is alive.
-                isRunning={isRunning}
-                onRespondPermission={live.respondPermission}
-                // Answering means reaching a live harness, so the control is offered only while
-                // there is one: a finished run keeps its widgets as a record.
-                {...(isRunning ? { onRespondWidget: live.respondWidget } : {})}
-              />
-
-              <HarnessComposer
-                value={input}
-                onChange={setInput}
-                onSubmit={submitInput}
-                onStop={() => {
-                  setAck(null);
-                  live.stopHarness();
-                }}
-                canSteer={canSteer}
-                isRunning={isRunning}
-              />
-              {ack && !ack.ok && (
-                <p className="text-destructive text-xs" role="alert">
-                  {ACK_MESSAGE[ack.error ?? ""] ?? "The orchestrator refused that message."}
-                </p>
-              )}
-            </TabsContent>
-
-            <TabsContent value="conversation" className="min-h-0 flex-1 p-4">
-              <div className="surface-edge h-full overflow-hidden rounded-xl border bg-card">
-                <ScrollArea className="h-full">
-                  <SessionLog events={events} summaries={summaries} loadRange={loadRange} />
-                </ScrollArea>
-              </div>
-            </TabsContent>
-          </Tabs>
+            <HarnessComposer
+              value={input}
+              onChange={setInput}
+              onSubmit={submitInput}
+              onStop={() => {
+                setAck(null);
+                live.stopHarness();
+              }}
+              canSteer={canSteer}
+              isRunning={isRunning}
+            />
+            {ack && !ack.ok && (
+              <p className="text-destructive text-xs" role="alert">
+                {ACK_MESSAGE[ack.error ?? ""] ?? "The orchestrator refused that message."}
+              </p>
+            )}
+          </div>
         }
         onResize={(changesWidth) => savePane({ ...pane, changesWidth })}
         onToggle={(changesCollapsed) => savePane({ ...pane, changesCollapsed })}
@@ -732,25 +675,4 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
       </div>
     </div>
   );
-}
-
-/**
- * A transcript row as the modal's wire-shaped request.
- *
- * The modal predates the transcript model and speaks `TaskEvent`; rather than teach it a second
- * shape, the one caller that still needs it converts. `taskId` is not read by the dialog — it
- * keys on `requestId` — so the row's own session is enough to identify the question.
- */
-function toDialogRequest(row: PermissionRow): PermissionRequest {
-  return {
-    kind: "permission_request",
-    taskId: "",
-    sessionId: row.sessionId,
-    seq: row.seq,
-    requestId: row.requestId,
-    title: row.title,
-    toolKind: row.toolKind,
-    toolCallId: row.toolCallId,
-    options: row.options,
-  };
 }

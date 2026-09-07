@@ -89,7 +89,11 @@ export function LaunchTaskDialog({
             Through a Workflow — one harness per Step, with its gates — or as a single harness run.
           </DialogDescription>
         </DialogHeader>
-        <div role="radiogroup" aria-label="Workflow" className="grid gap-1.5">
+        <div
+          role="radiogroup"
+          aria-label="Workflow"
+          className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-1.5"
+        >
           <Choice
             selected={choice === NONE}
             onSelect={() => setChoice(NONE)}
@@ -144,7 +148,7 @@ function Choice({
   // label is the whole row, which is the click target people expect.
   return (
     <label
-      className={`flex cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2 text-left transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring/50 ${
+      className={`flex min-w-0 cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2 text-left transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring/50 ${
         selected ? "border-primary/50 bg-primary/5" : "hover:border-ring/40 hover:bg-accent/30"
       }`}
     >
@@ -163,8 +167,8 @@ function Choice({
       >
         {icon}
       </span>
-      <span className="min-w-0">
-        <span className="block font-medium text-sm">{title}</span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate font-medium text-sm">{title}</span>
         <span className="block truncate text-muted-foreground text-xs">{detail}</span>
       </span>
     </label>
