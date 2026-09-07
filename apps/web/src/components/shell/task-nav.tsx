@@ -21,22 +21,21 @@ import {
   LaunchTaskDialog,
   useWorkflowChoices,
 } from "@/components/features/task/launch-task-dialog";
-import { stepStatuses, useTaskBinding } from "@/components/features/task/workflow-steps";
+import { useTaskBinding } from "@/components/features/task/workflow-steps";
 import { Button } from "@/components/ui/button";
-import { STATUS_WORD, StepMarker, stepLabelVariants } from "@/components/ui/steps";
 import { taskActionMessage } from "@/lib/task-errors";
 import { STATE_LABELS } from "@/lib/task-states";
-import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
 
 /**
- * The Task page's sidebar: what you can do to this Task, where it sits, and where to go from it.
+ * The Task page's sidebar: what you can do to this Task, and where to go from it.
  *
  * The page itself puts each control where its evidence is — the lifecycle arrows by the state
  * badge, the review verdicts under the diff. This is the same set gathered in one column, for
  * the reader who knows what they want to do and does not want to find the control for it in a
  * page that scrolls. It issues the same mutations the page does and invalidates the same
- * queries, so the page catches up on its own.
+ * queries, so the page catches up on its own. Nothing the page already shows is repeated here:
+ * the Workflow's Steps are in the header strip, and the sidebar only links to the Workflow.
  */
 
 function SectionLabel({ children }: { children: ReactNode }) {
@@ -145,7 +144,6 @@ export function TaskNav({ taskId }: { taskId: string }) {
   const forward = t.state === "running" || t.state === "ready" ? null : nextTaskState(t.state);
   const primary = t.repositories.length > 0 ? primaryTaskRepository(t.repositories) : null;
   const branch = primary?.resultBranch ?? primary?.checkoutBranch ?? null;
-  const stepped = binding ? stepStatuses(binding, t.state) : [];
 
   return (
     <div className="pb-3">
@@ -240,31 +238,6 @@ export function TaskNav({ taskId }: { taskId: string }) {
           </p>
         )}
       </nav>
-
-      {binding && (
-        <nav aria-label="Workflow steps">
-          <SectionLabel>{binding.workflowName}</SectionLabel>
-          <ol className="space-y-px px-2">
-            {stepped.map(({ step, status, current }, i) => (
-              <li
-                key={step.id}
-                data-status={status}
-                aria-current={current ? "step" : undefined}
-                className={cn(
-                  "flex items-center gap-2.5 rounded-md px-2 py-1.5",
-                  current && "bg-sidebar-accent/60",
-                )}
-              >
-                <StepMarker status={status} index={i} />
-                <span className={cn(stepLabelVariants({ status }), "min-w-0 flex-1 text-sm")}>
-                  {step.name}
-                </span>
-                {STATUS_WORD[status] && <span className="sr-only"> — {STATUS_WORD[status]}</span>}
-              </li>
-            ))}
-          </ol>
-        </nav>
-      )}
 
       <nav aria-label="Go to">
         <SectionLabel>Go to</SectionLabel>

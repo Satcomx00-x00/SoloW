@@ -139,45 +139,18 @@ describe("TaskNav", () => {
     expect(await screen.findByRole("alertdialog")).toBeDefined();
   });
 
-  it("lists the Workflow's Steps in the colours the header strip uses, with the current one marked", async () => {
+  it("links to the Workflow a bound Task runs on, without repeating the header's Step strip", async () => {
     renderWithTrpc(
       <TaskNav taskId="task-1" />,
       handlers(task({ state: "running", workflowId: "wf-1", workflowStepId: "st-2" })),
     );
 
-    const list = await screen.findByRole("navigation", { name: "Workflow steps" });
-    const items = within(list).getAllByRole("listitem");
-    expect(items.map((li) => li.getAttribute("data-status"))).toEqual(["done", "running"]);
-    expect(items[1]?.getAttribute("aria-current")).toBe("step");
-    expect(
-      within(screen.getByRole("navigation", { name: "Go to" }))
-        .getByRole("link", { name: "Workflow" })
-        .getAttribute("href"),
-    ).toBe("/workflows/wf-1");
-  });
-
-  it("colours a Step waiting on a person orange and a failed one red", async () => {
-    renderWithTrpc(
-      <TaskNav taskId="task-1" />,
-      handlers(task({ state: "review", workflowId: "wf-1", workflowStepId: "st-1" })),
-    );
-    const list = await screen.findByRole("navigation", { name: "Workflow steps" });
-    expect(
-      within(list)
-        .getAllByRole("listitem")
-        .map((li) => li.getAttribute("data-status")),
-    ).toEqual(["waiting", "upcoming"]);
-    cleanup();
-
-    renderWithTrpc(
-      <TaskNav taskId="task-1" />,
-      handlers(task({ state: "failed", workflowId: "wf-1", workflowStepId: "st-2" })),
-    );
-    const again = await screen.findByRole("navigation", { name: "Workflow steps" });
-    expect(
-      within(again)
-        .getAllByRole("listitem")
-        .map((li) => li.getAttribute("data-status")),
-    ).toEqual(["done", "failed"]);
+    const goTo = await screen.findByRole("navigation", { name: "Go to" });
+    await waitFor(() => {
+      expect(within(goTo).getByRole("link", { name: "Workflow" }).getAttribute("href")).toBe(
+        "/workflows/wf-1",
+      );
+    });
+    expect(screen.queryByRole("navigation", { name: "Workflow steps" })).toBeNull();
   });
 });
