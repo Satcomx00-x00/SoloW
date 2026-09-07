@@ -34,7 +34,7 @@ const STALE_TIME_MS = 30_000;
  * How long an unused answer is kept after the last component reading it unmounts.
  *
  * React Query's default is five minutes, which is short for the journey this app is built
- * around: an operator opens a Task, watches an agent work, reviews a diff and goes back. Fifteen
+ * around: an operator opens a Task, watches a harness work, reviews a diff and goes back. Fifteen
  * minutes covers that round trip, so returning to the board repaints instead of reloading.
  *
  * The cost is bounded and small — DTOs for a Workspace's issues, tasks and profiles — and it is

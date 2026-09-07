@@ -1,29 +1,29 @@
 import { z } from "zod";
 
 /**
- * Agent widgets: structured things an agent asks the frontend to *render*, rather than more text
+ * Harness widgets: structured things a harness asks the frontend to *render*, rather than more text
  * in the transcript.
  *
- * The problem this solves is that a coding agent's only output channel is prose. Anything richer
+ * The problem this solves is that a coding harness's only output channel is prose. Anything richer
  * — a question with tappable answers, a diagram, a checklist of what it is about to do — either
  * arrives as ASCII art or does not arrive at all. A widget is that same intent expressed as data
  * the client can draw properly, and answer.
  *
  * Three properties are deliberate:
  *
- * **Agent-agnostic.** Nothing here mentions Claude Code, ACP, or MCP. A widget is produced by
+ * **Harness-agnostic.** Nothing here mentions Claude Code, ACP, or MCP. A widget is produced by
  * whichever adapter recognises one (today: a fenced block in assistant output, parsed in the
- * orchestrator) and every producer funnels through `parseWidget`, so a second agent protocol
+ * orchestrator) and every producer funnels through `parseWidget`, so a second harness protocol
  * adds a producer, not a second vocabulary.
  *
  * **Bounded.** Every string has a length, every list a maximum. These payloads are appended to
  * the durable session log and replayed on reconnect: an unbounded `content` would let one turn
- * of agent output become the transcript's whole weight (Principle IV's neighbour — the log is
+ * of harness output become the transcript's whole weight (Principle IV's neighbour — the log is
  * evidence, and evidence has to stay readable).
  *
  * **Forward-compatible.** `WIDGET_CATALOG` names every widget in the agreed set, including the
  * ones not built yet, and `parseWidget` turns an unrecognised or malformed emission into the
- * `unsupported` variant instead of throwing it away. An agent that asks for a `weather` card
+ * `unsupported` variant instead of throwing it away. A harness that asks for a `weather` card
  * today gets a row saying so — which is the difference between "not built yet" and "your output
  * vanished".
  */
@@ -34,7 +34,7 @@ export const MAX_WIDGET_CONTENT = 64 * 1024;
 /**
  * Fields a person reads, and how much of one this build will show.
  *
- * The bug that forced this table is worth stating. An agent asked a real question — five options,
+ * The bug that forced this table is worth stating. A harness asked a real question — five options,
  * each a sentence describing what it proposed to do — and one label came to 240 characters against
  * a 200-character cap. The schema did what a strict schema tells it to: the whole widget failed,
  * degraded to `unsupported`, and the operator was left looking at a card with no options while the
@@ -51,7 +51,7 @@ export const MAX_WIDGET_CONTENT = 64 * 1024;
  * recording: a `ZodEffects` cannot be rendered into an OpenAPI schema, so every field carrying one
  * broke `openapi:gen` for the whole `session.get` response. A schema that quietly rewrites its own
  * input is also the more surprising design — this way the schemas stay declarative and the one
- * place that already normalises an agent's emission does the clipping too.
+ * place that already normalises a harness's emission does the clipping too.
  *
  * Two kinds of field are deliberately absent from the table. An option `id` must survive intact or
  * the answer stops matching what was offered; `show_widget.content` is markup, and a clipped SVG is
@@ -155,9 +155,9 @@ export type WidgetOption = z.infer<typeof widgetOptionSchema>;
  * A question with tappable answers (`ask_user_input_v0`).
  *
  * `mode` is what the client renders and what the response has to satisfy: one of, several of, or
- * all of them in an order. The agent never gets to invent an option after the fact — the answer
+ * all of them in an order. The harness never gets to invent an option after the fact — the answer
  * is validated against this list on the way back, the same rule the permission channel already
- * holds (an agent's own options, in the agent's own order, and nothing else).
+ * holds (a harness's own options, in the harness's own order, and nothing else).
  */
 export const askUserInputWidget = z.object({
   kind: z.literal("ask_user_input"),
@@ -169,7 +169,7 @@ export const askUserInputWidget = z.object({
 });
 
 /**
- * Rendered markup the agent produced (`show_widget`).
+ * Rendered markup the harness produced (`show_widget`).
  *
  * `content` is drawn inside a sandboxed iframe by the client, never injected into the app's own
  * DOM: this is markup written by a model, and the transcript it would land in sits beside a
@@ -194,7 +194,7 @@ export const optionsCardWidget = z.object({
     .max(12),
 });
 
-/** A stepper or checklist the agent keeps updated (`step_card`). Presentational — nothing to answer. */
+/** A stepper or checklist the harness keeps updated (`step_card`). Presentational — nothing to answer. */
 export const stepCardWidget = z.object({
   kind: z.literal("step_card"),
   title: z.string().max(fits("title")).optional(),
@@ -212,7 +212,7 @@ export const stepCardWidget = z.object({
 });
 
 /**
- * Files the agent wants looked at (`present_files`).
+ * Files the harness wants looked at (`present_files`).
  *
  * Paths and annotations only, never contents: the same rule `tool_call.input` follows, for the
  * same reason — a payload that could carry a file body would carry whatever was in it.
@@ -233,30 +233,30 @@ export const presentFilesWidget = z.object({
 });
 
 /**
- * How a run ended, in the agent's own words (`task_complete`).
+ * How a run ended, in the harness's own words (`task_complete`).
  *
- * The one thing an agent could never say. Its whole vocabulary for finishing was *stopping*, so
- * an agent that had done the work, one that ran out of context, and one that decided there was
+ * The one thing a harness could never say. Its whole vocabulary for finishing was *stopping*, so
+ * a harness that had done the work, one that ran out of context, and one that decided there was
  * nothing to do all exited the same way and were all read as "completed" — the orchestrator's
- * only other source was the agent's stderr, matched against regexes for the word "quota".
+ * only other source was the harness's stderr, matched against regexes for the word "quota".
  *
  * Deliberately a *report*, never a decision. It does not move the Task to `done`, and it must
  * not: the review gate exists because the party that did the work is not the party that signs it
  * off (Principle I). It carries the run to the gate with a reason attached, and a person opens
- * it. This is the same line the MCP surface draws by withholding `review.decide` — an agent may
+ * it. This is the same line the MCP surface draws by withholding `review.decide` — a harness may
  * say what happened and may not rule on it.
  */
 export const taskCompletionOutcomeSchema = z.enum([
   /** Work was done and is ready to look at. The ordinary ending. */
   "changes_ready",
   /**
-   * The agent finished and produced nothing — the brief was already satisfied, or was a question
+   * The harness finished and produced nothing — the brief was already satisfied, or was a question
    * rather than a change. Distinct from failure, and distinct from work: opening a review gate on
    * an empty diff asks somebody to approve nothing.
    */
   "nothing_to_do",
   /**
-   * The agent stopped because it could not continue — a missing credential, a decision it is not
+   * The harness stopped because it could not continue — a missing credential, a decision it is not
    * allowed to make, a dependency that is not there. It is not claiming its own work is good; it
    * is saying why there is none.
    */
@@ -264,25 +264,25 @@ export const taskCompletionOutcomeSchema = z.enum([
 ]);
 export type TaskCompletionOutcome = z.infer<typeof taskCompletionOutcomeSchema>;
 
-/** The agent reporting how its run ended (`task_complete`). Presentational — nothing to answer. */
+/** The harness reporting how its run ended (`task_complete`). Presentational — nothing to answer. */
 export const taskCompleteWidget = z.object({
   kind: z.literal("task_complete"),
   outcome: taskCompletionOutcomeSchema,
-  /** What the agent wants the reviewer to know before opening the diff. */
+  /** What the harness wants the reviewer to know before opening the diff. */
   summary: z.string().max(2000).optional(),
 });
 
 /**
  * An emission this build cannot draw: a catalogued widget that is still `planned`, or a payload
- * that failed its own schema. Produced only by `parseWidget` — an agent never sends this kind.
+ * that failed its own schema. Produced only by `parseWidget` — a harness never sends this kind.
  *
  * It exists so that a widget nobody implemented yet is *visible*. Dropping it would make the
- * agent's output disappear with no trace anywhere, which is the failure mode this whole path is
+ * harness's output disappear with no trace anywhere, which is the failure mode this whole path is
  * meant to remove.
  */
 export const unsupportedWidget = z.object({
   kind: z.literal("unsupported"),
-  /** The name the agent asked for, as it wrote it. */
+  /** The name the harness asked for, as it wrote it. */
   requested: z.string().max(fits("requested")),
   /** Why it could not be drawn — a catalogue status, or the first validation failure. */
   reason: z.string().max(fits("reason")),
@@ -320,12 +320,12 @@ export function widgetOptions(widget: Widget): WidgetOption[] {
 }
 
 /**
- * Read whatever an agent emitted into a widget. Total: it never throws, because the caller is a
+ * Read whatever a harness emitted into a widget. Total: it never throws, because the caller is a
  * stream producer that must keep going, and because an emission that cannot be drawn still has
  * to reach the transcript as something.
  *
  * The `kind` is read leniently — `ask_user_input_v0` and `ask_user_input` are the same widget,
- * and an agent copying the catalogue name with its version suffix should not be punished for it.
+ * and a harness copying the catalogue name with its version suffix should not be punished for it.
  */
 export function parseWidget(raw: unknown): Widget {
   const asObject = (raw ?? {}) as Record<string, unknown>;
@@ -363,10 +363,10 @@ export function normalizeWidgetName(raw: string): string {
 }
 
 /**
- * How an answer is announced to the agent.
+ * How an answer is announced to the harness.
  *
- * The agent is not blocked on a fenced widget — it is prose, not a tool call — so the answer
- * reaches it the only way anything reaches a running agent: as a message. That message is echoed
+ * The harness is not blocked on a fenced widget — it is prose, not a tool call — so the answer
+ * reaches it the only way anything reaches a running harness: as a message. That message is echoed
  * back by protocols that echo operator input (ACP does), which put a second, machine-shaped copy
  * of the answer in the transcript directly under the card that already showed it.
  *
@@ -384,7 +384,7 @@ export const WIDGET_ANSWER_PREFIX = "[solow:widget-response]";
  *
  * `values` are option ids — in the order the person put them for `rank`, in any order otherwise.
  * `text` is the free-text box, present only when the widget offered one. Both are validated
- * against the widget that asked, in the orchestrator, before the agent is told anything.
+ * against the widget that asked, in the orchestrator, before the harness is told anything.
  */
 export const widgetResponseSchema = z.object({
   widgetId: z.string().min(1).max(120),
@@ -394,7 +394,7 @@ export const widgetResponseSchema = z.object({
 export type WidgetResponse = z.infer<typeof widgetResponseSchema>;
 
 /**
- * Why an answer did not reach the agent. Mirrors the permission channel's vocabulary, because an
+ * Why an answer did not reach the harness. Mirrors the permission channel's vocabulary, because an
  * operator hitting either of these is asking the same question: did my answer land?
  */
 export const WidgetErrorCode = {
@@ -408,7 +408,7 @@ export type WidgetErrorCode = (typeof WidgetErrorCode)[keyof typeof WidgetErrorC
 /**
  * Check an answer against the widget that asked for it. Returns null when it is good.
  *
- * The rule is the permission channel's rule: only the options the agent itself offered, and
+ * The rule is the permission channel's rule: only the options the harness itself offered, and
  * nothing invented in between. A `single` question takes exactly one; `multi` takes at least
  * one; `rank` takes every option exactly once, which is what makes it a ranking rather than a
  * partial preference.

@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import {
-  type AgentProtocol,
   type ExecutorConfig,
+  type HarnessProtocol,
   parseSessionEventPayload,
   reviewDecisionSchema,
   type SessionEventPayload,
@@ -24,7 +24,7 @@ import {
 } from "@solow/contracts";
 import {
   CREDENTIAL_EXPIRED_REASON,
-  carryAgentDecision,
+  carryHarnessDecision,
   classifyRunFailure,
   PARTIAL_INTEGRATION_REASON,
   primaryTaskRepository,
@@ -36,7 +36,7 @@ import {
   createDb,
   type Db,
   decryptForScmSync,
-  loadAgentLibrariesForRun,
+  loadHarnessLibrariesForRun,
   loadTaskWorkflowRun,
 } from "@solow/db";
 import {
@@ -49,31 +49,16 @@ import {
 } from "@solow/observability";
 import { cloneUsernameFor } from "@solow/scm";
 import { z } from "zod";
-import { worktreeNameForTask } from "../../agent/claude-code-runner.js";
-import { materializeLibraries } from "../../agent/libraries.js";
-import {
-  agentCreatesOwnWorktree,
-  hasAgentRunner,
-  missingAgentRunnerReason,
-} from "../../agent/protocols.js";
-import { type AgentRegistry, agentRegistry } from "../../agent/registry.js";
-import type { AgentRunner, AgentTextChannel } from "../../agent/runner.js";
-import {
-  type AgentLaunchSettings,
-  createAgentRunner,
-  unsupportedLaunchSettings,
-} from "../../agent/runners.js";
-import { WIDGET_BRIEF_INSTRUCTIONS, WidgetFenceScanner } from "../../agent/widget-fence.js";
-import { prepareAgentEnv } from "../../billing/guard.js";
+import { prepareHarnessEnv } from "../../billing/guard.js";
 import {
   appendSessionEvent,
   clearTaskCompletion,
   compactSession,
   isMissingParentRow,
   latestStateTransition,
-  loadAgentProbeContext,
+  loadHarnessProbeContext,
   loadTaskRunContext,
-  loadWorkflowStepAgents,
+  loadWorkflowStepHarnesses,
   markWorktreesRemoved,
   nextSessionEventSeq,
   nextSessionUsageSeq,
@@ -87,9 +72,8 @@ import {
   type TaskRepositoryBinding,
   type TaskRunContext,
   unsatisfiedDependencyIds,
-  updateAgentCatalogCapabilities,
+  updateHarnessCatalogCapabilities,
 } from "../../data.js";
-
 import { orchestratorEnv } from "../../env.js";
 import { hasDriver, missingDriverReason } from "../../executor/drivers.js";
 import {
@@ -99,6 +83,21 @@ import {
 } from "../../executor/factory.js";
 import type { PreflightResult } from "../../executor/preflight.js";
 import type { Executor } from "../../executor/types.js";
+import { worktreeNameForTask } from "../../harness/claude-code-runner.js";
+import { materializeLibraries } from "../../harness/libraries.js";
+import {
+  harnessCreatesOwnWorktree,
+  hasHarnessRunner,
+  missingHarnessRunnerReason,
+} from "../../harness/protocols.js";
+import { type HarnessRegistry, harnessRegistry } from "../../harness/registry.js";
+import type { HarnessRunner, HarnessTextChannel } from "../../harness/runner.js";
+import {
+  createHarnessRunner,
+  type HarnessLaunchSettings,
+  unsupportedLaunchSettings,
+} from "../../harness/runners.js";
+import { WIDGET_BRIEF_INSTRUCTIONS, WidgetFenceScanner } from "../../harness/widget-fence.js";
 import { clearStrandedPark } from "../../reconcile.js";
 import {
   adoptWorktree,
@@ -154,16 +153,16 @@ interface WorktreeBinding {
 }
 
 /**
- * The agent binding and brief in force for the round about to run (issue #5, AC-3).
+ * The harness binding and brief in force for the round about to run (issue #5, AC-3).
  *
  * A *leg* rather than a Step, because a Step is not the unit this loop counts. The round counter
  * stays monotonic across Step boundaries — see the loop — so what actually changes at a boundary
- * is which agent is launched and which brief it is given, and this is exactly those two things.
+ * is which harness is launched and which brief it is given, and this is exactly those two things.
  *
  * Every field is null for a Task on no Workflow, and the two that are not — the Profile and the
  * catalog row — are then the Task's own. That is why the leg exists at all instead of the Step's
- * Profile being written over `ctx.agentProfile` in `loadTaskRunContext`: roughly a quarter of
- * this file reads `ctx.agentProfile`, and a Task with no Workflow must not move at all.
+ * Profile being written over `ctx.harnessProfile` in `loadTaskRunContext`: roughly a quarter of
+ * this file reads `ctx.harnessProfile`, and a Task with no Workflow must not move at all.
  */
 interface RunLeg {
   /** The Workflow Step this leg runs, or null for a Task following no Workflow. */
@@ -172,12 +171,12 @@ interface RunLeg {
   gate: WorkflowStepGate | null;
   /** Which signal finishes this Step. Read at both advance call sites — never a literal. */
   advanceOn: WorkflowAdvanceOn | null;
-  agentProfile: TaskRunContext["agentProfile"];
-  agentCatalog: TaskRunContext["agentCatalog"];
+  harnessProfile: TaskRunContext["harnessProfile"];
+  harnessCatalog: TaskRunContext["harnessCatalog"];
   /**
    * The Step's prompt with the previous Step's handoff already prepended — `buildStepBrief`'s
    * output, carried from `loadTaskWorkflowRun` or from the advance DTO and never re-derived here.
-   * One string, built in one place, so the API's preview and the agent's prompt cannot drift.
+   * One string, built in one place, so the API's preview and the harness's prompt cannot drift.
    */
   stepBrief: string | null;
 }
@@ -194,13 +193,13 @@ type LegAdvance =
   | { kind: "failed" };
 
 /**
- * What an Agent Profile asked its agent to be launched with (issue #94).
+ * What a Harness Profile asked its harness to be launched with (issue #94).
  *
- * A function of the Profile rather than a constant read of `ctx.agentProfile`, because under a
+ * A function of the Profile rather than a constant read of `ctx.harnessProfile`, because under a
  * Workflow the Profile changes at a Step boundary and the launch settings have to change with it
  * — a Step pinned to a planning model must not be launched with the previous Step's pin.
  */
-function launchSettingsFor(profile: TaskRunContext["agentProfile"]): AgentLaunchSettings {
+function launchSettingsFor(profile: TaskRunContext["harnessProfile"]): HarnessLaunchSettings {
   return {
     permissionMode: profile.permissionMode,
     ...(profile.model ? { model: profile.model } : {}),
@@ -209,8 +208,8 @@ function launchSettingsFor(profile: TaskRunContext["agentProfile"]): AgentLaunch
 }
 
 /** The sentence a run says about a pinned setting its protocol cannot carry (issue #94 AC-3). */
-function unsupportedLaunchSettingsNotice(protocol: AgentProtocol, unsupported: string[]): string {
-  return `This agent profile pins ${unsupported.join(" and ")}, which ${protocol} cannot select. The run used the agent's own choice instead.`;
+function unsupportedLaunchSettingsNotice(protocol: HarnessProtocol, unsupported: string[]): string {
+  return `This harness profile pins ${unsupported.join(" and ")}, which ${protocol} cannot select. The run used the harness's own choice instead.`;
 }
 
 /**
@@ -218,7 +217,7 @@ function unsupportedLaunchSettingsNotice(protocol: AgentProtocol, unsupported: s
  * restart resumes from the last completed step (Principle III). The review gate is a
  * `waitForEvent` (Principle I — no integration without a recorded human decision).
  *
- * The lifecycle body is factored into `runTaskLifecycle(deps, …)` so its collaborators (agent
+ * The lifecycle body is factored into `runTaskLifecycle(deps, …)` so its collaborators (harness
  * runner, worktree ops, hub, db) can be injected — the Inngest function wires the real ones,
  * and the integration test (TASK-020) drives it with a fake ACP agent + a controllable step.
  */
@@ -292,12 +291,12 @@ const TASK_RUN_RETRIES = 2;
 const HOST_EXECUTOR_CONFIG = { kind: "local", env: {} } as const;
 
 /**
- * How long a declared-finished agent is given to say anything more before the round is ended.
+ * How long a declared-finished harness is given to say anything more before the round is ended.
  *
  * Long enough that a model which declares and then adds a closing paragraph is not cut off;
  * short enough that a run does not spend a meaningful part of Inngest's execution budget waiting
  * on a process that has nothing left to do. Every further event re-arms it, so this is a
- * *silence* budget rather than a deadline on the agent.
+ * *silence* budget rather than a deadline on the harness.
  */
 const COMPLETION_GRACE_MS = 15_000;
 
@@ -307,18 +306,18 @@ const COMPLETION_GRACE_MS = 15_000;
  */
 export interface WorktreeOps {
   /**
-   * Resolve the repository the agent will run in. Claude Code creates the Task's worktree
+   * Resolve the repository the harness will run in. Claude Code creates the Task's worktree
    * itself (`--worktree`), so for that protocol this is all the preparation there is.
    */
   prepare(params: ProvisionParams): Promise<string>;
   /**
-   * Create the Task's worktree, for a protocol whose agent cannot (issue #58). ACP has no
-   * notion of a worktree: the agent works in the `cwd` it is handed, so SoloW makes the
+   * Create the Task's worktree, for a protocol whose harness cannot (issue #58). ACP has no
+   * notion of a worktree: the harness works in the `cwd` it is handed, so SoloW makes the
    * directory and points it there. The isolation guarantee is unchanged (Principle II) — only
    * who runs `git worktree add` moves.
    */
   provision(params: ProvisionParams): Promise<Worktree>;
-  /** Confirm with git that the path the agent reported really is a worktree of the repository. */
+  /** Confirm with git that the path the harness reported really is a worktree of the repository. */
   adopt(repoPath: string, reportedPath: string | null): Promise<Worktree>;
   /** Copy the Repository's allowlisted setup files into a freshly created worktree (issue #52). */
   seed(params: {
@@ -352,19 +351,19 @@ export interface TaskRunDeps {
   db: Db;
   /**
    * The adapter for a protocol, or null when this build cannot drive it (issue #58, AC-3). A
-   * function rather than a runner because the protocol comes from the Task's own Agent catalog
+   * function rather than a runner because the protocol comes from the Task's own Harness catalog
    * row: two Tasks in one Workspace can be driven over two different protocols.
    */
   /**
-   * Built per run, not once per process: an Agent Profile carries its own permission mode
-   * (spec F05), so two Tasks in the same Workspace can run the same agent under different
+   * Built per run, not once per process: a Harness Profile carries its own permission mode
+   * (spec F05), so two Tasks in the same Workspace can run the same harness under different
    * postures — one that may reach the shell, one that may not.
    */
   runner: (
-    protocol: AgentProtocol,
-    settings: AgentLaunchSettings,
+    protocol: HarnessProtocol,
+    settings: HarnessLaunchSettings,
     executor: Executor,
-  ) => AgentRunner | null;
+  ) => HarnessRunner | null;
   worktreeRoot: string;
   repoCacheRoot: string;
   logger: Logger;
@@ -397,10 +396,10 @@ export interface TaskRunDeps {
    */
   worktree: (executor: Executor) => WorktreeOps;
   hub: HubLike;
-  /** Where the hub finds the agent belonging to a Task, to deliver input or a stop. */
-  registry: AgentRegistry;
+  /** Where the hub finds the harness belonging to a Task, to deliver input or a stop. */
+  registry: HarnessRegistry;
   /**
-   * How long a declared-finished agent may stay silent before the round is ended
+   * How long a declared-finished harness may stay silent before the round is ended
    * (`COMPLETION_GRACE_MS`). Injected only so a test can shorten it — the wait is real time, and
    * a test that spent fifteen seconds proving a timer fired would be a test nobody runs.
    */
@@ -418,7 +417,7 @@ export function defaultDeps(): TaskRunDeps {
     executorFor: createExecutorFor,
     preflight: probeExecutorFor,
     runner: (protocol, settings, executor) =>
-      createAgentRunner(protocol, {
+      createHarnessRunner(protocol, {
         executor,
         permissionMode: settings.permissionMode,
         ...(settings.model ? { model: settings.model } : {}),
@@ -443,7 +442,7 @@ export function defaultDeps(): TaskRunDeps {
       diff: (path, patterns) => diffWorktree(executor, path, patterns),
     }),
     hub,
-    registry: agentRegistry,
+    registry: harnessRegistry,
   };
 }
 
@@ -469,13 +468,13 @@ export interface TaskRunArgs {
 }
 
 /**
- * What a line of agent output *is*, from the channel the protocol reported it on.
+ * What a line of harness output *is*, from the channel the protocol reported it on.
  *
  * The mapping is the whole point of carrying the channel this far: without it every line was a
  * `stdout` blob and the transcript could not distinguish the operator's own steering from the
  * model's answer from a mode switch (issue #2, AC-1).
  */
-function textPayload(channel: AgentTextChannel, text: string): SessionEventPayload {
+function textPayload(channel: HarnessTextChannel, text: string): SessionEventPayload {
   if (channel === "user") return { kind: "user_turn", text };
   if (channel === "system") return { kind: "notice", text };
   return { kind: "assistant_turn", text, thinking: channel === "thinking" };
@@ -581,7 +580,7 @@ function boundTodoText(value: unknown): unknown {
  * The todo list out of a `TodoWrite` call, or null when the input is not one.
  *
  * Pure and exported so it can be tested without a run: this is the only thing standing between
- * an agent's plan and the durable log, and its two failure modes pull in opposite directions —
+ * a harness's plan and the durable log, and its two failure modes pull in opposite directions —
  * too strict and the list is silently replaced by the contentless tool-call row it was meant to
  * abolish, too loose and an unbounded blob reaches a record that outlives the run.
  *
@@ -628,9 +627,9 @@ const REDACTED = "[redacted]";
 /**
  * Values this run holds that must never end up in a payload (Principle IV, issue #2 DoD).
  *
- * The needles are exact strings — the decrypted credential as it was written into the agent's
+ * The needles are exact strings — the decrypted credential as it was written into the harness's
  * environment, and the ciphertext it was decrypted from — rather than a pattern that guesses at
- * what a token looks like. The realistic path a secret takes into the log is the agent echoing
+ * what a token looks like. The realistic path a secret takes into the log is the harness echoing
  * its own environment: `echo $ANTHROPIC_API_KEY`, a config dump, a stack trace that prints a
  * header. All of those carry the value verbatim, so an exact match catches them, while a
  * heuristic would both miss real keys and mangle innocent text.
@@ -666,7 +665,7 @@ function redactValue(value: unknown, needles: readonly string[]): unknown {
  * A record with this run's own secrets stripped out of it.
  *
  * Applied to the whole payload rather than to the text variants alone: the log is the record
- * that outlives the run and travels — into a snapshot (#16), into an agent's context (#84) — and
+ * that outlives the run and travels — into a snapshot (#16), into a harness's context (#84) — and
  * a future producer that populates `tool_call.input` should inherit the protection rather than
  * have to remember it. `kind` is put back verbatim so a needle can never rewrite the
  * discriminator itself.
@@ -699,7 +698,7 @@ export async function runTaskLifecycle(
    * Both channels, and the second one is the bug this replaces. It published to the board channel
    * alone, on the reasoning that the board is what shows Task states — but the Task page shows
    * one too, and it subscribes to the *task* channel. So a run that finished, failed or parked
-   * updated the board instantly and left the page dedicated to that very Task claiming the agent
+   * updated the board instantly and left the page dedicated to that very Task claiming the harness
    * was still writing, until somebody reloaded. Every `diff` on the line below already went to
    * both; the status was the one that did not.
    *
@@ -730,7 +729,7 @@ export async function runTaskLifecycle(
   const recordTransition = async (from: TaskState, to: TaskState, reason?: string) => {
     try {
       // `seq` is read back as max+1, so the `(session_id, seq)` unique index cannot make a
-      // second attempt a no-op the way it does for the agent's own events — a retry would simply
+      // second attempt a no-op the way it does for the harness's own events — a retry would simply
       // land at a new seq. Inngest retries a step *body* from the top when anything in it
       // throws, and every call site here is followed by more work that can (the session write,
       // the diff capture, the publish), so the guard is the log itself: an identical transition
@@ -783,12 +782,12 @@ export async function runTaskLifecycle(
    * Before `executor-preflight` and before anything is cloned, because everything the pre-clone
    * gates below check is per-Step under a Workflow: which binaries the pipeline can spawn, and
    * which protocols it speaks. A resume that ran after the clone would discover the fourth
-   * Step's missing agent having already paid for three Steps of work.
+   * Step's missing harness having already paid for three Steps of work.
    *
    * Read-only. `loadTaskWorkflowRun` deliberately does not write the resolved cursor back — the
    * web DAL's `taskHasBegunWorkflow` reads exactly those columns to refuse a re-attach, and a
    * merely-resolved cursor persisted here would make "this Task has begun its pipeline" true for
-   * a Task whose agent never started.
+   * a Task whose harness never started.
    *
    * Skipped entirely — no step, no id — for a Task with no `workflowId` or in a Workspace with
    * `ff-workflows` off, which is what keeps the durable step sequence of every existing Task
@@ -802,7 +801,7 @@ export async function runTaskLifecycle(
     /*
      * The cursor names a Step this Workflow no longer contains — `resumeWorkflowCursor` refuses
      * that on purpose, and this side must not undo it. Restarting at Step one would silently
-     * re-run work an Owner has already paid an agent for, at the moment they are least able to
+     * re-run work an Owner has already paid a harness for, at the moment they are least able to
      * notice; the honest answer is a failed Task with the reason on it.
      */
     return await failRun("workflow-unresumable", "workflow_unresumable");
@@ -815,28 +814,28 @@ export async function runTaskLifecycle(
   }
 
   /**
-   * The Agent Profile behind every Step, resolved in one durable step (AC-3).
+   * The Harness Profile behind every Step, resolved in one durable step (AC-3).
    *
-   * Deliberately carries no credential — see `loadWorkflowStepAgents`. `step.run` memoizes what
+   * Deliberately carries no credential — see `loadWorkflowStepHarnesses`. `step.run` memoizes what
    * it returns into Inngest's durable store, and `load` already puts one decryptable ciphertext
    * there; the Step's own is read at the point of use inside `agent-run-${round}` instead.
    */
-  const stepAgents = wf
+  const stepHarnesses = wf
     ? await step.run("workflow-agents", () =>
-        loadWorkflowStepAgents(
+        loadWorkflowStepHarnesses(
           db,
           workspaceId,
           wf.steps.map((entry) => entry.agentProfileId),
         ),
       )
     : null;
-  if (stepAgents && !stepAgents.ok) {
+  if (stepHarnesses && !stepHarnesses.ok) {
     // A Profile or catalog row a Step names is gone. Failing by name beats launching the Step
-    // under some other agent, which is the only alternative that keeps the run going.
+    // under some other harness, which is the only alternative that keeps the run going.
     return await failRun("workflow-agents-missing", "workflow_step_agent_missing");
   }
-  const stepAgentByProfileId = new Map(
-    (stepAgents?.ok ? stepAgents.agents : []).map(
+  const stepHarnessByProfileId = new Map(
+    (stepHarnesses?.ok ? stepHarnesses.harnesses : []).map(
       (entry) => [entry.agentProfileId, entry] as const,
     ),
   );
@@ -847,26 +846,26 @@ export async function runTaskLifecycle(
     stepName: null,
     gate: null,
     advanceOn: null,
-    agentProfile: ctx.agentProfile,
-    agentCatalog: ctx.agentCatalog,
+    harnessProfile: ctx.harnessProfile,
+    harnessCatalog: ctx.harnessCatalog,
     stepBrief: null,
   });
 
   /**
    * The leg one Workflow Step runs. Null only if its Profile is absent from the resolved set,
    * which `workflow-agents` above already refused — kept as a value rather than an assertion so
-   * a future edit that loosens that gate fails legibly here instead of launching the wrong agent.
+   * a future edit that loosens that gate fails legibly here instead of launching the wrong harness.
    */
   const legForStep = (workflowStep: WorkflowStepDto, brief: string): RunLeg | null => {
-    const bound = stepAgentByProfileId.get(workflowStep.agentProfileId);
+    const bound = stepHarnessByProfileId.get(workflowStep.agentProfileId);
     if (!bound) return null;
     return {
       stepId: workflowStep.id,
       stepName: workflowStep.name,
       gate: workflowStep.gate,
       advanceOn: workflowStep.advanceOn,
-      agentProfile: bound.agentProfile,
-      agentCatalog: bound.agentCatalog,
+      harnessProfile: bound.harnessProfile,
+      harnessCatalog: bound.harnessCatalog,
       stepBrief: brief,
     };
   };
@@ -875,19 +874,19 @@ export async function runTaskLifecycle(
   if (!entryLeg) return await failRun("workflow-agents-missing", "workflow_step_agent_missing");
 
   /**
-   * An Agent Profile names the protocol its catalog row declares, and only some protocols have
+   * A Harness Profile names the protocol its catalog row declares, and only some protocols have
    * a runner behind them (issues #10 and #58). Checked here, before anything is cloned: a Task
    * pointed at a protocol nothing speaks must fail with a legible reason, not crash deep inside
    * a runner that was never built for it.
    *
    * The *entry* leg's protocol under a Workflow, which is the Task's own when there is none. It
-   * decides the pre-clone shape of the run — whether the agent makes its own worktree — and that
+   * decides the pre-clone shape of the run — whether the harness makes its own worktree — and that
    * decision is taken once, before the first Step. Later Steps continue inside whatever the first
    * one ended up with (`resuming` in the run body), so a pipeline mixing protocols still has
    * exactly one worktree per attachment. Every Step's protocol is still checked for a runner
    * below; only this one shapes the clone.
    */
-  const protocol = entryLeg.agentCatalog.protocol;
+  const protocol = entryLeg.harnessCatalog.protocol;
   /**
    * What this Profile asked to launch with (issue #94).
    *
@@ -895,13 +894,13 @@ export async function runTaskLifecycle(
    * through the one seam that already existed for the permission mode. Under a Workflow this is
    * the entry Step's Profile; a Step boundary rebuilds it, and re-emits the notice below.
    */
-  const launchSettings: AgentLaunchSettings = launchSettingsFor(entryLeg.agentProfile);
+  const launchSettings: HarnessLaunchSettings = launchSettingsFor(entryLeg.harnessProfile);
 
   /*
    * A setting this protocol cannot carry is **said**, never dropped (issue #94 AC-3).
    *
-   * A Profile pinned to a model that its agent's protocol has no way to select would otherwise
-   * run on whatever the agent chose, with the Profile still reading as though the pin held — a
+   * A Profile pinned to a model that its harness's protocol has no way to select would otherwise
+   * run on whatever the harness chose, with the Profile still reading as though the pin held — a
    * silent substitution, which is the one outcome that AC forbids by name. It is a notice rather
    * than a refusal: the work can still be done, and failing a Task over a setting nobody can act
    * on mid-run would be the worse trade. The reviewer reads it in the same log as everything
@@ -942,7 +941,7 @@ export async function runTaskLifecycle(
   /**
    * Does this Task get a repository of its own (issue #96 round 2, Principle II)?
    *
-   * True whenever the agent runs somewhere other than the orchestrator's own host — today, in a
+   * True whenever the harness runs somewhere other than the orchestrator's own host — today, in a
    * container. Everything the container can reach is a bind mount, and a repository two Tasks
    * share is therefore a repository each of them can read and write everything in: a reviewer
    * proved, on live containers, that Task A could read Task B's committed *and* merely staged
@@ -982,7 +981,7 @@ export async function runTaskLifecycle(
      *
      * Naming a directory that does not exist yet is safe on both drivers: the Docker driver
      * `mkdir -p`s every bind source before `docker run`, and `git worktree add` writes into an
-     * empty directory quite happily. Under `claude --worktree` the agent makes its own worktree
+     * empty directory quite happily. Under `claude --worktree` the harness makes its own worktree
      * inside the repository and never touches this path at all; that worktree stays reachable
      * because the repository it lives in is mounted, which is how it was reachable before.
      */
@@ -990,16 +989,16 @@ export async function runTaskLifecycle(
     worktreeRoot: deps.worktreeRoot,
     repoCacheRoot: deps.repoCacheRoot,
     bindPaths: executorBindPaths(deps, taskId, ctx.repositories, ownClone),
-    // What this run is going to spawn, probed once by the preflight so a missing agent binary
+    // What this run is going to spawn, probed once by the preflight so a missing harness binary
     // throws on the line the runners already guard rather than arriving as an exit 127.
     //
     // Every binary the *pipeline* can spawn under a Workflow, not just the entry Step's: the
     // probe is the one thing that runs before the clone, and discovering the fourth Step's
-    // missing agent after three Steps of paid agent time is the ordering it exists to prevent.
-    // Distinct, because two Steps routinely share one agent and probing it twice buys nothing.
-    agentCommands: wf
-      ? [...new Set([...stepAgentByProfileId.values()].map((e) => e.agentCatalog.command))]
-      : [ctx.agentCatalog.command],
+    // missing harness after three Steps of paid harness time is the ordering it exists to prevent.
+    // Distinct, because two Steps routinely share one harness and probing it twice buys nothing.
+    harnessCommands: wf
+      ? [...new Set([...stepHarnessByProfileId.values()].map((e) => e.harnessCatalog.command))]
+      : [ctx.harnessCatalog.command],
     // One map, shared by reference with the preflight that fills it — see `probeExecutorFor`.
     probedCommands: new Map(),
   };
@@ -1018,10 +1017,10 @@ export async function runTaskLifecycle(
    * same as `docker run` itself does, and the container is left holding nothing but this Task's
    * own two directories.
    *
-   * Everything about the Task's *content* — commit, discard, status, diff, and the agent — stays
+   * Everything about the Task's *content* — commit, discard, status, diff, and the harness — stays
    * on the Task's executor, because after this split those touch only the Task's own repository.
    * That is what keeps the driver gate above honest: a Docker-profiled Task still does all of its
-   * work in its container, and what moved to the host is bookkeeping no agent can influence.
+   * work in its container, and what moved to the host is bookkeeping no harness can influence.
    *
    * Identical to `worktreeOps` for a local run, where the two hosts are the same host.
    */
@@ -1064,14 +1063,14 @@ export async function runTaskLifecycle(
      * inside the container instead of the synchronous throw `probe.ts` and
      * `claude-code-runner.ts` already catch. It is why the result carries the commands at all.
      */
-    for (const command of probe.agentCommands) executorOpts.probedCommands?.set(command, true);
+    for (const command of probe.harnessCommands) executorOpts.probedCommands?.set(command, true);
 
     /**
-     * The adapter that drives the agent, bound to the executor above (issues #10, #58, #96).
+     * The adapter that drives the harness, bound to the executor above (issues #10, #58, #96).
      *
      * Built here rather than beside the protocol, because a runner is a protocol *paired with
      * somewhere to spawn it*: built from a process-wide local executor, a Docker-profiled Task
-     * would have started its agent on the orchestrator's host with an idle container beside it.
+     * would have started its harness on the orchestrator's host with an idle container beside it.
      * The "can this build drive the protocol at all" gate moves with it, so there is still one
      * place that question is asked, and it is still asked before anything is cloned.
      */
@@ -1086,11 +1085,11 @@ export async function runTaskLifecycle(
      */
     const undrivenProtocol = wf
       ? wf.steps
-          .map((entry) => stepAgentByProfileId.get(entry.agentProfileId)?.agentCatalog.protocol)
-          .find((candidate) => candidate !== undefined && !hasAgentRunner(candidate))
+          .map((entry) => stepHarnessByProfileId.get(entry.agentProfileId)?.harnessCatalog.protocol)
+          .find((candidate) => candidate !== undefined && !hasHarnessRunner(candidate))
       : undefined;
-    if (!hasAgentRunner(protocol) || !entryRunner || undrivenProtocol) {
-      const reason = missingAgentRunnerReason(undrivenProtocol ?? protocol);
+    if (!hasHarnessRunner(protocol) || !entryRunner || undrivenProtocol) {
+      const reason = missingHarnessRunnerReason(undrivenProtocol ?? protocol);
       await step.run("agent-runner-unavailable", async () => {
         await setTaskState(db, workspaceId, taskId, "failed", { failureReason: reason });
         await recordTransition(ctx.task.state, "failed", reason);
@@ -1102,13 +1101,13 @@ export async function runTaskLifecycle(
     }
 
     /**
-     * The Repositories this Task works in, and which of them the agent is started in (issue #7).
+     * The Repositories this Task works in, and which of them the harness is started in (issue #7).
      *
      * The lifecycle goes plural everywhere below — provisioning, seeding, diff capture, commit,
-     * discard, cleanup — but the agent process gets exactly one working directory, and that is the
+     * discard, cleanup — but the harness process gets exactly one working directory, and that is the
      * primary attachment. This is the stated limitation of multi-repository Tasks, not an
-     * accident: the other worktrees are named to the agent in the brief, which is the only way an
-     * agent can reach a repository it was not started in until per-repository integration (#100)
+     * accident: the other worktrees are named to the harness in the brief, which is the only way an
+     * harness can reach a repository it was not started in until per-repository integration (#100)
      * gives it a real surface. `primaryTaskRepository` is the single place that choice is made.
      */
     const primaryBinding = primaryTaskRepository(
@@ -1117,19 +1116,19 @@ export async function runTaskLifecycle(
     const secondaryBindings = ctx.repositories.filter((binding) => binding !== primaryBinding);
 
     /**
-     * Whether the agent is left to make the primary worktree itself (issue #7 AC-1/AC-2).
+     * Whether the harness is left to make the primary worktree itself (issue #7 AC-1/AC-2).
      *
      * `claude --worktree` makes its own, which is what lets several Tasks share one repository —
      * but it makes it from HEAD, on a branch it names itself, and neither is negotiable. So the
-     * attachment decides: one that asks for nothing in particular gets the agent's worktree and
+     * attachment decides: one that asks for nothing in particular gets the harness's worktree and
      * behaves exactly as it always has, while one that names a base ref or a branch of its own is
-     * provisioned here and the agent is started inside it. Without this the Owner's `Base ref`
+     * provisioned here and the harness is started inside it. Without this the Owner's `Base ref`
      * was accepted, stored, shown in the brief and silently ignored, and the *secondary*
      * attachments of the same Task honoured theirs — one Task behaving two ways.
      */
     const primaryAttachment = primaryBinding.attachment;
-    const agentMakesPrimaryWorktree =
-      agentCreatesOwnWorktree(protocol) &&
+    const harnessMakesPrimaryWorktree =
+      harnessCreatesOwnWorktree(protocol) &&
       primaryAttachment.baseRef === null &&
       primaryAttachment.checkoutBranch === taskCheckoutBranch(taskId);
 
@@ -1153,10 +1152,10 @@ export async function runTaskLifecycle(
     /**
      * Every attached repository, not the Task's worktree.
      *
-     * The agent creates its own worktree under `claude --worktree`, which is what lets several
+     * The harness creates its own worktree under `claude --worktree`, which is what lets several
      * Tasks run against one repository at a time (Principle II). This step still resolves and
-     * validates each repository up front, so an unusable location fails the Task before any agent
-     * starts rather than surfacing as a confusing agent error later (TASK-015, issue #7 AC-3).
+     * validates each repository up front, so an unusable location fails the Task before any harness
+     * starts rather than surfacing as a confusing harness error later (TASK-015, issue #7 AC-3).
      *
      * The loop stops at the first repository it cannot prepare and reports *that* repository by
      * name. Only the name — Owner-authored text — leaves the step: a failed clone echoes back the
@@ -1220,7 +1219,7 @@ export async function runTaskLifecycle(
      * Two things need it and neither can take `repoPathFor`. The setup-file allowlist copies a
      * `.env` that is ignored by git and therefore exists only in the Owner's own working tree —
      * a clone carries what was committed, so seeding from one would silently find nothing and
-     * hand the agent a worktree it cannot run the tests in (issue #52). And an approved branch
+     * hand the harness a worktree it cannot run the tests in (issue #52). And an approved branch
      * has to be published back into this repository to be a result at all (F08).
      *
      * The same two branches `prepareRepository` takes, which is why it is `repositoryHostPath`
@@ -1234,10 +1233,10 @@ export async function runTaskLifecycle(
      * round, so an orchestrator restart resumes with the same directories rather than branching a
      * second set from the base refs (Principle III).
      *
-     * For a protocol whose agent makes its own worktree only the *secondary* attachments are
-     * created here, and the agent still makes the primary — unless that attachment named a base
-     * ref or a branch the agent has no way to honour, which puts it in this list too. For a
-     * protocol whose agent cannot, SoloW creates all of them. Either way every attachment
+     * For a protocol whose harness makes its own worktree only the *secondary* attachments are
+     * created here, and the harness still makes the primary — unless that attachment named a base
+     * ref or a branch the harness has no way to honour, which puts it in this list too. For a
+     * protocol whose harness cannot, SoloW creates all of them. Either way every attachment
      * ends up with an isolated worktree of its own, on the branch the attachment says it is on.
      *
      * Caught, not left to escape, for the same reason the prepare loop is: a Task that cannot be
@@ -1245,7 +1244,7 @@ export async function runTaskLifecycle(
      * provisioning itself is idempotent (`provisionWorktree`), so relaunching or retrying the Task
      * after a fix reuses the same worktrees instead of colliding with the branches it left behind.
      */
-    const toProvision = agentMakesPrimaryWorktree ? secondaryBindings : ctx.repositories;
+    const toProvision = harnessMakesPrimaryWorktree ? secondaryBindings : ctx.repositories;
     const provisionedByAttachment = new Map<string, Worktree>();
     if (toProvision.length > 0) {
       const provisioning = await step.run("provision-worktree", async () => {
@@ -1316,7 +1315,7 @@ export async function runTaskLifecycle(
     /**
      * Copy each secondary worktree's own setup files in as soon as it exists (issue #52).
      *
-     * The primary's copy waits for the agent to announce where it went — SoloW does not
+     * The primary's copy waits for the harness to announce where it went — SoloW does not
      * always own that directory — but a secondary worktree is one SoloW just created, so
      * there is nothing to wait for and no path to confirm. Best-effort, like the primary's: a
      * pattern that matches nothing must not fail a Task that would otherwise run.
@@ -1339,15 +1338,15 @@ export async function runTaskLifecycle(
     }
 
     /**
-     * The primary Repository's setup-file allowlist (issue #52): copied into the worktree the agent
-     * creates, and subtracted from the diff and the commit, so a `.env` the agent needs to run
+     * The primary Repository's setup-file allowlist (issue #52): copied into the worktree the harness
+     * creates, and subtracted from the diff and the commit, so a `.env` the harness needs to run
      * the tests never reaches the review UI or the branch. Each secondary uses its own, above.
      */
     const setupFilePatterns = primaryBinding.repository.setupFilePatterns ?? [];
 
     /**
-     * Copy the setup files into the worktree the agent reported, having first made git confirm it
-     * really is a worktree of this repository — writing a `.env` into a directory the agent merely
+     * Copy the setup files into the worktree the harness reported, having first made git confirm it
+     * really is a worktree of this repository — writing a `.env` into a directory the harness merely
      * claimed is precisely the mistake the adoption check exists to prevent (Principle II).
      *
      * Everything here is best-effort. A pattern that matches nothing, a file that cannot be read,
@@ -1382,7 +1381,7 @@ export async function runTaskLifecycle(
 
     /**
      * The worktree every later step — diff, commit, discard, cleanup — acts on. Read back from
-     * the agent (Claude Code makes its own) or set from what SoloW provisioned (ACP), and
+     * the harness (Claude Code makes its own) or set from what SoloW provisioned (ACP), and
      * confirmed with git either way before anything is written into it.
      */
     let wt: Worktree | null = provisioned;
@@ -1390,7 +1389,7 @@ export async function runTaskLifecycle(
     /**
      * Every worktree this Task has, in attachment order, once the primary one is known.
      *
-     * The primary is whatever the agent reported and git confirmed; the others are what SoloW
+     * The primary is whatever the harness reported and git confirmed; the others are what SoloW
      * provisioned. An attachment with no worktree yet is left out rather than represented by a
      * placeholder — there is nothing to diff, commit or clean up for it.
      */
@@ -1405,16 +1404,16 @@ export async function runTaskLifecycle(
     let pendingFeedback: string | undefined;
 
     /**
-     * The agent binding and brief this round runs under (issue #5, AC-3).
+     * The harness binding and brief this round runs under (issue #5, AC-3).
      *
      * `let`, and so is the runner beside it — that pair is the whole of what a Step boundary
      * changes. Everything else the loop touches is per *round*, which is why there is no nested
      * Step loop: a nested one would reset `round` and Inngest would hand Step 2 back Step 1's
-     * memoized `agent-run-0` and `approve-0`, silently skipping Step 2's agent run and replaying
+     * memoized `agent-run-0` and `approve-0`, silently skipping Step 2's harness run and replaying
      * Step 1's review decision. A monotonic counter makes that impossible to write.
      */
     let leg = entryLeg;
-    let runner: AgentRunner = entryRunner;
+    let runner: HarnessRunner = entryRunner;
     /**
      * How many rounds this Step has had. `MAX_REVIEW_ROUNDS` is per Step, not per run: a
      * five-Step pipeline that spent its whole budget on Step 1 would otherwise reach Step 2 with
@@ -1468,7 +1467,7 @@ export async function runTaskLifecycle(
     };
 
     /**
-     * Take the advance: rebind the agent, clear what belonged to the finished Step, carry on
+     * Take the advance: rebind the harness, clear what belonged to the finished Step, carry on
      * (AC-2 — "advance to the next Step WITHOUT starting a new Task").
      *
      * Physically that means: no commit, no publish, no result branch, no `done`, no cleanup and
@@ -1491,7 +1490,7 @@ export async function runTaskLifecycle(
          * The cursor landed on a Step this run has never seen — a Step inserted into the
          * definition while the run was live. The advance itself already committed, so nothing is
          * lost by stopping: relaunching the Task reads the definition afresh and resumes on the
-         * new cursor. Binding it here is what is impossible, because the Step's Agent Profile was
+         * new cursor. Binding it here is what is impossible, because the Step's Harness Profile was
          * not in the set `workflow-agents` resolved and the pre-clone probe never saw its binary.
          *
          * This is the *only* thing drift costs a durable run. The step ids carry no Step ordinal,
@@ -1500,17 +1499,17 @@ export async function runTaskLifecycle(
         return await failRun(`workflow-step-unknown-${round}`, "workflow_step_unknown", "running");
       }
       const rebuiltRunner = deps.runner(
-        nextLeg.agentCatalog.protocol,
-        launchSettingsFor(nextLeg.agentProfile),
+        nextLeg.harnessCatalog.protocol,
+        launchSettingsFor(nextLeg.harnessProfile),
         executor,
       );
       if (!rebuiltRunner) {
-        // Unreachable through the pre-clone gate, which checked `hasAgentRunner` for every Step —
-        // but `hasAgentRunner` is the contracts' claim and this call is the fact, so the two are
+        // Unreachable through the pre-clone gate, which checked `hasHarnessRunner` for every Step —
+        // but `hasHarnessRunner` is the contracts' claim and this call is the fact, so the two are
         // allowed to disagree here rather than in a null dereference three lines on.
         return await failRun(
           `workflow-runner-missing-${round}`,
-          missingAgentRunnerReason(nextLeg.agentCatalog.protocol),
+          missingHarnessRunnerReason(nextLeg.harnessCatalog.protocol),
           "running",
         );
       }
@@ -1539,8 +1538,8 @@ export async function runTaskLifecycle(
       // cannot be honoured is said rather than dropped (issue #94 AC-3). Under the round-scoped
       // id, so the bare one stays exactly what a Task with no Workflow emits.
       const legUnsupported = unsupportedLaunchSettings(
-        nextLeg.agentCatalog.protocol,
-        launchSettingsFor(nextLeg.agentProfile),
+        nextLeg.harnessCatalog.protocol,
+        launchSettingsFor(nextLeg.harnessProfile),
       );
       if (legUnsupported.length > 0) {
         await step.run(`launch-settings-unsupported-${round}`, async () => {
@@ -1549,7 +1548,10 @@ export async function runTaskLifecycle(
             seq: await nextSessionEventSeq(db, workspaceId, sessionId),
             payload: {
               kind: "notice",
-              text: unsupportedLaunchSettingsNotice(nextLeg.agentCatalog.protocol, legUnsupported),
+              text: unsupportedLaunchSettingsNotice(
+                nextLeg.harnessCatalog.protocol,
+                legUnsupported,
+              ),
             },
           });
         });
@@ -1580,7 +1582,7 @@ export async function runTaskLifecycle(
       // on into the next Step with the reviewer's patience already spent.
       if (roundsOnStep >= MAX_REVIEW_ROUNDS) break;
       roundsOnStep += 1;
-      const brief = agentBrief(
+      const brief = harnessBrief(
         ctx,
         pendingFeedback,
         briefWorkspaces(ctx, primaryBinding, wt, provisionedByAttachment),
@@ -1596,27 +1598,27 @@ export async function runTaskLifecycle(
          * `workflow-agents` output: `step.run` memoizes what it returns into Inngest's durable
          * store, and `load` already puts one decryptable ciphertext there. One more per Step
          * widens an existing exposure to buy nothing (Principle IV). A Profile deleted since
-         * `workflow-agents` resolved reads as no credential, which `prepareAgentEnv` refuses
+         * `workflow-agents` resolved reads as no credential, which `prepareHarnessEnv` refuses
          * below as `credential_expired` — the same answer a revoked secret already gets.
          */
         const legCiphertext = wf
-          ? ((await loadAgentProbeContext(db, workspaceId, leg.agentProfile.id))
+          ? ((await loadHarnessProbeContext(db, workspaceId, leg.harnessProfile.id))
               ?.secretCiphertext ?? null)
           : ctx.secretCiphertext;
-        const shaped = prepareAgentEnv({
-          authMode: leg.agentProfile.authMode,
+        const shaped = prepareHarnessEnv({
+          authMode: leg.harnessProfile.authMode,
           secretCiphertext: legCiphertext,
           /*
            * What a command run by *this* executor would inherit, not what the orchestrator
            * inherited (issue #96, §1). `SpawnOpts.env` replaces the child's environment wholesale,
-           * so the base has to describe the machine the agent is actually on: handing a
-           * containerised agent the host's `PATH` and `HOME` describes a machine it is not running
+           * so the base has to describe the machine the harness is actually on: handing a
+           * containerised harness the host's `PATH` and `HOME` describes a machine it is not running
            * on, and it then fails for reasons that have nothing to do with the Task. Identical to
            * `process.env` for the local driver, which is what it always was.
            */
           baseEnv: await executor.baseEnv(),
-          subscriptionEnvVar: leg.agentCatalog.subscriptionEnvVar,
-          meteredEnvVar: leg.agentCatalog.meteredEnvVar,
+          subscriptionEnvVar: leg.harnessCatalog.subscriptionEnvVar,
+          meteredEnvVar: leg.harnessCatalog.meteredEnvVar,
           // The Executor Profile's environment (issue #73). It is applied under the credential
           // shaping, never over it, so a profile cannot become a route to metered billing.
           profileEnv: ctx.executorProfile.config.env ?? {},
@@ -1624,8 +1626,8 @@ export async function runTaskLifecycle(
         if (!shaped.ok) return { kind: "failed" as const, cls: CREDENTIAL_EXPIRED_REASON };
 
         // What must never reach a payload, computed from the env this run actually shaped rather
-        // than from a list of variable names, so it holds for whichever Agent is running.
-        const needles = secretNeedles(shaped.data, leg.agentCatalog, legCiphertext);
+        // than from a list of variable names, so it holds for whichever Harness is running.
+        const needles = secretNeedles(shaped.data, leg.harnessCatalog, legCiphertext);
 
         // Every streamed event is published live *and* appended to the session log, so a client
         // that reconnects can replay from `seq` instead of losing history (TASK-018). Writes are
@@ -1636,18 +1638,18 @@ export async function runTaskLifecycle(
         /**
          * The run outlived the rows it writes into.
          *
-         * A Task can be deleted — or its Issue force-deleted — while its agent is mid-turn:
-         * cancellation happens *between* Inngest steps, and stopping an agent is a request, not an
+         * A Task can be deleted — or its Issue force-deleted — while its harness is mid-turn:
+         * cancellation happens *between* Inngest steps, and stopping a harness is a request, not an
          * instant. `cascadeDeleteTasks` takes the `session` row with the Task, so every event this
          * run appends afterwards fails on `session_event.session_id`'s foreign key.
          *
-         * What that produced was one logged stack trace per chunk of agent output, for a run whose
+         * What that produced was one logged stack trace per chunk of harness output, for a run whose
          * transcript has nowhere to live, whose work nobody will review, and which keeps spending
          * tokens until it finishes on its own. So the first such failure latches here: the log
-         * says it once, the agent is stopped, and the rest of the round is skipped.
+         * says it once, the harness is stopped, and the rest of the round is skipped.
          */
         let abandoned = false;
-        /** Set once the agent exists, so `abandon` can stop something that started after it. */
+        /** Set once the harness exists, so `abandon` can stop something that started after it. */
         let live: { stop: () => Promise<void> | void } | null = null;
 
         const abandon = (stage: string) => {
@@ -1655,7 +1657,7 @@ export async function runTaskLifecycle(
           abandoned = true;
           log.warn(
             { stage },
-            "the Session this run writes to no longer exists — it was deleted while the agent was live; stopping the agent and abandoning the round",
+            "the Session this run writes to no longer exists — it was deleted while the harness was live; stopping the harness and abandoning the round",
           );
           try {
             void live?.stop();
@@ -1663,7 +1665,7 @@ export async function runTaskLifecycle(
             captureException(log, cause, { stage: "abandon-stop" });
           }
         };
-        // Usage is recorded per turn as it is reported (issue #14) — the agent states it once,
+        // Usage is recorded per turn as it is reported (issue #14) — the harness states it once,
         // in its own stream, and nothing else in the system can reconstruct it afterwards.
         //
         // The CLI emits one event per *content block* of a turn and repeats that turn's usage on
@@ -1696,10 +1698,10 @@ export async function runTaskLifecycle(
                 taskId,
                 // The Profile that actually burned these tokens, which under a Workflow is the
                 // Step's rather than the Task's (AC-3). `profile.ts` counts usage rows per
-                // Profile, so attributing Step 2's turns to Step 1's agent would be a durable
-                // record of work that agent never did. Identical to `ctx.agentProfile.id` for a
+                // Profile, so attributing Step 2's turns to Step 1's harness would be a durable
+                // record of work that harness never did. Identical to `ctx.harnessProfile.id` for a
                 // Task on no Workflow.
-                agentProfileId: leg.agentProfile.id,
+                agentProfileId: leg.harnessProfile.id,
                 messageId,
                 seq,
                 reported: u.reported,
@@ -1726,9 +1728,9 @@ export async function runTaskLifecycle(
         // transport's ("stdout", "tool_use") and let the two paths drift apart. A record with no
         // wire form is still written; it simply publishes nothing.
         /**
-         * Ending the round once the agent has said it is finished and gone quiet.
+         * Ending the round once the harness has said it is finished and gone quiet.
          *
-         * `await handle.outcome` waits for the agent **process to exit**, and a declaring agent
+         * `await handle.outcome` waits for the harness **process to exit**, and a declaring harness
          * does not exit — Claude Code says `task_complete` and then sits waiting for whatever the
          * operator wants next. That is a reasonable thing for a CLI to do and a fatal thing for a
          * durable run to wait on: the step never returns, so Inngest never checkpoints it, the
@@ -1736,13 +1738,13 @@ export async function runTaskLifecycle(
          * whole function is retried from the top — for ever. The gate step below it never runs, so
          * `waitForEvent` is never reached, so the `review.decided` event an approval publishes
          * arrives at a run that is not listening. That is the failure this file's own comment
-         * predicted ("an agent that declares and then waits for the operator does not exit") and
+         * predicted ("a harness that declares and then waits for the operator does not exit") and
          * worked around for the *board* by recording the declaration mid-run; the run itself was
          * still hanging.
          *
          * So the declaration ends the round — after a grace period, not at once. The comment on
-         * `completion` is right that an agent can declare and keep working: a `task_complete`
-         * followed by more output is a declaration that has been superseded, and cutting the agent
+         * `completion` is right that a harness can declare and keep working: a `task_complete`
+         * followed by more output is a declaration that has been superseded, and cutting the harness
          * off mid-thought would lose that work. Any further output therefore re-arms the timer, and
          * only silence ends the round.
          */
@@ -1766,7 +1768,7 @@ export async function runTaskLifecycle(
         const emit = (rawPayload: SessionEventPayload) => {
           // Nothing to append to and nothing worth publishing: the Session is gone.
           if (abandoned) return;
-          // The agent is still talking, so whatever it declared is not the last word yet.
+          // The harness is still talking, so whatever it declared is not the last word yet.
           if (completionStop) armCompletionStop();
           const at = seq++;
           // One record, read back through the union *before* either destination sees it.
@@ -1797,7 +1799,7 @@ export async function runTaskLifecycle(
         };
 
         /**
-         * Where the agent went, resolved as soon as it says so.
+         * Where the harness went, resolved as soon as it says so.
          *
          * A promise rather than the `reported` variable below, because the turn capture runs from
          * inside the event stream — which starts before that variable is assigned — and a capture
@@ -1811,8 +1813,8 @@ export async function runTaskLifecycle(
         /**
          * The primary worktree, as a fact rather than a claim.
          *
-         * A resuming round already holds it. A first round with a `--worktree` agent does not: the
-         * directory is the agent's to create, and it announces the path before its first turn.
+         * A resuming round already holds it. A first round with a `--worktree` harness does not: the
+         * directory is the harness's to create, and it announces the path before its first turn.
          * Adoption is what turns that announcement into something safe to run git in — the same
          * check the run's own adoption makes, for the same reason (Principle II). Memoized: it is
          * a git call, and the answer cannot change within a round.
@@ -1827,11 +1829,11 @@ export async function runTaskLifecycle(
         };
 
         /**
-         * The change the agent has made so far, captured at the boundary of every turn that
+         * The change the harness has made so far, captured at the boundary of every turn that
          * touched a file.
          *
          * The Changes panel renders `diff` records, and until now exactly one place wrote them:
-         * the step that moves a Task to review. An agent that stops mid-run to ask a question —
+         * the step that moves a Task to review. A harness that stops mid-run to ask a question —
          * "the change is in the working tree, shall I commit it?" — therefore left the operator
          * answering blind, with real work sitting in a worktree the UI structurally could not
          * show. This is the same capture the gate makes; only *when* moves. The gate still
@@ -1850,9 +1852,9 @@ export async function runTaskLifecycle(
          * this capture and nothing else.
          *
          * One capture at a time, and a turn that arrives while one is running sets `again` rather
-         * than starting a second. Two concurrent reads of a tree the agent is still writing buy
+         * than starting a second. Two concurrent reads of a tree the harness is still writing buy
          * nothing but contention — but *dropping* the later turn would leave the panel showing a
-         * state the agent has already moved on from, which is the failure this whole capture
+         * state the harness has already moved on from, which is the failure this whole capture
          * exists to remove. Trailing re-run, not trailing discard.
          */
         let capturing = false;
@@ -1904,16 +1906,16 @@ export async function runTaskLifecycle(
         };
 
         /**
-         * Widgets the agent drew and is still waiting on, by the id this run gave them.
+         * Widgets the harness drew and is still waiting on, by the id this run gave them.
          *
-         * The book is per-run and in memory for the same reason the agent registry is: an answer
+         * The book is per-run and in memory for the same reason the harness registry is: an answer
          * is only deliverable while the process that asked is alive. A run that ends with widgets
          * outstanding leaves them in the log as questions nobody answered, which is exactly what
          * they were.
          */
         const pendingWidgets = new Map<string, Widget>();
         /**
-         * The last `task_complete` the agent emitted this round, if it emitted one at all.
+         * The last `task_complete` the harness emitted this round, if it emitted one at all.
          *
          * A holder rather than a bare `let`: the only assignment is inside the output callback, and
          * the compiler cannot see that callback run — it would narrow a `let` to `null` at every
@@ -1923,9 +1925,9 @@ export async function runTaskLifecycle(
           widget: null,
         };
         /**
-         * Everything the agent *said* this round, in order — its answer to a Workflow branch
+         * Everything the harness *said* this round, in order — its answer to a Workflow branch
          * question is read off the end of it when the widget's summary does not repeat it (see
-         * `carryAgentDecision`). Prose only: reasoning is not a report.
+         * `carryHarnessDecision`). Prose only: reasoning is not a report.
          */
         let assistantText = "";
         const scanner = new WidgetFenceScanner();
@@ -1946,7 +1948,7 @@ export async function runTaskLifecycle(
         /** Emit whatever a chunk of assistant prose turned out to contain. */
         const emitAssistant = (text: string, thinking: boolean) => {
           // Only the model's answer is scanned. Reasoning is a thought about a widget, not a
-          // request to draw one, and the operator's own steering is not the agent's to render.
+          // request to draw one, and the operator's own steering is not the harness's to render.
           if (!ctx.widgetsEnabled || thinking) {
             if (!thinking) assistantText += text;
             emit({ kind: "assistant_turn", text, thinking });
@@ -1959,14 +1961,14 @@ export async function runTaskLifecycle(
             const widgetId = randomUUID();
             if (widgetExpectsResponse(widget)) pendingWidgets.set(widgetId, widget);
             /*
-             * The agent saying how its run ended.
+             * The harness saying how its run ended.
              *
-             * Held for the end of the run, because an agent can emit this and then keep working —
+             * Held for the end of the run, because a harness can emit this and then keep working —
              * it is prose, not a tool call, and nothing stops it — so what counts is the last one
              * standing when the run actually ends.
              *
              * *And* written down immediately, which is the part that was missing. The declaration
-             * used to reach the Task row only when the agent's process exited, and an agent that
+             * used to reach the Task row only when the harness's process exited, and a harness that
              * declares and then waits for the operator does not exit: a run could sit for eleven
              * minutes having said "changes_ready" with the board still drawing it as working, and
              * no amount of refreshing would have helped — there was nothing to fetch. A later
@@ -1975,7 +1977,7 @@ export async function runTaskLifecycle(
             if (widget.kind === "task_complete") {
               completion.widget = widget;
               const declared = widget;
-              // The agent has said it is done. Give it room to say more, then end the round —
+              // The harness has said it is done. Give it room to say more, then end the round —
               // see `armCompletionStop`.
               armCompletionStop();
               writes = writes
@@ -1999,11 +2001,11 @@ export async function runTaskLifecycle(
           }
         };
 
-        // Launch command and arguments come from the Agent's catalog row (issue #10) — not a
-        // global env var, since two Agent Profiles in the same Workspace can point at different
+        // Launch command and arguments come from the Harness's catalog row (issue #10) — not a
+        // global env var, since two Harness Profiles in the same Workspace can point at different
         // catalog entries.
-        const { command, argsTemplate: args } = leg.agentCatalog;
-        // First round with a `--worktree`-capable agent: run in the repository and have it create
+        const { command, argsTemplate: args } = leg.harnessCatalog;
+        // First round with a `--worktree`-capable harness: run in the repository and have it create
         // the Task's worktree. Later rounds continue *inside* that worktree — a reviewer asking
         // for changes wants the work carried on, and asking for the worktree again would branch a
         // fresh one from the base ref and throw the earlier round away. An ACP Task arrives here
@@ -2015,13 +2017,13 @@ export async function runTaskLifecycle(
         /*
          * What this leg loads from the libraries (spec F24): everything enabled Workspace-wide,
          * plus whatever its Workflow Step names. Resolved *here*, inside the step that spawns
-         * the agent, because it decrypts the Secrets an MCP server references — the same
+         * the harness, because it decrypts the Secrets an MCP server references — the same
          * point-of-use rule the credential above follows (Principle IV) — and materialized the
          * way this leg's runtime takes it (`materializeLibraries`). A Secret that is gone fails
          * the round by name rather than starting a server without its token.
          */
         const libraries = ctx.librariesEnabled
-          ? await loadAgentLibrariesForRun(db, workspaceId, leg.stepId)
+          ? await loadHarnessLibrariesForRun(db, workspaceId, leg.stepId)
           : { ok: true as const, data: { mcpServers: [], skills: [] } };
         if (!libraries.ok) {
           emit({
@@ -2032,8 +2034,8 @@ export async function runTaskLifecycle(
         }
         const loaded = await materializeLibraries({
           libraries: libraries.data,
-          protocol: leg.agentCatalog.protocol,
-          catalogKey: leg.agentCatalog.key,
+          protocol: leg.harnessCatalog.protocol,
+          catalogKey: leg.harnessCatalog.key,
           libraryDir: join(worktreePath(deps.worktreeRoot, taskId), ".solow-libraries"),
           worktreePath: resuming ? resuming.path : null,
         });
@@ -2051,7 +2053,7 @@ export async function runTaskLifecycle(
           prompt: brief,
           ...(loaded.mcpServers.length > 0 ? { mcpServers: loaded.mcpServers } : {}),
           onEvent: (e) => {
-            // The agent's channel decides what kind of record this is. `user` is the operator's
+            // The harness's channel decides what kind of record this is. `user` is the operator's
             // own steering echoed back, `system` is the machinery talking about itself, and the
             // rest is the model — the distinction the log could not previously make at all.
             if (e.kind === "stdout") {
@@ -2064,7 +2066,7 @@ export async function runTaskLifecycle(
               // The allowlist admits none of its arguments — a todo list is an array of objects
               // and `tool_call.input` is bounded to a flat map of short strings — so the row this
               // would otherwise write says "tool: TodoWrite" and nothing else: a contentless line
-              // in the transcript, with the agent's plan discarded alongside it. Emitting the list
+              // in the transcript, with the harness's plan discarded alongside it. Emitting the list
               // instead removes that row and is the only path by which the plan survives at all.
               //
               // Only a payload that reads as a todo list takes this branch. Anything else falls
@@ -2108,7 +2110,7 @@ export async function runTaskLifecycle(
               });
             } else if (e.kind === "capabilities") {
               /*
-               * Cache what the agent advertised (issue #94 AC-2), on the same fire-and-forget
+               * Cache what the harness advertised (issue #94 AC-2), on the same fire-and-forget
                * chain as the completion record: the run must not fail because its narration did
                * not land, and a capability list is narration — the fallback a Settings form reads
                * between runs, never something this run depends on.
@@ -2116,28 +2118,33 @@ export async function runTaskLifecycle(
               const advertised = { models: e.models, modes: e.modes };
               writes = writes
                 .then(() =>
-                  // The catalog row of the agent that advertised them — the Step's under a
-                  // Workflow. Writing one agent's advertised models over another's cache is how
-                  // the Settings pickers start suggesting models the agent cannot run.
-                  updateAgentCatalogCapabilities(db, workspaceId, leg.agentCatalog.id, advertised),
+                  // The catalog row of the harness that advertised them — the Step's under a
+                  // Workflow. Writing one harness's advertised models over another's cache is how
+                  // the Settings pickers start suggesting models the harness cannot run.
+                  updateHarnessCatalogCapabilities(
+                    db,
+                    workspaceId,
+                    leg.harnessCatalog.id,
+                    advertised,
+                  ),
                 )
                 .catch((cause) => captureException(log, cause, { stage: "capabilities-cache" }));
             } else recordUsage(e);
           },
         });
         live = handle;
-        // Hand the reported path to the turn capture the moment the agent states it — the capture
+        // Hand the reported path to the turn capture the moment the harness states it — the capture
         // is already running by now, waiting on exactly this.
         void handle.workspacePath.then(announcePath, () => announcePath(null));
         // Publish the handle for the lifetime of the run so the hub can deliver the operator's
-        // input or stop to *this* agent (TASK-022), and withdraw it the moment the run ends.
+        // input or stop to *this* harness (TASK-022), and withdraw it the moment the run ends.
         const deregister = deps.registry.register(workspaceId, {
           taskId,
           sessionId,
           handle,
           /**
            * Answer one of this run's widgets: validate against the widget that asked, record the
-           * answer in the log, then tell the agent in a line it can read. The agent is not blocked
+           * answer in the log, then tell the harness in a line it can read. The harness is not blocked
            * on this — a fenced widget is prose, not a tool call — so the answer arrives as steering,
            * which is the same channel an operator types into.
            */
@@ -2161,14 +2168,14 @@ export async function runTaskLifecycle(
         let outcome: Awaited<typeof handle.outcome>;
         let reported: string | null = null;
         try {
-          // Learn where the agent went as soon as it says so, before waiting on the run: if the
-          // agent dies mid-run we still know which worktree to clean up.
+          // Learn where the harness went as soon as it says so, before waiting on the run: if the
+          // harness dies mid-run we still know which worktree to clean up.
           reported = await handle.workspacePath;
           // ...and, on the first round, use that same moment to copy the Repository's setup files
-          // in. An agent announces its worktree before the model's first turn, so this is the
-          // earliest point at which the directory exists — and, in practice, before the agent has
+          // in. A harness announces its worktree before the model's first turn, so this is the
+          // earliest point at which the directory exists — and, in practice, before the harness has
           // looked at it. A later round skips it: the files are already there, and re-copying
-          // would overwrite anything the agent changed.
+          // would overwrite anything the harness changed.
           if (round === 0 && reported) await seed(reported);
           outcome = await handle.outcome;
         } finally {
@@ -2178,7 +2185,7 @@ export async function runTaskLifecycle(
           // running would otherwise chain its write on after the drain below had already passed.
           await pendingCapture;
           // Drain queued log and usage writes even when the run threw. Usage in particular
-          // cannot be re-obtained — the agent reports it once — so abandoning the chain on a
+          // cannot be re-obtained — the harness reports it once — so abandoning the chain on a
           // mid-turn failure would lose it permanently rather than merely delay it.
           await writes;
         }
@@ -2189,7 +2196,7 @@ export async function runTaskLifecycle(
         if (abandoned) return { kind: "abandoned" as const };
 
         // Confirm with git that the reported path really is a worktree of this repository. An
-        // agent working somewhere else has not been isolated, and committing from wherever it
+        // harness working somewhere else has not been isolated, and committing from wherever it
         // happened to point would be worse than failing (Principle II). A resuming round is
         // re-checked too: the worktree could have been removed underneath us between rounds.
         let adopted: Worktree;
@@ -2219,24 +2226,24 @@ export async function runTaskLifecycle(
         }
 
         /*
-         * The agent finished — written down here, inside the step that learned it, and not two
+         * The harness finished — written down here, inside the step that learned it, and not two
          * steps later when the Task is moved to review.
          *
          * That gap is a bug with a Failed column full of evidence for it. Completion used to exist
          * only as this function's return value: real, in memory, and recorded nowhere. Anything
          * that lost the run before `to-review` committed — a restart, a `bun --hot` reload, an
-         * engine that dropped an in-flight run — left no trace that the agent had ever finished, so
-         * the reclaim sweep found a `running` Task with no agent, could not tell "died mid-work"
+         * engine that dropped an in-flight run — left no trace that the harness had ever finished, so
+         * the reclaim sweep found a `running` Task with no harness, could not tell "died mid-work"
          * from "died having finished", and marked it `failed`. Work that was done and committed
          * ended up filed as a failure.
          *
          * A durable row before the fragile part is the whole fix. It carries the branch because
-         * that is what the review gate opens, and whatever the agent said about stopping, because
+         * that is what the review gate opens, and whatever the harness said about stopping, because
          * that is the only thing here it could have told us itself.
          */
-        // The widget's summary, with a branch answer the agent wrote in its final message
+        // The widget's summary, with a branch answer the harness wrote in its final message
         // carried in when the summary has none — this is what the next Step is briefed with.
-        const summary = carryAgentDecision(completion.widget?.summary ?? null, assistantText);
+        const summary = carryHarnessDecision(completion.widget?.summary ?? null, assistantText);
         emit({
           kind: "agent_done",
           changed,
@@ -2264,7 +2271,7 @@ export async function runTaskLifecycle(
       if (run.worktree) {
         wt = run.worktree;
         // The audit line binding a worktree to its Task (Principle IV) is emitted on adoption,
-        // because that is the first moment SoloW knows which directory the agent used.
+        // because that is the first moment SoloW knows which directory the harness used.
         logWorktreeBinding(log, { workspaceId, taskId, worktreePath: run.worktree.path });
         // And the row saying the same thing, for everything that has to answer "does this Task
         // still hold a working copy" without a filesystem to look at — the delete preview and the
@@ -2376,13 +2383,13 @@ export async function runTaskLifecycle(
       }
 
       /*
-       * The agent has finished. It does not follow that the Task is in review.
+       * The harness has finished. It does not follow that the Task is in review.
        *
        * This step used to move it there itself, which made the review gate something that happened
-       * *to* an operator rather than something they opened — and made "the agent stopped" and "the
-       * work is ready" the same event, which they are not: an agent stops when it runs out of
+       * *to* an operator rather than something they opened — and made "the harness stopped" and "the
+       * work is ready" the same event, which they are not: a harness stops when it runs out of
        * things to do, when it runs out of context, and when it decides the brief was already
-       * satisfied. Only one of those is worth a person's attention, and only the agent knows which.
+       * satisfied. Only one of those is worth a person's attention, and only the harness knows which.
        *
        * So the run records the declaration and the change, and stops. The Task stays where it is,
        * the board shows it as finished, and the transition into `review` is the operator's click —
@@ -2392,7 +2399,7 @@ export async function runTaskLifecycle(
       const gate = worktreeBindings(worktree);
       await step.run(`to-review-${round}`, async () => {
         await recordTaskCompletion(db, workspaceId, taskId, {
-          // `changes_ready` when the agent said nothing: it stopped having produced a run, and the
+          // `changes_ready` when the harness said nothing: it stopped having produced a run, and the
           // conservative reading is the one that puts the work in front of a person rather than
           // the one that quietly files it as "nothing to see".
           outcome: run.outcome ?? "changes_ready",
@@ -2438,13 +2445,13 @@ export async function runTaskLifecycle(
       announce("running");
 
       /*
-       * The agent has finished, and on an `agent-signal` Step that is the signal the Step
+       * The harness has finished, and on an `agent-signal` Step that is the signal the Step
        * advances on (AC-2). Reported here, and the placement is load-bearing:
        *
        * **After `to-review-${round}`, never before it.** `to-review` is what writes the `diff`
        * session events, and `taskHasRecordedChanges` corroborates the `producedChanges` claim
        * against exactly those events. Move this call above it and the corroborating scan finds
-       * nothing, so an `auto-unless-changes` gate opens on the agent's unverified word about its
+       * nothing, so an `auto-unless-changes` gate opens on the harness's unverified word about its
        * own output — which is the party the gate exists to catch.
        *
        * **Before `waitForEvent`,** because an `auto` Step must not need a human at all.
@@ -2482,7 +2489,7 @@ export async function runTaskLifecycle(
          * `awaiting-decision` and `held` fall through for the ordinary reason: the cursor did not
          * move and a person has to look. The Step's summary is parked in
          * `workflow_pending_handoff`, which is the column's whole purpose — the caller that
-         * replays this once someone has decided no longer has the agent's words.
+         * replays this once someone has decided no longer has the harness's words.
          */
       }
 
@@ -2498,7 +2505,7 @@ export async function runTaskLifecycle(
       if (decision === "approve") {
         /*
          * A human approved, and under a Workflow that is the second of the two facts a Step
-         * boundary needs — the agent finished (we are past `to-review`) and a person said yes.
+         * boundary needs — the harness finished (we are past `to-review`) and a person said yes.
          *
          * `signal: leg.advanceOn`, and **never the literal `"review"`**. A Step that advances on
          * `agent-signal` sitting behind a `human` gate is an ordinary configuration: sending
@@ -2507,17 +2514,17 @@ export async function runTaskLifecycle(
          * that reads as the run simply having stopped. The Step's own rule is what decides
          * whether this signal finishes it.
          *
-         * `handoff` carries this round's declaration when the agent made one, and is omitted when
+         * `handoff` carries this round's declaration when the harness made one, and is omitted when
          * it did not — in which case the transaction falls back to `workflow_pending_handoff`.
          *
          * The plan for this change had it omitted unconditionally, on the reasoning that "the
-         * caller that noticed the decision no longer has the agent's words". That is true of the
-         * *web* caller and false here: this call site is inside the same round as the agent run,
+         * caller that noticed the decision no longer has the harness's words". That is true of the
+         * *web* caller and false here: this call site is inside the same round as the harness run,
          * with `run.summary` in scope. Omitting it would mean a Step whose `advanceOn` is `review`
          * never carries a handoff at all — site A is the only thing that parks one, and site A
          * does not fire on a `review` Step — which would leave AC-2's "carrying the handoff
          * context" unmet for half the Step configurations the designer offers. The fallback is
-         * unchanged for the case the plan was actually protecting: when the agent said nothing,
+         * unchanged for the case the plan was actually protecting: when the harness said nothing,
          * nothing is sent and the parked summary is promoted.
          */
         if (wf && leg.stepId && leg.advanceOn) {
@@ -2573,10 +2580,10 @@ export async function runTaskLifecycle(
           // on: a single column on `task` could only ever name one of the branches a reviewer
           // would then need to fetch (issue #7 AC-4).
           //
-          // A worktree the agent never touched is skipped rather than committed. `git commit` with
+          // A worktree the harness never touched is skipped rather than committed. `git commit` with
           // nothing staged exits non-zero, so committing it unconditionally would fail the whole
-          // approve step — including for the repository the agent *did* change. That case is now
-          // ordinary rather than exotic: the agent runs in one working directory, so a Task
+          // approve step — including for the repository the harness *did* change. That case is now
+          // ordinary rather than exotic: the harness runs in one working directory, so a Task
           // spanning three repositories routinely reaches the gate having changed one of them. The
           // branch is still recorded, because it exists and is what a reviewer would fetch.
           //
@@ -2698,7 +2705,7 @@ export async function runTaskLifecycle(
          * rejected attempt still parked its summary in `workflow_pending_handoff`, and that column
          * is promoted into the handoff by whatever eventually completes this Step. Left in place,
          * the work a human explicitly refused becomes the next Step's inbound context, presented
-         * to that agent as what it is building on.
+         * to that harness as what it is building on.
          *
          * Its own durable step rather than folded into `reject-${round}`, which does filesystem
          * work that can throw ahead of it.
@@ -2713,7 +2720,7 @@ export async function runTaskLifecycle(
         announce("ready");
         break;
       }
-      // request_changes: resume the agent for another round, carrying the reviewer's feedback —
+      // request_changes: resume the harness for another round, carrying the reviewer's feedback —
       // without it the next round would repeat the same brief and produce the same work.
       //
       // Resuming is a *start*, so it is gated on the Task's dependencies exactly as a launch is
@@ -2762,7 +2769,7 @@ export async function runTaskLifecycle(
       ? worktreeBindings(adopted)
       : ctx.repositories.flatMap((binding) => {
           // Every attachment, not just the secondaries: when the primary's worktree is one
-          // SoloW provisioned, a run that ended before the agent reported anything still has
+          // SoloW provisioned, a run that ended before the harness reported anything still has
           // that directory to remove.
           const worktree = provisionedByAttachment.get(binding.attachment.id);
           return worktree ? [{ binding, worktree }] : [];
@@ -2834,7 +2841,7 @@ function repositoryHostPath(
  * One entry per directory *this Task* uses, never the roots that hold every Task's. Mounting
  * `SOLOW_WORKTREE_ROOT` and `SOLOW_REPO_CACHE_ROOT` was the shortest description of "everything
  * the run might touch", and it handed every container a read-write view of every other Task's
- * worktree in the deployment, across Workspaces — Task A's agent could read the `.env` seeded
+ * worktree in the deployment, across Workspaces — Task A's harness could read the `.env` seeded
  * into Task B's worktree, and write over Task B's work while it was running.
  *
  * Naming the paths costs nothing now that they are derived rather than discovered: the driver
@@ -2852,7 +2859,7 @@ function repositoryHostPath(
  * own clone, and both directories in each pair belong to this Task and to nothing else.
  *
  * What a `local_path` Repository is allowed to be remains the driver's question, not this one:
- * `guardMountSource` refuses a source that would hand the agent the machine, and refusing it in
+ * `guardMountSource` refuses a source that would hand the harness the machine, and refusing it in
  * one place means the operator reads one sentence rather than two.
  *
  * Exported for the tests and the live isolation probe, which need the mount set a Task would
@@ -2891,11 +2898,11 @@ function patternsFor(entry: WorktreeBinding): string[] {
 }
 
 /**
- * The other repositories the agent has been given, as absolute paths it can `cd` into.
+ * The other repositories the harness has been given, as absolute paths it can `cd` into.
  *
- * The agent runs in exactly one working directory, so this is the *only* way it learns that a
+ * The harness runs in exactly one working directory, so this is the *only* way it learns that a
  * second repository is part of its Task at all (issue #7, the stated limitation). The primary's
- * path is unknown on the first round of a `--worktree` protocol — the agent has not created it
+ * path is unknown on the first round of a `--worktree` protocol — the harness has not created it
  * yet — which is why it is nullable rather than always present.
  */
 function briefWorkspaces(
@@ -2909,12 +2916,12 @@ function briefWorkspaces(
       binding === primaryBinding ? primaryWorktree : provisioned.get(binding.attachment.id);
     return {
       repositoryName: binding.repository.name,
-      // The branch the agent will actually find itself on. A worktree SoloW provisioned is
+      // The branch the harness will actually find itself on. A worktree SoloW provisioned is
       // on the attachment's branch by construction, and one that does not exist yet will be —
-      // but a worktree the agent made for itself is on a branch it named (`solow-task-<id>`,
+      // but a worktree the harness made for itself is on a branch it named (`solow-task-<id>`,
       // not `solow/task-<id>`), which is only knowable once git has been asked. Until then
       // the brief says nothing rather than naming a branch that does not exist: the brief is the
-      // *only* mechanism by which a multi-repository agent learns its own layout, so a wrong
+      // *only* mechanism by which a multi-repository harness learns its own layout, so a wrong
       // line in it is worse than a missing one.
       branch:
         worktree?.branch ?? (binding === primaryBinding ? null : binding.attachment.checkoutBranch),
@@ -2931,12 +2938,12 @@ export interface BriefWorkspace {
   branch: string | null;
   /** Absolute path of the worktree, or null while it does not exist yet. */
   path: string | null;
-  /** True for the one the agent process is started in. */
+  /** True for the one the harness process is started in. */
   primary: boolean;
 }
 
 /**
- * What the agent is told when someone answers its widget.
+ * What the harness is told when someone answers its widget.
  *
  * Labels first, ids after: the model wrote the labels and reasons in them, while the ids are how
  * this build refers to the same options — so the sentence leads with what it recognises and
@@ -2949,9 +2956,9 @@ export function widgetAnswerMessage(widget: Widget, response: WidgetResponse): s
   const asked = widget.kind === "ask_user_input" ? widget.prompt : (widgetTitle(widget) ?? "");
 
   // Labels first, ids after: the model wrote the labels and its reasons live in them, while the
-  // ids are how it referred to the same options. The question is quoted back because an agent can
-  // have more than one widget outstanding, and it is the only reference *the agent itself*
-  // recognises — this build's own widget id was generated after the emission and the agent has
+  // ids are how it referred to the same options. The question is quoted back because a harness can
+  // have more than one widget outstanding, and it is the only reference *the harness itself*
+  // recognises — this build's own widget id was generated after the emission and the harness has
   // never seen it, so naming it here told nobody anything.
   const parts = [WIDGET_ANSWER_PREFIX];
   parts.push(
@@ -2969,31 +2976,31 @@ function widgetTitle(widget: Widget): string | undefined {
 }
 
 /**
- * The brief handed to the agent. Round one is the Issue and the Task; later rounds lead with the
+ * The brief handed to the harness. Round one is the Issue and the Task; later rounds lead with the
  * reviewer's feedback, because that — not the original brief — is what still needs doing.
  *
- * A Task spanning more than one Repository also gets a `# Repositories` section. The agent is
+ * A Task spanning more than one Repository also gets a `# Repositories` section. The harness is
  * started in one working directory and has no other way of discovering that the Task covers a
  * second repository, so naming the other worktrees is not a nicety — it is the whole mechanism
  * (issue #7). A single-Repository Task's brief is byte-identical to what it was before.
  */
-export function agentBrief(
+export function harnessBrief(
   ctx: TaskRunContext,
   feedback?: string | undefined,
   workspaces: readonly BriefWorkspace[] = [],
   /**
    * The Workflow Step this round runs, if any (issue #5, AC-2). `brief` is its prompt template
    * with the previous Step's handoff already prepended — `buildStepBrief`'s output, passed in
-   * rather than built here, because the API's preview and the agent's prompt must be one string
+   * rather than built here, because the API's preview and the harness's prompt must be one string
    * and two places that concatenate it are two that drift.
    *
    * Absent for a Task on no Workflow, which is what keeps that Task's brief byte-identical to
    * what it was before Workflows existed. A name *and* a brief rather than the brief alone: the
-   * section names the Step so an agent reading a transcript can tell which one it is answering.
+   * section names the Step so a harness reading a transcript can tell which one it is answering.
    */
   step?: { name: string; brief: string } | undefined,
 ): string {
-  // Widgets are taught, not assumed: an agent emits one only because the brief told it how, so
+  // Widgets are taught, not assumed: a harness emits one only because the brief told it how, so
   // the flag that draws them is the same flag that explains them (`ctx.widgetsEnabled`).
   const parts = [`# Task\n${ctx.task.title}`, `# Issue\n${ctx.issue.title}`];
   if (ctx.issue.description) parts.push(ctx.issue.description);
@@ -3013,9 +3020,9 @@ export function agentBrief(
    * The Step, between the repositories and the review feedback.
    *
    * Added to the brief rather than replacing it, and that is a Principle I decision rather than a
-   * formatting one: a Step's `promptTemplate` is Owner-authored text that becomes an agent's
+   * formatting one: a Step's `promptTemplate` is Owner-authored text that becomes a harness's
    * prompt, so letting it stand alone would let one Step silently repurpose the run away from the
-   * Task and Issue it was launched for. The agent is told what it is working on *and* what this
+   * Task and Issue it was launched for. The harness is told what it is working on *and* what this
    * Step of the pipeline asks of it.
    */
   if (step) {
@@ -3024,7 +3031,7 @@ export function agentBrief(
   // A rejection is announced whether or not the reviewer wrote anything. `undefined` is round
   // one and says nothing; an empty string is "rejected, no words", which the review gate now
   // produces on every Request changes. Without this the redo brief was byte-identical to the
-  // first — and since each round is a fresh process with no memory of the last, the agent was
+  // first — and since each round is a fresh process with no memory of the last, the harness was
   // handed the original instructions in a worktree already holding its own rejected work, with
   // nothing anywhere telling it the work had been turned down.
   if (feedback !== undefined) {
@@ -3051,7 +3058,7 @@ export const taskRun = inngest.createFunction(
      *
      * Inngest cancels *between* steps, so this is not instantaneous: the current step finishes,
      * then the run stops. That is why the deleting side re-checks Task state inside its own
-     * transaction instead of treating the accepted stop as proof the agent is already gone.
+     * transaction instead of treating the accepted stop as proof the harness is already gone.
      */
     cancelOn: [{ event: "task.stop.requested", if: "async.data.taskId == event.data.taskId" }],
   },

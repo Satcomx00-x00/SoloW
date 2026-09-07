@@ -4,9 +4,9 @@ import { beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { chmod, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AgentProtocol } from "@solow/contracts";
+import type { HarnessProtocol } from "@solow/contracts";
 import { signStreamTicket } from "@solow/core/stream";
-import { agentCatalog, agentProfile, encryptSecret, secret, workspace } from "@solow/db";
+import { encryptSecret, harnessCatalog, harnessProfile, secret, workspace } from "@solow/db";
 import { createTestDb, type TestDb } from "@solow/db/testing";
 import { and, eq } from "drizzle-orm";
 import { handleAnnouncePost, handleProbePost } from "./index.js";
@@ -77,11 +77,11 @@ describe("handleAnnouncePost", () => {
 });
 
 /**
- * `POST /probe-agent` — "does this Agent Profile actually work?", asked before a Task depends on
+ * `POST /probe-agent` — "does this Harness Profile actually work?", asked before a Task depends on
  * the answer (2026-08-28).
  *
  * Two rules carry the weight. The tenancy one is the same as `/announce`: the Workspace comes
- * from the signed ticket, never the body, so a caller cannot probe another tenant's agent. The
+ * from the signed ticket, never the body, so a caller cannot probe another tenant's harness. The
  * other is specific to this route and is why it is authenticated at all — it launches a binary
  * an Owner named, with that Owner's credential in its environment. An unauthenticated version
  * would be remote command execution with a wallet attached.
@@ -92,7 +92,7 @@ describe("handleProbePost", () => {
   let db: TestDb;
 
   beforeAll(() => {
-    // Set here rather than inherited from whichever test file ran first: `prepareAgentEnv`
+    // Set here rather than inherited from whichever test file ran first: `prepareHarnessEnv`
     // decrypts the Profile's Secret, and a suite that only passes after a neighbour's
     // `beforeAll` is a suite that fails when run alone.
     process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 3).toString("base64");
@@ -116,10 +116,10 @@ describe("handleProbePost", () => {
   const ticketFor = (workspaceId: string) =>
     signStreamTicket({ workspaceId, taskId: null }, SECRET, NOW);
 
-  /** A fake agent: a shell script doing exactly what the test needs (Principle VI). */
-  async function fakeAgent(body: string): Promise<string> {
+  /** A fake harness: a shell script doing exactly what the test needs (Principle VI). */
+  async function fakeHarness(body: string): Promise<string> {
     const dir = await mkdtemp(join(tmpdir(), "solow-probe-route-"));
-    const path = join(dir, "fake-agent");
+    const path = join(dir, "fake-harness");
     await writeFile(path, `#!/bin/sh\n${body}\n`);
     await chmod(path, 0o755);
     return path;
@@ -127,7 +127,7 @@ describe("handleProbePost", () => {
 
   async function seedProfile(
     workspaceId: string,
-    opts: { command: string; protocol: AgentProtocol; profileId?: string },
+    opts: { command: string; protocol: HarnessProtocol; profileId?: string },
   ): Promise<string> {
     const profileId = opts.profileId ?? `ap-${workspaceId}`;
     await db.insert(workspace).values({ id: workspaceId, name: "WS", ownerUserId: "owner" });
@@ -138,7 +138,7 @@ describe("handleProbePost", () => {
       kind: "subscription_token",
       ciphertext: encryptSecret("oauth-token"),
     });
-    await db.insert(agentCatalog).values({
+    await db.insert(harnessCatalog).values({
       id: `cat-${workspaceId}`,
       workspaceId,
       key: "probe-me",
@@ -149,7 +149,7 @@ describe("handleProbePost", () => {
       subscriptionEnvVar: "SUB_TOKEN",
       meteredEnvVar: "API_KEY",
     });
-    await db.insert(agentProfile).values({
+    await db.insert(harnessProfile).values({
       id: profileId,
       workspaceId,
       name: "Mine",
@@ -170,7 +170,7 @@ describe("handleProbePost", () => {
     expect(res.status).toBe(401);
   });
 
-  it("reads a Profile from another Workspace as absent, never as someone else's agent", async () => {
+  it("reads a Profile from another Workspace as absent, never as someone else's harness", async () => {
     // Principle V, at the one route that would otherwise start a stranger's binary.
     await seedProfile("ws-1", { command: "/bin/true", protocol: "cli_passthrough" });
 
@@ -179,8 +179,8 @@ describe("handleProbePost", () => {
     expect(res.status).toBe(404);
   });
 
-  it("reports a working agent, and caches what it advertises", async () => {
-    const command = await fakeAgent("sleep 5");
+  it("reports a working harness, and caches what it advertises", async () => {
+    const command = await fakeHarness("sleep 5");
     const id = await seedProfile("ws-1", { command, protocol: "cli_passthrough" });
 
     const res = await post({ ticket: ticketFor("ws-1"), agentProfileId: id });
@@ -189,11 +189,11 @@ describe("handleProbePost", () => {
     expect(await res.json()).toMatchObject({ ok: true, reason: null });
   });
 
-  it("answers with a readable reason rather than an error status when the agent is missing", async () => {
+  it("answers with a readable reason rather than an error status when the harness is missing", async () => {
     // The failure an Owner actually hits. A 500 here would put the reason in a server log
     // instead of on the screen of the person who can fix it.
     const id = await seedProfile("ws-1", {
-      command: "/nonexistent/agent-binary",
+      command: "/nonexistent/harness-binary",
       protocol: "cli_passthrough",
     });
 
@@ -209,7 +209,7 @@ describe("handleProbePost", () => {
     // The half of this feature that is not about failure: the pin pickers were empty until a
     // first Task completed, so the ordering was "commit work, then find out what you could
     // have chosen". A probe inverts it.
-    const command = await fakeAgent(`
+    const command = await fakeHarness(`
       while IFS= read -r line; do
         case "$line" in
           *'"initialize"'*) printf '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}\n' ;;
@@ -226,8 +226,8 @@ describe("handleProbePost", () => {
     });
     const [row] = await db
       .select()
-      .from(agentCatalog)
-      .where(and(eq(agentCatalog.workspaceId, "ws-1"), eq(agentCatalog.id, "cat-ws-1")))
+      .from(harnessCatalog)
+      .where(and(eq(harnessCatalog.workspaceId, "ws-1"), eq(harnessCatalog.id, "cat-ws-1")))
       .limit(1);
     expect(row?.capabilities).toEqual({ models: ["m-a", "m-b"], modes: ["plan"] });
   });

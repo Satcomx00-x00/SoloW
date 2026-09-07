@@ -6,9 +6,9 @@ import { idSchema } from "./common.js";
  *
  * The reason these lists are paged is not the SPA — it is the MCP surface. A tool list is derived
  * from the tRPC router (`apps/web/src/server/mcp/tools.ts`), so every `*.list` procedure is
- * already a tool an agent can call, and an unbounded one hands a model four hundred rows in full
+ * already a tool a harness can call, and an unbounded one hands a model four hundred rows in full
  * to answer a question about three of them. Issue #82 states it plainly: *a tool that returns 400
- * tasks with full bodies has spent the agent's context to tell it nothing.* A bound is therefore
+ * tasks with full bodies has spent the harness's context to tell it nothing.* A bound is therefore
  * a property of the contract, not a courtesy the caller may forget.
  *
  * **A keyset cursor, never an offset.** An offset is only stable while nothing is written, and

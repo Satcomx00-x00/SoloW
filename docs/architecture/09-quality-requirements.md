@@ -22,12 +22,12 @@ Each scenario names a stimulus and the response that constitutes success.
 
 - **Q-Reliability-1** *When the Orchestration Component restarts mid-Run,* every in-flight
   Run resumes from its last completed Step rather than restarting.
-- **Q-Reliability-2** *When one Task's Agent fails,* no other Task's working copy or progress
+- **Q-Reliability-2** *When one Task's Harness fails,* no other Task's working copy or progress
   is affected.
-- **Q-Security-1** *When an Agent runs arbitrary code,* it cannot read any stored credential.
+- **Q-Security-1** *When a Harness runs arbitrary code,* it cannot read any stored credential.
 - **Q-Security-2** *When any log, notification, report, or export is produced,* it contains no
   readable secret.
-- **Q-Cost-1** *When a Subscription-mode Agent runs,* no configuration causes metered
+- **Q-Cost-1** *When a Subscription-mode Harness runs,* no configuration causes metered
   billing; quota exhaustion parks work rather than switching billing.
 - **Q-Usability-1** *When a user looks at a Board or Workflow monitor,* they can tell the
   state of any Task or Run without reading raw logs.

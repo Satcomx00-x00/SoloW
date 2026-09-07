@@ -55,7 +55,7 @@ function CountingProbe({ connect, renders }: { connect: ConnectFn; renders: { n:
 
 function Probe({ connect }: { connect: ConnectFn }) {
   const [ack, setAck] = useState<TaskInputAck | null>(null);
-  const { events, status, sendInput, stopAgent } = useTaskStream("task-1", {
+  const { events, status, sendInput, stopHarness } = useTaskStream("task-1", {
     connect,
     onAck: setAck,
   });
@@ -70,7 +70,7 @@ function Probe({ connect }: { connect: ConnectFn }) {
       <button type="button" onClick={() => sendInput("keep going")}>
         Send
       </button>
-      <button type="button" onClick={() => stopAgent()}>
+      <button type="button" onClick={() => stopHarness()}>
         Stop
       </button>
     </div>
@@ -177,7 +177,7 @@ describe("useTaskStream — batching", () => {
   });
 });
 
-describe("useTaskStream — steering the agent (TASK-022)", () => {
+describe("useTaskStream — steering the harness (TASK-022)", () => {
   it("sends operator input and a stop on the same socket the stream arrives on", async () => {
     const { connect, sockets } = recordingConnect();
     renderWithTrpc(<Probe connect={connect} />, ticketHandler);
@@ -197,7 +197,7 @@ describe("useTaskStream — steering the agent (TASK-022)", () => {
     renderWithTrpc(<Probe connect={connect} />, ticketHandler);
     await waitFor(() => expect(sockets).toHaveLength(1));
 
-    // Input that reached no running agent must not look delivered to the operator.
+    // Input that reached no running harness must not look delivered to the operator.
     act(() => sockets[0]?.onAck({ kind: "ack", ok: false, error: "agent_not_running" }));
     await waitFor(() =>
       expect(screen.getByTestId("ack").textContent).toBe("false:agent_not_running"),

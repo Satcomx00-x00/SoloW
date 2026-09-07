@@ -57,7 +57,7 @@ export async function resolveMcpPrincipal(db: Db, presented: string): Promise<Mc
        * The token is the principal, not a person. `userId` is stamped with the token's id rather
        * than borrowing a human's, so an action taken over MCP is attributable to the credential
        * that took it — `review.decide` records this as the deciding actor, and a decision made by
-       * an external agent should not read as one a human made.
+       * an external harness should not read as one a human made.
        */
       session: { workspaceId: row.workspaceId, userId: `mcp:${row.id}` },
       flagOverrides: await getWorkspaceFlags(db, row.workspaceId),

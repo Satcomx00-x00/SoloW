@@ -1,9 +1,9 @@
 /// <reference types="bun-types" />
 import { beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import {
-  agentCatalog,
   encryptSecret,
   executorProfile,
+  harnessCatalog,
   integration,
   repository,
   secret,
@@ -19,7 +19,7 @@ import { getSyncStatus, getWorkspace, getWorkspaceSetup, renameWorkspace } from 
  *
  * The setup state is the part worth pinning hardest, because it replaced a fixture that lied.
  * A local install used to arrive holding two invented companies, each with a credential, an
- * Agent Profile, an Executor and a repository that never existed — so the product looked
+ * Harness Profile, an Executor and a repository that never existed — so the product looked
  * configured on first launch and the real gap stayed hidden. Everything below is about the
  * checklist telling the truth about rows that are actually there.
  */
@@ -107,8 +107,8 @@ describe("getWorkspaceSetup", () => {
     }
   });
 
-  it("says an Agent Profile is waiting on a credential rather than offering a dead action", async () => {
-    // A Profile binds an agent to a Secret, so a form opened before one exists has an empty
+  it("says a Harness Profile is waiting on a credential rather than offering a dead action", async () => {
+    // A Profile binds a harness to a Secret, so a form opened before one exists has an empty
     // picker. Naming the missing thing is a better answer than a button that cannot work.
     const id = await bareWorkspace();
 
@@ -207,7 +207,7 @@ describe("getWorkspaceSetup", () => {
       kind: "api_key",
       ciphertext: "cipher",
     });
-    await db.insert(agentCatalog).values({
+    await db.insert(harnessCatalog).values({
       workspaceId: theirs,
       key: "claude_code",
       displayName: "Claude Code",

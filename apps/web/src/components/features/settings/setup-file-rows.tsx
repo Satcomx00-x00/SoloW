@@ -11,7 +11,7 @@ import { trpc } from "@/trpc/react";
 /**
  * Per-Repository allowlist of files copied into every new worktree (issue #52).
  *
- * A fresh worktree has no `.env`, so the agent cannot run the test suite or start the dev
+ * A fresh worktree has no `.env`, so the harness cannot run the test suite or start the dev
  * server. This is where an operator names the handful of files that fixes that — and it is
  * deliberately a list of names, never a "copy everything git-ignored" switch.
  *
@@ -58,16 +58,16 @@ export function SetupFileRows({
     <div className="grid gap-2">
       <Label>Setup files</Label>
       <p className="text-muted-foreground text-xs">
-        Files copied from this repository into every new worktree, so the agent can run the tests
+        Files copied from this repository into every new worktree, so the harness can run the tests
         and start the dev server. One glob per row, relative to the repository root.
       </p>
       {/*
         A standing warning, not one that appears on `.env`: the point is that *any* pattern here
-        may match a file holding a credential, and that the agent will be able to read it.
+        may match a file holding a credential, and that the harness will be able to read it.
       */}
       <p className="rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-xs">
-        Matched files may contain secrets. They are placed in the agent's working directory, and are
-        kept out of the diff shown for review and out of the commit made on approval.
+        Matched files may contain secrets. They are placed in the harness's working directory, and
+        are kept out of the diff shown for review and out of the commit made on approval.
       </p>
       {rows.map((row, i) => (
         <div className="grid gap-1" key={row.id}>

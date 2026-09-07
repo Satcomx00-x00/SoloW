@@ -7,7 +7,7 @@ features and building blocks can reference them rather than restating them.
 
 ## Isolation
 
-Every Task runs in its own working copy per Repository, so concurrent agents never share
+Every Task runs in its own working copy per Repository, so concurrent harnesses never share
 working files. Isolation is structural and holds across all Executor types.
 → [F08](../features/F08-workspaces-repositories.md)
 
@@ -21,27 +21,27 @@ change is recorded so history can be reconstructed.
 ## Human-in-the-loop
 
 The review-first principle is a system-wide concern, not a single feature. It appears as
-Task Review, Workflow Gates, and agent tool-use approval — all governed by the same rule: a
+Task Review, Workflow Gates, and harness tool-use approval — all governed by the same rule: a
 recorded human decision is required to proceed.
 → [F10](../features/F10-review-approval.md)
 
 ## Credential safety & billing integrity
 
-Secrets are stored encrypted and never displayed after entry. Agent-run code never has
-access to raw credentials. Subscription-mode agents are never run in a way that causes
-metered billing. These rules apply everywhere agents run.
+Secrets are stored encrypted and never displayed after entry. Harness-run code never has
+access to raw credentials. Subscription-mode harnesses are never run in a way that causes
+metered billing. These rules apply everywhere harnesses run.
 → [F06](../features/F06-authentication-billing.md), [F17](../features/F17-security-secrets.md)
 
 ## Real-time observability
 
-Live agent activity and state changes are streamed to the user with low latency, so the
+Live harness activity and state changes are streamed to the user with low latency, so the
 board, the review workspace, and the Workflow monitor always reflect current reality.
 → [F09](../features/F09-integrated-workspace.md)
 
-## Uniform agent boundary
+## Uniform harness boundary
 
-All agents are driven through one standard protocol, so orchestration behaviour is
-independent of which agent tool is used, and adding an agent does not change the system.
+All harnesses are driven through one standard protocol, so orchestration behaviour is
+independent of which harness tool is used, and adding a harness does not change the system.
 → [Decision 0003](../decisions/0003-agent-connection-protocol.md)
 
 ## Tenancy & access

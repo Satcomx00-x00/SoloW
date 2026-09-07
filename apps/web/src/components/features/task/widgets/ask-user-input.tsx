@@ -13,7 +13,7 @@ import type { WidgetRendererProps } from "./registry";
 type AskWidget = z.infer<typeof askUserInputWidget>;
 
 /**
- * The agent's question, asked as a list of options you tick.
+ * The harness's question, asked as a list of options you tick.
  *
  * A list, not a row of pill buttons. Pills were fine for three one-word answers and wrong for
  * everything else: an option with a sentence of explanation had nowhere to put it, four options
@@ -22,8 +22,8 @@ type AskWidget = z.infer<typeof askUserInputWidget>;
  * click one and watch what happens. A checkbox and a radio answer that before the first click.
  *
  * The rule it inherits from the permission card, and the reason both exist: only the options the
- * agent itself offered, in the order it listed them. A UI that invented a "none of these" would
- * be answering on the agent's behalf.
+ * harness itself offered, in the order it listed them. A UI that invented a "none of these" would
+ * be answering on the harness's behalf.
  *
  * Three modes, one component, because they are the same question with different arity — and
  * splitting them would put "which options were offered" in three places:
@@ -40,7 +40,7 @@ export function AskUserInput({ widget, onRespond, response }: WidgetRendererProp
   const settled = response ?? null;
   const answering = onRespond !== undefined && settled === null;
 
-  // Ranking starts from the agent's own order and is rearranged from there — an empty list would
+  // Ranking starts from the harness's own order and is rearranged from there — an empty list would
   // make the operator build the answer out of nothing.
   const order = picked.length > 0 ? picked : widget.options.map((o) => o.id);
 
@@ -205,7 +205,7 @@ const ROW = "flex items-start gap-2.5 rounded-lg border px-2.5 py-2";
  *
  * Still the list, not a sentence naming the winner. What was *offered* is half of what a
  * reviewer needs — "they picked Red" says nothing without the three colours it beat — so the
- * options stay, ticked and dimmed, in the order the agent gave them.
+ * options stay, ticked and dimmed, in the order the harness gave them.
  */
 function AnsweredQuestion({
   widget,
@@ -216,7 +216,7 @@ function AnsweredQuestion({
 }) {
   const chosen = response?.values ?? [];
   // A ranking's answer is its order, so the settled list is re-ordered to match it; every other
-  // mode keeps the agent's own order, where the ticks carry the meaning.
+  // mode keeps the harness's own order, where the ticks carry the meaning.
   const rows =
     widget.mode === "rank" && chosen.length > 0
       ? chosen.map((id) => widget.options.find((o) => o.id === id)).filter((o) => o !== undefined)

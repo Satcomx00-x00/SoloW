@@ -151,15 +151,15 @@ describe("find bar", () => {
 /**
  * Saying that the run is alive.
  *
- * The panel's silence used to be ambiguous: an agent thinking for a minute, an agent inside a
- * long `Bash` call and an agent that had hung all drew the same settled transcript. These pin the
+ * The panel's silence used to be ambiguous: a harness thinking for a minute, a harness inside a
+ * long `Bash` call and a harness that had hung all drew the same settled transcript. These pin the
  * line that separates them — and pin that it is absent when there is nothing to report, which is
  * the half that keeps it from becoming decoration under every finished run.
  */
-describe("agent activity", () => {
-  it("says the agent is launching over the empty terminal of a running task", () => {
+describe("harness activity", () => {
+  it("says the harness is launching over the empty terminal of a running task", () => {
     renderTerminal({ rows: [], isRunning: true });
-    expect(screen.getByText(/Launching the agent/)).toBeTruthy();
+    expect(screen.getByText(/Launching the harness/)).toBeTruthy();
     // And specifically no longer tells the operator to do the thing they have just done.
     expect(screen.queryByText(/Launch the task to start a run/)).toBeNull();
   });
@@ -169,14 +169,14 @@ describe("agent activity", () => {
     expect(screen.getByText(/Launch the task to start a run/)).toBeTruthy();
   });
 
-  it("names what the agent is doing under a transcript that has stopped growing", () => {
+  it("names what the harness is doing under a transcript that has stopped growing", () => {
     const { container } = renderTerminal({ isRunning: true });
-    expect(container.querySelector("[data-agent-activity='thinking']")).toBeTruthy();
+    expect(container.querySelector("[data-harness-activity='thinking']")).toBeTruthy();
     expect(screen.getByText("Thinking…")).toBeTruthy();
   });
 
   it("leaves a finished run alone", () => {
     const { container } = renderTerminal();
-    expect(container.querySelector("[data-agent-activity]")).toBeNull();
+    expect(container.querySelector("[data-harness-activity]")).toBeNull();
   });
 });

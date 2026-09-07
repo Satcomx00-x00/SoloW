@@ -43,7 +43,7 @@ describe("summariseRowTasks", () => {
 
   it("answers null for a row with no tasks, which is not a row whose tasks are all done", () => {
     // The cell draws the two differently — nothing at all, versus a `done` badge — and conflating
-    // them would say an agent had finished work nobody ever started.
+    // them would say a harness had finished work nobody ever started.
     expect(summariseRowTasks([])).toBeNull();
     expect(summariseRowTasks([task("done")])?.state).toBe("done");
   });

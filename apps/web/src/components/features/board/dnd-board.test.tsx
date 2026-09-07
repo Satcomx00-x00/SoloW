@@ -19,7 +19,7 @@ function makeTask(over: Partial<TaskDto> = {}): TaskDto {
     issueId: "issue-1",
     title: "Investigate servo stall",
     state: "backlog",
-    agentProfileId: "agent-1",
+    agentProfileId: "harness-1",
     executorProfileId: "exec-1",
     repositories: [
       {
@@ -49,7 +49,7 @@ function makeStep(over: Partial<WorkflowStepDto> & { id: string; rank: string })
     workflowId: "wf-1",
     name: `Step ${over.id}`,
     position: 0,
-    agentProfileId: "agent-1",
+    agentProfileId: "harness-1",
     promptTemplate: "do the thing",
     gate: "human",
     advanceOn: "review",

@@ -2,9 +2,9 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import { bootstrapWorkspace, LOCAL_WORKSPACE_ID } from "./bootstrap.js";
 import {
-  agentCatalog,
-  agentProfile,
   executorProfile,
+  harnessCatalog,
+  harnessProfile,
   repository,
   secret,
   workspace,
@@ -14,7 +14,7 @@ import { createTestDb, type TestDb } from "./testing.js";
 /**
  * Bootstrap creates a Workspace, not a demo (2026-08-28).
  *
- * The fixture it replaced invented two companies with credentials, Agent Profiles and
+ * The fixture it replaced invented two companies with credentials, Harness Profiles and
  * repositories that never existed, which made a fresh install look configured and hid the real
  * first-run gap. The assertions that matter are therefore as much about what is *absent* as
  * what is present: anything invented here is something the setup checklist would then have to
@@ -32,8 +32,8 @@ describe("bootstrapWorkspace", () => {
 
     expect(result).toEqual({ workspaceId: LOCAL_WORKSPACE_ID, created: true });
     expect(await db.select().from(workspace)).toHaveLength(1);
-    // Reference data, not sample data: without it a new Workspace cannot name an agent at all.
-    const catalog = await db.select().from(agentCatalog);
+    // Reference data, not sample data: without it a new Workspace cannot name a harness at all.
+    const catalog = await db.select().from(harnessCatalog);
     expect(catalog.length).toBeGreaterThan(0);
     expect(catalog.map((row) => row.key).sort()).toContain("opencode");
   });
@@ -44,7 +44,7 @@ describe("bootstrapWorkspace", () => {
     // Each of these was a fabricated row in the retired fixture. A Workspace that starts with a
     // Secret nobody added is a Workspace whose checklist is already lying.
     expect(await db.select().from(secret)).toHaveLength(0);
-    expect(await db.select().from(agentProfile)).toHaveLength(0);
+    expect(await db.select().from(harnessProfile)).toHaveLength(0);
     expect(await db.select().from(executorProfile)).toHaveLength(0);
     expect(await db.select().from(repository)).toHaveLength(0);
   });

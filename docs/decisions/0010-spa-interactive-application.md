@@ -11,7 +11,7 @@ an interactive node-graph Workflow canvas ([F03](../features/F03-workflow-design
 streaming terminals and diffs ([F09](../features/F09-integrated-workspace.md)). These favour a
 rich client that loads once and updates continuously, rather than full-page navigation. The
 application also maintains live connections to the long-lived orchestrator
-([Decision 0002](./0002-technology-stack.md)) to stream agent activity and state changes.
+([Decision 0002](./0002-technology-stack.md)) to stream harness activity and state changes.
 
 ## Decision
 

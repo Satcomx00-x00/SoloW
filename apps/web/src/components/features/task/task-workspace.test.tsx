@@ -38,7 +38,7 @@ const { TaskWorkspace } = await import("./task-workspace");
 /**
  * Review workspace tests (tasks TASK-022 / TASK-024). The review gate is the enforcement point
  * for Principle I, so these assert that a decision is only offered when the Task is in Review,
- * that the controls lock while a decision is in flight (no double-approve), and that agent
+ * that the controls lock while a decision is in flight (no double-approve), and that harness
  * output already recorded is shown.
  */
 
@@ -51,7 +51,7 @@ function task(over: Partial<TaskDto> = {}): TaskDto {
     issueId: "issue-1",
     title: "Fix the gate latch",
     state: "review",
-    agentProfileId: "agent-1",
+    agentProfileId: "harness-1",
     executorProfileId: "exec-1",
     repositories: [
       {
@@ -171,7 +171,7 @@ describe("TaskWorkspace review gate", () => {
     await waitFor(() => {
       expect(log.calls.filter((c) => c.path === "review.decide")).toHaveLength(1);
     });
-    // Nothing invents a feedback string on the way out — the agent resumes on the original brief.
+    // Nothing invents a feedback string on the way out — the harness resumes on the original brief.
     expect(log.calls.find((c) => c.path === "review.decide")?.input).toEqual({
       sessionId: SESSION_ID,
       decision: "request_changes",
@@ -193,7 +193,7 @@ describe("TaskWorkspace review gate", () => {
     expect(screen.queryByRole("button", { name: /Approve/ })).toBeNull();
   });
 
-  it("renders recorded agent output in the terminal panel", async () => {
+  it("renders recorded harness output in the terminal panel", async () => {
     renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
       "task.get": () => task(),
       "session.listForTask": () => [session],
@@ -276,7 +276,7 @@ describe("TaskWorkspace destructive actions", () => {
   });
 });
 
-describe("TaskWorkspace agent steering (TASK-022)", () => {
+describe("TaskWorkspace harness steering (TASK-022)", () => {
   const handlers = (state: TaskDto["state"]) => ({
     "task.get": () => task({ state }),
     "session.listForTask": () => [session],
@@ -287,9 +287,9 @@ describe("TaskWorkspace agent steering (TASK-022)", () => {
     }),
   });
 
-  it("sends what the operator typed to the running agent, then clears the box", async () => {
+  it("sends what the operator typed to the running harness, then clears the box", async () => {
     renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, handlers("running"));
-    const box = (await screen.findByLabelText(/Message the agent/)) as HTMLInputElement;
+    const box = (await screen.findByLabelText(/Message the harness/)) as HTMLInputElement;
     await waitFor(() => expect(box.hasAttribute("disabled")).toBe(false));
 
     fireEvent.change(box, { target: { value: "also update the changelog" } });
@@ -306,15 +306,15 @@ describe("TaskWorkspace agent steering (TASK-022)", () => {
 
   it("offers no steering once the Task has left Running", async () => {
     // In Review the way to ask for more work is "request changes", which is recorded
-    // (Principle I) — a back channel into the agent would bypass that.
+    // (Principle I) — a back channel into the harness would bypass that.
     renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, handlers("review"));
-    const box = await screen.findByLabelText(/Message the agent/);
+    const box = await screen.findByLabelText(/Message the harness/);
     expect(box.hasAttribute("disabled")).toBe(true);
     expect(screen.getByRole("button", { name: /Send/ }).hasAttribute("disabled")).toBe(true);
     expect(screen.getByRole("button", { name: /Stop/ }).hasAttribute("disabled")).toBe(true);
   });
 
-  it("confirms before stopping the agent, then sends the stop", async () => {
+  it("confirms before stopping the harness, then sends the stop", async () => {
     renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, handlers("running"));
     const stop = await screen.findByRole("button", { name: /Stop/ });
     await waitFor(() => expect(stop.hasAttribute("disabled")).toBe(false));
@@ -323,27 +323,27 @@ describe("TaskWorkspace agent steering (TASK-022)", () => {
     expect(sockets[0]?.sent).toEqual([]);
     expect(await screen.findByRole("alertdialog")).toBeDefined();
 
-    fireEvent.click(screen.getByRole("button", { name: /Stop the agent/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Stop the harness/ }));
     await waitFor(() => expect(sockets[0]?.sent).toEqual([{ kind: "stop", taskId: TASK_ID }]));
   });
 
-  it("tells the operator when the hub had no agent to give the input to", async () => {
+  it("tells the operator when the hub had no harness to give the input to", async () => {
     renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, handlers("running"));
-    const box = (await screen.findByLabelText(/Message the agent/)) as HTMLInputElement;
+    const box = (await screen.findByLabelText(/Message the harness/)) as HTMLInputElement;
     await waitFor(() => expect(box.hasAttribute("disabled")).toBe(false));
 
     fireEvent.change(box, { target: { value: "are you there?" } });
     fireEvent.click(screen.getByRole("button", { name: /Send/ }));
     await waitFor(() => expect(sockets[0]?.sent).toHaveLength(1));
 
-    // Silently swallowing this would leave the operator believing the agent got the message.
+    // Silently swallowing this would leave the operator believing the harness got the message.
     act(() => sockets[0]?.emit({ kind: "ack", ok: false, error: "agent_not_running" }));
-    expect(await screen.findByText(/No agent is running/)).toBeDefined();
+    expect(await screen.findByText(/No harness is running/)).toBeDefined();
   });
 });
 
 /**
- * An agent asking for permission, from the operator's chair (issue #58, AC-4). The frame goes
+ * A harness asking for permission, from the operator's chair (issue #58, AC-4). The frame goes
  * through the component's real parsing path, so what is under test is that the contract, the
  * hook and the dialog agree — not that a mock was called.
  */
@@ -399,7 +399,7 @@ describe("TaskWorkspace permission prompt (issue #58)", () => {
   });
 
   it("escalates to the modal when the question is on a panel nobody is looking at", async () => {
-    // An agent is blocked on the answer, so a question the operator cannot see has to interrupt.
+    // A harness is blocked on the answer, so a question the operator cannot see has to interrupt.
     renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, handlers);
     await waitFor(() => expect(sockets[0]).toBeDefined());
 
@@ -596,10 +596,10 @@ describe("TaskWorkspace advance control", () => {
     ...over,
   });
 
-  it("starts the agent when the step forward is into Running, rather than only writing the state", async () => {
+  it("starts the harness when the step forward is into Running, rather than only writing the state", async () => {
     // `task.move` would be accepted here and would do nothing else: no Session, no launch event.
     // The Task page has no Launch button, so this arrow is how a run begins from it, and a bare
-    // move would leave a Task reading Running with no agent behind it — holding a concurrency
+    // move would leave a Task reading Running with no harness behind it — holding a concurrency
     // slot, with no legal way back and `task.launch` refusing it for no longer being Ready.
     const { log } = renderWithTrpc(
       <TaskWorkspace taskId={TASK_ID} />,
@@ -633,7 +633,7 @@ describe("TaskWorkspace advance control", () => {
 
   it("asks before moving out of Review, because the proposed changes are abandoned", async () => {
     // The same act as dragging the card off the Review column on the board, so it asks the same
-    // question: no review decision is recorded, and the agent's work is left where it stands.
+    // question: no review decision is recorded, and the harness's work is left where it stands.
     const { log } = renderWithTrpc(
       <TaskWorkspace taskId={TASK_ID} />,
       handlers("review", { "task.move": () => ({ ok: true }) }),
@@ -721,10 +721,10 @@ describe("TaskWorkspace advance control", () => {
 });
 
 /**
- * The agent's todo list beside the diff (the `TodoWrite` capture).
+ * The harness's todo list beside the diff (the `TodoWrite` capture).
  *
  * A `TodoWrite` used to reach the transcript as a contentless `tool_call` row, so the one artefact
- * that says what the agent thinks it is *going* to do was the one thing the operator could not
+ * that says what the harness thinks it is *going* to do was the one thing the operator could not
  * read. It is now its own event kind, and the panel has to draw it from both of the page's
  * sources — the persisted log for a run reopened later, and the socket for a run in progress,
  * which is the case the panel actually exists for.
@@ -749,18 +749,18 @@ describe("TaskWorkspace todo checklist", () => {
   it("draws the list a finished run left behind", async () => {
     renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, handlers([{ kind: "todos", items }]));
 
-    const plan = await screen.findByRole("region", { name: "Agent plan" });
+    const plan = await screen.findByRole("region", { name: "Harness plan" });
     expect(within(plan).getByText("Read the latch code")).toBeDefined();
-    // The live item is shown in the present tense the agent wrote for exactly this moment.
+    // The live item is shown in the present tense the harness wrote for exactly this moment.
     expect(within(plan).getByText("Writing the fix")).toBeDefined();
     expect(within(plan).getByText("1 of 3 done")).toBeDefined();
   });
 
-  it("shows no panel at all until the agent has published a plan", async () => {
+  it("shows no panel at all until the harness has published a plan", async () => {
     renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, handlers());
 
     await screen.findByRole("complementary", { name: "Changes" });
-    expect(screen.queryByRole("region", { name: "Agent plan" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Harness plan" })).toBeNull();
   });
 
   it("follows the run: a list published mid-run lands without a reload", async () => {
@@ -798,7 +798,7 @@ describe("TaskWorkspace todo checklist", () => {
  * announced on the Workspace board channel alone, so the board updated instantly and the page
  * dedicated to that very Task never heard it. Everything this page derives from the Task's state
  * was therefore correct only on a fresh load: the activity line, the review gate, and whether the
- * composer would still offer to steer an agent that had already stopped.
+ * composer would still offer to steer a harness that had already stopped.
  *
  * One test, because they are one fact: the Task's own channel now carries the status, and this
  * page acts on it. The review gate is the assertion because it is the consequence an operator is

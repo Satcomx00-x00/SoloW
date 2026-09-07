@@ -7,9 +7,9 @@ import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 
 /**
- * Agent output, rendered as markdown — under the assumption that it is hostile.
+ * Harness output, rendered as markdown — under the assumption that it is hostile.
  *
- * An agent's turn is markdown in practice (fenced patches, tables of findings, bullet lists),
+ * A harness's turn is markdown in practice (fenced patches, tables of findings, bullet lists),
  * and the terminal showed it as one flat `whitespace-pre-wrap` string, so a reviewer read raw
  * backticks and pipe characters instead of the structure the model was drawing. That is the
  * cosmetic half.
@@ -25,7 +25,7 @@ import { cn } from "@/lib/utils";
  * 2. **Only http(s) links.** `javascript:` and `data:` URLs are rendered as plain text rather
  *    than as an anchor, so a link in a transcript can never be a script the reviewer clicks.
  *    Real links leave the app in a new tab with `rel="noopener noreferrer"`, because the page
- *    they open is chosen by the agent, not by us.
+ *    they open is chosen by the harness, not by us.
  * 3. **Nothing widens the page.** A 400-column patch line or a table of file paths scrolls
  *    inside its own box; the transcript column never scrolls sideways, which is what makes the
  *    Task page usable next to an editor.
@@ -93,9 +93,9 @@ const components: Components = {
   ),
 
   /*
-   * `whitespace-pre-line` because agents hard-wrap. Markdown folds a single newline into a
+   * `whitespace-pre-line` because harnesses hard-wrap. Markdown folds a single newline into a
    * space, which is right for prose and wrong for the numbered plan or the aligned output an
-   * agent writes without leaving two trailing spaces on every line.
+   * harness writes without leaving two trailing spaces on every line.
    */
   p: ({ children }) => <p className="whitespace-pre-line break-words">{children}</p>,
 
@@ -111,7 +111,7 @@ const components: Components = {
 
   a: ({ href, children }) => {
     // A refused scheme still shows its label: dropping the text would hide from the reviewer
-    // that the agent tried to link them somewhere, which is exactly what they want to know.
+    // that the harness tried to link them somewhere, which is exactly what they want to know.
     if (!href || !SAFE_HREF.test(href.trim())) return <>{children}</>;
     return (
       <a
@@ -139,7 +139,7 @@ const components: Components = {
   /*
    * A fenced block, framed, with its language named in the corner.
    *
-   * The label is not decoration: an agent's turn can hold a patch, a shell session and a JSON
+   * The label is not decoration: a harness's turn can hold a patch, a shell session and a JSON
    * payload one after another, and which one you are looking at decides how you read it. It also
    * reports what the colours mean — they are highlight.js's grammar for *that* language.
    *
@@ -199,7 +199,7 @@ const components: Components = {
 
   /*
    * An image is a request. `![](https://attacker/pixel)` in a turn would have the reviewer's
-   * browser fetch a URL the agent chose the moment the row mounts — a beacon that says which
+   * browser fetch a URL the harness chose the moment the row mounts — a beacon that says which
    * transcript was read and when. The alt text is shown instead; nothing is loaded.
    */
   img: ({ alt, src }) => (
@@ -207,7 +207,7 @@ const components: Components = {
   ),
 };
 
-export const AgentMarkdown = memo(function AgentMarkdown({ text }: { text: string }) {
+export const HarnessMarkdown = memo(function HarnessMarkdown({ text }: { text: string }) {
   return (
     <div className="min-w-0 space-y-3 break-words text-sm leading-[1.75]">
       {/* `urlTransform` is left at its default on purpose: it strips dangerous URLs before the

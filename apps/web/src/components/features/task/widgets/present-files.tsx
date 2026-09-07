@@ -8,10 +8,10 @@ import type { WidgetRendererProps } from "./registry";
 type PresentFilesWidget = z.infer<typeof presentFilesWidget>;
 
 /**
- * Files the agent wants looked at (`present_files`).
+ * Files the harness wants looked at (`present_files`).
  *
  * Paths and annotations, never contents — the contract refuses a file body, and the Changes tab
- * is where a diff belongs. What this adds is the agent's own pointing: "these six of the forty
+ * is where a diff belongs. What this adds is the harness's own pointing: "these six of the forty
  * files I touched are the ones to read", which nothing else in the transcript can say.
  */
 export function PresentFiles({ widget }: WidgetRendererProps<PresentFilesWidget>) {

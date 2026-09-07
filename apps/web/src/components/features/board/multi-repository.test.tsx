@@ -11,7 +11,7 @@ import { TaskCard } from "./task-card";
  * Multi-repository Tasks in the board UI (issue #7).
  *
  * Two questions: does the create form actually send an attachment per repository the Owner
- * ticked, in the order that decides which one the agent runs in — and does a card say that a
+ * ticked, in the order that decides which one the harness runs in — and does a card say that a
  * Task spans more than one repository, given it only has room to name one branch.
  */
 
@@ -33,7 +33,7 @@ function task(repositories: TaskRepositoryDto[]): TaskDto {
     issueId: "issue-1",
     title: "Cross-repository change",
     state: "review",
-    agentProfileId: "agent-1",
+    agentProfileId: "harness-1",
     executorProfileId: "exec-1",
     repositories,
     failureReason: null,
@@ -71,7 +71,7 @@ describe("TaskCard with several Repositories", () => {
     expect(screen.queryByLabelText("1 repositories")).toBeNull();
   });
 
-  it("names the branch of the attachment the agent actually ran in", async () => {
+  it("names the branch of the attachment the harness actually ran in", async () => {
     // Position, not array order: a re-sorted list must not change which branch the card names.
     renderWithTrpc(
       <TaskCard
@@ -107,7 +107,10 @@ describe("creating a Task across several Repositories", () => {
       ],
       nextCursor: null,
     }),
-    "profile.agent.list": () => ({ items: [{ id: "agent-1", name: "Claude" }], nextCursor: null }),
+    "profile.agent.list": () => ({
+      items: [{ id: "harness-1", name: "Claude" }],
+      nextCursor: null,
+    }),
     "profile.executor.list": () => ({ items: [{ id: "exec-1", name: "Local" }], nextCursor: null }),
     "repository.list": () => ({
       items: [
@@ -138,7 +141,7 @@ describe("creating a Task across several Repositories", () => {
     // first for the Issue picked afterward to survive submission.
     await pick("Repository", "api");
     await pick("Issue", "Ship it");
-    await pick("Agent profile", "Claude");
+    await pick("Harness profile", "Claude");
     await pick("Executor", "Local");
     // Both fields now live behind the "Advanced" disclosure. Opened here rather than reached
     // into: happy-dom keeps a closed `details`' contents queryable, so a test that skipped this
@@ -154,7 +157,7 @@ describe("creating a Task across several Repositories", () => {
     const sent = log.calls.find((c) => c.path === "task.create")?.input as {
       repositories: Array<{ repositoryId: string; baseRef?: string }>;
     };
-    // Array order becomes `position`, and position 0 is the worktree the agent is started in —
+    // Array order becomes `position`, and position 0 is the worktree the harness is started in —
     // so the repository the Owner selected has to come first, with its own base ref.
     expect(sent.repositories).toEqual([
       { repositoryId: "repo-1", baseRef: "main" },
@@ -169,7 +172,7 @@ describe("creating a Task across several Repositories", () => {
     fireEvent.change(await screen.findByLabelText("Title"), { target: { value: "One repo" } });
     await pick("Repository", "api");
     await pick("Issue", "Ship it");
-    await pick("Agent profile", "Claude");
+    await pick("Harness profile", "Claude");
     await pick("Executor", "Local");
     fireEvent.click(screen.getByRole("button", { name: "Create task" }));
 

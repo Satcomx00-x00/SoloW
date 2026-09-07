@@ -18,7 +18,7 @@ export const TaskErrorCode = {
   NotReady: "TASK_NOT_READY",
   ConcurrencyCapReached: "TASK_CONCURRENCY_CAP_REACHED",
   RepositoryUnreachable: "TASK_REPOSITORY_UNREACHABLE",
-  AgentUnavailable: "TASK_AGENT_UNAVAILABLE",
+  HarnessUnavailable: "TASK_AGENT_UNAVAILABLE",
   /**
    * Deleting is refused while other Tasks declare a `blocked_by` edge on this one. Dropping it
    * would silently start work the Owner gated behind it, so the cascade is opt-in via `force`.
@@ -26,7 +26,7 @@ export const TaskErrorCode = {
   HasDependents: "TASK_HAS_DEPENDENTS",
   /**
    * The delete reached the cascade with the Task still running. Same reasoning as
-   * `IssueErrorCode.HasRunningTasks`: dropping the row mid-run orphans the agent process.
+   * `IssueErrorCode.HasRunningTasks`: dropping the row mid-run orphans the harness process.
    */
   StillRunning: "TASK_STILL_RUNNING",
   /**
@@ -35,7 +35,7 @@ export const TaskErrorCode = {
    */
   StopFailed: "TASK_STOP_FAILED",
   /**
-   * Someone asked to open the review gate on a Task whose agent has not said it finished.
+   * Someone asked to open the review gate on a Task whose harness has not said it finished.
    *
    * The gate is for judging finished work. Opening it on a run that is still going — or on one
    * that stopped without declaring anything — asks a person to approve something nobody has
@@ -106,15 +106,15 @@ export const IssueErrorCode = {
   /**
    * A force delete reached the cascade while a Task was still running. Distinct from `HasTasks`:
    * that one is the ordinary guard a force overrides, this one is the condition force must not
-   * override, because dropping a `task` row mid-run leaves its agent process with nothing
+   * override, because dropping a `task` row mid-run leaves its harness process with nothing
    * referencing it.
    */
   HasRunningTasks: "ISSUE_HAS_RUNNING_TASKS",
   /**
    * A force delete could not stop the Issue's running Tasks, so it did not delete anything.
-   * Reaching an agent mid-run goes through the orchestrator, and when that hand-off fails the
+   * Reaching a harness mid-run goes through the orchestrator, and when that hand-off fails the
    * only safe answer is to leave the Issue alone: cascading anyway would drop the `task` rows
-   * while their agent processes kept running, and nothing would be left holding a reference to
+   * while their harness processes kept running, and nothing would be left holding a reference to
    * stop them or clean up their worktrees.
    */
   StopFailed: "ISSUE_STOP_FAILED",
@@ -130,18 +130,18 @@ export type IssueErrorCode = (typeof IssueErrorCode)[keyof typeof IssueErrorCode
 
 export const SecretErrorCode = {
   /**
-   * The Secret is still referenced by an Integration or an Agent Profile. Neither reference is a
+   * The Secret is still referenced by an Integration or a Harness Profile. Neither reference is a
    * database foreign key — `secret_id` is a plain column on both — so deleting the row would not
-   * fail here, it would fail much later, as an authentication error at the next sync or agent
+   * fail here, it would fail much later, as an authentication error at the next sync or harness
    * run. Refusing up front is what makes that impossible (spec F17 FR-6).
    */
   InUse: "SECRET_IN_USE",
 } as const;
 export type SecretErrorCode = (typeof SecretErrorCode)[keyof typeof SecretErrorCode];
 
-export const AgentProfileErrorCode = {
+export const HarnessProfileErrorCode = {
   /**
-   * The Agent Profile is still referenced by a Task, a Workflow Step, or a Session's usage
+   * The Harness Profile is still referenced by a Task, a Workflow Step, or a Session's usage
    * record. All three are real foreign keys (unlike `secret_id`, a plain column) — so a naive
    * delete would not fail here, it would fail as a raw constraint violation deep in a query that
    * has nothing to do with deleting a profile. Refusing up front, and saying what still holds
@@ -149,17 +149,17 @@ export const AgentProfileErrorCode = {
    */
   InUse: "AGENT_PROFILE_IN_USE",
 } as const;
-export type AgentProfileErrorCode =
-  (typeof AgentProfileErrorCode)[keyof typeof AgentProfileErrorCode];
+export type HarnessProfileErrorCode =
+  (typeof HarnessProfileErrorCode)[keyof typeof HarnessProfileErrorCode];
 
-export const AgentCatalogErrorCode = {
+export const HarnessCatalogErrorCode = {
   /**
    * `(workspace_id, key)` is unique (spec F05 issue #10) — two rows with the same key would
-   * make "which agent does this Profile mean" ambiguous, since `key` (not the id) is how a
-   * Workspace names an agent to itself. Refused here rather than left to the database's raw
+   * make "which harness does this Profile mean" ambiguous, since `key` (not the id) is how a
+   * Workspace names a harness to itself. Refused here rather than left to the database's raw
    * constraint error, which names a column, not the row the Owner was trying to add.
    */
   KeyTaken: "AGENT_CATALOG_KEY_TAKEN",
 } as const;
-export type AgentCatalogErrorCode =
-  (typeof AgentCatalogErrorCode)[keyof typeof AgentCatalogErrorCode];
+export type HarnessCatalogErrorCode =
+  (typeof HarnessCatalogErrorCode)[keyof typeof HarnessCatalogErrorCode];

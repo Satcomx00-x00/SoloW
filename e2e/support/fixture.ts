@@ -7,7 +7,7 @@ import { join } from "node:path";
  * E2E fixture layout and preparation (tasks TASK-025 / TASK-026).
  *
  * Everything the run touches lives under one scratch root so a run is reproducible and leaves
- * nothing behind: the SQLite database, the git repository the agent works on, the worktree root
+ * nothing behind: the SQLite database, the git repository the harness works on, the worktree root
  * and the repo cache. The Playwright config prepares this *before* the servers start, so both
  * the web app and the orchestrator harness see the same, already-migrated database.
  */
@@ -40,7 +40,7 @@ export const SEED_WORKSPACE_A = "11111111-1111-4111-8111-111111111111";
 export const SEED_WORKSPACE_B = "22222222-2222-4222-8222-222222222222";
 
 /**
- * The Agent Profile and Executor `seed-cli.ts tenants` writes into the local Workspace, and that
+ * The Harness Profile and Executor `seed-cli.ts tenants` writes into the local Workspace, and that
  * `support/flows.ts` picks by name in the New task form.
  *
  * One definition for both ends on purpose. They used to be string literals in the specs that
@@ -48,7 +48,7 @@ export const SEED_WORKSPACE_B = "22222222-2222-4222-8222-222222222222";
  * at the seam — the names simply stopped matching anything, and the suite waited out its timeout
  * against a form the app was correctly refusing to render.
  */
-export const AGENT_PROFILE_NAME = "Claude Code (subscription)";
+export const HARNESS_PROFILE_NAME = "Claude Code (subscription)";
 export const EXECUTOR_PROFILE_NAME = "Local executor";
 
 /** Deterministic test-only values — never used by a real deployment. */

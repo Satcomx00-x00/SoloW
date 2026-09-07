@@ -184,7 +184,7 @@ describe("keeping copied files out of the review", () => {
       worktreePath: path,
       patterns: [".env"],
     });
-    // What the agent actually did, alongside the copied file.
+    // What the harness actually did, alongside the copied file.
     writeFileSync(join(path, "src.ts"), "export const latch = true;\n");
 
     const diff = await diffWorktree(executor, path, [".env"]);
@@ -209,7 +209,7 @@ describe("keeping copied files out of the review", () => {
     expect(readFileSync(join(path, "README.md"), "utf8")).toBe("locally modified\n");
     const diff = await diffWorktree(executor, path, ["README.md"]);
     expect(diff.files).toEqual([]);
-    // ...and it is not counted as the agent having produced work, either.
+    // ...and it is not counted as the harness having produced work, either.
     expect(await hasChanges(executor, path, ["README.md"])).toBe(false);
     // Nor does approving the Task commit it onto the branch (Principle IV).
     writeFileSync(join(path, "src.ts"), "export const latch = true;\n");

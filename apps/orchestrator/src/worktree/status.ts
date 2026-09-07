@@ -6,7 +6,7 @@ import { setupFileExclusions } from "./setup-files.js";
  * A worktree's source control, read from git (spec F22, Decision 0017).
  *
  * Separate from `diffWorktree` in `manager.ts` on purpose. That function answers one question —
- * "what has the agent changed, as a patch" — and answers it for the review gate, which wants a
+ * "what has the harness changed, as a patch" — and answers it for the review gate, which wants a
  * durable artefact. This one answers "what does git say right now, file by file, and which list
  * does each file belong in", which is a panel's question and has to survive being asked again a
  * second later.
@@ -197,7 +197,7 @@ export function parseNumstatZ(
  * compute for every row of a change nobody has opened yet.
  *
  * The setup-file allowlist (issue #52) is excluded from all three, exactly as the captured diff
- * excludes it — a `.env` the agent needed to run the tests is not part of what it proposed, and
+ * excludes it — a `.env` the harness needed to run the tests is not part of what it proposed, and
  * putting it on screen would put a secret on screen (Principle IV, F22 FR-17).
  */
 export async function readScmStatus(

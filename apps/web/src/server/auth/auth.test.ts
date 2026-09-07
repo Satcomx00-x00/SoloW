@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { beforeAll, beforeEach, describe, expect, it } from "bun:test";
-import { agentCatalog, authSchema, workspace } from "@solow/db";
+import { authSchema, harnessCatalog, workspace } from "@solow/db";
 import { createTestDb, type TestDb } from "@solow/db/testing";
 import { eq } from "drizzle-orm";
 import { createAuth, ownerExists, workspaceForUser } from "./auth.js";
@@ -57,7 +57,7 @@ describe("owner account creation", () => {
     await signUpOwner();
 
     // Left open, anyone who can reach the port could create an account on someone else's
-    // machine and read the Workspace that holds their agent credentials.
+    // machine and read the Workspace that holds their harness credentials.
     await expect(
       auth.api.signUpEmail({
         body: { email: "intruder@example.test", password: "another-long-password", name: "X" },
@@ -128,10 +128,10 @@ describe("resolveSession", () => {
 
   it("refuses a user with no Workspace rather than a session without a tenant key", async () => {
     const { cookie, userId } = await signUpOwner();
-    // Sign-up also seeds the Workspace's default agent catalog row (issue #10); delete it first
+    // Sign-up also seeds the Workspace's default harness catalog row (issue #10); delete it first
     // so the Workspace delete below isn't rejected by its own foreign key.
     const [ws] = await db.select().from(workspace).where(eq(workspace.ownerUserId, userId));
-    if (ws) await db.delete(agentCatalog).where(eq(agentCatalog.workspaceId, ws.id));
+    if (ws) await db.delete(harnessCatalog).where(eq(harnessCatalog.workspaceId, ws.id));
     await db.delete(workspace).where(eq(workspace.ownerUserId, userId));
 
     // Half a session is worse than none: `workspaceId` would then have to come from somewhere

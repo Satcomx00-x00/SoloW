@@ -170,7 +170,7 @@ export function ExecutorProfilesSection() {
       <CardHeader>
         <CardTitle>Executor profiles</CardTitle>
         <CardDescription>
-          Where agents run, and the configuration they run under. The local and Docker kinds have
+          Where harnesses run, and the configuration they run under. The local and Docker kinds have
           drivers today.
         </CardDescription>
       </CardHeader>
@@ -226,8 +226,8 @@ export function ExecutorProfilesSection() {
                 />
                 <p className="text-muted-foreground text-xs">
                   The image needs an ordinary shell userland — sh, env, cat, find, mkdir, cp, test,
-                  df, base64 and git. A distroless or scratch image fails the Task before the agent
-                  starts, saying which of them is missing.
+                  df, base64 and git. A distroless or scratch image fails the Task before the
+                  harness starts, saying which of them is missing.
                 </p>
               </div>
 

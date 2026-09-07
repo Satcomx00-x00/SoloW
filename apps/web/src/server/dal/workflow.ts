@@ -31,7 +31,7 @@ import {
 } from "@solow/core";
 import {
   advanceTaskWorkflow as advanceTaskWorkflowIn,
-  agentProfile,
+  harnessProfile,
   loadTaskWorkflowRun,
   stepsToDto,
   task,
@@ -39,8 +39,8 @@ import {
   workflowStep,
 } from "@solow/db";
 import { and, asc, eq, sql } from "drizzle-orm";
-import { checkStepTools } from "./agent-library.js";
 import type { RequestContext } from "./context.js";
+import { checkStepTools } from "./harness-library.js";
 
 /**
  * Workflow persistence (issue #5, spec F03).
@@ -248,14 +248,14 @@ export async function addWorkflowStep(
       if (!parent) return err(CommonErrorCode.NotFound);
 
       // The FK alone only proves the profile exists somewhere; without this a Step could name
-      // another tenant's Agent Profile and inherit its credentials at run time (Principle V).
+      // another tenant's Harness Profile and inherit its credentials at run time (Principle V).
       const [profile] = tx
-        .select({ id: agentProfile.id })
-        .from(agentProfile)
+        .select({ id: harnessProfile.id })
+        .from(harnessProfile)
         .where(
           and(
-            eq(agentProfile.workspaceId, ctx.workspaceId),
-            eq(agentProfile.id, input.agentProfileId),
+            eq(harnessProfile.workspaceId, ctx.workspaceId),
+            eq(harnessProfile.id, input.agentProfileId),
           ),
         )
         .limit(1)
@@ -346,12 +346,12 @@ export async function updateWorkflowStep(
 
       if (input.agentProfileId) {
         const [profile] = tx
-          .select({ id: agentProfile.id })
-          .from(agentProfile)
+          .select({ id: harnessProfile.id })
+          .from(harnessProfile)
           .where(
             and(
-              eq(agentProfile.workspaceId, ctx.workspaceId),
-              eq(agentProfile.id, input.agentProfileId),
+              eq(harnessProfile.workspaceId, ctx.workspaceId),
+              eq(harnessProfile.id, input.agentProfileId),
             ),
           )
           .limit(1)
@@ -557,7 +557,7 @@ export async function deleteWorkflowStep(
  * `task.state` cannot answer it: advancing a cursor never writes a state, so a Task attached in
  * `backlog` and walked through two Steps is still in `backlog`. Without this, a second
  * `attachTask` is accepted and silently rewinds the cursor to Step one and drops the handoff —
- * two Steps of paid agent work discarded with no error, which is the outcome
+ * two Steps of paid harness work discarded with no error, which is the outcome
  * `resumeWorkflowCursor` refuses to cause and this refuses to cause the other way round.
  *
  * "Begun" is any of the four things an advance leaves behind: a moved cursor, a carried handoff,
@@ -587,7 +587,7 @@ function taskHasBegunWorkflow(tx: Tx, ctx: RequestContext, row: typeof task.$inf
  * Put a Task on a Workflow, at its first Step.
  *
  * Refused once the Task has left `backlog`/`ready`: re-pointing the pipeline of a Task whose
- * agent is already running would change what that run is for, mid-run. Refused for an empty
+ * harness is already running would change what that run is for, mid-run. Refused for an empty
  * Workflow, because a cursor has to name something for the resume rule to have an answer — and
  * for a graph with a Step nothing leads to or no way to the end (`validateWorkflowGraph`).
  */

@@ -21,7 +21,7 @@ Rules for this log ([per our conventions](../CONVENTIONS.md)):
 |---|----------|--------|
 | [0001](./0001-scope-near-clone.md) | Build a near-clone rather than a narrower product | Accepted |
 | [0002](./0002-technology-stack.md) | Application + long-lived orchestrator, local-first with a path to hosted | Accepted |
-| [0003](./0003-agent-connection-protocol.md) | Integrate agents via the Agent Client Protocol (ACP) | Accepted |
+| [0003](./0003-agent-connection-protocol.md) | Integrate harnesses via the Agent Client Protocol (ACP) | Accepted |
 | [0004](./0004-durable-orchestration-engine.md) | Use a durable orchestration engine for Workflows and Tasks | Accepted |
 | [0005](./0005-subscription-authentication.md) | Support Claude subscription billing via a portable token | Accepted |
 | [0006](./0006-kanban-scoped-to-issues.md) | Administer Tasks on a Kanban board scoped under Issues | Accepted |
@@ -33,7 +33,7 @@ Rules for this log ([per our conventions](../CONVENTIONS.md)):
 | [0012](./0012-spa-build-stack.md) | Build the SPA with Vite + React; standalone API/orchestrator backend | Superseded by 0013 |
 | [0013](./0013-nextjs-web-framework.md) | Use Next.js (App Router) as the web framework, delivering a SPA-style client | Accepted |
 | [0014](./0014-direct-api-source-integrations.md) | Drive GitHub/GitLab integrations through their REST APIs directly, not gh/glab | Accepted |
-| [0015](./0015-markdown-rendering-of-agent-output.md) | Render agent output as Markdown with react-markdown (no raw HTML) | Accepted |
+| [0015](./0015-markdown-rendering-of-agent-output.md) | Render harness output as Markdown with react-markdown (no raw HTML) | Accepted |
 | [0016](./0016-integration-provider-registry.md) | Register integration providers by capability, rather than enumerating them | Accepted |
 | [0017](./0017-worktree-git-rpc.md) | Reach a Task's worktree through a synchronous RPC on the orchestrator | Accepted |
 | [0018](./0018-provider-owned-project-fields.md) | Mirror the provider's own planning fields, rather than owning a project model | Accepted |
@@ -42,4 +42,4 @@ Rules for this log ([per our conventions](../CONVENTIONS.md)):
 | [0021](./0021-commits-decide-the-version.md) | The commits decide the version, not the pull request | Accepted |
 | [0022](./0022-relicense-to-apache-2.md) | Relicense from AGPL-3.0-only to Apache-2.0 | Accepted |
 | [0023](./0023-docker-executor-cli.md) | Drive the container Executor through the `docker` CLI, one session container per Task | Accepted, amended 2026-09-03 |
-| [0024](./0024-agent-libraries-loading.md) | One library, three hand-overs: how each agent runtime is given MCP servers and Skills | Accepted |
+| [0024](./0024-agent-libraries-loading.md) | One library, three hand-overs: how each harness runtime is given MCP servers and Skills | Accepted |

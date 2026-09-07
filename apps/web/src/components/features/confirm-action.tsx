@@ -17,7 +17,7 @@ import {
 /**
  * Confirmation gate for an action that throws work away (task TASK-022).
  *
- * Rejecting a review discards the agent's worktree, stopping an agent ends a run, and dragging a
+ * Rejecting a review discards the harness's worktree, stopping a harness ends a run, and dragging a
  * Task out of Review on the board abandons the work without recording a decision — none of these
  * has an undo, so none may be one click. They go through one component so the wording, the
  * `alertdialog` semantics and the keyboard behaviour (focus on Cancel, Escape cancels) are the

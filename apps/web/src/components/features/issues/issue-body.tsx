@@ -3,7 +3,7 @@
 import type { IssueDto } from "@solow/contracts";
 import { Check, Loader2, Lock, Pencil, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import { AgentMarkdown } from "@/components/features/task/markdown";
+import { HarnessMarkdown } from "@/components/features/task/markdown";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/trpc/react";
@@ -15,7 +15,7 @@ import { trpc } from "@/trpc/react";
  * time. An issue body is markdown wherever it was written — a checklist of acceptance criteria, a
  * fenced repro, a table of cases — and rendering it flat handed the reader raw `- [ ]` and pipe
  * characters to parse themselves. The panel on the project table already renders the same string
- * through `AgentMarkdown`; the same body showing as prose in one place and as source in another
+ * through `HarnessMarkdown`; the same body showing as prose in one place and as source in another
  * was the part that read as a bug.
  *
  * Editing routes on who owns the text, which is the rule F01 FR-3 has always stated:
@@ -87,7 +87,7 @@ export function IssueBody({ issue }: { issue: IssueDto }) {
         <div className="flex items-start gap-2">
           <div className="min-w-0 flex-1">
             {issue.description ? (
-              <AgentMarkdown text={issue.description} />
+              <HarnessMarkdown text={issue.description} />
             ) : (
               <p className="text-muted-foreground text-sm italic">No description yet.</p>
             )}

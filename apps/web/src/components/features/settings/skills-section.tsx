@@ -28,11 +28,11 @@ import { ImportSkillsDialog } from "./import-skills-dialog";
 import { LibraryEmpty, LibraryForm, LibraryQueryState, LibraryRow } from "./library-ui";
 
 /**
- * The Skill library (spec F24): the playbooks an agent reads before it works.
+ * The Skill library (spec F24): the playbooks a harness reads before it works.
  *
- * A Skill is either written here — the body *is* the `SKILL.md` SoloW writes for the agent at
+ * A Skill is either written here — the body *is* the `SKILL.md` SoloW writes for the harness at
  * launch — or kept in a directory on the host that already holds one, read fresh on every run.
- * *Every agent* is the Workspace-wide switch; a Skill left off is loaded only by the Workflow
+ * *Every harness* is the Workspace-wide switch; a Skill left off is loaded only by the Workflow
  * Steps that name it.
  */
 export function SkillsSection() {
@@ -109,9 +109,9 @@ export function SkillsSection() {
       <CardHeader>
         <CardTitle>Skills</CardTitle>
         <CardDescription>
-          Playbooks an agent reads before it works — written here, or kept in a directory on this
-          machine. <em>Every agent</em> loads one into every run; otherwise only the Workflow Steps
-          that name it do.
+          Playbooks a harness reads before it works — written here, or kept in a directory on this
+          machine. <em>Every harness</em> loads one into every run; otherwise only the Workflow
+          Steps that name it do.
         </CardDescription>
         {usable && !adding && (
           <CardAction className="flex items-center gap-2">
@@ -157,7 +157,7 @@ export function SkillsSection() {
                 enabled={skill.enabled}
                 onEnabled={(on) => update.mutate({ id: skill.id, enabled: on })}
                 removeTitle={`Remove "${skill.name}"?`}
-                removeDescription="Agents stop reading it on their next run. Refused while a Workflow Step still names it."
+                removeDescription="Harnesses stop reading it on their next run. Refused while a Workflow Step still names it."
                 removeLabel="Remove skill"
                 onRemove={() => remove.mutate({ id: skill.id })}
               />
@@ -168,7 +168,7 @@ export function SkillsSection() {
           <LibraryEmpty
             icon={BookOpen}
             title="No skills yet"
-            hint="Write a SKILL.md here, point at a directory that holds one, or import every Skill in a folder or repository — then switch them on for every agent or name them from a Workflow Step."
+            hint="Write a SKILL.md here, point at a directory that holds one, or import every Skill in a folder or repository — then switch them on for every harness or name them from a Workflow Step."
             action="New skill"
             onAdd={() => setAdding(true)}
             secondary={
@@ -232,7 +232,7 @@ export function SkillsSection() {
               <Label htmlFor="skill-description">Description</Label>
               <Input
                 id="skill-description"
-                placeholder="When an agent should reach for it"
+                placeholder="When a harness should reach for it"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 required
@@ -275,7 +275,7 @@ export function SkillsSection() {
                   checked={enabled}
                   onCheckedChange={(checked) => setEnabled(checked === true)}
                 />
-                <Label htmlFor="skill-enabled">Load in every agent</Label>
+                <Label htmlFor="skill-enabled">Load in every harness</Label>
               </div>
               <Button type="submit" loading={create.isPending}>
                 Add skill

@@ -24,12 +24,12 @@ export const INNGEST_FUNCTIONS = [taskRun, repositorySync];
  *
  * Inngest executes a function by making an HTTP request per step and waiting for the response.
  * That model assumes steps are short. `task-run`'s central step is not: `agent-run-${round}`
- * holds an agent process for as long as the agent takes to do the work, which is minutes at
+ * holds a harness process for as long as the harness takes to do the work, which is minutes at
  * best. The request outlives the platform's execution budget, the platform gives up, and the
  * step's result is never checkpointed.
  *
  * That failure is silent in the worst way, and it is the one observed end to end on 2026-08-27:
- * the agent really did edit the file, its output really was streamed to the browser and written
+ * the harness really did edit the file, its output really was streamed to the browser and written
  * to the session log — every side effect of the step landed — while the *step* was recorded as
  * failed. Inngest then retried it from the top, so the run never reached the review gate, never
  * parked at `waitForEvent`, and the `review.decided` event published on approval arrived at a
@@ -49,8 +49,8 @@ export const INNGEST_FUNCTIONS = [taskRun, repositorySync];
  * both. Nothing about the request handling differs, so the route in `index.ts` is unchanged.
  *
  * This raises the ceiling; it does not remove it. A streaming step still ends at the platform's
- * hard function limit, so an agent that runs for hours will eventually meet the same wall. The
- * durable answer is for the run not to *hold* the agent at all — start it in one step, and park
+ * hard function limit, so a harness that runs for hours will eventually meet the same wall. The
+ * durable answer is for the run not to *hold* the harness at all — start it in one step, and park
  * on an event the supervising process publishes when it ends — which is a restructure of the
  * lifecycle rather than a change to how it is served.
  */

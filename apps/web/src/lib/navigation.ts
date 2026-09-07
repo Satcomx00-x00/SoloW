@@ -38,7 +38,7 @@ import {
  *
  * **Workflows is in the first list, not the second.** It sat under `/projects/:id/workflows` for
  * a while, which read as "a Project has workflows" — but `workflow.list` takes no Project and
- * never did, and a Workflow's Steps name Agent Profiles, so the same pipeline was being drawn
+ * never did, and a Workflow's Steps name Harness Profiles, so the same pipeline was being drawn
  * identically under every Project in the Workspace. A route that implies a scope the query does
  * not have is a route that lies; it is a top-level destination now, which is also what
  * docs/features/F03-workflow-designer.md said all along.
@@ -79,9 +79,9 @@ export const WORKSPACE_SECTIONS: readonly Section[] = [
   {
     href: "/workflows",
     label: "Workflows",
-    // Deliberately not "…in this project": a Workflow names Agent Profiles and Steps, never a
+    // Deliberately not "…in this project": a Workflow names Harness Profiles and Steps, never a
     // Project, so the caption must not imply a scope the data does not have.
-    caption: "Repeatable multi-agent pipelines",
+    caption: "Repeatable multi-harness pipelines",
     icon: Workflow,
     wip: true,
   },
@@ -110,7 +110,7 @@ export interface ProjectSection {
 
 export const PROJECT_SECTIONS: readonly ProjectSection[] = [
   { path: "", label: "Planning", caption: "The project table", icon: Table2 },
-  { path: "/board", label: "Board", caption: "Agent runs, by state", icon: Columns3 },
+  { path: "/board", label: "Board", caption: "Harness runs, by state", icon: Columns3 },
   { path: "/issues", label: "Issues", caption: "Work in this project", icon: Inbox },
 ];
 
@@ -191,7 +191,7 @@ export const SECTIONS = WORKSPACE_SECTIONS;
  * page renders: one group at a time, so no section is behind a scroll of unrelated forms.
  *
  * The order inside a group is the order things are set up in, and that is deliberate: a Secret,
- * then the Agent Profile that spends it, then somewhere to execute it.
+ * then the Harness Profile that spends it, then somewhere to execute it.
  */
 export interface SettingsSection {
   /** Also the `id` of the card it renders, so an in-page anchor points at the right form. */
@@ -203,7 +203,7 @@ export interface SettingsSection {
   icon: LucideIcon;
 }
 
-export type SettingsGroup = "Workspace" | "Connections" | "Agents" | "Extensions" | "Interface";
+export type SettingsGroup = "Workspace" | "Connections" | "Harnesses" | "Extensions" | "Interface";
 
 /** The groups in the order they are listed, each with the sentence its pane opens on. */
 export const SETTINGS_GROUPS: readonly { name: SettingsGroup; caption: string }[] = [
@@ -213,11 +213,11 @@ export const SETTINGS_GROUPS: readonly { name: SettingsGroup; caption: string }[
   },
   {
     name: "Connections",
-    caption: "Where the work comes from, and where an agent is allowed to write.",
+    caption: "Where the work comes from, and where a harness is allowed to write.",
   },
   {
-    name: "Agents",
-    caption: "A credential, the agent that spends it, and the machine it runs on.",
+    name: "Harnesses",
+    caption: "A credential, the harness that spends it, and the machine it runs on.",
   },
   { name: "Extensions", caption: "What can reach SoloW from outside." },
   { name: "Interface", caption: "How this app looks, and what it lets you try early." },
@@ -241,7 +241,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   {
     id: "repositories",
     label: "Repositories",
-    caption: "The checkouts an agent is allowed to work in",
+    caption: "The checkouts a harness is allowed to work in",
     group: "Connections",
     icon: FolderGit2,
   },
@@ -256,43 +256,43 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
     id: "secrets",
     label: "Secrets",
     caption: "Write-only credentials, never shown again after they are set",
-    group: "Agents",
+    group: "Harnesses",
     icon: KeyRound,
   },
   {
     id: "agent-profiles",
-    label: "Agent profiles",
-    caption: "Which agent runs, how it authenticates, how many at once",
-    group: "Agents",
+    label: "Harness profiles",
+    caption: "Which harness runs, how it authenticates, how many at once",
+    group: "Harnesses",
     icon: Bot,
   },
   {
     id: "executor-profiles",
     label: "Executors",
-    caption: "Where an agent's commands actually run",
-    group: "Agents",
+    caption: "Where a harness's commands actually run",
+    group: "Harnesses",
     icon: Server,
   },
   {
     id: "mcp-servers",
     label: "MCP servers",
-    caption: "Tools every agent can call — or only the Steps that name them",
-    group: "Agents",
+    caption: "Tools every harness can call — or only the Steps that name them",
+    group: "Harnesses",
     icon: Plug,
   },
   {
     id: "skills",
     label: "Skills",
-    caption: "Playbooks an agent reads before it works, written here or kept in a directory",
-    group: "Agents",
+    caption: "Playbooks a harness reads before it works, written here or kept in a directory",
+    group: "Harnesses",
     icon: BookOpen,
   },
   {
     id: "mcp",
-    // "MCP access", not "MCP": the *servers* an agent loads live under Agents, and a section
+    // "MCP access", not "MCP": the *servers* a harness loads live under Harnesses, and a section
     // called MCP beside them would read as the same thing from the other side.
     label: "MCP access",
-    caption: "Tokens that let an outside agent drive this Workspace",
+    caption: "Tokens that let an outside harness drive this Workspace",
     group: "Extensions",
     icon: Blocks,
   },

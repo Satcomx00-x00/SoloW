@@ -9,7 +9,7 @@ import { Transcript } from "./transcript-view";
  * When a text block is parsed as markdown and when it is left as plain text.
  *
  * The bug this pins down: the last text row of a transcript is always marked `open` — nothing has
- * arrived after it — so an agent's final message rendered as raw backticks for as long as the run
+ * arrived after it — so a harness's final message rendered as raw backticks for as long as the run
  * stayed alive. For a run waiting on an answer, that is forever, and the message ending in a code
  * block is the one people actually read.
  */
@@ -63,7 +63,7 @@ describe("text block rendering", () => {
   });
 
   it("renders the live tail as a code block too, once its fence is closed", () => {
-    // This is the reported case: the agent's last message, run still alive, ending in a block.
+    // This is the reported case: the harness's last message, run still alive, ending in a block.
     const { container } = show([row(FENCED, true)]);
     expect(container.querySelector("pre")).toBeTruthy();
     expect(container.textContent).not.toContain("```");

@@ -50,7 +50,7 @@ describe("groupChanges", () => {
     expect(new Set(groups.map((g) => g.key)).size).toBe(2);
   });
 
-  it("shows an attached repository the agent never touched, rather than omitting it", () => {
+  it("shows an attached repository the harness never touched, rather than omitting it", () => {
     // The defect this file exists for. Approving still records a branch for that attachment, so
     // a reviewer who saw only the changed repository was wrong about what they approved.
     const groups = groupChanges(
@@ -94,7 +94,7 @@ describe("groupChanges", () => {
   });
 
   it("orders the groups the way the attachments were given", () => {
-    // Position 0 is the worktree the agent was started in — the primary — and a reviewer reads
+    // Position 0 is the worktree the harness was started in — the primary — and a reviewer reads
     // the list expecting it first.
     const groups = groupChanges(
       [],
@@ -158,7 +158,9 @@ describe("summariseConsequences", () => {
   });
 
   it("says so plainly when there is nothing to integrate", () => {
-    expect(summariseConsequences([])).toBe("Nothing to integrate — the agent proposed no changes.");
+    expect(summariseConsequences([])).toBe(
+      "Nothing to integrate — the harness proposed no changes.",
+    );
   });
 
   it("promises no pull request, because this build opens none", () => {
@@ -195,7 +197,7 @@ describe("describeTarget before anything has been captured", () => {
    *
    * A change is read once, when the run reaches its review gate. So for the whole of a run — and
    * on a Task that has never run — every group legitimately has no diff, and the panel used to
-   * say "No changes" about all of them. It was on screen while the agent was visibly editing
+   * say "No changes" about all of them. It was on screen while the harness was visibly editing
    * files: the Changes column claimed nothing had changed beside a transcript of it changing
    * things.
    */

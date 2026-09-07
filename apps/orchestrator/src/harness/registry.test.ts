@@ -1,0 +1,220 @@
+/// <reference types="bun-types" />
+
+import { describe, expect, it } from "bun:test";
+import type { WidgetResponse } from "@solow/contracts";
+import { HarnessRegistry } from "./registry.js";
+import type { HarnessHandle } from "./runner.js";
+
+/**
+ * Live harness registry (tasks TASK-014 / TASK-022). The registry is what lets a terminal reach a
+ * running harness, so the thing worth pinning down is that it reaches *only* the right one: keys
+ * carry the Workspace, and an entry disappears the moment its run ends.
+ */
+
+function fakeHandle(): HarnessHandle & {
+  inputs: string[];
+  stopped: boolean;
+  answers: Array<{ requestId: string; optionId: string }>;
+} {
+  const state = {
+    inputs: [] as string[],
+    stopped: false,
+    answers: [] as Array<{ requestId: string; optionId: string }>,
+    outcome: Promise.resolve({ kind: "completed" as const }),
+    workspacePath: Promise.resolve<string | null>("/wt/task-1"),
+    async send(text: string) {
+      state.inputs.push(text);
+      return true;
+    },
+    async respondPermission(requestId: string, optionId: string) {
+      state.answers.push({ requestId, optionId });
+      return "answered" as const;
+    },
+    async stop() {
+      state.stopped = true;
+    },
+  };
+  return state;
+}
+
+/** A runner whose protocol has no permission channel — Claude Code's stream-JSON, in practice. */
+function handleWithoutPermissions(): HarnessHandle {
+  return {
+    outcome: Promise.resolve({ kind: "completed" as const }),
+    workspacePath: Promise.resolve<string | null>("/wt/task-1"),
+    async send() {
+      return true;
+    },
+    async stop() {},
+  };
+}
+
+describe("HarnessRegistry", () => {
+  it("routes input to the harness of the named Task", async () => {
+    const registry = new HarnessRegistry();
+    const a = fakeHandle();
+    const b = fakeHandle();
+    registry.register("ws-a", { taskId: "task-1", sessionId: "s1", handle: a });
+    registry.register("ws-a", { taskId: "task-2", sessionId: "s2", handle: b });
+
+    expect(await registry.send("ws-a", "task-1", "keep going")).toBe(true);
+    expect(a.inputs).toEqual(["keep going"]);
+    expect(b.inputs).toEqual([]);
+  });
+
+  it("does not reach another Workspace's harness under the same Task id", async () => {
+    // Ids are opaque; nothing stops two Workspaces holding the same string. The tenant key is
+    // what separates them, so a lookup with the wrong Workspace must find nothing (Principle V).
+    const registry = new HarnessRegistry();
+    const theirs = fakeHandle();
+    registry.register("ws-b", { taskId: "task-1", sessionId: "s1", handle: theirs });
+
+    expect(await registry.send("ws-a", "task-1", "steer")).toBe(false);
+    expect(await registry.stop("ws-a", "task-1")).toBe(false);
+    expect(theirs.inputs).toEqual([]);
+    expect(theirs.stopped).toBe(false);
+  });
+
+  it("reports that nothing was delivered when no harness is running", async () => {
+    const registry = new HarnessRegistry();
+    expect(await registry.send("ws-a", "task-1", "hello")).toBe(false);
+    expect(await registry.stop("ws-a", "task-1")).toBe(false);
+  });
+
+  it("stops the harness it holds", async () => {
+    const registry = new HarnessRegistry();
+    const handle = fakeHandle();
+    registry.register("ws-a", { taskId: "task-1", sessionId: "s1", handle });
+
+    expect(await registry.stop("ws-a", "task-1")).toBe(true);
+    expect(handle.stopped).toBe(true);
+  });
+
+  it("routes a permission answer to the harness of the named Task (issue #58, AC-4)", async () => {
+    const registry = new HarnessRegistry();
+    const mine = fakeHandle();
+    registry.register("ws-a", { taskId: "task-1", sessionId: "s1", handle: mine });
+
+    expect(await registry.respondPermission("ws-a", "task-1", "req-1", "allow")).toBe("answered");
+    expect(mine.answers).toEqual([{ requestId: "req-1", optionId: "allow" }]);
+  });
+
+  it("does not let one Workspace answer another's permission prompt (Principle V)", async () => {
+    // Granting a file write on someone else's harness is a strictly worse version of steering it.
+    const registry = new HarnessRegistry();
+    const theirs = fakeHandle();
+    registry.register("ws-b", { taskId: "task-1", sessionId: "s1", handle: theirs });
+
+    // Indistinguishable from no harness at all, deliberately: a client must not learn that
+    // another Workspace has a Task of that id (Principle V).
+    expect(await registry.respondPermission("ws-a", "task-1", "req-1", "allow")).toBe("no_agent");
+    expect(theirs.answers).toEqual([]);
+  });
+
+  it("reports that a permission answer reached nothing when the protocol has no channel", async () => {
+    const registry = new HarnessRegistry();
+    registry.register("ws-a", {
+      taskId: "task-1",
+      sessionId: "s1",
+      handle: handleWithoutPermissions(),
+    });
+
+    // Two different nothings: a live harness whose protocol has no permission channel, and no
+    // harness at all. The operator's terminal says something true about each.
+    expect(await registry.respondPermission("ws-a", "task-1", "req-1", "allow")).toBe(
+      "no_permission_channel",
+    );
+    expect(await registry.respondPermission("ws-a", "task-9", "req-1", "allow")).toBe("no_agent");
+  });
+
+  it("deregistering removes the entry", async () => {
+    const registry = new HarnessRegistry();
+    const handle = fakeHandle();
+    const deregister = registry.register("ws-a", { taskId: "task-1", sessionId: "s1", handle });
+
+    deregister();
+    expect(registry.size).toBe(0);
+    expect(await registry.send("ws-a", "task-1", "too late")).toBe(false);
+  });
+
+  it("a late deregister does not unhook the retry that replaced it", async () => {
+    // A retried Task registers a new run while the old one is still unwinding; if the old
+    // deregister removed by key alone it would silently orphan the live harness.
+    const registry = new HarnessRegistry();
+    const first = fakeHandle();
+    const second = fakeHandle();
+    const deregisterFirst = registry.register("ws-a", {
+      taskId: "task-1",
+      sessionId: "s1",
+      handle: first,
+    });
+    registry.register("ws-a", { taskId: "task-1", sessionId: "s2", handle: second });
+
+    deregisterFirst();
+    expect(await registry.send("ws-a", "task-1", "still steering")).toBe(true);
+    expect(second.inputs).toEqual(["still steering"]);
+  });
+});
+
+describe("HarnessRegistry.respondWidget", () => {
+  it("routes an answer to the run that drew the widget", async () => {
+    const registry = new HarnessRegistry();
+    const answered: WidgetResponse[] = [];
+    registry.register("ws-1", {
+      taskId: "task-1",
+      sessionId: "s-1",
+      handle: fakeHandle(),
+      respondWidget: async (response) => {
+        answered.push(response);
+        return "answered";
+      },
+    });
+
+    const result = await registry.respondWidget("ws-1", "task-1", {
+      widgetId: "w-1",
+      values: ["pg"],
+      text: null,
+    });
+    expect(result).toBe("answered");
+    expect(answered).toEqual([{ widgetId: "w-1", values: ["pg"], text: null }]);
+  });
+
+  it("refuses an answer for another tenant's Task", async () => {
+    const registry = new HarnessRegistry();
+    registry.register("ws-1", {
+      taskId: "task-1",
+      sessionId: "s-1",
+      handle: fakeHandle(),
+      respondWidget: async () => "answered",
+    });
+    // Principle V: the Workspace comes from the signed ticket, and a mismatch finds nothing.
+    expect(
+      await registry.respondWidget("ws-2", "task-1", { widgetId: "w-1", values: [], text: null }),
+    ).toBe("no_agent");
+  });
+
+  it("reports a run with no widget channel apart from a missing one", async () => {
+    const registry = new HarnessRegistry();
+    registry.register("ws-1", { taskId: "task-1", sessionId: "s-1", handle: fakeHandle() });
+    expect(
+      await registry.respondWidget("ws-1", "task-1", { widgetId: "w-1", values: [], text: null }),
+    ).toBe("no_widget_channel");
+    expect(
+      await registry.respondWidget("ws-1", "task-2", { widgetId: "w-1", values: [], text: null }),
+    ).toBe("no_agent");
+  });
+
+  it("passes the run's own verdict straight through", async () => {
+    const registry = new HarnessRegistry();
+    registry.register("ws-1", {
+      taskId: "task-1",
+      sessionId: "s-1",
+      handle: fakeHandle(),
+      respondWidget: async () => "not_pending",
+    });
+    // Only the lifecycle knows which widgets are outstanding; the registry never second-guesses it.
+    expect(
+      await registry.respondWidget("ws-1", "task-1", { widgetId: "gone", values: [], text: null }),
+    ).toBe("not_pending");
+  });
+});

@@ -33,7 +33,7 @@ documents, so there is no second definition of any operation to drift. It sits b
 
 ## Jobs served
 
-- **J2 — Organise agent work around issues.**
+- **J2 — Organise harness work around issues.**
 - **J9 — Collaborate and share.**
 
 ## User stories
@@ -112,7 +112,7 @@ documents, so there is no second definition of any operation to drift. It sits b
   and the two profile lists — is **paged**, and a caller that names no `limit` receives
   `PAGE_SIZE_DEFAULT` rows rather than the whole table. The bound is a property of the
   contract, not a courtesy the caller may forget: these procedures are tools by construction
-  (FR-9), and an unbounded one spends an agent's context listing four hundred rows to answer a
+  (FR-9), and an unbounded one spends a harness's context listing four hundred rows to answer a
   question about three.
 - **FR-14** Paging is a **keyset cursor** over `(createdAt, id)`, never an offset. These tables
   are written by the poll, the orchestrator and the person reading at the same time, and a row

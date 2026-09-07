@@ -39,7 +39,7 @@ const tool = (id: string, name: string, input: Record<string, string>): Transcri
 
 describe("rowText", () => {
   it("reads a tool call as its name and arguments", () => {
-    // What someone searching for "pip" wants is the row where the agent ran pip — the chip it
+    // What someone searching for "pip" wants is the row where the harness ran pip — the chip it
     // renders as says almost none of that.
     expect(rowText(tool("1", "Bash", { command: "pip index versions colorama" }))).toContain("pip");
     expect(rowText(tool("1", "Bash", { command: "ls" }))).toContain("Bash");
@@ -62,7 +62,7 @@ describe("rowText", () => {
       response: null,
     };
     expect(rowText(widget)).toContain("Event flow");
-    // Matching inside agent-written markup would send a search for "rect" to every diagram.
+    // Matching inside harness-written markup would send a search for "rect" to every diagram.
     expect(rowText(widget)).not.toContain("svg><rect");
   });
 });

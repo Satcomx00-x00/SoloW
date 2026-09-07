@@ -32,7 +32,7 @@ describe("deriveCostUsd", () => {
     expect(deriveCostUsd(turn({ model: "never-heard-of-it" }), PRICES)).toBeNull();
   });
 
-  it("returns null when the agent did not state a model", () => {
+  it("returns null when the harness did not state a model", () => {
     expect(deriveCostUsd(turn({ model: null }), PRICES)).toBeNull();
   });
 

@@ -114,7 +114,7 @@ export function RepositoriesSection() {
                       <span className="truncate text-muted-foreground text-xs">{r.location}</span>
                     </div>
                     <SeedDefaultLabelsButton provider={r.provider} repositoryId={r.id} />
-                    {/* Per-repository, because which files an agent needs is a property of the
+                    {/* Per-repository, because which files a harness needs is a property of the
                         repository, not of the Workspace (issue #52). */}
                     <SetupFileRows patterns={r.setupFilePatterns} repositoryId={r.id} />
                   </li>

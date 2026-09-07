@@ -1,7 +1,7 @@
 import "server-only";
 import {
-  type AgentProbeReport,
-  agentProbeReport,
+  type HarnessProbeReport,
+  harnessProbeReport,
   REPOSITORY_SYNC_REQUESTED,
   type ReviewDecision,
   type TaskState,
@@ -11,7 +11,7 @@ import { devOwnerMode, orchestratorUrl, webEnv } from "./env.js";
 
 /**
  * Thin client the API uses to hand work to the orchestrator service (Decision 0002).
- * The API never runs agents itself; it emits events the durable `task-run` workflow
+ * The API never runs harnesses itself; it emits events the durable `task-run` workflow
  * consumes (plan §9).
  *
  * Transport: when `SOLOW_ORCHESTRATOR_URL` is set, events are POSTed to that service's
@@ -28,7 +28,7 @@ export interface OrchestratorClient {
   enqueueTaskRun(input: { workspaceId: string; taskId: string; sessionId: string }): Promise<void>;
   /**
    * Ask the durable engine to cancel a Task's in-flight run. Fire-and-acknowledge: a 202 means
-   * the engine accepted the cancellation, not that the agent process is already gone — Inngest
+   * the engine accepted the cancellation, not that the harness process is already gone — Inngest
    * cancels between steps, so the run unwinds shortly after. Callers that need the row to be
    * safe to delete must re-check state after this returns, which `deleteIssue` does inside its
    * own transaction.
@@ -68,16 +68,16 @@ export interface OrchestratorClient {
    */
   requestMirrorSync(input: { workspaceId: string }): Promise<void>;
   /**
-   * Ask the orchestrator whether an Agent Profile actually works, before a Task depends on it.
+   * Ask the orchestrator whether a Harness Profile actually works, before a Task depends on it.
    *
    * Unlike the fire-and-forget calls above this one *answers*: the report is the whole point, so
    * a failure to reach the orchestrator is thrown rather than swallowed. An Owner who pressed
    * "Test" and got a green tick that meant "we could not ask" would be worse off than before.
    */
-  probeAgentProfile(input: {
+  probeHarnessProfile(input: {
     workspaceId: string;
     agentProfileId: string;
-  }): Promise<AgentProbeReport>;
+  }): Promise<HarnessProbeReport>;
 }
 
 const UNWIRED = "orchestrator not configured (SOLOW_ORCHESTRATOR_URL unset)";
@@ -155,9 +155,9 @@ export const orchestrator: OrchestratorClient = {
     }
   },
 
-  async probeAgentProfile(input) {
+  async probeHarnessProfile(input) {
     const base = orchestratorUrl();
-    if (!base) throw new Error(`${UNWIRED}: agent probe unavailable`);
+    if (!base) throw new Error(`${UNWIRED}: harness probe unavailable`);
     // Board-scoped: no `taskId`, because a probe happens in Settings before any Task exists.
     const ticket = signStreamTicket(
       { workspaceId: input.workspaceId, taskId: null },
@@ -174,6 +174,6 @@ export const orchestrator: OrchestratorClient = {
     }
     // Parsed, not cast: this crosses a service boundary, and a shape drift should read as a
     // failed probe rather than as an undefined field rendered into the form.
-    return agentProbeReport.parse(await res.json());
+    return harnessProbeReport.parse(await res.json());
   },
 };

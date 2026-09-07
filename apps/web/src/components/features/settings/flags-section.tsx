@@ -86,7 +86,7 @@ export function FlagsSection() {
           if (!open) setPendingLockout(null);
         }}
         title="Turn off the core Task loop?"
-        description="This locks out Issue → run agent → review → approve for everyone in this Workspace — including most of the rest of this Settings page — until it is turned back on. There is no in-app undo: recovery is `bun run flag enable ff-core-program` on the machine running this instance."
+        description="This locks out Issue → run harness → review → approve for everyone in this Workspace — including most of the rest of this Settings page — until it is turned back on. There is no in-app undo: recovery is `bun run flag enable ff-core-program` on the machine running this instance."
         confirmLabel="Turn off"
         onConfirm={() => {
           if (pendingLockout) set.mutate({ key: pendingLockout.key, enabled: false });

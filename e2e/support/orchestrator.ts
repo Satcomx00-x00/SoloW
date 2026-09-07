@@ -5,13 +5,13 @@ import { Writable } from "node:stream";
 import { createDb } from "@solow/db";
 import { createLogger } from "@solow/observability";
 import { $ } from "bun";
-import { agentRegistry } from "../../apps/orchestrator/src/agent/registry.js";
-import type {
-  AgentHandle,
-  AgentRunner,
-  AgentStartOpts,
-} from "../../apps/orchestrator/src/agent/runner.js";
 import { createLocalExecutor } from "../../apps/orchestrator/src/executor/local.js";
+import { harnessRegistry } from "../../apps/orchestrator/src/harness/registry.js";
+import type {
+  HarnessHandle,
+  HarnessRunner,
+  HarnessStartOpts,
+} from "../../apps/orchestrator/src/harness/runner.js";
 import { startWebSocketServer } from "../../apps/orchestrator/src/index.js";
 import {
   runTaskLifecycle,
@@ -37,33 +37,33 @@ import { PATHS, PORTS } from "./fixture.js";
  * Orchestrator harness for the E2E suite (tasks TASK-025 / TASK-026).
  *
  * It runs the *real* `runTaskLifecycle` and the *real* worktree manager against a deterministic
- * fake agent, and consumes the same `{name, data}` events the web app emits. What it stands in
+ * fake harness, and consumes the same `{name, data}` events the web app emits. What it stands in
  * for is only the durable engine: steps run inline and review waits are held in memory, so this
  * process makes no durability claim — that is Inngest's job in a deployment. Everything the
  * tests assert (review gate, worktree isolation, branch on approve) is production code.
  */
 
-/** A Task whose brief carries this marker keeps its agent alive so a test can steer it. */
+/** A Task whose brief carries this marker keeps its harness alive so a test can steer it. */
 const STEERABLE = "[steerable]";
 
 /**
- * Deterministic agent standing in for Claude Code.
+ * Deterministic harness standing in for Claude Code.
  *
  * It does what `claude --worktree` does: creates its own git worktree off the repository it was
  * pointed at, works only in there, and reports the path back so SoloW can adopt it. That
- * is what makes the isolation test meaningful under the new model — the agent, not SoloW,
- * chooses the directory, and the guarantee is that two agents on one repository never share one.
+ * is what makes the isolation test meaningful under the new model — the harness, not SoloW,
+ * chooses the directory, and the guarantee is that two harnesses on one repository never share one.
  *
  * It writes a marker into its worktree and records what it can see there. That recording is the
- * evidence: an agent that could reach another Task's worktree would list the other's marker.
+ * evidence: a harness that could reach another Task's worktree would list the other's marker.
  *
  * It also honours input and stop (TASK-022): a steerable Task's run stays open until the
  * operator sends something, and whatever arrives is echoed onto the stream.
  */
-class FixtureAgentRunner implements AgentRunner {
-  start(opts: AgentStartOpts): AgentHandle {
+class FixtureHarnessRunner implements HarnessRunner {
+  start(opts: HarnessStartOpts): HarnessHandle {
     // A resume round passes no name: the worktree already exists and `cwd` points at it
-    // (see AgentStartOpts.worktreeName). Only a first round creates one.
+    // (see HarnessStartOpts.worktreeName). Only a first round creates one.
     const worktree = opts.worktreeName ? join(PATHS.worktrees, opts.worktreeName) : opts.cwd;
 
     let resolveWorkspace: (path: string | null) => void = () => {};
@@ -77,7 +77,7 @@ class FixtureAgentRunner implements AgentRunner {
     });
 
     void (async () => {
-      // The agent creates its own worktree, exactly as `claude --worktree <name>` would —
+      // The harness creates its own worktree, exactly as `claude --worktree <name>` would —
       // but only on a first round. Asking git to add it again would fail, or branch a fresh
       // one from the base ref and throw the earlier round's work away.
       if (opts.worktreeName) {
@@ -93,13 +93,13 @@ class FixtureAgentRunner implements AgentRunner {
         input: undefined,
         status: null,
       });
-      writeFileSync(join(worktree, `marker-${label}.txt`), `edited by the agent in ${label}\n`);
+      writeFileSync(join(worktree, `marker-${label}.txt`), `edited by the harness in ${label}\n`);
       const visible = readdirSync(worktree)
         .filter((f) => f.startsWith("marker-"))
         .sort()
         .join(",");
       writeFileSync(join(worktree, "visible.txt"), `${visible}\n`);
-      opts.onEvent({ kind: "stdout", channel: "assistant", text: `agent edited ${label}\n` });
+      opts.onEvent({ kind: "stdout", channel: "assistant", text: `harness edited ${label}\n` });
 
       if (!opts.prompt.includes(STEERABLE)) finish({ kind: "completed" });
     })();
@@ -111,7 +111,7 @@ class FixtureAgentRunner implements AgentRunner {
         const path = await workspacePath;
         if (!path) return false;
         writeFileSync(join(path, "steered.txt"), `${text}\n`);
-        opts.onEvent({ kind: "stdout", channel: "user", text: `agent received: ${text}\n` });
+        opts.onEvent({ kind: "stdout", channel: "user", text: `harness received: ${text}\n` });
         finish({ kind: "completed" });
         return true;
       },
@@ -119,7 +119,7 @@ class FixtureAgentRunner implements AgentRunner {
         opts.onEvent({
           kind: "stdout",
           channel: "system",
-          text: "agent stopped by the operator\n",
+          text: "harness stopped by the operator\n",
         });
         finish({ kind: "completed" });
       },
@@ -159,7 +159,7 @@ function deps(): TaskRunDeps {
     db: createDb(),
     // One fixture runner whatever the catalog row's protocol says: the E2E proves the lifecycle,
     // not the protocol, and `packages/acp` covers that against a scripted peer (issue #58).
-    runner: () => new FixtureAgentRunner(),
+    runner: () => new FixtureHarnessRunner(),
     /*
      * The fixture's own executor, not `createExecutorFor` (issue #96): the suite pins its roots
      * to `PATHS`, while the factory reads the deployment's environment, and a fixture that ran
@@ -167,7 +167,7 @@ function deps(): TaskRunDeps {
      * profile the suite seeds is local, so there is nothing for a preflight to ask a daemon.
      */
     executorFor: () => executor,
-    preflight: async () => ({ ok: true, agentCommands: [] }),
+    preflight: async () => ({ ok: true, harnessCommands: [] }),
     worktreeRoot: PATHS.worktrees,
     repoCacheRoot: PATHS.repoCache,
     logger: createLogger({ service: "e2e-orchestrator", destination: quietLogs }),
@@ -191,8 +191,8 @@ function deps(): TaskRunDeps {
     }),
     hub,
     // The same process-wide registry the WebSocket hub looks in, so a frame the SPA sends
-    // reaches this run's agent exactly as it would in a deployment.
-    registry: agentRegistry,
+    // reaches this run's harness exactly as it would in a deployment.
+    registry: harnessRegistry,
   };
 }
 

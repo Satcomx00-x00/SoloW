@@ -4,7 +4,7 @@ import { PAGE_SIZE_MAX } from "@solow/contracts";
  * Reading a paged list from a screen that wants all of it (issue #82 AC-4).
  *
  * The bound on `issue.list`, `task.list`, `repository.list` and the two profile lists exists for
- * the **MCP surface**: those procedures are also tools, and an unbounded tool hands an agent every
+ * the **MCP surface**: those procedures are also tools, and an unbounded tool hands a harness every
  * row in the Workspace to answer a question about three of them. It was never meant to shorten a
  * screen — so a screen says `...WHOLE_PAGE` and gets the most one request may carry, which is what
  * every one of these callers already assumed it was getting.

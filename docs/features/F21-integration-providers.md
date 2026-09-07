@@ -23,7 +23,7 @@ one. See [Decision 0016](../decisions/0016-integration-provider-registry.md).
 
 ## Jobs served
 
-- **J2 — Organise agent work around issues.** — the job [F12](./F12-integrations.md) serves,
+- **J2 — Organise harness work around issues.** — the job [F12](./F12-integrations.md) serves,
   widened: issues can come from a tracker SoloW does not ship a driver for today.
 - **J10 — Operate with confidence.**
 

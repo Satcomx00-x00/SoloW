@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
  *
  * One component rather than a `Badge variant={...}` at each call site, because the mapping from
  * state to appearance is domain knowledge, not styling: it decides whether a reader can tell
- * "an agent is working" from "an agent is waiting for me" at a glance. Keeping it in one place
+ * "a harness is working" from "a harness is waiting for me" at a glance. Keeping it in one place
  * is what stops the two drifting back into looking alike.
  *
  * `data-task-state` stays on the element — the E2E suite reads the Task's state through it.

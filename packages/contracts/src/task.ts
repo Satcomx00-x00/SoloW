@@ -152,11 +152,11 @@ export const moveTaskInput = z.object({
 export type MoveTaskInput = z.infer<typeof moveTaskInput>;
 
 /**
- * Open the review gate on a Task whose agent has declared it finished (the completion gate).
+ * Open the review gate on a Task whose harness has declared it finished (the completion gate).
  *
  * A separate procedure from `move` on purpose: moving is a board gesture that may be refused by
  * the state machine, and this is an assertion that the work is ready to judge — refused when the
- * agent has not said so. One is dragging a card; the other is opening the gate.
+ * harness has not said so. One is dragging a card; the other is opening the gate.
  */
 export const submitTaskForReviewInput = z.object({ id: idSchema });
 export type SubmitTaskForReviewInput = z.infer<typeof submitTaskForReviewInput>;
@@ -189,7 +189,7 @@ export const taskDeletionImpactDto = z.object({
   worktreeCount: z.number().int().nonnegative(),
   /** Tasks blocked *by* this one — they are unblocked by the delete. */
   dependentCount: z.number().int().nonnegative(),
-  /** Whether an agent has to be stopped before the delete can proceed. */
+  /** Whether a harness has to be stopped before the delete can proceed. */
   running: z.boolean(),
 });
 export type TaskDeletionImpactDto = z.infer<typeof taskDeletionImpactDto>;
@@ -218,7 +218,7 @@ export type GetTaskInput = z.infer<typeof getTaskInput>;
 
 /**
  * One resolved attachment. `position` travels rather than being implied by array order, because
- * position 0 is what "the primary attachment" means — the worktree the agent is actually started
+ * position 0 is what "the primary attachment" means — the worktree the harness is actually started
  * in — and a client that re-sorts the list must not be able to change which one that is.
  *
  * `resultBranch` is separate from `checkoutBranch` even though the two are equal today: the
@@ -247,7 +247,7 @@ export const taskDto = z
     repositories: z.array(taskRepositoryDto),
     failureReason: z.string().nullable(),
     /**
-     * What the agent declared about how its run ended, if it declared anything.
+     * What the harness declared about how its run ended, if it declared anything.
      *
      * On the Task rather than derived from its Session, because the board asks it once per card:
      * "is this finished and waiting for me?" is the question the green control answers, and it
@@ -268,7 +268,7 @@ export const taskDto = z
      * "which column does this tile belong in" must be answerable without a query per tile.
      *
      * The *names* behind the ids are deliberately absent. This DTO is an MCP tool output, so
-     * every field on it is handed to an agent verbatim — and the Step row a name would be
+     * every field on it is handed to a harness verbatim — and the Step row a name would be
      * joined from also carries `promptTemplate`, Owner-authored text that must never travel on
      * a board payload. The board already holds `workflow.list` and `workflow.get` for its
      * picker, which is where the names it renders come from.
@@ -281,7 +281,7 @@ export type TaskDto = z.infer<typeof taskDto>;
 
 /**
  * A page of Tasks. Paged because this procedure is also an MCP tool, and an unbounded one hands
- * an agent every Task in the Workspace to answer a question about one — see `page.ts`.
+ * a harness every Task in the Workspace to answer a question about one — see `page.ts`.
  */
 export const taskListDto = pageOf(taskDto);
 export type TaskListDto = z.infer<typeof taskListDto>;

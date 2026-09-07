@@ -119,7 +119,7 @@ export function isExecutorUnavailable(cause: unknown): boolean {
  * The utilities every shimmed path in this file depends on.
  *
  * `base64` is on the list because the environment mechanism below is built on it, so a
- * distroless or scratch image fails the preflight legibly instead of producing an agent with an
+ * distroless or scratch image fails the preflight legibly instead of producing a harness with an
  * empty environment and no explanation. Distroless images are, deliberately, unsupported.
  */
 export const REQUIRED_CONTAINER_UTILITIES = [
@@ -163,7 +163,7 @@ export function containerName(
  * Not optional, and the one label neither of this feature's earlier designs had. Two
  * orchestrators sharing a daemon — a dev instance beside a real one, or `e2e/support/fixture.ts`
  * beside a live run — each see the other's containers as belonging to no Task they know about,
- * and a reaper reasoning without this would `docker rm -f` a running agent. Keyed on the
+ * and a reaper reasoning without this would `docker rm -f` a running harness. Keyed on the
  * worktree root because that is what actually distinguishes two deployments on one machine.
  */
 export function deploymentId(worktreeRoot: string): string {
@@ -187,7 +187,7 @@ export function dockerDaemonIsLocal(
 /**
  * The environment a shimmed command is given, as one base64 line.
  *
- * The environment travels on the exec's **own stdin**, ahead of the agent's traffic, and every
+ * The environment travels on the exec's **own stdin**, ahead of the harness's traffic, and every
  * alternative was rejected for a reason that shows up in production:
  *
  * - `-e KEY=VALUE` puts the value in the docker CLI's argv on the *host*, where `ps` shows it —
@@ -207,7 +207,7 @@ function envPreamble(env: Record<string, string>, opts: { replace: boolean }): s
   // First, so it cannot undo a PATH the caller did supply.
   if (opts.replace && env["PATH"] === undefined) lines.push("unset PATH");
   for (const [key, value] of Object.entries(env)) {
-    // Rejected rather than skipped: a variable the caller believes it set and the agent never
+    // Rejected rather than skipped: a variable the caller believes it set and the harness never
     // receives is the silent substitution this whole mechanism exists to avoid.
     if (!ENV_NAME.test(key)) throw new Error(`invalid environment variable name: ${key}`);
     lines.push(`export '${key}'='${value.replaceAll("'", "'\\''")}'`);
@@ -219,7 +219,7 @@ function envPreamble(env: Record<string, string>, opts: { replace: boolean }): s
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /**
- * The shim a spawned agent is launched through, as one argv element.
+ * The shim a spawned harness is launched through, as one argv element.
  *
  * The bootstrap `PATH` exists for exactly one reason — `base64` has to resolve under `env -i` —
  * and the decoded blob's first line then either sets the caller's `PATH` or unsets it, so the
@@ -231,7 +231,7 @@ const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
  * has to signal the process *inside* the container.
  *
  * Verified against busybox `ash` with a 15,740-byte preamble carrying embedded newlines and
- * single quotes: values arrive intact, the image's own `ENV` is cleared, and the agent's
+ * single quotes: values arrive intact, the image's own `ENV` is cleared, and the harness's
  * remaining stdin arrives unconsumed — `IFS= read -r` does not over-read the pipe. That last
  * property is what the entire mechanism rests on.
  */
@@ -356,8 +356,8 @@ function dockerCliEnv(): Record<string, string> {
  * An allow-list, because the refusal list this started as was a promise about every path nobody
  * thought of — and it did not hold: verified that with the worktree root anywhere off `/home`,
  * `$HOME` passed it (so `~/.ssh`, `~/.aws` and `~/.docker/config.json` were bind-mounted RW into
- * the agent's container) and so did `/var/run/docker.sock`, which is not a leak but an escape: an
- * agent that can reach the socket starts a privileged container and owns the machine. Naming
+ * the harness's container) and so did `/var/run/docker.sock`, which is not a leak but an escape: an
+ * harness that can reach the socket starts a privileged container and owns the machine. Naming
  * those two would only move the question to `/etc`, `/root`, `/dev` and the next one.
  *
  * The allow-list's first cut did not hold either, and for the mirror-image reason: the two rules
@@ -452,7 +452,7 @@ function refuseCsvInjection(value: string, role: "bind source" | "mount target")
 }
 
 /**
- * Refuse a bind source that would hand the agent the machine.
+ * Refuse a bind source that would hand the harness the machine.
  *
  * `resolveRepoPath` returns `params.repository.location` verbatim for a `local_path` Repository —
  * an arbitrary Owner-supplied host path, unvalidated by the schema. Registering `/` or `$HOME` as
@@ -547,7 +547,7 @@ export async function guardMountSource(
    * from `process.cwd()`: `guardMountSource("relative/path", roots)` used to return the
    * orchestrator's own checkout with `relative/path` on the end, and `guardMountSource("", roots)`
    * the checkout itself — so a Repository whose `location` is `"."` bind-mounted the
-   * orchestrator's source, its configuration and any `.env` beside it into the agent's container,
+   * orchestrator's source, its configuration and any `.env` beside it into the harness's container,
    * read-write, and `executorBindPaths`' `mkdir -p` created whatever was missing. Refusing here
    * also makes every answer below independent of which directory the process was started in.
    */
@@ -564,7 +564,7 @@ export async function guardMountSource(
   if (!isMountable(path, lexicalAllowList(roots)) || !isMountable(real, canonical)) {
     const via = real === path ? "" : ` (a symlink to ${real})`;
     throw new ExecutorUnavailableError(
-      `refusing to mount ${path}${via} into the container: a Repository at this path would expose the host — an agent is given the deployment's own directories, paths inside ${CONTENT_AREAS.join(", ")}, and the work half of a home directory, never the host's own`,
+      `refusing to mount ${path}${via} into the container: a Repository at this path would expose the host — a harness is given the deployment's own directories, paths inside ${CONTENT_AREAS.join(", ")}, and the work half of a home directory, never the host's own`,
     );
   }
   return path;
@@ -844,11 +844,11 @@ function labelsFor(
 }
 
 /**
- * The agent's `HOME` inside the container, when the image does not declare one of its own.
+ * The harness's `HOME` inside the container, when the image does not declare one of its own.
  *
  * A tmpfs (see `runArgs`) rather than the Task's worktree, which is where `baseEnv` used to
  * point it. The worktree is a **host bind mount**, so every credential cache a tool writes to
- * `$HOME` — `.gitconfig`, `.npmrc`, `~/.config/gh/hosts.yml`, an agent CLI's own token store —
+ * `$HOME` — `.gitconfig`, `.npmrc`, `~/.config/gh/hosts.yml`, a harness CLI's own token store —
  * was landing on the host filesystem and outliving the container that was supposed to contain
  * it. Worse, the worktree is deliberately kept after a hard failure, so those files persisted
  * exactly in the runs nobody goes back and looks at.
@@ -874,12 +874,12 @@ function runArgs(
   const args = ["run", "-d", "--name", name];
   for (const [key, value] of Object.entries(labels)) args.push("--label", `${key}=${value}`);
   args.push(
-    // A pid 1 that reaps: the kill ladder signals the agent by pid, and a shell that never
+    // A pid 1 that reaps: the kill ladder signals the harness by pid, and a shell that never
     // waits would leave every forked grandchild as a zombie for the life of the Task.
     "--init",
     /*
      * Derived from the orchestrator's own uid, not configured, and not optional. Verified:
-     * without it every file the agent writes into the bind-mounted worktree is root-owned on the
+     * without it every file the harness writes into the bind-mounted worktree is root-owned on the
      * host, and `cleanupWorktree`'s `git worktree remove --force --force` then fails with
      * permission denied and leaks the worktree silently — *after* the Task is marked done.
      */
@@ -894,18 +894,18 @@ function runArgs(
     "--tmpfs",
     `/run/solow:rw,mode=0700,uid=${uid},gid=${gid},size=1m`,
     /*
-     * The agent's `HOME` (`CONTAINER_HOME`), so that what a tool caches there dies with the
+     * The harness's `HOME` (`CONTAINER_HOME`), so that what a tool caches there dies with the
      * container instead of being written into the bind-mounted worktree on the host.
      *
      * `exec` is passed explicitly and the pid-file tmpfs above deliberately does not have it:
      * Docker mounts a tmpfs `noexec` by default, and a `HOME` that cannot execute breaks every
-     * agent CLI that installs a helper into `~/.local/bin` or `~/.bun/bin`. Verified live that
+     * harness CLI that installs a helper into `~/.local/bin` or `~/.bun/bin`. Verified live that
      * the mount comes up without `noexec` when it is named, and writable by the `--user` uid.
      *
      * 64 MiB, and a figure rather than the daemon's default of half of host RAM: what belongs in
      * `HOME` is configuration and tokens — kilobytes — while a package cache that grows past this
      * is memory charged to the container's `--memory` limit, which would turn a large `npm
-     * install` into an OOM kill instead of an ENOSPC an agent can report. Work that needs the
+     * install` into an OOM kill instead of an ENOSPC a harness can report. Work that needs the
      * space belongs in the worktree, which is disk.
      */
     "--tmpfs",
@@ -915,7 +915,7 @@ function runArgs(
     /*
      * `--mount`, never `-v`: verified that a missing bind source is refused loudly ("bind source
      * path does not exist"), where `-v` would silently create a root-owned directory and give the
-     * agent an empty worktree with no explanation.
+     * harness an empty worktree with no explanation.
      *
      * This join is a splice, and the daemon reads what comes out of it as CSV — a comma in
      * `source` or `target` opens a new key, and a later `src=` replaces the source the guard
@@ -957,7 +957,7 @@ function runArgs(
 /**
  * This orchestrator process, as a value a container can carry (issue #96, AC-4).
  *
- * The reaper's other evidence of life — the agent registry, and a Task row sitting in `review` or
+ * The reaper's other evidence of life — the harness registry, and a Task row sitting in `review` or
  * `parked` — cannot tell a live orchestrator from a crashed one. Inngest suspends a run by
  * leaving a step promise pending, so a Task waiting at the review gate has *no* process holding
  * it and no registry entry either; a container it left behind therefore looked identical to one
@@ -1002,7 +1002,7 @@ async function claimContainer(host: Executor, bin: string, name: string): Promis
  *
  * Adoption is `provisionWorktree`'s "reuse existing work, replace only what is not this Task's"
  * rule applied to containers: an Inngest retry, a second review round or a replay pass must not
- * tear down a live agent's workspace. A container that has stopped, whose `solow.cfg` no longer
+ * tear down a live harness's workspace. A container that has stopped, whose `solow.cfg` no longer
  * matches the profile, or that belongs to a previous *run* of this Task, is removed and rebuilt.
  */
 export async function ensureContainer(
@@ -1053,7 +1053,7 @@ export async function ensureContainer(
     // stop-then-relaunch path would keep the *dead* run's id for ever — and the reaper reads
     // that label to decide a container was left behind by a previous run. Adopting it left the
     // live run's own container looking orphaned, and the sweep sixty seconds later removed it.
-    // Rebuilding is the honest answer either way: a relaunch is a new agent, and what the
+    // Rebuilding is the honest answer either way: a relaunch is a new harness, and what the
     // previous one left running inside the container is not part of its inheritance.
     if (
       running === "true" &&
@@ -1220,7 +1220,7 @@ export function createDockerExecutor(
              * The container goes with the failure, and that is the whole fix: the script runs
              * only on the pass that *created* the container, so leaving a half-prepared one
              * running meant the next pass adopted it with `created: false`, skipped the script
-             * and handed the agent a container the profile's `apt-get` had never finished on —
+             * and handed the harness a container the profile's `apt-get` had never finished on —
              * verified live, where passes 2 and 3 succeeded against a container whose prepare
              * script had exited 100. Removing it makes the next pass rebuild and fail the same
              * way, loudly, until an operator fixes the script.
@@ -1400,7 +1400,7 @@ export function createDockerExecutor(
           spawnOpts.cwd,
           name,
           // `env -i` is what makes `SpawnOpts.env` mean *replace*: verified that without it the
-          // image's own `ENV` merges through and the agent sees variables no caller named.
+          // image's own `ENV` merges through and the harness sees variables no caller named.
           "env",
           "-i",
           "/bin/sh",
@@ -1449,7 +1449,7 @@ export function createDockerExecutor(
          * Signal the process *inside* the container, never the `docker exec` client.
          *
          * Verified: terminating the client leaves the inner `sleep 300` running — one leaked
-         * agent per stop. Signalling the pid works and the ladder escalates as
+         * harness per stop. Signalling the pid works and the ladder escalates as
          * `packages/acp/src/session.ts` expects: TERM by pid makes the client exit 143, and a
          * process holding `trap "" TERM` survives it and needs KILL, which exits 137. Mapping
          * both rungs onto `docker stop` would instead hang every escalation to its time-box.
@@ -1493,7 +1493,7 @@ export function createDockerExecutor(
     },
 
     async baseEnv(): Promise<Record<string, string>> {
-      // The *image's* environment, not the orchestrator's. Handing a containerised agent the
+      // The *image's* environment, not the orchestrator's. Handing a containerised harness the
       // host's `PATH` and `HOME` describes a machine it is not running on, and it then fails for
       // reasons that have nothing to do with the Task — see `Executor.baseEnv`.
       imageEnv ??= (async () => {
@@ -1518,11 +1518,11 @@ export function createDockerExecutor(
             }
           } catch {
             // A daemon that answered something unparseable is not a reason to fail the run; the
-            // defaults below are enough for an agent to start.
+            // defaults below are enough for a harness to start.
           }
         }
         // An image that declares neither still has to produce a runnable environment: `PATH` is
-        // the container's own default, and `HOME` is the container's own tmpfs, because an agent
+        // the container's own default, and `HOME` is the container's own tmpfs, because a harness
         // whose `HOME` is `/` cannot write its own config and dies on the first tool call.
         //
         // Not `jailRoot`, which is what this was: the jail is a bind mount from the host, so the

@@ -4,8 +4,8 @@
 
 ## Summary
 
-An Executor is where an Agent actually runs. SoloW supports several execution
-environments so users can run agents locally for convenience or offload heavy work to
+An Executor is where a Harness actually runs. SoloW supports several execution
+environments so users can run harnesses locally for convenience or offload heavy work to
 containers, remote machines, or the cloud — all managed from the same control plane.
 
 ## The `Executor` interface (issue #1)
@@ -15,7 +15,7 @@ Before a second Executor kind existed, SoloW adopted one interface every kind im
 
 ```ts
 interface Executor {
-  spawn(cmd: string[], opts: SpawnOpts): ProcessHandle; // long-lived agent process
+  spawn(cmd: string[], opts: SpawnOpts): ProcessHandle; // long-lived harness process
   exec(cmd: string[], opts?: ExecOpts): Promise<ExecResult>; // one-shot: git, du, version probes
   baseEnv(): Promise<Record<string, string>>; // what a command here would otherwise inherit
   fs: ExecutorFs; // list, read, write, copy — root-jailed
@@ -30,10 +30,10 @@ module in the orchestrator allowed to call `Bun.spawn`, the Bun shell, or touch 
 filesystem directly (`scripts/audit-executor-boundary.ts` enforces the boundary). The Container
 Executor (`apps/orchestrator/src/executor/docker.ts`, #96) is the second implementation, and it
 does **not** widen that boundary: it composes a host Executor and issues `docker` commands
-through it, so exactly one file still touches the host. Everything that reaches into the place an
-agent runs goes through the interface instead of a call of its own:
+through it, so exactly one file still touches the host. Everything that reaches into the place a
+harness runs goes through the interface instead of a call of its own:
 
-- The **agent runner** (`apps/orchestrator/src/agent/claude-code-runner.ts`) launches the
+- The **harness runner** (`apps/orchestrator/src/harness/claude-code-runner.ts`) launches the
   `claude` CLI via `executor.spawn` — `packages/claude-code`'s `startClaudeSession` never spawns
   a process itself, it takes a `SpawnFn` the caller supplies.
 - The **worktree manager and diff reader** (`apps/orchestrator/src/worktree/manager.ts`) run
@@ -45,18 +45,18 @@ Three properties every implementation must hold:
   inherits it — the highest path-traversal risk surface in the product (#33 file tree, #52
   `.env` copy).
 - **`spawn` takes the environment verbatim.** It replaces the child's environment rather than
-  merging it with the executor's own, so the one credential the billing guard shaped is all an
-  agent process ever sees (Principle IV).
+  merging it with the executor's own, so the one credential the billing guard shaped is all a
+  harness process ever sees (Principle IV).
 - **`baseEnv()` names what a command here would otherwise inherit** — the host's environment for
   the local driver, the image's for a container one. Because `spawn` replaces rather than merges,
-  the caller has to shape the agent's environment from the right base: handing a containerised
-  agent the orchestrator's own `PATH` and `HOME` describes a machine it is not running on, and it
+  the caller has to shape the harness's environment from the right base: handing a containerised
+  harness the orchestrator's own `PATH` and `HOME` describes a machine it is not running on, and it
   then fails for reasons that have nothing to do with the Task.
 
 The bet the interface was written on — that a second Executor kind is **one new file**
-implementing it, a driver rather than a second copy of "how do I reach the place the agent runs" —
+implementing it, a driver rather than a second copy of "how do I reach the place the harness runs" —
 has now been tested once, by the Container Executor (#96). It held: the call sites that run git,
-copy setup files and launch the agent were not rewritten for it, and `baseEnv()` above is the only
+copy setup files and launch the harness were not rewritten for it, and `baseEnv()` above is the only
 member the interface gained. Remote SSH (#97) and Cloud (#107) follow the same shape.
 
 ## The Container Executor (issue #96)
@@ -67,8 +67,8 @@ recorded in [ADR 0023](../decisions/0023-docker-executor-cli.md); what F07 needs
 a user gets.
 
 - **The Task's own Profile decides where it runs.** The executor is built per run from the Task's
-  Executor Profile, not once per process, and the agent runner and every worktree operation are
-  bound to it. Each `git` invocation, each setup-file copy and the agent itself therefore run
+  Executor Profile, not once per process, and the harness runner and every worktree operation are
+  bound to it. Each `git` invocation, each setup-file copy and the harness itself therefore run
   where the Task was told to run — which is what makes the driver gate below a real guarantee
   rather than a check nothing downstream honours.
 - **Provisioning is proved before anything is cloned** (FR-5). One preflight step, placed after
@@ -91,7 +91,7 @@ a user gets.
   than a rough one.
 - **Teardown is a sweep, not a hope.** A completed or failed run disposes of its container
   immediately, and the reconciliation sweep removes containers a crashed orchestrator left behind
-  — identified by their labels, and only once the Task and the agent registry both agree no run
+  — identified by their labels, and only once the Task and the harness registry both agree no run
   still holds them.
 
 ### The isolation that holds, and where it stops
@@ -132,7 +132,7 @@ inodes, and the container owns them; a fetch transfers a pack, so no inode is sh
 administration of the shared repository — the cache clone, `git worktree add`, seeding the
 setup-file allowlist, the removal at the end — runs on the *orchestrator's* executor, not the
 Task's, which is what keeps the shared repository out of the mount set in the first place. What
-stays on the Task's own executor is everything about the Task's content: the agent, commit,
+stays on the Task's own executor is everything about the Task's content: the harness, commit,
 discard, status and diff.
 
 **The approved branch is moved back afterwards.** A Task with its own clone commits into a
@@ -146,7 +146,7 @@ deletes.
 **A `local` Task keeps the shared repository, deliberately.** Its worktree is added to the
 Repository the deployment holds, and two local Tasks on one Repository share that parent with
 git's own locking, exactly as before. A private clone there would cost a copy of the repository
-per Task to buy nothing: a local agent runs as the orchestrator's uid on the orchestrator's
+per Task to buy nothing: a local harness runs as the orchestrator's uid on the orchestrator's
 filesystem, so it can walk to another Task's worktree whether or not the two share a parent.
 
 Stated precisely, the guarantee differs by Executor kind:
@@ -179,7 +179,7 @@ Where the proof lives, because a property this load-bearing should not rest on t
 
 ## Executor Profile configuration (issue #73)
 
-An Executor Profile answers *where* an agent runs; its `config` column answers *how*. The column
+An Executor Profile answers *where* a harness runs; its `config` column answers *how*. The column
 holds one typed payload per kind, validated by a **discriminated union** in
 `packages/contracts/src/executor-config.ts`:
 
@@ -208,9 +208,9 @@ Four properties hold, each enforced by something other than review:
   `ssh_key` and `cloud_credential` so those credentials have somewhere to live. Members are
   `.strict()`, so a config carrying `privateKey` is *rejected* at the API boundary rather than
   silently stripped and forgotten about.
-- **A profile's environment is for the runtime, not for the agent's credential.** The variables
+- **A profile's environment is for the runtime, not for the harness's credential.** The variables
   the billing guard owns (`ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`) cannot be named in a
-  profile at all, and `resolveAgentRunEnv` applies profile variables *under* the credential
+  profile at all, and `resolveHarnessRunEnv` applies profile variables *under* the credential
   shaping — so even a row written outside the API cannot become a route to metered billing.
 - **A configurable kind is not a runnable one.** `apps/orchestrator/src/executor/drivers.ts`
   lists the kinds a driver exists for — `local` and `docker` today, with SSH (#97) and Cloud
@@ -230,11 +230,11 @@ schema declares, then the shared prepare script and environment repeater.
 
 ## User stories
 
-- As a Solo Power User, I want agents to run on my own machine by default, so setup is
+- As a Solo Power User, I want harnesses to run on my own machine by default, so setup is
   trivial.
 - As a user, I want to run a resource-heavy Task in a container, so it does not slow my
   machine.
-- As an Operator, I want agents to run on a designated remote host, so compute is where it
+- As an Operator, I want harnesses to run on a designated remote host, so compute is where it
   should be.
 
 ## Functional requirements
@@ -242,12 +242,12 @@ schema declares, then the shared prepare script and environment repeater.
 - **FR-1** SoloW supports these Executor types: **Local** (a process on the host),
   **Container** (an isolated container), **Remote** (an SSH-connected host), and **Cloud**
   (a cloud runner).
-- **FR-2** A user configures an Executor as an Executor Profile (see [F05](./F05-agent-executor-profiles.md))
+- **FR-2** A user configures an Executor as an Executor Profile (see [F05](./F05-harness-executor-profiles.md))
   and selects it per Task.
-- **FR-3** Each Executor type runs the same Agents and produces the same Session behaviour,
+- **FR-3** Each Executor type runs the same Harnesses and produces the same Session behaviour,
   so the choice of Executor does not change how a Task is used or reviewed.
-- **FR-4** Subscription and API-key credentials are made available to Agents in every
-  Executor type without exposing them to Agent-run code (see [F06](./F06-authentication-billing.md),
+- **FR-4** Subscription and API-key credentials are made available to Harnesses in every
+  Executor type without exposing them to Harness-run code (see [F06](./F06-authentication-billing.md),
   [F17](./F17-security-secrets.md)).
 - **FR-5** SoloW reports Executor health and availability, and prevents launching a
   Task on an unavailable Executor with a clear reason. For a Container Executor the check runs
@@ -286,7 +286,7 @@ schema declares, then the shared prepare script and environment repeater.
 
 - If a Remote host becomes unreachable mid-run, the affected Session fails with a clear
   reason and can be retried, without affecting other Executors.
-- If a Container cannot be provisioned, the Task fails before starting the Agent, with an
+- If a Container cannot be provisioned, the Task fails before starting the Harness, with an
   actionable message — the check runs before the repository is prepared, so nothing has been
   cloned by the time it reports.
 - If the orchestrator dies while a container is running, nothing disposes of it at the time. The
@@ -301,7 +301,7 @@ schema declares, then the shared prepare script and environment repeater.
 
 ## Related
 
-- [F05 — Agent & Executor Profiles](./F05-agent-executor-profiles.md)
+- [F05 — Harness & Executor Profiles](./F05-harness-executor-profiles.md)
 - [F06 — Authentication & Billing Modes](./F06-authentication-billing.md)
 - [F08 — Worktrees & Repositories](./F08-workspaces-repositories.md)
 - [0023 — Drive the container Executor through the `docker` CLI](../decisions/0023-docker-executor-cli.md)

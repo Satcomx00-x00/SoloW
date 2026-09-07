@@ -39,9 +39,9 @@ import { WHOLE_PAGE } from "@/lib/paged";
 import { taskActionMessage } from "@/lib/task-errors";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
-import { AgentComposer } from "./agent-composer";
 import { ChangesPanel } from "./changes-panel";
 import { DeleteTaskAction } from "./delete-task-action";
+import { HarnessComposer } from "./harness-composer";
 import { LaunchTaskDialog, useWorkflowChoices } from "./launch-task-dialog";
 import { type PermissionRequest, PermissionRequestDialog } from "./permission-request-dialog";
 import { groupChanges, summariseConsequences } from "./review-groups";
@@ -54,7 +54,7 @@ import { buildTranscript, openPermission, type PermissionRow } from "./transcrip
 
 /** Shared empty array, so "no events yet" keeps a stable identity across renders. */
 /**
- * What the agent said about how its run ended, in the header.
+ * What the harness said about how its run ended, in the header.
  *
  * `changes_ready` reaches this only once the Task has left `running` — before that the same
  * outcome renders as the "Open review" control above.
@@ -89,13 +89,13 @@ const STREAM_TONE: Record<string, string> = {
 
 /** What the hub said about the last thing we sent, in words an operator can act on. */
 const ACK_MESSAGE: Record<string, string> = {
-  agent_not_running: "No agent is running for this task. Nothing was sent.",
+  agent_not_running: "No harness is running for this task. Nothing was sent.",
   frame_not_authorized: "This connection is not allowed to steer that task.",
   frame_malformed: "The message could not be read by the orchestrator.",
-  // The agent is still running in all three of these; only the question is over.
+  // The harness is still running in all three of these; only the question is over.
   permission_not_pending: "That request was already settled — by the deadline, or by someone else.",
-  permission_option_unknown: "The agent no longer offers that option.",
-  permission_unsupported: "This agent's protocol has no permission channel to answer on.",
+  permission_option_unknown: "The harness no longer offers that option.",
+  permission_unsupported: "This harness's protocol has no permission channel to answer on.",
 };
 
 /** Live connection indicator: a dot that pulses only while the stream is actually open. */
@@ -117,7 +117,7 @@ function StreamIndicator({ status }: { status: string }) {
   );
 }
 
-/** The IDE-like Task workspace: agent terminal + git changes + conversation + review gate. */
+/** The IDE-like Task workspace: harness terminal + git changes + conversation + review gate. */
 export function TaskWorkspace({ taskId }: { taskId: string }) {
   const utils = trpc.useUtils();
   const task = trpc.task.get.useQuery({ id: taskId });
@@ -131,12 +131,12 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   );
 
   /**
-   * Live agent stream (TASK-018). Output arrives as the agent produces it; this is about
+   * Live harness stream (TASK-018). Output arrives as the harness produces it; this is about
    * everything *around* the output, which the transcript does not carry.
    *
    * The rule the page needs is that nothing here is ever true only after a reload. Two things
    * broke it. The orchestrator announced state changes on the board channel alone, so a run that
-   * finished left this page — the one dedicated to that Task — saying the agent was still
+   * finished left this page — the one dedicated to that Task — saying the harness was still
    * writing; that is fixed on the publishing side. And this handler never invalidated
    * `session.get`, which is where the diffs, the summaries and the persisted events live: a
    * `diff` event arrived, the Task refetched, and the Changes panel beside it kept showing the
@@ -207,7 +207,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   const rows = useMemo(() => buildTranscript(events, live.events), [events, live.events]);
 
   /**
-   * The agent's own plan, read from both of the page's sources for the same reason `rows` is.
+   * The harness's own plan, read from both of the page's sources for the same reason `rows` is.
    *
    * `session.get` holds the list as it stood when the query ran and the socket holds everything
    * since, so a `TodoWrite` mid-run has to reach the panel from the stream or the plan would sit
@@ -270,7 +270,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
    *
    * A mutation of its own rather than `move`, for the reason the board gives: moving is a
    * gesture the state machine may refuse, and this asserts the work is ready to judge — refused
-   * server-side when the agent has not said so.
+   * server-side when the harness has not said so.
    */
   const submitForReview = trpc.task.submitForReview.useMutation({
     onSuccess: () => {
@@ -279,13 +279,13 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
     },
   });
   /**
-   * Starting the agent, from the same arrow that would otherwise only have written the state.
+   * Starting the harness, from the same arrow that would otherwise only have written the state.
    *
    * `task.move` into `running` is accepted by the server — the transition is legal — and does
    * nothing else: no Session is created and no launch is published. The Task page has no Launch
    * button of its own, so the forward arrow on a Ready Task is the obvious way to begin a run
-   * here, and a bare move would leave a Task that reads as Running with no agent behind it,
-   * holding one of the Agent Profile's concurrency slots and with no way back — `running` has no
+   * here, and a bare move would leave a Task that reads as Running with no harness behind it,
+   * holding one of the Harness Profile's concurrency slots and with no way back — `running` has no
    * legal retreat, and `task.launch` refuses a Task that is no longer Ready.
    */
   const launch = trpc.task.launch.useMutation({
@@ -349,12 +349,12 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   const elided = summaries.reduce((n, s) => n + s.eventCount, 0);
   const inReview = t.state === "review";
   const canDecide = inReview && !decide.isPending;
-  // Steering only makes sense while an agent is actually working; once the Task is in review
+  // Steering only makes sense while a harness is actually working; once the Task is in review
   // the way to ask for more is "request changes", which is recorded (Principle I).
   const isRunning = t.state === "running";
   const canSteer = isRunning && live.status === "open";
   // The primary attachment's branch (issue #7). The header has room for one line, so it names
-  // the repository the agent actually ran in; the Changes tab is where every repository's own
+  // the repository the harness actually ran in; the Changes tab is where every repository's own
   // branch and change is shown.
   const primary = t.repositories.length > 0 ? primaryTaskRepository(t.repositories) : null;
   const branch = primary?.resultBranch ?? latest?.diffRef ?? null;
@@ -368,7 +368,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   // The inline card in the transcript is the primary surface for a permission: the modal traps
   // focus, so with it open an operator cannot read the tool call they are being asked about.
   // The modal is kept only as the escalation — when the question is on a panel the operator is
-  // not looking at, something has to interrupt them, because an agent is blocked on the answer.
+  // not looking at, something has to interrupt them, because a harness is blocked on the answer.
   const permissionOutOfView = permission !== null && tab !== "terminal";
 
   const runDecision = (decision: "approve" | "reject" | "request_changes") => {
@@ -381,7 +381,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
    *
    * Two of the steps are not the plain state write they look like. Starting a Ready Task is a
    * launch, and goes through the mutation that actually creates a Session. Leaving Review throws
-   * something away — the agent's proposed changes are abandoned and no review decision is
+   * something away — the harness's proposed changes are abandoned and no review decision is
    * recorded — so it asks first, in the words the board asks in (TASK-022) when the move is
    * backwards, and in its own words for Done, where the thing being lost is the commit.
    */
@@ -411,7 +411,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
 
   return (
     <div className="flex h-full flex-col">
-      {/* The agent asking for something it cannot decide alone (issue #58, AC-4). */}
+      {/* The harness asking for something it cannot decide alone (issue #58, AC-4). */}
       <PermissionRequestDialog
         request={permissionOutOfView && permission ? toDialogRequest(permission) : null}
         onChoose={(requestId, optionId) => {
@@ -427,7 +427,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
         learned what it means there should not have to learn it again here. Forwards is a
         different act and cannot borrow that wording — pointing someone who just pressed "Move to
         Done" at Reject describes the opposite of what they asked for. What Done actually skips is
-        the approve step: `task.move` writes the state and nothing else, so the agent's branch is
+        the approve step: `task.move` writes the state and nothing else, so the harness's branch is
         never committed and the run is left waiting at a gate no decision ever reaches.
       */}
       <LaunchTaskDialog
@@ -449,8 +449,8 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
         }
         description={
           pendingMove === "done"
-            ? "No review decision is recorded and nothing is committed — the agent's changes stay on their branch and the task cannot be moved again. To accept the work and commit it, use Approve below."
-            : "The agent's proposed changes are left behind and no review decision is recorded. To reject the work properly, and keep the audit trail, use Reject below."
+            ? "No review decision is recorded and nothing is committed — the harness's changes stay on their branch and the task cannot be moved again. To accept the work and commit it, use Approve below."
+            : "The harness's proposed changes are left behind and no review decision is recorded. To reject the work properly, and keep the audit trail, use Reject below."
         }
         confirmLabel="Move it anyway"
         onConfirm={() => {
@@ -573,21 +573,21 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
                 rows={rows}
                 elided={elided}
                 // What lets the panel say "launching" over an empty terminal and name what the
-                // agent is doing under a quiet one — both are only true while a run is alive.
+                // harness is doing under a quiet one — both are only true while a run is alive.
                 isRunning={isRunning}
                 onRespondPermission={live.respondPermission}
-                // Answering means reaching a live agent, so the control is offered only while
+                // Answering means reaching a live harness, so the control is offered only while
                 // there is one: a finished run keeps its widgets as a record.
                 {...(isRunning ? { onRespondWidget: live.respondWidget } : {})}
               />
 
-              <AgentComposer
+              <HarnessComposer
                 value={input}
                 onChange={setInput}
                 onSubmit={submitInput}
                 onStop={() => {
                   setAck(null);
-                  live.stopAgent();
+                  live.stopHarness();
                 }}
                 canSteer={canSteer}
                 isRunning={isRunning}
@@ -633,18 +633,18 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
               />
 
               {/*
-                Plan under result, in the column that is already about what the agent did. The
+                Plan under result, in the column that is already about what the harness did. The
                 two answer the reviewer's question from opposite ends — the diff says what has
-                landed, the checklist says what the agent still believes is outstanding — and a
+                landed, the checklist says what the harness still believes is outstanding — and a
                 reviewer looking at a half-finished change needs to know which of the two they
                 are seeing. It sits below because the change is what the panel is for; the plan
                 is context for it.
 
-                Nothing at all when the agent has published no list: `TodoList` renders `null` on
+                Nothing at all when the harness has published no list: `TodoList` renders `null` on
                 an empty one, and a heading over nothing would claim a plan exists.
               */}
               {todos.length > 0 ? (
-                <section aria-label="Agent plan" className="mt-4">
+                <section aria-label="Harness plan" className="mt-4">
                   <h2 className="mb-2 flex items-center gap-2 font-medium text-sm">
                     <ListChecks className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
                     Plan
@@ -702,7 +702,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
               <ConfirmAction
                 disabled={!canDecide}
                 title="Reject these changes?"
-                description="The agent's work is discarded and the worktree is torn down. This cannot be undone. The task returns to Ready and would have to run again from scratch."
+                description="The harness's work is discarded and the worktree is torn down. This cannot be undone. The task returns to Ready and would have to run again from scratch."
                 confirmLabel="Discard the changes"
                 onConfirm={() => runDecision("reject")}
                 trigger={
@@ -725,7 +725,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
           </div>
         ) : (
           <p className="text-muted-foreground text-sm">
-            Review actions become available when the agent submits changes and the task enters{" "}
+            Review actions become available when the harness submits changes and the task enters{" "}
             <span className="font-medium text-foreground">Review</span>.
           </p>
         )}

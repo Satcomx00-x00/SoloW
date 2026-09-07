@@ -1,5 +1,5 @@
 /**
- * Reading a `SKILL.md` the way both agent runtimes do (spec F24): YAML-ish frontmatter with a
+ * Reading a `SKILL.md` the way both harnesses do (spec F24): YAML-ish frontmatter with a
  * `name` and a `description`, then the playbook itself.
  *
  * Deliberately not a YAML parser. The two keys a Skill needs are one-line scalars, and an author

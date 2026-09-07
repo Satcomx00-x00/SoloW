@@ -17,24 +17,24 @@ deliberately implementation-agnostic: it names responsibilities, not code.
   [Decision 0013](../decisions/0013-nextjs-web-framework.md)). It talks to the backend over
   **tRPC** for queries and mutations, served through Next.js Route Handlers with a generated
   `openapi.json` describing that HTTP API, and over a **WebSocket** channel for the live,
-  bidirectional stream — agent activity and state changes outward, terminal input and steering
+  bidirectional stream — harness activity and state changes outward, terminal input and steering
   inward (see [Decision 0011](../decisions/0011-frontend-backend-protocol.md)). The WebSocket
   channel and the Orchestration Component run in a **separate always-on service**, since
-  serverless-style Next.js does not host long-lived connections or agent processes.
+  serverless-style Next.js does not host long-lived connections or harness processes.
 
-- **Orchestration Component** — A long-lived component that launches and supervises agents,
+- **Orchestration Component** — A long-lived component that launches and supervises harnesses,
   provisions and cleans up working copies, applies billing-mode and credential rules, and
-  streams agent activity back to the application. It is where the durable orchestration
+  streams harness activity back to the application. It is where the durable orchestration
   engine runs.
 
 - **State Store** — The authoritative record of Workspaces, Issues, Tasks, Workflows, Runs,
   Sessions, Profiles, Integrations, and secrets. Chosen by deployment
   ([Decision 0008](../decisions/0008-data-store-strategy.md)).
 
-- **Agent Connections** — The standard-protocol boundary to external agent tools
+- **Harness Connections** — The standard-protocol boundary to external harness tools
   ([Decision 0003](../decisions/0003-agent-connection-protocol.md)).
 
-- **Execution Environments** — The local, container, remote, and cloud runtimes where agents
+- **Execution Environments** — The local, container, remote, and cloud runtimes where harnesses
   actually run ([F07](../features/F07-execution-environments.md)).
 
 ### Container summary (textual C4 Container view)
@@ -42,7 +42,7 @@ deliberately implementation-agnostic: it names responsibilities, not code.
 > Interactive Application ↔ State Store
 > Interactive Application ↔ (live updates) ↔ Orchestration Component
 > Orchestration Component ↔ State Store
-> Orchestration Component → Agent Connections → agents inside Execution Environments
+> Orchestration Component → Harness Connections → harnesses inside Execution Environments
 > Orchestration Component → provisions Worktrees inside Execution Environments
 
 ## Level 2 — Components (responsibilities within the parts)
@@ -74,7 +74,7 @@ deliberately implementation-agnostic: it names responsibilities, not code.
 
 ## Responsibility boundaries
 
-- The Interactive Application never launches or holds agent processes; it directs and
+- The Interactive Application never launches or holds harness processes; it directs and
   observes them through the Orchestration Component.
 - A feature module never reaches into a surface it does not own; it contributes to one, and a
   failing contribution costs its own slot rather than the surface (F19).

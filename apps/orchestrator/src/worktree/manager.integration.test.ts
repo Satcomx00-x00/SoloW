@@ -73,15 +73,15 @@ describe("provisionWorktree lifecycle (local_path)", () => {
   });
 
   it("detects uncommitted changes then commits them", async () => {
-    writeFileSync(join(wt.path, "agent-output.txt"), "the agent wrote this\n");
+    writeFileSync(join(wt.path, "harness-output.txt"), "the harness wrote this\n");
     expect(await hasChanges(executor, wt.path)).toBe(true);
 
-    await commitWorktree(executor, wt.path, "agent changes");
+    await commitWorktree(executor, wt.path, "harness changes");
     // After committing, the tree is clean again.
     expect(await hasChanges(executor, wt.path)).toBe(false);
 
     const log = await $`git -C ${wt.path} log -1 --pretty=%s`.quiet().text();
-    expect(log.trim()).toBe("agent changes");
+    expect(log.trim()).toBe("harness changes");
   });
 
   it("removes the worktree on cleanup", async () => {
@@ -92,7 +92,7 @@ describe("provisionWorktree lifecycle (local_path)", () => {
 
 /**
  * The diff a reviewer is shown (TASK-022). Against real git, because the thing most likely to be
- * wrong is which changes git reports — in particular that a file the agent *created* shows up at
+ * wrong is which changes git reports — in particular that a file the harness *created* shows up at
  * all, which plain `git diff` will not tell you.
  *
  * Each case gets its own worktree. Sharing one made the tests order-dependent: a case that
@@ -121,16 +121,16 @@ describe("diffWorktree", () => {
     }
   });
 
-  it("reports nothing when the agent changed nothing", async () => {
+  it("reports nothing when the harness changed nothing", async () => {
     const diff = await diffWorktree(executor, (await freshWorktree()).path);
     expect(diff.files).toEqual([]);
     expect(diff.patch).toBe("");
     expect(diff.truncated).toBe(false);
   });
 
-  it("includes a file the agent created, not just ones it edited", async () => {
+  it("includes a file the harness created, not just ones it edited", async () => {
     // An untracked file is invisible to `git diff`, so without the intent-to-add step the most
-    // interesting change an agent makes — a new module — would be missing from the review.
+    // interesting change a harness makes — a new module — would be missing from the review.
     const wt = await freshWorktree();
     writeFileSync(join(wt.path, "new-module.ts"), "export const answer = 42;\n");
 
@@ -177,21 +177,21 @@ describe("diffWorktree", () => {
 
   it("leaves the worktree committable, so intent-to-add did not break the approve path", async () => {
     const wt = await freshWorktree();
-    writeFileSync(join(wt.path, "added-by-agent.ts"), "export const x = 1;\n");
+    writeFileSync(join(wt.path, "added-by-harness.ts"), "export const x = 1;\n");
     await diffWorktree(executor, wt.path);
 
     await commitWorktree(executor, wt.path, "SoloW: diff test");
     expect(await hasChanges(executor, wt.path)).toBe(false);
     const shown = await $`git -C ${wt.path} show --name-only --format=`.quiet().text();
-    expect(shown).toContain("added-by-agent.ts");
+    expect(shown).toContain("added-by-harness.ts");
   });
 });
 
 /**
- * Adopting the worktree the agent created (task TASK-014).
+ * Adopting the worktree the harness created (task TASK-014).
  *
  * `claude --worktree` makes the directory, so SoloW no longer picks it — it confirms with
- * git that the path the agent reported really is a worktree of this repository, and refuses
+ * git that the path the harness reported really is a worktree of this repository, and refuses
  * anything else. That refusal is the isolation guarantee (Principle II): committing from a
  * directory we could not verify would be worse than failing the Task.
  */
@@ -206,13 +206,13 @@ describe("prepareRepository and adoptWorktree", () => {
     });
 
     expect(prepared).toBe(repoDir);
-    // The agent makes the worktree, so preparing must not have made one.
+    // The harness makes the worktree, so preparing must not have made one.
     expect(await listWorktrees(executor, repoDir)).toHaveLength(before.length);
   });
 
-  it("fails before any agent starts when the location is not a repository", async () => {
+  it("fails before any harness starts when the location is not a repository", async () => {
     // TASK-015: an unusable repository fails the Task up front rather than surfacing later as a
-    // confusing agent error.
+    // confusing harness error.
     const notARepo = mkdtempSync(join(tmpdir(), "gc-notrepo-"));
     await expect(
       prepareRepository(executor, {
@@ -225,34 +225,34 @@ describe("prepareRepository and adoptWorktree", () => {
     rmSync(notARepo, { recursive: true, force: true });
   });
 
-  it("adopts a worktree the agent created, reading its branch from git", async () => {
+  it("adopts a worktree the harness created, reading its branch from git", async () => {
     // Stands in for what `claude --worktree solow-task-9` does.
-    const agentPath = join(worktreeRoot, "solow-task-9");
-    await $`git -C ${repoDir} worktree add -b solow-task-9 ${agentPath}`.quiet();
+    const harnessPath = join(worktreeRoot, "solow-task-9");
+    await $`git -C ${repoDir} worktree add -b solow-task-9 ${harnessPath}`.quiet();
 
-    const adopted = await adoptWorktree(executor, repoDir, agentPath);
-    expect(adopted.path).toBe(agentPath);
+    const adopted = await adoptWorktree(executor, repoDir, harnessPath);
+    expect(adopted.path).toBe(harnessPath);
     expect(adopted.branch).toBe("solow-task-9");
     expect(adopted.repoPath).toBe(repoDir);
 
-    await cleanupWorktree(executor, repoDir, agentPath);
+    await cleanupWorktree(executor, repoDir, harnessPath);
   });
 
-  it("removes a worktree the agent locked and never unlocked", async () => {
+  it("removes a worktree the harness locked and never unlocked", async () => {
     /*
      * What Claude Code actually leaves behind. It creates its own worktree and locks it with
      * its session pid, then exits without unlocking — so teardown meets a lock held by a dead
      * process. `git worktree remove --force` refuses a locked worktree outright, which failed
-     * the cleanup step of every run the agent had worktreed for itself, after the Task had
+     * the cleanup step of every run the harness had worktreed for itself, after the Task had
      * already been marked done.
      */
-    const agentPath = join(worktreeRoot, "solow-task-locked");
-    await $`git -C ${repoDir} worktree add -b solow-task-locked ${agentPath}`.quiet();
-    await $`git -C ${repoDir} worktree lock --reason ${"claude session solow-task-locked (pid 999999)"} ${agentPath}`.quiet();
+    const harnessPath = join(worktreeRoot, "solow-task-locked");
+    await $`git -C ${repoDir} worktree add -b solow-task-locked ${harnessPath}`.quiet();
+    await $`git -C ${repoDir} worktree lock --reason ${"claude session solow-task-locked (pid 999999)"} ${harnessPath}`.quiet();
 
-    await cleanupWorktree(executor, repoDir, agentPath);
+    await cleanupWorktree(executor, repoDir, harnessPath);
 
-    expect(existsSync(agentPath)).toBe(false);
+    expect(existsSync(harnessPath)).toBe(false);
     // Gone from git's own bookkeeping too, not merely deleted from disk — a worktree removed
     // behind git's back leaves a stale entry that breaks the next `worktree add` on that name.
     const listed = await $`git -C ${repoDir} worktree list`.quiet();
@@ -260,21 +260,21 @@ describe("prepareRepository and adoptWorktree", () => {
   });
 
   it("refuses a path that is not a worktree of this repository", async () => {
-    // An agent working somewhere unverified has not been isolated; committing from there could
+    // A harness working somewhere unverified has not been isolated; committing from there could
     // mix another Task's changes into this one's branch.
     const stray = mkdtempSync(join(tmpdir(), "gc-stray-"));
     await expect(adoptWorktree(executor, repoDir, stray)).rejects.toThrow(/refusing to use it/);
     rmSync(stray, { recursive: true, force: true });
   });
 
-  it("refuses when the agent reported no workspace at all", async () => {
+  it("refuses when the harness reported no workspace at all", async () => {
     await expect(adoptWorktree(executor, repoDir, null)).rejects.toThrow(
       /did not report a workspace/,
     );
   });
 
   it("lists concurrent worktrees separately, which is what makes parallel Tasks safe", async () => {
-    // Two Tasks, one repository: each agent gets its own directory and its own branch.
+    // Two Tasks, one repository: each harness gets its own directory and its own branch.
     const a = join(worktreeRoot, "solow-task-a");
     const b = join(worktreeRoot, "solow-task-b");
     await $`git -C ${repoDir} worktree add -b solow-task-a ${a}`.quiet();
@@ -330,7 +330,7 @@ describe("provisionWorktree is idempotent for the same Task", () => {
   it("retries a failed Task onto the worktree it already had, without discarding its work", async () => {
     // A hard failure leaves both the directory and the branch in place, and `task.retry` is
     // explicitly allowed from `failed`. Reusing the worktree is what makes the retry a
-    // continuation rather than a collision — and the partial work is the agent's, not ours to
+    // continuation rather than a collision — and the partial work is the harness's, not ours to
     // throw away (Principle I).
     const first = await provisionWorktree(executor, params("retry-1"));
     writeFileSync(join(first.path, "half-finished.txt"), "the failed run got this far\n");

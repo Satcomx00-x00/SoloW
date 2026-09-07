@@ -66,7 +66,7 @@ describe("TaskStateBadge", () => {
     expect(badgeFor("done").getAttribute("data-task-state")).toBe("done");
   });
 
-  it("spins only while an agent is actually working", () => {
+  it("spins only while a harness is actually working", () => {
     // A permanent spinner on a finished Task would report work that is not happening.
     expect(badgeFor("running").querySelector("svg")?.getAttribute("class")).toContain(
       "spinner-ambient",

@@ -63,17 +63,17 @@ export interface TaskPreset {
 }
 
 /**
- * The repository the agent is started in stays a single Select, and any others are ticked
+ * The repository the harness is started in stays a single Select, and any others are ticked
  * beside it (issue #7).
  *
- * A flat multi-select would be the obvious shape and the wrong one: the agent process gets
+ * A flat multi-select would be the obvious shape and the wrong one: the harness process gets
  * exactly one working directory, so one attachment is materially different from the rest, and a
  * form that treated them as interchangeable would hide the one thing the Owner needs to decide.
  */
 const taskFormSchema = z.object({
   title: z.string().min(1, "Enter a task title"),
   issueId: z.string().min(1, "Select an issue"),
-  agentProfileId: z.string().min(1, "Select an agent profile"),
+  agentProfileId: z.string().min(1, "Select a harness profile"),
   executorProfileId: z.string().min(1, "Select an executor"),
   repositoryId: z.string().min(1, "Select a repository"),
   baseRef: z.string(),
@@ -86,7 +86,7 @@ type TaskFormValues = z.infer<typeof taskFormSchema>;
  * The Issue the Task is being opened against, shown in full.
  *
  * The picker above is a Select, and a Select shows one line: the title, truncated. So the Owner
- * was choosing the brief for an agent run from a fragment of it, and had to open the Issue in
+ * was choosing the brief for a harness run from a fragment of it, and had to open the Issue in
  * another tab to read what they had just picked. Everything the Issue actually carries is here
  * instead — the body as written, its labels, its status, and the link back to the provider.
  *
@@ -204,7 +204,7 @@ export function CreateTaskDialog({
   // "missingConfig" gate below). The picker itself reads from `issues` (filtered), so a
   // Repository with zero Issues narrows the picker to empty without hiding the whole form.
   const allIssues = trpc.issue.list.useQuery({ ...WHOLE_PAGE });
-  const agents = trpc.profile.agent.list.useQuery({ ...WHOLE_PAGE });
+  const harnesses = trpc.profile.agent.list.useQuery({ ...WHOLE_PAGE });
   const executors = trpc.profile.executor.list.useQuery({ ...WHOLE_PAGE });
   const repos = trpc.repository.list.useQuery({ ...WHOLE_PAGE });
 
@@ -260,7 +260,7 @@ export function CreateTaskDialog({
 
   const missingConfig =
     (allIssues.data?.items.length ?? 0) === 0 ||
-    (agents.data?.items.length ?? 0) === 0 ||
+    (harnesses.data?.items.length ?? 0) === 0 ||
     (executors.data?.items.length ?? 0) === 0 ||
     (repos.data?.items.length ?? 0) === 0;
 
@@ -319,7 +319,7 @@ export function CreateTaskDialog({
         <DialogHeader>
           <DialogTitle>New task</DialogTitle>
           <DialogDescription>
-            Assign an agent, executor, and repository to run a task.
+            Assign a harness, executor, and repository to run a task.
           </DialogDescription>
         </DialogHeader>
         {missingConfig ? (
@@ -339,7 +339,7 @@ export function CreateTaskDialog({
               </>
             ) : (
               <>
-                Configure a secret, an agent and executor profile, and a repository in{" "}
+                Configure a secret, a harness and executor profile, and a repository in{" "}
                 <span className="font-medium text-foreground">Settings</span> first.
               </>
             )}
@@ -352,7 +352,7 @@ export function CreateTaskDialog({
                   create.mutate({
                     ...values,
                     // The chosen repository first: array order is what becomes `position`, and
-                    // position 0 is the worktree the agent is started in.
+                    // position 0 is the worktree the harness is started in.
                     repositories: [
                       { repositoryId, ...(baseRef.trim() ? { baseRef: baseRef.trim() } : {}) },
                       ...additionalRepositoryIds
@@ -418,9 +418,9 @@ export function CreateTaskDialog({
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   {selectField(
                     "agentProfileId",
-                    "Agent profile",
-                    "Select an agent",
-                    (agents.data?.items ?? []).map((a) => ({ id: a.id, label: a.name })),
+                    "Harness profile",
+                    "Select a harness",
+                    (harnesses.data?.items ?? []).map((a) => ({ id: a.id, label: a.name })),
                   )}
                   {selectField(
                     "executorProfileId",
@@ -477,7 +477,7 @@ export function CreateTaskDialog({
                           <FormItem>
                             <FormLabel>Also works in</FormLabel>
                             <p className="text-muted-foreground text-xs">
-                              Each gets its own worktree and its own branch. The agent runs in the
+                              Each gets its own worktree and its own branch. The harness runs in the
                               repository above and is told where the others are.
                             </p>
                             <div className="space-y-1.5">

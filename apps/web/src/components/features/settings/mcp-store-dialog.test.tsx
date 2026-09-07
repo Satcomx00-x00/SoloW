@@ -95,7 +95,7 @@ describe("McpStoreDialog", () => {
       expect(log.calls.find((c) => c.path === "library.mcp.create")?.input).toEqual({
         name: "memory",
         description:
-          "A knowledge-graph memory the agent reads and writes across runs, kept in a local file.",
+          "A knowledge-graph memory the harness reads and writes across runs, kept in a local file.",
         transport: {
           kind: "stdio",
           command: "npx",

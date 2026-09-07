@@ -192,7 +192,7 @@ export const issueRouter = router({
     .input(deleteIssueInput)
     .output(z.object({ id: z.string(), deletedTaskCount: z.number().int().nonnegative() }))
     .mutation(async ({ ctx, input }) => {
-      // Stopping happens here rather than in the DAL: reaching a running agent is an
+      // Stopping happens here rather than in the DAL: reaching a running harness is an
       // orchestrator hand-off, and the DAL is the one layer that stays pure database (it
       // re-checks the same condition inside its transaction, which is what makes this safe
       // rather than merely polite).
@@ -207,7 +207,7 @@ export const issueRouter = router({
             });
           } catch (cause) {
             // Nothing has been deleted at this point, so refusing leaves the Issue exactly as
-            // it was — the one outcome that cannot orphan a running agent.
+            // it was — the one outcome that cannot orphan a running harness.
             throw new TRPCError({
               code: "PRECONDITION_FAILED",
               message: IssueErrorCode.StopFailed,

@@ -30,7 +30,7 @@ function trigger(open: () => void) {
 }
 
 describe("DeleteTaskAction", () => {
-  it("states sessions, the running agent, unblocked tasks and the worktree left on disk", async () => {
+  it("states sessions, the running harness, unblocked tasks and the worktree left on disk", async () => {
     renderWithTrpc(
       <DeleteTaskAction taskId="task-1" taskTitle="Fix the latch" trigger={trigger} />,
       { "task.deletionImpact": () => IMPACT },
@@ -39,7 +39,7 @@ describe("DeleteTaskAction", () => {
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
 
     const body = await screen.findByText(/2 sessions/);
-    expect(body.textContent).toContain("The running agent will be stopped first");
+    expect(body.textContent).toContain("The running harness will be stopped first");
     expect(body.textContent).toContain("3 tasks waiting on this one will be unblocked");
     expect(body.textContent).toContain("1 git worktree will be left on disk");
   });
@@ -89,7 +89,7 @@ describe("DeleteTaskAction", () => {
     expect(sent).toEqual({ id: "task-3", force: true });
   });
 
-  it("says nothing was deleted when the agent could not be stopped", async () => {
+  it("says nothing was deleted when the harness could not be stopped", async () => {
     renderWithTrpc(
       <DeleteTaskAction taskId="task-4" taskTitle="Orchestrator down" trigger={trigger} />,
       {

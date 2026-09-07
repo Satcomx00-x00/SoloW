@@ -19,7 +19,7 @@ import { review, session, sessionEvent, task, workflow, workflowStep } from "./s
  *
  * This lives in `@solow/db` rather than in the web app's DAL because both apps run it: the web
  * app advances a Task when a person decides, and the orchestrator advances the same Task from
- * inside a durable step when an agent reports in (AC-2, AC-3, AC-5). `@solow/db` is the one
+ * inside a durable step when a harness reports in (AC-2, AC-3, AC-5). `@solow/db` is the one
  * package both already depend on, and the orchestrator cannot import from `apps/web` at all.
  *
  * Duplicating the transaction on the orchestrator's side was the alternative, and it is the worst
@@ -78,7 +78,7 @@ export function stepsToDto(rows: readonly WorkflowStepRow[]): WorkflowStepDto[] 
  *
  * READ-ONLY, and that matters: the resolved cursor is *not* written back. `taskHasBegunWorkflow`
  * in the web DAL reads exactly these columns to refuse a re-attach, so persisting a merely
- * resolved cursor would make "this Task has begun its pipeline" true for a Task whose agent has
+ * resolved cursor would make "this Task has begun its pipeline" true for a Task whose harness has
  * never started.
  */
 export async function loadTaskWorkflowRun(
@@ -286,7 +286,7 @@ export async function advanceTaskWorkflow(
 
       // The Step's own summary is held apart from the one it was given until the cursor actually
       // moves. A Step that reports in behind a closed gate is replayed later by a caller that no
-      // longer has the agent's words, so throwing them away here loses the next Step's context on
+      // longer has the harness's words, so throwing them away here loses the next Step's context on
       // the one path the state machine guarantees will be taken (AC-2). Resolved *before* the
       // rules run, because a branch condition reads it — and reads the parked copy on the replay
       // for exactly the reason it was parked.
@@ -350,7 +350,7 @@ export async function advanceTaskWorkflow(
  * cursor deliberately does not move — but the rejected attempt still wrote its summary into
  * `workflow_pending_handoff`, and that column is promoted into `workflow_handoff` by whatever
  * eventually completes the Step. Left in place, the work a human explicitly refused becomes the
- * inbound context of the next Step, presented to that agent as what it is building on.
+ * inbound context of the next Step, presented to that harness as what it is building on.
  *
  * Guarded on `workflow_step_id = fromStepId` for the same reason `advanceTaskWorkflow` refuses a
  * `StaleCursor`: the caller is a durable step that can re-run after the cursor has already moved

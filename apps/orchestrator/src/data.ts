@@ -12,10 +12,10 @@ import {
   type SessionLogEvent,
 } from "@solow/core/session-log";
 import {
-  agentCatalog,
-  agentProfile,
   type Db,
   executorProfile,
+  harnessCatalog,
+  harnessProfile,
   integration,
   issue,
   repository,
@@ -61,29 +61,29 @@ export interface TaskRepositoryBinding {
 
 export interface TaskRunContext {
   task: typeof task.$inferSelect;
-  /** The Issue the Task belongs to — its description is the agent's brief. */
+  /** The Issue the Task belongs to — its description is the harness's brief. */
   issue: typeof issue.$inferSelect;
-  agentProfile: typeof agentProfile.$inferSelect;
-  /** Which agent this Profile runs, and how — launch command and billing variables (#10). */
-  agentCatalog: typeof agentCatalog.$inferSelect;
-  /** Where the agent runs, and the per-kind configuration it runs under (issue #73). */
+  harnessProfile: typeof harnessProfile.$inferSelect;
+  /** Which harness this Profile runs, and how — launch command and billing variables (#10). */
+  harnessCatalog: typeof harnessCatalog.$inferSelect;
+  /** Where the harness runs, and the per-kind configuration it runs under (issue #73). */
   executorProfile: typeof executorProfile.$inferSelect;
   /** Every Repository the Task works in, in position order. Never empty (issue #7). */
   repositories: TaskRepositoryBinding[];
   secretCiphertext: string | null;
   /**
-   * Whether this Workspace has agent widgets on (`ff-agent-widgets`).
+   * Whether this Workspace has harness widgets on (`ff-agent-widgets`).
    *
    * Read here rather than at the point of use so the run makes one decision about it: the flag
-   * governs both halves of the feature — whether the brief teaches the agent to emit a widget,
+   * governs both halves of the feature — whether the brief teaches the harness to emit a widget,
    * and whether the output stream is scanned for one — and a run where those two disagreed
    * would either teach a language nothing listens to or listen for one nothing was taught.
    */
   widgetsEnabled: boolean;
   /**
-   * Whether this Workspace has the agent libraries on (`ff-agent-libraries`, spec F24): the
-   * MCP servers and Skills every agent is handed, and the ones a Workflow Step names. Off, the
-   * run hands the agent nothing from them, whatever the library rows say.
+   * Whether this Workspace has the harness libraries on (`ff-agent-libraries`, spec F24): the
+   * MCP servers and Skills every harness is handed, and the ones a Workflow Step names. Off, the
+   * run hands the harness nothing from them, whatever the library rows say.
    */
   librariesEnabled: boolean;
   /**
@@ -91,11 +91,11 @@ export interface TaskRunContext {
    *
    * Read here for the same one-decision-per-run reason `widgetsEnabled` is: the flag governs
    * whether the run walks a Step cursor at all, and a run that asked the flag twice could resolve
-   * a Step's Agent Profile on one pass and integrate at the Task's own Profile on the next.
+   * a Step's Harness Profile on one pass and integrate at the Task's own Profile on the next.
    *
-   * It does *not* change anything else on this context. `agentProfile`, `agentCatalog` and
+   * It does *not* change anything else on this context. `harnessProfile`, `harnessCatalog` and
    * `secretCiphertext` stay the **Task's** own, because roughly a quarter of the lifecycle reads
-   * `ctx.agentProfile` and a Task with no Workflow must not move at all — the Step's binding is
+   * `ctx.harnessProfile` and a Task with no Workflow must not move at all — the Step's binding is
    * held in the loop's `RunLeg` instead, where it is local and reversible.
    */
   workflowsEnabled: boolean;
@@ -122,17 +122,21 @@ export async function loadTaskRunContext(
 
   const [ap] = await db
     .select()
-    .from(agentProfile)
-    .where(and(eq(agentProfile.workspaceId, workspaceId), eq(agentProfile.id, t.agentProfileId)))
+    .from(harnessProfile)
+    .where(
+      and(eq(harnessProfile.workspaceId, workspaceId), eq(harnessProfile.id, t.agentProfileId)),
+    )
     .limit(1);
-  if (!ap) throw new Error(`agent profile ${t.agentProfileId} not found`);
+  if (!ap) throw new Error(`harness profile ${t.agentProfileId} not found`);
 
   const [cat] = await db
     .select()
-    .from(agentCatalog)
-    .where(and(eq(agentCatalog.workspaceId, workspaceId), eq(agentCatalog.id, ap.agentCatalogId)))
+    .from(harnessCatalog)
+    .where(
+      and(eq(harnessCatalog.workspaceId, workspaceId), eq(harnessCatalog.id, ap.agentCatalogId)),
+    )
     .limit(1);
-  if (!cat) throw new Error(`agent catalog entry ${ap.agentCatalogId} not found`);
+  if (!cat) throw new Error(`harness catalog entry ${ap.agentCatalogId} not found`);
 
   const [ep] = await db
     .select()
@@ -147,7 +151,7 @@ export async function loadTaskRunContext(
   if (!ep) throw new Error(`executor profile ${t.executorProfileId} not found`);
 
   // Ordered by position, so index 0 is the primary attachment and `primaryTaskRepository` and
-  // this list agree about which worktree the agent is started in (issue #7).
+  // this list agree about which worktree the harness is started in (issue #7).
   const attachments = await db
     .select({ attachment: taskRepository, repository })
     .from(taskRepository)
@@ -191,8 +195,8 @@ export async function loadTaskRunContext(
   return {
     task: t,
     issue: iss,
-    agentProfile: ap,
-    agentCatalog: cat,
+    harnessProfile: ap,
+    harnessCatalog: cat,
     executorProfile: ep,
     repositories,
     widgetsEnabled: ws?.flags?.["ff-agent-widgets"] === true,
@@ -295,7 +299,7 @@ export async function setTaskRepositoryResultBranch(
 }
 
 /**
- * Write down what the agent said about how its run ended (the completion gate).
+ * Write down what the harness said about how its run ended (the completion gate).
  *
  * A report, never a decision: this does not move the Task, and it must not. The party that did
  * the work is not the party that signs it off (Principle I) — what this buys is that the board
@@ -326,7 +330,7 @@ export async function recordTaskCompletion(
  * Forget a previous run's declaration, at the moment a new run starts.
  *
  * Without this, a Task sent back for changes would keep the green "finished" control from the
- * round before while its agent is mid-way through the next one — the board would be offering to
+ * round before while its harness is mid-way through the next one — the board would be offering to
  * review work that is being rewritten as you look at it.
  */
 export async function clearTaskCompletion(
@@ -349,7 +353,7 @@ export async function clearTaskCompletion(
  * Record that a Task has a working copy on disk, and where (Principle II).
  *
  * Written at the moment the lifecycle learns the path — at provision for a worktree SoloW
- * created, at adoption for one the agent created — because until then there is nothing truthful
+ * created, at adoption for one the harness created — because until then there is nothing truthful
  * to record. The table was read in two places and written in none, so every caller asking "does
  * this Task still hold a working copy" got the same answer, `no`, whatever was on disk.
  *
@@ -414,7 +418,7 @@ export async function markWorktreesRemoved(
  * Read here as well as in the web DAL, and deliberately so. `review.decide` refuses a
  * `request_changes` that would start a blocked Task, but that refusal lives at the API boundary,
  * and the transition into `running` is applied *here* — the durable engine is what actually
- * starts the agent (Principle III). A guard on the API only holds while the API is the sole
+ * starts the harness (Principle III). A guard on the API only holds while the API is the sole
  * producer of `review.decided`; a guard at the transition holds whatever publishes it.
  */
 export async function unsatisfiedDependencyIds(
@@ -431,41 +435,43 @@ export async function unsatisfiedDependencyIds(
 }
 
 /**
- * Everything needed to probe one Agent Profile: what to launch, and the credential to launch it
+ * Everything needed to probe one Harness Profile: what to launch, and the credential to launch it
  * with (2026-08-28).
  *
  * Deliberately not `loadTaskRunContext`: a probe has no Task, no Issue and no Repository, and
- * requiring them would mean an Owner could not check an agent until they had already committed
+ * requiring them would mean an Owner could not check a harness until they had already committed
  * work to it — which is the ordering the probe exists to fix. Every lookup is scoped to the
  * Workspace, so a Profile id from another tenant reads as absent rather than as someone else's
- * agent (Principle V).
+ * harness (Principle V).
  *
  * It has a second caller now, and the name is kept rather than widened because the probe router
  * is still the first: the Workflow run loop calls this from *inside* `agent-run-${round}` to read
- * one Step's `secretCiphertext`, which `loadWorkflowStepAgents` deliberately does not carry (see
+ * one Step's `secretCiphertext`, which `loadWorkflowStepHarnesses` deliberately does not carry (see
  * there). Both callers want the same thing — one Profile, resolved and Workspace-scoped — so the
  * second one is a second call site rather than a second function.
  */
-export async function loadAgentProbeContext(
+export async function loadHarnessProbeContext(
   db: Db,
   workspaceId: string,
   agentProfileId: string,
 ): Promise<{
-  agentProfile: typeof agentProfile.$inferSelect;
-  agentCatalog: typeof agentCatalog.$inferSelect;
+  harnessProfile: typeof harnessProfile.$inferSelect;
+  harnessCatalog: typeof harnessCatalog.$inferSelect;
   secretCiphertext: string | null;
 } | null> {
   const [ap] = await db
     .select()
-    .from(agentProfile)
-    .where(and(eq(agentProfile.workspaceId, workspaceId), eq(agentProfile.id, agentProfileId)))
+    .from(harnessProfile)
+    .where(and(eq(harnessProfile.workspaceId, workspaceId), eq(harnessProfile.id, agentProfileId)))
     .limit(1);
   if (!ap) return null;
 
   const [cat] = await db
     .select()
-    .from(agentCatalog)
-    .where(and(eq(agentCatalog.workspaceId, workspaceId), eq(agentCatalog.id, ap.agentCatalogId)))
+    .from(harnessCatalog)
+    .where(
+      and(eq(harnessCatalog.workspaceId, workspaceId), eq(harnessCatalog.id, ap.agentCatalogId)),
+    )
     .limit(1);
   if (!cat) return null;
 
@@ -475,22 +481,22 @@ export async function loadAgentProbeContext(
     .where(and(eq(secret.workspaceId, workspaceId), eq(secret.id, ap.secretId)))
     .limit(1);
 
-  return { agentProfile: ap, agentCatalog: cat, secretCiphertext: sec?.ciphertext ?? null };
+  return { harnessProfile: ap, harnessCatalog: cat, secretCiphertext: sec?.ciphertext ?? null };
 }
 
 /**
- * The Agent Profile behind every Step of a Workflow, resolved once per run (issue #5, AC-3).
+ * The Harness Profile behind every Step of a Workflow, resolved once per run (issue #5, AC-3).
  *
  * Read in one durable step ahead of the loop rather than per Step, because the pre-clone gates
  * need the whole set before anything is cloned: the executor preflight probes every binary the
  * pipeline can spawn, and the runner gate refuses a pipeline naming a protocol this build cannot
  * drive. Asking per Step would discover the fourth Step's missing binary after three Steps' worth
- * of agent time had already been paid for.
+ * of harness time had already been paid for.
  *
  * **No `secretCiphertext`, deliberately.** `step.run` memoizes its return value into Inngest's
  * durable store, and `load` already puts one decryptable ciphertext there; carrying one per Step
  * would multiply an existing exposure to buy nothing (Principle IV). The Step's credential is
- * read instead inside `agent-run-${round}`, at the point of use, through `loadAgentProbeContext`
+ * read instead inside `agent-run-${round}`, at the point of use, through `loadHarnessProbeContext`
  * — already exported, already Workspace-scoped, and the only field taken from it there is
  * `.secretCiphertext`.
  *
@@ -498,30 +504,30 @@ export async function loadAgentProbeContext(
  * caller pairs by `agentProfileId` rather than by position. A Profile or catalog row that is
  * absent — deleted under a live pipeline, or belonging to another tenant, which reads the same
  * way here (Principle V) — is reported by id rather than skipped, so the caller can fail the run
- * with the id named instead of silently running a Step under the wrong agent.
+ * with the id named instead of silently running a Step under the wrong harness.
  */
-export async function loadWorkflowStepAgents(
+export async function loadWorkflowStepHarnesses(
   db: Db,
   workspaceId: string,
   agentProfileIds: readonly string[],
 ): Promise<
   | {
       ok: true;
-      agents: Array<{
+      harnesses: Array<{
         agentProfileId: string;
-        agentProfile: typeof agentProfile.$inferSelect;
-        agentCatalog: typeof agentCatalog.$inferSelect;
+        harnessProfile: typeof harnessProfile.$inferSelect;
+        harnessCatalog: typeof harnessCatalog.$inferSelect;
       }>;
     }
-  | { ok: false; missingAgentProfileId: string }
+  | { ok: false; missingHarnessProfileId: string }
 > {
   const wanted = [...new Set(agentProfileIds)];
-  if (wanted.length === 0) return { ok: true, agents: [] };
+  if (wanted.length === 0) return { ok: true, harnesses: [] };
 
   const profiles = await db
     .select()
-    .from(agentProfile)
-    .where(and(eq(agentProfile.workspaceId, workspaceId), inArray(agentProfile.id, wanted)));
+    .from(harnessProfile)
+    .where(and(eq(harnessProfile.workspaceId, workspaceId), inArray(harnessProfile.id, wanted)));
   const profileById = new Map(profiles.map((row) => [row.id, row]));
 
   // Skipped entirely when nothing resolved: an `inArray` over an empty list is a query whose
@@ -532,48 +538,51 @@ export async function loadWorkflowStepAgents(
       ? []
       : await db
           .select()
-          .from(agentCatalog)
+          .from(harnessCatalog)
           .where(
-            and(eq(agentCatalog.workspaceId, workspaceId), inArray(agentCatalog.id, catalogIds)),
+            and(
+              eq(harnessCatalog.workspaceId, workspaceId),
+              inArray(harnessCatalog.id, catalogIds),
+            ),
           );
   const catalogById = new Map(catalogs.map((row) => [row.id, row]));
 
-  const agents: Array<{
+  const harnesses: Array<{
     agentProfileId: string;
-    agentProfile: typeof agentProfile.$inferSelect;
-    agentCatalog: typeof agentCatalog.$inferSelect;
+    harnessProfile: typeof harnessProfile.$inferSelect;
+    harnessCatalog: typeof harnessCatalog.$inferSelect;
   }> = [];
   for (const id of wanted) {
     const ap = profileById.get(id);
     const cat = ap ? catalogById.get(ap.agentCatalogId) : undefined;
-    if (!ap || !cat) return { ok: false, missingAgentProfileId: id };
-    agents.push({ agentProfileId: id, agentProfile: ap, agentCatalog: cat });
+    if (!ap || !cat) return { ok: false, missingHarnessProfileId: id };
+    harnesses.push({ agentProfileId: id, harnessProfile: ap, harnessCatalog: cat });
   }
-  return { ok: true, agents };
+  return { ok: true, harnesses };
 }
 
 /**
- * Refresh the catalog row's capability cache from what an agent just advertised (issue #94 AC-2).
+ * Refresh the catalog row's capability cache from what a harness just advertised (issue #94 AC-2).
  *
  * The cache is a fallback, not the truth — the truth is the handshake, and it only exists while
  * a session is being opened. This write is what makes the Settings pickers non-empty *between*
- * runs: the first launch of an agent teaches the catalog what it offers, and every form after
+ * runs: the first launch of a harness teaches the catalog what it offers, and every form after
  * that has a list to suggest from.
  *
- * Written only when the agent said anything (the caller already filters silence out), and
+ * Written only when the harness said anything (the caller already filters silence out), and
  * written whole rather than merged: the advertised list *replaces* the cache because a model the
- * agent no longer lists is exactly what the stale-pin warning needs to be able to notice.
+ * harness no longer lists is exactly what the stale-pin warning needs to be able to notice.
  */
-export async function updateAgentCatalogCapabilities(
+export async function updateHarnessCatalogCapabilities(
   db: Db,
   workspaceId: string,
   agentCatalogId: string,
   capabilities: { models: string[]; modes: string[] },
 ): Promise<void> {
   await db
-    .update(agentCatalog)
+    .update(harnessCatalog)
     .set({ capabilities, updatedAt: new Date().toISOString() })
-    .where(and(eq(agentCatalog.workspaceId, workspaceId), eq(agentCatalog.id, agentCatalogId)));
+    .where(and(eq(harnessCatalog.workspaceId, workspaceId), eq(harnessCatalog.id, agentCatalogId)));
 }
 
 export async function setSessionState(
@@ -594,7 +603,7 @@ export async function setSessionState(
 }
 
 /**
- * Append-only agent event log (TASK-018 replay). Every streamed event is persisted before a
+ * Append-only harness event log (TASK-018 replay). Every streamed event is persisted before a
  * client can ask for it again, so a reconnecting SPA replays exactly what it missed instead of
  * losing terminal history. `seq` is unique per Session, so a retried durable step that re-emits
  * the same event is a no-op rather than a duplicate.
@@ -608,10 +617,10 @@ export async function setSessionState(
 /**
  * Whether a write failed because the row it points at is gone.
  *
- * The case this exists for: a Task is deleted (or its Issue force-deleted) while its agent is
+ * The case this exists for: a Task is deleted (or its Issue force-deleted) while its harness is
  * still streaming. `cascadeDeleteTasks` takes the `session` row with the Task, and every event
  * the live run appends afterwards hits `session_event.session_id`'s foreign key — one stack
- * trace per chunk of agent output, for a run whose transcript no longer has anywhere to live.
+ * trace per chunk of harness output, for a run whose transcript no longer has anywhere to live.
  *
  * Both dialects are named because the same condition means the same thing in each and this is
  * the only place that has to know their codes: SQLite reports `SQLITE_CONSTRAINT_FOREIGNKEY`,

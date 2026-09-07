@@ -86,7 +86,7 @@ container as outside it**. This is forced by fact (2), not chosen for simplicity
 
 A translated mount would require rewriting the absolute paths in argv, and translating arbitrary
 argv is undecidable — `git -C <path>` is recognisable, but the path in a `--git-dir`, in a script
-the agent writes, or in the seventeenth positional argument of a tool nobody has added yet is not.
+the harness writes, or in the seventeenth positional argument of a tool nobody has added yet is not.
 Worse, git writes those paths down: a worktree's `.git` file contains `gitdir: <absolute host
 path>`, so a parent repository mounted anywhere else is not a git repository at all from inside the
 container. The identical-path rule is what lets `manager.ts`, `scm-ops.ts` and `setup-files.ts` run
@@ -97,13 +97,13 @@ Three properties travel with it:
 - **Absolute roots are a precondition, checked first.** `SOLOW_WORKTREE_ROOT` defaults to
   `.solow/worktrees`, and a relative root resolves against the orchestrator's cwd on the host and
   against the image's `WORKDIR` in the container. The preflight's first rung refuses it by name
-  rather than letting the worktree silently not be where the agent looks.
+  rather than letting the worktree silently not be where the harness looks.
 - **`--mount`, never `-v`.** A missing bind source makes `--mount` refuse the run out loud
   (`bind source path does not exist`), where `-v` would silently create a root-owned directory and
-  hand the agent an empty worktree with no explanation. Sources the orchestrator knows about are
+  hand the harness an empty worktree with no explanation. Sources the orchestrator knows about are
   `mkdir -p`'d on the host first.
 - **`--user <uid>:<gid>`, derived from the orchestrator's own uid.** Verified: without it every
-  file the agent writes into the bind-mounted worktree is root-owned on the host, and
+  file the harness writes into the bind-mounted worktree is root-owned on the host, and
   `cleanupWorktree`'s `git worktree remove --force --force` then fails with permission denied and
   leaks the worktree silently — *after* the Task has been marked done. Numeric on both halves,
   because a username would be resolved against the image's `/etc/passwd` and the point of the flag
@@ -145,7 +145,7 @@ Because fact (4) makes the handler body cheap to re-enter and expensive to do wo
 memoized promise, and everything slow — the daemon handshake, the image pull, the userland probe,
 the prepare script — lives in one durable `step.run("executor-preflight")` placed after the driver
 gate and *before* `prepare-repository` clones anything. That placement is what makes F07's "if a
-Container cannot be provisioned, the Task fails before starting the Agent, with an actionable
+Container cannot be provisioned, the Task fails before starting the Harness, with an actionable
 message" true rather than aspirational.
 
 Identity is deliberately split. The container's **name** is
@@ -156,7 +156,7 @@ re-attaches instead of building a second container. The container's **identity**
 where values have no charset restriction, and every lookup is by label filter. `solow.cfg`, a hash
 of everything that cannot be changed after `docker run`, decides adoption: a container that is
 running and still matches is adopted as-is (an Inngest retry or a second review round must not tear
-down a live agent's workspace), and one that has stopped or whose profile has been edited is
+down a live harness's workspace), and one that has stopped or whose profile has been edited is
 removed and rebuilt.
 
 Teardown is two mechanisms because one is not enough. `dispose()` runs in a plain `finally` around
@@ -173,7 +173,7 @@ to find and an operator some evidence.
 ### The environment travels on the exec's own stdin
 
 Not in argv, not in a file, and not anywhere `docker inspect` can read it. The variables arrive as
-**one base64 line on the exec's own stdin, ahead of the agent's traffic**, decoded by a small shim
+**one base64 line on the exec's own stdin, ahead of the harness's traffic**, decoded by a small shim
 that `exec`s the real command.
 
 Every alternative fails a requirement that already existed:
@@ -199,14 +199,14 @@ the shim reads EOF, the environment silently vanishes, and the command exits 0 �
 the exact path issue #52 uses to copy `.env` files into a worktree. `-t` is never passed, because a
 TTY merges stdout and stderr and both runners depend on the split. And `base64` is on the required
 utilities list the preflight probes, so a distroless or scratch image fails legibly instead of
-producing an agent with an empty environment and no explanation; distroless images are, explicitly,
+producing a harness with an empty environment and no explanation; distroless images are, explicitly,
 unsupported.
 
 For `exec` — as opposed to `spawn` — "the executor's own environment" means **the container's,
 never `process.env`**. Copying the host's environment in would leak host credentials into the
 isolation the profile asked for, which is the opposite of what the driver is for. The same
-principle put `baseEnv()` on the interface: `resolveAgentRunEnv` used to shape the agent's
-environment from `process.env`, and handing a containerised agent the orchestrator's `PATH` and
+principle put `baseEnv()` on the interface: `resolveHarnessRunEnv` used to shape the harness's
+environment from `process.env`, and handing a containerised harness the orchestrator's `PATH` and
 `HOME` describes a machine it is not running on.
 
 ### The mount set: this Task's worktree and this Task's own clone
@@ -237,7 +237,7 @@ executor being described. Deriving the clone's cache path here would put a secon
 a container ends up mounting a directory the clone did not land in.
 
 So the isolation this driver buys is stated precisely, not generously. **Process, kernel-resource
-and image isolation are complete**: an agent gets the profile's image, its own pid namespace,
+and image isolation are complete**: a harness gets the profile's image, its own pid namespace,
 `--pids-limit`, `no-new-privileges`, and the `--cpus` / `--memory` ceilings the profile asked for,
 enforced by the kernel and refused up front by the preflight if this kernel cannot enforce them.
 **Filesystem isolation from the rest of the host is complete** — nothing outside the two roots and
@@ -259,7 +259,7 @@ from another.
 
 None of that is a Docker defect, and none of it is fixable in the mount set: a worktree needs its
 parent mounted, so a Task that shares a parent shares everything in it. Accepting it meant a
-container Executor whose one selling point over the local one — *this agent cannot reach that
+container Executor whose one selling point over the local one — *this harness cannot reach that
 work* — was false between exactly the Tasks most likely to run together, two Tasks on one
 Repository. That is not a limitation worth documenting; it is the feature not working.
 
@@ -305,7 +305,7 @@ Repository it is attached to, and the container is given nothing else.
   the host itself — and the clone, `git worktree add`, the setup-file seeding, the publish and the
   removal run there. That split is what keeps the shared repository out of the mount set; without
   it the container would need it mounted to do its own bookkeeping. Everything about the Task's
-  *content* — the agent, commit, discard, status, diff — stays on the Task's executor, so the
+  *content* — the harness, commit, discard, status, diff — stays on the Task's executor, so the
   driver gate stays honest.
 - The approved branch is moved back afterwards. `WorktreeOps.publish` → `publishWorktreeBranch`
   fetches `+refs/heads/<branch>` out of the Task's clone into the Repository the Owner holds,
@@ -355,7 +355,7 @@ two Repositories and compares the real mount sets in both directions, and
   revisiting if the text parsing ever becomes a source of real defects rather than one caught
   format string.
 
-- **A container per command, plus a long-lived one for the agent.** Rejected: the long-lived
+- **A container per command, plus a long-lived one for the harness.** Rejected: the long-lived
   container is needed either way, so this is strictly more machinery, two lifecycles for the reaper
   to understand, and a per-command image start-up on every `git status`.
 

@@ -17,7 +17,7 @@ import { idSchema } from "./common.js";
  *    field for a key, password, or token — only an id pointing at the encrypted `secret` table.
  *    Members are `.strict()`, so a config carrying `privateKey` is *rejected* at the boundary
  *    rather than silently stripped and forgotten about.
- * 2. **A profile's environment is for the runtime, not for the agent's credential.** The
+ * 2. **A profile's environment is for the runtime, not for the harness's credential.** The
  *    variables the billing guard owns cannot be set here at all — see `GUARDED_ENV_VARS`.
  */
 
@@ -47,7 +47,7 @@ const envMap = z
   })
   .default({});
 
-/** A shell snippet run in the workspace before the agent starts. */
+/** A shell snippet run in the workspace before the harness starts. */
 const prepareScript = z.string().max(20_000).optional();
 
 const localConfig = z

@@ -7,7 +7,7 @@ import { dbEnv } from "./env.js";
  * AES-256-GCM. The key comes from the validated env module only. Ciphertext is stored
  * as `iv.tag.data` (base64 parts). The plaintext is NEVER returned to a DTO, log, span,
  * or WebSocket event — only two named entry points yield plaintext, each solely for its own
- * caller: `decryptForAgentRun` (orchestrator-only, to inject a single credential into an agent
+ * caller: `decryptForHarnessRun` (orchestrator-only, to inject a single credential into a harness
  * process's environment) and `decryptForScmSync` (web layer, to call a GitHub/GitLab API
  * directly from the server process — issue #15). Neither's result is ever mapped into a DTO.
  */
@@ -44,10 +44,10 @@ function decrypt(ciphertext: string): string {
 }
 
 /**
- * Orchestrator-only. Decrypts a stored credential so it can be placed in a single agent
+ * Orchestrator-only. Decrypts a stored credential so it can be placed in a single harness
  * process's environment. Do not call from the web/API layer or expose via a DTO.
  */
-export function decryptForAgentRun(ciphertext: string): string {
+export function decryptForHarnessRun(ciphertext: string): string {
   return decrypt(ciphertext);
 }
 

@@ -4,8 +4,8 @@
 
 ## Context
 
-Agent work needs an organising structure. Users think in terms of Issues (a bug, a request,
-a feature) and want to break each Issue into concrete pieces of executable agent work, then
+Harness work needs an organising structure. Users think in terms of Issues (a bug, a request,
+a feature) and want to break each Issue into concrete pieces of executable harness work, then
 manage those pieces visually. We had to decide the relationship between Issues, Tasks, and
 the Kanban board.
 
@@ -18,7 +18,7 @@ span many Issues (with Issues shown as groupings). Every Task belongs to exactly
 ## Considered options
 
 - **Flat board of Tasks with no Issue concept** — Rejected: loses the connection between
-  agent work and the request it serves; makes status reporting against real work impossible.
+  harness work and the request it serves; makes status reporting against real work impossible.
 - **Issues only, no Kanban** — Rejected: loses the at-a-glance, drag-to-manage administration
   that makes parallel work legible.
 - **Issue → Tasks on a Kanban board (chosen)** — combines a real organising unit with a
@@ -26,7 +26,7 @@ span many Issues (with Issues shown as groupings). Every Task belongs to exactly
 
 ## Consequences
 
-- Positive: agent work is always anchored to an Issue; the board makes lifecycle state
+- Positive: harness work is always anchored to an Issue; the board makes lifecycle state
   obvious; Issue status can derive from its Tasks.
 - Positive: Issues can be native or synchronised from external trackers without changing how
   Tasks are administered.

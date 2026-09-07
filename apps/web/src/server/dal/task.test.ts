@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import { TaskErrorCode } from "@solow/contracts";
 import { CREDENTIAL_EXPIRED_REASON } from "@solow/core";
-import { agentProfile, repository } from "@solow/db";
+import { harnessProfile, repository } from "@solow/db";
 import { createTestDb, type TestDb } from "@solow/db/testing";
 import { eq } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
@@ -179,7 +179,7 @@ describe("task DAL", () => {
 /**
  * The Task ↔ Repository join from the DAL's side (issue #7). A Task now names several
  * Repositories, and the questions that matter are: does every attachment survive the write,
- * does position 0 stay the one the agent will run in, and can the set be replaced safely.
+ * does position 0 stay the one the harness will run in, and can the set be replaced safely.
  */
 describe("a Task's Repository attachments", () => {
   let db: TestDb;
@@ -219,7 +219,7 @@ describe("a Task's Repository attachments", () => {
 
     expect(created.ok).toBe(true);
     if (!created.ok) return;
-    // Array order becomes `position`, and position 0 is the worktree the agent is started in —
+    // Array order becomes `position`, and position 0 is the worktree the harness is started in —
     // so "which repository did the Owner mean first" is answered by the row, not by a re-sort.
     expect(created.data.repositories.map((r) => r.position)).toEqual([0, 1]);
     expect(created.data.repositories.map((r) => r.repositoryId)).toEqual([g.repositoryId, second]);
@@ -322,7 +322,7 @@ describe("a Task's Repository attachments", () => {
 
   it("refuses to re-point a Task whose worktrees are already live", async () => {
     // Re-pointing a running Task would orphan directories nothing else knows how to find, and
-    // leave the agent working in a repository the Task no longer claims (Principle II).
+    // leave the harness working in a repository the Task no longer claims (Principle II).
     const g = await seedWorkspaceGraph(db, "acme");
     const ctx = ctxFor(db, g.workspaceId);
     const issue = await seedIssueOk(db, ctx, { title: "Running" });
@@ -416,7 +416,7 @@ describe("taskIdsBlockedByCredential", () => {
     db = createTestDb();
   });
 
-  it("finds a failed Task whose Agent Profile spends the given Secret", async () => {
+  it("finds a failed Task whose Harness Profile spends the given Secret", async () => {
     const g = await seedWorkspaceGraph(db, "acme");
     const ctx = ctxFor(db, g.workspaceId);
     const issue = await seedIssueOk(db, ctx, { title: "Stuck on a credential" });
@@ -434,7 +434,7 @@ describe("taskIdsBlockedByCredential", () => {
       failureReason: CREDENTIAL_EXPIRED_REASON,
     });
 
-    // `seedWorkspaceGraph`'s Agent Profile spends the literal Secret id "secret-1" (test-fixtures.ts).
+    // `seedWorkspaceGraph`'s Harness Profile spends the literal Secret id "secret-1" (test-fixtures.ts).
     expect(await taskIdsBlockedByCredential(ctx, "secret-1")).toEqual([created.data.id]);
     expect(await taskIdsBlockedByCredential(ctx, "some-other-secret")).toEqual([]);
   });
@@ -479,16 +479,16 @@ describe("taskIdsBlockedByCredential", () => {
     expect(await taskIdsBlockedByCredential(ctx, "secret-1")).toEqual([]);
   });
 
-  it("does not cross Agent Profiles that happen to share a workspace but not a Secret", async () => {
+  it("does not cross Harness Profiles that happen to share a workspace but not a Secret", async () => {
     const g = await seedWorkspaceGraph(db, "acme");
     const ctx = ctxFor(db, g.workspaceId);
     const [existing] = await db
-      .select({ agentCatalogId: agentProfile.agentCatalogId })
-      .from(agentProfile)
-      .where(eq(agentProfile.id, g.agentProfileId));
+      .select({ agentCatalogId: harnessProfile.agentCatalogId })
+      .from(harnessProfile)
+      .where(eq(harnessProfile.id, g.agentProfileId));
     if (!existing) throw new Error("seed failed");
     const [other] = await db
-      .insert(agentProfile)
+      .insert(harnessProfile)
       .values({
         workspaceId: g.workspaceId,
         name: "a second profile",
@@ -538,7 +538,7 @@ describe("taskIdsBlockedByCredential", () => {
       failureReason: CREDENTIAL_EXPIRED_REASON,
     });
 
-    // Both fixtures' default Agent Profile spends the same literal Secret id ("secret-1"), so
+    // Both fixtures' default Harness Profile spends the same literal Secret id ("secret-1"), so
     // this is the case that actually exercises the workspace scope rather than a Secret mismatch.
     expect(await taskIdsBlockedByCredential(ctxB, "secret-1")).toEqual([]);
   });

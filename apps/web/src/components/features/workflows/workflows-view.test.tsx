@@ -10,7 +10,7 @@ import { WorkflowsView } from "./workflows-view";
  * The Workflow designer (issue #5 AC-1), drawn as a node graph.
  *
  * What is asserted is what the surface *sends*, not how it is drawn: the `+` beside a node has to
- * name the Step the new one follows and pick an agent without asking, a rename has to reach
+ * name the Step the new one follows and pick a harness without asking, a rename has to reach
  * `updateStep`. The drag arithmetic — which neighbour pair a drop turns into — is a pure function
  * with its own suite in `lib/workflow-canvas.test.ts`; React Flow's pointer machinery is not
  * something a DOM stand-in can drive, so it is not driven here.
@@ -108,7 +108,7 @@ describe("WorkflowsView", () => {
     expect(await stepNames()).toEqual(["Plan", "Implement", "Review"]);
   });
 
-  it("adds a step after the one whose + was pressed, on the first agent profile, without asking", async () => {
+  it("adds a step after the one whose + was pressed, on the first harness profile, without asking", async () => {
     const { log } = renderWithTrpc(
       <WorkflowsView />,
       handlersFor({ "workflow.addStep": () => PIPELINE }),
@@ -117,7 +117,7 @@ describe("WorkflowsView", () => {
     // By label rather than by role: React Flow keeps a node `visibility: hidden` until it has
     // measured it, which needs the ResizeObserver the DOM stand-in lacks, and role queries skip
     // hidden elements. The button is there and clickable; it is only unmeasured. Enabled only
-    // once the profile catalog has arrived — a `+` with no agent to give the Step is dimmed.
+    // once the profile catalog has arrived — a `+` with no harness to give the Step is dimmed.
     const add = (await screen.findByLabelText("Add a step after Implement")) as HTMLButtonElement;
     await waitFor(() => expect(add.disabled).toBe(false));
     fireEvent.click(add);
@@ -225,7 +225,7 @@ describe("WorkflowsView", () => {
     );
 
     const question = (await screen.findByLabelText(
-      "Question the agent answers",
+      "Question the harness answers",
     )) as HTMLTextAreaElement;
     expect(question.value).toBe("Does it need another pass?");
     // Exactly one Step branches, so exactly one pair of targets is on offer.
@@ -265,7 +265,7 @@ describe("WorkflowsView", () => {
     expect(screen.queryByLabelText("Problems with Review")).toBeNull();
   });
 
-  it("lets a step pick a library item from a searchable dropdown, and locks the ones every agent loads", async () => {
+  it("lets a step pick a library item from a searchable dropdown, and locks the ones every harness loads", async () => {
     const { log } = renderWithTrpc(
       <WorkflowsView />,
       handlersFor({
@@ -329,7 +329,7 @@ describe("WorkflowsView", () => {
     });
   });
 
-  it("refuses to add a step when there is no agent profile to give it", async () => {
+  it("refuses to add a step when there is no harness profile to give it", async () => {
     renderWithTrpc(
       <WorkflowsView />,
       handlersFor({
@@ -340,7 +340,7 @@ describe("WorkflowsView", () => {
 
     const button = await screen.findByRole("button", { name: "Add the first step" });
     await waitFor(() => expect(button.hasAttribute("disabled")).toBe(true));
-    expect(await screen.findByText(/Create an agent profile first/)).toBeTruthy();
+    expect(await screen.findByText(/Create a harness profile first/)).toBeTruthy();
   });
 
   it("tells a workspace with the flag off how to enable it, rather than showing an empty list", async () => {
@@ -358,11 +358,11 @@ describe("WorkflowsView", () => {
     expect(screen.queryByRole("list", { name: "Workflows" })).toBeNull();
   });
 
-  it("names the agent profile each step runs under, from the profile catalog", async () => {
+  it("names the harness profile each step runs under, from the profile catalog", async () => {
     renderWithTrpc(<WorkflowsView />, handlersFor());
 
-    // One `Agent profile` control per step, and no add-step form to carry a fourth.
-    const labels = await screen.findAllByText("Agent profile");
+    // One `Harness profile` control per step, and no add-step form to carry a fourth.
+    const labels = await screen.findAllByText("Harness profile");
     expect(labels).toHaveLength(3);
   });
 

@@ -63,8 +63,8 @@ export function WorkspaceSection() {
       <CardHeader>
         <CardTitle>Workspace</CardTitle>
         <CardDescription>
-          Everything in SoloW belongs to a workspace: its issues, projects, secrets, agent profiles
-          and the repositories agents are allowed to work in.
+          Everything in SoloW belongs to a workspace: its issues, projects, secrets, harness
+          profiles and the repositories harnesses are allowed to work in.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

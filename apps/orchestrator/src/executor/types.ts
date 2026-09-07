@@ -1,12 +1,12 @@
 /**
- * The `Executor` interface (Foundation 3 of 8 / issue #1). An Executor is where an agent
+ * The `Executor` interface (Foundation 3 of 8 / issue #1). An Executor is where a harness
  * actually runs — the local host today, a container/SSH/cloud driver later (#46 #47 #48). One
  * interface now, before the second implementation exists, means each of those becomes a driver
- * rather than growing its own copy of "how do I reach the place the agent runs".
+ * rather than growing its own copy of "how do I reach the place the harness runs".
  *
  * `local.ts` is the only module allowed to call `Bun.spawn`, the Bun shell, or the host
  * filesystem directly — enforced by `scripts/audit-executor-boundary.ts`. Every consumer
- * (the worktree manager, the diff reader, the agent runner) depends on this module only.
+ * (the worktree manager, the diff reader, the harness runner) depends on this module only.
  */
 
 /** A long-lived child process, shaped for interactive stream-JSON protocols. */
@@ -21,7 +21,7 @@ export interface ProcessHandle {
   exited: Promise<number>;
   /**
    * End the process, optionally naming the signal. Callers send none for the ordinary stop and
-   * escalate to `SIGKILL` only for an agent that ignored it — a driver that cannot route a
+   * escalate to `SIGKILL` only for a harness that ignored it — a driver that cannot route a
    * signal (a container or cloud executor whose API exposes one verb) may ignore the argument.
    */
   kill(signal?: number | string): void;
@@ -41,7 +41,7 @@ export interface ExecOpts {
   /**
    * Extra variables for this one command, merged *over* the executor's own environment.
    *
-   * The opposite of `SpawnOpts.env`, and deliberately so. A spawned agent must see exactly what
+   * The opposite of `SpawnOpts.env`, and deliberately so. A spawned harness must see exactly what
    * the caller shaped and nothing of the host (Principle IV) — but `exec` runs the product's own
    * short-lived tools, and a `git` that inherited no `PATH`, `HOME` or proxy settings would not
    * run at all. This is the channel for handing git a credential without putting it in argv,
@@ -83,7 +83,7 @@ export interface ExecutorMetrics {
 }
 
 export interface Executor {
-  /** A long-lived agent process (e.g. the `claude` CLI in stream-JSON mode). */
+  /** A long-lived harness process (e.g. the `claude` CLI in stream-JSON mode). */
   spawn(cmd: string[], opts: SpawnOpts): ProcessHandle;
   /** A one-shot command: git, du, version probes. Never throws on a non-zero exit. */
   exec(cmd: string[], opts?: ExecOpts): Promise<ExecResult>;
@@ -91,7 +91,7 @@ export interface Executor {
    * The environment a command run by this Executor would otherwise inherit — the host's for the
    * local driver, the image's for a container one. `spawn` replaces the child's environment
    * wholesale (Principle IV), so the *caller* must shape it from the right base: handing a
-   * containerised agent the orchestrator's own `PATH` and `HOME` describes a machine it is not
+   * containerised harness the orchestrator's own `PATH` and `HOME` describes a machine it is not
    * running on, and it fails for reasons that have nothing to do with the Task.
    */
   baseEnv(): Promise<Record<string, string>>;

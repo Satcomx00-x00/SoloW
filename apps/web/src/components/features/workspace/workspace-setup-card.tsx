@@ -13,7 +13,7 @@ import { trpc } from "@/trpc/react";
  * What this Workspace still needs, and the way to each of it (2026-08-28).
  *
  * It replaced a fixture. A local install used to arrive holding two invented companies, each
- * with a credential, an Agent Profile, an Executor and a repository that never existed — so the
+ * with a credential, a Harness Profile, an Executor and a repository that never existed — so the
  * product looked configured on first launch and the real gap stayed hidden: a Workspace from a
  * genuine sign-up has none of those, and its feature flags are off, so the core loop is
  * disabled. Nothing said so; you found out when a Task refused to run.
@@ -37,26 +37,26 @@ const STEPS: Record<
     blurb: "Everything you create belongs to it.",
   },
   agents: {
-    title: "Agents available",
-    blurb: "The agents this install can run.",
+    title: "Harnesses available",
+    blurb: "The harnesses this install can run.",
     href: "/settings?section=agent-profiles",
     action: "View",
   },
   secret: {
     title: "Credential",
-    blurb: "What authenticates the agent. Stored encrypted; only ever referenced by name.",
+    blurb: "What authenticates the harness. Stored encrypted; only ever referenced by name.",
     href: "/settings?section=secrets",
     action: "Add a secret",
   },
   "agent-profile": {
-    title: "Agent profile",
-    blurb: "Binds an agent to a credential, with its permission mode and concurrency cap.",
+    title: "Harness profile",
+    blurb: "Binds a harness to a credential, with its permission mode and concurrency cap.",
     href: "/settings?section=agent-profiles",
     action: "Create a profile",
   },
   executor: {
     title: "Executor",
-    blurb: "Where agents actually run — this machine, or a container.",
+    blurb: "Where harnesses actually run — this machine, or a container.",
     href: "/settings?section=executor-profiles",
     action: "Create an executor",
   },

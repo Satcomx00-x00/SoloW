@@ -9,7 +9,7 @@ the conceptual model, not a database design. All terms are defined in the
 ## The organising idea
 
 Work enters as an **Issue**. An Issue is broken into **Tasks**, which are administered on a
-**Kanban Board**. Each Task is executed by an **Agent** running in an **Executor**, inside
+**Kanban Board**. Each Task is executed by a **Harness** running in an **Executor**, inside
 an isolated **Worktree**, optionally following a **Workflow**. The person reviews the
 resulting **Diff** and decides what ships.
 
@@ -22,7 +22,7 @@ resulting **Diff** and decides what ships.
 - An **Issue** contains many **Tasks**. A Task always belongs to exactly one Issue.
 - A **Board** presents Tasks; it can be scoped to one Issue or span many Issues within a
   Workspace.
-- A **Task** references one **Agent Profile**, one **Executor Profile**, one or more
+- A **Task** references one **Harness Profile**, one **Executor Profile**, one or more
   **Repositories**, and creates one **Worktree** per Repository it touches.
 - A **Task** may execute a **Workflow**; if it does, the Workflow's **Steps** drive the
   Task's progress.
@@ -46,10 +46,10 @@ active, and Resolved when its Tasks are complete and their changes accepted.
 The default Kanban columns represent these states:
 
 - **Backlog** — created, not yet ready to run.
-- **Ready** — fully configured (Agent, Executor, Repositories) and eligible to run.
-- **Running** — an Agent is actively working.
+- **Ready** — fully configured (Harness, Executor, Repositories) and eligible to run.
+- **Running** — a Harness is actively working.
 - **Review** — changes are proposed and awaiting human decision.
-- **Parked** — paused because a subscription quota is exhausted or an agent credential
+- **Parked** — paused because a subscription quota is exhausted or a harness credential
   expired; resumes automatically or on user action (see [F06](../features/F06-authentication-billing.md)).
 - **Done** — changes accepted and integrated.
 - **Failed** — ended in an unrecoverable error; can be retried.
@@ -60,7 +60,7 @@ A Run that is interrupted resumes from its last completed Step rather than resta
 
 ### Session lifecycle
 Active → Awaiting Review → Resumable → Closed. A Session can be resumed to continue an
-Agent's work with its prior context.
+Harness's work with its prior context.
 
 ## Ownership and boundaries
 
@@ -73,5 +73,5 @@ Agent's work with its prior context.
 
 > Workspace → (Repositories, Issues, Boards, Profiles, Workflows, Integrations)
 > Issue → Tasks
-> Task → (Agent Profile, Executor Profile, Repositories → Worktrees, optional Workflow) → Sessions → Diff → Review
+> Task → (Harness Profile, Executor Profile, Repositories → Worktrees, optional Workflow) → Sessions → Diff → Review
 > Workflow → Steps (including Gates); a Run executes a Workflow

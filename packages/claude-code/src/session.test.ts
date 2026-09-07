@@ -74,7 +74,7 @@ async function run(script: FakeClaudeScript = {}, prompt = "fix the latch") {
 }
 
 describe("buildArgs", () => {
-  it("always passes --worktree, so no call site can run two agents in one working tree", () => {
+  it("always passes --worktree, so no call site can run two harnesses in one working tree", () => {
     // This is the isolation guarantee the whole review model rests on (Principle II): the flag
     // is added here rather than by the caller precisely so it cannot be forgotten.
     const args = buildArgs({ worktreeName: "solow-task-7", permissionMode: "acceptEdits" });
@@ -93,7 +93,7 @@ describe("buildArgs", () => {
   });
 
   it("passes the permission mode it was given, whichever it is", () => {
-    // The mode comes from the Agent Profile: `acceptEdits` leaves an agent unable to run a
+    // The mode comes from the Harness Profile: `acceptEdits` leaves a harness unable to run a
     // command in a headless run, `bypassPermissions` is what an Owner picks when the work needs
     // the shell. Neither is decided here — this only proves the choice reaches the CLI.
     for (const mode of ["acceptEdits", "plan", "bypassPermissions"] as const) {
@@ -133,7 +133,7 @@ describe("startClaudeSession", () => {
 
   it("reports the worktree the session is working in", async () => {
     // With `--worktree` the CLI makes the directory, so its init event is how SoloW finds
-    // out where the agent went — no guessing at a naming convention.
+    // out where the harness went — no guessing at a naming convention.
     const { session: s, workdir: dir } = await run();
     expect(await s.workspacePath).toBe(dir as string);
   });
@@ -177,8 +177,8 @@ describe("startClaudeSession", () => {
     expect((await s.outcome).ok).toBe(true);
   });
 
-  it("gives the agent process only the environment it was handed", async () => {
-    process.env["SOLOW_CLAUDE_LEAK_CHECK"] = "must-not-reach-the-agent";
+  it("gives the harness process only the environment it was handed", async () => {
+    process.env["SOLOW_CLAUDE_LEAK_CHECK"] = "must-not-reach-the-harness";
     try {
       const { session: s, workdir: dir } = await run({
         turns: [{ writes: [{ path: "env.json", content: "" }] }],
@@ -195,7 +195,7 @@ describe("startClaudeSession", () => {
 describe("continuing inside an existing worktree", () => {
   it("omits --worktree when the caller is already in one", () => {
     // A later review round runs *inside* the Task's worktree. Asking for a worktree from inside
-    // a worktree would nest one in the other, and the agent's edits would land somewhere the
+    // a worktree would nest one in the other, and the harness's edits would land somewhere the
     // lifecycle never diffs or commits.
     const args = buildArgs({ worktreeName: null, permissionMode: "acceptEdits" });
     expect(args).not.toContain("--worktree");

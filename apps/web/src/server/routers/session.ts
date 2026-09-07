@@ -97,7 +97,7 @@ export const sessionRouter = router({
         path: "/session.listForTask",
         tags: ["session"],
         protect: true,
-        summary: "List every agent Session recorded for a Task, newest first.",
+        summary: "List every harness Session recorded for a Task, newest first.",
       },
     })
     .input(getTaskSessionsInput)

@@ -29,7 +29,7 @@ export const connectRepositoryInput = z
      * A `local_path` location reaches the orchestrator as a host path — `manager.ts` returns it
      * verbatim, `task-run.ts` bind-mounts it — and a *relative* one is completed from whatever
      * directory the orchestrator process happens to be running in. `"."` therefore named SoloW's
-     * own checkout, and the Docker driver's mount guard mounted it read-write into the agent's
+     * own checkout, and the Docker driver's mount guard mounted it read-write into the harness's
      * container until it learned to refuse a source that is not absolute. That guard is still
      * where this is enforced, because it is the last thing before `docker run` and it also sees
      * paths that never came through this schema; what this adds is the Owner-facing half — the
@@ -94,7 +94,7 @@ export const MAX_SETUP_FILE_PATTERNS = 20;
 /**
  * One glob naming a file copied from the repository into every new worktree (issue #52).
  *
- * A fresh worktree has no `.env`, so the agent cannot run the test suite or start the dev
+ * A fresh worktree has no `.env`, so the harness cannot run the test suite or start the dev
  * server, and spends its first turns discovering that. This is the allowlist that fixes it —
  * deliberately an allowlist, never "copy everything git-ignored", which would sweep in
  * credentials, caches and build output indiscriminately.
@@ -161,7 +161,7 @@ export const gitRefNameSchema = z
  * The Repositories a Workspace has connected, one page at a time.
  *
  * Paged like every other list for one reason: `repository.list` is an MCP tool, and #82 is the
- * issue that says a discovery tool must bound what it spends of an agent's context. A Workspace
+ * issue that says a discovery tool must bound what it spends of a harness's context. A Workspace
  * rarely has a hundred repositories — but "rarely" is not a bound, and the surface that would
  * suffer is the one nobody is watching.
  */

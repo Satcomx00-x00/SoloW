@@ -2,9 +2,9 @@
 
 import { beforeEach, describe, expect, it } from "bun:test";
 import {
-  agentProfile,
-  ensureDefaultAgentCatalog,
+  ensureDefaultHarnessCatalog,
   executorProfile,
+  harnessProfile,
   issue as issueTable,
   repository,
   secret,
@@ -45,13 +45,13 @@ async function fixture(db: TestDb) {
     .values({ name: "Acme", ownerUserId: "owner-1" })
     .returning();
   if (!ws) throw new Error("failed to seed workspace");
-  const catalogId = await ensureDefaultAgentCatalog(db, ws.id);
+  const catalogId = await ensureDefaultHarnessCatalog(db, ws.id);
   const [sec] = await db
     .insert(secret)
     .values({ workspaceId: ws.id, name: "token", kind: "subscription_token", ciphertext: "x" })
     .returning();
-  const [agent] = await db
-    .insert(agentProfile)
+  const [harness] = await db
+    .insert(harnessProfile)
     .values({
       workspaceId: ws.id,
       name: "claude",
@@ -79,7 +79,7 @@ async function fixture(db: TestDb) {
       issueId: issue?.id ?? "",
       title: "Fix the latch",
       state: "review",
-      agentProfileId: agent?.id ?? "",
+      agentProfileId: harness?.id ?? "",
       executorProfileId: executor?.id ?? "",
     })
     .returning();

@@ -10,7 +10,7 @@ import { rendererFor } from "./registry";
 import { ShowWidget } from "./show-widget";
 
 /**
- * Agent widgets, on the client: the transcript has to fold a widget and its answer into one row,
+ * Harness widgets, on the client: the transcript has to fold a widget and its answer into one row,
  * and `show_widget` has to keep model-written markup out of the app's own document.
  */
 
@@ -164,7 +164,7 @@ describe("AskUserInput", () => {
     expect(sent).toEqual([["pg", "sqlite"]]);
   });
 
-  it("offers a ranking in the agent's own order, and reorders it", () => {
+  it("offers a ranking in the harness's own order, and reorders it", () => {
     const sent: string[][] = [];
     render(
       <AskUserInput widget={{ ...ASK, mode: "rank" }} onRespond={(values) => sent.push(values)} />,

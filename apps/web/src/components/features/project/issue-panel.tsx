@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { DeleteIssueAction } from "@/components/features/issues/delete-issue-action";
-import { AgentMarkdown } from "@/components/features/task/markdown";
+import { HarnessMarkdown } from "@/components/features/task/markdown";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -414,7 +414,7 @@ export function IssuePanel({
                     />
                   ) : data.description ? (
                     <div className="rounded-lg border bg-card/40 px-4 py-3">
-                      <AgentMarkdown text={data.description} />
+                      <HarnessMarkdown text={data.description} />
                     </div>
                   ) : (
                     <p className="text-muted-foreground text-xs italic">No description.</p>

@@ -10,14 +10,14 @@ import type { WidgetRendererProps } from "./registry";
 type StepCardWidget = z.infer<typeof stepCardWidget>;
 
 /**
- * The agent's own plan, as a checklist it re-emits as work proceeds (`step_card`).
+ * The harness's own plan, as a checklist it re-emits as work proceeds (`step_card`).
  *
  * Presentational: nothing here is answered. Its value is that "what is this run doing and how far
  * in is it" stops being a question you answer by reading two hundred lines of transcript.
  *
  * Each emission is a new row rather than an update of the last one. That is deliberate — the log
  * is append-only and a plan that rewrote its own history would destroy the evidence of what the
- * agent believed earlier, which is often the interesting part of a review.
+ * harness believed earlier, which is often the interesting part of a review.
  */
 export function StepCard({ widget }: WidgetRendererProps<StepCardWidget>) {
   const done = widget.steps.filter((s) => s.state === "done").length;

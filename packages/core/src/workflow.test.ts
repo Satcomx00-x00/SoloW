@@ -6,11 +6,11 @@ import {
   advanceWorkflowStep,
   appendRank,
   buildStepBrief,
-  carryAgentDecision,
+  carryHarnessDecision,
   evaluateStepCondition,
   rankBetween,
   rankForMove,
-  readAgentDecision,
+  readHarnessDecision,
   resumeWorkflowCursor,
   sortSteps,
   stepExits,
@@ -242,12 +242,12 @@ describe("resuming a workflow", () => {
 });
 
 describe("advancing a task through its steps", () => {
-  it("moves an auto-gated middle step on to the next one when the agent signals", () => {
+  it("moves an auto-gated middle step on to the next one when the harness signals", () => {
     const advance = unwrap(advanceWorkflowStep(pipeline("auto"), "plan", outcome()));
     expect(advance).toEqual({ status: "advanced", stepId: "implement", consumedApproval: false });
   });
 
-  it("holds a human-gated step until a decision is recorded, however the agent signalled", () => {
+  it("holds a human-gated step until a decision is recorded, however the harness signalled", () => {
     const steps = pipeline("human");
     expect(unwrap(advanceWorkflowStep(steps, "plan", outcome())).status).toBe("awaiting-decision");
     const decided = unwrap(advanceWorkflowStep(steps, "plan", outcome({ unspentApproval: true })));
@@ -428,20 +428,20 @@ describe("advancing a task through its steps", () => {
 describe("a step's condition", () => {
   const decides = { kind: "agent-decides", question: "Is it done?" } as const;
 
-  it("reads the agent's last DECISION line, whatever its case", () => {
-    expect(readAgentDecision("Plan written.\nDECISION: yes")).toBe("yes");
-    expect(readAgentDecision("decision: NO\n\nMore notes.")).toBe("no");
-    // The agent changed its mind while writing; the answer it finished on is the answer.
-    expect(readAgentDecision("DECISION: yes\nOn reflection…\nDECISION: no")).toBe("no");
+  it("reads the harness's last DECISION line, whatever its case", () => {
+    expect(readHarnessDecision("Plan written.\nDECISION: yes")).toBe("yes");
+    expect(readHarnessDecision("decision: NO\n\nMore notes.")).toBe("no");
+    // The harness changed its mind while writing; the answer it finished on is the answer.
+    expect(readHarnessDecision("DECISION: yes\nOn reflection…\nDECISION: no")).toBe("no");
   });
 
   it("does not read a sentence about the format as an answer", () => {
-    expect(readAgentDecision("I will end with the DECISION: yes/no line.")).toBeNull();
-    expect(readAgentDecision("DECISION: maybe")).toBeNull();
-    expect(readAgentDecision(null)).toBeNull();
+    expect(readHarnessDecision("I will end with the DECISION: yes/no line.")).toBeNull();
+    expect(readHarnessDecision("DECISION: maybe")).toBeNull();
+    expect(readHarnessDecision(null)).toBeNull();
   });
 
-  it("takes the agent's yes as the condition met, and anything else as not", () => {
+  it("takes the harness's yes as the condition met, and anything else as not", () => {
     expect(
       evaluateStepCondition(decides, { handoff: "DECISION: yes", producedChanges: false }),
     ).toBe(true);
@@ -456,16 +456,18 @@ describe("a step's condition", () => {
   });
 
   it("carries an answer from the final message into a summary that has none", () => {
-    expect(carryAgentDecision("No defects found.", "…all good.\n\nDECISION: no")).toBe(
+    expect(carryHarnessDecision("No defects found.", "…all good.\n\nDECISION: no")).toBe(
       "No defects found.\n\nDECISION: no",
     );
-    expect(carryAgentDecision(null, "DECISION: yes")).toBe("DECISION: yes");
+    expect(carryHarnessDecision(null, "DECISION: yes")).toBe("DECISION: yes");
   });
 
   it("leaves a summary that already answers alone, even when the message disagrees", () => {
-    expect(carryAgentDecision("Done.\nDECISION: yes", "DECISION: no")).toBe("Done.\nDECISION: yes");
-    expect(carryAgentDecision("Done.", "No decision here.")).toBe("Done.");
-    expect(carryAgentDecision(null, null)).toBeNull();
+    expect(carryHarnessDecision("Done.\nDECISION: yes", "DECISION: no")).toBe(
+      "Done.\nDECISION: yes",
+    );
+    expect(carryHarnessDecision("Done.", "No decision here.")).toBe("Done.");
+    expect(carryHarnessDecision(null, null)).toBeNull();
   });
 
   it("reads produced-changes from the outcome and nothing else", () => {
@@ -641,7 +643,7 @@ describe("the handoff brief", () => {
     expect(buildStepBrief({ promptTemplate: "Draw up a plan." }, null)).toBe("Draw up a plan.");
   });
 
-  it("asks the agent its branch question, naming what each answer leads to", () => {
+  it("asks the harness its branch question, naming what each answer leads to", () => {
     const [triage, design, implement] = branching();
     if (!triage || !design || !implement) throw new Error("pipeline");
     const brief = buildStepBrief(

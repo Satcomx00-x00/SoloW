@@ -122,7 +122,7 @@ export function SignInForm({ ownerExists }: { ownerExists: boolean }) {
       </div>
 
       <p className="mt-5 text-center text-2xs text-muted-foreground/70 leading-relaxed">
-        Self-hosted. Your agent credentials never leave this machine.
+        Self-hosted. Your harness credentials never leave this machine.
       </p>
     </div>
   );

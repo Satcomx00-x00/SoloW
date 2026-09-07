@@ -12,7 +12,7 @@ where the hand expects to find them.
 One thing is deliberately not VS Code's. In an editor, staging is a step on the way to a commit
 you make yourself. Here **staging *is* the review selection**: what is staged is exactly what
 approval commits, and the review record says which files those were. There is no second button
-that writes to a branch, because a path from agent output to a branch without a recorded human
+that writes to a branch, because a path from harness output to a branch without a recorded human
 decision is the one thing the product may not have (Principle I).
 
 That single substitution is what makes the familiar interaction legal here. A reviewer who has
@@ -30,15 +30,15 @@ that only the orchestrator may touch.
 
 ## User stories
 
-- As a Reviewer, I want the agent's change grouped the way my editor groups it, so I can read it
+- As a Reviewer, I want the harness's change grouped the way my editor groups it, so I can read it
   without learning a second vocabulary for the same thing.
 - As a Reviewer, I want to approve some files and send the rest back, so one file I dislike does
   not cost me a Task that is otherwise right.
-- As a Reviewer, I want to discard a file the agent should never have touched, without rejecting
+- As a Reviewer, I want to discard a file the harness should never have touched, without rejecting
   the whole run.
 - As a Reviewer, I want to know which branch this is and whether it is ahead of its remote, so I
   know what approving is going to publish.
-- As a Reviewer, I want to review a Task whose agent finished hours ago, so review is not tied to
+- As a Reviewer, I want to review a Task whose harness finished hours ago, so review is not tied to
   a process still being alive.
 - As an Operator, I want every write the panel makes to be in the record, so "what did the human
   change before approving" has an answer.
@@ -63,8 +63,8 @@ that only the orchestrator may touch.
 - **FR-8** WHERE nothing is staged, THE SYSTEM SHALL refuse approval and state why, rather than
   recording a decision over an empty commit.
 - **FR-9** THE SYSTEM SHALL record every panel write on the Session log as a typed event naming
-  the actor, the operation and the paths. A human's edit to the agent's proposal belongs in the
-  record beside the agent's own work, not outside it.
+  the actor, the operation and the paths. A human's edit to the harness's proposal belongs in the
+  record beside the harness's own work, not outside it.
 - **FR-10** THE SYSTEM SHALL store, on the review record, the paths approved and the tree hash
   they were approved at.
 - **FR-11** THE SYSTEM SHALL require confirmation before a discard, SHALL name what will be lost,
@@ -76,7 +76,7 @@ that only the orchestrator may touch.
   them SHALL be reachable for un-approved work.
 - **FR-14** THE SYSTEM SHALL refresh on demand, and SHALL refresh itself at the same turn
   boundary that captures the diff, so a live run's panel is current without polling.
-- **FR-15** THE SYSTEM SHALL work for a Task with no agent running.
+- **FR-15** THE SYSTEM SHALL work for a Task with no harness running.
 - **FR-16** THE SYSTEM SHALL present one source-control view per `(repository, branch)` worktree,
   named by its Repository (issue #7, issue #57).
 - **FR-17** THE SYSTEM SHALL exclude the Repository's setup-file allowlist (issue #52) from every
@@ -106,14 +106,14 @@ that only the orchestrator may touch.
 - A file is in exactly one group: conflicted, staged, changed, or untracked. A file both staged
   and further modified appears in *both* Staged Changes and Changes, as git reports it and as an
   editor shows it.
-- **The panel is read-only while the agent is running.** Staging under a process that is still
+- **The panel is read-only while the harness is running.** Staging under a process that is still
   writing is a race whose loser is the reviewer, and the panel would be describing a tree that
   has already moved. Writes become available when the Task is at the review gate, parked, or
   failed with its worktree preserved.
 - **Approval is still one decision.** Selecting files chooses the content of that decision; it
   does not split one Task into several partial approvals. A Task spanning repositories still
   approves once, across all of them (issue #70's rule).
-- Discard is destructive and final from the panel's point of view. The agent's work is not in a
+- Discard is destructive and final from the panel's point of view. The harness's work is not in a
   commit yet, so there is nothing to restore it from.
 - A worktree that has been cleaned up has no source control. The Task's captured diff is still
   there, and the panel says which it is showing.
@@ -121,7 +121,7 @@ that only the orchestrator may touch.
 
 ## Edge cases & failure handling
 
-- **The agent is still running** — read-only, with the reason stated in place of the actions
+- **The harness is still running** — read-only, with the reason stated in place of the actions
   rather than as disabled buttons with no explanation.
 - **The worktree is gone** (an approved Task, cleaned up) — the panel falls back to the captured
   diff, read-only, and says so. This is why the capture exists.
@@ -149,13 +149,13 @@ that only the orchestrator may touch.
   UIs go subtly wrong, and file granularity is what a review selection actually needs. Revisit
   with evidence that files are too coarse.
 - **Editing files in the panel.** Issue #67 states the rule and it holds here: a human editing
-  the agent's worktree makes the review record describe changes the agent did not make.
+  the harness's worktree makes the review record describe changes the harness did not make.
 - **An independent commit button, a commit message box, and amend.** Superseded by FR-7 — the
   gate is the commit.
 - **History, blame, stash, and the timeline.** Every one is a second feature with its own
   storage question.
 - **Conflict resolution.** Showing a conflict is here; resolving it is an editor's job (#67) or
-  the agent's.
+  the harness's.
 - **Branch creation and switching.** A Task's branch is decided by its attachment (issue #57);
   changing it mid-review would move the ground under the diff being approved.
 

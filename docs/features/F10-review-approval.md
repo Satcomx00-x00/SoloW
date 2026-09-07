@@ -4,9 +4,9 @@
 
 ## Summary
 
-Review is the human decision that gives SoloW its review-first character. No agent
+Review is the human decision that gives SoloW its review-first character. No harness
 change is integrated until a person has inspected it and approved it. Review applies both
-to a Task's final changes and to human-in-the-loop Gates inside Workflows and Agent tool
+to a Task's final changes and to human-in-the-loop Gates inside Workflows and Harness tool
 use.
 
 ## Jobs served
@@ -15,27 +15,27 @@ use.
 
 ## User stories
 
-- As a Reviewer, I want to approve, reject, or request changes on an agent's proposed diff,
+- As a Reviewer, I want to approve, reject, or request changes on a harness's proposed diff,
   so only good changes land.
-- As a Reviewer, I want to approve or deny an agent's request to use a sensitive tool, so I
+- As a Reviewer, I want to approve or deny a harness's request to use a sensitive tool, so I
   keep control of risky actions.
 - As a user, I want a Workflow to pause for my decision at defined points, so the process
   respects human judgment.
 
 ## Functional requirements
 
-- **FR-1** When an Agent proposes changes, the Task enters Review and the changes are
+- **FR-1** When a Harness proposes changes, the Task enters Review and the changes are
   presented as a Diff for inspection (see [F09](./F09-integrated-workspace.md)).
 - **FR-2** A Reviewer can **approve** (accept the changes), **reject** (discard them), or
-  **request changes** (return the Task to the Agent with feedback).
+  **request changes** (return the Task to the Harness with feedback).
 - **FR-3** Approval is required before a Task can reach Done; changes are integrated only
   after approval.
-- **FR-4** A Reviewer can approve or deny an Agent's request to use a tool, when the Agent
-  Profile's policy requires human approval (see [F04](./F04-agent-orchestration.md)).
+- **FR-4** A Reviewer can approve or deny a Harness's request to use a tool, when the Harness
+  Profile's policy requires human approval (see [F04](./F04-harness-orchestration.md)).
 - **FR-5** A Workflow Gate presents a decision to a human and blocks downstream Steps until
   the decision is recorded (see [F03](./F03-workflow-designer.md)).
 - **FR-6** Every Review decision is recorded with who decided, when, and any feedback given.
-- **FR-7** Requesting changes resumes the Agent's Session with the reviewer's feedback in
+- **FR-7** Requesting changes resumes the Harness's Session with the reviewer's feedback in
   context rather than starting over.
 - **FR-8** Destructive review actions (rejecting/discarding changes) require confirmation.
 - **FR-9** Proposed changes are grouped by `(repository, branch)`, not by repository alone. A
@@ -44,7 +44,7 @@ use.
   fetches.
 - **FR-10** Each group states its **integration target before the decision is taken**: the
   branch an approval commits to, what that branch was cut from, and how many files changed. A
-  repository the agent never touched is still shown as a group, saying so — approving records a
+  repository the harness never touched is still shown as a group, saying so — approving records a
   result branch for it, and a reviewer shown only the changed repositories would be wrong about
   what they had just approved.
 - **FR-11** One decision covers the whole Task, and its scope is stated in one line above the
@@ -63,19 +63,19 @@ use.
 
 ### Ending a round
 
-- **FR-14** A round ends on the agent's **declaration**, not on its process exiting. An agent
-  that reports `task_complete` and then waits — which is what a CLI agent does — is torn down
+- **FR-14** A round ends on the harness's **declaration**, not on its process exiting. A harness
+  that reports `task_complete` and then waits — which is what a CLI harness does — is torn down
   after a grace period of silence, and any further output re-arms that grace so a declaration
-  the agent supersedes does not cut it off mid-thought.
+  the harness supersedes does not cut it off mid-thought.
 - **FR-15** THE SYSTEM SHALL NOT hold a durable step open on a process it does not control.
-  Waiting on the agent's exit made the run outlive the engine's execution budget, so the step
+  Waiting on the harness's exit made the run outlive the engine's execution budget, so the step
   was never checkpointed, the run was retried from the top indefinitely, and every step below
-  it — the review gate, the wait for a decision, the commit — was unreachable while the agent's
+  it — the review gate, the wait for a decision, the commit — was unreachable while the harness's
   own side effects landed normally. The product looked correct until an approval did nothing.
 
 ## Non-functional requirements
 
-- **NFR-1** No path integrates agent changes without a recorded human approval
+- **NFR-1** No path integrates harness changes without a recorded human approval
   (product [NFR-3](../product/03-product-requirements.md)).
 - **NFR-2** Review decisions are durably recorded and auditable.
 

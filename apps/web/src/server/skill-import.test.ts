@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AgentLibraryErrorCode } from "@solow/contracts";
+import { HarnessLibraryErrorCode } from "@solow/contracts";
 import { zipSync } from "fflate";
 import {
   archiveDirFor,
@@ -79,11 +79,11 @@ describe("resolveImportRoot", () => {
     });
     expect(await resolveImportRoot({ kind: "path", path: join(root, "f.txt") }, root)).toEqual({
       ok: false,
-      error: AgentLibraryErrorCode.ImportSourceNotFound,
+      error: HarnessLibraryErrorCode.ImportSourceNotFound,
     });
     expect(await resolveImportRoot({ kind: "path", path: join(root, "nope") }, root)).toEqual({
       ok: false,
-      error: AgentLibraryErrorCode.ImportSourceNotFound,
+      error: HarnessLibraryErrorCode.ImportSourceNotFound,
     });
   });
 
@@ -147,16 +147,16 @@ describe("resolveImportRoot", () => {
   it("refuses what is not a repository URL, and a repository it cannot fetch", async () => {
     expect(await resolveImportRoot({ kind: "git", url: "not a url" }, root)).toEqual({
       ok: false,
-      error: AgentLibraryErrorCode.ImportCloneFailed,
+      error: HarnessLibraryErrorCode.ImportCloneFailed,
     });
     const gone = fetchOf(async () => new Response("", { status: 404 }));
     expect(
       await resolveImportRoot({ kind: "git", url: "https://github.com/acme/missing" }, root, gone),
-    ).toEqual({ ok: false, error: AgentLibraryErrorCode.ImportCloneFailed });
+    ).toEqual({ ok: false, error: HarnessLibraryErrorCode.ImportCloneFailed });
     const garbage = fetchOf(async () => new Response("<html>", { status: 200 }));
     expect(
       await resolveImportRoot({ kind: "git", url: "https://github.com/acme/html" }, root, garbage),
-    ).toEqual({ ok: false, error: AgentLibraryErrorCode.ImportCloneFailed });
+    ).toEqual({ ok: false, error: HarnessLibraryErrorCode.ImportCloneFailed });
   });
 });
 
@@ -241,17 +241,17 @@ describe("unpackSkillArchive", () => {
     const slip = zipSync({ "../evil/SKILL.md": text("x"), "ok/SKILL.md": text("y") });
     expect(await unpackSkillArchive("slip.zip", slip, root)).toEqual({
       ok: false,
-      error: AgentLibraryErrorCode.ImportArchiveInvalid,
+      error: HarnessLibraryErrorCode.ImportArchiveInvalid,
     });
     await expect(stat(join(root, "slip"))).rejects.toThrow();
     await expect(stat(join(root, "evil"))).rejects.toThrow();
     expect(await unpackSkillArchive("nope.zip", text("not a zip at all"), root)).toEqual({
       ok: false,
-      error: AgentLibraryErrorCode.ImportArchiveInvalid,
+      error: HarnessLibraryErrorCode.ImportArchiveInvalid,
     });
     expect(await unpackSkillArchive("empty.zip", zipSync({}), root)).toEqual({
       ok: false,
-      error: AgentLibraryErrorCode.ImportArchiveInvalid,
+      error: HarnessLibraryErrorCode.ImportArchiveInvalid,
     });
   });
 

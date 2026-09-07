@@ -10,7 +10,7 @@ import { SourceControlPanel } from "./source-control-panel";
 /**
  * The Changes column (spec F22).
  *
- * The source-control panel over the change captured from the agent's last turn, with the
+ * The source-control panel over the change captured from the harness's last turn, with the
  * selected file's diff beneath it. Selecting a row shows that file without navigating away,
  * which is the whole reason the panel is a list of files rather than one long patch: on a change
  * touching thirty files, scrolling is not review.
@@ -19,7 +19,7 @@ import { SourceControlPanel } from "./source-control-panel";
  * path reads git through the orchestrator (Decision 0017) and is what makes staging possible.
  */
 
-const CAPTURED_REASON = "Captured from the agent's last turn — read-only.";
+const CAPTURED_REASON = "Captured from the harness's last turn — read-only.";
 
 function RepositoryChanges({ diff }: { diff: TaskDiffDto }) {
   const [view, setView] = useState<"tree" | "list">("list");
@@ -98,7 +98,7 @@ function GroupHeading({ group, captured }: { group: ReviewGroup; captured: boole
 /**
  * The Changes column, grouped by `(repository, branch)` (spec F10 / issue #70, AC-1 and AC-2).
  *
- * Every group this approval covers is drawn, including a repository the agent never touched —
+ * Every group this approval covers is drawn, including a repository the harness never touched —
  * approving still records a branch for it, and a reviewer shown only the changed repositories
  * would be wrong about what they just approved. `groupChanges` decides what the groups are; this
  * only draws them.
@@ -116,7 +116,7 @@ export function ChangesPanel({
    * Whether the run has reached the point where a change is read at all.
    *
    * A change is captured once, at the review gate. Before that — and on a Task that has never
-   * run — "no changes" is not a fact anyone has checked, and saying it while the agent is
+   * run — "no changes" is not a fact anyone has checked, and saying it while the harness is
    * visibly editing files is the panel contradicting the transcript beside it.
    */
   captured?: boolean;
@@ -158,7 +158,7 @@ export function ChangesPanel({
             // something anyone has checked. See `describeTarget`.
             <p className="surface-edge rounded-lg border bg-card px-3 py-2 text-2xs text-muted-foreground/70">
               {captured
-                ? "The agent made no changes in this repository."
+                ? "The harness made no changes in this repository."
                 : "No change has been read from this repository yet."}
             </p>
           )}

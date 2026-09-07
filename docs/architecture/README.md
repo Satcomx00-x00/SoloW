@@ -27,7 +27,7 @@ behind each significant choice.
 
 SoloW is a control plane. A person interacts with an application that presents Boards,
 Issues, Workflows, and a review workspace. Behind it, a long-lived orchestration component
-launches and supervises external AI coding agents through a standard protocol, each in an
+launches and supervises external AI coding harnesses through a standard protocol, each in an
 isolated working copy inside a chosen execution environment, and streams their activity back
 to the person for review. A durable orchestration engine ensures multi-step Workflows and
 Tasks survive interruptions and pause cleanly for human decisions. State is stored so that

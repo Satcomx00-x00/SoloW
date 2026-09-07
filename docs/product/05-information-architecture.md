@@ -17,9 +17,9 @@ business-level; it does not prescribe visual design.
 4. **Task Detail** — The focused, per-Task review workspace: terminal, editor, diff,
    preview, and conversation.
 5. **Repositories** — Connected Git repositories and their configuration.
-6. **Profiles** — Agent Profiles and Executor Profiles.
+6. **Profiles** — Harness Profiles and Executor Profiles.
 7. **Integrations** — Connections to external trackers, chat, and source hosts.
-8. **Insights** — Analytics and reporting on throughput and agent activity.
+8. **Insights** — Analytics and reporting on throughput and harness activity.
 9. **Settings** — Workspace configuration, secrets, members and access (hosted), platform
    options, and the entry point to re-run the **Setup Workflow** (onboarding).
 
@@ -39,7 +39,7 @@ Runs are watched either in the Workflows monitor or from Task Detail.
 - **Boards** answer "what work is in flight and where does it stand?"
 - **Issues** answer "what needs doing, and which Tasks address it?"
 - **Workflows** answer "what repeatable process runs, and how is this Run progressing?"
-- **Task Detail** answers "what exactly did this agent do, and do I accept it?"
+- **Task Detail** answers "what exactly did this harness do, and do I accept it?"
 - **Profiles / Repositories / Integrations** answer "what reusable building blocks power the
   work?"
 - **Insights** answer "how much are we getting done, and how?"

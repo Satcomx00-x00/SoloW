@@ -132,10 +132,10 @@ export interface TaskRepositoryPosition {
 }
 
 /**
- * The attachment the agent is actually started in (issue #7).
+ * The attachment the harness is actually started in (issue #7).
  *
  * This is the *one* place the product picks a single repository out of a Task's several, and it
- * is named rather than being a `[0]` somewhere in the lifecycle. The lifecycle runs the agent in
+ * is named rather than being a `[0]` somewhere in the lifecycle. The lifecycle runs the harness in
  * exactly one working directory — that is the stated limitation of multi-repository Tasks, not
  * an accident — so something has to answer "which one", and the answer must be the same on every
  * read. It is decided by `position`, which a unique `(task_id, position)` index makes

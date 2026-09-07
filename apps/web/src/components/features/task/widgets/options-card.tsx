@@ -45,7 +45,7 @@ export function OptionsCard({
                   answering ? "hover:border-ring/40 hover:bg-accent/40" : "cursor-default",
                   picked ? "border-primary/50 bg-primary/[0.06]" : "bg-card",
                   // A settled card dims what was not chosen rather than hiding it: the options
-                  // the agent offered are part of the record of what was decided.
+                  // the harness offered are part of the record of what was decided.
                   !answering && !picked && "opacity-55",
                 )}
               >

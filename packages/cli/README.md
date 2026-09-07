@@ -1,6 +1,6 @@
 # SoloW
 
-**Solo Workflow** — a self-hostable control plane for orchestrating AI coding agents in
+**Solo Workflow** — a self-hostable control plane for orchestrating AI coding harnesses in
 parallel, under human review.
 
 ```sh
@@ -11,25 +11,25 @@ That is the whole install. It brings up the stack on <http://localhost:5000> and
 
 ## What it does
 
-SoloW gives a single developer a board where AI coding agents work issues in parallel, each in
+SoloW gives a single developer a board where AI coding harnesses work issues in parallel, each in
 its own git worktree, and nothing merges without you approving the diff.
 
 - **Issues and projects mirrored from GitHub or GitLab.** SoloW never creates anything on your
   provider — it mirrors what is already there, and you decide what gets worked.
-- **A task per agent, a worktree per task.** Agents run isolated; concurrent tasks cannot see or
+- **A task per harness, a worktree per task.** Harnesses run isolated; concurrent tasks cannot see or
   clobber each other's working tree.
 - **A review gate on every run.** A run pauses and waits for you. Approve it or send it back with
-  changes; the agent resumes from where it stopped, not from a cold prompt.
+  changes; the harness resumes from where it stopped, not from a cold prompt.
 - **Durable runs.** The workflow engine persists queued events and in-flight runs, so a run
   parked at the review gate survives a restart.
 
-Everything runs on your machine. The database is a local SQLite file, agent credentials are
+Everything runs on your machine. The database is a local SQLite file, harness credentials are
 encrypted at rest, and nothing is sent anywhere you did not configure.
 
 ## Requirements
 
 - **Node.js 20+** — to run `npx`.
-- To actually run agents you will want the [Claude Code](https://claude.com/claude-code) CLI on
+- To actually run harnesses you will want the [Claude Code](https://claude.com/claude-code) CLI on
   your `PATH`; SoloW launches it per task.
 
 ## Airgapped and npm-only installs

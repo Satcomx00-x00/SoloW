@@ -29,7 +29,7 @@ significant state change is recorded so Runs and Tasks can resume and be reconst
 
 - Positive: interrupted Workflow Runs and Tasks resume instead of restarting (product NFR-1);
   human Gates are reliable; failures retry cleanly.
-- Positive: agent-chaining Workflows map naturally onto the engine's step model.
+- Positive: harness-chaining Workflows map naturally onto the engine's step model.
 - Negative: adds a dependency to the local-first story; resumption correctness for partially
   completed steps must be validated (risk R-4).
 - Realises the [durability cross-cutting concept](../architecture/08-crosscutting-concepts.md)

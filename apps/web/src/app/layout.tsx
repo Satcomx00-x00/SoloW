@@ -15,7 +15,7 @@ export const metadata: Metadata = {
 
 /**
  * Geist and Geist Mono, self-hosted through `next/font` (no render-blocking external request,
- * no layout shift). The monospace face is not decoration here: agent output, branch names and
+ * no layout shift). The monospace face is not decoration here: harness output, branch names and
  * task ids are read character by character, and leaving that to whatever the operating system
  * happens to supply means the terminal looks different on every machine.
  */

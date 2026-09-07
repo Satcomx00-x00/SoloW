@@ -162,7 +162,7 @@ describe("mappers", () => {
       issueId: "issue-1",
       title: "Do the thing",
       state: "running" as const,
-      agentProfileId: "agent-1",
+      agentProfileId: "harness-1",
       executorProfileId: "exec-1",
       failureReason: null,
       completedAt: null,
@@ -216,7 +216,7 @@ describe("mappers", () => {
     });
 
     it("puts the attachments in position order whatever order the rows arrive in", () => {
-      // `repositories[0]` is the primary attachment — the worktree the agent is started in — so
+      // `repositories[0]` is the primary attachment — the worktree the harness is started in — so
       // position order is a promise the DTO makes to every consumer. The read path sorts in SQL,
       // but `task.create` and `task.setRepositories` map the rows `INSERT … RETURNING` handed
       // back, whose order SQLite documents as undefined.

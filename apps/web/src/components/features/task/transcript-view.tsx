@@ -2,8 +2,8 @@
 
 import { memo } from "react";
 import { cn } from "@/lib/utils";
-import { ThinkingDots } from "./agent-activity";
-import { AgentMarkdown } from "./markdown";
+import { ThinkingDots } from "./harness-activity";
+import { HarnessMarkdown } from "./markdown";
 import { PermissionCard } from "./permission-card";
 import { highlightsInline, splitHighlights, type TranscriptMatch } from "./terminal-search";
 import { ToolCall } from "./tool-call";
@@ -11,7 +11,7 @@ import { fencesBalanced, type TranscriptRow } from "./transcript";
 import { rendererFor } from "./widgets/registry";
 
 /**
- * The agent transcript: one memoized component per row.
+ * The harness transcript: one memoized component per row.
  *
  * What this replaces is the whole of the reported slowness. The terminal used to be a single
  * `<pre>` holding `preamble + events.map(...).join("") + live.events.map(...).join("")`, computed
@@ -204,13 +204,13 @@ const TextBlock = memo(function TextBlock({
   // 2. The block is the still-growing tail *and* it has a fence open. A half-arrived fence parsed
   //    as markdown swallows the rest of the turn and re-parses into something else on the next
   //    chunk. A tail whose fences are all closed has neither problem, so it is parsed — which is
-  //    what makes an agent's last message readable while the run is still alive.
+  //    what makes a harness's last message readable while the run is still alive.
   const streamingMidFence = open && !fencesBalanced(text);
   const body =
     streamingMidFence || query !== "" ? (
       <PlainText text={text} query={query} activeIndex={activeIndex} />
     ) : (
-      <AgentMarkdown text={text} />
+      <HarnessMarkdown text={text} />
     );
 
   if (channel === "system") {
@@ -226,7 +226,7 @@ const TextBlock = memo(function TextBlock({
       The operator's own turns sit on the right, in a filled bubble — the arrangement every chat
       surface uses, and the reason it is worth borrowing here: a transcript is a conversation
       between two parties, and "who said this" should be answerable from across the room rather
-      than by reading a small grey label. The agent keeps the full width on the left, because its
+      than by reading a small grey label. The harness keeps the full width on the left, because its
       output is the content (code, diffs, tables) and a bubble would only narrow it.
     */
     return (

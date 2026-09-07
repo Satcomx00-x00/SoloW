@@ -4,10 +4,10 @@
 
 ## Summary
 
-A Workflow is a repeatable, multi-step process that chains Agents and human decisions
+A Workflow is a repeatable, multi-step process that chains Harnesses and human decisions
 together. SoloW presents Workflows as a **visual node graph**: users design a
 Workflow by arranging and connecting Steps on a canvas, and watch a live Run's progress
-overlaid on that same graph. This makes complex, multi-agent processes understandable and
+overlaid on that same graph. This makes complex, multi-harness processes understandable and
 steerable without reading logs.
 
 ## Jobs served
@@ -18,7 +18,7 @@ steerable without reading logs.
 
 ## User stories
 
-- As a Team Lead, I want to design a process where one agent plans, another implements, and
+- As a Team Lead, I want to design a process where one harness plans, another implements, and
   a third reviews, so my team runs it the same way every time.
 - As a user, I want to see, as a graph, where a running Workflow currently is, so I
   understand its state instantly.
@@ -32,10 +32,10 @@ steerable without reading logs.
 ### Designing
 - **FR-1** A user can create a Workflow as a graph of Steps on a visual canvas, adding
   Steps as nodes and connecting them with directed edges that represent transitions.
-- **FR-2** Step types include at minimum: an **Agent Step** (an Agent performs an action),
+- **FR-2** Step types include at minimum: a **Harness Step** (a Harness performs an action),
   a **Gate** (waits for a human decision), a **Condition** (branches on a rule), and a
   **Fork/Join** (runs branches in parallel and recombines them).
-- **FR-3** Each Agent Step references an Agent Profile and the instruction or role it plays.
+- **FR-3** Each Harness Step references a Harness Profile and the instruction or role it plays.
 - **FR-4** A user can arrange, connect, disconnect, and delete Steps directly on the canvas,
   and the canvas supports panning, zooming, and readable layout of large graphs.
 - **FR-5** The designer prevents invalid graphs (for example, a Join without a matching
@@ -111,7 +111,7 @@ it is how an operator gets from one shape to the next.
   the Step, skip it (if allowed), or cancel the Run.
 - If a Gate is never resolved, the Run remains paused and is clearly shown as waiting on a
   human, and can be reassigned or cancelled.
-- If an Agent Step exhausts a subscription quota, the Step parks and the Run waits, matching
+- If a Harness Step exhausts a subscription quota, the Step parks and the Run waits, matching
   Task Parked behaviour in [F06](./F06-authentication-billing.md).
 
 ## Out of scope
@@ -123,7 +123,7 @@ it is how an operator gets from one shape to the next.
 ## What ships in v1
 
 - **Launch asks which Workflow.** Pressing *Launch* on a Ready Task (board or Task page) opens a
-  choice — *No workflow* (one agent run) or any pipeline of the Workspace, preselected to what the
+  choice — *No workflow* (one harness run) or any pipeline of the Workspace, preselected to what the
   Task is bound to — writes the binding, then launches. With no Workflow in the Workspace, or the
   flag off, the launch goes straight through as before.
 - **Built through the SoloW MCP too** — the `workflow.*` authoring procedures (create, add /
@@ -132,46 +132,46 @@ it is how an operator gets from one shape to the next.
   can design a pipeline. `workflow.advanceTask` and `workflow.acknowledgeDrift` stay withheld:
   the gates are a person's to open. The two library *lists* are exposed so a Step can name items
   by id; library writes stay signed-in.
-- **Three pipelines by default** — *Implement & review* (a reviewer agent decides whether another
+- **Three pipelines by default** — *Implement & review* (a reviewer harness decides whether another
   pass is needed), *Plan, then build* (a plan you approve, then the build), *Bug fix* (reproduce,
   fix, verify, looping while the bug still reproduces). Seeded once the Workspace has its first
-  Agent Profile and only while it has no Workflow of its own, so a pipeline you delete stays deleted. (issue #5)
+  Harness Profile and only while it has no Workflow of its own, so a pipeline you delete stays deleted. (issue #5)
 
 The model, its seam and the designing canvas ship; the monitor does not. Concretely:
 
 - **Designing is a node graph of a linear pipeline.** `workflow` + `workflow_step` tables,
   Workspace-scoped (Principle V), drawn at `/workflows` on a React Flow canvas
   ([Decision 0007](../decisions/0007-reactflow-workflow-visualisation.md)): one node per Step,
-  left to right in rank order, each node carrying its own form — Agent Profile, gate, advance
-  rule, prompt — and a `+` beside it that adds the next Step on the first Agent Profile in the
+  left to right in rank order, each node carrying its own form — Harness Profile, gate, advance
+  rule, prompt — and a `+` beside it that adds the next Step on the first Harness Profile in the
   catalog, renamed in place. Edges follow the order and are not drawn by hand: a linear pipeline
   has exactly one edge between consecutive Steps, and the one connect gesture — dragging a
   branch's `Yes`/`No` exit onto a Step or the end — re-points an exit that already exists rather
   than adding an edge (FR-1 without its branching; FR-4's panning and zooming). Dragging a node past a neighbour is a reorder — the drop
   is turned into the neighbour pair `workflow.reorderStep` takes and the node snaps back to its
   laid-out place, so the canvas never stores a position the run loop could disagree with.
-  Parallel Steps and non-agent nodes (Gate, Fork/Join — FR-2) stay Later.
-- **A Step names what it loads from the agent libraries** ([F24](./F24-agent-libraries.md)):
+  Parallel Steps and non-harness nodes (Gate, Fork/Join — FR-2) stay Later.
+- **A Step names what it loads from the harness libraries** ([F24](./F24-harness-libraries.md)):
   `workflow_step.mcp_server_ids` / `skill_ids`, chosen on the node under *Loads*, additively —
   the Workspace-wide items are checked and locked there, the rest are the Step's own. Every id is
   checked against the Workspace's libraries before it is written (`WORKFLOW_TOOL_NOT_IN_WORKSPACE`),
   and an item a Step names cannot be deleted from its library.
 - **A Step can branch on a condition** (FR-2's *Condition*, in the shape this pipeline can
-  answer). It is a property of an agent Step rather than a Step kind of its own — a Condition node
-  would be a row with no agent, no prompt and no gate, and every rule that reads a Step would have
+  answer). It is a property of a Harness Step rather than a Step kind of its own — a Condition node
+  would be a row with no harness, no prompt and no gate, and every rule that reads a Step would have
   to learn to skip it. `workflow_step.branch` holds a condition and two targets: when the
   condition holds, the Task goes to `thenStepId`, otherwise to `elseStepId`. Either target may be
   null, meaning *the pipeline ends here*, and either may name an **earlier** Step — "changes
   requested, go back and implement" is the branch most worth having. Two conditions exist, and
   neither fetches evidence the advance transaction does not already hold, so a Condition never
-  becomes a second rules engine. **`agent-decides` is the one the feature is for: the agent
+  becomes a second rules engine. **`agent-decides` is the one the feature is for: the harness
   answers the question.** The operator phrases it ("Does the implementation need another pass?");
   `buildStepBrief` appends it to the Step's brief under *Decision to make*, with the exact line to
-  answer on (`DECISION: yes` / `DECISION: no`) and what each answer leads to; the agent — the
+  answer on (`DECISION: yes` / `DECISION: no`) and what each answer leads to; the harness — the
   party that has just read the code — answers at the end of its final message, and the advance
-  reads the last such line off the handoff (`readAgentDecision`). The handoff is the
-  `task_complete` widget's summary; an answer the agent wrote in its message but not in that
-  summary is carried into it by the run loop (`carryAgentDecision`), because the first live run
+  reads the last such line off the handoff (`readHarnessDecision`). The handoff is the
+  `task_complete` widget's summary; an answer the harness wrote in its message but not in that
+  summary is carried into it by the run loop (`carryHarnessDecision`), because the first live run
   did exactly that and the answer would otherwise have been lost. No answer is not an affirmation and counts
   as `no`, and the brief says so. `produced-changes` is the other: the same corroborated fact
   `auto-unless-changes` reads. A Step without a branch still goes to its rank successor, so every
@@ -182,9 +182,9 @@ The model, its seam and the designing canvas ship; the monitor does not. Concret
 - **Step order is a lexicographic rank string**, not a position. Inserting a Step in the middle
   writes exactly one row and renumbers nothing; a reorder names the two Steps the moved one lands
   between, and is refused as stale if those two are no longer adjacent.
-- **Every Step names an Agent Profile** from the catalog of [F05](./F05-agent-executor-profiles.md)
-  (issue #10). There is no second way of naming an agent, which is what makes "a single Task uses
-  different agents across Steps" a difference between two rows.
+- **Every Step names a Harness Profile** from the catalog of [F05](./F05-harness-executor-profiles.md)
+  (issue #10). There is no second way of naming a harness, which is what makes "a single Task uses
+  different harnesses across Steps" a difference between two rows.
 - **Gates.** A Step's gate is `human`, `auto`, or `auto-unless-changes`; its advance rule is
   `agent-signal` or `review`. A gate decides whether an *intermediate* Step waits for a person.
 - **The human decision before integration is unconditional, and it is an approval.** The last Step
@@ -209,7 +209,7 @@ The model, its seam and the designing canvas ship; the monitor does not. Concret
   `WORKFLOW_STALE_CURSOR` rather than skipping a Step.
 - **A Step's handoff survives a closed gate.** The summary a Step reports is held in
   `task.workflow_pending_handoff` until the cursor actually moves, because the caller that replays
-  the signal once a human has decided no longer has the agent's words.
+  the signal once a human has decided no longer has the harness's words.
 - **Attaching and detaching are symmetric.** Both are refused once the Task has left
   `backlog`/`ready`; attaching is refused once a Task has begun a pipeline at all, so re-attaching
   cannot silently rewind a cursor, and detaching is refused for a Task that follows nothing — which
@@ -222,7 +222,7 @@ The model, its seam and the designing canvas ship; the monitor does not. Concret
   under *States & rules* is still the target; a snapshot table with no producer would be a table
   nothing writes.
 - **The Workflow namespace is withheld from the external MCP surface** (issue #16). The holder of
-  an MCP token is the agent whose work the gates exist to hold, and `workflow.advanceTask` is the
+  an MCP token is the harness whose work the gates exist to hold, and `workflow.advanceTask` is the
   call that opens them. Driving a pipeline from MCP is issue #86, and it needs the run loop that
   produces one Session per Step so a completion report can be attributed to the Step it came from.
 - **Automations are a Step property.** `workflow_step.on_enter` is reserved for the automations of
@@ -235,10 +235,10 @@ The orchestrator walks the Steps. `runTaskLifecycle` in
 it took is worth stating because it is not the obvious one.
 
 - **One monotonic round counter, and no nested Step loop.** A Step boundary is a round at which
-  the agent binding and the brief change; the existing review-round loop already does everything a
+  the harness binding and the brief change; the existing review-round loop already does everything a
   Step loop would. A nested loop that reset `round` per Step would replay `agent-run-0` and
   `approve-0` on Step 2, and Inngest would hand back Step 1's memoized results — silently skipping
-  Step 2's agent run and replaying Step 1's review decision. Because no durable step id contains a
+  Step 2's harness run and replaying Step 1's review decision. Because no durable step id contains a
   Step ordinal, **a definition edit cannot corrupt a live run's journal**, which is why there is no
   drift refusal on this side. `MAX_REVIEW_ROUNDS` is per Step; a Workflow may have at most
   `MAX_WORKFLOW_STEPS` (20) Steps and a longer one is refused by name rather than truncated.
@@ -246,7 +246,7 @@ it took is worth stating because it is not the obvious one.
   cursor is not written back, because `taskHasBegunWorkflow` reads exactly those columns to refuse
   a re-attach. A cursor naming a Step the Workflow no longer contains fails the Task with
   `workflow_unresumable` — never a silent restart at Step one.
-- **Every Step's agent is resolved before anything is cloned.** The executor preflight probes every
+- **Every Step's harness is resolved before anything is cloned.** The executor preflight probes every
   binary the pipeline can spawn and the runner gate refuses a pipeline naming a protocol this build
   cannot drive, both before `prepare-repository`. The resolved set deliberately carries **no
   credential**: `step.run` memoizes its return value durably, so each Step's ciphertext is read at
@@ -291,7 +291,7 @@ pipeline*, the badge says *what is happening to it*.
 ### What this costs, stated rather than discovered
 
 - **The kill switch is a footgun.** Turning `ff-workflows` off mid-pipeline makes the next run of
-  that Task ignore its cursor entirely: it runs the Task's own Agent Profile from the top and
+  that Task ignore its cursor entirely: it runs the Task's own Harness Profile from the top and
   integrates on the first approval, as if the pipeline were not there. The cursor is not cleared,
   so turning the flag back on resumes where it was — but the work done in between was done outside
   the pipeline. Turn the flag off for a Workspace with Tasks in flight only deliberately.
@@ -301,7 +301,7 @@ pipeline*, the badge says *what is happening to it*.
   transition events. Two approvals recorded inside one Step's review round leave the newer one
   unspent and available to the next gate. Per-Step review linkage needs one Session per Step
   (#26/#61).
-- **An extra approval in one state.** If the agent's signal reaches the last Step while an
+- **An extra approval in one state.** If the harness's signal reaches the last Step while an
   approval is already unspent, the agent-signal path reports `completed` and marks that approval
   spent without integrating. The review that follows then finds nothing to spend and the run stops
   with a notice asking for the decision again. Stricter than required; never looser.
@@ -319,12 +319,12 @@ pipeline*, the badge says *what is happening to it*.
   "the pipeline ends here".
 - **Concurrency caps are still checked against the Task's Profile only.** `withinConcurrencyCap` in
   `apps/web/src/server/dal/task.ts` reads `task.agentProfileId`, so a Workflow walking onto a Step
-  whose Agent Profile is already at its cap is not checked at all. This issue opens that hole; it
+  whose Harness Profile is already at its cap is not checked at all. This issue opens that hole; it
   closes when the cap check learns about the cursor.
 
 Later, in the order they unblock things: the Monitor strip of FR-9, one Session per Step (#26/#61)
 and the per-Step review linkage it unlocks, copy-on-write versioning so a Run really is pinned to
-the definition it started on, non-agent Step kinds (Gate, Fork/Join — FR-2; Condition ships as a Step property, above), validity
+the definition it started on, non-harness Step kinds (Gate, Fork/Join — FR-2; Condition ships as a Step property, above), validity
 checking (FR-5), import/export (FR-7), and per-Step run history.
 
 The /workflows UI keeps its WIP badge (`Section.wip` in `apps/web/src/lib/navigation.ts`) while the
@@ -334,7 +334,7 @@ rather than one that looks broken.
 ## Related
 
 - [F02 — Kanban Task Administration](./F02-kanban-task-administration.md)
-- [F04 — Multi-Agent Orchestration](./F04-agent-orchestration.md)
+- [F04 — Multi-Harness Orchestration](./F04-harness-orchestration.md)
 - [F10 — Review & Approval](./F10-review-approval.md)
 - [Decision 0007 — ReactFlow for Workflow visualisation](../decisions/0007-reactflow-workflow-visualisation.md)
 - [Decision 0004 — Durable orchestration engine](../decisions/0004-durable-orchestration-engine.md)

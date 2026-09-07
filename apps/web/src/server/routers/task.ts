@@ -33,13 +33,13 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import type { RequestContext } from "../dal/context.js";
 import { getIssueById } from "../dal/issue.js";
-import { getAgentProfile, getExecutorProfile } from "../dal/profile.js";
+import { getExecutorProfile, getHarnessProfile } from "../dal/profile.js";
 import { getRepository } from "../dal/repository.js";
 import { createSession } from "../dal/session.js";
 import {
   activeSessionForTask,
   addTaskDependencyEdge,
-  countRunningForAgentProfile,
+  countRunningForHarnessProfile,
   createTaskRecord,
   deleteTask,
   getTaskById,
@@ -62,7 +62,7 @@ import { ownerProcedure, rateLimit, router, unwrap } from "../trpc.js";
  * invariant dies is the next start path added — workflow advance, a coordinator — being written
  * by someone who did not know a check existed to repeat. There is nothing to remember here: a
  * new start path either calls this or it does not start Tasks. Exported for the same reason:
- * `review.decide` resumes an agent, so it is a start path and calls this one, rather than
+ * `review.decide` resumes a harness, so it is a start path and calls this one, rather than
  * growing a second opinion about what "blocked" means.
  *
  * The MCP surface needs no gate of its own; `mcp/tools.ts` derives every tool from these same
@@ -86,10 +86,10 @@ export async function requireUnblocked(rctx: RequestContext, taskId: string): Pr
  * batch from resuming.
  */
 /**
- * Start an agent on a Task. The one path into `running`, whoever asked.
+ * Start a harness on a Task. The one path into `running`, whoever asked.
  *
  * There used to be two: `launch`/`retry` created a Session and published to the durable engine,
- * while `move` into `running` wrote the column and stopped — no Session, no agent, and a card
+ * while `move` into `running` wrote the column and stopped — no Session, no harness, and a card
  * sitting in Running with nothing behind it. The board offered both gestures and only one of them
  * worked, which is a trap rather than a choice, and it stranded a real Task for hours.
  *
@@ -102,9 +102,9 @@ export async function startTaskRun(rctx: RequestContext, taskId: string): Promis
   unwrap(canTransitionTask(existing.state, "running"));
   await requireUnblocked(rctx, existing.id);
 
-  // The Agent Profile concurrency cap (spec FR-017), on every path into `running`.
-  const profile = unwrap(await getAgentProfile(rctx, existing.agentProfileId));
-  const running = await countRunningForAgentProfile(rctx, existing.agentProfileId);
+  // The Harness Profile concurrency cap (spec FR-017), on every path into `running`.
+  const profile = unwrap(await getHarnessProfile(rctx, existing.agentProfileId));
+  const running = await countRunningForHarnessProfile(rctx, existing.agentProfileId);
   if (!withinConcurrencyCap(profile.concurrencyCap, running)) {
     throw new TRPCError({
       code: "TOO_MANY_REQUESTS",
@@ -145,7 +145,7 @@ export const taskRouter = router({
         tags: ["task"],
         protect: true,
         summary:
-          "Create a Task under an Issue, binding an Agent Profile, an Executor Profile, and one or more Repositories — each with its own base ref and checkout branch. Creates it in the backlog; it does not start an agent — use task.launch for that.",
+          "Create a Task under an Issue, binding a Harness Profile, an Executor Profile, and one or more Repositories — each with its own base ref and checkout branch. Creates it in the backlog; it does not start a harness — use task.launch for that.",
       },
     })
     .input(createTaskInput)
@@ -154,7 +154,7 @@ export const taskRouter = router({
       // Ownership: every referenced entity must belong to this Workspace, or the create is
       // a cross-tenant reference and must fail (Principle V). Each lookup is workspace-scoped.
       unwrap(await getIssueById(ctx.rctx, input.issueId));
-      unwrap(await getAgentProfile(ctx.rctx, input.agentProfileId));
+      unwrap(await getHarnessProfile(ctx.rctx, input.agentProfileId));
       unwrap(await getExecutorProfile(ctx.rctx, input.executorProfileId));
       // Every attached Repository, resolved before anything is written: one id from another
       // Workspace has to fail the whole create, not attach the rest and leave a Task half
@@ -224,7 +224,7 @@ export const taskRouter = router({
         tags: ["task"],
         protect: true,
         summary:
-          "Start an agent on a ready Task in its own isolated worktree. Rate limited, and refused if the Agent Profile is already at its concurrency cap. The run ends at a human review gate — it never merges on its own.",
+          "Start a harness on a ready Task in its own isolated worktree. Rate limited, and refused if the Harness Profile is already at its concurrency cap. The run ends at a human review gate — it never merges on its own.",
       },
     })
     .use(rateLimit("task.launch"))
@@ -236,9 +236,9 @@ export const taskRouter = router({
         throw new TRPCError({ code: "BAD_REQUEST", message: TaskErrorCode.NotReady });
       }
       await requireUnblocked(ctx.rctx, task.id);
-      // Enforce the Agent Profile concurrency cap (spec FR-017).
-      const profile = unwrap(await getAgentProfile(ctx.rctx, task.agentProfileId));
-      const running = await countRunningForAgentProfile(ctx.rctx, task.agentProfileId);
+      // Enforce the Harness Profile concurrency cap (spec FR-017).
+      const profile = unwrap(await getHarnessProfile(ctx.rctx, task.agentProfileId));
+      const running = await countRunningForHarnessProfile(ctx.rctx, task.agentProfileId);
       if (!withinConcurrencyCap(profile.concurrencyCap, running)) {
         throw new TRPCError({
           code: "TOO_MANY_REQUESTS",
@@ -266,7 +266,7 @@ export const taskRouter = router({
       unwrap(canTransitionTask(task.state, input.to));
       // Moving into `running` *is* starting, and now does it: same Session, same concurrency cap,
       // same publish to the durable engine as Launch and Retry. It used to write the column and
-      // nothing else, which left a card in Running with no agent behind it and no way to tell.
+      // nothing else, which left a card in Running with no harness behind it and no way to tell.
       if (input.to === "running") return startTaskRun(ctx.rctx, task.id);
       const moved = unwrap(await updateTaskState(ctx.rctx, task.id, input.to));
       // Every client watching, not just the one that dragged the card.
@@ -286,14 +286,14 @@ export const taskRouter = router({
         tags: ["task"],
         protect: true,
         summary:
-          "Open the review gate on a Task whose agent has declared it finished. Refused when no declaration has been made — the gate is for judging finished work, not work still in progress.",
+          "Open the review gate on a Task whose harness has declared it finished. Refused when no declaration has been made — the gate is for judging finished work, not work still in progress.",
       },
     })
     .input(submitTaskForReviewInput)
     .output(taskDto)
     .mutation(async ({ ctx, input }) => {
       const task = unwrap(await getTaskById(ctx.rctx, input.id));
-      // The agent's own word, and only `changes_ready` counts: a run that finished having changed
+      // The harness's own word, and only `changes_ready` counts: a run that finished having changed
       // nothing (`nothing_to_do`) has nothing to approve, and one that gave up (`blocked`) has not
       // finished at all. Checked here rather than only in the UI, because the button is not the
       // only caller — MCP and the OpenAPI surface reach this too.
@@ -429,7 +429,7 @@ export const taskRouter = router({
     .input(deleteTaskInput)
     .output(z.object({ id: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      // Stopping lives here, not in the DAL: reaching a running agent is an orchestrator
+      // Stopping lives here, not in the DAL: reaching a running harness is an orchestrator
       // hand-off, and the DAL stays pure database. It re-checks the same condition inside its
       // transaction, which is what makes this safe rather than merely polite.
       const sessionId = await activeSessionForTask(ctx.rctx, input.id);
@@ -443,11 +443,11 @@ export const taskRouter = router({
           });
           // The orchestrator accepted the cancellation. It unwinds between steps, so the Task
           // row will still read `running` for a moment — `stopIssued` is what tells the DAL that
-          // the stale flag is expected rather than a live agent it must protect.
+          // the stale flag is expected rather than a live harness it must protect.
           stopIssued = true;
         } catch (cause) {
           // Nothing has been deleted yet, so refusing leaves the Task exactly as it was — the
-          // one outcome that cannot orphan a running agent.
+          // one outcome that cannot orphan a running harness.
           throw new TRPCError({
             code: "PRECONDITION_FAILED",
             message: TaskErrorCode.StopFailed,

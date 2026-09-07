@@ -6,10 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
-import { AgentActivityLine, LaunchingPanel } from "./agent-activity";
 import { EmptyPanel } from "./empty-panel";
+import { HarnessActivityLine, LaunchingPanel } from "./harness-activity";
 import { findMatches, stepMatch } from "./terminal-search";
-import { agentActivity, type TranscriptRow } from "./transcript";
+import { harnessActivity, type TranscriptRow } from "./transcript";
 import { Transcript } from "./transcript-view";
 
 /**
@@ -31,9 +31,9 @@ import { Transcript } from "./transcript-view";
  * the viewport, and following and scrolling-to-a-match are both things you do *to* a viewport.
  *
  * **Saying that it is alive.** A run is mostly silence — the launch, a long tool call, a thinking
- * block — and a settled transcript looks the same whether the agent is composing or has hung. So
+ * block — and a settled transcript looks the same whether the harness is composing or has hung. So
  * the foot of the list carries a line naming what is happening, and an empty terminal under a
- * running Task says the agent is starting rather than inviting the operator to start it again.
+ * running Task says the harness is starting rather than inviting the operator to start it again.
  */
 export function TerminalView({
   rows,
@@ -45,7 +45,7 @@ export function TerminalView({
   rows: readonly TranscriptRow[];
   /** How many earlier events a summary stands in for, if any. */
   elided: number;
-  /** Whether an agent is on the other end. Nothing below the transcript moves when it is not. */
+  /** Whether a harness is on the other end. Nothing below the transcript moves when it is not. */
   isRunning?: boolean;
   onRespondPermission: (requestId: string, optionId: string) => void;
   onRespondWidget?: ((widgetId: string, values: string[], text?: string) => void) | undefined;
@@ -59,7 +59,7 @@ export function TerminalView({
 
   const matches = useMemo(() => findMatches(rows, query), [rows, query]);
   const activeMatch = matches[active] ?? null;
-  const activity = useMemo(() => agentActivity(rows, isRunning), [rows, isRunning]);
+  const activity = useMemo(() => harnessActivity(rows, isRunning), [rows, isRunning]);
 
   const scrollToBottom = useCallback(() => {
     const el = viewport.current;
@@ -297,14 +297,14 @@ export function TerminalView({
                 thing in the transcript for as long as there is nothing after it. */}
             {activity && (
               <div className="px-4 pb-4">
-                <AgentActivityLine activity={activity} />
+                <HarnessActivityLine activity={activity} />
               </div>
             )}
           </>
         ) : isRunning ? (
           <LaunchingPanel />
         ) : (
-          <EmptyPanel label="No agent output yet. Launch the task to start a run." />
+          <EmptyPanel label="No harness output yet. Launch the task to start a run." />
         )}
       </ScrollArea>
     </div>

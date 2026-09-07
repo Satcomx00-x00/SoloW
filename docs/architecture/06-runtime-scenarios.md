@@ -9,19 +9,19 @@ scenario is described as a sequence of responsibilities, not implementation.
 
 1. A user creates a Task under an Issue and marks it Ready (Interactive Application, F02).
 2. The user launches the Task; the Orchestration Component checks concurrency and billing
-   rules, provisions a Worktree, and starts an Agent Session through the standard protocol
+   rules, provisions a Worktree, and starts a Harness Session through the standard protocol
    (F04, F06, F08).
-3. The Agent works; its activity streams live to the review workspace (F09).
-4. The Agent proposes changes; the Task enters Review and the changes are presented as a
+3. The Harness works; its activity streams live to the review workspace (F09).
+4. The Harness proposes changes; the Task enters Review and the changes are presented as a
    Diff (F10).
 5. The user approves; the changes are integrated (optionally as a pull request), the Task
    moves to Done, and the Worktree is cleaned up (F08, F12).
 
-## Scenario 2 — Run a multi-agent Workflow with a human Gate
+## Scenario 2 — Run a multi-harness Workflow with a human Gate
 
 1. A Task executes a Workflow; the Workflow engine begins the Run and records its progress
    durably (F03, Decision 0004).
-2. An Agent Step runs; on completion the engine advances to the next Step.
+2. A Harness Step runs; on completion the engine advances to the next Step.
 3. The Run reaches a Gate; it pauses and requests a human decision, notifying the reviewer
    (F10, F15).
 4. The reviewer approves at the Gate; the engine resumes and continues downstream Steps.
@@ -37,7 +37,7 @@ scenario is described as a sequence of responsibilities, not implementation.
 
 ## Scenario 4 — Subscription quota exhausted
 
-1. A Subscription-mode Agent exhausts its quota window mid-run (F06).
+1. A Subscription-mode Harness exhausts its quota window mid-run (F06).
 2. The billing & credential guard moves the Task (or Workflow Step) to Parked, preserving all
    work.
 3. When the quota window resets, Parked work resumes automatically, in order and within the

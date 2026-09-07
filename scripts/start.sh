@@ -41,7 +41,7 @@ export SOLOW_DEV_OWNER="${SOLOW_DEV_OWNER:-on}"
 export SOLOW_AUTH_SECRET="${SOLOW_AUTH_SECRET:-dev-insecure-session-secret-32ch}"
 # Shared by web (signs stream tickets) and orchestrator (verifies them) — same value, both sides.
 export SOLOW_STREAM_SECRET="${SOLOW_STREAM_SECRET:-dev-insecure-stream}"
-# The Claude Code binary each run's agent_catalog row names (packages/db/src/agent-catalog-
+# The Claude Code binary each run's agent_catalog row names (packages/db/src/harness-catalog-
 # defaults.ts seeds "claude"; these two are read by nothing in apps/orchestrator/src today, so
 # they do not override that — kept only for a deployment that wires its own catalog lookup to
 # them). SoloW adds the arguments it needs itself, including --worktree, so each Task gets
@@ -54,7 +54,7 @@ export SOLOW_WEB_URL="${SOLOW_WEB_URL:-http://localhost:5000}"
 # Where the web app's emit() POSTs task-run/review events (apps/web/src/server/orchestrator-
 # client.ts) — the orchestrator's own /events route, which forwards them into a real
 # inngest.send() (Decision 0004). Without this, enqueueTaskRun()/resumeReview() silently no-op
-# in dev-owner mode instead of ever reaching an agent.
+# in dev-owner mode instead of ever reaching a harness.
 export SOLOW_ORCHESTRATOR_URL="${SOLOW_ORCHESTRATOR_URL:-http://localhost:$SOLOW_WS_PORT}"
 export SOLOW_INNGEST_PORT="${SOLOW_INNGEST_PORT:-8288}"
 # Inngest's own env var (not SoloW's — see apps/orchestrator/src/inngest/client.ts): a URL
@@ -73,7 +73,7 @@ if [ ! -f "$SOLOW_SQLITE_PATH" ]; then
     echo "[start] initializing database at $SOLOW_SQLITE_PATH"
 fi
 bun run db:migrate
-# Every start, not only the first: this creates the Workspace and its agent catalog and nothing
+# Every start, not only the first: this creates the Workspace and its harness catalog and nothing
 # else, so it is a no-op once they exist.
 bun run db:bootstrap
 

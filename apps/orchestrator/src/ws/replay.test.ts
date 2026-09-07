@@ -3,9 +3,9 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import type { SessionEventPayload, TaskEvent } from "@solow/contracts";
 import {
-  agentCatalog,
-  agentProfile,
   executorProfile,
+  harnessCatalog,
+  harnessProfile,
   issue,
   session,
   sessionEvent,
@@ -115,7 +115,7 @@ describe("toTaskEvent", () => {
     });
   });
 
-  it("replays the agent's todo list whole, so a client that joined late still has the plan", () => {
+  it("replays the harness's todo list whole, so a client that joined late still has the plan", () => {
     // The list is stored entire on every rewrite rather than as a delta, which is what makes a
     // reconnect work at all: there is nothing for a late client to apply a delta to.
     expect(
@@ -164,7 +164,7 @@ describe("attachSubscriber (typed log, unchanged wire)", () => {
     db = createTestDb();
     await db.insert(workspace).values({ id: "ws-a", name: "Alpha", ownerUserId: "owner" });
     await db.insert(issue).values({ id: "iss-1", workspaceId: "ws-a", title: "I" });
-    await db.insert(agentCatalog).values({
+    await db.insert(harnessCatalog).values({
       id: "cat-1",
       workspaceId: "ws-a",
       key: "claude_code",
@@ -174,7 +174,7 @@ describe("attachSubscriber (typed log, unchanged wire)", () => {
       subscriptionEnvVar: "CLAUDE_CODE_OAUTH_TOKEN",
       meteredEnvVar: "ANTHROPIC_API_KEY",
     });
-    await db.insert(agentProfile).values({
+    await db.insert(harnessProfile).values({
       id: "ap-1",
       workspaceId: "ws-a",
       name: "Claude",

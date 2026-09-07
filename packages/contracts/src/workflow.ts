@@ -2,7 +2,7 @@ import { z } from "zod";
 import { idSchema, timestampsSchema } from "./common.js";
 
 /**
- * Workflows — an ordered pipeline of Steps, each run by its own Agent Profile (issue #5, spec
+ * Workflows — an ordered pipeline of Steps, each run by its own Harness Profile (issue #5, spec
  * F03). A Task follows at most one Workflow and carries a durable cursor naming the Step it is
  * on, which is what lets "advance to the next Step" be a move of one Task rather than the
  * creation of a second one.
@@ -28,7 +28,7 @@ import { idSchema, timestampsSchema } from "./common.js";
 export const workflowStepGateSchema = z.enum(["human", "auto", "auto-unless-changes"]);
 export type WorkflowStepGate = z.infer<typeof workflowStepGateSchema>;
 
-/** Which signal counts as "this Step is finished" — the agent saying so, or a review landing. */
+/** Which signal counts as "this Step is finished" — the harness saying so, or a review landing. */
 export const workflowAdvanceOnSchema = z.enum(["agent-signal", "review"]);
 export type WorkflowAdvanceOn = z.infer<typeof workflowAdvanceOnSchema>;
 
@@ -55,11 +55,11 @@ export type WorkflowStepAutomation = z.infer<typeof workflowStepAutomationSchema
  * condition that fetched its own facts would be a second rules engine, which is the thing the
  * Step model refuses to grow:
  *
- *  - `agent-decides`: **the agent answers the question.** The Step's brief carries it, asks for
+ *  - `agent-decides`: **the harness answers the question.** The Step's brief carries it, asks for
  *    a `DECISION: yes` or `DECISION: no` line at the end of its final message, and the advance reads that
- *    line off the handoff — see `buildStepBrief` and `readAgentDecision` in `@solow/core`. The
- *    agent is the party that has just read the code, the plan or the review, so it is the party
- *    that can say whether the condition is met; the operator only phrases the question. An agent
+ *    line off the handoff — see `buildStepBrief` and `readHarnessDecision` in `@solow/core`. The
+ *    harness is the party that has just read the code, the plan or the review, so it is the party
+ *    that can say whether the condition is met; the operator only phrases the question. A harness
  *    that does not answer has not affirmed the condition, and that counts as `no`.
  *  - `produced-changes`: the Step left a diff behind. The same fact `auto-unless-changes` reads,
  *    corroborated the same way — the caller's claim is a floor, the Session log is the answer.
@@ -74,7 +74,7 @@ export type WorkflowStepCondition = z.infer<typeof workflowStepConditionSchema>;
  * Where a Step sends the Task next, as a function of a condition — "if yes, run X; if no, run Y".
  *
  * On a Step rather than as a Step *kind*: a Condition node of its own would be a row with no
- * agent, no prompt and no gate, and every rule that reads a Step would have to learn to skip it.
+ * harness, no prompt and no gate, and every rule that reads a Step would have to learn to skip it.
  * The condition is evaluated on the outcome of the Step it hangs off, which is also the only
  * outcome it can be about.
  *
@@ -119,7 +119,7 @@ export const WorkflowErrorCode = {
   TaskNotOnWorkflow: "WORKFLOW_TASK_NOT_ON_WORKFLOW",
   /**
    * The Task has already begun its pipeline — its cursor has moved, a handoff was carried, or an
-   * approval was spent. Re-attaching would reset all three, discarding paid agent work with no
+   * approval was spent. Re-attaching would reset all three, discarding paid harness work with no
    * error and no warning, which is the outcome `resumeWorkflowCursor` refuses for the same reason.
    */
   TaskWorkflowInProgress: "WORKFLOW_TASK_IN_PROGRESS",
@@ -271,7 +271,7 @@ export type AcknowledgeTaskWorkflowDriftInput = z.infer<typeof acknowledgeTaskWo
  * `producedChanges` is a claim by the same reasoning, and is treated as one: the server ORs it
  * with what it has itself recorded about the Task, so reporting `false` on a Step that wrote a
  * diff cannot open the gate that exists to catch exactly that. It is kept as an input because the
- * agent knows first — it is a floor on the answer, never the whole of it.
+ * harness knows first — it is a floor on the answer, never the whole of it.
  *
  * `fromStepId` names the Step the caller believes it is finishing, for the reason
  * `reorderWorkflowStepInput` names neighbours rather than a position: a payload that names only
@@ -349,7 +349,7 @@ export const workflowWithStepsDto = workflowDto.extend({ steps: z.array(workflow
 export type WorkflowWithStepsDto = z.infer<typeof workflowWithStepsDto>;
 
 /**
- * Where a Task is in its Workflow. `brief` is the prompt the current Step's agent should be
+ * Where a Task is in its Workflow. `brief` is the prompt the current Step's harness should be
  * given — the Step's template with the previous Step's handoff prepended — so the runner reads
  * one field rather than re-deriving the concatenation and drifting from it (issue #82).
  */

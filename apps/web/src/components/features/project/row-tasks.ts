@@ -1,11 +1,11 @@
 import type { TaskDto, TaskState } from "@solow/contracts";
 
 /**
- * What a project row says about the agent runs underneath it.
+ * What a project row says about the harness runs underneath it.
  *
  * The planning table sits above execution ([Decision 0006](../../../../../docs/decisions/0006-issue-task-separation.md)),
  * and F23 FR-14 asks the two layers to be one click apart: a row that plans work should say
- * whether an agent is on it, waiting for you, or has failed. This is the summary a single cell
+ * whether a harness is on it, waiting for you, or has failed. This is the summary a single cell
  * can hold.
  */
 export interface RowTaskSummary {

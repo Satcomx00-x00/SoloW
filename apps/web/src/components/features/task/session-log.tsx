@@ -22,7 +22,7 @@ import { cn } from "@/lib/utils";
 
 const ROLE: Record<string, { label: string; variant: "default" | "secondary" | "outline" }> = {
   user_turn: { label: "You", variant: "default" },
-  assistant_turn: { label: "Agent", variant: "secondary" },
+  assistant_turn: { label: "Harness", variant: "secondary" },
 };
 
 export function SessionLog({

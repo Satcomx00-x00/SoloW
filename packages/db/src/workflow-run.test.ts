@@ -3,10 +3,10 @@ import { beforeEach, describe, expect, it } from "bun:test";
 import { WorkflowErrorCode } from "@solow/contracts";
 import { appendRank } from "@solow/core";
 import { eq } from "drizzle-orm";
-import { ensureDefaultAgentCatalog } from "./agent-catalog-defaults.js";
+import { ensureDefaultHarnessCatalog } from "./harness-catalog-defaults.js";
 import {
-  agentProfile,
   executorProfile,
+  harnessProfile,
   issue,
   review,
   session,
@@ -73,12 +73,12 @@ async function pipeline(name: string, specs: StepSpec[]): Promise<Pipeline> {
   if (!ws) throw new Error("failed to seed workspace");
   const workspaceId = ws.id;
 
-  const agentCatalogId = await ensureDefaultAgentCatalog(db, workspaceId);
-  const [agent] = await db
-    .insert(agentProfile)
+  const agentCatalogId = await ensureDefaultHarnessCatalog(db, workspaceId);
+  const [harness] = await db
+    .insert(harnessProfile)
     .values({
       workspaceId,
-      name: `${name}-agent`,
+      name: `${name}-harness`,
       agentCatalogId,
       authMode: "subscription",
       secretId: "secret-not-read-here",
@@ -89,7 +89,7 @@ async function pipeline(name: string, specs: StepSpec[]): Promise<Pipeline> {
     .values({ workspaceId, name: `${name}-executor` })
     .returning();
   const [iss] = await db.insert(issue).values({ workspaceId, title: "Fix latch" }).returning();
-  if (!agent || !executor || !iss) throw new Error("failed to seed profiles");
+  if (!harness || !executor || !iss) throw new Error("failed to seed profiles");
 
   const [row] = await db
     .insert(task)
@@ -97,7 +97,7 @@ async function pipeline(name: string, specs: StepSpec[]): Promise<Pipeline> {
       workspaceId,
       issueId: iss.id,
       title: `${name} task`,
-      agentProfileId: agent.id,
+      agentProfileId: harness.id,
       executorProfileId: executor.id,
     })
     .returning();
@@ -118,7 +118,7 @@ async function pipeline(name: string, specs: StepSpec[]): Promise<Pipeline> {
         workflowId: wf.id,
         rank,
         name: `Step ${index + 1}`,
-        agentProfileId: agent.id,
+        agentProfileId: harness.id,
         promptTemplate: `Do step ${index + 1}.`,
         gate: spec.gate ?? "auto",
         advanceOn: spec.advanceOn ?? "agent-signal",
@@ -218,7 +218,7 @@ describe("advancing a task's workflow", () => {
    *
    * Step 1 needs no approval to move but advances *on a review*, so a human approving the PLAN
    * triggers its advance. Before the rule was fixed that approval was left unspent, and Step 3's
-   * agent signal found it still on offer — completing the pipeline, and therefore integrating an
+   * harness signal found it still on offer — completing the pipeline, and therefore integrating an
    * implementation, on the strength of a decision made about a plan. The last assertion is the
    * one that matters: `awaiting-decision`, not `completed`.
    */
@@ -481,7 +481,7 @@ describe("loading a task's workflow run", () => {
 
   /**
    * A cursor that names a Step this Workflow does not contain is an error, never a silent restart
-   * at Step 1 — that would re-run work an Owner has already paid an agent for, at the moment
+   * at Step 1 — that would re-run work an Owner has already paid a harness for, at the moment
    * nobody is watching. It is the state the orchestrator's `workflow-unresumable` path exists for.
    *
    * Reached here by re-pointing the cursor at a Step of another Workflow rather than by deleting
@@ -501,9 +501,9 @@ describe("loading a task's workflow run", () => {
       .values({ workspaceId: p.workspaceId, name: "other-wf" })
       .returning();
     const [profile] = await db
-      .select({ id: agentProfile.id })
-      .from(agentProfile)
-      .where(eq(agentProfile.workspaceId, p.workspaceId))
+      .select({ id: harnessProfile.id })
+      .from(harnessProfile)
+      .where(eq(harnessProfile.workspaceId, p.workspaceId))
       .limit(1);
     if (!other || !profile) throw new Error("failed to seed the stray workflow");
     const [stray] = await db

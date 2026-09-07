@@ -20,9 +20,9 @@ import {
   settingsSectionsIn,
 } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
-import { AgentProfilesSection } from "./agent-profiles-section";
 import { ExecutorProfilesSection } from "./executor-profiles-section";
 import { FlagsSection } from "./flags-section";
+import { HarnessProfilesSection } from "./harness-profiles-section";
 import { IntegrationsSection } from "./integrations-section";
 import { McpSection } from "./mcp-section";
 import { McpServersSection } from "./mcp-servers-section";
@@ -44,7 +44,7 @@ import { WorkspaceSection } from "./workspace-section";
  * from the top and re-reads everything.
  *
  * So the unit on screen is a **group** (`SETTINGS_GROUPS`), not a section. A group is one screen
- * of related decisions in the order they are made — a Secret, the Agent Profile that spends it,
+ * of related decisions in the order they are made — a Secret, the Harness Profile that spends it,
  * the Executor it runs on — which keeps the sequence the old single column was arranged to show
  * while dropping the eight unrelated cards between you and the one you came for.
  *
@@ -210,7 +210,7 @@ const SECTION_COMPONENTS: Record<string, () => React.ReactNode> = {
   repositories: () => <RepositoriesSection />,
   "provider-identity": () => <ProviderIdentitySection />,
   secrets: () => <SecretsSection />,
-  "agent-profiles": () => <AgentProfilesSection />,
+  "agent-profiles": () => <HarnessProfilesSection />,
   "executor-profiles": () => <ExecutorProfilesSection />,
   "mcp-servers": () => <McpServersSection />,
   skills: () => <SkillsSection />,

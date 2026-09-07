@@ -9,15 +9,15 @@ import { mcpServer, skill } from "./schema.js";
  *
  * Seeded only into an **empty** library, not by name: a row the operator removed stays removed
  * across restarts, and a library they have filled themselves is theirs. Both ship switched off —
- * a default that quietly reached every agent run would be a default nobody chose.
+ * a default that quietly reached every harness run would be a default nobody chose.
  *
- * The server is `@modelcontextprotocol/server-memory`: a knowledge graph the agent reads and
+ * The server is `@modelcontextprotocol/server-memory`: a knowledge graph the harness reads and
  * writes, kept in a local file. No network beyond the package fetch, no token, no service.
  */
 export const DEFAULT_MCP_SERVER = {
   name: "memory",
   description:
-    "A knowledge-graph memory the agent can read and write across runs, kept in a local file — no network, no account.",
+    "A knowledge-graph memory the harness can read and write across runs, kept in a local file — no network, no account.",
   transport: {
     kind: "stdio" as const,
     command: "npx",

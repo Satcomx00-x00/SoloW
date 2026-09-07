@@ -4417,7 +4417,7 @@
     "/library.mcp.create": {
       "post": {
         "operationId": "library-mcp-create",
-        "summary": "Add an MCP server — a stdio command or an HTTP endpoint — to the library. Each env variable or header is a literal or a reference to one of this Workspace's Secrets. `enabled` loads it into every agent run; off, it is loaded only by the Workflow Steps that name it.",
+        "summary": "Add an MCP server — a stdio command or an HTTP endpoint — to the library. Each env variable or header is a literal or a reference to one of this Workspace's Secrets. `enabled` loads it into every harness run; off, it is loaded only by the Workflow Steps that name it.",
         "tags": [
           "library"
         ],
@@ -5728,7 +5728,7 @@
     "/library.skill.create": {
       "post": {
         "operationId": "library-skill-create",
-        "summary": "Add a Skill — written inline as the SKILL.md the agent will read, or pointing at a directory on the host that holds one. `enabled` loads it into every agent run; off, only the Workflow Steps that name it load it.",
+        "summary": "Add a Skill — written inline as the SKILL.md the harness will read, or pointing at a directory on the host that holds one. `enabled` loads it into every harness run; off, only the Workflow Steps that name it load it.",
         "tags": [
           "library"
         ],
@@ -9619,7 +9619,7 @@
     "/task.create": {
       "post": {
         "operationId": "task-create",
-        "summary": "Create a Task under an Issue, binding an Agent Profile, an Executor Profile, and one or more Repositories — each with its own base ref and checkout branch. Creates it in the backlog; it does not start an agent — use task.launch for that.",
+        "summary": "Create a Task under an Issue, binding a Harness Profile, an Executor Profile, and one or more Repositories — each with its own base ref and checkout branch. Creates it in the backlog; it does not start a harness — use task.launch for that.",
         "tags": [
           "task"
         ],
@@ -10621,7 +10621,7 @@
     "/task.launch": {
       "post": {
         "operationId": "task-launch",
-        "summary": "Start an agent on a ready Task in its own isolated worktree. Rate limited, and refused if the Agent Profile is already at its concurrency cap. The run ends at a human review gate — it never merges on its own.",
+        "summary": "Start a harness on a ready Task in its own isolated worktree. Rate limited, and refused if the Harness Profile is already at its concurrency cap. The run ends at a human review gate — it never merges on its own.",
         "tags": [
           "task"
         ],
@@ -11062,7 +11062,7 @@
     "/task.submitForReview": {
       "post": {
         "operationId": "task-submitForReview",
-        "summary": "Open the review gate on a Task whose agent has declared it finished. Refused when no declaration has been made — the gate is for judging finished work, not work still in progress.",
+        "summary": "Open the review gate on a Task whose harness has declared it finished. Refused when no declaration has been made — the gate is for judging finished work, not work still in progress.",
         "tags": [
           "task"
         ],
@@ -12080,7 +12080,7 @@
     "/profile.agent.create": {
       "post": {
         "operationId": "profile-agent-create",
-        "summary": "Create an Agent Profile: which catalog agent to run, its billing/auth mode, the Secret holding its credential, and its concurrency cap.",
+        "summary": "Create a Harness Profile: which catalog harness to run, its billing/auth mode, the Secret holding its credential, and its concurrency cap.",
         "tags": [
           "profile"
         ],
@@ -12304,7 +12304,7 @@
     "/profile.agent.list": {
       "get": {
         "operationId": "profile-agent-list",
-        "summary": "List Agent Profiles available to bind to a Task, with how many Tasks, Workflow Steps and Sessions each is used by.",
+        "summary": "List Harness Profiles available to bind to a Task, with how many Tasks, Workflow Steps and Sessions each is used by.",
         "tags": [
           "profile"
         ],
@@ -12505,7 +12505,7 @@
     "/profile.agent.update": {
       "post": {
         "operationId": "profile-agent-update",
-        "summary": "Edit an Agent Profile's name, concurrency cap or permission mode. The agent it runs and the credential it runs on are fixed at creation — changing those would rewrite what its finished runs meant.",
+        "summary": "Edit a Harness Profile's name, concurrency cap or permission mode. The harness it runs and the credential it runs on are fixed at creation — changing those would rewrite what its finished runs meant.",
         "tags": [
           "profile"
         ],
@@ -12711,7 +12711,7 @@
     "/profile.agent.delete": {
       "post": {
         "operationId": "profile-agent-delete",
-        "summary": "Delete an Agent Profile. Refused while a Task, a Workflow Step, or a Session's usage record still references it.",
+        "summary": "Delete a Harness Profile. Refused while a Task, a Workflow Step, or a Session's usage record still references it.",
         "tags": [
           "profile"
         ],
@@ -12887,7 +12887,7 @@
     "/profile.agent.probe": {
       "post": {
         "operationId": "profile-agent-probe",
-        "summary": "Test an Agent Profile: launch its agent with its credential, complete the protocol handshake, and report whether it works and what models and modes it advertises.",
+        "summary": "Test a Harness Profile: launch its harness with its credential, complete the protocol handshake, and report whether it works and what models and modes it advertises.",
         "tags": [
           "profile"
         ],
@@ -13019,7 +13019,7 @@
     "/profile.agentCatalog.list": {
       "get": {
         "operationId": "profile-agentCatalog-list",
-        "summary": "List the agents this Workspace can run — the catalog an Agent Profile points at.",
+        "summary": "List the harnesses this Workspace can run — the catalog a Harness Profile points at.",
         "tags": [
           "profile"
         ],
@@ -13188,7 +13188,7 @@
     "/profile.agentCatalog.create": {
       "post": {
         "operationId": "profile-agentCatalog-create",
-        "summary": "Declare a new agent this Workspace can run: which protocol it speaks, the command that starts it, and the two environment variables billing integrity depends on.",
+        "summary": "Declare a new harness this Workspace can run: which protocol it speaks, the command that starts it, and the two environment variables billing integrity depends on.",
         "tags": [
           "profile"
         ],
@@ -13437,7 +13437,7 @@
     "/profile.executor.create": {
       "post": {
         "operationId": "profile-executor-create",
-        "summary": "Create an Executor Profile — where an agent runs, with per-kind typed configuration. Credentials are given as Secret references, never inline values.",
+        "summary": "Create an Executor Profile — where a harness runs, with per-kind typed configuration. Credentials are given as Secret references, never inline values.",
         "tags": [
           "profile"
         ],
@@ -19925,7 +19925,7 @@
     "/repository.updateSetup": {
       "post": {
         "operationId": "repository-updateSetup",
-        "summary": "Replace the allowlist of files copied from the Repository into every new worktree, such as a .env the agent needs to run the test suite.",
+        "summary": "Replace the allowlist of files copied from the Repository into every new worktree, such as a .env the harness needs to run the test suite.",
         "tags": [
           "repository"
         ],
@@ -20631,7 +20631,7 @@
     "/review.decide": {
       "post": {
         "operationId": "review-decide",
-        "summary": "Record the human decision on a Session's diff: approve (commit), reject (discard), or request_changes (resume the agent with feedback). This is the review gate — nothing is integrated without it.",
+        "summary": "Record the human decision on a Session's diff: approve (commit), reject (discard), or request_changes (resume the harness with feedback). This is the review gate — nothing is integrated without it.",
         "tags": [
           "review"
         ],
@@ -21059,7 +21059,7 @@
     "/secret.delete": {
       "post": {
         "operationId": "secret-delete",
-        "summary": "Delete a Secret. Refused while an Integration or Agent Profile still references it.",
+        "summary": "Delete a Secret. Refused while an Integration or Harness Profile still references it.",
         "tags": [
           "secret"
         ],
@@ -21191,7 +21191,7 @@
     "/session.listForTask": {
       "get": {
         "operationId": "session-listForTask",
-        "summary": "List every agent Session recorded for a Task, newest first.",
+        "summary": "List every harness Session recorded for a Task, newest first.",
         "tags": [
           "session"
         ],
@@ -24828,7 +24828,7 @@
     "/workflow.list": {
       "get": {
         "operationId": "workflow-list",
-        "summary": "List this Workspace's Workflows — repeatable pipelines of Steps, each Step run by its own Agent Profile. Returns the definition version and how many Steps each has, not the Steps themselves.",
+        "summary": "List this Workspace's Workflows — repeatable pipelines of Steps, each Step run by its own Harness Profile. Returns the definition version and how many Steps each has, not the Steps themselves.",
         "tags": [
           "workflow"
         ],
@@ -25630,7 +25630,7 @@
     "/workflow.addStep": {
       "post": {
         "operationId": "workflow-addStep",
-        "summary": "Add a Step to a Workflow, bound to an Agent Profile with its own prompt template and gate rule. Appends unless afterStepId names the Step it should follow, or is null to put it at the head; inserting anywhere writes one row and reorders nothing. An optional branch makes the Step conditional: when its condition holds the Task goes to thenStepId, otherwise to elseStepId — either may be null to end the pipeline, and either may name an earlier Step.",
+        "summary": "Add a Step to a Workflow, bound to a Harness Profile with its own prompt template and gate rule. Appends unless afterStepId names the Step it should follow, or is null to put it at the head; inserting anywhere writes one row and reorders nothing. An optional branch makes the Step conditional: when its condition holds the Task goes to thenStepId, otherwise to elseStepId — either may be null to end the pipeline, and either may name an earlier Step.",
         "tags": [
           "workflow"
         ],
@@ -26050,7 +26050,7 @@
     "/workflow.updateStep": {
       "post": {
         "operationId": "workflow-updateStep",
-        "summary": "Change a Step's name, Agent Profile, prompt template, gate, advance rule, branch, or the MCP servers and Skills it loads on top of the Workspace-wide ones. A branch's targets must be Steps of the same Workflow and never the Step itself; null removes the branch. Bumps the Workflow's definition version, so an attached Task reports the drift.",
+        "summary": "Change a Step's name, Harness Profile, prompt template, gate, advance rule, branch, or the MCP servers and Skills it loads on top of the Workspace-wide ones. A branch's targets must be Steps of the same Workflow and never the Step itself; null removes the branch. Bumps the Workflow's definition version, so an attached Task reports the drift.",
         "tags": [
           "workflow"
         ],
@@ -27615,7 +27615,7 @@
     "/workflow.taskBinding": {
       "get": {
         "operationId": "workflow-taskBinding",
-        "summary": "Where a Task is in its Workflow: the current Step with its Agent Profile, the whole Step list, the carried handoff, and the brief the current Step's agent should be given.",
+        "summary": "Where a Task is in its Workflow: the current Step with its Harness Profile, the whole Step list, the carried handoff, and the brief the current Step's harness should be given.",
         "tags": [
           "workflow"
         ],
@@ -28869,7 +28869,7 @@
     "/workspace.setup": {
       "get": {
         "operationId": "workspace-setup",
-        "summary": "What this Workspace still needs before it can run anything — a credential, an Agent Profile, an Executor, a Repository and the core loop — derived from what it actually has.",
+        "summary": "What this Workspace still needs before it can run anything — a credential, a Harness Profile, an Executor, a Repository and the core loop — derived from what it actually has.",
         "tags": [
           "workspace"
         ],

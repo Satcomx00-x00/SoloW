@@ -7,16 +7,16 @@
 # behave, and a fake agrees with whatever the driver says. Three of them were wrong in review and
 # only a live run said so — `-v` silently creating an empty root-owned worktree, `docker exec`
 # without `-i` writing a zero-byte file and exiting 0, and a `kill` aimed at the client leaving
-# the agent running inside the container.
+# the harness running inside the container.
 #
 # So this asks the six acceptance criteria as questions about the world rather than about the
 # code, and each one is shaped so that the wrong answer is a failure and not a quieter pass:
 #
-#   AC-1  an agent runs *inside* a container       — the daemon lists it, and its UTS hostname is
+#   AC-1  a harness runs *inside* a container       — the daemon lists it, and its UTS hostname is
 #                                                    that container's id
 #   AC-2  one executor cannot see another's work   — two Tasks on one Repository, driven with
 #                                                    the mount set production builds for them
-#   AC-3  a credential reaches the process only    — the agent prints it; `docker inspect` and the
+#   AC-3  a credential reaches the process only    — the harness prints it; `docker inspect` and the
 #                                                    host's `ps` must not
 #   AC-4  `dispose()` removes the container        — asked of the daemon, after the fact
 #   AC-5  the resource ceilings are enforced       — both cgroup files, *and* the kernel acting
@@ -288,7 +288,7 @@ if (balloon.exitCode === 0 || balloon.stdout.includes("ALLOCATED")) {
   fail(`a ${LIMIT_MB} MiB container allocated 16 GiB (exit ${balloon.exitCode}) — the ceiling is declared but not enforced`);
 }
 // The kill has to land on the process, not the container: an OOM that took the Task's container
-// down would fail the run for a reason the agent could not see and the reaper could not explain.
+// down would fail the run for a reason the harness could not see and the reaper could not explain.
 const survived = await limited.executor.exec(["echo", "alive"]);
 if (survived.stdout.trim() !== "alive") {
   fail(`the container did not survive its own OOM kill: ${JSON.stringify(survived.stderr.trim())}`);
@@ -338,7 +338,7 @@ if (after <= before) {
 ok(`AC-5  ${CPU_LIMIT} CPU enforced — cpu.max "${CPU_QUOTA}", and the kernel throttled ${after - before} periods in ${SPIN_SECONDS}s`);
 
 /* AC-2 — two Tasks on one Repository, each holding only its own directories. */
-const a = await executorFor("agent", base);
+const a = await executorFor("harness", base);
 const b = await executorFor("peer", base);
 await a.executor.fs.writeFile("secret.txt", "task-a private\n");
 await b.executor.fs.writeFile("own.txt", "task-b private\n");
@@ -359,7 +359,7 @@ const ownRepoVisible = await a.executor.exec(["cat", join(a.ownRepo, "OWN")]);
 if (ownRepoVisible.exitCode !== 0 || !ownRepoVisible.stdout.includes("task-a clone")) {
   fail(`the Task's own repository clone is not mounted (exit ${ownRepoVisible.exitCode}) — the refusals below would prove nothing`);
 }
-// The real question, asked the way an agent would ask it: an absolute host path, `cat` inside the
+// The real question, asked the way a harness would ask it: an absolute host path, `cat` inside the
 // other container. The mounts are identical-path, so this is the same string that works in A.
 const across = await b.executor.exec(["cat", join(a.jailRoot, "secret.txt")]);
 if (across.exitCode === 0 || across.stdout.includes("task-a private")) {
@@ -377,7 +377,7 @@ if (acrossRepo.exitCode === 0 || acrossRepo.stdout.includes("task-a clone")) {
 }
 // And the shared clone itself, which is in neither mount set. `test -e`, so that a directory
 // answers as plainly as a file would.
-for (const [who, box] of [["agent", a], ["peer", b]]) {
+for (const [who, box] of [["harness", a], ["peer", b]]) {
   const shared = await box.executor.exec(["test", "-e", sharedRepo]);
   if (shared.exitCode === 0) {
     fail(`the ${who} container can see the Repository the deployment shares, at ${sharedRepo}`);
@@ -387,20 +387,20 @@ for (const [who, box] of [["agent", a], ["peer", b]]) {
 // reaches a container. Both halves matter: one is a mount namespace, the other is arithmetic.
 let escaped = false;
 try {
-  await b.executor.fs.readFile("../agent/secret.txt");
+  await b.executor.fs.readFile("../harness/secret.txt");
   escaped = true;
 } catch {
   // The jail refusing is the pass.
 }
 if (escaped) fail("fs.readFile walked out of the executor root with ..");
-ok(`AC-2  with the production mount set, the peer container reads neither the agent's worktree nor its clone of the Repository they share (exit ${across.exitCode}/${acrossRepo.exitCode}), and .. is refused`);
+ok(`AC-2  with the production mount set, the peer container reads neither the harness's worktree nor its clone of the Repository they share (exit ${across.exitCode}/${acrossRepo.exitCode}), and .. is refused`);
 
-/* AC-1 and AC-3 — a live agent, its credential, and what the host can see of it. */
+/* AC-1 and AC-3 — a live harness, its credential, and what the host can see of it. */
 const secret = (await readFile(join(work, "secret"), "utf8")).trim();
-// Shaped from the *image's* environment, which is what a containerised agent's caller must do:
+// Shaped from the *image's* environment, which is what a containerised harness's caller must do:
 // handing it the orchestrator's PATH and HOME describes a machine it is not running on.
 const imageEnv = await a.executor.baseEnv();
-const agent = a.executor.spawn(
+const harness = a.executor.spawn(
   // `sleep 3417` is the marker the host half greps `docker top` for — distinctive enough that a
   // stray sleep on a busy machine cannot answer for it.
   ["/bin/sh", "-c", 'echo "HOSTNAME:$(cat /etc/hostname)"; echo "SECRET:$SMOKE_SECRET"; exec sleep 3417'],
@@ -411,7 +411,7 @@ const said = new Map();
 const decoder = new TextDecoder();
 let buffered = "";
 const readMarkers = (async () => {
-  for await (const chunk of agent.stdout) {
+  for await (const chunk of harness.stdout) {
     buffered += decoder.decode(chunk, { stream: true });
     for (const line of buffered.split("\n").slice(0, -1)) {
       const at = line.indexOf(":");
@@ -423,7 +423,7 @@ const readMarkers = (async () => {
 })();
 await Promise.race([
   readMarkers,
-  new Promise((_, reject) => setTimeout(() => reject(new Error("the agent said nothing in 60s")), 60_000)),
+  new Promise((_, reject) => setTimeout(() => reject(new Error("the harness said nothing in 60s")), 60_000)),
 ]).catch((cause) => fail(cause.message));
 
 if (said.get("SECRET") !== secret) {
@@ -431,14 +431,14 @@ if (said.get("SECRET") !== secret) {
   // put it in the CI log, which is one of the places AC-3 is about.
   fail("the credential in SpawnOpts.env did not reach the process inside the container");
 }
-if (!said.get("HOSTNAME")) fail("the agent could not report the hostname of its own UTS namespace");
+if (!said.get("HOSTNAME")) fail("the harness could not report the hostname of its own UTS namespace");
 // Handed to the host half rather than checked here: the container id is the daemon's answer, and
 // this process has no business asking the daemon for it.
-await writeFile(join(work, "agent-hostname"), said.get("HOSTNAME"));
+await writeFile(join(work, "harness-hostname"), said.get("HOSTNAME"));
 ok("AC-3  the credential reached the process (the host half checks it went nowhere else)");
-ok("AC-1  the agent is running and reported a UTS hostname (the host half settles whose)");
+ok("AC-1  the harness is running and reported a UTS hostname (the host half settles whose)");
 
-// The rendezvous. Everything above is done and the agent is still alive, which is the only state
+// The rendezvous. Everything above is done and the harness is still alive, which is the only state
 // the host half can ask its questions in.
 await writeFile(join(work, "live"), "");
 for (let waited = 0; !existsSync(join(work, "go")); waited++) {
@@ -447,9 +447,9 @@ for (let waited = 0; !existsSync(join(work, "go")); waited++) {
 }
 
 /* AC-4 — dispose removes the container. Asked by the host half, after this exits. */
-// Stopped the way the kill ladder stops a real agent, so dispose is not covering for a leak.
-agent.kill();
-await Promise.race([agent.exited, new Promise((r) => setTimeout(r, 10_000))]);
+// Stopped the way the kill ladder stops a real harness, so dispose is not covering for a leak.
+harness.kill();
+await Promise.race([harness.exited, new Promise((r) => setTimeout(r, 10_000))]);
 // Every executor, including the one whose image never pulled: `dispose()` must be safe on a
 // container that was never created, because that is the path a failed preflight takes.
 for (const executor of made) await executor.dispose();
@@ -461,11 +461,11 @@ PROBE_PID=$!
 waited=0
 while [ ! -f "$WORK/live" ]; do
     if ! kill -0 "$PROBE_PID" 2> /dev/null; then
-        echo "smoke-docker-executor: the driver probe exited before the agent was up." >&2
+        echo "smoke-docker-executor: the driver probe exited before the harness was up." >&2
         exit 1
     fi
     [ "$waited" -lt "$PROBE_TIMEOUT" ] || {
-        echo "smoke-docker-executor: the driver probe did not reach a live agent within ${PROBE_TIMEOUT}s." >&2
+        echo "smoke-docker-executor: the driver probe did not reach a live harness within ${PROBE_TIMEOUT}s." >&2
         exit 1
     }
     sleep 1
@@ -475,13 +475,13 @@ sed 's/^/    /' "$WORK/probe.log"
 
 echo "==> what the host can see"
 
-AGENT="$(docker ps -q --filter "label=solow.workspace=$WORKSPACE" --filter "label=solow.task=agent")"
-[ -n "$AGENT" ] || {
-    echo "smoke-docker-executor: no running container carries this run's agent labels." >&2
+HARNESS="$(docker ps -q --filter "label=solow.workspace=$WORKSPACE" --filter "label=solow.task=harness")"
+[ -n "$HARNESS" ] || {
+    echo "smoke-docker-executor: no running container carries this run's harness labels." >&2
     exit 1
 }
 
-# AC-6's other half. Three containers is the whole population: agent, peer, limits. A fourth means
+# AC-6's other half. Three containers is the whole population: harness, peer, limits. A fourth means
 # the unpullable image got as far as creating something, which is the "before anything starts"
 # part of the claim — and a container nobody can ever exec into is one the reaper has to explain.
 CREATED="$(docker ps -aq --filter "label=solow.workspace=$WORKSPACE" | wc -l | tr -d ' ')"
@@ -494,20 +494,20 @@ echo "    ok   AC-6  the unpullable image created no container"
 # AC-1, asked of the daemon rather than of the process. The host's own `ps` cannot answer this:
 # container processes are visible in it, so finding `sleep 3417` there would prove nothing about
 # which namespace it is in. `docker top` is the daemon saying the process belongs to this
-# container, and the UTS hostname the agent reported is that container's id — which nothing on
+# container, and the UTS hostname the harness reported is that container's id — which nothing on
 # the host could have handed it.
-docker top "$AGENT" -o pid,args 2> /dev/null | grep -q 'sleep 3417' || {
-    echo "smoke-docker-executor: the daemon does not list the agent as a process of its container." >&2
+docker top "$HARNESS" -o pid,args 2> /dev/null | grep -q 'sleep 3417' || {
+    echo "smoke-docker-executor: the daemon does not list the harness as a process of its container." >&2
     exit 1
 }
-case "$(docker inspect -f '{{.Id}}' "$AGENT")" in
-    "$(cat "$WORK/agent-hostname")"*) ;;
+case "$(docker inspect -f '{{.Id}}' "$HARNESS")" in
+    "$(cat "$WORK/harness-hostname")"*) ;;
     *)
-        echo "smoke-docker-executor: the agent's UTS hostname is not this container's id — it is not running where the driver says." >&2
+        echo "smoke-docker-executor: the harness's UTS hostname is not this container's id — it is not running where the driver says." >&2
         exit 1
         ;;
 esac
-echo "    ok   AC-1  the daemon lists the agent in its container, whose id is the agent's hostname"
+echo "    ok   AC-1  the daemon lists the harness in its container, whose id is the harness's hostname"
 
 # AC-3's other two thirds. `-f "$WORK/secret"` rather than the value: this script must not put the
 # credential in an argv either, or it would be manufacturing the leak it is checking for.
@@ -535,7 +535,7 @@ if grep -F -q -f "$WORK/shared-repo" "$WORK/inspect.json"; then
 fi
 echo "    ok   AC-2  the shared Repository is in no container's mount set"
 
-# Releases the probe, which kills the agent and calls dispose() on all four executors.
+# Releases the probe, which kills the harness and calls dispose() on all four executors.
 : > "$WORK/go"
 if ! wait "$PROBE_PID"; then
     PROBE_PID=""
@@ -554,18 +554,18 @@ REMAINING="$(docker ps -aq --filter "label=solow.workspace=$WORKSPACE")"
 echo "    ok   AC-4  every container this run created is gone"
 
 # The three halves of the acceptance criteria the six blocks above never reach. Each one runs its
-# own short Bun program rather than being folded into the probe: the probe holds a live agent open
+# own short Bun program rather than being folded into the probe: the probe holds a live harness open
 # across a rendezvous so the host half can ask the daemon about it, and every question below is
 # asked *after* something has ended — a preflight that refused, a run that finished, an
 # orchestrator that died. Sharing one process would mean either widening that rendezvous into a
-# state machine or asserting about containers while the agent's are still up, and the container
+# state machine or asserting about containers while the harness's are still up, and the container
 # census in AC-6 below is only meaningful when nothing else this run made is running.
 #
 # All of them carry `solow.workspace=$WORKSPACE`, so `cleanup` removes whatever they leave behind
 # whichever line the script died on.
 
 echo "==> AC-6  the preflight ladder itself, against this daemon"
-# `probeExecutor` is what fails a Task *before* an agent exists, and its verdict is the whole of
+# `probeExecutor` is what fails a Task *before* a harness exists, and its verdict is the whole of
 # what an operator reads on the card. The AC-6 block above drives the driver (`ensureContainer` →
 # `docker run`); nothing anywhere drives the ladder's own rungs, and the defect class that lives
 # exactly there is misdiagnosis — an image with no `/bin/sh` reported as a host with no Docker
@@ -740,9 +740,9 @@ echo "==> AC-3  the credential, after the run is over"
 # The block above proves the value is in neither `docker inspect` nor the host's `ps` — both
 # questions about the *running* system. This is the other half: what is left on disk once the
 # container is gone. The worktree bind mount is deliberately preserved on failure so an operator
-# can read what the agent did, so anything a credential-caching tool wrote into it outlives the
+# can read what the harness did, so anything a credential-caching tool wrote into it outlives the
 # Task by design, and `$HOME` is where every such tool writes — `.gitconfig`, `.npmrc`,
-# `~/.config/gh/hosts.yml`, an agent CLI's own token store. `HOME` was moved onto a tmpfs for
+# `~/.config/gh/hosts.yml`, a harness CLI's own token store. `HOME` was moved onto a tmpfs for
 # exactly that reason; this is the test that pins the decision to the kernel rather than to the
 # comment that explains it.
 cat > "$WORK/persist.ts" << 'PERSIST'
@@ -799,16 +799,16 @@ const secret = (await readFile(join(work, "secret"), "utf8")).trim();
 const imageEnv = await executor.baseEnv();
 
 /*
- * The whole of `baseEnv()` plus the credential, which is what the lifecycle passes: `agentEnv`
+ * The whole of `baseEnv()` plus the credential, which is what the lifecycle passes: `harnessEnv`
  * in `packages/core/src/billing.ts` copies every entry of the base environment into the child
  * and then adds the credential on top.
  *
- * The block above overrides `HOME` with the jail on purpose, because AC-1 needs a live agent
+ * The block above overrides `HOME` with the jail on purpose, because AC-1 needs a live harness
  * somewhere writable. Here the driver's own answer is the thing under test — `baseEnv` is where
  * `HOME` is decided, and it is the decision that moved it off the bind mount — so naming a
  * `HOME` here would answer this file's question with this file's own value.
  */
-const agent = executor.spawn(
+const harness = executor.spawn(
   [
     "/bin/sh",
     "-c",
@@ -818,13 +818,13 @@ const agent = executor.spawn(
       // from inside a shell until you ask what is actually mounted there.
       `echo "HOMEFS:$(awk -v h="$HOME" '$2 == h { print $3 }' /proc/mounts | head -n 1)"`,
       // What a tool that caches a credential does, spelled the way they spell it.
-      'mkdir -p "$HOME/.config/agent"',
-      'printf %s "$SMOKE_SECRET" > "$HOME/.config/agent/token.json"',
+      'mkdir -p "$HOME/.config/harness"',
+      'printf %s "$SMOKE_SECRET" > "$HOME/.config/harness/token.json"',
       'printf %s "$SMOKE_SECRET" > "$HOME/.netrc"',
       'env > "$HOME/env-dump"',
       // The control, in the bind mount: something the container wrote that *must* survive, so
       // that "the secret is not in the worktree" cannot pass by the worktree being empty.
-      `printf %s "the agent was here" > ${JSON.stringify(join(jailRoot, "AGENT-WROTE-THIS"))}`,
+      `printf %s "the harness was here" > ${JSON.stringify(join(jailRoot, "HARNESS-WROTE-THIS"))}`,
       'echo "DONE:1"',
     ].join("; "),
   ],
@@ -837,8 +837,8 @@ const decoder = new TextDecoder();
 // stderr is drained alongside, and only so a failure here can say *why*: a shell that could not
 // write to its own HOME reports it there, and a block that read stdout alone would blame the
 // driver for it.
-const complaints = new Response(agent.stderr).text();
-for await (const chunk of agent.stdout) {
+const complaints = new Response(harness.stderr).text();
+for await (const chunk of harness.stdout) {
   buffered += decoder.decode(chunk, { stream: true });
   for (const line of buffered.split("\n").slice(0, -1)) {
     const at = line.indexOf(":");
@@ -846,26 +846,26 @@ for await (const chunk of agent.stdout) {
   }
   buffered = buffered.slice(buffered.lastIndexOf("\n") + 1);
 }
-await agent.exited;
+await harness.exited;
 
 if (said.get("DONE") !== "1") {
   fail(
-    `the agent did not finish writing its caches: ${JSON.stringify([...said])} / ${JSON.stringify((await complaints).trim())}`,
+    `the harness did not finish writing its caches: ${JSON.stringify([...said])} / ${JSON.stringify((await complaints).trim())}`,
   );
 }
 const home = said.get("HOME");
-if (!home) fail("the agent had no HOME at all — the driver stopped filling one in");
+if (!home) fail("the harness had no HOME at all — the driver stopped filling one in");
 // The decision, stated as the two things that make it true. A `HOME` inside either root is a
 // `HOME` on a host bind mount however it is spelled, and a `HOME` that is not a tmpfs survives
 // into whatever the container's layer becomes.
 if (home.startsWith(`${worktreeRoot}/`) || home === worktreeRoot) {
-  fail(`the agent's HOME is inside the bind-mounted worktree root: ${home}`);
+  fail(`the harness's HOME is inside the bind-mounted worktree root: ${home}`);
 }
 if (home.startsWith(`${repoCacheRoot}/`) || home === repoCacheRoot) {
-  fail(`the agent's HOME is inside the bind-mounted repository cache: ${home}`);
+  fail(`the harness's HOME is inside the bind-mounted repository cache: ${home}`);
 }
 if (said.get("HOMEFS") !== "tmpfs") {
-  fail(`the agent's HOME is a ${JSON.stringify(said.get("HOMEFS"))} mount, not a tmpfs — what a tool caches there outlives the container`);
+  fail(`the harness's HOME is a ${JSON.stringify(said.get("HOMEFS"))} mount, not a tmpfs — what a tool caches there outlives the container`);
 }
 ok(`AC-3  HOME is ${home}, a tmpfs, and inside neither bind-mounted root`);
 
@@ -875,7 +875,7 @@ await executor.dispose();
 
 await writeFile(join(work, "persist-roots"), `${worktreeRoot}\n${repoCacheRoot}\n`);
 await writeFile(join(work, "persist-home"), home);
-await writeFile(join(work, "persist-marker"), join(jailRoot, "AGENT-WROTE-THIS"));
+await writeFile(join(work, "persist-marker"), join(jailRoot, "HARNESS-WROTE-THIS"));
 ok("AC-3  the container is gone; the host half reads what it left");
 PERSIST
 
@@ -907,7 +907,7 @@ while IFS= read -r dir; do
     # here holding a *derived* token this script has no copy of to grep for.
     STRAYS="$(find "$dir" \( -name env-dump -o -name .netrc -o -name token.json \) -print 2> /dev/null)"
     [ -z "$STRAYS" ] || {
-        echo "smoke-docker-executor: the agent's HOME caches were written onto the host under $dir:" >&2
+        echo "smoke-docker-executor: the harness's HOME caches were written onto the host under $dir:" >&2
         echo "$STRAYS" | sed 's/^/    /' >&2
         exit 1
     }
@@ -957,7 +957,7 @@ const { createLocalExecutor } = await import(join(root, "apps/orchestrator/src/e
 const { reapOrphanedContainers } = await import(join(root, "apps/orchestrator/src/executor/reap.js"));
 const { RECLAIM_STALE_MS } = await import(join(root, "apps/orchestrator/src/reconcile.js"));
 const { createTestDb } = await import(join(root, "packages/db/src/testing.js"));
-const { agentCatalog, agentProfile, executorProfile, issue, session, task, workspace: workspaceTable } =
+const { harnessCatalog, harnessProfile, executorProfile, issue, session, task, workspace: workspaceTable } =
   await import(join(root, "packages/db/src/schema.js"));
 
 function fail(why) {
@@ -1026,7 +1026,7 @@ if (readback.stdout.trim() !== crashed) {
 const db = createTestDb();
 await db.insert(workspaceTable).values({ id: workspace, name: workspace, ownerUserId: "smoke" });
 await db.insert(issue).values({ id: "iss-smoke", workspaceId: workspace, title: "smoke" });
-await db.insert(agentCatalog).values({
+await db.insert(harnessCatalog).values({
   id: "cat-smoke",
   workspaceId: workspace,
   key: "claude_code",
@@ -1036,7 +1036,7 @@ await db.insert(agentCatalog).values({
   subscriptionEnvVar: "CLAUDE_CODE_OAUTH_TOKEN",
   meteredEnvVar: "ANTHROPIC_API_KEY",
 });
-await db.insert(agentProfile).values({
+await db.insert(harnessProfile).values({
   id: "ap-smoke",
   workspaceId: workspace,
   name: "Default",
@@ -1096,7 +1096,7 @@ sed 's/^/    /' "$WORK/reap.log"
 
 # Both halves asked of the daemon. The first is the one a reaper that does nothing fails; the
 # second is the one a reaper that removes everything fails, and it is the expensive one to get
-# wrong — a container removed out from under a run at the review gate takes the agent's exec with
+# wrong — a container removed out from under a run at the review gate takes the harness's exec with
 # it and fails the round with no explanation an operator can see.
 ORPHANED="$(docker ps -aq --filter "label=solow.workspace=$WORKSPACE" --filter "label=solow.task=reap-orphan")"
 [ -z "$ORPHANED" ] || {

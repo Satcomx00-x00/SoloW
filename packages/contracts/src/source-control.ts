@@ -107,7 +107,7 @@ export const scmWorktreeDto = z.object({
   /**
    * Whether the panel may write here, and why not when it may not (F22, States & rules).
    *
-   * Decided on the server: a browser that decides for itself whether an agent is running would
+   * Decided on the server: a browser that decides for itself whether a harness is running would
    * be deciding it from data that is at best one turn stale, and the cost of getting it wrong is
    * a stage racing the process still writing the file.
    */

@@ -8,7 +8,7 @@ import { WorkspaceSetupCard } from "./workspace-setup-card";
  * The checklist that replaced the fixture (2026-08-28).
  *
  * A local install used to arrive holding two invented companies, each already carrying a
- * credential, an Agent Profile, an Executor and a repository that never existed — so the product
+ * credential, a Harness Profile, an Executor and a repository that never existed — so the product
  * looked configured on first launch, and the real gap stayed hidden until a Task refused to run.
  * These assert the two properties that make the replacement honest: it says what is missing, and
  * it goes away by itself once nothing is.
@@ -22,7 +22,7 @@ const setup = (over: Record<string, unknown> = {}) => ({
   workspace: { id: "ws-1", name: "My workspace", createdAt: "2026-08-01T00:00:00.000Z" },
   steps: [
     { key: "workspace", done: true, detail: "My workspace", blockedBy: null },
-    { key: "agents", done: true, detail: "2 agents", blockedBy: null },
+    { key: "agents", done: true, detail: "2 harnesses", blockedBy: null },
     { key: "secret", done: false, detail: "", blockedBy: null },
     { key: "agent-profile", done: false, detail: "", blockedBy: "secret" },
     { key: "executor", done: false, detail: "", blockedBy: null },
@@ -43,7 +43,7 @@ describe("WorkspaceSetupCard", () => {
   });
 
   it("names what a blocked step is waiting on instead of offering a dead action", async () => {
-    // An Agent Profile binds an agent to a Secret; opening that form first would show an empty
+    // A Harness Profile binds a harness to a Secret; opening that form first would show an empty
     // picker, which is a worse answer than a sentence saying why not yet.
     renderWithTrpc(<WorkspaceSetupCard />, { "workspace.setup": () => setup() });
 

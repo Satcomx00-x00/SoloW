@@ -2,22 +2,22 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { agentProbeRequest, announceRequest, taskInputSchema } from "@solow/contracts";
+import { announceRequest, harnessProbeRequest, taskInputSchema } from "@solow/contracts";
 import { type StreamTicketClaims, streamChannel, verifyStreamTicket } from "@solow/core/stream";
 import { createDb, type Db } from "@solow/db";
-import { probeAgent } from "./agent/probe.js";
-import {
-  type AgentRegistry,
-  agentRegistry,
-  type PermissionAnswerResult,
-  type WidgetAnswerResult,
-} from "./agent/registry.js";
-import { prepareAgentEnv } from "./billing/guard.js";
-import { loadAgentProbeContext, updateAgentCatalogCapabilities } from "./data.js";
+import { prepareHarnessEnv } from "./billing/guard.js";
+import { loadHarnessProbeContext, updateHarnessCatalogCapabilities } from "./data.js";
 import { orchestratorEnv } from "./env.js";
 import { createLocalExecutor } from "./executor/local.js";
 import { reapOrphanedContainers } from "./executor/reap.js";
 import type { Executor } from "./executor/types.js";
+import { probeHarness } from "./harness/probe.js";
+import {
+  type HarnessRegistry,
+  harnessRegistry,
+  type PermissionAnswerResult,
+  type WidgetAnswerResult,
+} from "./harness/registry.js";
 import { inngest } from "./inngest/client.js";
 import { handleEventPost } from "./inngest/events.js";
 import { INNGEST_FUNCTIONS, inngestServeHandler } from "./inngest/serve.js";
@@ -44,8 +44,8 @@ export interface WsServerDeps {
   db: Db;
   now: () => number;
   streamSecret: string;
-  /** Where a client's input or stop is routed — the agent running that Task, if any. */
-  registry: AgentRegistry;
+  /** Where a client's input or stop is routed — the harness running that Task, if any. */
+  registry: HarnessRegistry;
   /**
    * How the container reaper reaches the Docker daemon (issue #96).
    *
@@ -62,7 +62,7 @@ function defaultWsDeps(): WsServerDeps {
     db: createDb(),
     now: () => Date.now(),
     streamSecret: orchestratorEnv().SOLOW_STREAM_SECRET,
-    registry: agentRegistry,
+    registry: harnessRegistry,
     // `process.cwd()` as its root because the reaper uses only `exec`, and every command it
     // issues names what it acts on. In idiom with `handleProbePost` below.
     dockerHost: createLocalExecutor(process.cwd()),
@@ -140,7 +140,7 @@ export async function handleAnnouncePost(
 }
 
 /**
- * `POST /probe-agent` — start the agent an Agent Profile names, ask it what it is, and stop it.
+ * `POST /probe-agent` — start the harness a Harness Profile names, ask it what it is, and stop it.
  *
  * Why this lives here rather than in the web API: the API is forbidden to reach the execution
  * host at all (`scripts/audit-executor-boundary.ts`), and a probe is by definition a spawn. Why
@@ -162,14 +162,14 @@ export async function handleProbePost(
   } catch {
     return new Response("invalid_json", { status: 400 });
   }
-  const parsed = agentProbeRequest.safeParse(body);
+  const parsed = harnessProbeRequest.safeParse(body);
   if (!parsed.success) return new Response("invalid_request", { status: 400 });
 
   const verified = verifyStreamTicket(parsed.data.ticket, deps.streamSecret, deps.now());
   if (!verified.ok) return new Response(verified.error, { status: 401 });
   const { workspaceId } = verified.claims;
 
-  const ctx = await loadAgentProbeContext(deps.db, workspaceId, parsed.data.agentProfileId);
+  const ctx = await loadHarnessProbeContext(deps.db, workspaceId, parsed.data.agentProfileId);
   if (!ctx) return new Response("agent_profile_not_found", { status: 404 });
 
   /*
@@ -177,12 +177,12 @@ export async function handleProbePost(
    * my credential" is most of what the question means, and a probe that shaped its own env would
    * be testing a configuration no run will ever use.
    */
-  const shaped = prepareAgentEnv({
-    authMode: ctx.agentProfile.authMode,
+  const shaped = prepareHarnessEnv({
+    authMode: ctx.harnessProfile.authMode,
     secretCiphertext: ctx.secretCiphertext,
     baseEnv: process.env,
-    subscriptionEnvVar: ctx.agentCatalog.subscriptionEnvVar,
-    meteredEnvVar: ctx.agentCatalog.meteredEnvVar,
+    subscriptionEnvVar: ctx.harnessCatalog.subscriptionEnvVar,
+    meteredEnvVar: ctx.harnessCatalog.meteredEnvVar,
   });
   if (!shaped.ok) {
     return Response.json({
@@ -201,12 +201,12 @@ export async function handleProbePost(
    */
   const cwd = await mkdtemp(join(tmpdir(), "solow-probe-"));
   try {
-    const report = await probeAgent(createLocalExecutor(cwd), {
-      command: ctx.agentCatalog.command,
-      args: ctx.agentCatalog.argsTemplate ?? [],
+    const report = await probeHarness(createLocalExecutor(cwd), {
+      command: ctx.harnessCatalog.command,
+      args: ctx.harnessCatalog.argsTemplate ?? [],
       env: shaped.data,
       cwd,
-      protocol: ctx.agentCatalog.protocol,
+      protocol: ctx.harnessCatalog.protocol,
     });
 
     /*
@@ -219,10 +219,10 @@ export async function handleProbePost(
       report.ok &&
       (report.capabilities.models.length > 0 || report.capabilities.modes.length > 0)
     ) {
-      await updateAgentCatalogCapabilities(
+      await updateHarnessCatalogCapabilities(
         deps.db,
         workspaceId,
-        ctx.agentCatalog.id,
+        ctx.harnessCatalog.id,
         report.capabilities,
       ).catch(() => {});
     }
@@ -241,11 +241,11 @@ export async function handleProbePost(
 export { attachSubscriber };
 
 /**
- * Route a client frame to the agent running that Task (tasks TASK-014 / TASK-022).
+ * Route a client frame to the harness running that Task (tasks TASK-014 / TASK-022).
  *
  * Tenancy: the Workspace comes from the subscriber's *signed ticket*, never from the frame, and
  * a frame naming a different Task than the ticket authorized is refused — so a client can only
- * ever steer the one agent it was granted (Principle V). A board-channel subscriber has no
+ * ever steer the one harness it was granted (Principle V). A board-channel subscriber has no
  * `taskId` in its claims and therefore cannot steer anything.
  */
 export async function handleClientFrame(
@@ -269,9 +269,9 @@ export async function handleClientFrame(
     return stopped ? { ok: true, action: "stop" } : { ok: false, error: "agent_not_running" };
   }
   if (frame.kind === "permission") {
-    // The operator's answer to something the agent asked (issue #58, AC-4), routed the same way
+    // The operator's answer to something the harness asked (issue #58, AC-4), routed the same way
     // as input and stop and under the same tenant key: a client can only ever answer for the
-    // one agent its ticket authorized (Principle V).
+    // one harness its ticket authorized (Principle V).
     const answered = await deps.registry.respondPermission(
       claims.workspaceId,
       frame.taskId,
@@ -280,12 +280,12 @@ export async function handleClientFrame(
     );
     if (answered === "answered") return { ok: true, action: "permission" };
     // Four refusals, four things to say. An answer that arrived a moment after the deadline
-    // settled the request must not be reported as an agent that is no longer running — the
-    // agent is mid-turn, streaming into the terminal the operator is looking at.
+    // settled the request must not be reported as a harness that is no longer running — the
+    // harness is mid-turn, streaming into the terminal the operator is looking at.
     return { ok: false, error: PERMISSION_FRAME_ERROR[answered] };
   }
   if (frame.kind === "widget_response") {
-    // The operator's answer to something the agent drew. Same route, same tenant key, same ack
+    // The operator's answer to something the harness drew. Same route, same tenant key, same ack
     // shape as a permission — the two are the same act with different vocabulary.
     const answered = await deps.registry.respondWidget(claims.workspaceId, frame.taskId, {
       widgetId: frame.widgetId,
@@ -347,7 +347,7 @@ const decodeUtf8 = (bytes: Uint8Array): string => new TextDecoder().decode(bytes
 
 /**
  * How long to wait after boot before the first reclaim sweep (see `reconcile.ts`). Long enough
- * that a legitimate Inngest redrive — which re-registers with `agentRegistry` the moment it
+ * that a legitimate Inngest redrive — which re-registers with `harnessRegistry` the moment it
  * resumes — has a real chance to land first.
  */
 const RECONCILE_GRACE_MS = 20_000;
@@ -357,7 +357,7 @@ const RECONCILE_GRACE_MS = 20_000;
  *
  * The sweep used to happen once, at boot, and that was the bug: it answers only "was something
  * orphaned by the process before me", never "has something been orphaned since". A run that died
- * two hours into a process left its Task showing `running`, with an input box answering "No agent
+ * two hours into a process left its Task showing `running`, with an input box answering "No harness
  * is running", until somebody restarted the orchestrator. Sweeping on a timer is what closes it.
  *
  * A minute is cheap — one indexed select over `running` Tasks, which is a handful of rows — and
@@ -369,13 +369,13 @@ const RECONCILE_INTERVAL_MS = 60_000;
 /**
  * What one sweep needs, which is less than the server has.
  *
- * `Pick<WsServerDeps, ...>` would drag the whole `AgentRegistry` class in, and every arm here
- * asks it exactly one question — the same `Pick<AgentRegistry, "get">` the reconcilers themselves
+ * `Pick<WsServerDeps, ...>` would drag the whole `HarnessRegistry` class in, and every arm here
+ * asks it exactly one question — the same `Pick<HarnessRegistry, "get">` the reconcilers themselves
  * take. A `WsServerDeps` satisfies this structurally, so the production call site is unchanged.
  */
 export interface SweepDeps {
   db: Db;
-  registry: Pick<AgentRegistry, "get">;
+  registry: Pick<HarnessRegistry, "get">;
   dockerHost: Executor;
 }
 
@@ -511,7 +511,7 @@ export function startWebSocketServer(
       async message(ws, raw) {
         const result = await handleClientFrame(deps, ws.data.claims, raw);
         // Acknowledge either way: the terminal needs to tell the operator that their input
-        // went nowhere (no agent running) rather than appear to have been accepted.
+        // went nowhere (no harness running) rather than appear to have been accepted.
         ws.send(JSON.stringify({ kind: "ack", ...result }));
       },
       close(ws) {

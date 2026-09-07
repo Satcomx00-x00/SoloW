@@ -12,19 +12,19 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 
-/** The one wire event this dialog renders — an agent asking for something (issue #58, AC-4). */
+/** The one wire event this dialog renders — a harness asking for something (issue #58, AC-4). */
 export type PermissionRequest = Extract<TaskEvent, { kind: "permission_request" }>;
 
 /**
- * The permission prompt an ACP agent's request raises in the task workspace (issue #58, AC-4).
+ * The permission prompt an ACP harness's request raises in the task workspace (issue #58, AC-4).
  *
  * Two rules shape it, and both come from the same place as ACP's capability negotiation: never
  * invent something the other side did not offer, and never let silence read as consent.
  *
- * - **Only the agent's own options are shown**, in the order it listed them. SoloW does
- *   not add an "always allow" the agent never offered, and does not reword the ones it did.
+ * - **Only the harness's own options are shown**, in the order it listed them. SoloW does
+ *   not add an "always allow" the harness never offered, and does not reword the ones it did.
  * - **There is no dismiss.** Closing the dialog would leave the operator believing they had
- *   declined while the run went on waiting. If the agent offered a refusal, refusing is one of
+ *   declined while the run went on waiting. If the harness offered a refusal, refusing is one of
  *   its buttons; if it offered none, the honest thing is that there is nothing to click.
  *
  * The deadline is stated because it is real, and so is what it does: an unanswered request is
@@ -48,7 +48,7 @@ export function PermissionRequestDialog({
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2">
               <ShieldQuestion className="size-4 shrink-0 text-state-review" aria-hidden />
-              The agent is asking for permission
+              The harness is asking for permission
             </AlertDialogTitle>
             <AlertDialogDescription>
               <span className="block font-medium text-foreground">{request.title}</span>
@@ -81,7 +81,7 @@ export function PermissionRequestDialog({
               ))
             ) : (
               <p className="text-muted-foreground text-sm">
-                The agent offered no options to choose from. The run will continue once its own
+                The harness offered no options to choose from. The run will continue once its own
                 timeout passes.
               </p>
             )}

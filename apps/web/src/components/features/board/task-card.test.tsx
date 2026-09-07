@@ -21,7 +21,7 @@ const task: TaskDto = {
   issueId: "issue-1",
   title: "Cap the upload size",
   state: "ready",
-  agentProfileId: "agent-1",
+  agentProfileId: "harness-1",
   executorProfileId: "exec-1",
   repositories: [
     {
@@ -202,7 +202,7 @@ describe("TaskCard issue menu, provider not installed", () => {
  * The completion gate (the green control).
  *
  * A run finishing is not the same event as work being ready, and neither is the same as a person
- * deciding to look at it. The card is where those three come apart: it reports what the agent
+ * deciding to look at it. The card is where those three come apart: it reports what the harness
  * declared, and offers exactly one action — and only when there is something to judge.
  */
 describe("the completion gate", () => {
@@ -225,14 +225,14 @@ describe("the completion gate", () => {
     );
   }
 
-  it("offers nothing while the agent has declared nothing", () => {
+  it("offers nothing while the harness has declared nothing", () => {
     showGate({ state: "running" }, () => {});
 
     expect(screen.queryByRole("button", { name: /open review/i })).toBeNull();
     expect(screen.queryByText("Finished")).toBeNull();
   });
 
-  it("shows the control once the agent says the work is ready", () => {
+  it("shows the control once the harness says the work is ready", () => {
     showGate(FINISHED, () => {});
 
     expect(screen.getByRole("button", { name: /open review/i })).toBeDefined();
@@ -268,7 +268,7 @@ describe("the completion gate", () => {
     showGate(FINISHED);
 
     expect(screen.queryByRole("button", { name: /open review/i })).toBeNull();
-    // ...but still says the agent finished, because that is a fact about the Task.
+    // ...but still says the harness finished, because that is a fact about the Task.
     expect(screen.getByText("Finished")).toBeDefined();
   });
 });

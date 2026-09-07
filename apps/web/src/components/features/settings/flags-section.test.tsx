@@ -17,13 +17,13 @@ afterEach(cleanup);
 const FLAGS = [
   {
     key: "ff-core-program",
-    description: "Core end-to-end Task loop (Issue → run agent → review → approve).",
+    description: "Core end-to-end Task loop (Issue → run harness → review → approve).",
     default: false,
     enabled: false,
   },
   {
     key: "ff-workflows",
-    description: "Agentic workflows — multi-step pipelines with a different agent per Step.",
+    description: "Agentic workflows — multi-step pipelines with a different harness per Step.",
     default: false,
     enabled: false,
   },
@@ -35,7 +35,7 @@ describe("FlagsSection", () => {
 
     expect(await screen.findByText("ff-core-program")).toBeDefined();
     expect(
-      screen.getByText("Core end-to-end Task loop (Issue → run agent → review → approve)."),
+      screen.getByText("Core end-to-end Task loop (Issue → run harness → review → approve)."),
     ).toBeDefined();
     expect(screen.getByText("ff-workflows")).toBeDefined();
     const checkbox = screen.getByRole("checkbox", { name: "ff-core-program" });

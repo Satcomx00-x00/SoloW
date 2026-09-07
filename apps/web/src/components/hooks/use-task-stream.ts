@@ -14,12 +14,12 @@ import { trpc } from "@/trpc/react";
  *
  * The hub is a separate process with no access to the session cookie, so the flow is: ask the
  * API for a short-lived ticket (it checks session + Workspace ownership), connect with it, and
- * on every reconnect resume from the last `seq` seen so missed agent output is replayed rather
+ * on every reconnect resume from the last `seq` seen so missed harness output is replayed rather
  * than lost. Nothing here names a Workspace — the tenant key lives inside the signed ticket.
  *
  * The socket is bidirectional: the same connection carries the operator's input and stop to the
- * agent (TASK-022). The hub acknowledges each one, so the terminal can say that input reached no
- * running agent instead of appearing to have delivered it.
+ * harness (TASK-022). The hub acknowledges each one, so the terminal can say that input reached no
+ * running harness instead of appearing to have delivered it.
  */
 
 export type StreamStatus = "idle" | "connecting" | "open" | "reconnecting" | "error";
@@ -175,7 +175,7 @@ export function useEventStream({
 }
 
 /**
- * Live agent events for one Task, oldest first — what the terminal panel renders. `onEvent`
+ * Live harness events for one Task, oldest first — what the terminal panel renders. `onEvent`
  * lets the caller react to an event as well (e.g. refetch the Task when its state changes).
  */
 export function useTaskStream(
@@ -189,17 +189,17 @@ export function useTaskStream(
 ): {
   events: TaskEvent[];
   status: StreamStatus;
-  /** Hand the agent a further instruction. `false` if the stream is not connected. */
+  /** Hand the harness a further instruction. `false` if the stream is not connected. */
   sendInput: (text: string) => boolean;
-  /** Ask the agent to stop. `false` if the stream is not connected. */
-  stopAgent: () => boolean;
+  /** Ask the harness to stop. `false` if the stream is not connected. */
+  stopHarness: () => boolean;
   /**
-   * Answer a permission the agent asked for (issue #58, AC-4). Sent on the same socket as input
+   * Answer a permission the harness asked for (issue #58, AC-4). Sent on the same socket as input
    * and stop — a second connection for one frame would need a second ticket and a second
    * tenancy check for no benefit. `false` if the stream is not connected.
    */
   respondPermission: (requestId: string, optionId: string) => boolean;
-  /** Answer an interactive widget the agent drew. `false` when the socket is not open. */
+  /** Answer an interactive widget the harness drew. `false` when the socket is not open. */
   respondWidget: (widgetId: string, values: string[], text?: string) => boolean;
 } {
   const [events, setEvents] = useState<TaskEvent[]>([]);
@@ -210,7 +210,7 @@ export function useTaskStream(
    * Frames that have arrived but not yet been committed to state.
    *
    * Each socket message is its own macrotask, so React cannot batch them: one `setEvents` per
-   * frame meant one render of the whole Task page per chunk of agent output, and the previous
+   * frame meant one render of the whole Task page per chunk of harness output, and the previous
    * `[...prev, event]` copied the entire array each time — O(n²) over a run, on top of a
    * terminal that re-derived the whole transcript on every one of those renders.
    *
@@ -269,7 +269,7 @@ export function useTaskStream(
     (text: string) => send({ kind: "input", taskId, data: text }),
     [send, taskId],
   );
-  const stopAgent = useCallback(() => send({ kind: "stop", taskId }), [send, taskId]);
+  const stopHarness = useCallback(() => send({ kind: "stop", taskId }), [send, taskId]);
   const respondPermission = useCallback(
     (requestId: string, optionId: string) =>
       send({ kind: "permission", taskId, requestId, optionId }),
@@ -282,5 +282,5 @@ export function useTaskStream(
     [send, taskId],
   );
 
-  return { events, status, sendInput, stopAgent, respondPermission, respondWidget };
+  return { events, status, sendInput, stopHarness, respondPermission, respondWidget };
 }

@@ -7,7 +7,7 @@ import {
   type DependencyGraph,
   parseDependencyCycleMessage,
 } from "@solow/core";
-import { ensureDefaultAgentCatalog, issue as issueTable, workspace } from "@solow/db";
+import { ensureDefaultHarnessCatalog, issue as issueTable, workspace } from "@solow/db";
 import { createTestDb, type TestDb } from "@solow/db/testing";
 import { dispatch } from "../mcp/protocol.js";
 import { resetRateLimits } from "../rate-limit.js";
@@ -84,9 +84,9 @@ async function errMessage(fn: () => Promise<unknown>): Promise<string> {
 async function fixture(db: TestDb, name: string) {
   const wsId = await seedWs(db, name);
   const c = caller(db, wsId);
-  const agentCatalogId = await ensureDefaultAgentCatalog(db, wsId);
+  const agentCatalogId = await ensureDefaultHarnessCatalog(db, wsId);
   const { secret } = await c.secret.set({ name: "sub", kind: "subscription_token", value: "tok" });
-  const agent = await c.profile.agent.create({
+  const harness = await c.profile.agent.create({
     name: "Claude",
     agentCatalogId,
     authMode: "subscription",
@@ -109,7 +109,7 @@ async function fixture(db: TestDb, name: string) {
     await c.task.create({
       issueId: issue.id,
       title,
-      agentProfileId: agent.id,
+      agentProfileId: harness.id,
       executorProfileId: executor.id,
       repositories: [{ repositoryId: repo.id }],
     });
@@ -346,7 +346,7 @@ describe("task dependencies", () => {
     });
 
     it("refuses task_launch called over MCP, and leaves the Task where it was", async () => {
-      // AC-3 says "any automated path", and MCP is the path an agent takes. Driven through the
+      // AC-3 says "any automated path", and MCP is the path a harness takes. Driven through the
       // real JSON-RPC dispatcher rather than by asserting the tool names exist: the claim is that
       // the MCP surface *inherits* the gate, and a list of procedure keys would still be correct
       // if MCP dispatched somewhere else entirely.

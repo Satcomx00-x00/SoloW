@@ -157,7 +157,7 @@
   {
     "name": "area/workflows",
     "color": "BFD4F2",
-    "description": "Subsystem: multi-step agent pipelines"
+    "description": "Subsystem: multi-step harness pipelines"
   },
   {
     "name": "area/board",
@@ -170,9 +170,9 @@
     "description": "Subsystem: issue management"
   },
   {
-    "name": "area/agents",
+    "name": "area/harnesses",
     "color": "BFD4F2",
-    "description": "Subsystem: agent catalog, protocol, profiles"
+    "description": "Subsystem: harness catalog, protocol, profiles"
   },
   {
     "name": "area/sessions",

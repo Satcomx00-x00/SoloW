@@ -30,7 +30,7 @@ export type SetSecretInput = z.infer<typeof setSecretInput>;
 
 /**
  * What still holds a Secret. Carried on every read so the UI can say *which* Integration or
- * Agent Profile depends on a credential before the user tries to delete it, rather than only
+ * Harness Profile depends on a credential before the user tries to delete it, rather than only
  * after the server refuses.
  */
 export const secretUsageDto = z.object({
@@ -71,7 +71,7 @@ export type SetSecretResultDto = z.infer<typeof setSecretResultDto>;
 
 /**
  * Delete a Secret. Refused with `SECRET_IN_USE` while anything still references it — a stored
- * credential is the only copy SoloW has, and dropping one an Integration or Agent Profile
+ * credential is the only copy SoloW has, and dropping one an Integration or Harness Profile
  * points at breaks that holder with no way to put the value back (spec F17 FR-6).
  */
 export const deleteSecretInput = z.object({ id: idSchema });

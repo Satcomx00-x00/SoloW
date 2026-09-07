@@ -7,7 +7,7 @@
 Onboarding is a guided **Setup Workflow** that prepares a Workspace for use. Rather than
 leaving a new user to discover configuration screens on their own, SoloW walks them
 through the essential steps as an ordered, resumable, self-verifying sequence — connecting
-source hosts, repositories, and integrations; creating at least one Agent Profile and one
+source hosts, repositories, and integrations; creating at least one Harness Profile and one
 Executor Profile; choosing a billing mode; and confirming the setup works with a small
 verification Task. The Setup Workflow uses the same guided, step-based, resumable model as
 user-authored Workflows ([F03](./F03-workflow-designer.md)), so getting started and running
@@ -45,10 +45,10 @@ work share one mental model.
      [F12](./F12-integrations.md), [Decision 0014](../decisions/0014-direct-api-source-integrations.md)).
   3. Connect one or more **Repositories** (see [F08](./F08-workspaces-repositories.md)).
   4. Configure optional **Integrations** (issue trackers, chat) (see [F12](./F12-integrations.md)).
-  5. Create at least one **Agent Profile**, including its **Authentication & Billing Mode** —
-     Subscription or API Key (see [F05](./F05-agent-executor-profiles.md), [F06](./F06-authentication-billing.md)).
+  5. Create at least one **Harness Profile**, including its **Authentication & Billing Mode** —
+     Subscription or API Key (see [F05](./F05-harness-executor-profiles.md), [F06](./F06-authentication-billing.md)).
   6. Create at least one **Executor Profile** (see [F07](./F07-execution-environments.md)).
-  7. Run a **verification** step: a minimal Task confirming an Agent can run and produce a
+  7. Run a **verification** step: a minimal Task confirming a Harness can run and produce a
      reviewable result.
 - **FR-4** The Setup Workflow detects steps that are already satisfied and only prompts for
   what is missing, so it behaves as a checklist and is safe to re-run.
@@ -56,7 +56,7 @@ work share one mental model.
   progress.
 - **FR-6** The Setup Workflow can be re-run at any time from Settings to add or reconfigure.
 - **FR-7** The Setup Workflow surfaces prerequisites — for example, that a GitHub/GitLab
-  Personal Access Token authenticates successfully, and that the chosen agent tools are
+  Personal Access Token authenticates successfully, and that the chosen harness tools are
   available and authenticated — and guides the user to satisfy them, without ever
   displaying secrets.
 - **FR-8** Completing the Setup Workflow leaves the Workspace ready to create Issues and
@@ -89,7 +89,7 @@ work share one mental model.
   the steps that do not depend on it.
 - If the verification Task fails, the Setup Workflow surfaces the reason and points the user
   to the step likely responsible (for example, an unavailable Executor or an unauthenticated
-  agent), rather than declaring the Workspace Ready.
+  harness), rather than declaring the Workspace Ready.
 
 ## Out of scope
 
@@ -99,7 +99,7 @@ work share one mental model.
 ## Related
 
 - [F03 — Visual Workflow Designer & Monitor](./F03-workflow-designer.md)
-- [F05 — Agent & Executor Profiles](./F05-agent-executor-profiles.md)
+- [F05 — Harness & Executor Profiles](./F05-harness-executor-profiles.md)
 - [F06 — Authentication & Billing Modes](./F06-authentication-billing.md)
 - [F12 — External Integrations](./F12-integrations.md)
 - [Decision 0014 — Direct API GitHub/GitLab integrations](../decisions/0014-direct-api-source-integrations.md)

@@ -66,8 +66,6 @@ export function createDb() {
 
 export type Db = ReturnType<typeof createDb>;
 
-export { ensureDefaultAgentCatalog } from "./agent-catalog-defaults.js";
-export { loadAgentLibrariesForRun } from "./agent-library-run.js";
 export * from "./auth-schema.js";
 export { bootstrapWorkspace, LOCAL_WORKSPACE_ID } from "./bootstrap.js";
 export { dbEnv } from "./env.js";
@@ -81,6 +79,8 @@ export {
   isFlagKey,
 } from "./flag-registry.js";
 export { listWorkspaceFlags, setWorkspaceFlag, type WorkspaceFlags } from "./flags.js";
+export { ensureDefaultHarnessCatalog } from "./harness-catalog-defaults.js";
+export { loadHarnessLibrariesForRun } from "./harness-library-run.js";
 export { DEFAULT_MCP_SERVER, DEFAULT_SKILL, ensureDefaultLibraries } from "./library-defaults.js";
 export {
   type GeneratedMcpToken,
@@ -95,7 +95,7 @@ export {
 } from "./project-membership.js";
 export * from "./schema.js";
 export { schema } from "./schema.js";
-export { decryptForAgentRun, decryptForScmSync, encryptSecret } from "./secret-store.js";
+export { decryptForHarnessRun, decryptForScmSync, encryptSecret } from "./secret-store.js";
 export { allTables } from "./tables.js";
 export { DEFAULT_WORKFLOWS, ensureDefaultWorkflows } from "./workflow-defaults.js";
 export {

@@ -4,29 +4,29 @@
 
 ## TL;DR
 
-SoloW is a self-hostable control plane for running many AI coding agents in
+SoloW is a self-hostable control plane for running many AI coding harnesses in
 parallel under human oversight. Users administer work as **Tasks on a Kanban board,
-organised under Issues**, design multi-agent processes as **visual Workflows**, and
+organised under Issues**, design multi-harness processes as **visual Workflows**, and
 review every change before it lands. It matches the capability of comparable tools and adds
 first-class use of Claude subscription plans, durable and resumable orchestration, and a
 single codebase that runs both locally and as a hosted team service.
 
 ## The problem
 
-Individual AI coding-agent CLIs are capable at doing work but lack the surrounding
+Individual AI coding-harness CLIs are capable at doing work but lack the surrounding
 infrastructure to be used seriously at scale. Teams and power users cannot easily:
 
-- run several agents at once without them colliding on the same files or branches;
-- see, understand, and approve what an agent changed before it ships;
-- repeat a proven multi-step process (for example: one agent designs, another
+- run several harnesses at once without them colliding on the same files or branches;
+- see, understand, and approve what a harness changed before it ships;
+- repeat a proven multi-step process (for example: one harness designs, another
   implements, a third reviews) reliably;
-- track agent work against the issues it belongs to;
-- offload heavy agent work to remote or containerised machines while keeping one place to
+- track harness work against the issues it belongs to;
+- offload heavy harness work to remote or containerised machines while keeping one place to
   watch and steer it.
 
 ## The vision
 
-A single, trustworthy control plane where a person points agents at issues, watches their
+A single, trustworthy control plane where a person points harnesses at issues, watches their
 work unfold visually, reviews the results, and ships — with the same confidence and
 auditability they would expect from a human team, and without surrendering control or
 data to a closed cloud.
@@ -41,15 +41,15 @@ data to a closed cloud.
    and run consistently.
 4. **Own your compute and your data.** Everything can run on the user's own machines with
    no telemetry and no vendor lock-in.
-5. **Meet users where their budget is.** Agents can run on a personal subscription or on
-   metered API keys, chosen per Agent Profile.
+5. **Meet users where their budget is.** Harnesses can run on a personal subscription or on
+   metered API keys, chosen per Harness Profile.
 
 ## In scope
 
 - Issue tracking (native and synchronised from external trackers).
 - Kanban administration of Tasks under Issues.
 - Visual Workflow design and monitoring.
-- Multi-agent orchestration across many agent CLIs via a standard protocol.
+- Multi-harness orchestration across many harness CLIs via a standard protocol.
 - Isolated per-Task working copies and multi-repository Tasks.
 - Multiple execution environments (local, container, remote, cloud).
 - An integrated review workspace (terminal, editor, diff, preview).
@@ -72,7 +72,7 @@ SoloW matches the feature breadth of comparable tools and differentiates on four
 
 | Dimension | Comparable tools | SoloW |
 |-----------|--------|-------------|
-| Subscription-based agents | Not first-class | First-class: run agents on a Claude Pro/Max plan across all executor types via a portable subscription token |
+| Subscription-based harnesses | Not first-class | First-class: run harnesses on a Claude Pro/Max plan across all executor types via a portable subscription token |
 | Orchestration durability | Hand-built | Durable and resumable, with first-class human-in-the-loop gates |
 | Deployment target | Local/desktop-first | Local **and** hosted multi-user from one codebase |
 | Quota awareness | — | Concurrency caps and a "Parked" state so parallel work never silently exhausts a subscription quota |
@@ -82,6 +82,6 @@ See the [Decision Log](../decisions/README.md) for the reasoning behind these ch
 ## Success criteria
 
 The product is succeeding when a user can, in one place: create or import an Issue, break
-it into Tasks on a board, run agents against those Tasks in parallel on their chosen
+it into Tasks on a board, run harnesses against those Tasks in parallel on their chosen
 billing mode, review the proposed changes, and ship — repeatably, and without changes
 landing that a human did not approve.

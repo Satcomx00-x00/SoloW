@@ -66,7 +66,7 @@ export const workspaceRouter = router({
         tags: ["workspace"],
         protect: true,
         summary:
-          "What this Workspace still needs before it can run anything — a credential, an Agent Profile, an Executor, a Repository and the core loop — derived from what it actually has.",
+          "What this Workspace still needs before it can run anything — a credential, a Harness Profile, an Executor, a Repository and the core loop — derived from what it actually has.",
       },
     })
     .input(workspaceDto.pick({}).optional())

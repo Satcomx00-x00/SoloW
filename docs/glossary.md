@@ -20,7 +20,7 @@ docs when they refer to these specific concepts.
   **under** an Issue.
 
 - **Task** — An executable unit of work that lives on a Kanban Board under an Issue. A
-  Task binds together an Agent Profile, an Executor Profile, and a Worktree, and moves
+  Task binds together a Harness Profile, an Executor Profile, and a Worktree, and moves
   through a defined lifecycle from creation to review to completion.
 
 - **Board** — The Kanban surface on which Tasks are administered. A Board arranges Tasks
@@ -32,39 +32,39 @@ docs when they refer to these specific concepts.
 - **Worktree** — The isolated Git working copy created for a single Task, so that
   concurrent Tasks never interfere with one another's files or branches.
 
-- **Executor** — The runtime environment in which an Agent runs: a local process, a
+- **Executor** — The runtime environment in which a Harness runs: a local process, a
   Docker container, an SSH-connected remote host, or a cloud runner.
 
 - **Executor Profile** — A reusable, named configuration describing an Executor.
 
-## Agents and sessions
+## Harnesses and sessions
 
-- **Agent** — An external AI coding-agent command-line tool (for example Claude Code,
+- **Harness** — An external AI coding-harness command-line tool (for example Claude Code,
   Codex, Gemini CLI) that SoloW drives to perform work.
 
 - **Agent Client Protocol (ACP)** — The open, standard protocol SoloW uses to
-  connect to Agents, analogous to how the Language Server Protocol standardised editor
+  connect to Harnesses, analogous to how the Language Server Protocol standardised editor
   tooling.
 
-- **Agent Profile** — A reusable, named configuration for an Agent: which tool, which
+- **Harness Profile** — A reusable, named configuration for a Harness: which tool, which
   model, its connected tools, its authentication and billing mode, and its concurrency
   limit.
 
-- **Authentication Mode** — How an Agent is billed and authenticated: **Subscription**
+- **Authentication Mode** — How a Harness is billed and authenticated: **Subscription**
   (using a personal Claude Pro/Max plan) or **API Key**.
 
-- **Session** — A single run of an Agent against a Task, producing a Conversation, a
+- **Session** — A single run of a Harness against a Task, producing a Conversation, a
   stream of events, and a set of proposed changes. Sessions can be reviewed and resumed.
 
-- **Conversation** — The recorded exchange between a user, SoloW, and an Agent
+- **Conversation** — The recorded exchange between a user, SoloW, and a Harness
   within a Session.
 
 ## Workflows
 
-- **Workflow** — A repeatable, multi-step process that chains Agents and human decisions
+- **Workflow** — A repeatable, multi-step process that chains Harnesses and human decisions
   together. Workflows are designed and monitored as a visual node graph.
 
-- **Workflow Step** — A single node in a Workflow: an Agent action, a human review gate,
+- **Workflow Step** — A single node in a Workflow: a Harness action, a human review gate,
   a condition, or a fork/join.
 
 - **Gate** — A Workflow Step that pauses execution until a human approves, rejects, or
@@ -75,7 +75,7 @@ docs when they refer to these specific concepts.
 
 ## Review and change
 
-- **Diff** — The set of file changes an Agent proposes, presented for human review before
+- **Diff** — The set of file changes a Harness proposes, presented for human review before
   they are accepted.
 
 - **Review** — The human step of inspecting a Diff and approving, rejecting, or requesting
@@ -125,5 +125,5 @@ docs when they refer to these specific concepts.
   tooling. Covers the HTTP API only, not the realtime channel.
 
 - **WebSocket channel** — The live, bidirectional connection between the SPA and the backend
-  that streams agent activity and state changes outward and carries terminal input and
+  that streams harness activity and state changes outward and carries terminal input and
   steering inward.

@@ -65,7 +65,7 @@ export function ProjectsHub() {
           <FolderGit2 aria-hidden className="size-9 text-muted-foreground/40" />
           <h1 className="font-semibold text-base">Start with a project</h1>
           <p className="max-w-md text-muted-foreground text-sm leading-relaxed">
-            Everything in SoloW lives inside a project: the issues it holds, the board its agents
+            Everything in SoloW lives inside a project: the issues it holds, the board its harnesses
             run on, the workflows that chain them. A project is <em>mirrored</em> from GitHub or
             GitLab — SoloW never creates one on your provider. If your tracker has nothing like that
             to mirror, create one here instead — SoloW still creates nothing on your provider, only
@@ -97,7 +97,7 @@ export function ProjectsHub() {
         <div className="space-y-1">
           <h1 className="font-semibold text-lg tracking-[-0.01em]">Projects</h1>
           <p className="text-muted-foreground text-sm leading-relaxed">
-            Pick a project to plan it, run agents on it, and review what they change.
+            Pick a project to plan it, run harnesses on it, and review what they change.
           </p>
         </div>
         <div className="flex items-center gap-2">

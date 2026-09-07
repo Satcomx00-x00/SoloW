@@ -9,8 +9,8 @@ The Interactive Application is a Single Page Application
 distinct kinds of communication:
 
 1. **Request/response** — queries and mutations (create a Task, move a card, save a Profile).
-2. **A live, bidirectional channel** — streaming agent terminal output, Board and Workflow
-   Run state changes, and carrying client input back to a running agent (terminal input,
+2. **A live, bidirectional channel** — streaming harness terminal output, Board and Workflow
+   Run state changes, and carrying client input back to a running harness (terminal input,
    steering).
 
 The stack is TypeScript end-to-end with Zod validation. A required deliverable is an
@@ -24,7 +24,7 @@ standard tooling can use the API against a portable contract.
 - **Generate and publish an `openapi.json`** describing the HTTP API, exported from the tRPC
   routers, as a committed build artifact — so the API is also available through a standard,
   language-agnostic contract.
-- Use a **WebSocket** channel for the live, bidirectional stream: agent activity, Board and
+- Use a **WebSocket** channel for the live, bidirectional stream: harness activity, Board and
   Run updates outward, and terminal input and steering inward.
 
 `openapi.json` describes the **HTTP request/response API only**. The realtime WebSocket
@@ -41,7 +41,7 @@ separately (for example with AsyncAPI) and is out of scope here.
 - **GraphQL** — Rejected: heavier server and caching model than this application needs.
 - **Plain tRPC with no OpenAPI** — Rejected: does not satisfy the `openapi.json` deliverable.
 - **Server-Sent Events for the live channel** — Rejected: server-to-client only; the SPA must
-  send input back to a running agent, which requires a bidirectional channel.
+  send input back to a running harness, which requires a bidirectional channel.
 
 ## Consequences
 
@@ -51,7 +51,7 @@ separately (for example with AsyncAPI) and is out of scope here.
   a constraint on router design and a build step that must be kept working.
 - Neutral: OpenAPI does not describe the WebSocket channel; that is an accepted boundary.
 - Distinct from the internal protocols, which this decision does not change: **ACP**
-  (orchestrator ↔ agent CLIs, [Decision 0003](./0003-agent-connection-protocol.md)) and
+  (orchestrator ↔ harness CLIs, [Decision 0003](./0003-agent-connection-protocol.md)) and
   **Inngest** durable orchestration ([Decision 0004](./0004-durable-orchestration-engine.md)).
 - Affects the [building block view](../architecture/05-building-blocks.md) and the API-surface
   constraint in the constitution.

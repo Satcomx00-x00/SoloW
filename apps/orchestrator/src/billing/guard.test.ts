@@ -4,12 +4,12 @@ beforeAll(() => {
   process.env.SOLOW_SECRET_KEY = Buffer.alloc(32, 7).toString("base64");
 });
 
-describe("prepareAgentEnv — decrypt + billing integrity", () => {
+describe("prepareHarnessEnv — decrypt + billing integrity", () => {
   it("subscription decrypts the token and strips ANTHROPIC_API_KEY", async () => {
     const { encryptSecret } = await import("@solow/db");
-    const { prepareAgentEnv } = await import("./guard.js");
+    const { prepareHarnessEnv } = await import("./guard.js");
     const ciphertext = encryptSecret("sk-ant-oat01-tok");
-    const r = prepareAgentEnv({
+    const r = prepareHarnessEnv({
       authMode: "subscription",
       secretCiphertext: ciphertext,
       baseEnv: { ANTHROPIC_API_KEY: "leak", PATH: "/bin" },
@@ -24,8 +24,8 @@ describe("prepareAgentEnv — decrypt + billing integrity", () => {
   });
 
   it("errors when no credential", async () => {
-    const { prepareAgentEnv } = await import("./guard.js");
-    const r = prepareAgentEnv({
+    const { prepareHarnessEnv } = await import("./guard.js");
+    const r = prepareHarnessEnv({
       authMode: "api_key",
       secretCiphertext: null,
       baseEnv: {},

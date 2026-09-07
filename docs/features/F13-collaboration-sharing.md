@@ -4,7 +4,7 @@
 
 ## Summary
 
-SoloW lets users share what agents did so teammates can learn from, review, or build
+SoloW lets users share what harnesses did so teammates can learn from, review, or build
 on it. The primary mechanism is a redacted, shareable Snapshot of a Task's Conversation and
 outcome.
 
@@ -14,7 +14,7 @@ outcome.
 
 ## User stories
 
-- As a user, I want to share a clean record of how an agent solved a Task, so a teammate can
+- As a user, I want to share a clean record of how a harness solved a Task, so a teammate can
   learn from it.
 - As a user, I want sensitive details removed from a shared record, so I do not leak secrets.
 - As a Team Lead, I want a reusable Workflow to be shareable, so my team adopts it.

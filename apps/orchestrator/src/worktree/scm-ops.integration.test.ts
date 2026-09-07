@@ -45,9 +45,9 @@ beforeEach(async () => {
   await $`git -C ${repoDir} add -A`.quiet();
   await $`git -C ${repoDir} commit -qm init`.quiet();
 
-  writeFileSync(join(repoDir, "tracked.txt"), "edited by the agent\n");
-  writeFileSync(join(repoDir, "new.txt"), "created by the agent\n");
-  writeFileSync(join(outsideDir, "secret.txt"), "not the agent's to touch\n");
+  writeFileSync(join(repoDir, "tracked.txt"), "edited by the harness\n");
+  writeFileSync(join(repoDir, "new.txt"), "created by the harness\n");
+  writeFileSync(join(outsideDir, "secret.txt"), "not the harness's to touch\n");
 });
 
 afterAll(() => {
@@ -75,7 +75,7 @@ describe("staging is the review selection", () => {
     await unstagePaths(executor, repoDir, ["tracked.txt"]);
 
     expect(group(await readScmStatus(executor, repoDir), "tracked.txt")).toEqual(["changes"]);
-    expect(readFileSync(join(repoDir, "tracked.txt"), "utf8")).toBe("edited by the agent\n");
+    expect(readFileSync(join(repoDir, "tracked.txt"), "utf8")).toBe("edited by the harness\n");
   });
 });
 
@@ -133,7 +133,7 @@ describe("path containment (F22 NFR-3, AC-9)", () => {
 
     const staged = await executor.exec(["git", "-C", repoDir, "show", ":escape.txt"]);
     expect(staged.stdout).toBe(join(outsideDir, "secret.txt"));
-    expect(staged.stdout).not.toContain("not the agent's to touch");
+    expect(staged.stdout).not.toContain("not the harness's to touch");
   });
 
   it("cannot be used to delete a file outside the worktree through a symlink", async () => {
@@ -143,7 +143,9 @@ describe("path containment (F22 NFR-3, AC-9)", () => {
 
     // The link is gone; what it pointed at is untouched.
     expect(existsSync(join(repoDir, "escape.txt"))).toBe(false);
-    expect(readFileSync(join(outsideDir, "secret.txt"), "utf8")).toBe("not the agent's to touch\n");
+    expect(readFileSync(join(outsideDir, "secret.txt"), "utf8")).toBe(
+      "not the harness's to touch\n",
+    );
   });
 
   it("refuses the whole call when any one path is refused", async () => {

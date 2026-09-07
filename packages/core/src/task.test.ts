@@ -132,7 +132,7 @@ describe("buildCreateTaskPayload", () => {
 
 /**
  * The Task ↔ Repository join, from the pure side (issue #7). Both functions exist so that
- * "which branch" and "which worktree does the agent run in" have exactly one answer each, and
+ * "which branch" and "which worktree does the harness run in" have exactly one answer each, and
  * that answer is testable without a database.
  */
 describe("taskCheckoutBranch", () => {
@@ -148,8 +148,8 @@ describe("taskCheckoutBranch", () => {
 
 describe("primaryTaskRepository", () => {
   it("returns the position-0 attachment whatever order the list arrives in", () => {
-    // The agent runs in exactly one working directory, so this decides which. Deciding it by
-    // array order would make a re-sorted list start the agent somewhere else.
+    // The harness runs in exactly one working directory, so this decides which. Deciding it by
+    // array order would make a re-sorted list start the harness somewhere else.
     const attachments = [
       { id: "b", position: 2 },
       { id: "a", position: 0 },

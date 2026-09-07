@@ -365,7 +365,7 @@ function WorkflowsNav() {
         </ul>
         {!workflows.isLoading && !failed && list.length === 0 && (
           <p className="px-3 pt-1 text-muted-foreground text-xs leading-relaxed">
-            None yet. A workflow chains agents: one plans, another implements, a third reviews.
+            None yet. A workflow chains harnesses: one plans, another implements, a third reviews.
           </p>
         )}
         {remove.error && (

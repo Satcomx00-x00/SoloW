@@ -36,7 +36,7 @@ export function TaskAdvance({
   const back = previousTaskState(state);
   // Running is the one state whose forward exit is not the operator's to write. `review`,
   // `parked` and `failed` are all outcomes the orchestrator announces when the run ends; writing
-  // `review` by hand puts the review gate on screen while the agent is still mid-turn, before
+  // `review` by hand puts the review gate on screen while the harness is still mid-turn, before
   // the workflow is waiting for a decision. An Approve pressed there is recorded and published
   // into nothing — the run reaches its own gate afterwards and waits out the seven-day timeout
   // for a decision that was already given, and the work is discarded with nothing committed.

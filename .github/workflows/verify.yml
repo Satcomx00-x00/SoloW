@@ -70,7 +70,7 @@ jobs:
       - name: Unit tests
         run: make test
 
-      # Executes the real lifecycle against an in-memory DB, a fake agent and a temp git repo.
+      # Executes the real lifecycle against an in-memory DB, a fake harness and a temp git repo.
       # It is what would have caught #111 breaking scripts/smoke.ts — but only by running it:
       # `scripts/` is listed in the root tsconfig, yet `bun run typecheck` fans out per package
       # and never invokes that config, so a stale call signature there still compiles. This

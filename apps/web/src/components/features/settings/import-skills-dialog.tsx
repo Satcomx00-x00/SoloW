@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  AgentLibraryErrorCode,
+  HarnessLibraryErrorCode,
   type ScannedSkillDto,
   type SkillImportSource,
 } from "@solow/contracts";
@@ -36,7 +36,7 @@ import { trpc } from "@/trpc/react";
  *
  * Two steps on purpose: a scan first, which finds every directory holding a `SKILL.md` and
  * says what it would call each one, then the import of the ones left ticked. A directory of
- * fifty Skills usually has a few the team does not want every agent reading, and the only
+ * fifty Skills usually has a few the team does not want every harness reading, and the only
  * moment to leave those out is before they are in the library. A Skill whose name is already
  * there is shown unticked and locked, with the reason, rather than silently dropped.
  *
@@ -326,7 +326,7 @@ export function ImportSkillsDialog({
               checked={enabled}
               onCheckedChange={(checked) => setEnabled(checked === true)}
             />
-            <Label htmlFor="skills-import-enabled">Load in every agent</Label>
+            <Label htmlFor="skills-import-enabled">Load in every harness</Label>
           </div>
           <Button
             type="button"
@@ -350,13 +350,13 @@ export function ImportSkillsDialog({
 
 /** The scan's failure, said the way the operator can act on it. */
 function describeScanError(code: string, kind: Source): string {
-  if (code === AgentLibraryErrorCode.ImportSourceNotFound) {
+  if (code === HarnessLibraryErrorCode.ImportSourceNotFound) {
     return "That is not a directory on the machine SoloW runs on.";
   }
-  if (code === AgentLibraryErrorCode.ImportArchiveInvalid) {
+  if (code === HarnessLibraryErrorCode.ImportArchiveInvalid) {
     return "That is not a .zip SoloW can unpack — or it names a path outside itself, which is refused whole.";
   }
-  if (code === AgentLibraryErrorCode.ImportCloneFailed) {
+  if (code === HarnessLibraryErrorCode.ImportCloneFailed) {
     return kind === "git"
       ? "That repository's archive could not be fetched — check the URL (add #branch for a branch other than the default), and that it is public or reachable from this machine."
       : code;

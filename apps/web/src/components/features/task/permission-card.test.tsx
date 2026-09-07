@@ -7,7 +7,7 @@ import type { PermissionRow } from "./transcript";
 
 /**
  * The inline half of AC-4. The properties under test are the ones a reviewer relies on months
- * later: a live question offers exactly the agent's options, and a settled one is a record —
+ * later: a live question offers exactly the harness's options, and a settled one is a record —
  * naming what was asked, what was answered and whether a human was the one who answered it.
  */
 
@@ -38,7 +38,7 @@ describe("PermissionCard", () => {
     expect(screen.getByText("Write .env in the worktree")).toBeDefined();
   });
 
-  it("reports the option the operator clicked, by the agent's own id", () => {
+  it("reports the option the operator clicked, by the harness's own id", () => {
     const chosen: string[] = [];
     render(<PermissionCard row={row()} onRespond={(optionId) => chosen.push(optionId)} />);
 
@@ -46,8 +46,8 @@ describe("PermissionCard", () => {
     expect(chosen).toEqual(["no"]);
   });
 
-  it("offers one button per option the agent offered, in its order, and no others", () => {
-    // Ordering is the agent's: the option it lists first is the ordinary answer, and DOM order
+  it("offers one button per option the harness offered, in its order, and no others", () => {
+    // Ordering is the harness's: the option it lists first is the ordinary answer, and DOM order
     // is the tab order, so reordering here would change what a keyboard user reaches first.
     render(<PermissionCard row={row()} onRespond={() => {}} />);
     const names = screen.getAllByRole("button").map((b) => b.textContent);
@@ -62,7 +62,7 @@ describe("PermissionCard", () => {
     expect(screen.getByRole("group", { name: /Write \.env in the worktree/ })).toBeDefined();
   });
 
-  it("says plainly when the agent offered nothing to choose from", () => {
+  it("says plainly when the harness offered nothing to choose from", () => {
     render(<PermissionCard row={row({ options: [] })} onRespond={() => {}} />);
     expect(screen.getByText(/offered no options/)).toBeDefined();
     expect(screen.queryByRole("button")).toBeNull();

@@ -35,7 +35,7 @@ export SOLOW_DEV_OWNER="${SOLOW_DEV_OWNER:-on}"
 export SOLOW_AUTH_SECRET="${SOLOW_AUTH_SECRET:-dev-insecure-session-secret-32ch}"
 # Shared by web (signs stream tickets) and orchestrator (verifies them) — same value, both sides.
 export SOLOW_STREAM_SECRET="${SOLOW_STREAM_SECRET:-dev-insecure-stream}"
-# The Claude Code binary each run's agent_catalog row names (packages/db/src/agent-catalog-
+# The Claude Code binary each run's agent_catalog row names (packages/db/src/harness-catalog-
 # defaults.ts seeds "claude"; these two are read by nothing in apps/orchestrator/src today, so
 # they do not override that — kept only for a deployment that wires its own catalog lookup to
 # them). SoloW adds the arguments it needs itself, including --worktree, so each Task gets
@@ -48,7 +48,7 @@ export SOLOW_WEB_URL="${SOLOW_WEB_URL:-http://localhost:5000}"
 # Where the web app's emit() POSTs task-run/review events (apps/web/src/server/orchestrator-
 # client.ts) — the orchestrator's own /events route, which forwards them into a real
 # inngest.send() (Decision 0004). Without this, enqueueTaskRun()/resumeReview() silently no-op
-# in dev-owner mode instead of ever reaching an agent.
+# in dev-owner mode instead of ever reaching a harness.
 export SOLOW_ORCHESTRATOR_URL="${SOLOW_ORCHESTRATOR_URL:-http://localhost:$SOLOW_WS_PORT}"
 export SOLOW_INNGEST_PORT="${SOLOW_INNGEST_PORT:-8288}"
 # Inngest's own env var (not SoloW's — see apps/orchestrator/src/inngest/client.ts): a URL
@@ -69,9 +69,9 @@ if [ ! -f "$SOLOW_SQLITE_PATH" ]; then
 else
     bun run db:migrate
 fi
-# Every start, not only the first: this creates the Workspace and its agent catalog and nothing
+# Every start, not only the first: this creates the Workspace and its harness catalog and nothing
 # else, so it is a no-op once they exist — and a database from a build that predates the catalog
-# gets one instead of a Settings page with an empty agent picker.
+# gets one instead of a Settings page with an empty harness picker.
 bun run db:bootstrap
 
 # Track child PIDs and stop all three services on exit.
@@ -88,7 +88,7 @@ echo "[dev] orchestrator → ws://localhost:$SOLOW_WS_PORT  (+ /events, /api/inn
 #
 # Hot-reloading the orchestrator reloads the module graph an in-flight run is executing in, and
 # in practice that kills the run: three real runs were lost to it in one afternoon, each of them
-# an agent that had already done the work. The web app has no such state — a reload there costs a
+# a harness that had already done the work. The web app has no such state — a reload there costs a
 # re-render — so it keeps the fast loop, and this one trades an edit-time restart for runs that
 # survive being edited around. Restart the stack after changing anything under `apps/orchestrator`
 # or `packages/` for it to take effect.

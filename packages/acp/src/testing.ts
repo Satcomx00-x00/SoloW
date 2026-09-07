@@ -5,7 +5,7 @@ import { AcpMethod } from "./protocol.js";
 import type { ChildProcessHandle } from "./session.js";
 
 /**
- * A scripted stand-in for an ACP agent (Principle VI — the DoD's "no live agent in CI").
+ * A scripted stand-in for an ACP agent (Principle VI — the DoD's "no live harness in CI").
  *
  * It speaks the real protocol: real JSON-RPC framing, a real `initialize` handshake, real
  * `session/update` notifications, and real client-bound requests for permissions. A test

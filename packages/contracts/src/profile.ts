@@ -8,96 +8,96 @@ import {
 import { pageInputSchema, pageOf } from "./page.js";
 
 /**
- * How much an agent may do without stopping to ask (spec F05).
+ * How much a harness may do without stopping to ask (spec F05).
  *
  * These are the vendor CLI's own `--permission-mode` values, deliberately not renamed: the
- * profile is configuring the agent, and inventing a second vocabulary for it would mean
+ * profile is configuring the harness, and inventing a second vocabulary for it would mean
  * translating in both directions and being wrong the day the CLI adds a fourth.
  *
  * - `acceptEdits` — the default, and what every Profile ran as before this field existed. The
- *   agent edits inside its own worktree freely and asks for everything else.
+ *   harness edits inside its own worktree freely and asks for everything else.
  * - `plan` — it may read and reason but not change anything. A Profile for "tell me what you
  *   would do" rather than "do it".
  * - `bypassPermissions` — it never asks.
  *
- * The last one deserves its name. SoloW runs an agent headless, in a worktree, with **no
+ * The last one deserves its name. SoloW runs a harness headless, in a worktree, with **no
  * channel to ask an operator on** for the stream-json protocol — so under `acceptEdits` every
  * shell command and every fetch is refused by a prompt nobody can answer, and a task that needs
- * either simply cannot be done (observed: an agent asking for `pip index versions` in a loop
+ * either simply cannot be done (observed: a harness asking for `pip index versions` in a loop
  * until it gave up). `bypassPermissions` is the answer to that, and it is a real grant: the
- * agent gets the shell and the network, bounded by the worktree it runs in and by the review
+ * harness gets the shell and the network, bounded by the worktree it runs in and by the review
  * gate that still holds every change before it reaches a branch (Principle I).
  */
-export const agentPermissionModeSchema = z.enum(["acceptEdits", "plan", "bypassPermissions"]);
-export type AgentPermissionMode = z.infer<typeof agentPermissionModeSchema>;
+export const harnessPermissionModeSchema = z.enum(["acceptEdits", "plan", "bypassPermissions"]);
+export type HarnessPermissionMode = z.infer<typeof harnessPermissionModeSchema>;
 
 /**
  * What a Profile runs as when it says nothing.
  *
- * `bypassPermissions`, by decision (2026-08-22): SoloW runs agents headless, and under any
+ * `bypassPermissions`, by decision (2026-08-22): SoloW runs harnesses headless, and under any
  * asking mode a prompt reaches nobody — so the cautious-looking default did not produce caution,
- * it produced runs that failed partway through with the work half done. The bound on an agent is
+ * it produced runs that failed partway through with the work half done. The bound on a harness is
  * the worktree it is confined to and the review gate every change still stops at (Principle I),
  * not a question with no answerer.
  *
- * A Profile can still choose otherwise, and `plan` in particular is a real posture for an agent
+ * A Profile can still choose otherwise, and `plan` in particular is a real posture for a harness
  * meant to propose rather than act.
  */
-export const DEFAULT_AGENT_PERMISSION_MODE: AgentPermissionMode = "bypassPermissions";
+export const DEFAULT_HARNESS_PERMISSION_MODE: HarnessPermissionMode = "bypassPermissions";
 
 /**
- * Agent Profile (spec F05/F06, issue #10). `agentCatalogId` replaces the old closed
- * `agentKind` enum — which agent this Profile runs, and how, is data in `agent_catalog`, not a
+ * Harness Profile (spec F05/F06, issue #10). `agentCatalogId` replaces the old closed
+ * `agentKind` enum — which harness this Profile runs, and how, is data in `agent_catalog`, not a
  * literal the contract has to know about.
  */
 
 /**
- * What a Profile chooses about *how* its agent is launched (spec F05, issue #94).
+ * What a Profile chooses about *how* its harness is launched (spec F05, issue #94).
  *
- * Both are **null by default, and null means "whatever the agent chooses"** — not a value picked
- * here. An agent advertises its own models and modes at handshake, and those lists change on the
+ * Both are **null by default, and null means "whatever the harness chooses"** — not a value picked
+ * here. A harness advertises its own models and modes at handshake, and those lists change on the
  * provider's schedule, not this codebase's: a default written down here would be a choice that
  * rots into a launch failure the first time a model is retired. Null is the only value that
  * cannot go stale.
  *
- * `model` is the model id as the agent names it. `modeId` is one of the modes it advertises —
+ * `model` is the model id as the harness names it. `modeId` is one of the modes it advertises —
  * ACP's `session/set_mode` takes exactly this, and the client already refuses to send an id the
- * agent never offered rather than guessing.
+ * harness never offered rather than guessing.
  */
-export const agentModelIdSchema = z.string().min(1).max(120);
-export const agentModeIdSchema = z.string().min(1).max(120);
+export const harnessModelIdSchema = z.string().min(1).max(120);
+export const harnessModeIdSchema = z.string().min(1).max(120);
 
-export const createAgentProfileInput = z.object({
+export const createHarnessProfileInput = z.object({
   name: z.string().min(1).max(120),
   agentCatalogId: idSchema,
   authMode: authModeSchema,
   /** References a stored Secret (subscription token or API key). */
   secretId: idSchema,
   concurrencyCap: z.number().int().min(1).max(20).default(3),
-  permissionMode: agentPermissionModeSchema.default(DEFAULT_AGENT_PERMISSION_MODE),
-  /** Null — the default — leaves the choice to the agent. See `agentModelIdSchema`. */
-  model: agentModelIdSchema.nullable().default(null),
-  modeId: agentModeIdSchema.nullable().default(null),
+  permissionMode: harnessPermissionModeSchema.default(DEFAULT_HARNESS_PERMISSION_MODE),
+  /** Null — the default — leaves the choice to the harness. See `harnessModelIdSchema`. */
+  model: harnessModelIdSchema.nullable().default(null),
+  modeId: harnessModeIdSchema.nullable().default(null),
 });
-export type CreateAgentProfileInput = z.infer<typeof createAgentProfileInput>;
+export type CreateHarnessProfileInput = z.infer<typeof createHarnessProfileInput>;
 
 /**
- * What still holds this Agent Profile, so Settings can disable Delete and say why before the
+ * What still holds this Harness Profile, so Settings can disable Delete and say why before the
  * Owner tries it rather than only after the server refuses (same reasoning as `secretRefDto`'s
  * `usedBy`). Counts rather than named rows: unlike a Secret — typically held by one or two named
  * Integrations or Profiles — a Profile can be referenced by hundreds of Tasks, and "used by 42
  * tasks" is the useful summary, not a list of their titles.
  */
-export const agentProfileUsageDto = z.object({
+export const harnessProfileUsageDto = z.object({
   taskCount: z.number().int().nonnegative(),
   workflowStepCount: z.number().int().nonnegative(),
   /** Historical billing attribution (issue #14) — present even for a Profile whose every Task
    * has since been deleted, which is exactly the case a Task/Step count alone would miss. */
   sessionUsageCount: z.number().int().nonnegative(),
 });
-export type AgentProfileUsageDto = z.infer<typeof agentProfileUsageDto>;
+export type HarnessProfileUsageDto = z.infer<typeof harnessProfileUsageDto>;
 
-export const agentProfileDto = z
+export const harnessProfileDto = z
   .object({
     id: idSchema,
     name: z.string(),
@@ -105,37 +105,37 @@ export const agentProfileDto = z
     authMode: authModeSchema,
     secretId: idSchema,
     concurrencyCap: z.number().int(),
-    permissionMode: agentPermissionModeSchema,
-    model: agentModelIdSchema.nullable(),
-    modeId: agentModeIdSchema.nullable(),
-    usage: agentProfileUsageDto,
+    permissionMode: harnessPermissionModeSchema,
+    model: harnessModelIdSchema.nullable(),
+    modeId: harnessModeIdSchema.nullable(),
+    usage: harnessProfileUsageDto,
   })
   .merge(timestampsSchema);
-export type AgentProfileDto = z.infer<typeof agentProfileDto>;
+export type HarnessProfileDto = z.infer<typeof harnessProfileDto>;
 
 /**
- * Edit a Profile. No `agentCatalogId`, `authMode` or `secretId`: which agent a Profile runs and
+ * Edit a Profile. No `agentCatalogId`, `authMode` or `secretId`: which harness a Profile runs and
  * how it authenticates are what a Profile *is*, and changing them under Tasks that already
  * reference it would rewrite the meaning of finished runs. What can change is what it is called,
  * how many of it may run at once, and how much it is allowed to do.
  */
-export const updateAgentProfileInput = z.object({
+export const updateHarnessProfileInput = z.object({
   id: idSchema,
   name: z.string().min(1).max(120).optional(),
   concurrencyCap: z.number().int().min(1).max(20).optional(),
-  permissionMode: agentPermissionModeSchema.optional(),
+  permissionMode: harnessPermissionModeSchema.optional(),
   /*
    * `.nullable().optional()` on both, and the two mean different things: absent leaves the
-   * setting alone, null hands the choice back to the agent. Collapsing them would make "stop
+   * setting alone, null hands the choice back to the harness. Collapsing them would make "stop
    * pinning a model" unexpressible.
    */
-  model: agentModelIdSchema.nullable().optional(),
-  modeId: agentModeIdSchema.nullable().optional(),
+  model: harnessModelIdSchema.nullable().optional(),
+  modeId: harnessModeIdSchema.nullable().optional(),
 });
-export type UpdateAgentProfileInput = z.infer<typeof updateAgentProfileInput>;
+export type UpdateHarnessProfileInput = z.infer<typeof updateHarnessProfileInput>;
 
-export const deleteAgentProfileInput = z.object({ id: idSchema });
-export type DeleteAgentProfileInput = z.infer<typeof deleteAgentProfileInput>;
+export const deleteHarnessProfileInput = z.object({ id: idSchema });
+export type DeleteHarnessProfileInput = z.infer<typeof deleteHarnessProfileInput>;
 
 /**
  * Executor Profile (spec F07, issue #73).
@@ -174,14 +174,14 @@ export type ExecutorProfileDto = z.infer<typeof executorProfileDto>;
 
 /**
  * The two profile catalogues, paged — see `listRepositoriesInput` for why a small list is paged
- * too. `agentCatalog` is deliberately not among them: it is the fixed set of agents this build
+ * too. `harnessCatalog` is deliberately not among them: it is the fixed set of harnesses this build
  * knows how to run, not a collection that grows with use.
  */
 export const listProfilesInput = pageInputSchema;
 export type ListProfilesInput = z.infer<typeof listProfilesInput>;
 
-export const agentProfileListDto = pageOf(agentProfileDto);
-export type AgentProfileListDto = z.infer<typeof agentProfileListDto>;
+export const harnessProfileListDto = pageOf(harnessProfileDto);
+export type HarnessProfileListDto = z.infer<typeof harnessProfileListDto>;
 
 export const executorProfileListDto = pageOf(executorProfileDto);
 export type ExecutorProfileListDto = z.infer<typeof executorProfileListDto>;

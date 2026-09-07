@@ -10,7 +10,7 @@ import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
  * `workspaceId` is derived from the authenticated user, never from client input.
  *
  * Table names are prefixed `auth_`: BetterAuth's default model name for a login session is
- * `session`, which is already taken here by an *agent* session. The prefix keeps the two
+ * `session`, which is already taken here by a *harness* session. The prefix keeps the two
  * unambiguous in SQL as well as in code.
  */
 

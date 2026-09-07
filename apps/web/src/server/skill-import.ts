@@ -2,8 +2,8 @@ import "server-only";
 import { mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import {
-  AgentLibraryErrorCode,
   err,
+  HarnessLibraryErrorCode,
   ok,
   type Result,
   type SkillImportSource,
@@ -41,9 +41,9 @@ export type ScannedSkill = {
 };
 
 export type ImportError =
-  | typeof AgentLibraryErrorCode.ImportSourceNotFound
-  | typeof AgentLibraryErrorCode.ImportCloneFailed
-  | typeof AgentLibraryErrorCode.ImportArchiveInvalid;
+  | typeof HarnessLibraryErrorCode.ImportSourceNotFound
+  | typeof HarnessLibraryErrorCode.ImportCloneFailed
+  | typeof HarnessLibraryErrorCode.ImportArchiveInvalid;
 
 /** Enough for a repository of Skills with their assets; a bomb stops here, not at the disk. */
 const MAX_ARCHIVE_ENTRIES = 5000;
@@ -155,14 +155,14 @@ export async function resolveImportRoot(
   if (source.kind === "path") {
     const root = resolve(source.path);
     const info = await stat(root).catch(() => null);
-    return info?.isDirectory() ? ok(root) : err(AgentLibraryErrorCode.ImportSourceNotFound);
+    return info?.isDirectory() ? ok(root) : err(HarnessLibraryErrorCode.ImportSourceNotFound);
   }
   const repo = parseRepositoryUrl(source.url);
-  if (!repo) return err(AgentLibraryErrorCode.ImportCloneFailed);
+  if (!repo) return err(HarnessLibraryErrorCode.ImportCloneFailed);
   const bytes = await fetchArchive(archiveUrlsFor(repo), fetchImpl);
-  if (!bytes) return err(AgentLibraryErrorCode.ImportCloneFailed);
+  if (!bytes) return err(HarnessLibraryErrorCode.ImportCloneFailed);
   const unpacked = await unpackArchiveInto(cloneDirFor(source.url, skillsRoot), bytes);
-  return unpacked.ok ? unpacked : err(AgentLibraryErrorCode.ImportCloneFailed);
+  return unpacked.ok ? unpacked : err(HarnessLibraryErrorCode.ImportCloneFailed);
 }
 
 async function countFiles(dir: string): Promise<number> {
@@ -251,26 +251,26 @@ export async function unpackSkillArchive(
 async function unpackArchiveInto(
   dir: string,
   bytes: Uint8Array,
-): Promise<Result<string, typeof AgentLibraryErrorCode.ImportArchiveInvalid>> {
+): Promise<Result<string, typeof HarnessLibraryErrorCode.ImportArchiveInvalid>> {
   let entries: Record<string, Uint8Array>;
   try {
     entries = unzipSync(bytes);
   } catch {
-    return err(AgentLibraryErrorCode.ImportArchiveInvalid);
+    return err(HarnessLibraryErrorCode.ImportArchiveInvalid);
   }
   const files = Object.entries(entries).filter(([name]) => !name.endsWith("/"));
   if (files.length === 0 || files.length > MAX_ARCHIVE_ENTRIES) {
-    return err(AgentLibraryErrorCode.ImportArchiveInvalid);
+    return err(HarnessLibraryErrorCode.ImportArchiveInvalid);
   }
   let total = 0;
   const writes: { path: string; data: Uint8Array }[] = [];
   for (const [name, data] of files) {
     const rel = normalize(name.replace(/\\/g, "/"));
     if (isAbsolute(rel) || rel === ".." || rel.startsWith(`..${sep}`) || /^[A-Za-z]:/.test(rel)) {
-      return err(AgentLibraryErrorCode.ImportArchiveInvalid);
+      return err(HarnessLibraryErrorCode.ImportArchiveInvalid);
     }
     total += data.byteLength;
-    if (total > MAX_ARCHIVE_BYTES) return err(AgentLibraryErrorCode.ImportArchiveInvalid);
+    if (total > MAX_ARCHIVE_BYTES) return err(HarnessLibraryErrorCode.ImportArchiveInvalid);
     writes.push({ path: join(dir, rel), data });
   }
   await rm(dir, { recursive: true, force: true });

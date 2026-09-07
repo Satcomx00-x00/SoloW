@@ -7,7 +7,7 @@
 
 [0009](./0009-cli-based-source-integrations.md) chose to drive GitHub and GitLab integrations
 through their official CLIs (`gh`, `glab`), reusing the CLI-driving pattern already used for
-agents ([0003](./0003-agent-connection-protocol.md)). Issue #15 ("GitHub integration — and the
+harnesses ([0003](./0003-agent-connection-protocol.md)). Issue #15 ("GitHub integration — and the
 provider interface GitLab is a driver for") is the concrete specification this area was
 actually built from, and its accepted design is a `ChangeProvider` interface authenticated by
 a **stored Secret reference** (Principle IV) — it does not mention `gh`/`glab` at all. Building
@@ -22,7 +22,7 @@ against #15 surfaced three problems with the CLI approach that 0009 did not have
   and `glab auth login` store credentials in the CLI's own local state (a config file, the OS
   keychain) — a **process-local, host-local** credential. SoloW's credential model is a
   Workspace-scoped, encrypted `Secret` row (Principle IV; [0005](./0005-subscription-authentication.md)
-  established the same shape for agent credentials). Reusing an inherited CLI login means the
+  established the same shape for harness credentials). Reusing an inherited CLI login means the
   integration's credential does not live in that model at all, and a hosted or multi-host
   deployment ([0008](./0008-data-store-strategy.md)) has no login to inherit.
 - **Two credential shapes for the same PAT.** A user who already has a GitHub PAT would need
@@ -39,7 +39,7 @@ needs it (`decryptForScmSync`). No shell-out, no dependency on `gh`/`glab` being
 
 0009 is superseded **for GitHub and GitLab only**; nothing else changes. The "drive the
 official CLI" pattern remains correct where 0009's own reasoning still applies — most notably
-agents, whose CLIs are the product being integrated, not an API surface with its own stable,
+harnesses, whose CLIs are the product being integrated, not an API surface with its own stable,
 documented contract.
 
 ## Considered options
@@ -56,7 +56,7 @@ documented contract.
 
 - Positive: `packages/scm`'s provider tests run against `Bun.serve` fixtures with zero live
   network calls, satisfying Principle VI without a CLI-mocking layer.
-- Positive: one credential shape (`Secret`) across every integration the product has, agents
+- Positive: one credential shape (`Secret`) across every integration the product has, harnesses
   included — no second place a token can live.
 - Positive: no install-and-authenticate prerequisite for GitHub/GitLab specifically; the Setup
   Workflow's `gh`/`glab` preflight check (F18 FR-7) no longer applies to this pair (it may still

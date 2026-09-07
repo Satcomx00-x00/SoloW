@@ -1,10 +1,10 @@
 import { beforeAll, describe, expect, it } from "bun:test";
 import { INTERRUPTED_REASON } from "@solow/core";
 import {
-  agentCatalog,
-  agentProfile,
   encryptSecret,
   executorProfile,
+  harnessCatalog,
+  harnessProfile,
   issue,
   review,
   secret,
@@ -42,9 +42,9 @@ import type { ExecResult, Executor } from "./types.js";
  *
  * **The direction of inference is what these cases are really about.** `reclaimOrphanedRuns`
  * starts from database rows and asks "is this run still alive"; this starts from the host and
- * asks "does this container still belong to something", so the Task table, the agent registry and
+ * asks "does this container still belong to something", so the Task table, the harness registry and
  * the container's own claim are read as *evidence of life* and never as a list of things to kill.
- * Almost every test below is therefore a **skip**: removing a container that a live agent is
+ * Almost every test below is therefore a **skip**: removing a container that a live harness is
  * working inside is the worst outcome available to this function, and it costs an operator a
  * twenty-minute build with no explanation anywhere they can see.
  *
@@ -117,7 +117,7 @@ async function seedTask(
       kind: "subscription_token",
       ciphertext: encryptSecret("sk-ant-oat01-super-secret"),
     });
-    await db.insert(agentCatalog).values({
+    await db.insert(harnessCatalog).values({
       id: `cat-${WS}`,
       workspaceId: WS,
       key: "claude_code",
@@ -127,7 +127,7 @@ async function seedTask(
       subscriptionEnvVar: "CLAUDE_CODE_OAUTH_TOKEN",
       meteredEnvVar: "ANTHROPIC_API_KEY",
     });
-    await db.insert(agentProfile).values({
+    await db.insert(harnessProfile).values({
       id: `ap-${WS}`,
       workspaceId: WS,
       name: "Default Claude",
@@ -320,7 +320,7 @@ describe("filter 1 — grace", () => {
 });
 
 describe("filter 2 — the registry", () => {
-  it("leaves a container alone while its agent is registered", async () => {
+  it("leaves a container alone while its harness is registered", async () => {
     const db = createTestDb();
     // Deliberately with no Task row and a stale clock, so the registry is the *only* thing
     // saving it. Registration spans the whole `agent-run` step, which is where a container
@@ -391,10 +391,10 @@ describe("filter 3 — quiet", () => {
      *
      * The registry is no help across the gaps, which is the whole reason this filter exists. On
      * this path there is exactly one gap and not several: after `park-woke-` the loop head runs
-     * `agentBrief` and `briefWorkspaces`, both synchronous, and the next statement is `agent-run`,
+     * `harnessBrief` and `briefWorkspaces`, both synchronous, and the next statement is `agent-run`,
      * which registers on the same tick as `runner.start`. The gap that matters is the other one —
      * the container's own create-and-prepare happens in `executor-preflight`, a durable step with
-     * no agent in it at all. What removal costs there is not a rebuild: verified on Docker 29.7.2
+     * no harness in it at all. What removal costs there is not a rebuild: verified on Docker 29.7.2
      * that `docker rm -f` on a container with a running exec kills it with 137, which
      * `ensureContainer` reports as an `ExecutorUnavailableError` that fails the round.
      */
@@ -587,7 +587,7 @@ describe("filter 4 — what is actually orphaned", () => {
 
     // The late redrive: the run was not gone after all, took the decision, and started another
     // round. `resume-` in task-run.ts moves the Task to `running` without clearing the reason, so
-    // the row now carries a verdict that has been overtaken — and an agent is working inside this
+    // the row now carries a verdict that has been overtaken — and a harness is working inside this
     // container. Reading the reason on its own would remove the workspace out from under it,
     // which is why the verdict is only read for a Task still sitting at the gate.
     await setTaskState(db, WS, "task-resumed", "running");
@@ -823,7 +823,7 @@ describe("the container lifecycle the reaper leans on", () => {
     const second = await ensureContainer(daemon.executor, DRIVER_CONFIG, DRIVER_IDS, DRIVER_OPTS);
 
     // The whole point of adoption: an Inngest replay, a retry or a second review round must
-    // re-attach to the container the abandoned pass made rather than tear down a live agent's
+    // re-attach to the container the abandoned pass made rather than tear down a live harness's
     // workspace — so this must stay true whatever the cases below do to the relaunch path.
     expect(first.created).toBe(true);
     expect(second.created).toBe(false);
@@ -847,7 +847,7 @@ describe("the container lifecycle the reaper leans on", () => {
      * *dead* run's id — and `solow.run` is what the sweep above reads to decide a container was
      * left behind by a previous run. The live run's own container therefore looked orphaned, and
      * the next sweep removed it: verified on Docker 29.7.2, one reaped container per ordinary
-     * stop-then-relaunch. A relaunch is a new agent anyway; what the previous one left running
+     * stop-then-relaunch. A relaunch is a new harness anyway; what the previous one left running
      * inside the container is not part of its inheritance.
      */
     expect(relaunch.created).toBe(true);
@@ -873,7 +873,7 @@ describe("the container lifecycle the reaper leans on", () => {
 
     // The real reaper over the real driver's container, on the path a `task.stop.requested`
     // cancellation takes: the `finally` dispose never runs, the next launch's Session is a new
-    // row, and no agent is registered while a Task waits at the review gate. This is the case
+    // row, and no harness is registered while a Task waits at the review gate. This is the case
     // that used to remove the container the operator was watching.
     const host = fakeHost([
       {
@@ -906,7 +906,7 @@ describe("the container lifecycle the reaper leans on", () => {
     /*
      * The script runs only on the pass that *created* the container, so leaving a half-prepared
      * one behind meant the next pass adopted it with `created: false`, skipped the script and
-     * resolved: verified live, where passes 2 and 3 ran the agent in a container whose prepare
+     * resolved: verified live, where passes 2 and 3 ran the harness in a container whose prepare
      * script had exited 100 — a profile that cannot install its tooling failing silently into a
      * Task that goes on to fail for some unrelated-looking reason.
      */
@@ -965,8 +965,8 @@ describe("the sweep it is an arm of", () => {
 
   it("leaves a live preflight's container standing in the pass that condemns its run", async () => {
     const db = createTestDb();
-    // A `running` Task inside `executor-preflight`: no agent registered (that step holds no
-    // `AgentHandle` to register), no session event (an image pull produces none), and a container
+    // A `running` Task inside `executor-preflight`: no harness registered (that step holds no
+    // `HarnessHandle` to register), no session event (an image pull produces none), and a container
     // carrying this process's own epoch, because this process is the one building it.
     const { sessionId } = await seedTask(db, { taskId: "task-preflight" });
     const host = fakeHost([
@@ -1010,7 +1010,7 @@ describe("the sweep it is an arm of", () => {
      * And the boundary the comments in `reap.ts` now claim, pinned rather than described: the
      * cushion buys the run one more quiet window measured from the verdict, and no more. A
      * preflight still going after `2 × RECLAIM_STALE_MS` loses its container exactly as before.
-     * Closing *that* needs the run lifecycle to publish a container before an agent owns it, which
+     * Closing *that* needs the run lifecycle to publish a container before a harness owns it, which
      * is not a change any sweep can make — so this case exists to fail the day someone believes
      * the hazard is closed.
      */

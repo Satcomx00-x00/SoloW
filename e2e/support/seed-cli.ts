@@ -9,14 +9,14 @@
  * `db:migrate`/`db:seed`); this is the same pattern for the two things a spec needs mid-run:
  *
  *   bun run e2e/support/seed-cli.ts tenants
- *     → creates the two Workspaces this suite runs against, each with its agent catalog, and
- *       gives the local one the Agent Profile and Executor every spec drives the Task form with.
+ *     → creates the two Workspaces this suite runs against, each with its harness catalog, and
+ *       gives the local one the Harness Profile and Executor every spec drives the Task form with.
  *
  *   bun run e2e/support/seed-cli.ts issue <workspaceId> <title>
  *     → inserts one Issue into an existing Workspace, prints its id.
  *
  *   bun run e2e/support/seed-cli.ts task <workspaceId> <title>
- *     → inserts a complete, self-contained graph (secret, agent profile, executor profile,
+ *     → inserts a complete, self-contained graph (secret, harness profile, executor profile,
  *       repository, Issue, Task) into an existing Workspace, prints the Task's id.
  *
  * There is no `issue.create` or UI form any more (every real Issue is imported from a connected
@@ -25,12 +25,12 @@
  */
 
 import {
-  agentProfile,
   bootstrapWorkspace,
   createDb,
   encryptSecret,
-  ensureDefaultAgentCatalog,
+  ensureDefaultHarnessCatalog,
   executorProfile,
+  harnessProfile,
   issue,
   repository,
   secret,
@@ -38,7 +38,7 @@ import {
   taskRepository,
   workspace,
 } from "@solow/db";
-import { AGENT_PROFILE_NAME, EXECUTOR_PROFILE_NAME } from "./fixture.js";
+import { EXECUTOR_PROFILE_NAME, HARNESS_PROFILE_NAME } from "./fixture.js";
 
 async function seedIssue(workspaceId: string, repoName: string, title: string): Promise<void> {
   const db = createDb();
@@ -83,13 +83,13 @@ async function seedTask(workspaceId: string, title: string): Promise<void> {
     .returning();
   if (!sec) throw new Error("failed to seed secret");
 
-  const agentCatalogId = await ensureDefaultAgentCatalog(db, workspaceId);
-  const [agent] = await db
-    .insert(agentProfile)
+  const harnessCatalogId = await ensureDefaultHarnessCatalog(db, workspaceId);
+  const [harness] = await db
+    .insert(harnessProfile)
     .values({
       workspaceId,
-      name: `e2e-agent-${suffix}`,
-      agentCatalogId,
+      name: `e2e-harness-${suffix}`,
+      agentCatalogId: harnessCatalogId,
       authMode: "subscription",
       secretId: sec.id,
     })
@@ -108,7 +108,7 @@ async function seedTask(workspaceId: string, title: string): Promise<void> {
     })
     .returning();
   const [iss] = await db.insert(issue).values({ workspaceId, title }).returning();
-  if (!agent || !executor || !repo || !iss) throw new Error("failed to seed task graph");
+  if (!harness || !executor || !repo || !iss) throw new Error("failed to seed task graph");
 
   const [row] = await db
     .insert(task)
@@ -116,7 +116,7 @@ async function seedTask(workspaceId: string, title: string): Promise<void> {
       workspaceId,
       issueId: iss.id,
       title,
-      agentProfileId: agent.id,
+      agentProfileId: harness.id,
       executorProfileId: executor.id,
     })
     .returning();
@@ -134,15 +134,15 @@ async function seedTask(workspaceId: string, title: string): Promise<void> {
 }
 
 /**
- * The credential, Agent Profile and Executor a Task cannot be created without.
+ * The credential, Harness Profile and Executor a Task cannot be created without.
  *
  * These came free until 2026-08-28: the E2E fixture ran `db:seed`, and that two-company fixture
- * happened to contain an Agent Profile named "Claude Code (subscription)" and an Executor named
+ * happened to contain a Harness Profile named "Claude Code (subscription)" and an Executor named
  * "Local executor" — the exact two names `support/flows.ts` picks in the New task form. The
  * fixture was retired (a fresh install must look unconfigured, because it is), the suite moved to
  * seeding its own tenants, and nothing replaced those two rows. The form's own guard then did
- * precisely what it is there for: with no Agent Profile and no Executor in the Workspace it
- * rendered "Configure a secret, an agent and executor profile, and a repository in Settings
+ * precisely what it is there for: with no Harness Profile and no Executor in the Workspace it
+ * rendered "Configure a secret, a harness and executor profile, and a repository in Settings
  * first." instead of the fields, and every spec that creates a Task timed out waiting for a
  * "Title" box that was never going to exist.
  *
@@ -158,8 +158,9 @@ async function seedCoreProfiles(
   db: ReturnType<typeof createDb>,
   workspaceId: string,
 ): Promise<void> {
-  const profiles = await db.select().from(agentProfile);
-  if (profiles.some((p) => p.workspaceId === workspaceId && p.name === AGENT_PROFILE_NAME)) return;
+  const profiles = await db.select().from(harnessProfile);
+  if (profiles.some((p) => p.workspaceId === workspaceId && p.name === HARNESS_PROFILE_NAME))
+    return;
 
   const [sec] = await db
     .insert(secret)
@@ -170,12 +171,12 @@ async function seedCoreProfiles(
       ciphertext: encryptSecret("e2e-fixture-token"),
     })
     .returning();
-  if (!sec) throw new Error("failed to seed the agent profile's secret");
+  if (!sec) throw new Error("failed to seed the harness profile's secret");
 
-  await db.insert(agentProfile).values({
+  await db.insert(harnessProfile).values({
     workspaceId,
-    name: AGENT_PROFILE_NAME,
-    agentCatalogId: await ensureDefaultAgentCatalog(db, workspaceId),
+    name: HARNESS_PROFILE_NAME,
+    agentCatalogId: await ensureDefaultHarnessCatalog(db, workspaceId),
     authMode: "subscription",
     secretId: sec.id,
   });
@@ -207,7 +208,7 @@ async function seedTenants(): Promise<void> {
     .insert(workspace)
     .values({ id: OTHER_WORKSPACE, name: "E2E other tenant", ownerUserId: "other-owner" })
     .onConflictDoNothing();
-  await ensureDefaultAgentCatalog(db, OTHER_WORKSPACE);
+  await ensureDefaultHarnessCatalog(db, OTHER_WORKSPACE);
   console.log(JSON.stringify({ tenants: [LOCAL_WORKSPACE, OTHER_WORKSPACE] }));
 }
 

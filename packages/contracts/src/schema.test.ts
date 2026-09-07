@@ -296,7 +296,7 @@ describe("connectRepositoryInput superRefine", () => {
 /**
  * `request_changes` is no longer gated on feedback. The Task page dropped its feedback panel, so a
  * schema that refused the decision without text would have made "Request changes" un-submittable
- * from the only UI that sends it. The field survives — it is what reaches the agent as
+ * from the only UI that sends it. The field survives — it is what reaches the harness as
  * `pendingFeedback` on the next round — but as an option for callers who have something to say,
  * not a precondition for the ones who do not.
  */
@@ -472,7 +472,7 @@ describe("taskEventSchema discriminated union", () => {
     expect(res.success).toBe(false);
   });
 
-  it("carries the agent's todo list, addressed like every other row of the log", () => {
+  it("carries the harness's todo list, addressed like every other row of the log", () => {
     // The frame needs `sessionId` and `seq` as much as a tool call does: it is projected from a
     // stored event, and a reconnecting client drops what it has already seen by `seq`.
     const res = taskEventSchema.safeParse({
@@ -489,7 +489,7 @@ describe("taskEventSchema discriminated union", () => {
     if (res.success && res.data.kind === "todos") {
       expect(res.data.items).toHaveLength(2);
       expect(res.data.items[0]?.activeForm).toBe("Recording it");
-      // Optional, and absent rather than defaulted: an agent that offers no present-tense form
+      // Optional, and absent rather than defaulted: a harness that offers no present-tense form
       // is not the same as one that offers an empty string.
       expect(res.data.items[1]?.activeForm).toBeUndefined();
     }
@@ -508,7 +508,7 @@ describe("taskEventSchema discriminated union", () => {
 });
 
 /**
- * The allowlist that decides which files are copied into an agent's worktree (issue #52). Every
+ * The allowlist that decides which files are copied into a harness's worktree (issue #52). Every
  * rejection here is a path jail expressed as a type: a pattern that cannot name a file outside
  * the repository cannot copy a credential out of one.
  */
@@ -563,7 +563,7 @@ describe("setupFilePatternSchema (issue #52 AC-6)", () => {
 /**
  * The todo item both the wire frame and the durable log carry (`todoItemSchema`).
  *
- * Its bounds are what stop an agent's plan from becoming an unbounded blob in a record that
+ * Its bounds are what stop a harness's plan from becoming an unbounded blob in a record that
  * outlives the run, so they are pinned here rather than left to the producer that applies them.
  */
 describe("todoItemSchema", () => {

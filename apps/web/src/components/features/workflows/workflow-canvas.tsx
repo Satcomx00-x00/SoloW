@@ -89,7 +89,7 @@ import { trpc } from "@/trpc/react";
 /**
  * The Workflow designer as a node graph (issue #5 AC-1, F03 FR-1/FR-4, Decision 0007).
  *
- * Each Step is a node that *is* its own form — agent, gate, advance rule, prompt — rather than a
+ * Each Step is a node that *is* its own form — harness, gate, advance rule, prompt — rather than a
  * node that opens one: the pipeline is meant to be read and edited in one glance, and a side
  * panel would put the thing being edited out of sight of the thing it connects to. Every edit
  * is a `workflow.updateStep` on blur or on change, exactly what the list editor this replaces
@@ -105,7 +105,7 @@ import { trpc } from "@/trpc/react";
  * `stepEdges` derives them from the list. A Step without a branch has one exit, to its rank
  * successor; a Step *with* one has a `Yes` exit and a `No` exit, each pointing wherever the
  * branch says, including backwards and including the `End` node. Changing where an exit goes is
- * done on the node that owns it — in the same form as its agent and prompt — or by *dragging the
+ * done on the node that owns it — in the same form as its harness and prompt — or by *dragging the
  * exit itself* onto the Step it should reach, which is the one connect gesture there is
  * (`branchRetarget`): it re-points a branch that already exists, and cannot create an edge the
  * model has no row for. The plain `next` exit and the start are not draggable at all.
@@ -127,12 +127,12 @@ const GATE_LABELS: Record<WorkflowStepGate, string> = {
 };
 
 const ADVANCE_LABELS: Record<WorkflowAdvanceOn, string> = {
-  "agent-signal": "Agent says done",
+  "agent-signal": "Harness says done",
   review: "Review recorded",
 };
 
 const CONDITION_LABELS: Record<WorkflowStepCondition["kind"], string> = {
-  "agent-decides": "The agent decides",
+  "agent-decides": "The harness decides",
   "produced-changes": "Step produced changes",
 };
 
@@ -153,7 +153,7 @@ const END_TARGET = END_NODE_ID;
 /**
  * What a Step is given when the operator first asks it to branch: both exits pointing where the
  * Step already went, so turning the branch on changes nothing until a target is chosen, and the
- * condition the agent answers — the one the feature exists for.
+ * condition the harness answers — the one the feature exists for.
  */
 function defaultBranch(successorId: string | null): WorkflowStepBranch {
   return {
@@ -199,7 +199,7 @@ type StepNodeData = {
   /** Every Step of the pipeline, in rank order — what a branch target is chosen from. */
   siblings: readonly Pick<WorkflowStepDto, "id" | "name">[];
   onAddAfter: (stepId: string) => void;
-  /** Is a Step being added, or is there no Agent Profile to give one? Either dims the `+`. */
+  /** Is a Step being added, or is there no Harness Profile to give one? Either dims the `+`. */
   adding: boolean;
 };
 
@@ -342,7 +342,7 @@ function BranchFields({
       {branch.when.kind === "agent-decides" && (
         <div className="grid gap-1.5">
           <Label htmlFor={`step-question-${step.id}`} className="sr-only">
-            Question the agent answers
+            Question the harness answers
           </Label>
           <Textarea
             id={`step-question-${step.id}`}
@@ -360,7 +360,7 @@ function BranchFields({
             }}
           />
           <p className="text-2xs text-muted-foreground leading-snug">
-            Asked of the agent at the end of this step; it answers yes or no in its final message.
+            Asked of the harness at the end of this step; it answers yes or no in its final message.
           </p>
         </div>
       )}
@@ -503,7 +503,9 @@ function LibraryPicker({
                         )}
                       </span>
                       {item.enabled && (
-                        <span className="shrink-0 text-2xs text-muted-foreground">every agent</span>
+                        <span className="shrink-0 text-2xs text-muted-foreground">
+                          every harness
+                        </span>
                       )}
                     </CommandItem>
                   );
@@ -518,7 +520,7 @@ function LibraryPicker({
 }
 
 /**
- * What this Step loads from the libraries, on top of what every agent loads (spec F24): one
+ * What this Step loads from the libraries, on top of what every harness loads (spec F24): one
  * picker per library, each saved whole on every change, like the Task's repositories are.
  */
 function LoadsFields({
@@ -690,14 +692,14 @@ function StepNodeView({ data }: NodeProps<StepNode>) {
 
       <div className="space-y-2.5 px-3 py-2.5">
         <div className="grid gap-1.5">
-          <Label htmlFor={`step-agent-${step.id}`} className="text-xs">
-            Agent profile
+          <Label htmlFor={`step-harness-${step.id}`} className="text-xs">
+            Harness profile
           </Label>
           <Select
             value={step.agentProfileId}
             onValueChange={(v) => update.mutate({ stepId: step.id, agentProfileId: v })}
           >
-            <SelectTrigger id={`step-agent-${step.id}`} className={`${FIELD} h-7 w-full text-xs`}>
+            <SelectTrigger id={`step-harness-${step.id}`} className={`${FIELD} h-7 w-full text-xs`}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -1080,10 +1082,10 @@ function Canvas({ workflow }: { workflow: WorkflowWithStepsDto }) {
   const [connecting, setConnecting] = useState(false);
 
   /**
-   * The `+` asks nothing: the new Step takes the first Agent Profile in the catalog and a
+   * The `+` asks nothing: the new Step takes the first Harness Profile in the catalog and a
    * numbered name, both changed in place on the node it becomes. A form here would be the
    * add-step card the canvas exists to get rid of. Refused, not guessed, when the catalog is
-   * empty — a Step must name an agent, and there is none to name.
+   * empty — a Step must name a harness, and there is none to name.
    */
   const firstProfile = options[0];
   // Held as one flag rather than two, because the node has one thing to do with it — dim the
@@ -1299,7 +1301,7 @@ function Canvas({ workflow }: { workflow: WorkflowWithStepsDto }) {
             </Button>
             {!profiles.isLoading && !firstProfile && (
               <p className="text-muted-foreground text-xs">
-                Create an agent profile first — a step has to name one.
+                Create a harness profile first — a step has to name one.
               </p>
             )}
           </Panel>

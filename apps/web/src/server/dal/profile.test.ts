@@ -1,27 +1,31 @@
 import { beforeEach, describe, expect, it } from "bun:test";
-import { AgentCatalogErrorCode, AgentProfileErrorCode, CommonErrorCode } from "@solow/contracts";
-import { agentProfile, session, sessionUsage, workflow, workflowStep } from "@solow/db";
+import {
+  CommonErrorCode,
+  HarnessCatalogErrorCode,
+  HarnessProfileErrorCode,
+} from "@solow/contracts";
+import { harnessProfile, session, sessionUsage, workflow, workflowStep } from "@solow/db";
 import { createTestDb, type TestDb } from "@solow/db/testing";
 import { eq } from "drizzle-orm";
 import {
-  createAgentCatalogEntry,
-  createAgentProfile,
-  deleteAgentProfile,
-  getAgentProfile,
-  listAgentCatalog,
-  updateAgentProfile,
+  createHarnessCatalogEntry,
+  createHarnessProfile,
+  deleteHarnessProfile,
+  getHarnessProfile,
+  listHarnessCatalog,
+  updateHarnessProfile,
 } from "./profile.js";
 import { createTaskRecord } from "./task.js";
 import { ctxFor, seedIssue, seedWorkspaceGraph } from "./test-fixtures.js";
 
 /**
- * Agent Profile deletion. `agent_profile.id` is a real NOT NULL foreign key on three tables —
+ * Harness Profile deletion. `agent_profile.id` is a real NOT NULL foreign key on three tables —
  * `task`, `workflow_step`, `session_usage` — so what these prove is that the refusal happens as
  * a named product error before any of them, not as a raw SQLite constraint violation surfacing
  * from whichever one the delete statement happens to hit first.
  */
 
-describe("Agent Profile usage and deletion", () => {
+describe("Harness Profile usage and deletion", () => {
   let db: TestDb;
   beforeEach(() => {
     db = createTestDb();
@@ -30,7 +34,7 @@ describe("Agent Profile usage and deletion", () => {
   it("reports zero usage for a freshly created Profile", async () => {
     const g = await seedWorkspaceGraph(db, "acme");
     const ctx = ctxFor(db, g.workspaceId);
-    const found = await getAgentProfile(ctx, g.agentProfileId);
+    const found = await getHarnessProfile(ctx, g.agentProfileId);
     expect(found.ok && found.data.usage).toEqual({
       taskCount: 0,
       workflowStepCount: 0,
@@ -42,11 +46,11 @@ describe("Agent Profile usage and deletion", () => {
     const g = await seedWorkspaceGraph(db, "acme");
     const ctx = ctxFor(db, g.workspaceId);
     const [existing] = await db
-      .select({ agentCatalogId: agentProfile.agentCatalogId })
-      .from(agentProfile)
-      .where(eq(agentProfile.id, g.agentProfileId));
+      .select({ agentCatalogId: harnessProfile.agentCatalogId })
+      .from(harnessProfile)
+      .where(eq(harnessProfile.id, g.agentProfileId));
     if (!existing) throw new Error("seed failed");
-    const created = await createAgentProfile(ctx, {
+    const created = await createHarnessProfile(ctx, {
       name: "Spare",
       agentCatalogId: existing.agentCatalogId,
       authMode: "api_key",
@@ -58,9 +62,9 @@ describe("Agent Profile usage and deletion", () => {
     });
     if (!created.ok) throw new Error("seed failed");
 
-    const deleted = await deleteAgentProfile(ctx, { id: created.data.id });
+    const deleted = await deleteHarnessProfile(ctx, { id: created.data.id });
     expect(deleted).toEqual({ ok: true, data: created.data });
-    expect(await getAgentProfile(ctx, created.data.id)).toEqual({
+    expect(await getHarnessProfile(ctx, created.data.id)).toEqual({
       ok: false,
       error: CommonErrorCode.NotFound,
     });
@@ -80,10 +84,10 @@ describe("Agent Profile usage and deletion", () => {
     });
     if (!made.ok) throw new Error("seed failed");
 
-    const attempt = await deleteAgentProfile(ctx, { id: g.agentProfileId });
-    expect(attempt).toEqual({ ok: false, error: AgentProfileErrorCode.InUse });
+    const attempt = await deleteHarnessProfile(ctx, { id: g.agentProfileId });
+    expect(attempt).toEqual({ ok: false, error: HarnessProfileErrorCode.InUse });
 
-    const found = await getAgentProfile(ctx, g.agentProfileId);
+    const found = await getHarnessProfile(ctx, g.agentProfileId);
     expect(found.ok && found.data.usage.taskCount).toBe(1);
     // Refused, not partially applied — the row is exactly as it was.
     expect(found.ok).toBe(true);
@@ -105,8 +109,8 @@ describe("Agent Profile usage and deletion", () => {
       agentProfileId: g.agentProfileId,
     });
 
-    const attempt = await deleteAgentProfile(ctx, { id: g.agentProfileId });
-    expect(attempt).toEqual({ ok: false, error: AgentProfileErrorCode.InUse });
+    const attempt = await deleteHarnessProfile(ctx, { id: g.agentProfileId });
+    expect(attempt).toEqual({ ok: false, error: HarnessProfileErrorCode.InUse });
   });
 
   it("refuses to delete a Profile with Session usage history, even with every Task since deleted", async () => {
@@ -138,18 +142,18 @@ describe("Agent Profile usage and deletion", () => {
       seq: 0,
     });
 
-    const attempt = await deleteAgentProfile(ctx, { id: g.agentProfileId });
-    expect(attempt).toEqual({ ok: false, error: AgentProfileErrorCode.InUse });
-    const found = await getAgentProfile(ctx, g.agentProfileId);
+    const attempt = await deleteHarnessProfile(ctx, { id: g.agentProfileId });
+    expect(attempt).toEqual({ ok: false, error: HarnessProfileErrorCode.InUse });
+    const found = await getHarnessProfile(ctx, g.agentProfileId);
     expect(found.ok && found.data.usage.sessionUsageCount).toBe(1);
   });
 
-  it("cannot delete another Workspace's Agent Profile (Principle V)", async () => {
+  it("cannot delete another Workspace's Harness Profile (Principle V)", async () => {
     const a = await seedWorkspaceGraph(db, "delete-a");
     const b = await seedWorkspaceGraph(db, "delete-b");
-    const attempt = await deleteAgentProfile(ctxFor(db, b.workspaceId), { id: a.agentProfileId });
+    const attempt = await deleteHarnessProfile(ctxFor(db, b.workspaceId), { id: a.agentProfileId });
     expect(attempt).toEqual({ ok: false, error: CommonErrorCode.NotFound });
-    expect((await getAgentProfile(ctxFor(db, a.workspaceId), a.agentProfileId)).ok).toBe(true);
+    expect((await getHarnessProfile(ctxFor(db, a.workspaceId), a.agentProfileId)).ok).toBe(true);
   });
 
   it("does not count a Task, Step or Session belonging to another Workspace", async () => {
@@ -170,25 +174,25 @@ describe("Agent Profile usage and deletion", () => {
     if (!made.ok) throw new Error("seed failed");
 
     // A's Profile is untouched by B's Task — it should still be freely deletable.
-    const deleted = await deleteAgentProfile(ctxFor(db, a.workspaceId), { id: a.agentProfileId });
+    const deleted = await deleteHarnessProfile(ctxFor(db, a.workspaceId), { id: a.agentProfileId });
     expect(deleted.ok).toBe(true);
   });
 });
 
 /**
- * Extending the agent catalog (spec F05 AC-1, issue #10/#58). Every Workspace starts with one
+ * Extending the harness catalog (spec F05 AC-1, issue #10/#58). Every Workspace starts with one
  * seeded row — `claude_code`, protocol `claude_code_stream_json` — and until this function
  * existed nothing could ever add a second one. That mattered specifically for `acp`: the
  * protocol already has a full runner (`acp-runner.ts`) implementing `session/request_permission`,
- * but no catalog row meant no Agent Profile could ever be pointed at it.
+ * but no catalog row meant no Harness Profile could ever be pointed at it.
  */
-describe("createAgentCatalogEntry", () => {
+describe("createHarnessCatalogEntry", () => {
   let db: TestDb;
   beforeEach(() => {
     db = createTestDb();
   });
 
-  function acpEntry(over: Partial<Parameters<typeof createAgentCatalogEntry>[1]> = {}) {
+  function acpEntry(over: Partial<Parameters<typeof createHarnessCatalogEntry>[1]> = {}) {
     return {
       key: "claude_acp",
       displayName: "Claude Code (ACP)",
@@ -207,27 +211,27 @@ describe("createAgentCatalogEntry", () => {
     const g = await seedWorkspaceGraph(db, "acme");
     const ctx = ctxFor(db, g.workspaceId);
 
-    const created = await createAgentCatalogEntry(ctx, acpEntry());
+    const created = await createHarnessCatalogEntry(ctx, acpEntry());
 
     expect(created.ok).toBe(true);
     expect(created.ok && created.data.protocol).toBe("acp");
-    const listed = await listAgentCatalog(ctx);
+    const listed = await listHarnessCatalog(ctx);
     expect(listed.ok && listed.data.map((e) => e.key)).toContain("claude_acp");
   });
 
   it("refuses a key already used in this Workspace, and leaves the original row alone", async () => {
     const g = await seedWorkspaceGraph(db, "acme");
     const ctx = ctxFor(db, g.workspaceId);
-    const first = await createAgentCatalogEntry(ctx, acpEntry());
+    const first = await createHarnessCatalogEntry(ctx, acpEntry());
     if (!first.ok) throw new Error("seed failed");
 
-    const attempt = await createAgentCatalogEntry(
+    const attempt = await createHarnessCatalogEntry(
       ctx,
-      acpEntry({ displayName: "A different agent entirely" }),
+      acpEntry({ displayName: "A different harness entirely" }),
     );
 
-    expect(attempt).toEqual({ ok: false, error: AgentCatalogErrorCode.KeyTaken });
-    const listed = await listAgentCatalog(ctx);
+    expect(attempt).toEqual({ ok: false, error: HarnessCatalogErrorCode.KeyTaken });
+    const listed = await listHarnessCatalog(ctx);
     expect(listed.ok && listed.data.filter((e) => e.key === "claude_acp")).toHaveLength(1);
   });
 
@@ -235,22 +239,22 @@ describe("createAgentCatalogEntry", () => {
     const a = await seedWorkspaceGraph(db, "key-a");
     const b = await seedWorkspaceGraph(db, "key-b");
 
-    const inA = await createAgentCatalogEntry(ctxFor(db, a.workspaceId), acpEntry());
-    const inB = await createAgentCatalogEntry(ctxFor(db, b.workspaceId), acpEntry());
+    const inA = await createHarnessCatalogEntry(ctxFor(db, a.workspaceId), acpEntry());
+    const inB = await createHarnessCatalogEntry(ctxFor(db, b.workspaceId), acpEntry());
 
     expect(inA.ok).toBe(true);
     expect(inB.ok).toBe(true);
   });
 
-  it("stores an Agent Profile can actually be created against the new entry", async () => {
+  it("stores a Harness Profile can actually be created against the new entry", async () => {
     // The point of the whole feature: a catalog row on its own is not useful, a Profile that
     // can be pointed at it is.
     const g = await seedWorkspaceGraph(db, "acme");
     const ctx = ctxFor(db, g.workspaceId);
-    const catalogEntry = await createAgentCatalogEntry(ctx, acpEntry());
+    const catalogEntry = await createHarnessCatalogEntry(ctx, acpEntry());
     if (!catalogEntry.ok) throw new Error("seed failed");
 
-    const profile = await createAgentProfile(ctx, {
+    const profile = await createHarnessProfile(ctx, {
       name: "ACP Claude",
       agentCatalogId: catalogEntry.data.id,
       authMode: "subscription",
@@ -266,7 +270,7 @@ describe("createAgentCatalogEntry", () => {
   });
 });
 
-describe("updateAgentProfile", () => {
+describe("updateHarnessProfile", () => {
   let db: TestDb;
   beforeEach(() => {
     db = createTestDb();
@@ -275,18 +279,18 @@ describe("updateAgentProfile", () => {
   it("changes the permission mode without touching what the Profile is", async () => {
     const g = await seedWorkspaceGraph(db, "acme");
     const ctx = ctxFor(db, g.workspaceId);
-    const before = await getAgentProfile(ctx, g.agentProfileId);
+    const before = await getHarnessProfile(ctx, g.agentProfileId);
     if (!before.ok) throw new Error("seed failed");
     // Every Profile starts where they all were before the column existed.
     expect(before.data.permissionMode).toBe("acceptEdits");
 
-    const updated = await updateAgentProfile(ctx, {
+    const updated = await updateHarnessProfile(ctx, {
       id: g.agentProfileId,
       permissionMode: "bypassPermissions",
     });
     expect(updated.ok && updated.data.permissionMode).toBe("bypassPermissions");
     if (!updated.ok) return;
-    // Which agent it runs and what it spends stay put: those are what its finished runs meant.
+    // Which harness it runs and what it spends stay put: those are what its finished runs meant.
     expect(updated.data.agentCatalogId).toBe(before.data.agentCatalogId);
     expect(updated.data.authMode).toBe(before.data.authMode);
     expect(updated.data.secretId).toBe(before.data.secretId);
@@ -295,7 +299,7 @@ describe("updateAgentProfile", () => {
   it("leaves untouched fields alone", async () => {
     const g = await seedWorkspaceGraph(db, "acme");
     const ctx = ctxFor(db, g.workspaceId);
-    const renamed = await updateAgentProfile(ctx, { id: g.agentProfileId, name: "Renamed" });
+    const renamed = await updateHarnessProfile(ctx, { id: g.agentProfileId, name: "Renamed" });
     expect(renamed.ok && renamed.data.name).toBe("Renamed");
     expect(renamed.ok && renamed.data.permissionMode).toBe("acceptEdits");
   });
@@ -303,7 +307,7 @@ describe("updateAgentProfile", () => {
   it("refuses a Profile in another Workspace", async () => {
     const g = await seedWorkspaceGraph(db, "acme");
     const outsider = await seedWorkspaceGraph(db, "other");
-    const result = await updateAgentProfile(ctxFor(db, outsider.workspaceId), {
+    const result = await updateHarnessProfile(ctxFor(db, outsider.workspaceId), {
       id: g.agentProfileId,
       permissionMode: "bypassPermissions",
     });

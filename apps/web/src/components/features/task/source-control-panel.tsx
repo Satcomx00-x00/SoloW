@@ -28,7 +28,7 @@ import { buildScmTree, type ScmTreeNode, splitPath } from "./source-control-tree
  *
  * Presentational on purpose. It renders the status the orchestrator read and calls back with
  * paths; it never decides whether a write is allowed, because that answer depends on whether an
- * agent is running and a browser can only know that one turn late (`writable` on the DTO).
+ * harness is running and a browser can only know that one turn late (`writable` on the DTO).
  */
 
 const GROUP_ORDER: ScmGroup[] = ["merge", "staged", "changes", "untracked"];
@@ -256,7 +256,7 @@ function discardCopy(files: ScmFileDto[]): {
     untracked.length > 0 && tracked === 0
       ? `${untracked.length} untracked ${noun} will be deleted from the worktree. There is no commit to restore ${files.length === 1 ? "it" : "them"} from.`
       : untracked.length === 0
-        ? `${tracked} ${noun} will be reverted to the last commit. Any change the agent made ${files.length === 1 ? "to it" : "to them"} is lost.`
+        ? `${tracked} ${noun} will be reverted to the last commit. Any change the harness made ${files.length === 1 ? "to it" : "to them"} is lost.`
         : `${tracked} tracked ${noun === "file" ? "file" : "files"} will be reverted to the last commit and ${untracked.length} untracked will be deleted.`;
   return {
     title: `Discard ${files.length} ${noun}?`,

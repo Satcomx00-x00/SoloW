@@ -5,13 +5,13 @@
 ## Context
 
 The goal is to build an alternative to the established tools in this category —
-orchestration platforms for running many AI coding agents in parallel with human review. We
+orchestration platforms for running many AI coding harnesses in parallel with human review. We
 had to decide how closely to match their capability surface: a focused minimal product, a
 near-clone matching their breadth, or a differentiated product in the same category.
 
 ## Decision
 
-Build a **near-clone**: match the full feature breadth of comparable tools (multi-agent
+Build a **near-clone**: match the full feature breadth of comparable tools (multi-harness
 orchestration, Kanban board, visual workflows, worktree isolation, multi-repo, multiple
 executors, integrations, review-first) and differentiate on a few high-value points rather
 than by narrowing scope.

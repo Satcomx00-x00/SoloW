@@ -7,7 +7,7 @@ import { readScmStatus } from "./status.js";
  *
  * There is no commit here, and no push. Staging is the review selection; the gate is what turns
  * a selection into a commit (F22 FR-7). A function in this file that wrote to a branch would be
- * a path from agent output to a remote with no recorded decision, which is the one thing
+ * a path from harness output to a remote with no recorded decision, which is the one thing
  * Principle I does not permit.
  */
 
@@ -77,7 +77,7 @@ export async function stagePaths(
  *
  * Unstaging must never touch the working tree. A reviewer removing a file from what they are
  * about to approve is saying "not this time", not "throw this away" — and conflating the two
- * would destroy an agent's work on a mis-click, with nothing to restore it from.
+ * would destroy a harness's work on a mis-click, with nothing to restore it from.
  */
 export async function unstagePaths(
   executor: Executor,

@@ -86,7 +86,7 @@ function describe(impact: TaskDeletionImpactDto | undefined): string {
     const its = impact.sessionCount === 1 ? "its" : "their";
     text += ` It deletes ${plural(impact.sessionCount, "session")} with ${its} logs and review history.`;
   }
-  if (impact.running) text += " The running agent will be stopped first.";
+  if (impact.running) text += " The running harness will be stopped first.";
   if (impact.dependentCount > 0) {
     text += ` ${plural(impact.dependentCount, "task")} waiting on this one will be unblocked.`;
   }

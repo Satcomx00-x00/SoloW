@@ -4,7 +4,7 @@
 
 ## Context
 
-Workflows chain multiple agents and human decisions into multi-step processes. These
+Workflows chain multiple harnesses and human decisions into multi-step processes. These
 processes are hard to understand and steer when represented as lists or logs. Users need to
 both **design** a Workflow and **watch a live Run** in a way that makes branching, parallel
 steps, and human gates immediately legible.
@@ -27,7 +27,7 @@ a Run.
 
 ## Consequences
 
-- Positive: complex, multi-agent processes are understandable at a glance and steerable in
+- Positive: complex, multi-harness processes are understandable at a glance and steerable in
   real time; design and monitoring share one mental model.
 - Positive: aligns with the product principle that Workflows are visual and repeatable.
 - Negative: large graphs require careful layout and navigation to stay legible (risk noted in
