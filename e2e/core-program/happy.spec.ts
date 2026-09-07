@@ -15,7 +15,7 @@ import { seedIssue } from "../support/seed.js";
 
 /**
  * Happy-path E2E (task TASK-025): an Owner takes an Issue all the way to a reviewed, approved
- * change on a new local branch — the loop the whole product exists to serve. The agent is the
+ * change on a new local branch — the loop the whole product exists to serve. The harness is the
  * deterministic fixture runner, but every other layer (SPA → tRPC → DAL → orchestrator →
  * worktree → git) is production code.
  *
@@ -38,13 +38,13 @@ async function ensureRepository(page: import("@playwright/test").Page): Promise<
   await connectRepository(page, REPO_NAME, PATHS.repo);
 }
 
-test.describe("steering a running agent", () => {
-  test("an instruction typed in the terminal reaches the agent and its reply comes back", async ({
+test.describe("steering a running harness", () => {
+  test("an instruction typed in the terminal reaches the harness and its reply comes back", async ({
     page,
   }) => {
     const stamp = Date.now();
     const issueTitle = `Latch sticks in the cold ${stamp}`;
-    // The marker keeps the fixture agent running so there is a live agent to steer.
+    // The marker keeps the fixture harness running so there is a live harness to steer.
     const taskTitle = `Warm the latch housing ${stamp} [steerable]`;
 
     await ensureRepository(page);
@@ -58,14 +58,14 @@ test.describe("steering a running agent", () => {
     await openTask(page, issue.id, taskTitle);
     await launchTask(page);
 
-    const box = page.getByLabel("Message the agent");
+    const box = page.getByLabel("Message the harness");
     await expect(box).toBeEnabled();
     await box.fill("check the heater fuse too");
     await page.getByRole("button", { name: "Send" }).click();
 
-    // SPA → hub → registry → the agent for *this* Task → back down the stream (TASK-022).
-    await expect(page.getByText("agent received: check the heater fuse too")).toBeVisible();
-    // Having taken the instruction the agent finishes and declares — the gate is the operator's
+    // SPA → hub → registry → the harness for *this* Task → back down the stream (TASK-022).
+    await expect(page.getByText("harness received: check the heater fuse too")).toBeVisible();
+    // Having taken the instruction the harness finishes and declares — the gate is the operator's
     // to open, so the page offers it rather than moving on its own.
     await openReview(page);
   });
@@ -91,18 +91,18 @@ test.describe("core program happy path", () => {
     const taskId = await openTask(page, issue.id, taskTitle);
     await launchToReview(page);
 
-    // The agent's output is on screen — streamed live and replayed from the session log.
-    await expect(page.getByText(/agent edited/)).toBeVisible();
+    // The harness's output is on screen — streamed live and replayed from the session log.
+    await expect(page.getByText(/harness edited/)).toBeVisible();
 
-    // And the change itself is reviewable in the app: the files the agent actually wrote, in
+    // And the change itself is reviewable in the app: the files the harness actually wrote, in
     // the captured source-control panel, with the written line in the diff beside them. No tab
     // to click any more — the Changes column sits beside the terminal in the split pane, on
     // screen the whole time the review is.
     const changed = page.getByRole("list", { name: "Changes" });
     await expect(changed.getByTitle(`marker-solow-task-${taskId}.txt`)).toBeVisible();
     await expect(changed.getByTitle("visible.txt")).toBeVisible();
-    // …and the diff body carries the line the agent actually wrote.
-    await expect(page.getByText(/edited by the agent in/).first()).toBeVisible();
+    // …and the diff body carries the line the harness actually wrote.
+    await expect(page.getByText(/edited by the harness in/).first()).toBeVisible();
 
     await page.getByRole("button", { name: "Approve" }).click();
 
@@ -112,20 +112,20 @@ test.describe("core program happy path", () => {
     const branch = `solow-task-${taskId}`;
     await expect(page.getByText(branch).first()).toBeVisible();
 
-    // …and the branch really exists in the repository, with the agent's file on it. Polled:
+    // …and the branch really exists in the repository, with the harness's file on it. Polled:
     // the API answers as soon as the state is written, a moment before the step returns.
     expect(git(["branch", "--list", branch])).toContain(branch);
     await expect
       .poll(() => git(["show", "--name-only", "--format=", branch]))
       .toContain(`marker-solow-task-${taskId}.txt`);
     expect(git(["show", `${branch}:marker-solow-task-${taskId}.txt`])).toContain(
-      "edited by the agent",
+      "edited by the harness",
     );
     // No push, no PR: the change lives only on the local branch (spec FR-009).
     expect(git(["remote"])).toBe("");
   });
 
-  test("rejecting a diff discards the agent's changes", async ({ page }) => {
+  test("rejecting a diff discards the harness's changes", async ({ page }) => {
     const stamp = Date.now();
     const issueTitle = `Keypad flicker ${stamp}`;
     const taskTitle = `Debounce the backlight ${stamp}`;
@@ -143,7 +143,7 @@ test.describe("core program happy path", () => {
     await launchToReview(page);
 
     await page.getByRole("button", { name: "Reject" }).click();
-    // Rejecting discards the agent's work, so it is confirmed rather than done on one click.
+    // Rejecting discards the harness's work, so it is confirmed rather than done on one click.
     await page
       .getByRole("alertdialog")
       .getByRole("button", { name: "Discard the changes" })

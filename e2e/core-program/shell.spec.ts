@@ -30,7 +30,7 @@ test.describe("the shell", () => {
     await page.setViewportSize({ width: 1280, height: 780 });
     await page.goto(DENSE);
     // The content has to have arrived, or an empty page would pass this trivially.
-    await expect(page.getByRole("heading", { name: "Agents", level: 1 })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Harnesses", level: 1 })).toBeVisible();
 
     /*
      * Passed as a string rather than as an arrow function.
@@ -52,7 +52,7 @@ test.describe("the shell", () => {
   test("keeps the status bar and header in place while the content scrolls", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 780 });
     await page.goto(DENSE);
-    await expect(page.getByRole("heading", { name: "Agents", level: 1 })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Harnesses", level: 1 })).toBeVisible();
 
     // The consequence a user actually feels, and the reason the assertion above is worth having.
     await page.locator("main").evaluate("el => { el.scrollTop = el.scrollHeight; }");
