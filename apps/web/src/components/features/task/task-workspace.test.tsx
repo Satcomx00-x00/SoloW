@@ -398,26 +398,6 @@ describe("TaskWorkspace permission prompt (issue #58)", () => {
     );
   });
 
-  it("escalates to the modal when the question is on a panel nobody is looking at", async () => {
-    // A harness is blocked on the answer, so a question the operator cannot see has to interrupt.
-    renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, handlers);
-    await waitFor(() => expect(sockets[0]).toBeDefined());
-
-    // Radix activates a tab on focus, not on a bare click. Conversation is the other panel now
-    // that Changes is a column beside the terminal rather than a tab.
-    const otherTab = await screen.findByRole("tab", { name: /Conversation/ });
-    fireEvent.mouseDown(otherTab);
-    fireEvent.focus(otherTab);
-    fireEvent.click(otherTab);
-    // Wait for the panel to actually swap: the escalation is decided from which panel is
-    // showing, so emitting while the terminal is still mounted would prove nothing.
-    await waitFor(() => expect(otherTab.getAttribute("aria-selected")).toBe("true"));
-
-    act(() => sockets[0]?.emit(permissionFrame));
-
-    expect(await screen.findByRole("alertdialog")).toBeDefined();
-  });
-
   it("stops offering a choice once the request is settled, however it was settled", async () => {
     // The deadline policy can settle it while nobody is looking; the card must not sit there
     // offering a choice that no longer reaches anything.
@@ -835,5 +815,89 @@ describe("TaskWorkspace live state", () => {
     );
 
     expect(await screen.findByRole("button", { name: /Approve/ })).toBeDefined();
+  });
+});
+
+/** Where the Task is in its Workflow, in the header (spec F03). */
+describe("TaskWorkspace workflow steps", () => {
+  const step = (id: string, name: string, position: number) => ({
+    id,
+    workflowId: "wf-1",
+    name,
+    position,
+    rank: `r${position}`,
+    agentProfileId: "harness-1",
+    promptTemplate: "Do it.",
+    gate: "human" as const,
+    advanceOn: "review" as const,
+    onEnter: null,
+    branch: null,
+    mcpServerIds: [],
+    skillIds: [],
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  });
+  const steps = [step("st-1", "Implement", 0), step("st-2", "Review", 1), step("st-3", "Ship", 2)];
+  const binding = (current: string) => ({
+    taskId: TASK_ID,
+    workflowId: "wf-1",
+    workflowName: "Implement & review",
+    attachedVersion: 1,
+    currentVersion: 1,
+    definitionDrifted: false,
+    currentStep: steps.find((s) => s.id === current),
+    steps,
+    handoff: null,
+    brief: "Do it.",
+  });
+  const base: Handlers = {
+    "session.listForTask": () => [session],
+    "session.get": () => detail(),
+    "stream.ticket": () => ({
+      url: "ws://hub.test/?ticket=t",
+      expiresAt: "2026-01-01T00:01:00.000Z",
+    }),
+  };
+
+  it("names the current Step, with the ones before it done and the ones after still to come", async () => {
+    renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
+      ...base,
+      "task.get": () => task({ state: "running", workflowId: "wf-1", workflowStepId: "st-2" }),
+      "workflow.taskBinding": () => binding("st-2"),
+    });
+
+    const strip = await screen.findByRole("region", { name: "Workflow progress" });
+    expect(strip.textContent).toContain("Implement & review");
+    expect(strip.textContent).toContain("Step 2 of 3");
+    const items = within(strip).getAllByRole("listitem");
+    expect(items.map((li) => li.getAttribute("data-status"))).toEqual([
+      "done",
+      "current",
+      "upcoming",
+    ]);
+    expect(items[1]?.getAttribute("aria-current")).toBe("step");
+  });
+
+  it("marks the last Step done once the Task is, rather than leaving it current forever", async () => {
+    renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
+      ...base,
+      "task.get": () => task({ state: "done", workflowId: "wf-1", workflowStepId: "st-3" }),
+      "workflow.taskBinding": () => binding("st-3"),
+    });
+
+    const strip = await screen.findByRole("region", { name: "Workflow progress" });
+    const items = within(strip).getAllByRole("listitem");
+    expect(items.map((li) => li.getAttribute("data-status"))).toEqual(["done", "done", "done"]);
+  });
+
+  it("shows nothing for a Task on no Workflow, and never asks for its binding", async () => {
+    const { log } = renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
+      ...base,
+      "task.get": () => task(),
+    });
+
+    await screen.findByText(/Review actions become available|Approve/);
+    expect(screen.queryByRole("region", { name: "Workflow progress" })).toBeNull();
+    expect(log.calls.some((c) => c.path === "workflow.taskBinding")).toBe(false);
   });
 });

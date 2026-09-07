@@ -8,11 +8,11 @@ import type { PermissionRow } from "./transcript";
 /**
  * A permission question, asked and answered *inside* the transcript.
  *
- * `PermissionRequestDialog` asks the same question in a modal, and the modal traps focus — which
- * is the whole reason this exists. The thing an operator needs in order to answer "may I write
- * .env" is the tool call, the file and the turn that led to it, and all three are in the rows
- * directly above this one; a dialog puts a scrim over the evidence and asks for a decision
- * anyway. Inline, the question sits where the run reached it and the transcript stays readable.
+ * A modal used to ask the same question, and a modal traps focus — which is the whole reason this
+ * exists. The thing an operator needs in order to answer "may I write .env" is the tool call, the
+ * file and the turn that led to it, and all three are in the rows directly above this one; a
+ * dialog puts a scrim over the evidence and asks for a decision anyway. Inline, the question sits
+ * where the run reached it and the transcript stays readable.
  *
  * What is *not* reinvented here is the wording and the two rules behind it, both lifted from the
  * dialog: only the harness's own options are offered, in the order it listed them — SoloW

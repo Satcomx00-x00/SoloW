@@ -138,8 +138,8 @@ interface Normalised {
  * in the operator's own words, what they picked. One of the two is a duplicate, and it is this
  * one: it is addressed to the model, phrased for the model, and carries option ids.
  *
- * Dropped from the transcript only. The turn stays in the session log and stays visible in the
- * Conversation tab, so "what was the harness actually told" is still answerable — this hides a
+ * Dropped from the transcript only. The turn stays in the session log, which `session.get` still
+ * returns in full, so "what was the harness actually told" is still answerable — this hides a
  * repetition in the one view where the thing it repeats is on screen.
  */
 function isWidgetAnswerEcho(channel: TranscriptChannel, text: string): boolean {
