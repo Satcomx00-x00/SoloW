@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
-import { Check, Hourglass, X } from "lucide-react"
+import { Hourglass, X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 
@@ -17,8 +17,8 @@ function Steps({ className, ...props }: React.ComponentProps<"ol">) {
 }
 
 /**
- * One colour per state, and never the colour alone: the marker carries a glyph or a number and
- * a screen reader gets the word. The colours are the Task-state tokens the board's columns and
+ * One colour per state, and never the colour alone: the marker carries its number — or a glyph
+ * for the two states that are not simply a position — and a screen reader gets the word. The colours are the Task-state tokens the board's columns and
  * badges use — green done, blue running, orange waiting on someone (review), red failed — so
  * a step and the column it corresponds to can never disagree; a step still to come is uncoloured.
  */
@@ -81,15 +81,7 @@ function StepMarker({
         <span className="absolute inline-flex size-full animate-ping rounded-full bg-state-running opacity-40" />
       )}
       <span className="relative inline-flex">
-        {status === "done" ? (
-          <Check />
-        ) : status === "failed" ? (
-          <X />
-        ) : status === "waiting" ? (
-          <Hourglass />
-        ) : (
-          index + 1
-        )}
+        {status === "failed" ? <X /> : status === "waiting" ? <Hourglass /> : index + 1}
       </span>
     </span>
   )
