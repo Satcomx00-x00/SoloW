@@ -101,3 +101,63 @@ describe("ToolCall", () => {
     }
   });
 });
+
+describe("ToolCall — what is open from the start", () => {
+  it("shows a shell command and its output without a click, as a prompt line over the output", () => {
+    // A reader following a run wants to see what was run and what it printed, the way a
+    // terminal shows it; folding every command away meant opening each one to learn that.
+    const { container } = render(
+      <ToolCall
+        row={toolRow({
+          name: "Bash",
+          input: { command: "bun test", description: "Run the suite" },
+          result: { ok: true, output: "12 pass\n", truncated: false },
+        })}
+      />,
+    );
+
+    const details = container.querySelector("details") as HTMLDetailsElement;
+    expect(details.open).toBe(true);
+    expect(screen.getByText("bun test", { selector: "pre" })).toBeDefined();
+    expect(screen.getByText("Output")).toBeDefined();
+    expect(screen.getByText(/12 pass/)).toBeDefined();
+    // The command is the prompt line, not a `command:` row repeated underneath it.
+    expect(screen.queryByText("command")).toBeNull();
+    expect(screen.getByText("description")).toBeDefined();
+  });
+
+  it("opens a file change and says where the change itself is, since the log never holds it", () => {
+    const { container } = render(
+      <ToolCall
+        row={toolRow({
+          name: "Edit",
+          input: { file_path: "src/latch.ts", replace_all: "false" },
+          result: { ok: true, output: "The file src/latch.ts has been updated.", truncated: false },
+        })}
+      />,
+    );
+
+    const details = container.querySelector("details") as HTMLDetailsElement;
+    expect(details.open).toBe(true);
+    expect(screen.getByText(/The change itself is in the Changes column/)).toBeDefined();
+    // Named twice on purpose: once in the summary, once in the sentence that says where to look.
+    expect(screen.getAllByText("src/latch.ts")).toHaveLength(2);
+  });
+
+  it("opens a failed call, whichever signal carried the failure", () => {
+    const { container: byStatus } = render(<ToolCall row={toolRow({ status: "failed" })} />);
+    expect((byStatus.querySelector("details") as HTMLDetailsElement).open).toBe(true);
+    cleanup();
+    const { container: byResult } = render(
+      <ToolCall
+        row={toolRow({ status: null, result: { ok: false, output: null, truncated: false } })}
+      />,
+    );
+    expect((byResult.querySelector("details") as HTMLDetailsElement).open).toBe(true);
+  });
+
+  it("still keeps a Read folded — its body is a file, not what the run did", () => {
+    const { container } = render(<ToolCall row={toolRow()} />);
+    expect((container.querySelector("details") as HTMLDetailsElement).open).toBe(false);
+  });
+});
