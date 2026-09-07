@@ -328,7 +328,8 @@ describe("workflows", () => {
       if (!step) throw new Error("pipeline");
       const mine = await other.newTask("Mine");
 
-      expect(await other.c.workflow.list({})).toHaveLength(0);
+      // The other Workspace sees its own defaults (seeded with its first Profile), never "Ship".
+      expect((await other.c.workflow.list({})).map((w) => w.id)).not.toContain(theirs.id);
       expect(await errCode(() => other.c.workflow.get({ id: theirs.id }))).toBe("NOT_FOUND");
       expect(
         await errCode(() =>
@@ -556,7 +557,7 @@ describe("workflows", () => {
       await c.workflow.detachTask({ taskId: t.id });
       await c.workflow.deleteStep({ stepId: first.id });
       await c.workflow.delete({ id: wf.id });
-      expect(await c.workflow.list({})).toHaveLength(0);
+      expect((await c.workflow.list({})).map((w) => w.id)).not.toContain(wf.id);
     });
 
     it("refuses to read a binding for a Task that follows no workflow", async () => {

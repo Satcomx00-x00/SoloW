@@ -74,7 +74,9 @@ export async function loadAgentLibrariesForRun(
   const resolve = (value: McpConfigValue): string | null => {
     if (value.kind === "literal") return value.value;
     const ciphertext = ciphertexts.get(value.secretId);
-    return ciphertext === undefined ? null : decryptForAgentRun(ciphertext);
+    return ciphertext === undefined
+      ? null
+      : `${value.prefix ?? ""}${decryptForAgentRun(ciphertext)}`;
   };
 
   const mcpServers: ResolvedMcpServer[] = [];

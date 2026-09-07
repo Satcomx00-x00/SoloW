@@ -184,4 +184,25 @@ describe("loadAgentLibrariesForRun", () => {
     if (!loaded.ok) throw new Error(loaded.error);
     expect(loaded.data.mcpServers).toEqual([]);
   });
+  it("writes a Secret's prefix in front of the decrypted value — `Bearer ` for a remote endpoint", async () => {
+    const secretId = await seedSecret(wsId, "tok-123");
+    await db.insert(mcpServer).values({
+      workspaceId: wsId,
+      name: "remote",
+      description: null,
+      transport: {
+        kind: "http",
+        url: "https://gateway.example/mcp",
+        headers: { Authorization: { kind: "secret", secretId, prefix: "Bearer " } },
+      },
+      enabled: true,
+    });
+    const out = await loadAgentLibrariesForRun(db, wsId, null);
+    if (!out.ok) throw new Error(out.error);
+    expect(out.data.mcpServers[0]?.transport).toEqual({
+      kind: "http",
+      url: "https://gateway.example/mcp",
+      headers: { Authorization: "Bearer tok-123" },
+    });
+  });
 });

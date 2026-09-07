@@ -120,7 +120,12 @@ it is how an operator gets from one shape to the next.
   see [Decision 0004](../decisions/0004-durable-orchestration-engine.md)).
 - The specific visual styling of the canvas (owned by Design).
 
-## What ships in v1 (issue #5)
+## What ships in v1
+
+- **Three pipelines by default** — *Implement & review* (a reviewer agent decides whether another
+  pass is needed), *Plan, then build* (a plan you approve, then the build), *Bug fix* (reproduce,
+  fix, verify, looping while the bug still reproduces). Seeded once the Workspace has its first
+  Agent Profile and only while it has no Workflow of its own, so a pipeline you delete stays deleted. (issue #5)
 
 The model, its seam and the designing canvas ship; the monitor does not. Concretely:
 

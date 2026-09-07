@@ -23,6 +23,7 @@ import {
 import {
   agentCatalog,
   agentProfile,
+  ensureDefaultWorkflows,
   executorProfile,
   sessionUsage,
   task,
@@ -120,6 +121,9 @@ export async function createAgentProfile(
       modeId: input.modeId,
     })
     .returning();
+  // The Workspace's first Profile is what the default Workflows were waiting for: a Step has to
+  // name the agent that runs it, so they could not be seeded before one existed (spec F03).
+  if (row) await ensureDefaultWorkflows(ctx.db, ctx.workspaceId);
   // A Profile just created cannot be referenced by anything yet — nothing existed a statement
   // ago that could point at this id.
   return row ? ok({ ...row, usage: EMPTY_USAGE }) : err(CommonErrorCode.ValidationFailed);

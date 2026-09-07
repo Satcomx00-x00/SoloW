@@ -1,7 +1,7 @@
 "use client";
 
 import type { McpConfigValue, McpServerDto, McpServerTransport } from "@solow/contracts";
-import { Globe, KeyRound, Plug, Plus, Terminal, Trash2 } from "lucide-react";
+import { Globe, KeyRound, Plug, Plus, Store, Terminal, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,6 +26,7 @@ import { joinCommandLine, splitCommandLine } from "@/lib/command-line";
 import { newRowId } from "@/lib/row-id";
 import { trpc } from "@/trpc/react";
 import { LibraryEmpty, LibraryForm, LibraryQueryState, LibraryRow } from "./library-ui";
+import { McpStoreDialog } from "./mcp-store-dialog";
 
 /**
  * The MCP server library (spec F24): what an agent can be handed to call, kept in one place.
@@ -39,8 +40,21 @@ import { LibraryEmpty, LibraryForm, LibraryQueryState, LibraryRow } from "./libr
  */
 
 /** One env variable or header while it is being edited: a literal, or a Secret by id. */
-type ValueRow = { id: string; name: string; kind: "literal" | "secret"; text: string };
-const newRow = (): ValueRow => ({ id: newRowId(), name: "", kind: "literal", text: "" });
+type ValueRow = {
+  id: string;
+  name: string;
+  kind: "literal" | "secret";
+  text: string;
+  /** Written in front of the Secret at run time — `Bearer ` for an Authorization header. */
+  prefix: string;
+};
+const newRow = (): ValueRow => ({
+  id: newRowId(),
+  name: "",
+  kind: "literal",
+  text: "",
+  prefix: "",
+});
 
 function rowsToValues(rows: ValueRow[]): Record<string, McpConfigValue> {
   const out: Record<string, McpConfigValue> = {};
@@ -49,7 +63,7 @@ function rowsToValues(rows: ValueRow[]): Record<string, McpConfigValue> {
     if (!name) continue;
     out[name] =
       row.kind === "secret"
-        ? { kind: "secret", secretId: row.text }
+        ? { kind: "secret", secretId: row.text, ...(row.prefix ? { prefix: row.prefix } : {}) }
         : { kind: "literal", value: row.text };
   }
   return out;
@@ -119,24 +133,39 @@ function ValueRows({
                 </SelectContent>
               </Select>
               {row.kind === "secret" ? (
-                <Select value={row.text} onValueChange={(v) => set(row.id, { text: v })}>
-                  <SelectTrigger size="sm" className="text-xs" aria-label={`${label} secret`}>
-                    <KeyRound aria-hidden className="size-3 text-muted-foreground" />
-                    <SelectValue placeholder="Pick a secret" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {secrets.length === 0 && (
-                      <p className="px-2 py-1.5 text-muted-foreground text-xs">
-                        No Secrets yet — add one in Secrets above.
-                      </p>
-                    )}
-                    {secrets.map((s) => (
-                      <SelectItem key={s.id} value={s.id}>
-                        {s.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <div className="flex min-w-0 items-center gap-1">
+                  {/* The scheme in front of the token — `Bearer ` for nearly every remote
+                      endpoint — stays visible here while the token itself stays a Secret. */}
+                  <Input
+                    aria-label={`${label} prefix`}
+                    placeholder="Bearer "
+                    className="h-7 w-20 shrink-0 font-mono text-xs"
+                    value={row.prefix}
+                    onChange={(e) => set(row.id, { prefix: e.target.value })}
+                  />
+                  <Select value={row.text} onValueChange={(v) => set(row.id, { text: v })}>
+                    <SelectTrigger
+                      size="sm"
+                      className="min-w-0 text-xs"
+                      aria-label={`${label} secret`}
+                    >
+                      <KeyRound aria-hidden className="size-3 text-muted-foreground" />
+                      <SelectValue placeholder="Pick a secret" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {secrets.length === 0 && (
+                        <p className="px-2 py-1.5 text-muted-foreground text-xs">
+                          No Secrets yet — add one in Secrets above.
+                        </p>
+                      )}
+                      {secrets.map((s) => (
+                        <SelectItem key={s.id} value={s.id}>
+                          {s.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               ) : (
                 <Input
                   aria-label={`${label} value`}
@@ -186,6 +215,7 @@ export function McpServersSection() {
   const [url, setUrl] = useState("");
   const [values, setValues] = useState<ValueRow[]>([]);
   const [enabled, setEnabled] = useState(false);
+  const [installed, setInstalled] = useState<string | null>(null);
 
   const refresh = () => utils.library.mcp.list.invalidate();
   const create = trpc.library.mcp.create.useMutation({
@@ -226,7 +256,17 @@ export function McpServersSection() {
           Workflow Steps that name it do.
         </CardDescription>
         {usable && !adding && (
-          <CardAction>
+          <CardAction className="flex items-center gap-2">
+            <McpStoreDialog
+              installed={list}
+              onInstalled={(name) => setInstalled(name)}
+              trigger={
+                <Button type="button" variant="outline" size="sm">
+                  <Store aria-hidden />
+                  Store
+                </Button>
+              }
+            />
             <Button type="button" variant="outline" size="sm" onClick={() => setAdding(true)}>
               <Plus aria-hidden />
               New MCP server
@@ -236,6 +276,12 @@ export function McpServersSection() {
       </CardHeader>
       <CardContent className="space-y-4">
         <LibraryQueryState error={servers.error} />
+        {installed && (
+          <p className="text-sm text-state-done" role="status">
+            Installed <span className="font-mono">{installed}</span> from the store — switched off
+            until you turn it on or a Step names it.
+          </p>
+        )}
 
         {usable && list.length > 0 && (
           <ul className="divide-y rounded-lg border" aria-label="MCP servers">
@@ -261,9 +307,21 @@ export function McpServersSection() {
           <LibraryEmpty
             icon={Plug}
             title="No MCP servers yet"
-            hint="Add a command the agent spawns or an endpoint it connects to, then switch it on for every agent or name it from a Workflow Step."
+            hint="Install one from the store, or add a command the agent spawns or a URL it connects to — then switch it on for every agent or name it from a Workflow Step."
             action="New MCP server"
             onAdd={() => setAdding(true)}
+            secondary={
+              <McpStoreDialog
+                installed={list}
+                onInstalled={(name) => setInstalled(name)}
+                trigger={
+                  <Button type="button" variant="outline" size="sm">
+                    <Store aria-hidden />
+                    Browse the store
+                  </Button>
+                }
+              />
+            }
           />
         )}
         {(update.error || remove.error) && (
@@ -313,7 +371,7 @@ export function McpServersSection() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="stdio">Command (stdio)</SelectItem>
-                    <SelectItem value="http">HTTP endpoint</SelectItem>
+                    <SelectItem value="http">Remote URL (HTTP)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -362,12 +420,18 @@ export function McpServersSection() {
                 <Input
                   id="mcp-url"
                   type="url"
-                  placeholder="https://mcp.example.com/sse"
+                  placeholder="https://mcp.example.com/mcp"
                   className="font-mono"
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
                   required
                 />
+                <p className="text-2xs text-muted-foreground">
+                  A Streamable HTTP or SSE endpoint: a hosted server, or a gateway in front of many
+                  — agentgateway's <span className="font-mono">/mcp</span>, for one. When it wants a
+                  token, add an <span className="font-mono">Authorization</span> header from a
+                  Secret with the <span className="font-mono">Bearer </span> prefix.
+                </p>
               </div>
             )}
             <ValueRows

@@ -1,6 +1,8 @@
 import { ensureDefaultAgentCatalog } from "./agent-catalog-defaults.js";
 import type { Db } from "./index.js";
+import { ensureDefaultLibraries } from "./library-defaults.js";
 import { workspace } from "./schema.js";
+import { ensureDefaultWorkflows } from "./workflow-defaults.js";
 
 /**
  * Bring a database up to a usable *empty* Workspace (2026-08-28).
@@ -67,6 +69,10 @@ export async function bootstrapWorkspace(
     .onConflictDoNothing();
 
   await ensureDefaultAgentCatalog(db, LOCAL_WORKSPACE_ID);
+  // The libraries' and the designer's starting content (specs F24, F03). Each seeds only into a
+  // Workspace that has nothing of its own yet, so this is safe to run on every start.
+  await ensureDefaultLibraries(db, LOCAL_WORKSPACE_ID);
+  await ensureDefaultWorkflows(db, LOCAL_WORKSPACE_ID);
 
   return { workspaceId: LOCAL_WORKSPACE_ID, created: existing.length === 0 };
 }
