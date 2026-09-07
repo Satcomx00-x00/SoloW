@@ -31,6 +31,8 @@ interface ColumnChrome {
   textClassName: string;
   /** Just the fill, for the hairline rule across the column head. */
   barClassName: string;
+  /** The fill at a whisper, washed over the column head. */
+  tintClassName: string;
   /** Longer-form meaning, shown as the header's title. */
   hint: string;
 }
@@ -83,6 +85,7 @@ const LIFECYCLE_COLUMNS: readonly BoardColumn[] = BOARD_COLUMNS.map((state) => {
     icon: style.icon,
     textClassName: style.textClassName,
     barClassName: style.barClassName,
+    tintClassName: style.tintClassName,
     hint: style.hint,
     droppable: true,
   } as const;
@@ -109,18 +112,21 @@ const GATE_CHROME: Record<WorkflowStepGate, Omit<ColumnChrome, "label">> = {
     icon: UserRoundCheck,
     textClassName: STATE_STYLE.review.textClassName,
     barClassName: STATE_STYLE.review.barClassName,
+    tintClassName: STATE_STYLE.review.tintClassName,
     hint: "Advances when you approve the review",
   },
   auto: {
     icon: Zap,
     textClassName: "text-muted-foreground",
     barClassName: "bg-muted-foreground/40",
+    tintClassName: "bg-transparent",
     hint: "Advances on its own — the work still needs your approval before anything is integrated",
   },
   "auto-unless-changes": {
     icon: ShieldCheck,
     textClassName: "text-muted-foreground",
     barClassName: "bg-muted-foreground/40",
+    tintClassName: "bg-transparent",
     hint: "Advances on its own unless the run produced changes, which need your approval",
   },
 };
@@ -158,6 +164,7 @@ export function workflowColumns(steps: readonly WorkflowStepDto[]): readonly Boa
         icon: chrome.icon,
         textClassName: chrome.textClassName,
         barClassName: chrome.barClassName,
+        tintClassName: chrome.tintClassName,
         hint: chrome.hint,
         droppable: false,
       };
@@ -170,6 +177,7 @@ export function workflowColumns(steps: readonly WorkflowStepDto[]): readonly Boa
       icon: done.icon,
       textClassName: done.textClassName,
       barClassName: done.barClassName,
+      tintClassName: done.tintClassName,
       hint: done.hint,
       droppable: true,
     },
@@ -180,6 +188,7 @@ export function workflowColumns(steps: readonly WorkflowStepDto[]): readonly Boa
       icon: Inbox,
       textClassName: "text-muted-foreground",
       barClassName: "bg-border",
+      tintClassName: "bg-transparent",
       hint: "Tasks on another workflow, or on none",
       droppable: false,
     },
