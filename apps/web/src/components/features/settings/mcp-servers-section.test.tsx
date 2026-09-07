@@ -65,6 +65,45 @@ describe("McpServersSection", () => {
     });
   });
 
+  it("sends a remote endpoint's Authorization header as a Secret with its Bearer prefix", async () => {
+    const { log } = renderWithTrpc(<McpServersSection />, {
+      "library.mcp.list": () => [],
+      "secret.list": () => [
+        { id: "s1", name: "gw-token", kind: "api_key", createdAt: AT, updatedAt: AT, usedBy: [] },
+      ],
+      "library.mcp.create": () => ({}),
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "New MCP server" }));
+    fireEvent.change(await screen.findByLabelText("Name"), { target: { value: "gateway" } });
+    fireEvent.click(screen.getByRole("combobox", { name: "Transport" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Remote URL (HTTP)" }));
+    fireEvent.change(await screen.findByLabelText("URL"), {
+      target: { value: "http://localhost:3000/mcp" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Add header" }));
+    fireEvent.change(screen.getByLabelText("Headers name"), { target: { value: "Authorization" } });
+    fireEvent.click(screen.getByRole("combobox", { name: "Headers value kind" }));
+    fireEvent.click(await screen.findByRole("option", { name: "A Secret" }));
+    fireEvent.change(await screen.findByLabelText("Headers prefix"), {
+      target: { value: "Bearer " },
+    });
+    fireEvent.click(screen.getByRole("combobox", { name: "Headers secret" }));
+    fireEvent.click(await screen.findByRole("option", { name: "gw-token" }));
+    fireEvent.submit(screen.getByRole("button", { name: "Add MCP server" }).closest("form")!);
+
+    await waitFor(() => {
+      expect(log.calls.find((c) => c.path === "library.mcp.create")?.input).toEqual({
+        name: "gateway",
+        transport: {
+          kind: "http",
+          url: "http://localhost:3000/mcp",
+          headers: { Authorization: { kind: "secret", secretId: "s1", prefix: "Bearer " } },
+        },
+        enabled: false,
+      });
+    });
+  });
+
   it("tells a workspace with the flag off how to enable it", async () => {
     renderWithTrpc(<McpServersSection />, {
       "library.mcp.list": () => {

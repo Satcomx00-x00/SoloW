@@ -63,6 +63,17 @@ each agent runtime is handed it, because Claude Code and an ACP agent take it di
   of prose when there is none — ticked for import unless the library already holds that name.
   Each import is a directory source, so the scripts, references and assets beside the `SKILL.md`
   travel with it.
+- **The MCP store** (Settings → MCP servers → *Store*): a curated catalog in `@solow/core`
+  (`MCP_STORE`, 30 well-known servers — GitHub and GitLab among them, plus local tools, browsers,
+  documentation, search, data, cloud and productivity servers, and a gateway entry) installed with
+  one click. An entry that needs a credential asks for a Secret; the install writes an ordinary
+  server row, switched off. Reviewed in pull requests, never fetched from a registry at run time.
+- **Remote endpoints**: the `http` transport takes any Streamable HTTP or SSE URL — a hosted
+  server, or a gateway such as agentgateway's `/mcp`. A Secret in a header may carry a `prefix`
+  (`Bearer `) written in front of the decrypted value at run time.
+- **Defaults**: an empty library is seeded with one local server (`memory`, no network, no
+  account) and one Skill (`review-checklist`), both switched off — only when the library is
+  empty, so a row the operator removed stays removed.
 - `library.mcp.*` and `library.skill.*` on tRPC and OpenAPI. The `library` namespace is withheld
   from the external MCP surface: an agent's token must not be able to hand that agent a new
   server or re-point one at a different credential.

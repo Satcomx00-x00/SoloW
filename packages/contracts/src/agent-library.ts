@@ -38,9 +38,19 @@ export const libraryNameSchema = z
  * started, and never travels through a DTO (Principle IV — the same rule as an Agent Profile's
  * credential).
  */
+/**
+ * One env variable or header value: typed in, or a Secret by id. A Secret may carry a `prefix`
+ * written in front of the decrypted value at run time — `Bearer ` is the one every remote MCP
+ * endpoint wants in its `Authorization` header — so the token itself stays a Secret and the
+ * scheme stays visible in the config.
+ */
 export const mcpConfigValueSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("literal"), value: z.string().max(4000) }),
-  z.object({ kind: z.literal("secret"), secretId: idSchema }),
+  z.object({
+    kind: z.literal("secret"),
+    secretId: idSchema,
+    prefix: z.string().max(64).optional(),
+  }),
 ]);
 export type McpConfigValue = z.infer<typeof mcpConfigValueSchema>;
 

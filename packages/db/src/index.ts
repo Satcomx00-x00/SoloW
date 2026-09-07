@@ -81,6 +81,7 @@ export {
   isFlagKey,
 } from "./flag-registry.js";
 export { listWorkspaceFlags, setWorkspaceFlag, type WorkspaceFlags } from "./flags.js";
+export { DEFAULT_MCP_SERVER, DEFAULT_SKILL, ensureDefaultLibraries } from "./library-defaults.js";
 export {
   type GeneratedMcpToken,
   generateMcpToken,
@@ -96,6 +97,7 @@ export * from "./schema.js";
 export { schema } from "./schema.js";
 export { decryptForAgentRun, decryptForScmSync, encryptSecret } from "./secret-store.js";
 export { allTables } from "./tables.js";
+export { DEFAULT_WORKFLOWS, ensureDefaultWorkflows } from "./workflow-defaults.js";
 export {
   advanceTaskWorkflow,
   clearTaskWorkflowPendingHandoff,

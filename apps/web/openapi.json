@@ -4239,6 +4239,10 @@
                                         "secretId": {
                                           "type": "string",
                                           "minLength": 1
+                                        },
+                                        "prefix": {
+                                          "type": "string",
+                                          "maxLength": 64
                                         }
                                       },
                                       "required": [
@@ -4307,6 +4311,10 @@
                                         "secretId": {
                                           "type": "string",
                                           "minLength": 1
+                                        },
+                                        "prefix": {
+                                          "type": "string",
+                                          "maxLength": 64
                                         }
                                       },
                                       "required": [
@@ -4493,6 +4501,10 @@
                                     "secretId": {
                                       "type": "string",
                                       "minLength": 1
+                                    },
+                                    "prefix": {
+                                      "type": "string",
+                                      "maxLength": 64
                                     }
                                   },
                                   "required": [
@@ -4559,6 +4571,10 @@
                                     "secretId": {
                                       "type": "string",
                                       "minLength": 1
+                                    },
+                                    "prefix": {
+                                      "type": "string",
+                                      "maxLength": 64
                                     }
                                   },
                                   "required": [
@@ -4671,6 +4687,10 @@
                                       "secretId": {
                                         "type": "string",
                                         "minLength": 1
+                                      },
+                                      "prefix": {
+                                        "type": "string",
+                                        "maxLength": 64
                                       }
                                     },
                                     "required": [
@@ -4739,6 +4759,10 @@
                                       "secretId": {
                                         "type": "string",
                                         "minLength": 1
+                                      },
+                                      "prefix": {
+                                        "type": "string",
+                                        "maxLength": 64
                                       }
                                     },
                                     "required": [
@@ -4919,6 +4943,10 @@
                                     "secretId": {
                                       "type": "string",
                                       "minLength": 1
+                                    },
+                                    "prefix": {
+                                      "type": "string",
+                                      "maxLength": 64
                                     }
                                   },
                                   "required": [
@@ -4985,6 +5013,10 @@
                                     "secretId": {
                                       "type": "string",
                                       "minLength": 1
+                                    },
+                                    "prefix": {
+                                      "type": "string",
+                                      "maxLength": 64
                                     }
                                   },
                                   "required": [
@@ -5095,6 +5127,10 @@
                                       "secretId": {
                                         "type": "string",
                                         "minLength": 1
+                                      },
+                                      "prefix": {
+                                        "type": "string",
+                                        "maxLength": 64
                                       }
                                     },
                                     "required": [
@@ -5163,6 +5199,10 @@
                                       "secretId": {
                                         "type": "string",
                                         "minLength": 1
+                                      },
+                                      "prefix": {
+                                        "type": "string",
+                                        "maxLength": 64
                                       }
                                     },
                                     "required": [
@@ -5364,6 +5404,10 @@
                                         "secretId": {
                                           "type": "string",
                                           "minLength": 1
+                                        },
+                                        "prefix": {
+                                          "type": "string",
+                                          "maxLength": 64
                                         }
                                       },
                                       "required": [
@@ -5432,6 +5476,10 @@
                                         "secretId": {
                                           "type": "string",
                                           "minLength": 1
+                                        },
+                                        "prefix": {
+                                          "type": "string",
+                                          "maxLength": 64
                                         }
                                       },
                                       "required": [
