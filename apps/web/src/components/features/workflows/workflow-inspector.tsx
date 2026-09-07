@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { WHOLE_PAGE } from "@/lib/paged";
+import { taskActionMessage } from "@/lib/task-errors";
 import { nextStepName, stepDotColors } from "@/lib/workflow-canvas";
 import { trpc } from "@/trpc/react";
 
@@ -223,7 +224,7 @@ function Properties({ workflow }: { workflow: WorkflowWithStepsDto }) {
 
       <ConfirmAction
         title={`Delete “${workflow.name}”?`}
-        description="Its steps go with it. Refused while any task still follows it."
+        description="Its steps go with it. Refused while a task is still on it; finished tasks are simply unbound."
         confirmLabel="Delete workflow"
         onConfirm={() => remove.mutate({ id: workflow.id })}
         trigger={
@@ -235,7 +236,7 @@ function Properties({ workflow }: { workflow: WorkflowWithStepsDto }) {
       />
       {(rename.error || remove.error) && (
         <p className="font-mono text-2xs text-state-failed" role="alert">
-          {(rename.error ?? remove.error)?.message}
+          {taskActionMessage((rename.error ?? remove.error)?.message)}
         </p>
       )}
     </div>

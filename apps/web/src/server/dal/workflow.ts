@@ -12,6 +12,7 @@ import {
   type RenameWorkflowInput,
   type ReorderWorkflowStepInput,
   type Result,
+  type TaskState,
   type TaskWorkflowBindingDto,
   type UpdateWorkflowStepInput,
   type WorkflowAdvanceDto,
@@ -167,13 +168,22 @@ export async function deleteWorkflow(
         .all();
       if (!row) return err(CommonErrorCode.NotFound);
 
-      const [follower] = tx
-        .select({ id: task.id })
+      // "In use" means a Task that could still move along it. A finished Task's binding is a
+      // record of which pipeline ran it — worth keeping while the pipeline exists, and nothing
+      // to keep once it does not — so `done` and `failed` are unbound rather than counted, or a
+      // Workflow that ever ran a Task could never be deleted.
+      const followers = tx
+        .select({ id: task.id, state: task.state })
         .from(task)
         .where(and(eq(task.workspaceId, ctx.workspaceId), eq(task.workflowId, id)))
-        .limit(1)
         .all();
-      if (follower) return err(WorkflowErrorCode.InUse);
+      if (followers.some((t) => !finished(t.state))) return err(WorkflowErrorCode.InUse);
+      if (followers.length > 0) {
+        tx.update(task)
+          .set(UNBOUND)
+          .where(and(eq(task.workspaceId, ctx.workspaceId), eq(task.workflowId, id)))
+          .run();
+      }
 
       tx.delete(workflowStep)
         .where(and(eq(workflowStep.workspaceId, ctx.workspaceId), eq(workflowStep.workflowId, id)))
@@ -512,13 +522,21 @@ export async function deleteWorkflowStep(
         .all();
       if (!step) return err(CommonErrorCode.NotFound);
 
-      const [parked] = tx
-        .select({ id: task.id })
+      // Same rule as `deleteWorkflow`: a Task that finished on this Step no longer holds it. It
+      // is unbound from the whole pipeline rather than left pointing at a Step that is gone —
+      // a binding with no current Step is one `taskBinding` cannot describe.
+      const parked = tx
+        .select({ id: task.id, state: task.state })
         .from(task)
         .where(and(eq(task.workspaceId, ctx.workspaceId), eq(task.workflowStepId, step.id)))
-        .limit(1)
         .all();
-      if (parked) return err(WorkflowErrorCode.StepInUse);
+      if (parked.some((t) => !finished(t.state))) return err(WorkflowErrorCode.StepInUse);
+      if (parked.length > 0) {
+        tx.update(task)
+          .set(UNBOUND)
+          .where(and(eq(task.workspaceId, ctx.workspaceId), eq(task.workflowStepId, step.id)))
+          .run();
+      }
 
       const siblings = tx
         .select({ id: workflowStep.id, branch: workflowStep.branch })
@@ -663,6 +681,19 @@ export async function attachTaskWorkflow(
  * handoff away mid-pipeline — and, worse, defeated the `StepInUse`/`InUse` guards outright:
  * detach, then delete the Step the run was executing.
  */
+/** A Task that will not move again, whatever pipeline it was on. */
+const finished = (state: TaskState): boolean => state === "done" || state === "failed";
+
+/** Every column a binding writes, cleared — what `detachTaskWorkflow` writes, shared. */
+const UNBOUND = {
+  workflowId: null,
+  workflowStepId: null,
+  workflowVersion: null,
+  workflowHandoff: null,
+  workflowPendingHandoff: null,
+  workflowDecisionId: null,
+} as const;
+
 export async function detachTaskWorkflow(
   ctx: RequestContext,
   taskId: string,
@@ -682,15 +713,7 @@ export async function detachTaskWorkflow(
       }
 
       tx.update(task)
-        .set({
-          workflowId: null,
-          workflowStepId: null,
-          workflowVersion: null,
-          workflowHandoff: null,
-          workflowPendingHandoff: null,
-          workflowDecisionId: null,
-          updatedAt: now(),
-        })
+        .set({ ...UNBOUND, updatedAt: now() })
         .where(and(eq(task.workspaceId, ctx.workspaceId), eq(task.id, taskId)))
         .run();
       return ok(undefined);

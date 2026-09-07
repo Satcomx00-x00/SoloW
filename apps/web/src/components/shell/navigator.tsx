@@ -32,6 +32,7 @@ import {
   workflowIdFromPath,
 } from "@/lib/navigation";
 import { WHOLE_PAGE } from "@/lib/paged";
+import { taskActionMessage } from "@/lib/task-errors";
 import { BOARD_COLUMNS, STATE_LABELS, STATE_STYLE } from "@/lib/task-states";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
@@ -343,7 +344,7 @@ function WorkflowsNav() {
                 </Link>
                 <ConfirmAction
                   title={`Delete “${w.name}”?`}
-                  description="Its steps go with it. Refused while any task still follows it."
+                  description="Its steps go with it. Refused while a task is still on it; finished tasks are simply unbound."
                   confirmLabel="Delete workflow"
                   onConfirm={() => remove.mutate({ id: w.id })}
                   trigger={
@@ -371,8 +372,8 @@ function WorkflowsNav() {
           </p>
         )}
         {remove.error && (
-          <p className="px-3 pt-1 font-mono text-2xs text-state-failed" role="alert">
-            {remove.error.message}
+          <p className="px-3 pt-1 text-2xs text-state-failed" role="alert">
+            {taskActionMessage(remove.error.message)}
           </p>
         )}
       </nav>
