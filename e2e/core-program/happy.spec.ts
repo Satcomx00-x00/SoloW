@@ -104,7 +104,7 @@ test.describe("core program happy path", () => {
     // …and the diff body carries the line the harness actually wrote.
     await expect(page.getByText(/edited by the harness in/).first()).toBeVisible();
 
-    await page.getByRole("button", { name: "Approve" }).click();
+    await page.getByRole("main").getByRole("button", { name: "Approve" }).click();
 
     // The workflow committed the change and moved the Task to Done. The state is read from the
     // badge's own attribute — the lifecycle labels also appear as plain words elsewhere.
@@ -142,7 +142,7 @@ test.describe("core program happy path", () => {
     const taskId = await openTask(page, issue.id, taskTitle);
     await launchToReview(page);
 
-    await page.getByRole("button", { name: "Reject" }).click();
+    await page.getByRole("main").getByRole("button", { name: "Reject" }).click();
     // Rejecting discards the harness's work, so it is confirmed rather than done on one click.
     await page
       .getByRole("alertdialog")
