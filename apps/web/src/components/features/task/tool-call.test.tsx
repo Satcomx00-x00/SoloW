@@ -64,7 +64,7 @@ describe("ToolCall", () => {
     expect(details.getAttribute("data-tool-status")).toBe("failed");
     // Tinted with the same token the board uses for a failed Task, and never colour alone: the
     // pill and the result heading both say the word.
-    expect(details.className).toContain("red-500");
+    expect(details.className).toContain("state-failed");
     expect(screen.getAllByText("Failed").length).toBe(2);
   });
 

@@ -56,7 +56,8 @@ export const STATE_LABELS: Record<TaskState, string> = {
  * fail WCAG 1.4.1 for a colour-blind reader, and these distinctions are the product.
  *
  * The parts are separate because the same state is drawn several ways — a pill on a card, a
- * bare glyph in the navigator, a segment of the distribution bar — and they must not drift.
+ * bare glyph in the navigator, a segment of the distribution bar, the wash over a column head —
+ * and they must not drift.
  */
 export interface StateStyle {
   icon: LucideIcon;
@@ -66,6 +67,8 @@ export interface StateStyle {
   textClassName: string;
   /** Just the fill, for a chart segment or a rule. */
   barClassName: string;
+  /** The fill at a whisper, for a surface that belongs to the state — a kanban column's head. */
+  tintClassName: string;
   /** Longer-form meaning, used as the badge's accessible description. */
   hint: string;
 }
@@ -76,6 +79,7 @@ export const STATE_STYLE: Record<TaskState, StateStyle> = {
     badgeClassName: "badge-soft [--badge-color:var(--state-idle)]",
     textClassName: "text-state-idle",
     barClassName: "bg-state-idle",
+    tintClassName: "bg-state-idle/10",
     hint: "Not started",
   },
   ready: {
@@ -83,6 +87,7 @@ export const STATE_STYLE: Record<TaskState, StateStyle> = {
     badgeClassName: "badge-soft [--badge-color:var(--state-queued)]",
     textClassName: "text-state-queued",
     barClassName: "bg-state-queued",
+    tintClassName: "bg-state-queued/10",
     hint: "Queued, ready to launch",
   },
   running: {
@@ -90,6 +95,7 @@ export const STATE_STYLE: Record<TaskState, StateStyle> = {
     badgeClassName: "badge-soft [--badge-color:var(--state-running)]",
     textClassName: "text-state-running",
     barClassName: "bg-state-running",
+    tintClassName: "bg-state-running/10",
     hint: "A harness is working",
   },
   review: {
@@ -97,6 +103,7 @@ export const STATE_STYLE: Record<TaskState, StateStyle> = {
     badgeClassName: "badge-soft [--badge-color:var(--state-review)]",
     textClassName: "text-state-review",
     barClassName: "bg-state-review",
+    tintClassName: "bg-state-review/10",
     hint: "Waiting for your review",
   },
   parked: {
@@ -104,6 +111,7 @@ export const STATE_STYLE: Record<TaskState, StateStyle> = {
     badgeClassName: "badge-soft [--badge-color:var(--state-parked)]",
     textClassName: "text-state-parked",
     barClassName: "bg-state-parked",
+    tintClassName: "bg-state-parked/10",
     hint: "Paused on quota, resumes automatically",
   },
   failed: {
@@ -111,6 +119,7 @@ export const STATE_STYLE: Record<TaskState, StateStyle> = {
     badgeClassName: "badge-soft [--badge-color:var(--state-failed)]",
     textClassName: "text-state-failed",
     barClassName: "bg-state-failed",
+    tintClassName: "bg-state-failed/10",
     hint: "The run failed, retry to try again",
   },
   done: {
@@ -118,6 +127,7 @@ export const STATE_STYLE: Record<TaskState, StateStyle> = {
     badgeClassName: "badge-soft [--badge-color:var(--state-done)]",
     textClassName: "text-state-done",
     barClassName: "bg-state-done",
+    tintClassName: "bg-state-done/10",
     hint: "Approved and committed",
   },
 };

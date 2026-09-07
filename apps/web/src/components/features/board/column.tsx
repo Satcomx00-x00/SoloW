@@ -30,17 +30,19 @@ export const CARD_ENTRANCE_CLASS = "animate-in fade-in-0 slide-in-from-top-1 dur
  * exist and can draw a Workflow Step with the same markup it always drew a state with.
  */
 export function ColumnHeader({ column, count }: { column: BoardColumn; count: number }) {
-  const { icon: Icon, textClassName, barClassName, hint, label } = column;
+  const { icon: Icon, textClassName, barClassName, tintClassName, hint, label } = column;
   return (
-    <header className="flex shrink-0 items-center gap-2 px-3 pt-3 pb-2.5">
-      <Icon
-        aria-hidden
-        strokeWidth={2.25}
-        className={cn(
-          "size-3.5 shrink-0",
-          count === 0 ? "text-muted-foreground/40" : textClassName,
-        )}
-      />
+    // The head is washed in the column's own colour and the rule across its top is the colour
+    // at full strength — a column reads as itself from across the room, an empty one only
+    // slightly more quietly.
+    <header
+      className={cn(
+        "flex shrink-0 items-center gap-2 border-b border-border/60 px-3 pt-3 pb-2.5",
+        tintClassName,
+        count === 0 && "opacity-70",
+      )}
+    >
+      <Icon aria-hidden strokeWidth={2.25} className={cn("size-3.5 shrink-0", textClassName)} />
       <span
         title={hint}
         className={cn(
@@ -58,15 +60,7 @@ export function ColumnHeader({ column, count }: { column: BoardColumn; count: nu
       >
         {count}
       </span>
-      {/* A short rule in the column's own colour: identity without a coloured header block. */}
-      <span
-        aria-hidden
-        className={cn(
-          "absolute inset-x-3 top-0 h-[2px] rounded-full",
-          count === 0 ? "bg-border" : barClassName,
-          count === 0 ? "opacity-100" : "opacity-70",
-        )}
-      />
+      <span aria-hidden className={cn("absolute inset-x-0 top-0 h-[2px]", barClassName)} />
     </header>
   );
 }

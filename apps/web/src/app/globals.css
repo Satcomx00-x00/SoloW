@@ -6,17 +6,15 @@
 /*
  * SoloW surface system — shadcn/ui's stock "neutral" theme, chroma 0 throughout.
  *
- * This used to carry a blue-violet cast (hue 265) as an elevation cue and seven hued Task-state
- * colours as the primary way to tell a failed run from a finished one at a glance. Both are gone
- * by decision: every base token below is pure grayscale (oklch's second component, chroma, is 0
- * on all of them bar `--destructive`, which shadcn's own neutral theme keeps red), and the
- * Task-state colours are flattened the same way, encoding urgency as *contrast weight* instead
- * of hue — see the comment above `--state-idle`. `--destructive` stays red because it marks an
+ * This used to carry a blue-violet cast (hue 265) as an elevation cue; that is gone by decision,
+ * and every base token below is pure grayscale (oklch's second component, chroma, is 0 on all of
+ * them bar `--destructive`, which shadcn's own neutral theme keeps red). The *Task-state* colours
+ * are the one hued family, on purpose: they are what the board, the step strip and every badge
+ * agree on — see the comment above `--state-idle`. `--destructive` stays red because it marks an
  * irreversible action (delete), a different kind of signal than a Task's lifecycle, and shadcn's
  * own default keeps it apart from the theme for exactly that reason.
  *
- * Every state still carries its own icon (WCAG 1.4.1) — that was true before this change and
- * matters more now that weight, not hue, is the colour signal doing the rest of the work.
+ * Every state still carries its own icon (WCAG 1.4.1): hue is never the only signal.
  */
 
 :root {
@@ -57,20 +55,20 @@
   --grain-opacity: 0;
 
   /*
-   * Task lifecycle colours, flattened to grayscale (this file's header explains why). Weight now
-   * carries what hue used to: `review` is darkest against a light background because it is the
-   * one state waiting on a human and used to be the loudest hue; `parked` is lightest because it
-   * is deliberately the quietest — "nothing for you to do, it resumes by itself" — and used to be
-   * the nearest to greyscale already. `failed` matches `review`'s weight: both need a human, and
-   * the icon is what tells them apart now that colour no longer does.
+   * Task lifecycle colours — the one hued family in the theme, and the same seven every surface
+   * reads: the kanban columns, the state badges, the Workflow step strip and the tool-call pills.
+   * Green is done, blue is running, orange is waiting on a person (review), red is failed;
+   * `ready` is indigo (queued, about to move), `parked` violet (paused, resumes by itself) and
+   * `backlog` stays grey — nothing has happened to it yet. Lightness sits around 0.55 so white
+   * text reads on a filled marker and the hue reads on a white surface.
    */
   --state-idle: oklch(0.55 0 0);
-  --state-queued: oklch(0.4 0 0);
-  --state-running: oklch(0.32 0 0);
-  --state-review: oklch(0.18 0 0);
-  --state-parked: oklch(0.65 0 0);
-  --state-failed: oklch(0.18 0 0);
-  --state-done: oklch(0.42 0 0);
+  --state-queued: oklch(0.52 0.16 275);
+  --state-running: oklch(0.55 0.16 240);
+  --state-review: oklch(0.66 0.17 65);
+  --state-parked: oklch(0.58 0.15 320);
+  --state-failed: oklch(0.58 0.2 27);
+  --state-done: oklch(0.6 0.16 150);
 
   /*
    * The diff editor's own green/red — not a Task-state colour.
@@ -138,14 +136,14 @@
   --shadow-float: 0 2px 6px oklch(0 0 0 / 45%), 0 24px 64px oklch(0 0 0 / 40%);
   --grain-opacity: 0.028;
 
-  /* Inverted from `:root`: on a dark background, more contrast (higher L) is louder. */
-  --state-idle: oklch(0.65 0 0);
-  --state-queued: oklch(0.75 0 0);
-  --state-running: oklch(0.8 0 0);
-  --state-review: oklch(0.92 0 0);
-  --state-parked: oklch(0.55 0 0);
-  --state-failed: oklch(0.92 0 0);
-  --state-done: oklch(0.78 0 0);
+  /* Same hues, lifted: on a dark background a colour needs more lightness to carry. */
+  --state-idle: oklch(0.68 0 0);
+  --state-queued: oklch(0.72 0.13 275);
+  --state-running: oklch(0.75 0.13 240);
+  --state-review: oklch(0.78 0.15 70);
+  --state-parked: oklch(0.72 0.12 320);
+  --state-failed: oklch(0.7 0.18 25);
+  --state-done: oklch(0.75 0.15 150);
 
   --diff-added: oklch(0.72 0.17 145);
   --diff-removed: oklch(0.72 0.19 25);

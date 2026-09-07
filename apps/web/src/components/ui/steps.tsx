@@ -18,8 +18,9 @@ function Steps({ className, ...props }: React.ComponentProps<"ol">) {
 
 /**
  * One colour per state, and never the colour alone: the marker carries a glyph or a number and
- * a screen reader gets the word. Green is done, blue is running, orange is waiting on someone,
- * red is failed, and a step still to come is uncoloured.
+ * a screen reader gets the word. The colours are the Task-state tokens the board's columns and
+ * badges use — green done, blue running, orange waiting on someone (review), red failed — so
+ * a step and the column it corresponds to can never disagree; a step still to come is uncoloured.
  */
 const stepMarkerVariants = cva(
   "relative flex size-5 shrink-0 items-center justify-center rounded-full border font-medium text-2xs tabular-nums transition-colors [&>svg]:size-3",
@@ -27,10 +28,10 @@ const stepMarkerVariants = cva(
     variants: {
       status: {
         upcoming: "border-border bg-background text-muted-foreground",
-        running: "border-sky-500 bg-sky-500 text-white ring-4 ring-sky-500/20",
-        waiting: "border-amber-500 bg-amber-500 text-white ring-4 ring-amber-500/20",
-        done: "border-emerald-500 bg-emerald-500 text-white",
-        failed: "border-red-500 bg-red-500 text-white",
+        running: "border-state-running bg-state-running text-background ring-4 ring-state-running/20",
+        waiting: "border-state-review bg-state-review text-background ring-4 ring-state-review/20",
+        done: "border-state-done bg-state-done text-background",
+        failed: "border-state-failed bg-state-failed text-background",
       },
     },
     defaultVariants: {
@@ -43,10 +44,10 @@ const stepLabelVariants = cva("max-w-64 truncate text-xs", {
   variants: {
     status: {
       upcoming: "text-muted-foreground",
-      running: "font-medium text-sky-600 dark:text-sky-400",
-      waiting: "font-medium text-amber-600 dark:text-amber-400",
+      running: "font-medium text-state-running",
+      waiting: "font-medium text-state-review",
       done: "text-foreground/80",
-      failed: "font-medium text-red-600 dark:text-red-400",
+      failed: "font-medium text-state-failed",
     },
   },
   defaultVariants: {
@@ -77,7 +78,7 @@ function StepMarker({
   return (
     <span aria-hidden className={cn(stepMarkerVariants({ status }), className)}>
       {status === "running" && (
-        <span className="absolute inline-flex size-full animate-ping rounded-full bg-sky-500 opacity-40" />
+        <span className="absolute inline-flex size-full animate-ping rounded-full bg-state-running opacity-40" />
       )}
       <span className="relative inline-flex">
         {status === "done" ? (
@@ -127,7 +128,7 @@ function Step({
           aria-hidden
           className={cn(
             "h-px w-8 shrink-0",
-            status === "done" ? "bg-emerald-500/60" : "bg-border"
+            status === "done" ? "bg-state-done/60" : "bg-border"
           )}
         />
       )}
