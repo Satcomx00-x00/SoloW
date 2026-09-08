@@ -92,7 +92,7 @@ describe("StatusBarSection", () => {
 
     await waitFor(() => expect(preferences.saved().order.length).toBeGreaterThan(0));
     const { order } = preferences.saved();
-    expect(order.indexOf("status.running")).toBeLessThan(order.indexOf("status.tasks"));
+    expect(order.indexOf("status.sync")).toBeLessThan(order.indexOf("status.tasks"));
   });
 
   it("cannot move the first item of a side up, or the last one down", () => {

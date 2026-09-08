@@ -132,6 +132,49 @@ export const STATE_STYLE: Record<TaskState, StateStyle> = {
   },
 };
 
+/**
+ * The `failureReason` values that do not earn a badge of their own, as words.
+ *
+ * Four reasons are drawn individually on the card (`task-card.tsx`) because each has its own
+ * icon and its own next step. Everything else fell through to a badge that printed the raw class
+ * string in monospace — a machine name shown to an Owner who cannot act on it, which is the same
+ * mistake `taskActionMessage` was written to stop the banner making.
+ *
+ * `park_never_resumed` is not hypothetical: the orchestrator's sweep writes it onto a Task that
+ * slept through its quota window, so the board really was rendering that string. Its literal is
+ * repeated here rather than imported because it is defined in the orchestrator
+ * (`apps/orchestrator/src/reconcile.ts`), which the web app does not depend on; `fail` and `park`
+ * are `classifyRunFailure`'s own verdicts.
+ *
+ * The tone matters as much as the wording. A parked Task's reason painted in the failed red
+ * would contradict the violet badge sitting next to it, so each reason names the state whose
+ * colour and glyph it borrows.
+ */
+const FAILURE_REASONS: Record<string, { label: string; tone: TaskState }> = {
+  fail: { label: "Run failed", tone: "failed" },
+  park: { label: "Paused on quota", tone: "parked" },
+  park_never_resumed: { label: "Never resumed", tone: "parked" },
+};
+
+export interface FailureReasonLabel {
+  label: string;
+  /** The state this reason borrows its colour and glyph from. */
+  tone: TaskState;
+  /**
+   * The raw class, and only when the label above is a generic stand-in for a reason this build
+   * does not recognise. A class added upstream should still read as a failure to an Owner while
+   * staying identifiable to whoever is debugging it.
+   */
+  code: string | null;
+}
+
+/** How a `failureReason` with no badge of its own should read. */
+export function failureReasonLabel(reason: string): FailureReasonLabel {
+  const known = FAILURE_REASONS[reason];
+  if (known) return { label: known.label, tone: known.tone, code: null };
+  return { label: "Run failed", tone: "failed", code: reason };
+}
+
 /** The states that are actively moving, so the indicator spins only when work is happening. */
 export const isLiveState = (state: TaskState): boolean => state === "running";
 

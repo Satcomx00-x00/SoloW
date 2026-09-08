@@ -18,9 +18,27 @@ import { StatusBar } from "./status-bar";
  */
 
 const TASKS = [
-  { id: "t1", title: "Keypad", state: "running" },
-  { id: "t2", title: "Gate relay", state: "review" },
-  { id: "t3", title: "Docs", state: "done" },
+  {
+    id: "t1",
+    title: "Keypad",
+    state: "running",
+    workflowId: null,
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  },
+  {
+    id: "t2",
+    title: "Gate relay",
+    state: "review",
+    workflowId: null,
+    updatedAt: "2026-01-01T00:00:01.000Z",
+  },
+  {
+    id: "t3",
+    title: "Docs",
+    state: "done",
+    workflowId: null,
+    updatedAt: "2026-01-01T00:00:02.000Z",
+  },
 ];
 
 function renderBoth() {
@@ -40,13 +58,19 @@ afterEach(cleanup);
 
 describe("arranging the status bar", () => {
   it("moves the segment on the bar, not only the row in Settings", async () => {
+    // Workspace and Local development owner are both left-slot segments and, with the session
+    // signed out, both are the two the bar actually draws next to each other — Signed-in account
+    // sorts between them in Settings' full list (issue #3 lists every registration) but never
+    // renders here, so it cannot be the pair a real move on this bar is asserted against.
     const { bar } = renderBoth();
     await waitFor(() => expect(screen.getByText("3 tasks")).toBeDefined());
-    expect(bar().indexOf("3 tasks")).toBeLessThan(bar().indexOf("1 running"));
+    expect(bar().indexOf("local workspace")).toBeLessThan(bar().indexOf("dev owner"));
 
-    fireEvent.click(screen.getByRole("button", { name: "Move Task count down" }));
+    fireEvent.click(screen.getByRole("button", { name: "Move Workspace down" }));
 
-    await waitFor(() => expect(bar().indexOf("1 running")).toBeLessThan(bar().indexOf("3 tasks")));
+    await waitFor(() =>
+      expect(bar().indexOf("dev owner")).toBeLessThan(bar().indexOf("local workspace")),
+    );
   });
 
   it("takes a segment off the bar when it is unticked, and puts it back when it is re-ticked", async () => {

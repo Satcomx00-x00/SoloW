@@ -15,6 +15,7 @@ import type { ReactNode } from "react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   CREDENTIAL_EXPIRED_REASON,
+  failureReasonLabel,
   INTERRUPTED_REASON,
   needsAttention,
   PARTIAL_INTEGRATION_REASON,
@@ -26,6 +27,36 @@ import { waitingOn } from "./blockers";
 import { useBoardReferences } from "./board-references";
 import { IssueMenu } from "./issue-menu";
 import { TaskStateBadge } from "./task-state-badge";
+
+/**
+ * Every `failureReason` that does not earn a badge of its own, in words rather than as its raw
+ * class string — see `failureReasonLabel`, which owns the whole mapping so a reason added
+ * upstream cannot leak a machine name onto a card the way it used to.
+ *
+ * The glyph and colour come from the state the reason belongs to, so a Task parked past its
+ * window reads violet like the badge beside it instead of contradicting it in red.
+ */
+function FailureBadge({ reason }: { reason: string }) {
+  const { label, tone, code } = failureReasonLabel(reason);
+  const Icon = STATE_STYLE[tone].icon;
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded border px-1.5 py-px text-2xs",
+        STATE_STYLE[tone].badgeClassName,
+      )}
+    >
+      <Icon className="size-3 shrink-0" aria-hidden strokeWidth={2.25} />
+      {label}
+      {/*
+        The raw class, for whoever is debugging a reason this build does not recognise yet.
+        Announced rather than hovered: a `title` here would be mouse-only, and the card already
+        carries two explanations that way.
+      */}
+      {code ? <span className="sr-only"> (reason: {code})</span> : null}
+    </span>
+  );
+}
 
 /**
  * A single Task card on the board.
@@ -253,14 +284,7 @@ export function TaskCard({
                 Partly integrated
               </span>
             ) : task.failureReason ? (
-              <span
-                className={cn(
-                  "inline-flex items-center gap-1 rounded border px-1.5 py-px font-mono text-2xs",
-                  STATE_STYLE.failed.badgeClassName,
-                )}
-              >
-                {task.failureReason}
-              </span>
+              <FailureBadge reason={task.failureReason} />
             ) : null}
             {extraRepositories > 0 ? (
               <span

@@ -48,6 +48,31 @@
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
 
+  /*
+   * The output well: the transcript and the raw patch, the two surfaces that are read the way a
+   * terminal is. One step *below* the field rather than above it, because output is something the
+   * page is looking into rather than a panel sitting on it — and chroma 0 like the rest of the
+   * chrome, since a well is not a signal.
+   */
+  --terminal: oklch(0.97 0 0);
+
+  /*
+   * A fourth family: how an *action* went, as opposed to where a Task is in its life.
+   *
+   * These start at the same values as `--state-done` / `--state-failed` / `--state-review` and
+   * that is the point — they are a seam, not a new palette. Settings had borrowed the lifecycle
+   * tokens in sixteen places to say "saved", "that command was not found", "this one asks before
+   * it acts", none of which is a Task state. The Three Families Rule exists because families that
+   * share a token cannot be retuned apart: today, warming the Review amber would silently restyle
+   * every permission badge in Settings. Now it would not.
+   */
+  --feedback-ok: oklch(0.6 0.16 150);
+  --feedback-error: oklch(0.58 0.2 27);
+  --feedback-caution: oklch(0.66 0.17 65);
+  /* A fourth member, for the same reason the other three exist: a tool call in flight, or a
+     stream reconnecting, is an action in progress and not a Task that is Running. */
+  --feedback-busy: oklch(0.55 0.16 240);
+
   /* Edge highlight and cast shadow, tuned per theme so panels read as physical. Pure black/white. */
   --edge-highlight: oklch(1 0 0 / 0%);
   --shadow-panel: 0 1px 2px oklch(0 0 0 / 6%), 0 8px 24px oklch(0 0 0 / 6%);
@@ -130,6 +155,13 @@
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
 
+  --terminal: oklch(0.13 0 0);
+
+  --feedback-ok: oklch(0.75 0.15 150);
+  --feedback-error: oklch(0.7 0.18 25);
+  --feedback-caution: oklch(0.78 0.15 70);
+  --feedback-busy: oklch(0.75 0.13 240);
+
   /* A 1px top highlight is what stops a dark panel reading as a hole in the page. */
   --edge-highlight: oklch(1 0 0 / 5%);
   --shadow-panel: 0 1px 2px oklch(0 0 0 / 40%), 0 8px 24px oklch(0 0 0 / 22%);
@@ -147,6 +179,17 @@
 
   --diff-added: oklch(0.72 0.17 145);
   --diff-removed: oklch(0.72 0.19 25);
+  /*
+   * The other two things a file can be, which the diff family had no words for.
+   *
+   * `M` and `R` in a source-control list were borrowing `--state-running` and `--state-parked` —
+   * Working Blue and Paused Violet, two Task lifecycle states — so a modified file was coloured
+   * "a harness is working on it" and a renamed one "paused on quota". Retuning either lifecycle
+   * hue would have silently restyled every file glyph in the review panel. Same values, own
+   * family, separable from now on.
+   */
+  --diff-modified: oklch(0.75 0.13 240);
+  --diff-moved: oklch(0.72 0.12 320);
 
   /* GitHub's own dark-dimmed values: #57AB5A open, #986EE2 closed/merged. */
   --scm-open: oklch(0.68 0.13 145);
@@ -228,6 +271,13 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
 
+  --color-terminal: var(--terminal);
+
+  --color-feedback-ok: var(--feedback-ok);
+  --color-feedback-error: var(--feedback-error);
+  --color-feedback-caution: var(--feedback-caution);
+  --color-feedback-busy: var(--feedback-busy);
+
   --color-state-idle: var(--state-idle);
   --color-state-queued: var(--state-queued);
   --color-state-running: var(--state-running);
@@ -238,6 +288,8 @@
 
   --color-diff-added: var(--diff-added);
   --color-diff-removed: var(--diff-removed);
+  --color-diff-modified: var(--diff-modified);
+  --color-diff-moved: var(--diff-moved);
 
   --color-scm-open: var(--scm-open);
   --color-scm-closed: var(--scm-closed);

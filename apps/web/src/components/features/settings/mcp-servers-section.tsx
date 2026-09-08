@@ -4,14 +4,6 @@ import type { McpConfigValue, McpServerDto, McpServerTransport } from "@solow/co
 import { Globe, KeyRound, Plug, Plus, Store, Terminal, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -27,6 +19,7 @@ import { newRowId } from "@/lib/row-id";
 import { trpc } from "@/trpc/react";
 import { LibraryEmpty, LibraryForm, LibraryQueryState, LibraryRow } from "./library-ui";
 import { McpStoreDialog } from "./mcp-store-dialog";
+import { SectionStatus, SettingsEmpty, SettingsLoading, SettingsSection } from "./settings-shell";
 
 /**
  * The MCP server library (spec F24): what a harness can be handed to call, kept in one place.
@@ -247,221 +240,231 @@ export function McpServersSection() {
   const secretOptions = (secrets.data ?? []).map((s) => ({ id: s.id, name: s.name }));
   const usable = !servers.error;
 
+  const enabledCount = list.filter((server) => server.enabled).length;
+
   return (
-    <Card id="mcp-servers" className="scroll-mt-16">
-      <CardHeader>
-        <CardTitle>MCP servers</CardTitle>
-        <CardDescription>
-          Tools a harness can call. <em>Every harness</em> loads one into every run; otherwise only
-          the Workflow Steps that name it do.
-        </CardDescription>
-        {usable && !adding && (
-          <CardAction className="flex items-center gap-2">
+    <SettingsSection
+      caption="Tools a harness can call. Every harness loads an enabled one into every run; otherwise only the Workflow Steps that name it do."
+      id="mcp-servers"
+      status={
+        servers.isSuccess ? (
+          <SectionStatus tone={enabledCount > 0 ? "active" : "idle"}>
+            {list.length === 0 ? "None installed" : `${enabledCount} of ${list.length} enabled`}
+          </SectionStatus>
+        ) : null
+      }
+      title="MCP servers"
+    >
+      <LibraryQueryState error={servers.error} />
+      {usable && !adding && (
+        <div className="flex items-center gap-2">
+          <McpStoreDialog
+            installed={list}
+            onInstalled={(name) => setInstalled(name)}
+            trigger={
+              <Button size="sm" type="button" variant="outline">
+                <Store aria-hidden />
+                Store
+              </Button>
+            }
+          />
+          <Button onClick={() => setAdding(true)} size="sm" type="button" variant="outline">
+            <Plus aria-hidden />
+            New MCP server
+          </Button>
+        </div>
+      )}
+      {installed && (
+        <p className="text-feedback-ok text-sm" role="status">
+          Installed <span className="font-mono">{installed}</span> from the store — switched off
+          until you turn it on or a Step names it.
+        </p>
+      )}
+
+      {servers.isPending && <SettingsLoading rows={2} />}
+      {usable && servers.isSuccess && list.length === 0 && !adding && (
+        <SettingsEmpty>
+          No MCP servers installed. A harness can only call the tools it is handed.
+        </SettingsEmpty>
+      )}
+      {usable && list.length > 0 && (
+        <ul aria-label="MCP servers" className="-mx-1 divide-y">
+          {list.map((server) => (
+            <LibraryRow
+              key={server.id}
+              icon={server.transport.kind === "stdio" ? Terminal : Globe}
+              name={server.name}
+              flavour={server.transport.kind}
+              description={server.description}
+              detail={describeTransport(server.transport)}
+              enabled={server.enabled}
+              onEnabled={(on) => update.mutate({ id: server.id, enabled: on })}
+              removeTitle={`Remove "${server.name}"?`}
+              removeDescription="Harnesses stop being handed it on their next run. Refused while a Workflow Step still names it."
+              removeLabel="Remove server"
+              onRemove={() => remove.mutate({ id: server.id })}
+            />
+          ))}
+        </ul>
+      )}
+      {usable && servers.data?.length === 0 && !adding && (
+        <LibraryEmpty
+          icon={Plug}
+          title="No MCP servers yet"
+          hint="Install one from the store, or add a command the harness spawns or a URL it connects to — then switch it on for every harness or name it from a Workflow Step."
+          action="New MCP server"
+          onAdd={() => setAdding(true)}
+          secondary={
             <McpStoreDialog
               installed={list}
               onInstalled={(name) => setInstalled(name)}
               trigger={
                 <Button type="button" variant="outline" size="sm">
                   <Store aria-hidden />
-                  Store
+                  Browse the store
                 </Button>
               }
             />
-            <Button type="button" variant="outline" size="sm" onClick={() => setAdding(true)}>
-              <Plus aria-hidden />
-              New MCP server
-            </Button>
-          </CardAction>
-        )}
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <LibraryQueryState error={servers.error} />
-        {installed && (
-          <p className="text-sm text-state-done" role="status">
-            Installed <span className="font-mono">{installed}</span> from the store — switched off
-            until you turn it on or a Step names it.
-          </p>
-        )}
+          }
+        />
+      )}
+      {(update.error || remove.error) && (
+        <p className="font-mono text-feedback-error text-xs" role="alert">
+          {(update.error ?? remove.error)?.message}
+        </p>
+      )}
 
-        {usable && list.length > 0 && (
-          <ul className="divide-y rounded-lg border" aria-label="MCP servers">
-            {list.map((server) => (
-              <LibraryRow
-                key={server.id}
-                icon={server.transport.kind === "stdio" ? Terminal : Globe}
-                name={server.name}
-                flavour={server.transport.kind}
-                description={server.description}
-                detail={describeTransport(server.transport)}
-                enabled={server.enabled}
-                onEnabled={(on) => update.mutate({ id: server.id, enabled: on })}
-                removeTitle={`Remove "${server.name}"?`}
-                removeDescription="Harnesses stop being handed it on their next run. Refused while a Workflow Step still names it."
-                removeLabel="Remove server"
-                onRemove={() => remove.mutate({ id: server.id })}
+      {usable && adding && (
+        <LibraryForm
+          title="New MCP server"
+          onCancel={() => setAdding(false)}
+          onSubmit={() => {
+            const built = transport();
+            if (!built) return;
+            create.mutate({
+              name: name.trim(),
+              ...(description.trim() ? { description: description.trim() } : {}),
+              transport: built,
+              enabled,
+            });
+          }}
+        >
+          <div className="grid gap-4 sm:grid-cols-[1fr_12rem]">
+            <div className="grid gap-2">
+              <Label htmlFor="mcp-name">Name</Label>
+              <Input
+                id="mcp-name"
+                placeholder="github"
+                className="font-mono"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                required
               />
-            ))}
-          </ul>
-        )}
-        {usable && servers.data?.length === 0 && !adding && (
-          <LibraryEmpty
-            icon={Plug}
-            title="No MCP servers yet"
-            hint="Install one from the store, or add a command the harness spawns or a URL it connects to — then switch it on for every harness or name it from a Workflow Step."
-            action="New MCP server"
-            onAdd={() => setAdding(true)}
-            secondary={
-              <McpStoreDialog
-                installed={list}
-                onInstalled={(name) => setInstalled(name)}
-                trigger={
-                  <Button type="button" variant="outline" size="sm">
-                    <Store aria-hidden />
-                    Browse the store
-                  </Button>
-                }
-              />
-            }
-          />
-        )}
-        {(update.error || remove.error) && (
-          <p className="font-mono text-state-failed text-xs" role="alert">
-            {(update.error ?? remove.error)?.message}
-          </p>
-        )}
-
-        {usable && adding && (
-          <LibraryForm
-            title="New MCP server"
-            onCancel={() => setAdding(false)}
-            onSubmit={() => {
-              const built = transport();
-              if (!built) return;
-              create.mutate({
-                name: name.trim(),
-                ...(description.trim() ? { description: description.trim() } : {}),
-                transport: built,
-                enabled,
-              });
-            }}
-          >
-            <div className="grid gap-4 sm:grid-cols-[1fr_12rem]">
-              <div className="grid gap-2">
-                <Label htmlFor="mcp-name">Name</Label>
-                <Input
-                  id="mcp-name"
-                  placeholder="github"
-                  className="font-mono"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  required
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="mcp-kind">Transport</Label>
-                <Select
-                  value={kind}
-                  onValueChange={(v) => {
-                    setKind(v as McpServerTransport["kind"]);
-                    setValues([]);
-                  }}
-                >
-                  <SelectTrigger id="mcp-kind" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="stdio">Command (stdio)</SelectItem>
-                    <SelectItem value="http">Remote URL (HTTP)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="mcp-description">Description</Label>
-              <Input
-                id="mcp-description"
-                placeholder="What it gives the harness"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-              />
+              <Label htmlFor="mcp-kind">Transport</Label>
+              <Select
+                value={kind}
+                onValueChange={(v) => {
+                  setKind(v as McpServerTransport["kind"]);
+                  setValues([]);
+                }}
+              >
+                <SelectTrigger id="mcp-kind" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="stdio">Command (stdio)</SelectItem>
+                  <SelectItem value="http">Remote URL (HTTP)</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
-            {kind === "stdio" ? (
-              <div className="grid gap-2">
-                <Label htmlFor="mcp-command">Command</Label>
-                <Input
-                  id="mcp-command"
-                  placeholder="npx -y @modelcontextprotocol/server-github"
-                  className="font-mono"
-                  value={commandLine}
-                  aria-invalid={commandLine.trim() !== "" && commandError !== null}
-                  aria-describedby="mcp-command-hint"
-                  onChange={(e) => setCommandLine(e.target.value)}
-                  required
-                />
-                <p id="mcp-command-hint" className="text-2xs text-muted-foreground">
-                  {commandLine.trim() !== "" && commandError ? (
-                    <span className="text-state-failed">{commandError}</span>
-                  ) : parsed && !("error" in parsed) && parsed.args.length > 0 ? (
-                    <>
-                      Runs <span className="font-mono">{parsed.command}</span> with{" "}
-                      {parsed.args.length} argument{parsed.args.length === 1 ? "" : "s"}:{" "}
-                      <span className="font-mono">
-                        {parsed.args.map((arg) => JSON.stringify(arg)).join(", ")}
-                      </span>
-                    </>
-                  ) : (
-                    "As you would type it in a shell — quote an argument that has a space in it."
-                  )}
-                </p>
-              </div>
-            ) : (
-              <div className="grid gap-2">
-                <Label htmlFor="mcp-url">URL</Label>
-                <Input
-                  id="mcp-url"
-                  type="url"
-                  placeholder="https://mcp.example.com/mcp"
-                  className="font-mono"
-                  value={url}
-                  onChange={(e) => setUrl(e.target.value)}
-                  required
-                />
-                <p className="text-2xs text-muted-foreground">
-                  A Streamable HTTP or SSE endpoint: a hosted server, or a gateway in front of many
-                  — agentgateway's <span className="font-mono">/mcp</span>, for one. When it wants a
-                  token, add an <span className="font-mono">Authorization</span> header from a
-                  Secret with the <span className="font-mono">Bearer </span> prefix.
-                </p>
-              </div>
-            )}
-            <ValueRows
-              label={kind === "stdio" ? "Environment" : "Headers"}
-              noun={kind === "stdio" ? "variable" : "header"}
-              rows={values}
-              onChange={setValues}
-              secrets={secretOptions}
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="mcp-description">Description</Label>
+            <Input
+              id="mcp-description"
+              placeholder="What it gives the harness"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
             />
-            <div className="flex items-center justify-between gap-3 border-t pt-4">
-              <div className="flex items-center gap-2 text-sm">
-                <Checkbox
-                  id="mcp-enabled"
-                  checked={enabled}
-                  onCheckedChange={(checked) => setEnabled(checked === true)}
-                />
-                <Label htmlFor="mcp-enabled">Load in every harness</Label>
-              </div>
-              <Button type="submit" loading={create.isPending} disabled={commandError !== null}>
-                Add MCP server
-              </Button>
-            </div>
-            {create.error && (
-              <p className="font-mono text-state-failed text-xs" role="alert">
-                {create.error.message}
+          </div>
+          {kind === "stdio" ? (
+            <div className="grid gap-2">
+              <Label htmlFor="mcp-command">Command</Label>
+              <Input
+                id="mcp-command"
+                placeholder="npx -y @modelcontextprotocol/server-github"
+                className="font-mono"
+                value={commandLine}
+                aria-invalid={commandLine.trim() !== "" && commandError !== null}
+                aria-describedby="mcp-command-hint"
+                onChange={(e) => setCommandLine(e.target.value)}
+                required
+              />
+              <p id="mcp-command-hint" className="text-2xs text-muted-foreground">
+                {commandLine.trim() !== "" && commandError ? (
+                  <span className="text-feedback-error">{commandError}</span>
+                ) : parsed && !("error" in parsed) && parsed.args.length > 0 ? (
+                  <>
+                    Runs <span className="font-mono">{parsed.command}</span> with{" "}
+                    {parsed.args.length} argument{parsed.args.length === 1 ? "" : "s"}:{" "}
+                    <span className="font-mono">
+                      {parsed.args.map((arg) => JSON.stringify(arg)).join(", ")}
+                    </span>
+                  </>
+                ) : (
+                  "As you would type it in a shell — quote an argument that has a space in it."
+                )}
               </p>
-            )}
-          </LibraryForm>
-        )}
-      </CardContent>
-    </Card>
+            </div>
+          ) : (
+            <div className="grid gap-2">
+              <Label htmlFor="mcp-url">URL</Label>
+              <Input
+                id="mcp-url"
+                type="url"
+                placeholder="https://mcp.example.com/mcp"
+                className="font-mono"
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                required
+              />
+              <p className="text-2xs text-muted-foreground">
+                A Streamable HTTP or SSE endpoint: a hosted server, or a gateway in front of many —
+                agentgateway's <span className="font-mono">/mcp</span>, for one. When it wants a
+                token, add an <span className="font-mono">Authorization</span> header from a Secret
+                with the <span className="font-mono">Bearer </span> prefix.
+              </p>
+            </div>
+          )}
+          <ValueRows
+            label={kind === "stdio" ? "Environment" : "Headers"}
+            noun={kind === "stdio" ? "variable" : "header"}
+            rows={values}
+            onChange={setValues}
+            secrets={secretOptions}
+          />
+          <div className="flex items-center justify-between gap-3 border-t pt-4">
+            <div className="flex items-center gap-2 text-sm">
+              <Checkbox
+                id="mcp-enabled"
+                checked={enabled}
+                onCheckedChange={(checked) => setEnabled(checked === true)}
+              />
+              <Label htmlFor="mcp-enabled">Load in every harness</Label>
+            </div>
+            <Button type="submit" loading={create.isPending} disabled={commandError !== null}>
+              Add MCP server
+            </Button>
+          </div>
+          {create.error && (
+            <p className="font-mono text-feedback-error text-xs" role="alert">
+              {create.error.message}
+            </p>
+          )}
+        </LibraryForm>
+      )}
+    </SettingsSection>
   );
 }

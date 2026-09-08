@@ -44,9 +44,9 @@ const GROUP_LABEL: Record<ScmGroup, string> = {
 const LETTER_TONE: Record<string, string> = {
   A: "text-diff-added",
   "?": "text-diff-added",
-  M: "text-state-running",
-  R: "text-state-parked",
-  C: "text-state-parked",
+  M: "text-diff-modified",
+  R: "text-diff-moved",
+  C: "text-diff-moved",
   D: "text-diff-removed",
   U: "text-diff-removed",
 };

@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
 /** A line's role in the patch, from its first character. */
 export function lineTone(line: string): string {
   if (line.startsWith("+++") || line.startsWith("---")) return "text-muted-foreground/60";
-  if (line.startsWith("@@")) return "text-state-parked";
+  if (line.startsWith("@@")) return "text-diff-moved";
   if (line.startsWith("+")) return "text-diff-added";
   if (line.startsWith("-")) return "text-diff-removed";
   if (line.startsWith("diff --git")) return "text-muted-foreground font-medium";
@@ -37,7 +37,7 @@ export function PatchView({
   return (
     <section
       aria-label={label}
-      className="surface-edge flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-[oklch(0.13_0.008_265)]"
+      className="surface-edge flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-terminal"
     >
       <pre className="min-h-0 flex-1 overflow-auto p-3 font-mono text-xs leading-[1.6]">
         {patch.split("\n").map((line, index) => (

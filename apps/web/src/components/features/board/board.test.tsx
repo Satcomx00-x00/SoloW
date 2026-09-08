@@ -1,18 +1,35 @@
 /// <reference types="bun-types" />
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import { CommonErrorCode, type TaskDto, TaskErrorCode, type TaskState } from "@solow/contracts";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { BOARD_COLUMNS, STATE_LABELS } from "@/lib/task-states";
 import { WorkspaceEventsProvider } from "@/lib/workspace-events";
 import { type FakeSocket, installFakeWebSocket, renderWithTrpc } from "@/test/trpc-harness";
-import { Board } from "./board";
 
 /**
  * Wired board tests (tasks TASK-021 / TASK-024). Unlike the `BoardView` prop tests, these drive
  * the real component — its tRPC queries, its per-card actions and its realtime subscription —
  * to prove the board reflects a run advancing in the background without a reload.
+ *
+ * `next/navigation` is stubbed locally, the same way `secrets-section.test.tsx` documents:
+ * `Board` now reads `?column=` (the sidebar's scroll-to-column link) via `useSearchParams`, and a
+ * shared partial stub from whichever sibling file bun loads first is a leak waiting to break the
+ * next consumer.
  */
+let searchParams = new URLSearchParams();
+mock.module("next/navigation", () => ({
+  useRouter: () => ({ push: () => {}, replace: () => {}, refresh: () => {} }),
+  usePathname: () => "/projects/proj-1/board",
+  useSearchParams: () => searchParams,
+  useParams: () => ({}),
+}));
+
+const { Board } = await import("./board");
+
+beforeEach(() => {
+  searchParams = new URLSearchParams();
+});
 
 function makeTask(over: Partial<TaskDto> & { id: string; state: TaskState }): TaskDto {
   return {
@@ -180,6 +197,85 @@ describe("Board (wired)", () => {
       // was shown TASK_CONCURRENCY_CAP_REACHED and left to guess.
       expect(alert).not.toContain(TaskErrorCode.ConcurrencyCapReached);
     });
+  });
+
+  it("keeps every other card launchable while one launch is in flight", async () => {
+    // The board's whole premise is running several harnesses at once. A board-wide `busy` flag
+    // used to be ORed across the move/launch/retry mutations and passed to `disabled` on every
+    // card, so launching one Task greyed out Launch on all the others and six Ready Tasks meant
+    // six waits. The cap that actually matters is enforced by `task.launch` and arrives as a
+    // sentence in the banner; a disabled button only ever hid that refusal.
+    let release: (() => void) | undefined;
+    const launched: string[] = [];
+    renderWithTrpc(
+      <Live>
+        <Board />
+      </Live>,
+      {
+        ...ticket,
+        "task.list": () => ({
+          items: [
+            makeTask({ id: "task-1", state: "ready", title: "First" }),
+            makeTask({ id: "task-2", state: "ready", title: "Second" }),
+          ],
+          nextCursor: null,
+        }),
+        "task.dependencies": () => [],
+        // Held open so the assertion runs while the first launch is genuinely still pending.
+        "task.launch": async (input: unknown) => {
+          launched.push((input as { id: string }).id);
+          await new Promise<void>((resolve) => {
+            release = resolve;
+          });
+          return { ok: true };
+        },
+      },
+    );
+
+    const buttons = await screen.findAllByRole("button", { name: "Launch" });
+    expect(buttons).toHaveLength(2);
+    fireEvent.click(buttons[0] as HTMLElement);
+
+    await waitFor(() => expect(launched).toEqual(["task-1"]));
+    // The clicked card blocks itself — `loading` disables it, so a pending launch cannot be
+    // double-submitted — and the other card stays live.
+    expect((buttons[0] as HTMLButtonElement).disabled).toBe(true);
+    expect((buttons[1] as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(buttons[1] as HTMLElement);
+    await waitFor(() => expect(launched).toEqual(["task-1", "task-2"]));
+    act(() => release?.());
+  });
+
+  it("puts the error banner away when it is dismissed", async () => {
+    // It had no dismiss: a refused action's sentence sat over the columns until the next action
+    // of the same kind replaced it, so a message about a Task already dealt with stayed on screen
+    // and the only way to be rid of it was to do something else that could also fail.
+    renderWithTrpc(
+      <Live>
+        <Board />
+      </Live>,
+      {
+        ...ticket,
+        "task.list": () => ({
+          items: [makeTask({ id: "task-1", state: "ready", title: "Launchable" })],
+          nextCursor: null,
+        }),
+        "task.dependencies": () => [],
+        "task.launch": () => {
+          throw new Error(TaskErrorCode.ConcurrencyCapReached);
+        },
+      },
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Launch" }));
+    await waitFor(() => expect(screen.getByRole("alert")).toBeDefined());
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+
+    // Gone for good: the sentence is derived from the mutation's own error, so dismissing has to
+    // reset the mutation or the banner returns on the next render.
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
   });
 
   it("falls back to a sentence for a code it does not know, rather than leaking it", async () => {

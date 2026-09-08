@@ -3,7 +3,11 @@ import {
   DEFAULT_SURFACE_LAYOUT,
   DEFAULT_TASK_PANE_LAYOUT,
   ok,
+  RECENT_TASKS_MAX,
+  RECENT_TASKS_PREFERENCE_KEY,
+  type RecentTasksDto,
   type Result,
+  recentTaskIdsSchema,
   type SetSurfaceLayoutInput,
   type SurfaceKey,
   type SurfaceLayout,
@@ -131,4 +135,68 @@ export async function setTaskPaneLayout(
     });
 
   return ok({ workspaceId: ctx.workspaceId, userId: ctx.userId, layout });
+}
+
+/**
+ * The sidebar's memory of which Tasks you were just on (spec F03 follow-on) — the same
+ * read-parse-or-default shape as the pair above, degrading to an empty list rather than failing
+ * the read for the same reason: a corrupt or stale row is a lost convenience, not an outage.
+ */
+export async function getRecentTasks(ctx: RequestContext): Promise<Result<RecentTasksDto>> {
+  const [row] = await ctx.db
+    .select({ value: uiPreference.value })
+    .from(uiPreference)
+    .where(
+      and(
+        eq(uiPreference.workspaceId, ctx.workspaceId),
+        eq(uiPreference.userId, ctx.userId),
+        eq(uiPreference.key, RECENT_TASKS_PREFERENCE_KEY),
+      ),
+    )
+    .limit(1);
+
+  const parsed = recentTaskIdsSchema.safeParse(row?.value);
+  return ok({
+    workspaceId: ctx.workspaceId,
+    userId: ctx.userId,
+    taskIds: parsed.success ? parsed.data : [],
+  });
+}
+
+/**
+ * Move a Task to the front of the list, deduplicated, capped at `RECENT_TASKS_MAX`.
+ *
+ * Read-modify-write rather than an upsert with a database-side array operation: sqlite has none,
+ * and the list is short enough (five ids) that the round trip costs nothing next to the request
+ * it rides in on — recording a visit happens once per Task page mount, never in a loop. A race
+ * between two tabs recording different Tasks in the same instant can only ever reorder which of
+ * the two ends up first; neither is dropped, because each write starts from what the other one
+ * left, one request later.
+ */
+export async function recordRecentTask(
+  ctx: RequestContext,
+  taskId: string,
+): Promise<Result<RecentTasksDto>> {
+  const current = await getRecentTasks(ctx);
+  if (!current.ok) return current;
+
+  const next = [taskId, ...current.data.taskIds.filter((id) => id !== taskId)].slice(
+    0,
+    RECENT_TASKS_MAX,
+  );
+  const now = new Date().toISOString();
+  await ctx.db
+    .insert(uiPreference)
+    .values({
+      workspaceId: ctx.workspaceId,
+      userId: ctx.userId,
+      key: RECENT_TASKS_PREFERENCE_KEY,
+      value: next,
+    })
+    .onConflictDoUpdate({
+      target: [uiPreference.workspaceId, uiPreference.userId, uiPreference.key],
+      set: { value: next, updatedAt: now },
+    });
+
+  return ok({ workspaceId: ctx.workspaceId, userId: ctx.userId, taskIds: next });
 }

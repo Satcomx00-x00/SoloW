@@ -144,12 +144,29 @@ export interface RepositoryEnrichment {
   provider: string | null;
   integrationBaseUrl: string | null;
   issueCount: number;
+  /**
+   * What else holds this Repository, so Settings can offer a Disconnect that explains itself.
+   *
+   * Part of the enrichment rather than of the row for the same reason the Issue count is: these
+   * are joins, and this module maps rows. Optional for the same reason the rest of this interface
+   * is defaulted — a caller with no Disconnect to draw should not have to pay for three counts, or
+   * even to mention them.
+   */
+  usage?: RepositoryDto["usage"] | undefined;
 }
+
+/** "Nothing holds it, as far as this caller asked" — the honest default for an unenriched map. */
+const NO_REPOSITORY_USAGE: RepositoryDto["usage"] = {
+  taskCount: 0,
+  projectCount: 0,
+  changeRequestCount: 0,
+};
 
 const NO_ENRICHMENT: RepositoryEnrichment = {
   provider: null,
   integrationBaseUrl: null,
   issueCount: 0,
+  usage: NO_REPOSITORY_USAGE,
 };
 
 export function repositoryToDto(
@@ -166,6 +183,7 @@ export function repositoryToDto(
     provider: enrichment.provider,
     integrationBaseUrl: enrichment.integrationBaseUrl,
     issueCount: enrichment.issueCount,
+    usage: enrichment.usage ?? NO_REPOSITORY_USAGE,
     // Coalesced because the column was added to a populated table (issue #52): a row written
     // before the migration reads back as null, and the DTO promises a list.
     setupFilePatterns: row.setupFilePatterns ?? [],

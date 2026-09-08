@@ -280,6 +280,7 @@ describe("mappers", () => {
         provider: null,
         integrationBaseUrl: null,
         issueCount: 0,
+        usage: { taskCount: 0, projectCount: 0, changeRequestCount: 0 },
         setupFilePatterns: [".env"],
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z",

@@ -62,9 +62,10 @@ describe("ToolCall", () => {
 
     const details = container.querySelector("[data-tool-call]") as HTMLElement;
     expect(details.getAttribute("data-tool-status")).toBe("failed");
-    // Tinted with the same token the board uses for a failed Task, and never colour alone: the
-    // pill and the result heading both say the word.
-    expect(details.className).toContain("state-failed");
+    // Marked with the *feedback* token, not the board's Failed-Task one — a tool call that failed
+    // is not a failed Task. A border rather than a wash, because the pill and the result heading
+    // already say the word; never colour alone either way.
+    expect(details.className).toContain("feedback-error");
     expect(screen.getAllByText("Failed").length).toBe(2);
   });
 

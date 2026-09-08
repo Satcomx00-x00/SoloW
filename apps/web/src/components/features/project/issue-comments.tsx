@@ -30,9 +30,9 @@ function Comment({ comment }: { comment: IssueCommentDto }) {
   return (
     <article className="rounded-lg border bg-card/40">
       <header className="flex items-center gap-2 border-b px-3 py-2">
-        <Avatar className="size-5 shrink-0">
+        <Avatar className="shrink-0" size="xs">
           {comment.author?.avatarUrl ? <AvatarImage src={comment.author.avatarUrl} alt="" /> : null}
-          <AvatarFallback className="text-[9px] uppercase">{login.slice(0, 2)}</AvatarFallback>
+          <AvatarFallback>{login.slice(0, 2)}</AvatarFallback>
         </Avatar>
         <span className="min-w-0 truncate font-medium text-xs">
           {comment.author?.name ?? login}

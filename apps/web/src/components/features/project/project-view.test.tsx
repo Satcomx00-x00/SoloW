@@ -1,6 +1,6 @@
 /// <reference types="bun-types" />
 
-import { afterEach, describe, expect, it, mock } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import type { IssueDto, ProjectDto, ProjectFieldDto, ProjectViewDto } from "@solow/contracts";
 import { DEFAULT_PROJECT_VIEW_CONFIG } from "@solow/contracts";
 import { formatProjectFilter, parseProjectFilter } from "@solow/core";
@@ -35,6 +35,11 @@ mock.module("next/navigation", () => ({
 const { ProjectView } = await import("./project-view");
 
 afterEach(cleanup);
+// Every test in this file mounts the same `projectId`/view-id pair, and the draft persistence
+// this page now does (see `project-view-draft.ts`) writes real `localStorage` — the one piece of
+// state in this suite that a component `cleanup()` does not touch. Left uncleared, an earlier
+// test's "click Roadmap" leaks into a later test that never asked for it and expects the default.
+beforeEach(() => window.localStorage.clear());
 
 const TIMESTAMPS = { createdAt: "2026-08-25T00:00:00.000Z", updatedAt: "2026-08-25T00:00:00.000Z" };
 
@@ -590,6 +595,228 @@ describe("starting a task from a row", () => {
   });
 });
 
+/**
+ * Checking several rows and launching them together on one Workflow (user request 2026-09-08).
+ *
+ * Every row in `ITEMS` already carries a `repositoryId`, which is what the row-level "Start a
+ * task" flow above needs too — the same eligibility this bulk action reuses (`ineligibleReason`),
+ * so this suite does not have to invent a second fixture project just to prove the guard works.
+ */
+describe("launching several selected issues at once", () => {
+  const launchDialogHandlers = {
+    "profile.agent.list": () => ({
+      items: [{ id: "harness-1", name: "Claude" }],
+      nextCursor: null,
+    }),
+    "profile.executor.list": () => ({ items: [{ id: "exec-1", name: "Local" }], nextCursor: null }),
+  };
+
+  const allRowsHandlers = () => ({
+    ...handlers("ada-on-the-host"),
+    ...launchDialogHandlers,
+    "project.views": () => [{ ...MY_ITEMS, name: "All", config: DEFAULT_PROJECT_VIEW_CONFIG }],
+  });
+
+  /** The row's own checkbox — the table draws exactly one per row once selection is on. */
+  async function check(title: string): Promise<void> {
+    const row = (await screen.findByText(title)).closest("tr");
+    if (!row) throw new Error(`no row for "${title}"`);
+    fireEvent.click(within(row as HTMLElement).getByRole("checkbox"));
+  }
+
+  async function openBulkMenuOn(title: string): Promise<HTMLElement> {
+    const row = (await screen.findByText(title)).closest("tr") as HTMLElement;
+    fireEvent.contextMenu(row);
+    return row;
+  }
+
+  it("offers the bulk action only once more than one row is checked", async () => {
+    renderWithTrpc(<ProjectView projectId="prj-1" />, allRowsHandlers());
+
+    await check("Cap the upload size");
+    await openBulkMenuOn("Cap the upload size");
+    expect(screen.queryByText(/selected issues…/)).toBeNull();
+    fireEvent.keyDown(document.body, { key: "Escape" });
+
+    await check("Rotate the keys");
+    await openBulkMenuOn("Cap the upload size");
+    expect(await screen.findByText("Launch 2 selected issues…")).toBeDefined();
+  });
+
+  it("creates and launches a Task for every checked issue, then clears the checkmarks", async () => {
+    const created: unknown[] = [];
+    const launched: unknown[] = [];
+    renderWithTrpc(<ProjectView projectId="prj-1" />, {
+      ...allRowsHandlers(),
+      "task.create": (input) => {
+        created.push(input);
+        const { issueId, title } = input as { issueId: string; title: string };
+        return {
+          id: `task-${created.length}`,
+          issueId,
+          title,
+          state: "backlog",
+          workflowId: null,
+          updatedAt: TIMESTAMPS.updatedAt,
+        };
+      },
+      "task.move": (input) => ({ id: (input as { id: string }).id, state: "ready" }),
+      "task.launch": (input) => {
+        launched.push(input);
+        return { id: (input as { id: string }).id, state: "running" };
+      },
+      "task.list": () => ({ items: [], nextCursor: null }),
+    });
+
+    await check("Cap the upload size");
+    await check("Rotate the keys");
+    await openBulkMenuOn("Cap the upload size");
+    fireEvent.click(await screen.findByText("Launch 2 selected issues…"));
+
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("combobox", { name: "Harness" }));
+    fireEvent.click(await screen.findByText("Claude"));
+    fireEvent.click(within(dialog).getByRole("combobox", { name: "Executor" }));
+    fireEvent.click(await screen.findByText("Local"));
+    fireEvent.click(within(dialog).getByRole("button", { name: /Launch 2 issues/ }));
+
+    await waitFor(() => expect(launched.length).toBe(2));
+    expect(created.length).toBe(2);
+    // Both Issues, not the same one twice — the loop's per-row `issueId` actually varied.
+    expect(new Set(created.map((c) => (c as { issueId: string }).issueId)).size).toBe(2);
+
+    // "Cancel" becomes "Done" once every row has an outcome — the batch is not abandonable
+    // mid-flight, but there is nothing left in flight to abandon once it says so.
+    fireEvent.click(await within(dialog).findByRole("button", { name: "Done" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+    // The checkmarks were cleared the moment the batch was asked for — right-clicking either row
+    // again offers no bulk action, because nothing is checked any more.
+    await openBulkMenuOn("Cap the upload size");
+    expect(screen.queryByText(/selected issues…/)).toBeNull();
+  });
+
+  it("skips a row with no repository behind it, and says so", async () => {
+    renderWithTrpc(<ProjectView projectId="prj-1" />, {
+      ...allRowsHandlers(),
+      "project.allItems": () => ({
+        items: ITEMS.items.map((item, index) =>
+          index === 1 ? { ...item, repositoryId: null } : item,
+        ),
+        total: ITEMS.total,
+        truncated: ITEMS.truncated,
+      }),
+    });
+
+    await check("Cap the upload size");
+    await check("Rotate the keys");
+    await openBulkMenuOn("Cap the upload size");
+    fireEvent.click(await screen.findByText("Launch 2 selected issues…"));
+
+    expect(await screen.findByText(/Skipped — no repository/)).toBeDefined();
+  });
+
+  it("binds the chosen Workflow to every Task before launching it — the same one for the batch", async () => {
+    const attached: unknown[] = [];
+    const workflow = {
+      id: "wf-1",
+      name: "Implement & review",
+      description: null,
+      version: 1,
+      stepCount: 2,
+      createdAt: TIMESTAMPS.createdAt,
+      updatedAt: TIMESTAMPS.updatedAt,
+    };
+    renderWithTrpc(<ProjectView projectId="prj-1" />, {
+      ...allRowsHandlers(),
+      "workflow.list": () => [workflow],
+      "workflow.attachTask": (input) => {
+        attached.push(input);
+        return { ok: true };
+      },
+      "task.create": (input) => {
+        const { issueId, title } = input as { issueId: string; title: string };
+        return {
+          id: `task-${issueId}`,
+          issueId,
+          title,
+          state: "backlog",
+          workflowId: null,
+          updatedAt: TIMESTAMPS.updatedAt,
+        };
+      },
+      "task.move": (input) => ({ id: (input as { id: string }).id, state: "ready" }),
+      "task.launch": (input) => ({ id: (input as { id: string }).id, state: "running" }),
+      "task.list": () => ({ items: [], nextCursor: null }),
+    });
+
+    await check("Cap the upload size");
+    await check("Rotate the keys");
+    await openBulkMenuOn("Cap the upload size");
+    fireEvent.click(await screen.findByText("Launch 2 selected issues…"));
+
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("combobox", { name: "Harness" }));
+    fireEvent.click(await screen.findByText("Claude"));
+    fireEvent.click(within(dialog).getByRole("combobox", { name: "Executor" }));
+    fireEvent.click(await screen.findByText("Local"));
+    fireEvent.click(within(dialog).getByRole("combobox", { name: "Workflow" }));
+    fireEvent.click(await screen.findByText("Implement & review"));
+    fireEvent.click(within(dialog).getByRole("button", { name: /Launch 2 issues/ }));
+
+    await waitFor(() => expect(attached.length).toBe(2));
+    expect(attached.every((a) => (a as { workflowId: string }).workflowId === "wf-1")).toBe(true);
+    // Both Tasks, not the same one twice.
+    expect(new Set(attached.map((a) => (a as { taskId: string }).taskId)).size).toBe(2);
+  });
+
+  it("does not let one Issue's refusal stop the rest of the batch", async () => {
+    // task-iss-1 refuses to launch (its Harness Profile is imagined at its concurrency cap); the
+    // other Issue in the same batch must still reach `running` — the same guarantee `resumeTask`
+    // gives its own sweep, applied here to a batch a person asked for explicitly.
+    renderWithTrpc(<ProjectView projectId="prj-1" />, {
+      ...allRowsHandlers(),
+      "task.create": (input) => {
+        const { issueId, title } = input as { issueId: string; title: string };
+        return {
+          id: `task-${issueId}`,
+          issueId,
+          title,
+          state: "backlog",
+          workflowId: null,
+          updatedAt: TIMESTAMPS.updatedAt,
+        };
+      },
+      "task.move": (input) => ({ id: (input as { id: string }).id, state: "ready" }),
+      "task.launch": (input) => {
+        const { id } = input as { id: string };
+        if (id === "task-iss-1") throw new Error("Harness Profile at its concurrency cap");
+        return { id, state: "running" };
+      },
+      "task.list": () => ({ items: [], nextCursor: null }),
+    });
+
+    await check("Cap the upload size");
+    await check("Rotate the keys");
+    await openBulkMenuOn("Cap the upload size");
+    fireEvent.click(await screen.findByText("Launch 2 selected issues…"));
+
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("combobox", { name: "Harness" }));
+    fireEvent.click(await screen.findByText("Claude"));
+    fireEvent.click(within(dialog).getByRole("combobox", { name: "Executor" }));
+    fireEvent.click(await screen.findByText("Local"));
+    fireEvent.click(within(dialog).getByRole("button", { name: /Launch 2 issues/ }));
+
+    expect(
+      await within(dialog).findByText("1 of 2 did not launch — see each row above."),
+    ).toBeDefined();
+    expect(within(dialog).getByText("Failed")).toBeDefined();
+    // The batch still finished — the refusal did not leave it stuck "busy" forever.
+    expect(await within(dialog).findByRole("button", { name: "Done" })).toBeDefined();
+  });
+});
+
 describe("deleting a project", () => {
   it("asks for confirmation before the mutation fires", async () => {
     const calls: unknown[] = [];
@@ -607,5 +834,113 @@ describe("deleting a project", () => {
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete project" }));
     await waitFor(() => expect(calls).toEqual([{ projectId: "prj-1" }]));
+  });
+});
+
+/**
+ * The toolbar's unsaved tweaks survive a refresh (user report: "Hide closed" and the rest of the
+ * toolbar reset on reload).
+ *
+ * These mount the component twice in a row rather than reloading a page — there is no page to
+ * reload in this harness — which is exactly the claim worth proving: nothing about the *second*
+ * mount, other than `localStorage` already holding what the first one wrote, produces the
+ * restored state. A prop, a query response or a URL param doing the same job would be a
+ * regression this test cannot see.
+ */
+describe("the toolbar's draft survives a refresh", () => {
+  const ALL: ProjectViewDto = { ...MY_ITEMS, name: "All", config: DEFAULT_PROJECT_VIEW_CONFIG };
+
+  it("remembers Hide closed across a remount", async () => {
+    const { unmount } = renderWithTrpc(<ProjectView projectId="prj-1" />, {
+      ...handlers("ada-on-the-host"),
+      "project.views": () => [ALL],
+    });
+
+    const hideClosed = await screen.findByRole("checkbox", { name: "Hide closed" });
+    expect(hideClosed.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(hideClosed);
+    await waitFor(() => expect(hideClosed.getAttribute("aria-checked")).toBe("true"));
+
+    // The stand-in for "the reader hits refresh": tear the tree down and mount a fresh one, with
+    // nothing carried over except whatever `localStorage` itself now holds.
+    unmount();
+    renderWithTrpc(<ProjectView projectId="prj-1" />, {
+      ...handlers("ada-on-the-host"),
+      "project.views": () => [ALL],
+    });
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("checkbox", { name: "Hide closed" }).getAttribute("aria-checked"),
+      ).toBe("true"),
+    );
+  });
+
+  it("remembers the Roadmap layout across a remount", async () => {
+    const { unmount } = renderWithTrpc(<ProjectView projectId="prj-1" />, {
+      ...handlers("ada-on-the-host"),
+      "project.views": () => [ALL],
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: /Roadmap/ }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /Roadmap/ }).getAttribute("aria-pressed")).toBe(
+        "true",
+      ),
+    );
+
+    unmount();
+    renderWithTrpc(<ProjectView projectId="prj-1" />, {
+      ...handlers("ada-on-the-host"),
+      "project.views": () => [ALL],
+    });
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /Roadmap/ }).getAttribute("aria-pressed")).toBe(
+        "true",
+      ),
+    );
+  });
+
+  it("keeps two Projects' drafts apart", async () => {
+    const { unmount } = renderWithTrpc(<ProjectView projectId="prj-1" />, {
+      ...handlers("ada-on-the-host"),
+      "project.views": () => [ALL],
+    });
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Hide closed" }));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("checkbox", { name: "Hide closed" }).getAttribute("aria-checked"),
+      ).toBe("true"),
+    );
+    unmount();
+
+    renderWithTrpc(<ProjectView projectId="prj-2" />, {
+      ...handlers("ada-on-the-host"),
+      "project.get": () => ({ ...PROJECT, id: "prj-2" }),
+      "project.views": () => [ALL],
+    });
+
+    // A different Project's toolbar starts exactly as unconfigured as it always did.
+    await waitFor(() =>
+      expect(
+        screen.getByRole("checkbox", { name: "Hide closed" }).getAttribute("aria-checked"),
+      ).toBe("false"),
+    );
+  });
+
+  it("forgets the draft once it is saved into the view itself", async () => {
+    renderWithTrpc(<ProjectView projectId="prj-1" />, {
+      ...handlers("ada-on-the-host"),
+      "project.views": () => [ALL],
+      "project.updateView": () => ({ ...ALL, config: { ...ALL.config, hideClosed: true } }),
+    });
+
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Hide closed" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Save to All/ }));
+
+    await waitFor(() =>
+      expect(window.localStorage.getItem(`solow:project-view-draft:prj-1:${ALL.id}`)).toBeNull(),
+    );
   });
 });

@@ -36,6 +36,7 @@ import {
 } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { TaskStateBadge } from "@/components/features/board/task-state-badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -411,22 +412,45 @@ function RowLabels({
  *
  * The one action that changes state is starting a Task, and it is offered only where it can
  * actually run: a row with no provider issue behind it has nothing for a harness to work on.
+ *
+ * A row that is part of a multi-row selection gets one more entry above the rest: launching
+ * every checked row on one Workflow, chosen once (user request 2026-09-08). Offered beside the
+ * single-row action rather than instead of it — right-clicking a selected row is still, first,
+ * a right-click on *that* row, and swapping its whole menu for a bulk one would hide "Open
+ * details" exactly when several rows are checked.
  */
 function RowMenu({
   row,
   onOpenRow,
   onStartTask,
+  selected,
+  selectedCount,
+  onLaunchSelected,
 }: {
   row: ProjectRow;
   onOpenRow?: ((row: ProjectRow) => void) | undefined;
   onStartTask?: ((row: ProjectRow) => void) | undefined;
+  /** Whether this row itself is one of the checked rows. */
+  selected?: boolean | undefined;
+  selectedCount?: number | undefined;
+  onLaunchSelected?: (() => void) | undefined;
 }) {
+  const bulk = Boolean(selected && (selectedCount ?? 0) > 1 && onLaunchSelected);
   return (
-    <ContextMenuContent className="w-60">
+    <ContextMenuContent className="w-64">
       <ContextMenuLabel className="truncate text-2xs text-muted-foreground">
         {row.issueNumber === null ? row.title : `#${row.issueNumber} ${row.title}`}
       </ContextMenuLabel>
       <ContextMenuSeparator />
+      {bulk && (
+        <>
+          <ContextMenuItem onSelect={() => onLaunchSelected?.()}>
+            <Zap aria-hidden />
+            Launch {selectedCount} selected issues…
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+        </>
+      )}
       {onStartTask && row.issueNumber !== null && (
         <ContextMenuItem onSelect={() => onStartTask(row)}>
           <Zap aria-hidden />
@@ -726,6 +750,10 @@ const BodyRow = memo(function BodyRow({
   onOpenRow,
   onSetPriority,
   onStartTask,
+  selected,
+  selectedCount,
+  onToggleSelect,
+  onLaunchSelected,
 }: {
   row: NestableProjectRow;
   depth: number;
@@ -747,11 +775,29 @@ const BodyRow = memo(function BodyRow({
   onOpenRow?: ((row: ProjectRow) => void) | undefined;
   onSetPriority?: ((row: ProjectRow, label: string | null) => void) | undefined;
   onStartTask?: ((row: ProjectRow) => void) | undefined;
+  /** Whether this row is checked for the bulk-launch action. */
+  selected?: boolean | undefined;
+  selectedCount?: number | undefined;
+  /** Absent renders no checkbox column at all — the same capability-gated pattern `onResize`
+   *  and the rest of this row's handlers already follow. */
+  onToggleSelect?: ((itemId: string) => void) | undefined;
+  onLaunchSelected?: (() => void) | undefined;
 }) {
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <TableRow className="hover:bg-accent/30" style={{ height: ROW_HEIGHT }}>
+          {onToggleSelect && (
+            <TableCell className="w-8 px-2 align-middle">
+              <Checkbox
+                aria-label={
+                  row.issueNumber === null ? `Select ${row.title}` : `Select #${row.issueNumber}`
+                }
+                checked={Boolean(selected)}
+                onCheckedChange={() => onToggleSelect(row.item.id)}
+              />
+            </TableCell>
+          )}
           {/*
             The issue's own number — see the header for why it is not an
             ordinal — and the way out to the provider.
@@ -913,7 +959,14 @@ const BodyRow = memo(function BodyRow({
           ))}
         </TableRow>
       </ContextMenuTrigger>
-      <RowMenu row={row} onOpenRow={onOpenRow} onStartTask={onStartTask} />
+      <RowMenu
+        row={row}
+        onOpenRow={onOpenRow}
+        onStartTask={onStartTask}
+        selected={selected}
+        selectedCount={selectedCount}
+        onLaunchSelected={onLaunchSelected}
+      />
     </ContextMenu>
   );
 });
@@ -937,6 +990,7 @@ export function ProjectTable({
   onResize,
   onReorder,
   onStartTask,
+  onLaunchSelected,
   pendingCells = [],
 }: {
   project: ProjectDto;
@@ -1015,6 +1069,16 @@ export function ProjectTable({
    * test, in a read-only view, or anywhere the dialog does not exist.
    */
   onStartTask?: ((row: ProjectRow) => void) | undefined;
+  /**
+   * Launch every checked row on one Workflow, chosen once (user request 2026-09-08).
+   *
+   * Absent renders no checkbox column at all — the same capability gate every other action on
+   * this table follows — and present turns the whole selection over at the moment it fires: the
+   * table hands back the rows that were checked and immediately clears the checkmarks, because a
+   * bulk action that leaves its own selection ticked reads as still pending after it has already
+   * been asked for.
+   */
+  onLaunchSelected?: ((rows: ProjectRow[]) => void) | undefined;
   /** `itemId:fieldId` of writes in flight, so a cell can disable itself without a local copy. */
   pendingCells?: string[];
 }) {
@@ -1038,6 +1102,36 @@ export function ProjectTable({
       return next;
     });
   }, []);
+
+  /**
+   * Which rows are checked for the bulk-launch action, by item id — local like `expanded` above,
+   * and for the same reason: nothing outside this table needs to know which rows are ticked
+   * until the operator actually asks it to do something with them.
+   */
+  const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
+  const toggleSelected = useCallback((itemId: string) => {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (!next.delete(itemId)) next.add(itemId);
+      return next;
+    });
+  }, []);
+  const selectable = Boolean(onLaunchSelected);
+  /** The checked rows that are still on screen — a row a filter just hid drops out on its own. */
+  const selectedRows = useMemo(() => rows.filter((r) => selected.has(r.item.id)), [rows, selected]);
+  const allSelected = selectable && rows.length > 0 && selectedRows.length === rows.length;
+  const someSelected = selectedRows.length > 0 && !allSelected;
+  const toggleSelectAll = useCallback(() => {
+    setSelected((current) => {
+      const ids = rows.map((r) => r.item.id);
+      const everyIdChecked = ids.length > 0 && ids.every((id) => current.has(id));
+      return everyIdChecked ? new Set() : new Set(ids);
+    });
+  }, [rows]);
+  const launchSelected = useCallback(() => {
+    onLaunchSelected?.(selectedRows);
+    setSelected(new Set());
+  }, [onLaunchSelected, selectedRows]);
 
   /**
    * How tall the scrolling pane is and how far down it, which is the whole input to windowing
@@ -1271,6 +1365,15 @@ export function ProjectTable({
         >
           <TableHeader className="sticky top-0 z-10 bg-card">
             <TableRow className="hover:bg-transparent">
+              {selectable && (
+                <TableHead className="w-8 px-2" style={{ height: COLUMN_HEADER_HEIGHT }}>
+                  <Checkbox
+                    aria-label={allSelected ? "Deselect every row" : "Select every row"}
+                    checked={allSelected ? true : someSelected ? "indeterminate" : false}
+                    onCheckedChange={toggleSelectAll}
+                  />
+                </TableHead>
+              )}
               {/* The gutter's own header cell. Without it the header row is one cell short of the
                   body and every label sits over the wrong column — which is exactly what happened
                   the first time the gutter was added to the body alone. */}
@@ -1399,7 +1502,7 @@ export function ProjectTable({
               line.kind === "group" ? (
                 <TableRow key={`group:${line.key}`} className="bg-card hover:bg-card">
                   <TableHead
-                    colSpan={columns.length + 6}
+                    colSpan={columns.length + 6 + (selectable ? 1 : 0)}
                     className="px-2 text-left font-medium text-2xs"
                     style={{ height: GROUP_HEADER_HEIGHT }}
                   >
@@ -1467,6 +1570,10 @@ export function ProjectTable({
                   onOpenRow={onOpenRow}
                   onSetPriority={onSetPriority}
                   onStartTask={onStartTask}
+                  selected={selected.has(line.entry.row.item.id)}
+                  selectedCount={selectedRows.length}
+                  onToggleSelect={selectable ? toggleSelected : undefined}
+                  onLaunchSelected={selectable ? launchSelected : undefined}
                 />
               ),
             )}

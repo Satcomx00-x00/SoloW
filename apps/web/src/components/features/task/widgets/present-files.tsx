@@ -57,7 +57,7 @@ export function PresentFiles({ widget }: WidgetRendererProps<PresentFilesWidget>
  */
 const STATUS_TONE: Record<NonNullable<PresentFilesWidget["files"][number]["status"]>, string> = {
   added: "text-diff-added",
-  modified: "text-state-running",
+  modified: "text-diff-modified",
   deleted: "text-diff-removed",
   renamed: "text-muted-foreground",
 };

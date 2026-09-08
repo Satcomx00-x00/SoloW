@@ -53,6 +53,9 @@ export const connectRepositoryInput = z
   });
 export type ConnectRepositoryInput = z.infer<typeof connectRepositoryInput>;
 
+export const disconnectRepositoryInput = z.object({ id: idSchema });
+export type DisconnectRepositoryInput = z.infer<typeof disconnectRepositoryInput>;
+
 export const repositoryDto = z
   .object({
     id: idSchema,
@@ -78,6 +81,20 @@ export const repositoryDto = z
     integrationBaseUrl: z.string().nullable(),
     /** How many Issues this Repository currently holds — for a picker to show before it commits. */
     issueCount: z.number().int().nonnegative(),
+    /**
+     * Everything else that still points at this Repository, so Settings can disable Disconnect and
+     * say what to detach rather than letting the Owner discover it as a server refusal.
+     *
+     * Counts rather than named rows, for the reason `harnessProfileUsageDto` gives: a Repository
+     * can be attached to hundreds of Tasks, and "held by 42 tasks" is the useful summary. The
+     * Issue count is deliberately *not* repeated here — it already has a field above, and one
+     * number with two spellings is a number that will disagree with itself.
+     */
+    usage: z.object({
+      taskCount: z.number().int().nonnegative(),
+      projectCount: z.number().int().nonnegative(),
+      changeRequestCount: z.number().int().nonnegative(),
+    }),
     /** Files copied into every new worktree, as repository-relative globs (issue #52). */
     setupFilePatterns: z.array(z.string()),
   })

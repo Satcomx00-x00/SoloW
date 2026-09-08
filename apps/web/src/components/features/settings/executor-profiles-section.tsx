@@ -1,10 +1,10 @@
 "use client";
 
 import type { ExecutorConfig, ExecutorKind, ExecutorProfileDto } from "@solow/contracts";
+import { Pencil, Trash2 } from "lucide-react";
 import { useState } from "react";
-import { Badge } from "@/components/ui/badge";
+import { ConfirmAction } from "@/components/features/confirm-action";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -19,6 +19,15 @@ import { WHOLE_PAGE } from "@/lib/paged";
 import { trpc } from "@/trpc/react";
 import { type EnvPair, EnvRows, fromEnvPairs, toEnvPairs } from "./env-rows";
 import { fromMountRows, type MountRow, MountRows, toMountRows } from "./mount-rows";
+import {
+  SectionStatus,
+  SettingsCreate,
+  SettingsEmpty,
+  SettingsLoading,
+  SettingsRow,
+  SettingsRows,
+  SettingsSection,
+} from "./settings-shell";
 
 /**
  * Executor Profiles (issue #73). The form **renders from the selected kind**: one `Select` for
@@ -124,6 +133,14 @@ export function ExecutorProfilesSection() {
   };
   const create = trpc.profile.executor.create.useMutation({ onSuccess: onSaved });
   const update = trpc.profile.executor.update.useMutation({ onSuccess: onSaved });
+  const remove = trpc.profile.executor.delete.useMutation({
+    onSuccess: () => {
+      utils.profile.executor.list.invalidate();
+      // Editing the profile that has just been deleted would leave the form bound to a row the
+      // server no longer has, and "Save changes" on it would fail with a not-found nobody expects.
+      reset();
+    },
+  });
   const pending = create.isPending || update.isPending;
   const error = create.error ?? update.error;
 
@@ -165,16 +182,100 @@ export function ExecutorProfilesSection() {
     </Select>
   );
 
+  const rows = list.data?.items ?? [];
+  const runnable = rows.filter((p) => RUNNABLE_KINDS.includes(p.kind)).length;
+
   return (
-    <Card className="scroll-mt-16" id="executor-profiles">
-      <CardHeader>
-        <CardTitle>Executor profiles</CardTitle>
-        <CardDescription>
-          Where harnesses run, and the configuration they run under. The local and Docker kinds have
-          drivers today.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
+    <SettingsSection
+      caption="Where a harness's commands actually run, and the configuration they run under. The local and Docker kinds have drivers today."
+      id="executor-profiles"
+      status={
+        list.isSuccess ? (
+          <SectionStatus tone={rows.length > 0 && runnable === 0 ? "bad" : "idle"}>
+            {rows.length === 0 ? "None configured" : `${runnable} of ${rows.length} runnable`}
+          </SectionStatus>
+        ) : null
+      }
+      title="Executors"
+    >
+      {list.isPending ? (
+        <SettingsLoading rows={2} />
+      ) : rows.length === 0 ? (
+        <SettingsEmpty>
+          No executors configured. A Task needs one to say where its harness runs.
+        </SettingsEmpty>
+      ) : (
+        <SettingsRows>
+          {rows.map((p) => {
+            const drivable = RUNNABLE_KINDS.includes(p.kind);
+            return (
+              <SettingsRow
+                actions={
+                  <>
+                    {/*
+                      A real button that says "Edit". Choosing an executor to edit used to mean
+                      clicking the *badge* showing its name — a pill with no button affordance, no
+                      label saying what clicking did, and no way to tell it apart from the dozens
+                      of badges on this page that do nothing.
+                    */}
+                    <Button
+                      onClick={() => edit(p)}
+                      size="sm"
+                      type="button"
+                      variant={editingId === p.id ? "secondary" : "ghost"}
+                    >
+                      <Pencil />
+                      Edit
+                    </Button>
+                    <ConfirmAction
+                      confirmLabel="Delete executor"
+                      description="The profile is removed. Nothing on the machine it described is touched — this only forgets how to reach it."
+                      onConfirm={() => remove.mutate({ id: p.id })}
+                      title={`Delete "${p.name}"?`}
+                      trigger={
+                        <Button
+                          aria-label={`Delete the executor ${p.name}`}
+                          loading={remove.isPending && remove.variables?.id === p.id}
+                          size="icon-sm"
+                          type="button"
+                          variant="ghost"
+                        >
+                          <Trash2 />
+                        </Button>
+                      }
+                    />
+                  </>
+                }
+                key={p.id}
+                meta={KIND_LABELS[p.kind]}
+                status={
+                  <SectionStatus tone={drivable ? "idle" : "waiting"}>
+                    {drivable ? "ready" : "no driver yet"}
+                  </SectionStatus>
+                }
+                title={p.name}
+              />
+            );
+          })}
+        </SettingsRows>
+      )}
+
+      {remove.error && (
+        <p className="text-destructive text-sm" role="alert">
+          {remove.error.message}
+        </p>
+      )}
+
+      {/*
+        Remounted whenever the edited profile changes, which resets the disclosure's own
+        open/closed override so that pressing Edit always reveals the form — even for someone who
+        had folded it away a moment earlier.
+      */}
+      <SettingsCreate
+        defaultOpen={editingId !== null || (list.isSuccess && rows.length === 0)}
+        key={editingId ?? "new"}
+        label={editingId ? "Editing an executor" : "Add an executor"}
+      >
         <form className="space-y-4" onSubmit={submit}>
           <div className="grid gap-2">
             <Label htmlFor="executor-name">Name</Label>
@@ -386,19 +487,7 @@ export function ExecutorProfilesSection() {
             {error.message}
           </p>
         )}
-
-        {(list.data?.items.length ?? 0) > 0 && (
-          <div className="flex flex-wrap gap-2 border-t pt-4">
-            {(list.data?.items ?? []).map((p) => (
-              <Button key={p.id} onClick={() => edit(p)} size="sm" type="button" variant="ghost">
-                <Badge variant="secondary">
-                  {p.name} · {KIND_LABELS[p.kind]}
-                </Badge>
-              </Button>
-            ))}
-          </div>
-        )}
-      </CardContent>
-    </Card>
+      </SettingsCreate>
+    </SettingsSection>
   );
 }

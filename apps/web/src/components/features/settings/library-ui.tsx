@@ -39,7 +39,7 @@ export function LibraryQueryState({ error }: { error: { message: string } | null
   }
   return (
     <div className="flex items-start gap-2 text-sm" role="alert">
-      <TriangleAlert className="mt-px size-4 shrink-0 text-state-failed" aria-hidden />
+      <TriangleAlert className="mt-px size-4 shrink-0 text-feedback-error" aria-hidden />
       <p className="font-mono text-muted-foreground text-xs">{error.message}</p>
     </div>
   );

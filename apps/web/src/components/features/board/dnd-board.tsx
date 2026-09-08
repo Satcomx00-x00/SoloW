@@ -170,7 +170,12 @@ function ColumnShell({
       ref={sectionRef}
       aria-label={`${column.label} column`}
       data-column={column.id}
-      {...(column.kind === "state" ? { "data-state": column.state } : {})}
+      // Only on a lifecycle column, and only that kind: a Workflow Step's id is not stable
+      // across boards (two pipelines can each have a "Step 1"), so it earns no anchor here. This
+      // is what the sidebar's lifecycle rows scroll to — see `BoardNav` in `navigator.tsx`.
+      {...(column.kind === "state"
+        ? { "data-state": column.state, id: `board-column-${column.state}` }
+        : {})}
       className={cn(
         "relative flex w-72 shrink-0 flex-col overflow-hidden rounded-xl border bg-sidebar/60 transition-colors duration-150",
         isOver && "border-ring/60 bg-accent/30",

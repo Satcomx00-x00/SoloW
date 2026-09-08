@@ -54,6 +54,21 @@ export function DashboardShell({
         <TooltipProvider delayDuration={200}>
           <SecondarySidebarProvider>
             <div className="flex h-[100dvh] flex-col overflow-hidden bg-background text-foreground">
+              {/*
+                Skip to content — the first thing in the tab order, invisible until focused.
+
+                WCAG 2.4.1 is met by a skip link *or* a heading outline, and Settings had neither:
+                nineteen tab stops separate the document start from its first control, because the
+                activity rail and all twelve navigator links come first on every single visit. The
+                rail is the same on every page, so this is not a Settings fix that happens to live
+                in the shell — it is a shell fix that Settings made impossible to keep ignoring.
+              */}
+              <a
+                href="#main"
+                className="-translate-y-full focus-visible:-translate-y-0 absolute top-0 left-0 z-50 rounded-br-md bg-primary px-3 py-2 font-medium text-primary-foreground text-sm transition-transform focus-visible:relative"
+              >
+                Skip to content
+              </a>
               <div className="flex min-h-0 flex-1">
                 <ActivityBar signedIn={identity !== null} />
                 <Navigator workspaceName={workspaceName} />
@@ -76,7 +91,11 @@ export function DashboardShell({
                 back inside the region that owns them, and the document stays exactly `100dvh`.
               */}
                   <div className="flex min-h-0 flex-1">
-                    <main className="relative min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
+                    <main
+                      id="main"
+                      tabIndex={-1}
+                      className="relative min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden outline-none"
+                    >
                       {children}
                     </main>
                     {/* Inside the header'd column and beside `main`, not beside the whole column:

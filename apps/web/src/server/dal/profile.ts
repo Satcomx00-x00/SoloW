@@ -4,8 +4,10 @@ import {
   type CreateExecutorProfileInput,
   type CreateHarnessCatalogEntryInput,
   type CreateHarnessProfileInput,
+  type DeleteExecutorProfileInput,
   type DeleteHarnessProfileInput,
   type ExecutorProfileDto,
+  ExecutorProfileErrorCode,
   type ExecutorProfileListDto,
   err,
   type HarnessCatalogEntryDto,
@@ -137,6 +139,8 @@ const EMPTY_USAGE: HarnessProfileUsageDto = {
   taskCount: 0,
   workflowStepCount: 0,
   sessionUsageCount: 0,
+  runningCount: 0,
+  parkedCount: 0,
 };
 
 /**
@@ -154,8 +158,10 @@ async function loadHarnessProfileUsage(
   ctx: RequestContext,
 ): Promise<Map<string, HarnessProfileUsageDto>> {
   const [tasks, steps, usages] = await Promise.all([
+    // `state` alongside the id, so the same pass yields both the historical attachment count and
+    // the live tally. A second query for "how many are running" would read the same rows twice.
     ctx.db
-      .select({ agentProfileId: task.agentProfileId })
+      .select({ agentProfileId: task.agentProfileId, state: task.state })
       .from(task)
       .where(eq(task.workspaceId, ctx.workspaceId)),
     ctx.db
@@ -174,7 +180,11 @@ async function loadHarnessProfileUsage(
     existing[key] += 1;
     usage.set(id, existing);
   };
-  for (const row of tasks) bump(row.agentProfileId, "taskCount");
+  for (const row of tasks) {
+    bump(row.agentProfileId, "taskCount");
+    if (row.state === "running") bump(row.agentProfileId, "runningCount");
+    else if (row.state === "parked") bump(row.agentProfileId, "parkedCount");
+  }
   for (const row of steps) bump(row.agentProfileId, "workflowStepCount");
   for (const row of usages) bump(row.agentProfileId, "sessionUsageCount");
   return usage;
@@ -349,4 +359,46 @@ export async function getExecutorProfile(
     .where(and(eq(executorProfile.workspaceId, ctx.workspaceId), eq(executorProfile.id, id)))
     .limit(1);
   return row ? ok(row) : err(CommonErrorCode.NotFound);
+}
+
+/**
+ * Delete an Executor Profile that no Task names.
+ *
+ * The sibling of `deleteHarnessProfile`, and it exists for the same reason the harness one does:
+ * an Executor Profile is where a harness's commands run, `task.executor_profile_id` is a real
+ * foreign key with no cascade, and until now there was no delete path at all — an Owner could add
+ * an executor on a machine they later decommissioned and had no way to say so. On a product whose
+ * whole premise is that the compute is yours, a list you can only ever append to is wrong.
+ *
+ * Refused rather than cascaded while a Task still names it, because the Task's record of *where it
+ * ran* is part of what the review gate approved. Deleting the executor out from under it would
+ * leave a finished run unable to say what machine produced it.
+ */
+export async function deleteExecutorProfile(
+  ctx: RequestContext,
+  input: DeleteExecutorProfileInput,
+): Promise<
+  Result<
+    ExecutorProfileDto,
+    typeof CommonErrorCode.NotFound | typeof ExecutorProfileErrorCode.InUse
+  >
+> {
+  const [row] = await ctx.db
+    .select()
+    .from(executorProfile)
+    .where(and(eq(executorProfile.workspaceId, ctx.workspaceId), eq(executorProfile.id, input.id)))
+    .limit(1);
+  if (!row) return err(CommonErrorCode.NotFound);
+
+  const holders = await ctx.db
+    .select({ id: task.id })
+    .from(task)
+    .where(and(eq(task.workspaceId, ctx.workspaceId), eq(task.executorProfileId, row.id)))
+    .limit(1);
+  if (holders.length > 0) return err(ExecutorProfileErrorCode.InUse);
+
+  await ctx.db
+    .delete(executorProfile)
+    .where(and(eq(executorProfile.workspaceId, ctx.workspaceId), eq(executorProfile.id, row.id)));
+  return ok(row);
 }

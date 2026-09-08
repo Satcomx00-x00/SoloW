@@ -76,7 +76,7 @@ export function ProjectsHub() {
             <CreateLocalProjectDialog onCreated={(id) => router.push(`/projects/${id}`)} />
           </div>
           {(unassigned.data?.items ?? []).length > 0 && (
-            <p className="pt-4 text-2xs text-muted-foreground/70">
+            <p className="pt-4 text-muted-foreground/70 text-xs">
               {/* Never a dead end: issues imported before any project existed still have a screen,
                 or the Tasks under them would go out of reach with them. */}
               <Link href="/unassigned" className="hover:underline">
@@ -118,7 +118,7 @@ export function ProjectsHub() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="px-4 pt-1.5">
-                  <span className="flex flex-wrap items-center gap-2 text-2xs text-muted-foreground">
+                  <span className="flex flex-wrap items-center gap-2 text-muted-foreground text-xs">
                     {/* The row count, not the field count: the list read does not load a
                         Project's fields, so `fields: []` there means "not loaded" and printing
                         its length said "0 fields" over a project with nineteen. */}

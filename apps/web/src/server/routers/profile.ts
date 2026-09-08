@@ -3,6 +3,7 @@ import {
   createExecutorProfileInput,
   createHarnessCatalogEntryInput,
   createHarnessProfileInput,
+  deleteExecutorProfileInput,
   deleteHarnessProfileInput,
   executorProfileDto,
   executorProfileListDto,
@@ -19,6 +20,7 @@ import {
   createExecutorProfile,
   createHarnessCatalogEntry,
   createHarnessProfile,
+  deleteExecutorProfile,
   deleteHarnessProfile,
   listExecutorProfiles,
   listHarnessCatalog,
@@ -178,6 +180,20 @@ export const profileRouter = router({
       .input(updateExecutorProfileInput)
       .output(executorProfileDto)
       .mutation(async ({ ctx, input }) => unwrap(await updateExecutorProfile(ctx.rctx, input))),
+    delete: ownerProcedure
+      .meta({
+        openapi: {
+          method: "POST",
+          path: "/profile.executor.delete",
+          tags: ["profile"],
+          protect: true,
+          summary:
+            "Delete an Executor Profile no Task names. Refused while one still does — a finished run has to keep being able to say which machine produced it.",
+        },
+      })
+      .input(deleteExecutorProfileInput)
+      .output(executorProfileDto)
+      .mutation(async ({ ctx, input }) => unwrap(await deleteExecutorProfile(ctx.rctx, input))),
     list: ownerProcedure
       .meta({
         openapi: {

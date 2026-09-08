@@ -38,9 +38,9 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CreateTaskDialog, type TaskPreset } from "@/components/features/board/create-task-dialog";
 import { ConfirmAction } from "@/components/features/confirm-action";
-import { AdoptProjectDialog } from "@/components/features/project/adopt-project-dialog";
 import { IssueLabel } from "@/components/features/project/issue-label";
 import { IssuePanel } from "@/components/features/project/issue-panel";
+import { LaunchIssuesDialog } from "@/components/features/project/launch-issues-dialog";
 import type { PriorityChoice } from "@/components/features/project/project-cell";
 import { ProjectCreateMenu } from "@/components/features/project/project-create-menu";
 import { ProjectRepositoriesDialog } from "@/components/features/project/project-repositories-dialog";
@@ -75,6 +75,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { WHOLE_PAGE } from "@/lib/paged";
+import {
+  clearDraftOverlay,
+  type ProjectViewDraftOverlay,
+  readDraftOverlay,
+  writeDraftOverlay,
+} from "@/lib/project-view-draft";
 import { trpc } from "@/trpc/react";
 
 /**
@@ -334,6 +340,13 @@ export function ProjectView({ projectId }: { projectId: string }) {
    * Issue back over one the operator had since changed in the form.
    */
   const [taskPreset, setTaskPreset] = useState<TaskPreset | null>(null);
+  /**
+   * The rows the table's checkboxes had checked at the moment "Launch N selected issues" was
+   * asked for, or null for "no dialog" (user request 2026-09-08). A snapshot, not a live
+   * selection: the table clears its own checkmarks the instant it hands this array over, so
+   * nothing here needs to track which rows are still checked while the dialog is open.
+   */
+  const [launchRows, setLaunchRows] = useState<ProjectRow[] | null>(null);
   const [pending, setPending] = useState<string[]>([]);
   /**
    * Change a priority by rewriting the **label** that carries it.
@@ -408,12 +421,33 @@ export function ProjectView({ projectId }: { projectId: string }) {
    * effect having to notice — a reset that runs a render late is a tab briefly showing the
    * previous tab's grouping.
    */
-  const [draft, setDraft] = useState<{ viewId: string | null; config: Partial<ProjectViewConfig> }>(
-    { viewId: null, config: {} },
-  );
+  const [draft, setDraft] = useState<{ viewId: string | null; config: ProjectViewDraftOverlay }>({
+    viewId: null,
+    config: {},
+  });
   const drafted = draft.viewId === activeViewId ? draft.config : {};
-  const patchDraft = (patch: Partial<ProjectViewConfig>) =>
-    setDraft({ viewId: activeViewId, config: { ...drafted, ...patch } });
+  /** Which tab a stored draft belongs to — `activeViewId` names one, or "default" names none. */
+  const draftStorageKey = activeViewId ?? "default";
+  const patchDraft = (patch: ProjectViewDraftOverlay) => {
+    const next = { ...drafted, ...patch };
+    setDraft({ viewId: activeViewId, config: next });
+    // Written through on every change rather than only on unmount: a crash or a closed tab must
+    // not lose the draft any more than a deliberate refresh does.
+    writeDraftOverlay(projectId, draftStorageKey, next);
+  };
+  /**
+   * Restore this tab's draft when it, or the Project, first becomes known.
+   *
+   * The dependency is `draftStorageKey`, not `draft` — reading from storage on every render this
+   * effect *wrote* to would be a loop, and the point is to run once per tab, not once per
+   * keystroke. `views.data` resolving after mount is exactly the case this exists for: the first
+   * render has `activeViewId === null` (no view loaded yet), and the effect runs again, correctly,
+   * once the real tab id arrives.
+   */
+  useEffect(() => {
+    const stored = readDraftOverlay(projectId, draftStorageKey);
+    setDraft({ viewId: activeViewId, config: stored });
+  }, [projectId, draftStorageKey, activeViewId]);
 
   const savedText = formatProjectFilter(saved.filter);
   const filterText = params.get("q") ?? savedText;
@@ -452,6 +486,9 @@ export function ProjectView({ projectId }: { projectId: string }) {
   const updateView = trpc.project.updateView.useMutation({
     onSuccess: () => {
       setDraft({ viewId: null, config: {} });
+      // The draft's contents are now the view's own — a stored overlay left behind here would
+      // silently re-apply on top of the fresh save the moment `views.data` refetches.
+      clearDraftOverlay(projectId, draftStorageKey);
       void utils.project.views.invalidate();
     },
   });
@@ -598,15 +635,32 @@ export function ProjectView({ projectId }: { projectId: string }) {
         tabs. A switcher inside the table also implied the table was the Project, when the board
         and the issue list are equally inside it.
       */}
-      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b px-4 py-2">
-        <span className="ml-auto flex items-center gap-2">
-          <span className="font-mono text-2xs text-muted-foreground tabular-nums">
+      {/*
+        A header, where there was a right-aligned scatter.
+
+        Everything in this row used to sit under one `ml-auto`, so thirteen hundred pixels of the
+        widest screen were empty and six controls of equal weight crowded the last two hundred —
+        including Delete, which removes the Project, rendered exactly like Refresh and sitting
+        beside "Adopt a project". The page also had **no heading of any level**: a screen reader
+        arrived at a fourteen-column table and was offered no landing point at all, and the one
+        thing that says which Project this is lived only in the breadcrumb.
+      */}
+      <div className="flex shrink-0 flex-wrap items-center gap-3 border-b px-4 py-2.5">
+        <div className="min-w-0">
+          {/* The Title step (16px here), not the Body step: 14px semibold over an 11px count is
+              barely a step at all, and this is the one line that says which Project you are in. */}
+          <h1 className="truncate font-semibold text-lg leading-tight">
+            {project.data?.title ?? "Project"}
+          </h1>
+          <p className="font-mono text-2xs text-muted-foreground tabular-nums">
             {/* Both numbers while a filter is on: "12 items" under a filter reads as a project
                 that has twelve items, which is a different and wrong claim. */}
             {rows.length === allRows.length
               ? `${items.data?.total ?? 0} items`
               : `${rows.length} of ${items.data?.total ?? 0} items`}
-          </span>
+          </p>
+        </div>
+        <span className="ml-auto flex items-center gap-1">
           {/* The one authoring action the toolbar has (F23a): sits immediately left of the
               source-branched controls, its two entries each stating why when they cannot run. */}
           {project.data && <ProjectCreateMenu project={project.data} />}
@@ -644,15 +698,27 @@ export function ProjectView({ projectId }: { projectId: string }) {
               >
                 <FolderSync className={rescan.isPending ? "animate-spin" : undefined} /> Rescan
               </Button>
-              <AdoptProjectDialog onAdopted={(id) => go({ project: id, view: null, q: null })} />
             </>
           )}
-          {/* Regardless of source — a local Project's Repositories dialog and a mirrored one's
-              sync controls both decide what's *in* the Project; deleting it is a different axis
-              and applies to either kind the same way. */}
+          {/*
+            Regardless of source — a local Project's Repositories dialog and a mirrored one's sync
+            controls both decide what's *in* the Project; deleting it is a different axis and
+            applies to either kind the same way.
+
+            Which is why it is fenced off and coloured. It used to be the sixth ghost button in a
+            row of six, indistinguishable from Refresh, one click from "Adopt a project". The
+            theme reserves Alarm Red for irreversible actions and this is the most irreversible
+            control on the surface; a hairline before it says it belongs to a different axis.
+          */}
+          <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border" />
           <ConfirmAction
             trigger={
-              <Button size="xs" variant="ghost" disabled={deleteProject.isPending}>
+              <Button
+                className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                disabled={deleteProject.isPending}
+                size="xs"
+                variant="ghost"
+              >
                 <Trash2 aria-hidden /> Delete
               </Button>
             }
@@ -1045,6 +1111,7 @@ export function ProjectView({ projectId }: { projectId: string }) {
             onEdit={editCell}
             onOpenRow={openRow}
             onStartTask={startTask}
+            onLaunchSelected={setLaunchRows}
             sort={config.sort}
             /*
              * Ascending → descending → none, on the header itself (`cycleSort`).
@@ -1078,6 +1145,10 @@ export function ProjectView({ projectId }: { projectId: string }) {
           onOpenChange={(next) => !next && setTaskPreset(null)}
         />
       )}
+
+      {/* The context menu's "Launch N selected issues", mounted here for the same reason
+          `CreateTaskDialog` above is: one overlay per row-triggered action, all in one place. */}
+      <LaunchIssuesDialog rows={launchRows} onOpenChange={(next) => !next && setLaunchRows(null)} />
 
       {/* Column visibility for *this person*, saved through F19's preference boundary so it
           survives a device change — the same seam the status bar uses. It rides on top of the

@@ -242,6 +242,16 @@ const TextBlock = memo(function TextBlock({
   }
 
   const thinking = channel === "thinking";
+  /*
+   * A thinking block with nothing in it draws nothing.
+   *
+   * The header was unconditional, so a settled empty block rendered a 22px row that was entirely
+   * its own "THINKING" label with no body under it — a heading claiming content that does not
+   * exist, twice on the run this was found on. While the block is still arriving the label and
+   * its dots are exactly right: that is the one case where "nothing yet" is the information.
+   */
+  if (thinking && !open && text.trim() === "") return null;
+
   return (
     <div className={cn(thinking && "border-muted-foreground/25 border-l-2 pl-3 opacity-70")}>
       {thinking && (

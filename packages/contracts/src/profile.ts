@@ -94,6 +94,21 @@ export const harnessProfileUsageDto = z.object({
   /** Historical billing attribution (issue #14) — present even for a Profile whose every Task
    * has since been deleted, which is exactly the case a Task/Step count alone would miss. */
   sessionUsageCount: z.number().int().nonnegative(),
+  /**
+   * What this Profile is doing *now*, as opposed to what has ever referenced it.
+   *
+   * The three counts above are history and attachment; these two are the present tense, and they
+   * are the reason Settings can say "2 of 3 running" beside a concurrency cap instead of printing
+   * the cap as a number in a form. A cap is only meaningful against the slots it is currently
+   * spending, and "Parked" is the state that cap *causes* — a Profile at its ceiling with work
+   * waiting behind it is the single most useful fact this page can carry, and until now it was
+   * only visible on the board.
+   *
+   * Free to compute: the Task pass that produces `taskCount` already reads every Task in the
+   * Workspace, so these are a second and third tally over rows that were being fetched anyway.
+   */
+  runningCount: z.number().int().nonnegative(),
+  parkedCount: z.number().int().nonnegative(),
 });
 export type HarnessProfileUsageDto = z.infer<typeof harnessProfileUsageDto>;
 
@@ -136,6 +151,9 @@ export type UpdateHarnessProfileInput = z.infer<typeof updateHarnessProfileInput
 
 export const deleteHarnessProfileInput = z.object({ id: idSchema });
 export type DeleteHarnessProfileInput = z.infer<typeof deleteHarnessProfileInput>;
+
+export const deleteExecutorProfileInput = z.object({ id: idSchema });
+export type DeleteExecutorProfileInput = z.infer<typeof deleteExecutorProfileInput>;
 
 /**
  * Executor Profile (spec F07, issue #73).

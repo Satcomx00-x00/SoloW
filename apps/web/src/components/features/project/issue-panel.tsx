@@ -99,9 +99,9 @@ function Person({
 }) {
   return (
     <span className="inline-flex items-center gap-1.5">
-      <Avatar className="size-5">
+      <Avatar size="xs">
         {avatarUrl ? <AvatarImage src={avatarUrl} alt="" /> : null}
-        <AvatarFallback className="text-[9px] uppercase">{login.slice(0, 2)}</AvatarFallback>
+        <AvatarFallback>{login.slice(0, 2)}</AvatarFallback>
       </Avatar>
       <span className="truncate text-xs">{name ?? login}</span>
     </span>
@@ -191,7 +191,7 @@ export function IssuePanel({
                   )}
                 </span>
               )}
-              <span className="min-w-0 flex-1 font-semibold text-[15px] leading-snug">
+              <span className="min-w-0 flex-1 font-semibold text-lg leading-snug">
                 {data?.title ?? "Issue"}
               </span>
               {update.isPending && (

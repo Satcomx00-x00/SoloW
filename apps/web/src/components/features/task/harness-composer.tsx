@@ -35,7 +35,11 @@ export function HarnessComposer({
 }) {
   return (
     <form
-      className="surface-edge flex items-center gap-2 rounded-xl border bg-card/60 p-2 transition-colors focus-within:border-ring/40"
+      // Wraps rather than crushes. Send and Stop have a fixed appetite, so on a narrow run column
+      // a single row spent the remainder on the field and left a box two characters wide; below
+      // the field's floor the actions drop to their own line instead, which is the arrangement
+      // that still lets someone type.
+      className="surface-edge flex flex-wrap items-center justify-end gap-2 rounded-xl border bg-card/60 p-2 transition-colors focus-within:border-ring/40"
       onSubmit={(e) => {
         e.preventDefault();
         onSubmit();
@@ -54,7 +58,9 @@ export function HarnessComposer({
             ? "Message the harness…"
             : "The harness is not running, so there is nothing to steer."
         }
-        className="h-9 flex-1 border-0 bg-transparent text-sm shadow-none focus-visible:border-0"
+        // A floor, not a fixed width: without one the field's flex basis is its placeholder and it
+        // pushed Send and Stop out of the form; with one it holds 10rem and the actions wrap.
+        className="h-9 min-w-40 flex-1 border-0 bg-transparent text-sm shadow-none focus-visible:border-0"
       />
       <Button type="submit" disabled={!canSteer || !value.trim()}>
         <CornerDownLeft /> Send

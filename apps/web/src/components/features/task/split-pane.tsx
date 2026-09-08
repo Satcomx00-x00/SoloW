@@ -128,14 +128,25 @@ export function SplitPane({
             }}
             tabIndex={0}
           />
+          {/*
+            The width is a ceiling, not a promise. A column pinned at the pixel width someone
+            dragged it to on a wide screen keeps that width when the window is narrowed, and
+            because it is `shrink-0` the run column beside it is what gives way: at 900px a
+            617px preference left the terminal two pixels wide, pushed the composer's buttons out
+            of their own form, and ran the panel past the right edge of the page. `min()` hands
+            the excess back to the run, and the saved preference is untouched, so the arrangement
+            returns intact on a wide window.
+          */}
           <aside
             aria-label={rightLabel}
             className="flex min-h-0 shrink-0 flex-col"
             id="task-changes-panel"
-            style={{ width: shown }}
+            style={{ width: `min(${shown}px, 60%)` }}
           >
             <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
-              <h2 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
+              {/* The label step, the one the navigator's section headers and every other panel
+                  caption already use — 11px at 0.14em, not a third definition of "small caps". */}
+              <h2 className="min-w-0 truncate font-medium text-2xs text-muted-foreground uppercase tracking-[0.14em]">
                 {rightLabel}
               </h2>
               <Button

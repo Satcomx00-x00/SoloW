@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
-import { IntegrationErrorCode } from "@solow/contracts";
+import { CommonErrorCode, IntegrationErrorCode, RepositoryErrorCode } from "@solow/contracts";
 import { createTestDb, type TestDb } from "@solow/db/testing";
 import {
+  connectRepository,
+  disconnectRepository,
   getRepository,
   listRepositories,
   listRepositoryAssignees,
@@ -11,7 +13,8 @@ import {
   listRepositoryMilestones,
   updateRepositorySetup,
 } from "./repository.js";
-import { ctxFor, seedWorkspaceGraph } from "./test-fixtures.js";
+import { createTaskRecord } from "./task.js";
+import { ctxFor, seedIssue, seedWorkspaceGraph } from "./test-fixtures.js";
 
 /**
  * `repository.regression.ts` needs real network I/O against a fixture provider server and can't
@@ -155,5 +158,80 @@ describe("listRepositoryAssignees / listRepositoryMilestones — non-network cas
 
     expect(assignees).toEqual({ ok: false, error: "NOT_FOUND" });
     expect(milestones).toEqual({ ok: false, error: "NOT_FOUND" });
+  });
+});
+
+/**
+ * Disconnecting a Repository.
+ *
+ * There was no delete path at all before this, so these are the first statements anywhere about
+ * what disconnecting means. The refusal is the interesting half: `issue`, `task_repository`,
+ * `project_repository` and `change_request` all carry real foreign keys with no cascade, and those
+ * rows are the record of what a harness actually did in that repository. Losing them silently
+ * would be worse than being unable to tidy the list.
+ */
+describe("repository DAL — disconnect", () => {
+  let db: TestDb;
+  beforeEach(() => {
+    db = createTestDb();
+  });
+
+  it("disconnects a Repository nothing holds", async () => {
+    const g = await seedWorkspaceGraph(db, "acme");
+    const ctx = ctxFor(db, g.workspaceId);
+    const created = await connectRepository(ctx, {
+      name: "spare",
+      source: "local_path",
+      location: "/srv/repos/spare",
+    });
+    if (!created.ok) throw new Error("seed failed");
+
+    expect((await disconnectRepository(ctx, { id: created.data.id })).ok).toBe(true);
+    expect(await getRepository(ctx, created.data.id)).toEqual({
+      ok: false,
+      error: CommonErrorCode.NotFound,
+    });
+  });
+
+  it("refuses while an Issue still points at it", async () => {
+    const g = await seedWorkspaceGraph(db, "acme");
+    const ctx = ctxFor(db, g.workspaceId);
+    await seedIssue(db, g.workspaceId, { repositoryId: g.repositoryId });
+
+    expect(await disconnectRepository(ctx, { id: g.repositoryId })).toEqual({
+      ok: false,
+      error: RepositoryErrorCode.InUse,
+    });
+  });
+
+  it("refuses while a Task is still attached to it", async () => {
+    const g = await seedWorkspaceGraph(db, "acme");
+    const ctx = ctxFor(db, g.workspaceId);
+    const issue = await seedIssue(db, g.workspaceId, { title: "Work to do" });
+    const made = await createTaskRecord(ctx, {
+      issueId: issue.id,
+      title: "Touches the repo",
+      agentProfileId: g.agentProfileId,
+      executorProfileId: g.executorProfileId,
+      repositories: [{ repositoryId: g.repositoryId }],
+      state: "backlog",
+    });
+    if (!made.ok) throw new Error("seed failed");
+
+    expect(await disconnectRepository(ctx, { id: g.repositoryId })).toEqual({
+      ok: false,
+      error: RepositoryErrorCode.InUse,
+    });
+  });
+
+  it("refuses a Repository belonging to another Workspace (Principle V)", async () => {
+    const mine = await seedWorkspaceGraph(db, "acme");
+    const theirs = await seedWorkspaceGraph(db, "other");
+    const ctx = ctxFor(db, mine.workspaceId);
+
+    expect(await disconnectRepository(ctx, { id: theirs.repositoryId })).toEqual({
+      ok: false,
+      error: CommonErrorCode.NotFound,
+    });
   });
 });

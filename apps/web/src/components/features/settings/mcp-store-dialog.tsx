@@ -281,7 +281,7 @@ function StoreCard({
                 )}
                 {input.hint && <p className="text-2xs text-muted-foreground">{input.hint}</p>}
                 {invalid && (
-                  <p className="text-2xs text-state-failed" role="alert">
+                  <p className="text-2xs text-feedback-error" role="alert">
                     Pick a Secret for this.
                   </p>
                 )}
@@ -291,7 +291,7 @@ function StoreCard({
         </div>
       )}
       {create.error && (
-        <p className="text-state-failed text-xs" role="alert">
+        <p className="text-feedback-error text-xs" role="alert">
           {create.error.message === HarnessLibraryErrorCode.NameTaken
             ? `A server named ${entry.name} is already in the library.`
             : create.error.message}
@@ -309,7 +309,7 @@ function StoreCard({
           <ExternalLink aria-hidden className="size-3" />
         </a>
         {installed ? (
-          <span className="inline-flex items-center gap-1 text-state-done text-xs">
+          <span className="inline-flex items-center gap-1 text-feedback-ok text-xs">
             <Check aria-hidden className="size-3.5" />
             Installed
           </span>

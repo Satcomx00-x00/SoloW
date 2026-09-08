@@ -19,7 +19,6 @@ import {
   settingsSectionFor,
   settingsSectionsIn,
 } from "@/lib/navigation";
-import { cn } from "@/lib/utils";
 import { ExecutorProfilesSection } from "./executor-profiles-section";
 import { FlagsSection } from "./flags-section";
 import { HarnessProfilesSection } from "./harness-profiles-section";
@@ -54,9 +53,13 @@ import { WorkspaceSection } from "./workspace-section";
  * event — the palette navigating from one settings section to another would have moved the
  * address bar and nothing else. Old `#hash` links still land correctly; see the effect below.
  *
- * Every section keeps its own `<Card id="…">` heading, so nothing here repeats what the card
- * beneath it already says. That is also what makes the anchors real: within a group the id is a
- * genuine fragment to scroll to.
+ * Every section keeps its own `<section id="…">` heading (see `settings-shell.tsx`), so nothing
+ * here repeats what the section beneath it already says. That is also what makes the anchors real:
+ * within a group the id is a genuine fragment to scroll to.
+ *
+ * The two-column arrangement each section takes on a wide screen used to be described *here*, as
+ * ten `[&>div>[data-slot=card]]` selectors reaching down into markup this file cannot see. It
+ * belongs to the section, and `SettingsSection` owns it now.
  */
 export function Settings() {
   const params = useSearchParams();
@@ -85,19 +88,58 @@ export function Settings() {
    *
    * Only then: scrolling on arrival at the top of a group would fight the reader for the first
    * paint of every visit, and the card is already the first thing on screen.
+   *
+   * **Why this re-aligns instead of scrolling once.** It used to be a single `scrollIntoView` in
+   * an effect, and it landed on the wrong section every time. The effect runs when the *route*
+   * settles, which is long before the tRPC lists above the target have come back; every list that
+   * resolves afterwards makes its own card taller and pushes the target further down the page
+   * under the reader. Measured on `?section=skills`: the page scrolled to 1458px and `#skills`
+   * ended up 1016px below the top of the viewport — the screen showed Executor profiles while the
+   * navigator highlighted Skills. Since those are the hrefs the navigator, the palette and every
+   * shared link use, the one affordance this page was rewritten to provide was the one that lied.
+   *
+   * So: align now, then keep aligning while the surface is still growing, and stop. A
+   * `ResizeObserver` on the scroll container reports every one of those late expansions, and the
+   * window closes on its own so nothing fights a reader who scrolls away. `behavior: "auto"`,
+   * because a smooth animation restarted on each arriving query is a page that slides for a
+   * second and a half.
    */
   const opensOn = sections[0]?.id;
   useEffect(() => {
     if (opensOn === active.id) return;
-    document.getElementById(active.id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    const align = () =>
+      document.getElementById(active.id)?.scrollIntoView({ behavior: "auto", block: "start" });
+    align();
+
+    const container = document.getElementById(active.id)?.closest("main");
+    if (!container) return;
+    const observer = new ResizeObserver(align);
+    observer.observe(container);
+    for (const child of container.querySelectorAll("section[id]")) observer.observe(child);
+    // Long enough for the slowest list on the page to land, short enough that it can never be
+    // mistaken for the page fighting the reader.
+    const stop = window.setTimeout(() => observer.disconnect(), 1500);
+    return () => {
+      observer.disconnect();
+      window.clearTimeout(stop);
+    };
   }, [active.id, opensOn]);
 
   return (
     <div className={PAGE_WIDTH}>
+      {/*
+        No eyebrow. "SETTINGS" sat above the group name in 11px uppercase, and it was saying
+        something the breadcrumb, the activity rail and the sidebar all already say — the heading
+        carries its own weight. Dropping it also lets the group name take the Headline step
+        (`text-xl`, 18px here) instead of `text-lg`, which resolves to 16px in this theme and was
+        therefore exactly the size of the card titles beneath it. The page's own title and its
+        twelve section titles being the same size is why the header read as a stutter.
+      */}
       <header className="space-y-1.5">
-        <p className="text-2xs text-muted-foreground uppercase tracking-wider">Settings</p>
-        <h1 className="font-semibold text-lg tracking-[-0.01em]">{group}</h1>
-        <p className="text-sm text-muted-foreground leading-relaxed">{captionFor(group)}</p>
+        <h1 className="font-semibold text-xl tracking-[-0.01em]">{group}</h1>
+        <p className="max-w-prose text-muted-foreground text-sm leading-relaxed">
+          {captionFor(group)}
+        </p>
       </header>
 
       {/*
@@ -129,7 +171,7 @@ export function Settings() {
         </SelectContent>
       </Select>
 
-      <div className={cn("space-y-6", WIDE_SECTION_LAYOUT)}>
+      <div className="space-y-5">
         {sections.map((section) => (
           <div key={section.id}>{SECTION_COMPONENTS[section.id]?.()}</div>
         ))}
@@ -143,55 +185,15 @@ export function Settings() {
  *
  * Measured: at 1280 the old fixed `max-w-3xl` column filled 78% of the area beside the sidebar,
  * which reads as a page. At 1920 it filled **47%** — a 768px form marooned in 1622px with 427
- * pixels of nothing down each side, which reads as a page that failed to load. A single Workspace
- * card, the shortest section here, occupied about a seventh of the screen and the rest was empty.
+ * pixels of nothing down each side, which reads as a page that failed to load.
  *
  * Widening it unconditionally would be the opposite mistake: a text input stretched to 1500px is
- * harder to use than a narrow one, and prose past about 90 characters stops being readable. So
- * the column only grows where there is genuinely space to grow into, and what it does with that
- * space is described below — it is not spent on longer lines.
+ * harder to use than a narrow one, and prose past about 90 characters stops being readable. So the
+ * column only grows where there is space to grow into, and what it does with that space is turn
+ * each section into a description column and a control column — see `SettingsSection`. No input
+ * gets wider; the page stops being a ribbon down the middle.
  */
 const PAGE_WIDTH = "mx-auto w-full max-w-3xl 2xl:max-w-6xl space-y-5 px-6 py-6";
-
-/**
- * On a wide screen a section becomes two columns: what it is on the left, its controls on the
- * right.
- *
- * This is the shape that lets a settings page use a large screen without making anything on it
- * wider. The heading and its explanation move out of the controls' way into a fixed 18rem
- * column, and the controls keep roughly the measure they already had — 776px at 1536 and above,
- * against 720 before — so no input grows and no sentence gets longer. The page stops being a
- * narrow ribbon down the middle; nothing inside it changes size.
- *
- * Expressible in one place because every section here has the same skeleton: exactly one `Card`,
- * holding exactly one `CardHeader` and one `CardContent`. Grid auto-placement does the rest, so
- * ten sections are re-laid out without any of them learning about it — and a section added later
- * inherits it by being built the same way as its neighbours.
- *
- * `2xl`, not `xl`: at 1280 the split would take the controls down to 606px, narrower than the
- * 720 they have today, so the breakpoint is set where the trade actually pays. Below it this is
- * inert and the layout is exactly the one that measured healthy.
- *
- * Scoped `> div >` rather than by descendant: `flags-section` opens a dialog, and a dialog that
- * happened to hold a card would otherwise be re-laid out as a settings row.
- *
- * A header that carries a `CardAction` (the libraries' *New …* / *Import* buttons) is two columns
- * on its own — `1fr auto`, the action in the corner — which inside an 18rem column left the
- * description a few rems and wrapped it one word per line. Wide, the header goes back to one
- * column and the action sits beneath the description, where the 18rem is all its own.
- */
-const WIDE_SECTION_LAYOUT = [
-  "2xl:[&>div>[data-slot=card]]:grid",
-  "2xl:[&>div>[data-slot=card]]:grid-cols-[minmax(0,18rem)_minmax(0,1fr)]",
-  "2xl:[&>div>[data-slot=card]]:items-start",
-  "2xl:[&>div>[data-slot=card]]:gap-x-10",
-  "2xl:[&>div>[data-slot=card]>[data-slot=card-header]]:grid-cols-1",
-  "2xl:[&>div>[data-slot=card]>[data-slot=card-header]>[data-slot=card-action]]:col-start-1",
-  "2xl:[&>div>[data-slot=card]>[data-slot=card-header]>[data-slot=card-action]]:row-start-3",
-  "2xl:[&>div>[data-slot=card]>[data-slot=card-header]>[data-slot=card-action]]:row-span-1",
-  "2xl:[&>div>[data-slot=card]>[data-slot=card-header]>[data-slot=card-action]]:justify-self-start",
-  "2xl:[&>div>[data-slot=card]>[data-slot=card-header]>[data-slot=card-action]]:pt-2",
-].join(" ");
 
 function captionFor(group: SettingsGroup): string {
   return SETTINGS_GROUPS.find((g) => g.name === group)?.caption ?? "";

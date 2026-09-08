@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import type { VariantProps } from "class-variance-authority"
 import { AlertDialog as AlertDialogPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
@@ -112,13 +113,25 @@ function AlertDialogDescription({
   )
 }
 
+/**
+ * The confirm button, in the variant the action deserves.
+ *
+ * It used to call `buttonVariants()` with no argument, so "Delete secret", "Disconnect" and "Turn
+ * off the core loop" all rendered as the near-white primary — identical to "Save". The theme
+ * reserves Alarm Red for exactly this ("an irreversible action is a different kind of signal from
+ * a Task's lifecycle") and the one place it most needed to appear was the one place it could not
+ * be reached. `variant` now forwards, and a dialog that is about destroying something says so on
+ * the button the reader's hand is already over.
+ */
 function AlertDialogAction({
   className,
+  variant,
   ...props
-}: React.ComponentProps<typeof AlertDialogPrimitive.Action>) {
+}: React.ComponentProps<typeof AlertDialogPrimitive.Action> &
+  Pick<VariantProps<typeof buttonVariants>, "variant">) {
   return (
     <AlertDialogPrimitive.Action
-      className={cn(buttonVariants(), className)}
+      className={cn(buttonVariants({ variant }), className)}
       {...props}
     />
   )

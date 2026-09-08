@@ -31,29 +31,31 @@ const STATUS: Record<
   NonNullable<ToolRow["status"]>,
   { label: string; icon: typeof CircleDot; className: string; spin?: boolean }
 > = {
-  // The Task-state tokens the board and the step strip use — orange waiting, blue running,
-  // green done, red failed — and never colour alone: a colour-blind reader gets the glyph and
-  // the word too (WCAG 1.4.1).
+  // The *feedback* family — how this call went — not the Task-state family. A tool call that
+  // failed is not a failed Task, and a call in flight is not a Task that is Running; the two used
+  // to share four tokens, so retuning the board's blue would have restyled every tool pill in
+  // every transcript. Same values, separable. Never colour alone either: a colour-blind reader
+  // gets the glyph and the word too (WCAG 1.4.1).
   pending: {
     label: "Pending",
     icon: CircleDot,
-    className: "badge-soft [--badge-color:var(--state-review)]",
+    className: "badge-soft [--badge-color:var(--feedback-caution)]",
   },
   in_progress: {
     label: "Running",
     icon: LoaderCircle,
-    className: "badge-soft [--badge-color:var(--state-running)]",
+    className: "badge-soft [--badge-color:var(--feedback-busy)]",
     spin: true,
   },
   completed: {
     label: "Completed",
     icon: CircleCheck,
-    className: "badge-soft [--badge-color:var(--state-done)]",
+    className: "badge-soft [--badge-color:var(--feedback-ok)]",
   },
   failed: {
     label: "Failed",
     icon: CircleAlert,
-    className: "badge-soft [--badge-color:var(--state-failed)]",
+    className: "badge-soft [--badge-color:var(--feedback-error)]",
   },
 };
 
@@ -124,7 +126,11 @@ export function ToolCall({ row }: { row: ToolRow }) {
       data-tool-status={row.status ?? "unknown"}
       className={cn(
         "group rounded-lg border bg-card/40 px-3 py-2",
-        failed && "border-state-failed/40 bg-state-failed/8",
+        // A border, not a wash. The badge already says Failed, and the body repeats it — a
+        // full-bleed red tint across a 630px card made one unlucky tool call the loudest object
+        // in a run that had otherwise succeeded, louder than the completion card below it. One
+        // frame signal, one badge, one word is the proportion this deserves.
+        failed && "border-feedback-error/40",
       )}
     >
       <summary className="flex cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
@@ -153,7 +159,7 @@ export function ToolCall({ row }: { row: ToolRow }) {
 
       <div className="mt-2 space-y-2.5 border-t pt-2">
         {command !== null && (
-          <pre className="whitespace-pre-wrap break-words rounded-md bg-background/60 p-2.5 font-mono text-2xs leading-[1.7]">
+          <pre className="whitespace-pre-wrap break-words rounded-md bg-background/60 p-2.5 font-mono text-xs leading-[1.7]">
             <span aria-hidden className="select-none text-muted-foreground/70">
               ${" "}
             </span>
@@ -161,7 +167,7 @@ export function ToolCall({ row }: { row: ToolRow }) {
           </pre>
         )}
         {file !== null && (
-          <p className="text-2xs text-muted-foreground">
+          <p className="text-muted-foreground text-xs leading-relaxed">
             Changed <span className="break-all font-mono text-foreground/80">{file}</span>. The
             change itself is in the Changes column, read from the worktree — the log records which
             file, never the contents.
@@ -171,13 +177,13 @@ export function ToolCall({ row }: { row: ToolRow }) {
           /* A real state, not a gap in the render: the orchestrator captures only allowlisted
              keys — an unknown tool contributes none — and ACP never exposes tool input at all.
              Saying so beats an empty box that reads as a bug. */
-          <p className="text-2xs text-muted-foreground">No arguments recorded.</p>
+          <p className="text-muted-foreground text-xs">No arguments recorded.</p>
         ) : (
           <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1">
             {args.map(([key, value]) => (
               <Fragment key={key}>
                 <dt className="font-mono text-2xs text-muted-foreground/70">{key}</dt>
-                <dd className="min-w-0 whitespace-pre-wrap break-words font-mono text-2xs">
+                <dd className="min-w-0 whitespace-pre-wrap break-words font-mono text-xs">
                   {value}
                 </dd>
               </Fragment>
@@ -186,28 +192,28 @@ export function ToolCall({ row }: { row: ToolRow }) {
         )}
 
         {row.result === null ? (
-          <p className="text-2xs text-muted-foreground/70">No result recorded yet.</p>
+          <p className="text-muted-foreground/70 text-xs">No result recorded yet.</p>
         ) : (
           <div>
             <p
               className={cn(
                 "font-medium text-2xs",
-                row.result.ok ? "text-muted-foreground" : "text-state-failed",
+                row.result.ok ? "text-muted-foreground" : "text-feedback-error",
               )}
             >
               {row.result.ok ? (shell ? "Output" : "Result") : "Failed"}
             </p>
             {row.result.output ? (
-              <pre className="mt-1.5 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-background/60 p-2.5 font-mono text-2xs leading-[1.7]">
+              <pre className="mt-1.5 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-background/60 p-2.5 font-mono text-xs leading-[1.7]">
                 {row.result.output}
               </pre>
             ) : (
-              <p className="mt-1 text-2xs text-muted-foreground">The tool returned no output.</p>
+              <p className="mt-1 text-muted-foreground text-xs">The tool returned no output.</p>
             )}
             {/* Never silent about a cut: a reader who mistakes the head of an output for the whole
                 of it will conclude the wrong thing from it, which is worse than not reading it. */}
             {row.result.truncated && (
-              <p className="mt-1 text-2xs text-muted-foreground">
+              <p className="mt-1 text-muted-foreground text-xs">
                 Output truncated — this is the beginning of it, not the whole result.
               </p>
             )}

@@ -38,7 +38,7 @@ describe("FlagsSection", () => {
       screen.getByText("Core end-to-end Task loop (Issue → run harness → review → approve)."),
     ).toBeDefined();
     expect(screen.getByText("ff-workflows")).toBeDefined();
-    const checkbox = screen.getByRole("checkbox", { name: "ff-core-program" });
+    const checkbox = screen.getByRole("checkbox", { name: "Core program" });
     expect(checkbox.getAttribute("data-state")).toBe("unchecked");
   });
 
@@ -47,7 +47,7 @@ describe("FlagsSection", () => {
       "flag.list": () => FLAGS.map((f) => (f.key === "ff-workflows" ? { ...f, enabled: true } : f)),
     });
 
-    const checkbox = await screen.findByRole("checkbox", { name: "ff-workflows" });
+    const checkbox = await screen.findByRole("checkbox", { name: "Workflows" });
     expect(checkbox.getAttribute("data-state")).toBe("checked");
   });
 
@@ -57,7 +57,7 @@ describe("FlagsSection", () => {
       "flag.set": (input) => ({ ...FLAGS[1], ...(input as object) }),
     });
 
-    fireEvent.click(await screen.findByRole("checkbox", { name: "ff-workflows" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Workflows" }));
 
     expect(screen.queryByRole("alertdialog")).toBeNull();
     await waitFor(() => {
@@ -74,7 +74,7 @@ describe("FlagsSection", () => {
       "flag.set": (input) => ({ ...FLAGS[0], ...(input as object) }),
     });
 
-    fireEvent.click(await screen.findByRole("checkbox", { name: "ff-core-program" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Core program" }));
 
     const dialog = await screen.findByRole("alertdialog");
     expect(dialog.textContent).toContain("Turn off the core Task loop?");
@@ -96,13 +96,13 @@ describe("FlagsSection", () => {
       "flag.set": (input) => ({ ...FLAGS[0], ...(input as object) }),
     });
 
-    fireEvent.click(await screen.findByRole("checkbox", { name: "ff-core-program" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Core program" }));
     fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
 
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
     expect(log.calls.filter((c) => c.path === "flag.set")).toHaveLength(0);
-    expect(
-      screen.getByRole("checkbox", { name: "ff-core-program" }).getAttribute("data-state"),
-    ).toBe("checked");
+    expect(screen.getByRole("checkbox", { name: "Core program" }).getAttribute("data-state")).toBe(
+      "checked",
+    );
   });
 });

@@ -233,9 +233,9 @@ function Face({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Avatar className="size-5 shrink-0 border border-background">
+        <Avatar className="shrink-0 border border-background" size="xs">
           {user.avatarUrl ? <AvatarImage src={user.avatarUrl} alt="" /> : null}
-          <AvatarFallback className="text-[9px] uppercase">{user.login.slice(0, 2)}</AvatarFallback>
+          <AvatarFallback>{user.login.slice(0, 2)}</AvatarFallback>
         </Avatar>
       </TooltipTrigger>
       <TooltipContent>{user.name ? `${user.name} (${user.login})` : user.login}</TooltipContent>
@@ -650,7 +650,7 @@ function DateCell({
               <abbr
                 key={name}
                 title={name}
-                className="py-1 text-center font-medium text-[10px] text-muted-foreground/70 no-underline"
+                className="py-1 text-center font-medium text-2xs text-muted-foreground/70 no-underline"
               >
                 {initial}
               </abbr>

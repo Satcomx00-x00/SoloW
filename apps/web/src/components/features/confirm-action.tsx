@@ -28,6 +28,18 @@ export interface ConfirmCopy {
   title: string;
   description: string;
   confirmLabel: string;
+  /**
+   * What kind of confirmation this is, which decides what the confirm button looks like.
+   *
+   * `destructive` is the default because that is what this component is for — every existing call
+   * site is discarding a worktree, deleting a credential or abandoning a run, and all of them used
+   * to end on the near-white primary button, indistinguishable from "Save". The theme reserves
+   * Alarm Red for irreversible actions; this is the seam that lets it reach them.
+   *
+   * `neutral` is for the handful of confirmations that only ask "are you sure you meant to?" about
+   * something reversible, where red would be crying wolf.
+   */
+  tone?: "destructive" | "neutral" | undefined;
 }
 
 /** Controlled variant — for a confirmation raised by something other than a button press. */
@@ -38,6 +50,7 @@ export function ConfirmDialog({
   title,
   description,
   confirmLabel,
+  tone,
 }: ConfirmCopy & {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -49,6 +62,7 @@ export function ConfirmDialog({
         title={title}
         description={description}
         confirmLabel={confirmLabel}
+        tone={tone}
         onConfirm={() => {
           onOpenChange(false);
           onConfirm();
@@ -91,6 +105,7 @@ function ConfirmBody({
   title,
   description,
   confirmLabel,
+  tone = "destructive",
   onConfirm,
 }: ConfirmCopy & { onConfirm: () => void }) {
   return (
@@ -101,7 +116,12 @@ function ConfirmBody({
       </AlertDialogHeader>
       <AlertDialogFooter>
         <AlertDialogCancel>Cancel</AlertDialogCancel>
-        <AlertDialogAction onClick={onConfirm}>{confirmLabel}</AlertDialogAction>
+        <AlertDialogAction
+          variant={tone === "destructive" ? "destructive" : "default"}
+          onClick={onConfirm}
+        >
+          {confirmLabel}
+        </AlertDialogAction>
       </AlertDialogFooter>
     </AlertDialogContent>
   );

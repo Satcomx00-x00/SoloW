@@ -19,9 +19,9 @@ import { PatchView } from "./patch-view";
 
 const STATUS_STYLE: Record<DiffFileDto["status"], { icon: typeof FilePen; tone: string }> = {
   added: { icon: FilePlus2, tone: "text-diff-added" },
-  modified: { icon: FilePen, tone: "text-state-running" },
+  modified: { icon: FilePen, tone: "text-diff-modified" },
   deleted: { icon: FileMinus2, tone: "text-diff-removed" },
-  renamed: { icon: FilePen, tone: "text-state-parked" },
+  renamed: { icon: FilePen, tone: "text-diff-moved" },
 };
 
 function FileRow({ file }: { file: DiffFileDto }) {

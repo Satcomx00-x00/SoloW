@@ -952,6 +952,110 @@ describe("the issue number", () => {
 });
 
 /**
+ * Checking several rows for a bulk launch (user request 2026-09-08). `onLaunchSelected` is the
+ * capability gate the checkbox column follows — the same pattern `onResize`/`onReorder` already
+ * use — so a read-only render (no handler) draws no checkboxes at all.
+ */
+describe("selecting rows for a bulk launch", () => {
+  const two = [
+    { ...row("r1", "Cap the upload size"), issueNumber: 1 },
+    { ...row("r2", "Rotate the keys"), issueNumber: 2 },
+  ];
+
+  it("draws no checkbox column at all without a bulk-launch handler", () => {
+    render(
+      <ProjectTable project={project([field({ id: "f1" })])} rows={two} groupByFieldId={null} />,
+    );
+
+    expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
+  });
+
+  it("offers the bulk action once a second row is checked, and not before", () => {
+    render(
+      <ProjectTable
+        project={project([field({ id: "f1" })])}
+        rows={two}
+        groupByFieldId={null}
+        onLaunchSelected={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select #1" }));
+    fireEvent.contextMenu(screen.getByText("Cap the upload size").closest("tr") as HTMLElement);
+    expect(screen.queryByText(/selected issues…/)).toBeNull();
+    fireEvent.keyDown(document.body, { key: "Escape" });
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select #2" }));
+    fireEvent.contextMenu(screen.getByText("Cap the upload size").closest("tr") as HTMLElement);
+    expect(screen.getByText("Launch 2 selected issues…")).toBeDefined();
+  });
+
+  it("hands back the checked rows and clears the checkmarks the moment the action fires", () => {
+    const batches: ProjectRow[][] = [];
+    render(
+      <ProjectTable
+        project={project([field({ id: "f1" })])}
+        rows={two}
+        groupByFieldId={null}
+        onLaunchSelected={(rows) => batches.push(rows)}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select #1" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select #2" }));
+    fireEvent.contextMenu(screen.getByText("Cap the upload size").closest("tr") as HTMLElement);
+    fireEvent.click(screen.getByText("Launch 2 selected issues…"));
+
+    expect(batches).toHaveLength(1);
+    expect(batches[0]?.map((r) => r.item.id).sort()).toEqual(["r1", "r2"]);
+    expect(screen.getByRole("checkbox", { name: "Select #1" }).getAttribute("data-state")).toBe(
+      "unchecked",
+    );
+  });
+
+  it("checks and unchecks every row from the header checkbox", () => {
+    render(
+      <ProjectTable
+        project={project([field({ id: "f1" })])}
+        rows={two}
+        groupByFieldId={null}
+        onLaunchSelected={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select every row" }));
+    expect(screen.getByRole("checkbox", { name: "Select #1" }).getAttribute("data-state")).toBe(
+      "checked",
+    );
+    expect(screen.getByRole("checkbox", { name: "Select #2" }).getAttribute("data-state")).toBe(
+      "checked",
+    );
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Deselect every row" }));
+    expect(screen.getByRole("checkbox", { name: "Select #1" }).getAttribute("data-state")).toBe(
+      "unchecked",
+    );
+  });
+
+  it("marks the header checkbox indeterminate when only some rows are checked", () => {
+    render(
+      <ProjectTable
+        project={project([field({ id: "f1" })])}
+        rows={two}
+        groupByFieldId={null}
+        onLaunchSelected={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select #1" }));
+
+    expect(
+      screen.getByRole("checkbox", { name: "Select every row" }).getAttribute("data-state"),
+    ).toBe("indeterminate");
+  });
+});
+
+/**
  * The Priority column, over a project whose Priority field was never configured.
  *
  * This is not a hypothetical: a GitHub project ships a `Priority` single-select, a great many

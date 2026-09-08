@@ -68,13 +68,33 @@ describe("BoardView", () => {
     expect(screen.getAllByText(/^No tasks in/)).toHaveLength(BOARD_COLUMNS.length - 2);
   });
 
-  it("shows a failure reason on a failed Task card", () => {
+  it("names an unrecognised failure reason instead of printing its class", () => {
+    // The reasons with a next step of their own are drawn individually below; everything else
+    // used to fall through to a badge rendering the raw class in monospace. An Owner can do
+    // nothing with `some_generic_failure`, so the badge says what happened — and keeps the class
+    // announced, for whoever is debugging a reason this build does not know yet.
     render(
       <BoardView
         tasks={[makeTask({ id: "3", state: "failed", failureReason: "some_generic_failure" })]}
       />,
     );
-    expect(screen.getByText("some_generic_failure")).toBeDefined();
+    expect(screen.getByText("Run failed")).toBeDefined();
+    expect(screen.queryByText("some_generic_failure")).toBeNull();
+    expect(screen.getByText(/reason: some_generic_failure/)).toBeDefined();
+  });
+
+  it("reads a Task parked past its window in the parked voice, not as a failure", () => {
+    // `park_never_resumed` is written by the orchestrator's sweep onto a Task that slept through
+    // its quota window, so this is the reason that actually reached the raw-string badge in
+    // practice. It belongs to `parked`, and painting it in the failed red would contradict the
+    // state badge sitting beside it.
+    render(
+      <BoardView
+        tasks={[makeTask({ id: "3a", state: "parked", failureReason: "park_never_resumed" })]}
+      />,
+    );
+    expect(screen.getByText("Never resumed")).toBeDefined();
+    expect(screen.queryByText("park_never_resumed")).toBeNull();
   });
 
   it("shows an expired credential distinctly, not as the raw failure class (spec AC-013)", () => {

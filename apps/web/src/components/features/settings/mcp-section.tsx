@@ -3,11 +3,9 @@
 import type { McpScope } from "@solow/contracts";
 import { Check, Copy } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Badge } from "@/components/ui/badge";
+import { ConfirmAction } from "@/components/features/confirm-action";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -17,6 +15,16 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { trpc } from "@/trpc/react";
+import {
+  SectionStatus,
+  SettingsCreate,
+  SettingsEmpty,
+  SettingsField,
+  SettingsLoading,
+  SettingsRow,
+  SettingsRows,
+  SettingsSection,
+} from "./settings-shell";
 
 /**
  * External MCP server (issue #16). Issue and revoke scoped tokens, and copy a ready-made client
@@ -127,44 +135,118 @@ export function McpSection() {
   const live = (tokens.data ?? []).filter((t) => !t.revokedAt);
 
   return (
-    <Card id="mcp" className="scroll-mt-16">
-      <CardHeader>
-        <CardTitle>MCP</CardTitle>
-        <CardDescription>
-          Drive SoloW from an outside agent. A token carries one Workspace and one scope — the same
-          permission checks apply as in this UI.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-6">
-        <div className="grid gap-2">
-          <Label htmlFor="mcp-endpoint">Endpoint</Label>
-          <div className="flex items-center gap-2">
-            <Input id="mcp-endpoint" readOnly value={url} className="font-mono text-xs" />
-            <CopyButton text={url} label="Copy MCP endpoint URL" />
-          </div>
+    <SettingsSection
+      caption="Drive SoloW from an outside agent. A token carries one Workspace and one scope — the same permission checks apply as in this UI."
+      id="mcp"
+      status={
+        tokens.isSuccess ? (
+          <SectionStatus tone={live.length > 0 ? "active" : "idle"}>
+            {live.length === 0
+              ? "No live tokens"
+              : `${live.length} live token${live.length === 1 ? "" : "s"}`}
+          </SectionStatus>
+        ) : null
+      }
+      title="MCP access"
+    >
+      <SettingsField htmlFor="mcp-endpoint" label="Endpoint">
+        <div className="flex items-center gap-2">
+          <Input className="font-mono text-xs" id="mcp-endpoint" readOnly value={url} />
+          <CopyButton label="Copy MCP endpoint URL" text={url} />
         </div>
+      </SettingsField>
 
+      {/* The inventory, above the form that makes more of them — these are live credentials, and
+          what already exists matters more than issuing another. */}
+      {tokens.isPending ? (
+        <SettingsLoading rows={2} />
+      ) : live.length === 0 ? (
+        <SettingsEmpty>No tokens issued. Nothing outside SoloW can reach it yet.</SettingsEmpty>
+      ) : (
+        <SettingsRows>
+          {live.map((t) => (
+            <SettingsRow
+              actions={
+                /*
+                  Confirmed, at last. Revoking was one unconfirmed click while *deleting a Secret*
+                  — which you can simply paste again — was confirmed, so the page asked hardest
+                  about the cheaper mistake. A revoked token cannot be reinstated, and the thing
+                  holding it is an outside agent that will fail mid-run without knowing why.
+                */
+                <ConfirmAction
+                  confirmLabel="Revoke token"
+                  description="Any outside agent using this token stops working immediately, mid-run if it is running. The token cannot be reinstated — you would issue a new one and reconfigure whatever held this."
+                  onConfirm={() => revoke.mutate({ id: t.id })}
+                  title={`Revoke "${t.label}"?`}
+                  trigger={
+                    <Button
+                      aria-label={`Revoke the token ${t.label}`}
+                      // Scoped by id. It used to bind the bare `isPending`, so revoking one token
+                      // spun the button on every row — its siblings in this folder all scope by id.
+                      loading={revoke.isPending && revoke.variables?.id === t.id}
+                      size="sm"
+                      type="button"
+                      variant="ghost"
+                    >
+                      Revoke
+                    </Button>
+                  }
+                />
+              }
+              key={t.id}
+              meta={
+                <span className="font-mono">
+                  {t.prefix}… · {t.scope === "read" ? "read only" : "read and write"}
+                </span>
+              }
+              status={
+                <SectionStatus tone={t.lastUsedAt ? "active" : "idle"}>
+                  {t.lastUsedAt ? `used ${t.lastUsedAt.slice(0, 10)}` : "never used"}
+                </SectionStatus>
+              }
+              title={t.label}
+            />
+          ))}
+        </SettingsRows>
+      )}
+
+      {issued && (
+        <div className="space-y-3 rounded-lg border border-primary/40 bg-primary/5 p-4">
+          <p className="font-medium text-sm">Copy this token now</p>
+          <p className="text-muted-foreground text-xs leading-relaxed">
+            It is stored hashed, so this is the only time it can be shown. If you lose it, issue a
+            new one and revoke this.
+          </p>
+          <div className="flex items-center gap-2">
+            <Input className="font-mono text-xs" readOnly value={issued} />
+            <CopyButton label="Copy the issued token value" text={issued} />
+          </div>
+          <Button onClick={() => setIssued(null)} size="sm" type="button" variant="ghost">
+            Done
+          </Button>
+        </div>
+      )}
+
+      <SettingsCreate defaultOpen={tokens.isSuccess && live.length === 0} label="Issue a token">
         <form
-          className="space-y-4 border-t pt-6"
+          className="space-y-4"
           onSubmit={(e) => {
             e.preventDefault();
             issue.mutate({ label, scope });
           }}
         >
-          <div className="grid gap-2">
-            <Label htmlFor="mcp-label">Token label</Label>
+          <SettingsField htmlFor="mcp-label" label="Token label">
             <Input
               id="mcp-label"
-              placeholder="e.g. laptop-claude-code"
-              value={label}
               onChange={(e) => setLabel(e.target.value)}
+              placeholder="e.g. laptop-claude-code"
               required
+              value={label}
             />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="mcp-scope">Scope</Label>
-            <Select value={scope} onValueChange={(v) => setScope(v as McpScope)}>
-              <SelectTrigger id="mcp-scope" className="w-full">
+          </SettingsField>
+          <SettingsField htmlFor="mcp-scope" label="Scope">
+            <Select onValueChange={(v) => setScope(v as McpScope)} value={scope}>
+              <SelectTrigger className="w-full" id="mcp-scope">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -172,85 +254,44 @@ export function McpSection() {
                 <SelectItem value="read_write">Read and write</SelectItem>
               </SelectContent>
             </Select>
-          </div>
-          <Button type="submit" loading={issue.isPending}>
+          </SettingsField>
+          <Button loading={issue.isPending} type="submit">
             Issue token
           </Button>
         </form>
-
         {issue.error && (
           <p className="text-destructive text-sm" role="alert">
             {issue.error.message}
           </p>
         )}
+      </SettingsCreate>
 
-        {issued && (
-          <div className="space-y-3 rounded-md border border-primary/40 bg-primary/5 p-4">
-            <p className="font-medium text-sm">Copy this token now</p>
-            <p className="text-muted-foreground text-xs leading-relaxed">
-              It is stored hashed, so this is the only time it can be shown. If you lose it, issue a
-              new one and revoke this.
-            </p>
-            <div className="flex items-center gap-2">
-              <Input readOnly value={issued} className="font-mono text-xs" />
-              <CopyButton text={issued} label="Copy the issued token value" />
-            </div>
-            <Button type="button" variant="ghost" size="sm" onClick={() => setIssued(null)}>
-              Done
-            </Button>
-          </div>
-        )}
-
-        <div className="space-y-3 border-t pt-6">
-          <p className="font-medium text-sm">Client configuration</p>
-          <Tabs defaultValue="claude-code">
-            <TabsList>
-              {snippets.map((s) => (
-                <TabsTrigger key={s.id} value={s.id}>
-                  {s.label}
-                </TabsTrigger>
-              ))}
-            </TabsList>
+      <div className="space-y-3 border-t pt-4">
+        <p className="font-medium text-sm">Client configuration</p>
+        <Tabs defaultValue="claude-code">
+          <TabsList>
             {snippets.map((s) => (
-              <TabsContent key={s.id} value={s.id} className="space-y-2">
-                <pre className="overflow-x-auto rounded-md border bg-muted/40 p-3 text-xs">
-                  <code>{s.body}</code>
-                </pre>
-                <CopyButton text={s.body} label={`Copy the ${s.label} configuration`} />
-              </TabsContent>
+              <TabsTrigger key={s.id} value={s.id}>
+                {s.label}
+              </TabsTrigger>
             ))}
-          </Tabs>
-        </div>
+          </TabsList>
+          {snippets.map((s) => (
+            <TabsContent className="space-y-2" key={s.id} value={s.id}>
+              <pre className="overflow-x-auto rounded-lg border bg-muted/40 p-3 text-xs">
+                <code>{s.body}</code>
+              </pre>
+              <CopyButton label={`Copy the ${s.label} configuration`} text={s.body} />
+            </TabsContent>
+          ))}
+        </Tabs>
+      </div>
 
-        {live.length > 0 && (
-          <div className="space-y-2 border-t pt-6">
-            <p className="font-medium text-sm">Issued tokens</p>
-            <ul className="divide-y">
-              {live.map((t) => (
-                <li key={t.id} className="flex items-center gap-3 py-2">
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm">{t.label}</p>
-                    <p className="font-mono text-muted-foreground text-xs">{t.prefix}…</p>
-                  </div>
-                  <Badge variant="secondary">{t.scope === "read" ? "read" : "read/write"}</Badge>
-                  <span className="text-muted-foreground text-xs">
-                    {t.lastUsedAt ? `used ${t.lastUsedAt.slice(0, 10)}` : "never used"}
-                  </span>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    loading={revoke.isPending}
-                    onClick={() => revoke.mutate({ id: t.id })}
-                  >
-                    Revoke
-                  </Button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </CardContent>
-    </Card>
+      {revoke.error && (
+        <p className="text-destructive text-sm" role="alert">
+          {revoke.error.message}
+        </p>
+      )}
+    </SettingsSection>
   );
 }

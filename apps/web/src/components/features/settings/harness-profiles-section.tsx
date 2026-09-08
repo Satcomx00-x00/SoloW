@@ -13,12 +13,11 @@ import {
   HARNESS_PROTOCOLS,
   harnessProtocolSchema,
 } from "@solow/contracts";
-import { ChevronRight, Stethoscope, Trash2 } from "lucide-react";
+import { ChevronRight, ShieldAlert, Stethoscope, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { ConfirmAction } from "@/components/features/confirm-action";
+import { ConfirmAction, ConfirmDialog } from "@/components/features/confirm-action";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -31,6 +30,15 @@ import {
 import { WHOLE_PAGE } from "@/lib/paged";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
+import {
+  SectionStatus,
+  SettingsCreate,
+  SettingsEmpty,
+  SettingsLoading,
+  SettingsRow,
+  SettingsRows,
+  SettingsSection,
+} from "./settings-shell";
 
 /**
  * What each protocol actually means, spelled out where the Owner is about to pick one — the
@@ -76,6 +84,25 @@ function describeHarnessProfileUsage(usage: HarnessProfileDto["usage"]): string 
  * under the default mode there is nobody for a prompt to reach, so a Task needing either simply
  * fails partway through, which is a worse outcome badly disguised as a safer one.
  */
+/**
+ * How much each mode grants, so "is this change an increase" is one comparison rather than a
+ * hand-written matrix that will disagree with itself the day a fourth mode arrives.
+ */
+const PERMISSION_RANK: Record<HarnessPermissionMode, number> = {
+  plan: 0,
+  acceptEdits: 1,
+  bypassPermissions: 2,
+};
+
+/** What is being granted, in the words the field below already uses. */
+const PERMISSION_ESCALATION_COPY: Record<HarnessPermissionMode, string> = {
+  plan: "The harness may read and reason, but change nothing.",
+  acceptEdits:
+    "The harness may edit files inside its own worktree without asking. Anything beyond that still stops for a prompt — and because SoloW runs harnesses headless, a prompt reaches nobody, so a task needing the shell or the network will stall rather than proceed.",
+  bypassPermissions:
+    "The harness never asks. Within its worktree it has your shell and the network, on every future run of this profile. The bound on it is the worktree it is confined to and the review gate every change still stops at — not a question, because a headless run has nobody to answer one.",
+};
+
 const PERMISSION_MODES: Array<{
   value: HarnessPermissionMode;
   label: string;
@@ -255,15 +282,250 @@ export function HarnessProfilesSection() {
     onSuccess: () => utils.profile.agent.list.invalidate(),
   });
 
+  /**
+   * A pending permission *increase*, held until the Owner confirms it.
+   *
+   * Only one direction is gated. Moving a profile to "read only" or "asks first" takes something
+   * away and can be undone by moving it back; moving it to "never asks" hands a harness the shell
+   * and the network for every future run, and that used to happen on a single unconfirmed click of
+   * a grey dropdown — on a page where deleting the same profile asked twice.
+   */
+  const [escalation, setEscalation] = useState<{
+    id: string;
+    name: string;
+    to: HarnessPermissionMode;
+  } | null>(null);
+
+  const requestPermissionChange = (
+    profile: { id: string; name: string; permissionMode: HarnessPermissionMode },
+    to: HarnessPermissionMode,
+  ) => {
+    if (to === profile.permissionMode) return;
+    if (PERMISSION_RANK[to] > PERMISSION_RANK[profile.permissionMode]) {
+      setEscalation({ id: profile.id, name: profile.name, to });
+      return;
+    }
+    updateProfile.mutate({ id: profile.id, permissionMode: to });
+  };
+
   const secretOptions = secrets.data ?? [];
 
+  const rows = profiles.data?.items ?? [];
+  const running = rows.reduce((n, p) => n + p.usage.runningCount, 0);
+  const parked = rows.reduce((n, p) => n + p.usage.parkedCount, 0);
+  const capacity = rows.reduce((n, p) => n + p.concurrencyCap, 0);
+
   return (
-    <Card id="agent-profiles" className="scroll-mt-16">
-      <CardHeader>
-        <CardTitle>Harness profiles</CardTitle>
-        <CardDescription>Auth mode + concurrency cap, bound to a stored secret.</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
+    <SettingsSection
+      caption="Which harness runs, how it authenticates, and how many of it may run at once."
+      id="agent-profiles"
+      status={
+        profiles.isSuccess ? (
+          /*
+            The reading this whole section exists to give, and which it never gave before: a
+            concurrency cap is only meaningful against the slots currently spending it. Parked
+            outranks running in the tone, because Parked is the state a cap *causes* — it means
+            work is waiting on a ceiling set right here.
+          */
+          <SectionStatus tone={parked > 0 ? "waiting" : running > 0 ? "active" : "idle"}>
+            {rows.length === 0
+              ? "None configured"
+              : parked > 0
+                ? `${running} of ${capacity} running · ${parked} parked`
+                : `${running} of ${capacity} running`}
+          </SectionStatus>
+        ) : null
+      }
+      title="Harness profiles"
+    >
+      {profiles.isPending ? (
+        <SettingsLoading rows={2} />
+      ) : rows.length === 0 ? (
+        <SettingsEmpty>
+          No harness profiles yet. One binds a stored secret to the harness that spends it.
+        </SettingsEmpty>
+      ) : (
+        <SettingsRows>
+          {rows.map((p) => {
+            const inUse = describeHarnessProfileUsage(p.usage);
+            const stale = stalePinOn(p, catalogOptions);
+            const probe = probed[p.id];
+            const unattended = p.permissionMode === "bypassPermissions";
+            return (
+              <SettingsRow
+                actions={
+                  <>
+                    {/*
+                      Deliberately never disabled — a Profile that is in use is the one it is most
+                      urgent to be able to test, and "in use" is not evidence that it still works.
+                    */}
+                    <Button
+                      aria-label={`Test the harness profile ${p.name}`}
+                      loading={
+                        probeProfile.isPending && probeProfile.variables?.agentProfileId === p.id
+                      }
+                      onClick={() => probeProfile.mutate({ agentProfileId: p.id })}
+                      size="icon-sm"
+                      type="button"
+                      variant="ghost"
+                    >
+                      <Stethoscope />
+                    </Button>
+                    <span
+                      className="inline-flex"
+                      title={inUse ? `Used by ${inUse}. Detach those first.` : undefined}
+                    >
+                      <ConfirmAction
+                        confirmLabel="Delete profile"
+                        description="This cannot be undone. Deleting a Profile does not touch the Secret it spends — only the binding between them."
+                        disabled={inUse.length > 0}
+                        onConfirm={() => deleteProfile.mutate({ id: p.id })}
+                        title={`Delete "${p.name}"?`}
+                        trigger={
+                          <Button
+                            aria-label={`Delete the harness profile ${p.name}`}
+                            disabled={inUse.length > 0}
+                            loading={
+                              deleteProfile.isPending && deleteProfile.variables?.id === p.id
+                            }
+                            size="icon-sm"
+                            type="button"
+                            variant="ghost"
+                          >
+                            <Trash2 />
+                          </Button>
+                        }
+                      />
+                    </span>
+                  </>
+                }
+                key={p.id}
+                meta={
+                  <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span>
+                      {p.authMode} · cap {p.concurrencyCap}
+                    </span>
+                    {/*
+                      The permissive mode is the one that gets marked now, and it is marked with
+                      the destructive token and its own glyph.
+
+                      It used to be the other way round: only the *cautious* modes were badged, in
+                      amber, so a list of ten profiles lit up the safe rows and left the ones that
+                      run the shell and the network unasked completely unmarked. In a scan, the
+                      signal pointed at exactly the wrong rows. Colour is never alone — the glyph
+                      and the words carry it too (the Never Colour Alone Rule).
+                    */}
+                    {unattended ? (
+                      <span className="inline-flex items-center gap-1 font-medium text-destructive">
+                        <ShieldAlert aria-hidden className="size-3" />
+                        Never asks
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">
+                        {p.permissionMode === "plan" ? "Read only" : "Asks first"}
+                      </span>
+                    )}
+                    {(p.model || p.modeId) && (
+                      <span className="font-mono text-2xs">
+                        {[p.model, p.modeId].filter(Boolean).join(" · ")}
+                      </span>
+                    )}
+                    {stale && (
+                      <span
+                        className="text-feedback-error"
+                        title="This harness's last handshake did not advertise it. The run will say so and use the harness's own choice — edit the pin here to fix it."
+                      >
+                        {stale} no longer advertised
+                      </span>
+                    )}
+                    {inUse && <span className="truncate">Used by {inUse}</span>}
+                  </span>
+                }
+                status={
+                  <div className="flex items-center gap-2">
+                    {probe && (
+                      <SectionStatus tone={probe.ok ? "idle" : "bad"}>
+                        {probeSummary(probe)}
+                      </SectionStatus>
+                    )}
+                    <SectionStatus
+                      tone={
+                        p.usage.parkedCount > 0
+                          ? "waiting"
+                          : p.usage.runningCount > 0
+                            ? "active"
+                            : "idle"
+                      }
+                    >
+                      {p.usage.parkedCount > 0
+                        ? `${p.usage.runningCount} of ${p.concurrencyCap} · ${p.usage.parkedCount} parked`
+                        : `${p.usage.runningCount} of ${p.concurrencyCap} running`}
+                    </SectionStatus>
+                    <Select
+                      onValueChange={(v) => requestPermissionChange(p, v as HarnessPermissionMode)}
+                      value={p.permissionMode}
+                    >
+                      <SelectTrigger
+                        aria-label={`Permission mode for ${p.name}`}
+                        className="w-40 shrink-0"
+                        size="sm"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {PERMISSION_MODES.map((mode) => (
+                          <SelectItem key={mode.value} value={mode.value}>
+                            {mode.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                }
+                title={p.name}
+              />
+            );
+          })}
+        </SettingsRows>
+      )}
+      {deleteProfile.error && (
+        <p className="text-destructive text-sm" role="alert">
+          {deleteProfile.error.message}
+        </p>
+      )}
+
+      {/*
+        Raising what a harness may do without asking is a decision, not a setting.
+
+        The select used to write straight through on change: one unconfirmed click took a profile
+        from "asks first" to running the shell and the network unattended, while *deleting* that
+        same profile was confirmed. Lowering it needs no ceremony — only the direction that grants
+        more is stopped, and the words are the ones already written for the field below.
+      */}
+      <ConfirmDialog
+        confirmLabel="Grant it"
+        description={escalation ? PERMISSION_ESCALATION_COPY[escalation.to] : ""}
+        onConfirm={() => {
+          if (escalation) {
+            updateProfile.mutate({ id: escalation.id, permissionMode: escalation.to });
+          }
+          setEscalation(null);
+        }}
+        onOpenChange={(open) => {
+          if (!open) setEscalation(null);
+        }}
+        open={escalation !== null}
+        title={
+          escalation
+            ? `Let "${escalation.name}" do more without asking?`
+            : "Let this profile do more without asking?"
+        }
+      />
+
+      <SettingsCreate
+        defaultOpen={profiles.isSuccess && rows.length === 0}
+        label="Add a harness profile"
+      >
         <form
           className="space-y-4"
           onSubmit={(e) => {
@@ -448,6 +710,22 @@ export function HarnessProfilesSection() {
             <p className="text-muted-foreground text-xs leading-relaxed">
               {PERMISSION_MODES.find((m) => m.value === permissionMode)?.description}
             </p>
+            {/*
+              The default, said out loud at the field that carries it.
+
+              A new Profile arrives on "Never ask", and until now nothing on screen admitted that
+              or explained it — a permissive default arriving silently through a grey dropdown is
+              the only version of this that can surprise someone. It is a deliberate choice with a
+              real reason, so the reason belongs here rather than in the contract's comments.
+            */}
+            {permissionMode === DEFAULT_HARNESS_PERMISSION_MODE && (
+              <p className="flex items-start gap-1.5 text-feedback-caution text-xs leading-relaxed">
+                <ShieldAlert aria-hidden className="mt-0.5 size-3 shrink-0" />
+                This is the default. SoloW runs harnesses headless, so under any asking mode the
+                prompt reaches nobody and the task stalls part-done — pick another mode if this
+                profile should propose rather than act.
+              </p>
+            )}
           </div>
           <Button
             type="submit"
@@ -561,7 +839,7 @@ export function HarnessProfilesSection() {
                 <p
                   className={cn(
                     "text-2xs",
-                    catalogProtocol === "acp" ? "text-state-done" : "text-muted-foreground",
+                    catalogProtocol === "acp" ? "text-feedback-ok" : "text-muted-foreground",
                   )}
                 >
                   {PROTOCOL_HINT[catalogProtocol]}
@@ -624,153 +902,7 @@ export function HarnessProfilesSection() {
             )}
           </div>
         </details>
-
-        {(profiles.data?.items.length ?? 0) > 0 && (
-          <ul className="divide-y border-t">
-            {(profiles.data?.items ?? []).map((p) => {
-              const inUse = describeHarnessProfileUsage(p.usage);
-              return (
-                <li key={p.id} className="flex items-center gap-3 py-2">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <Badge variant="secondary">
-                        {p.name} · {p.authMode} · cap {p.concurrencyCap}
-                      </Badge>
-                      {/* A pin is worth showing because it is the exception: most Profiles let
-                          the harness choose, and a row that names a model is one whose runs will
-                          differ from its neighbours'. */}
-                      {(p.model || p.modeId) && (
-                        <Badge variant="outline" className="font-mono text-2xs">
-                          {[p.model, p.modeId].filter(Boolean).join(" · ")}
-                        </Badge>
-                      )}
-                      {/*
-                        A pin the harness no longer advertises (issue #94 AC-3).
-
-                        Judged against the cache only when the cache says anything: a harness that
-                        has never run has an empty cache, and warning about every pin on a fresh
-                        install would train people to ignore the one warning that matters. The
-                        run itself never substitutes — this is the surface that lets somebody
-                        fix the pin *before* the launch that would have to say so.
-                      */}
-                      {stalePinOn(p, catalogOptions) && (
-                        <Badge
-                          variant="outline"
-                          className="border-state-failed/40 text-2xs text-state-failed"
-                          title="This harness's last handshake did not advertise it. The run will say so and use the harness's own choice — edit the pin here to fix it."
-                        >
-                          {stalePinOn(p, catalogOptions)} no longer advertised
-                        </Badge>
-                      )}
-                      {/*
-                        What the last probe found, kept beside the Profile it is about rather
-                        than in a toast that outlives its context. A failure carries its reason
-                        in the badge itself: "it did not work" without the why would send an
-                        Owner back to guessing, which is the state this replaced.
-                      */}
-                      {probed[p.id] && (
-                        <Badge
-                          variant="outline"
-                          className={
-                            probed[p.id]?.ok
-                              ? "border-state-ready/40 text-2xs text-state-ready"
-                              : "border-state-failed/40 text-2xs text-state-failed"
-                          }
-                          title={probeSummary(probed[p.id] as HarnessProbeReport)}
-                        >
-                          {probeSummary(probed[p.id] as HarnessProbeReport)}
-                        </Badge>
-                      )}
-                      {/* Badged for the *exception*, which is now the Profile that still asks:
-                          marking every row with the ordinary case would say nothing at all, and
-                          a Profile that stalls on a prompt nobody can answer is the one worth
-                          spotting in a list. */}
-                      {p.permissionMode !== DEFAULT_HARNESS_PERMISSION_MODE && (
-                        <Badge
-                          variant="outline"
-                          className="border-state-review/40 text-state-review"
-                        >
-                          {p.permissionMode === "plan" ? "read only" : "asks first"}
-                        </Badge>
-                      )}
-                    </div>
-                    {inUse && (
-                      <p className="mt-1 truncate text-muted-foreground text-xs">Used by {inUse}</p>
-                    )}
-                  </div>
-                  <Select
-                    value={p.permissionMode}
-                    onValueChange={(v) =>
-                      updateProfile.mutate({ id: p.id, permissionMode: v as HarnessPermissionMode })
-                    }
-                  >
-                    <SelectTrigger
-                      size="sm"
-                      className="w-44 shrink-0"
-                      aria-label={`Permission mode for ${p.name}`}
-                    >
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {PERMISSION_MODES.map((mode) => (
-                        <SelectItem key={mode.value} value={mode.value}>
-                          {mode.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {/*
-                    Deliberately never disabled — a Profile that is in use is the one it is most
-                    urgent to be able to test, and "in use" is not evidence that it still works.
-                  */}
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    aria-label={`Test the harness profile ${p.name}`}
-                    loading={
-                      probeProfile.isPending && probeProfile.variables?.agentProfileId === p.id
-                    }
-                    onClick={() => probeProfile.mutate({ agentProfileId: p.id })}
-                  >
-                    <Stethoscope />
-                  </Button>
-                  {/*
-                    A Profile in use is not deletable at all — the server refuses it, and a
-                    button that only ever produces an error is worse than one that explains
-                    itself. The reason sits beside it, so the disabled state is never a mystery
-                    (same idiom as the Secrets list above).
-                  */}
-                  <ConfirmAction
-                    title={`Delete "${p.name}"?`}
-                    description="This cannot be undone. Deleting a Profile does not touch the Secret it spends — only the binding between them."
-                    confirmLabel="Delete profile"
-                    disabled={inUse.length > 0}
-                    onConfirm={() => deleteProfile.mutate({ id: p.id })}
-                    trigger={
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        disabled={inUse.length > 0}
-                        aria-label={`Delete the harness profile ${p.name}`}
-                        loading={deleteProfile.isPending && deleteProfile.variables?.id === p.id}
-                      >
-                        <Trash2 />
-                      </Button>
-                    }
-                  />
-                </li>
-              );
-            })}
-          </ul>
-        )}
-        {deleteProfile.error && (
-          <p className="text-destructive text-sm" role="alert">
-            {deleteProfile.error.message}
-          </p>
-        )}
-      </CardContent>
-    </Card>
+      </SettingsCreate>
+    </SettingsSection>
   );
 }

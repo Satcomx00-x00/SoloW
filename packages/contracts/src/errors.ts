@@ -152,6 +152,31 @@ export const HarnessProfileErrorCode = {
 export type HarnessProfileErrorCode =
   (typeof HarnessProfileErrorCode)[keyof typeof HarnessProfileErrorCode];
 
+export const RepositoryErrorCode = {
+  /**
+   * The Repository is still held by a Task attachment, a Project, an Issue or a mirrored Change
+   * Request. Every one of those is a real foreign key with no cascade, so a naive delete fails as
+   * a raw constraint violation from inside a statement that says nothing about repositories.
+   *
+   * Refusing up front is also the *product* answer, not only the safe one: a Repository is where
+   * a harness is allowed to write, and the rows pointing at it are the record of what it wrote.
+   * Disconnecting one that still holds Issues and Tasks would not tidy a workspace, it would
+   * erase the provenance of work that already happened. So the refusal names what to detach.
+   */
+  InUse: "REPOSITORY_IN_USE",
+} as const;
+export type RepositoryErrorCode = (typeof RepositoryErrorCode)[keyof typeof RepositoryErrorCode];
+
+export const ExecutorProfileErrorCode = {
+  /**
+   * The Executor Profile is still named by a Task or a Workflow Step — the same shape of refusal
+   * `HarnessProfileErrorCode.InUse` gives, for the same reason, on the sibling table.
+   */
+  InUse: "EXECUTOR_PROFILE_IN_USE",
+} as const;
+export type ExecutorProfileErrorCode =
+  (typeof ExecutorProfileErrorCode)[keyof typeof ExecutorProfileErrorCode];
+
 export const HarnessCatalogErrorCode = {
   /**
    * `(workspace_id, key)` is unique (spec F05 issue #10) — two rows with the same key would

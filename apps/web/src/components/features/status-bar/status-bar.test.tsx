@@ -19,9 +19,27 @@ import { StatusBar } from "./status-bar";
  */
 
 const TASKS = [
-  { id: "t1", title: "Keypad", state: "running" },
-  { id: "t2", title: "Gate relay", state: "review" },
-  { id: "t3", title: "Docs", state: "done" },
+  {
+    id: "t1",
+    title: "Keypad",
+    state: "running",
+    workflowId: null,
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  },
+  {
+    id: "t2",
+    title: "Gate relay",
+    state: "review",
+    workflowId: null,
+    updatedAt: "2026-01-01T00:00:01.000Z",
+  },
+  {
+    id: "t3",
+    title: "Docs",
+    state: "done",
+    workflowId: null,
+    updatedAt: "2026-01-01T00:00:02.000Z",
+  },
 ];
 
 const PROBE_ID = "test.seam-probe";
@@ -69,8 +87,12 @@ describe("StatusBar", () => {
     await waitFor(() => expect(screen.getByText("3 tasks")).toBeDefined());
     const text = container.textContent ?? "";
     expect(text.indexOf("local workspace")).toBeLessThan(text.indexOf("dev owner"));
-    expect(text.indexOf("3 tasks")).toBeLessThan(text.indexOf("1 running"));
-    expect(text.indexOf("1 running")).toBeLessThan(text.indexOf("1 awaiting review"));
+    // Left of the bar (issue #3, user request 2026-09-08: the running/review tabs sit in the
+    // bar's centre-left, ahead of the right-aligned counters), so the active tabs read before
+    // the task count rather than after it.
+    expect(text.indexOf("Keypad")).toBeLessThan(text.indexOf("3 tasks"));
+    // Running before Review, within the one combined segment that replaced the two bare counts.
+    expect(text.indexOf("Keypad")).toBeLessThan(text.indexOf("Gate relay"));
   });
 
   it("swaps the identity segment for the dev-owner one through a predicate, not a branch", () => {
@@ -120,8 +142,10 @@ describe("StatusBar", () => {
   });
 
   it("puts the user's saved arrangement ahead of the registered priorities", async () => {
+    // Both left-slot segments, so the order the harness saves is the only thing that can move
+    // them past each other — the registered priorities alone would put Workspace first.
     const { container } = renderBar(null, {
-      order: ["status.review", "status.running", "status.tasks"],
+      order: ["status.dev-owner", "status.workspace"],
       hidden: [],
       shown: [],
       widths: {},
@@ -130,10 +154,8 @@ describe("StatusBar", () => {
     await waitFor(() => expect(screen.getByText("3 tasks")).toBeDefined());
     await waitFor(() => {
       const text = container.textContent ?? "";
-      expect(text.indexOf("1 awaiting review")).toBeLessThan(text.indexOf("1 running"));
+      expect(text.indexOf("dev owner")).toBeLessThan(text.indexOf("local workspace"));
     });
-    const text = container.textContent ?? "";
-    expect(text.indexOf("1 running")).toBeLessThan(text.indexOf("3 tasks"));
   });
 
   it("gives a segment the user hid no space at all, rather than rendering it empty", async () => {
@@ -141,5 +163,49 @@ describe("StatusBar", () => {
 
     await waitFor(() => expect(screen.getByText("3 tasks")).toBeDefined());
     await waitFor(() => expect(screen.queryByText("local workspace")).toBeNull());
+  });
+});
+
+/**
+ * A tab names its Task by the Issue's own number, not the Task's title (user request
+ * 2026-09-08) — the identifier the rest of the product already uses to name a row of work.
+ */
+describe("a running task's tab", () => {
+  const NUMBERED_TASKS = [
+    {
+      id: "t1",
+      issueId: "iss-1",
+      title: "Keypad",
+      state: "running",
+      workflowId: null,
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    },
+  ];
+
+  function renderNumberedBar(issue: { externalNumber: number | null }) {
+    const preferences = preferenceFixture();
+    return renderWithTrpc(
+      <AppContextProvider value={{ identity: null }}>
+        <StatusBar />
+      </AppContextProvider>,
+      {
+        "task.list": () => ({ items: NUMBERED_TASKS, nextCursor: null }),
+        "issue.get": () => issue,
+        ...preferences.handlers,
+      },
+    );
+  }
+
+  it("shows the issue's number once it resolves, not the task's title", async () => {
+    renderNumberedBar({ externalNumber: 90 });
+
+    expect(await screen.findByText("#90")).toBeDefined();
+    expect(screen.queryByText("Keypad")).toBeNull();
+  });
+
+  it("falls back to the task's title for an issue the provider never numbered", async () => {
+    renderNumberedBar({ externalNumber: null });
+
+    expect(await screen.findByText("Keypad")).toBeDefined();
   });
 });

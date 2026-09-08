@@ -28,9 +28,22 @@ function CardHeader({ className, ...props }: React.ComponentProps<"div">) {
   )
 }
 
-function CardTitle({ className, ...props }: React.ComponentProps<"div">) {
+/**
+ * `as` exists so a card title can be a real heading.
+ *
+ * A `div` is the right default — most cards in this app sit inside a section that already has
+ * one, and a heading there would invent a level. But a page whose whole body is cards has no
+ * other heading structure at all: Settings rendered twelve card titles and exactly one `h1`, so a
+ * screen reader was offered a single landing point for 2,300 pixels of forms, and WCAG 2.4.1 was
+ * met by neither a heading outline nor a skip link. Callers that own the outline pass `as="h2"`.
+ */
+function CardTitle({
+  className,
+  as: Comp = "div",
+  ...props
+}: React.ComponentProps<"div"> & { as?: "div" | "h2" | "h3" }) {
   return (
-    <div
+    <Comp
       data-slot="card-title"
       className={cn("leading-none font-semibold", className)}
       {...props}

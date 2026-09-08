@@ -153,7 +153,7 @@ const components: Components = {
     return (
       <div className="relative min-w-0">
         {language && (
-          <span className="absolute top-1.5 right-2 select-none font-mono text-[10px] text-muted-foreground/60 uppercase tracking-wider">
+          <span className="absolute top-1.5 right-2 select-none font-mono text-2xs text-muted-foreground/60 uppercase tracking-wider">
             {language}
           </span>
         )}

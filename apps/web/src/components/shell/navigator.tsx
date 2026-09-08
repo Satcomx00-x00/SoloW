@@ -4,9 +4,10 @@ import type { IssueStatus, TaskState } from "@solow/contracts";
 import { Plus, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { type ReactNode, Suspense, useState } from "react";
+import { type ReactNode, Suspense, useEffect, useRef, useState } from "react";
 import { ConfirmAction } from "@/components/features/confirm-action";
 import { Button } from "@/components/ui/button";
+import { CreateDisclosure } from "@/components/ui/create-disclosure";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -93,7 +94,7 @@ function CountRow({
   count: number;
   tone: string;
   hint?: string;
-  href?: string;
+  href?: string | undefined;
 }) {
   const empty = count === 0;
   const body = (
@@ -126,7 +127,15 @@ function CountRow({
   );
 }
 
-/** Board context: live per-state task counts, for the Project the board is inside. */
+/**
+ * Board context: live per-state task counts, for the Project the board is inside.
+ *
+ * Every row is a link, unlike before — this was the one counted list in the app whose rows did
+ * not act on a click, next to Issues' identical shape where every row filters. A column here is
+ * never hidden or reordered, so "filter" would only narrow to what is already the whole board;
+ * what a click can usefully do is bring a column back into view on a lifecycle strip wide enough
+ * to scroll off-screen. See the effect in `board.tsx` that reads `?column=`.
+ */
 function BoardNav({ projectId }: { projectId?: string | undefined }) {
   const tasks = trpc.task.list.useQuery(projectId ? { ...WHOLE_PAGE, projectId } : WHOLE_PAGE);
   const rows = tasks.data?.items ?? [];
@@ -134,6 +143,7 @@ function BoardNav({ projectId }: { projectId?: string | undefined }) {
     acc[t.state] = (acc[t.state] ?? 0) + 1;
     return acc;
   }, {});
+  const boardHref = projectId ? projectSectionHref(projectId, "/board") : null;
 
   return (
     <nav className="pb-3" aria-label="Board lifecycle">
@@ -155,6 +165,7 @@ function BoardNav({ projectId }: { projectId?: string | undefined }) {
             count={counts[state] ?? 0}
             tone={STATE_STYLE[state].textClassName}
             hint={STATE_STYLE[state].hint}
+            href={boardHref ? `${boardHref}?column=${state}` : undefined}
           />
         ))}
       </ul>
@@ -251,6 +262,12 @@ function AllIcon({ className, strokeWidth }: { className?: string; strokeWidth?:
  * Each row is a `Link`, not a button: the selection belongs in the URL (`workflowIdFromPath`), so
  * a pipeline can be linked to, reopened by a reload, and read by the secondary sidebar without
  * this component having to tell it.
+ *
+ * The create field used to sit above the list, permanently expanded — the same inversion Settings
+ * was built to fix: the first thing on screen was a blank field for a pipeline that did not exist
+ * yet, while the pipelines you already had were pushed underneath it. `CreateDisclosure` puts the
+ * list first and folds the field behind one button, open by default only while there is nothing
+ * to list.
  */
 function WorkflowsNav() {
   const pathname = usePathname();
@@ -283,41 +300,6 @@ function WorkflowsNav() {
 
   return (
     <div className="pb-3">
-      <form
-        className="space-y-1.5 px-2 pt-2.5"
-        onSubmit={(e) => {
-          e.preventDefault();
-          create.mutate({ name });
-        }}
-      >
-        <Label htmlFor="new-workflow-name" className="sr-only">
-          New workflow
-        </Label>
-        <Input
-          id="new-workflow-name"
-          className="h-8 text-xs"
-          placeholder="e.g. Plan, build, review"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          disabled={failed}
-          required
-        />
-        <Button
-          type="submit"
-          size="sm"
-          className="w-full"
-          disabled={!name || failed || create.isPending}
-        >
-          <Plus aria-hidden />
-          New workflow
-        </Button>
-        {create.error && (
-          <p className="font-mono text-2xs text-state-failed" role="alert">
-            {create.error.message}
-          </p>
-        )}
-      </form>
-
       <nav aria-label="Workflows">
         <SectionLabel>Pipelines</SectionLabel>
         <ul className="space-y-px px-2" aria-label="Workflows">
@@ -377,6 +359,48 @@ function WorkflowsNav() {
           </p>
         )}
       </nav>
+
+      <div className="px-2">
+        <CreateDisclosure
+          defaultOpen={!workflows.isLoading && list.length === 0}
+          label="New workflow"
+        >
+          <form
+            className="space-y-1.5"
+            onSubmit={(e) => {
+              e.preventDefault();
+              create.mutate({ name });
+            }}
+          >
+            <Label htmlFor="new-workflow-name" className="sr-only">
+              Workflow name
+            </Label>
+            <Input
+              className="h-8 text-xs"
+              disabled={failed}
+              id="new-workflow-name"
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Plan, build, review"
+              required
+              value={name}
+            />
+            <Button
+              className="w-full"
+              disabled={!name || failed || create.isPending}
+              size="sm"
+              type="submit"
+            >
+              <Plus aria-hidden />
+              Create
+            </Button>
+            {create.error && (
+              <p className="font-mono text-2xs text-state-failed" role="alert">
+                {create.error.message}
+              </p>
+            )}
+          </form>
+        </CreateDisclosure>
+      </div>
     </div>
   );
 }
@@ -502,6 +526,71 @@ function ProjectNav({ projectId }: { projectId: string }) {
   );
 }
 
+/**
+ * The last few Tasks you were on, most recent first (spec F03 follow-on).
+ *
+ * A Task page has nothing that plays this role. The board and the issue list both leave it the
+ * moment you navigate away, so a Task left five minutes ago — to check an Issue, glance at
+ * Settings, or open a second Task — was otherwise gone until you re-found it by hand, the one
+ * structural gap none of the other sidebar variants have: every one of them is *some* list you
+ * can always get back to, and a Task is the one navigable thing in the app that is not on one.
+ *
+ * Server-persisted (`preference.getRecentTasks`, the same `ui_preference` mechanism the task
+ * pane's saved width uses) rather than kept in `localStorage`, so it survives a cleared cache and
+ * reads the same on another device signed into the same account.
+ *
+ * Shown above whatever the route's own content is, on every screen — not filed under Tasks or
+ * the board, because leaving a Task is exactly the moment you are looking at something else.
+ * Absent entirely once there is nothing to recall, and the Task you are *currently* on is
+ * filtered out: linking to where you already are is not a memory aid.
+ */
+function RecentTasksNav({ excludeTaskId }: { excludeTaskId: string | null }) {
+  const recents = trpc.preference.getRecentTasks.useQuery({});
+  const ids = (recents.data?.taskIds ?? []).filter((id) => id !== excludeTaskId);
+  if (ids.length === 0) return null;
+  return (
+    <nav aria-label="Recent tasks">
+      <SectionLabel>Recent</SectionLabel>
+      <ul className="space-y-px px-2 pb-1">
+        {ids.map((id) => (
+          <RecentTaskRow key={id} taskId={id} />
+        ))}
+      </ul>
+    </nav>
+  );
+}
+
+/**
+ * One recalled Task, by itself: title, and the same lifecycle glyph and colour the board and the
+ * state badge already use for it — the point of the list is to say "here is one waiting on you"
+ * as readily as "here is one you were just in", and a bare title cannot say which.
+ *
+ * A dangling id — the Task was deleted since it was recorded — renders nothing rather than a
+ * broken row; it ages out of the stored list on its own the next time five newer Tasks are
+ * visited; the DAL that returns it is undisturbed either way.
+ */
+function RecentTaskRow({ taskId }: { taskId: string }) {
+  const task = trpc.task.get.useQuery({ id: taskId });
+  if (!task.data) return null;
+  const t = task.data;
+  const style = STATE_STYLE[t.state];
+  return (
+    <li>
+      <Link
+        href={`/task/${t.id}`}
+        className="flex items-center gap-2.5 rounded-md px-2 py-1.5 text-foreground/75 text-sm transition-colors hover:bg-sidebar-accent/50 hover:text-foreground"
+      >
+        <style.icon
+          aria-hidden
+          strokeWidth={2}
+          className={cn("size-3.5 shrink-0", style.textClassName)}
+        />
+        <span className="min-w-0 flex-1 truncate">{t.title}</span>
+      </Link>
+    </li>
+  );
+}
+
 /** VS-Code-style navigator: the context panel next to the activity bar. */
 export function Navigator({ workspaceName }: { workspaceName: string }) {
   const pathname = usePathname();
@@ -525,6 +614,26 @@ export function Navigator({ workspaceName }: { workspaceName: string }) {
   // say which one is open.
   const task = trpc.task.get.useQuery({ id: taskId ?? "" }, { enabled: taskId !== null });
 
+  /**
+   * Record this Task as visited, once per Task rather than once per render.
+   *
+   * `recordedTaskId` is the guard, not `taskId` alone: the mutation object tRPC hands back is a
+   * new value on every render (React Query's own contract), so keying the effect on it as well
+   * would fire a write on every keystroke of a component two levels up re-rendering, not once per
+   * navigation. The ref remembers what was last recorded across those renders; only a genuine
+   * change of Task clears it.
+   */
+  const utils = trpc.useUtils();
+  const recordVisit = trpc.preference.recordRecentTask.useMutation({
+    onSuccess: () => utils.preference.getRecentTasks.invalidate(),
+  });
+  const recordedTaskId = useRef<string | null>(null);
+  useEffect(() => {
+    if (!taskId || recordedTaskId.current === taskId) return;
+    recordedTaskId.current = taskId;
+    recordVisit.mutate({ taskId });
+  }, [taskId, recordVisit.mutate]);
+
   const title = taskId
     ? (task.data?.title ?? "Task")
     : projectId
@@ -540,9 +649,10 @@ export function Navigator({ workspaceName }: { workspaceName: string }) {
     <aside className="hidden w-60 shrink-0 flex-col border-r bg-sidebar md:flex">
       <div className="flex h-11 shrink-0 flex-col justify-center border-b px-3">
         <span className="truncate font-semibold text-sm leading-tight">{title}</span>
-        <span className="truncate text-2xs text-muted-foreground leading-tight">{caption}</span>
+        <span className="truncate text-muted-foreground text-xs leading-tight">{caption}</span>
       </div>
       <ScrollArea className="flex-1">
+        <RecentTasksNav excludeTaskId={taskId} />
         {taskId ? (
           <TaskNav taskId={taskId} />
         ) : projectId ? (

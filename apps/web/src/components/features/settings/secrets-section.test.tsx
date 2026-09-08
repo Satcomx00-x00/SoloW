@@ -53,6 +53,7 @@ describe("SecretsSection", () => {
         }),
     });
 
+    await screen.findByRole("button", { name: "Save secret" });
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "anthropic-api-key" } });
     fireEvent.change(screen.getByLabelText("Value"), { target: { value: SECRET_VALUE } });
     fireEvent.submit(screen.getByRole("button", { name: "Save secret" }).closest("form")!);
@@ -86,6 +87,7 @@ describe("SecretsSection", () => {
     });
 
     const value = screen.getByLabelText("Value") as HTMLInputElement;
+    await screen.findByRole("button", { name: "Save secret" });
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "token" } });
     fireEvent.change(value, { target: { value: SECRET_VALUE } });
     fireEvent.submit(screen.getByRole("button", { name: "Save secret" }).closest("form")!);
@@ -144,6 +146,7 @@ describe("SecretsSection", () => {
       },
     });
 
+    await screen.findByRole("button", { name: "Save secret" });
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "token" } });
     fireEvent.change(screen.getByLabelText("Value"), { target: { value: SECRET_VALUE } });
     fireEvent.submit(screen.getByRole("button", { name: "Save secret" }).closest("form")!);
@@ -197,6 +200,7 @@ describe("SecretsSection", () => {
       }),
     });
 
+    await screen.findByRole("button", { name: "Save secret" });
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "anthropic-api-key" } });
     fireEvent.change(screen.getByLabelText("Value"), { target: { value: SECRET_VALUE } });
     fireEvent.submit(screen.getByRole("button", { name: "Save secret" }).closest("form")!);
@@ -215,6 +219,7 @@ describe("SecretsSection", () => {
       }),
     });
 
+    await screen.findByRole("button", { name: "Save secret" });
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "brand-new" } });
     fireEvent.change(screen.getByLabelText("Value"), { target: { value: SECRET_VALUE } });
     fireEvent.submit(screen.getByRole("button", { name: "Save secret" }).closest("form")!);

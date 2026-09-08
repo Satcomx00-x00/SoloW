@@ -7,9 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { ConfirmAction } from "@/components/features/confirm-action";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -18,6 +16,16 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { trpc } from "@/trpc/react";
+import {
+  SectionStatus,
+  SettingsCreate,
+  SettingsEmpty,
+  SettingsField,
+  SettingsLoading,
+  SettingsRow,
+  SettingsRows,
+  SettingsSection,
+} from "./settings-shell";
 
 /**
  * How a Secret's holders read in the list and in the confirmation. Named rather than counted:
@@ -86,119 +94,159 @@ export function SecretsSection() {
     onSuccess: () => utils.secret.list.invalidate(),
   });
 
+  const rows = secrets.data ?? [];
+  // Open on the form only when there is nothing to look at, or when a Task sent the Owner here to
+  // renew a specific credential. Otherwise the section is the list, and creating is a click.
+  const openOnForm = renewTarget !== null || (secrets.isSuccess && rows.length === 0);
+
   return (
-    <Card id="secrets" className="scroll-mt-16" ref={cardRef}>
-      <CardHeader>
-        <CardTitle>Secrets</CardTitle>
-        <CardDescription>
-          Write-only credentials. The value is never shown after entry.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <form
-          className="space-y-4"
-          onSubmit={(e) => {
-            e.preventDefault();
-            setSecret.mutate({ name, kind, value });
-          }}
-        >
-          <div className="grid gap-2">
-            <Label htmlFor="secret-name">Name</Label>
-            <Input
-              id="secret-name"
-              placeholder="e.g. anthropic-api-key"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="secret-kind">Kind</Label>
-            <Select value={kind} onValueChange={(v) => setKind(v as SecretKind)}>
-              <SelectTrigger id="secret-kind" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="api_key">API key</SelectItem>
-                <SelectItem value="subscription_token">Subscription token</SelectItem>
-                <SelectItem value="scm_pat">Personal access token (GitHub/GitLab)</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="secret-value">Value</Label>
-            <Input
-              id="secret-value"
-              ref={valueRef}
-              type="password"
-              placeholder="Paste the secret value"
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-              required
-            />
-          </div>
-          <Button type="submit" loading={setSecret.isPending}>
-            Save secret
-          </Button>
-        </form>
-        {setSecret.error && (
-          <p className="text-destructive text-sm" role="alert">
-            {setSecret.error.message}
-          </p>
-        )}
-        {justResumed !== null && (
-          <p className="text-sm text-state-done" role="status">
-            Saved. {justResumed} task{justResumed === 1 ? "" : "s"} paused on this credential{" "}
-            {justResumed === 1 ? "has" : "have"} resumed.
-          </p>
-        )}
-        {(secrets.data?.length ?? 0) > 0 && (
-          <ul className="divide-y border-t">
-            {(secrets.data ?? []).map((s) => (
-              <li key={s.id} className="flex items-center gap-3 py-2">
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm">{s.name}</p>
-                  {s.usedBy.length > 0 && (
-                    <p className="truncate text-muted-foreground text-xs">
-                      Used by {describeUsage(s.usedBy)}
-                    </p>
-                  )}
-                </div>
-                <Badge variant="secondary">{s.kind}</Badge>
-                {/*
-                  A Secret in use is not deletable at all — the server refuses it, and a button
-                  that only ever produces an error is worse than one that explains itself. The
-                  reason sits beside it in the row above, so the disabled state is never a mystery.
-                */}
-                <ConfirmAction
-                  title={`Delete "${s.name}"?`}
-                  description="The stored value is encrypted and cannot be read back, so deleting it is permanent — you would have to obtain the credential again from wherever it came from."
-                  confirmLabel="Delete secret"
-                  disabled={s.usedBy.length > 0}
-                  onConfirm={() => deleteSecret.mutate({ id: s.id })}
-                  trigger={
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      disabled={s.usedBy.length > 0}
-                      aria-label={`Delete the secret ${s.name}`}
-                      loading={deleteSecret.isPending && deleteSecret.variables?.id === s.id}
-                    >
-                      <Trash2 />
-                    </Button>
+    <div ref={cardRef}>
+      <SettingsSection
+        caption="Write-only credentials. The value is never shown after entry."
+        id="secrets"
+        status={
+          secrets.isSuccess ? (
+            <SectionStatus>
+              {rows.length === 0
+                ? "None stored"
+                : `${rows.length} stored · ${rows.filter((s) => s.usedBy.length > 0).length} in use`}
+            </SectionStatus>
+          ) : null
+        }
+        title="Secrets"
+      >
+        {secrets.isPending ? (
+          <SettingsLoading rows={3} />
+        ) : rows.length === 0 ? (
+          <SettingsEmpty>
+            No credentials stored yet. A harness needs one before it can run.
+          </SettingsEmpty>
+        ) : (
+          <SettingsRows>
+            {rows.map((s) => {
+              const held = s.usedBy.length > 0;
+              // A Secret in use is not deletable — the server refuses it, and a button that only
+              // ever produces an error is worse than one that explains itself. The reason used to
+              // sit only in the row above, which never said it *blocked* deletion and which a
+              // keyboard user could not reach at all, because a disabled button takes no focus and
+              // fires no pointer events. The title now rides on a wrapper, so the explanation is
+              // available from the control itself.
+              const reason = held
+                ? `In use by ${describeUsage(s.usedBy)}. Detach it there before deleting.`
+                : undefined;
+              return (
+                <SettingsRow
+                  actions={
+                    <span className="inline-flex" title={reason}>
+                      <ConfirmAction
+                        confirmLabel="Delete secret"
+                        description="The stored value is encrypted and cannot be read back, so deleting it is permanent — you would have to obtain the credential again from wherever it came from."
+                        disabled={held}
+                        onConfirm={() => deleteSecret.mutate({ id: s.id })}
+                        title={`Delete "${s.name}"?`}
+                        trigger={
+                          <Button
+                            aria-label={`Delete the secret ${s.name}`}
+                            disabled={held}
+                            loading={deleteSecret.isPending && deleteSecret.variables?.id === s.id}
+                            size="icon-sm"
+                            type="button"
+                            variant="ghost"
+                          >
+                            <Trash2 />
+                          </Button>
+                        }
+                      />
+                    </span>
                   }
+                  key={s.id}
+                  meta={held ? `Used by ${describeUsage(s.usedBy)}` : "Held by nothing"}
+                  status={<Badge variant="secondary">{SECRET_KIND_LABELS[s.kind] ?? s.kind}</Badge>}
+                  title={s.name}
                 />
-              </li>
-            ))}
-          </ul>
+              );
+            })}
+          </SettingsRows>
         )}
+
         {deleteSecret.error && (
           <p className="text-destructive text-sm" role="alert">
             {deleteSecret.error.message}
           </p>
         )}
-      </CardContent>
-    </Card>
+
+        <SettingsCreate defaultOpen={openOnForm} label="Add a secret">
+          <form
+            className="space-y-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+              setSecret.mutate({ name, kind, value });
+            }}
+          >
+            <SettingsField htmlFor="secret-name" label="Name">
+              <Input
+                id="secret-name"
+                onChange={(e) => setName(e.target.value)}
+                placeholder="e.g. anthropic-api-key"
+                required
+                value={name}
+              />
+            </SettingsField>
+            <SettingsField htmlFor="secret-kind" label="Kind">
+              <Select onValueChange={(v) => setKind(v as SecretKind)} value={kind}>
+                <SelectTrigger className="w-full" id="secret-kind">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.entries(SECRET_KIND_LABELS).map(([value, label]) => (
+                    <SelectItem key={value} value={value}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </SettingsField>
+            <SettingsField htmlFor="secret-value" label="Value">
+              <Input
+                id="secret-value"
+                onChange={(e) => setValue(e.target.value)}
+                placeholder="Paste the secret value"
+                ref={valueRef}
+                required
+                type="password"
+                value={value}
+              />
+            </SettingsField>
+            <Button loading={setSecret.isPending} type="submit">
+              Save secret
+            </Button>
+          </form>
+          {setSecret.error && (
+            <p className="text-destructive text-sm" role="alert">
+              {setSecret.error.message}
+            </p>
+          )}
+          {justResumed !== null && (
+            <p className="text-feedback-ok text-sm" role="status">
+              Saved. {justResumed} task{justResumed === 1 ? "" : "s"} paused on this credential{" "}
+              {justResumed === 1 ? "has" : "have"} resumed.
+            </p>
+          )}
+        </SettingsCreate>
+      </SettingsSection>
+    </div>
   );
 }
+
+/**
+ * The kinds, in the Owner's words rather than the column's.
+ *
+ * `scm_pat` and `subscription_token` are database values and they were reaching the screen intact
+ * — in the list badge, and in a select placeholder that read "Select a scm_pat secret". One map,
+ * read by the form and the list, so the two can never drift into naming the same thing twice.
+ */
+export const SECRET_KIND_LABELS: Record<string, string> = {
+  api_key: "API key",
+  subscription_token: "Subscription token",
+  scm_pat: "Access token",
+};

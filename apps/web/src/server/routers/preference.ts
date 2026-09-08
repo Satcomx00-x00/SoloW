@@ -1,6 +1,8 @@
 import "server-only";
 import {
   getSurfaceLayoutInput,
+  recentTasksDto,
+  recordRecentTaskInput,
   setSurfaceLayoutInput,
   setTaskPaneLayoutInput,
   surfaceLayoutDto,
@@ -8,8 +10,10 @@ import {
 } from "@solow/contracts";
 import { z } from "zod";
 import {
+  getRecentTasks,
   getSurfaceLayout,
   getTaskPaneLayout,
+  recordRecentTask,
   setSurfaceLayout,
   setTaskPaneLayout,
 } from "../dal/preference.js";
@@ -82,4 +86,33 @@ export const preferenceRouter = router({
     .input(setTaskPaneLayoutInput)
     .output(taskPaneLayoutDto)
     .mutation(async ({ ctx, input }) => unwrap(await setTaskPaneLayout(ctx.rctx, input))),
+
+  getRecentTasks: ownerProcedure
+    .meta({
+      openapi: {
+        method: "GET",
+        path: "/preference.getRecentTasks",
+        tags: ["preference"],
+        protect: true,
+        summary:
+          "The signed-in user's recently visited Tasks, most recent first. Empty when nothing is saved.",
+      },
+    })
+    .input(z.object({}))
+    .output(recentTasksDto)
+    .query(async ({ ctx }) => unwrap(await getRecentTasks(ctx.rctx))),
+
+  recordRecentTask: ownerProcedure
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/preference.recordRecentTask",
+        tags: ["preference"],
+        protect: true,
+        summary: "Move a Task to the front of the signed-in user's recent list.",
+      },
+    })
+    .input(recordRecentTaskInput)
+    .output(recentTasksDto)
+    .mutation(async ({ ctx, input }) => unwrap(await recordRecentTask(ctx.rctx, input.taskId))),
 });

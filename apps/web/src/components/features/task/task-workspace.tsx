@@ -15,8 +15,10 @@ import {
   ArrowLeft,
   Check,
   CheckCircle2,
+  CircleSlash,
   GitBranch,
   ListChecks,
+  OctagonAlert,
   RotateCcw,
   Trash2,
   TriangleAlert,
@@ -29,6 +31,7 @@ import { TaskStateBadge } from "@/components/features/board/task-state-badge";
 import { ConfirmAction, ConfirmDialog } from "@/components/features/confirm-action";
 import { useBackToProject } from "@/components/features/shared/back-to-project";
 import { useTaskStream } from "@/components/hooks/use-task-stream";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { WHOLE_PAGE } from "@/lib/paged";
@@ -47,19 +50,23 @@ import { latestTodos, TodoList } from "./todo-list";
 import { buildTranscript } from "./transcript";
 import { WorkflowSteps } from "./workflow-steps";
 
-/** Shared empty array, so "no events yet" keeps a stable identity across renders. */
 /**
  * What the harness said about how its run ended, in the header.
  *
  * `changes_ready` reaches this only once the Task has left `running` — before that the same
  * outcome renders as the "Open review" control above.
+ *
+ * Each outcome carries its own glyph as well as its own words. One check-circle for all three
+ * said "finished well" over a run that had given up, which is the same failure the labels here
+ * were written to fix — the icon is read first, and it was contradicting the sentence beside it.
  */
-const COMPLETION_LABEL: Record<string, string> = {
-  changes_ready: "Finished — changes ready",
-  nothing_to_do: "Nothing to do",
-  blocked: "Stopped — blocked",
+const COMPLETION_OUTCOME: Record<string, { label: string; icon: typeof CheckCircle2 }> = {
+  changes_ready: { label: "Finished — changes ready", icon: CheckCircle2 },
+  nothing_to_do: { label: "Nothing to do", icon: CircleSlash },
+  blocked: { label: "Stopped — blocked", icon: OctagonAlert },
 };
 
+/** Shared empty array, so "no events yet" keeps a stable identity across renders. */
 const NO_EVENTS: SessionEventDto[] = [];
 /** Stable empties, for the same reason `NO_EVENTS` is one: a fresh literal misses every memo. */
 const NO_DIFFS: TaskDiffDto[] = [];
@@ -73,13 +80,21 @@ const STREAM_LABEL: Record<string, string> = {
   error: "Stream offline",
 };
 
-/** Connection health, told by colour as well as by word. */
+/**
+ * Connection health, told by colour as well as by word.
+ *
+ * The feedback family, not the lifecycle one. A socket that is open, retrying or dead says
+ * nothing about where the Task is in its life — it used to borrow Done green, Review amber and
+ * Failed red, which meant a reconnecting stream wore the exact colour the board reserves for
+ * "a person is needed here". Two unrelated facts sharing three tokens is what the Three Families
+ * Rule exists to prevent.
+ */
 const STREAM_TONE: Record<string, string> = {
   idle: "text-muted-foreground/60",
   connecting: "text-muted-foreground",
-  open: "text-state-done",
-  reconnecting: "text-state-review",
-  error: "text-state-failed",
+  open: "text-feedback-ok",
+  reconnecting: "text-feedback-caution",
+  error: "text-feedback-error",
 };
 
 /** What the hub said about the last thing we sent, in words an operator can act on. */
@@ -92,6 +107,19 @@ const ACK_MESSAGE: Record<string, string> = {
   permission_option_unknown: "The harness no longer offers that option.",
   permission_unsupported: "This harness's protocol has no permission channel to answer on.",
 };
+
+/** How the last run ended, as the app's soft badge — one shape, one definition, like every other. */
+function CompletionBadge({ outcome }: { outcome: string | null }) {
+  const completion = COMPLETION_OUTCOME[outcome ?? "blocked"] ?? COMPLETION_OUTCOME.blocked;
+  if (!completion) return null;
+  const Icon = completion.icon;
+  return (
+    <Badge variant="outline" className="shrink-0">
+      <Icon aria-hidden />
+      {completion.label}
+    </Badge>
+  );
+}
 
 /** Live connection indicator: a dot that pulses only while the stream is actually open. */
 function StreamIndicator({ status }: { status: string }) {
@@ -429,7 +457,13 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
         </Button>
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <h1 className="truncate font-semibold text-sm">{t.title}</h1>
+            {/*
+              The Title step (`text-lg`, 16px here), not the control step, and the same one
+              `/projects` gives its own heading. This is the one thing on the page that says what
+              you are looking at, and at 13px it weighed exactly as much as the branch name under
+              it and the chip beside it — a header where nothing was the subject.
+            */}
+            <h1 className="truncate font-semibold text-lg">{t.title}</h1>
             <TaskStateBadge state={t.state} size="sm" />
             {/*
               Beside the badge rather than in the action cluster on the right: the arrows change
@@ -450,32 +484,38 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
               and one that gave up has not finished.
             */}
             {t.completedOutcome === "changes_ready" && t.state === "running" ? (
-              <button
-                type="button"
-                disabled={submitForReview.isPending}
+              // The app's own Button, not a styled `<button>`: it brings the control ladder, the
+              // one focus ring, the press, and — the reason it matters here — a loading state the
+              // component owns, so the gate cannot be opened twice while the first call is in
+              // flight. It keeps the done hue because it is the one control on this page that is
+              // about a run having succeeded.
+              <Button
+                size="sm"
+                variant="outline"
+                className="border-state-done/35 bg-state-done/12 text-state-done hover:border-state-done/50 hover:bg-state-done/20 hover:text-state-done"
+                loading={submitForReview.isPending}
                 onClick={() => submitForReview.mutate({ id: t.id })}
                 title={t.completedSummary ?? undefined}
-                className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-state-done/35 bg-state-done/12 px-2 py-1 font-medium text-2xs text-state-done transition-colors hover:bg-state-done/20 disabled:opacity-50"
               >
-                <CheckCircle2 className="size-3.5 shrink-0" aria-hidden />
+                <CheckCircle2 />
                 Open review
-              </button>
+              </Button>
             ) : t.completedAt ? (
-              <span className="inline-flex shrink-0 items-center gap-1 rounded border border-border bg-muted/40 px-1.5 py-px text-2xs text-muted-foreground">
-                <CheckCircle2 className="size-3 shrink-0" aria-hidden />
-                {/*
-                  All three outcomes, named. This used to be a two-way split on `nothing_to_do`,
-                  which sent `changes_ready` into the "Stopped — blocked" arm — so the moment a
-                  successful run entered review, the header called it blocked while the
-                  transcript two inches below said "Finished — changes ready". Observed on a real
-                  run: two opposite claims on one screen, and the wrong one is the one in the
-                  header a reader trusts.
-                */}
-                {COMPLETION_LABEL[t.completedOutcome ?? "blocked"]}
-              </span>
+              /*
+                All three outcomes, named — and drawn as the app's soft badge rather than a
+                hand-rolled 4px rectangle, which put two differently-shaped pills side by side in
+                one header. This used to be a two-way split on `nothing_to_do`, which sent
+                `changes_ready` into the "Stopped — blocked" arm — so the moment a successful run
+                entered review, the header called it blocked while the transcript two inches below
+                said "Finished — changes ready". Observed on a real run: two opposite claims on one
+                screen, and the wrong one is the one in the header a reader trusts.
+              */
+              <CompletionBadge outcome={t.completedOutcome} />
             ) : null}
           </div>
-          <p className="mt-0.5 flex items-center gap-1.5 truncate font-mono text-2xs text-muted-foreground">
+          {/* The code step (12px mono), not the label step: this is a branch name, read glyph by
+              glyph, and it was set at the size reserved for uppercase section captions. */}
+          <p className="mt-0.5 flex items-center gap-1.5 truncate font-mono text-muted-foreground text-xs">
             <GitBranch className="size-3 shrink-0" aria-hidden />
             {branch ?? `base ${primary?.baseRef ?? "HEAD"}`}
           </p>
@@ -522,7 +562,9 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
       <SplitPane
         collapsed={pane.changesCollapsed}
         left={
-          <div className="flex min-h-0 flex-1 flex-col gap-2 p-4">
+          // Panel padding, the same 12px the Changes column beside it uses. Two halves of one
+          // split with two different gutters is a seam you can see along the divider.
+          <div className="flex min-h-0 flex-1 flex-col gap-2 p-3">
             <TerminalView
               rows={rows}
               elided={elided}

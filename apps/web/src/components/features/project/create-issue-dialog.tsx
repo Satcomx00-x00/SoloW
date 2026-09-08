@@ -1110,11 +1110,9 @@ function AssigneeField({
                     value={`${u.login} ${u.name ?? ""}`}
                     onSelect={() => onToggle(u.login)}
                   >
-                    <Avatar className="size-5 shrink-0 border border-background">
+                    <Avatar className="shrink-0 border border-background" size="xs">
                       {u.avatarUrl ? <AvatarImage src={u.avatarUrl} alt="" /> : null}
-                      <AvatarFallback className="text-[9px] uppercase">
-                        {u.login.slice(0, 2)}
-                      </AvatarFallback>
+                      <AvatarFallback>{u.login.slice(0, 2)}</AvatarFallback>
                     </Avatar>
                     <span className="min-w-0 flex-1 truncate">{u.name ?? u.login}</span>
                     {selected.includes(u.login) && <Check className="ml-auto size-3.5" />}
@@ -1142,11 +1140,9 @@ function AssigneeField({
                 className="flex items-center gap-1 rounded-full border bg-muted/40 py-0.5 pr-1.5 pl-0.5 text-xs hover:bg-muted"
                 aria-label={`Remove ${u.name ?? u.login}`}
               >
-                <Avatar className="size-4 shrink-0">
+                <Avatar className="shrink-0" size="xs">
                   {u.avatarUrl ? <AvatarImage src={u.avatarUrl} alt="" /> : null}
-                  <AvatarFallback className="text-[8px] uppercase">
-                    {u.login.slice(0, 2)}
-                  </AvatarFallback>
+                  <AvatarFallback>{u.login.slice(0, 2)}</AvatarFallback>
                 </Avatar>
                 <span className="max-w-[7rem] truncate">{u.name ?? u.login}</span>
                 <X aria-hidden className="size-3 opacity-60" />

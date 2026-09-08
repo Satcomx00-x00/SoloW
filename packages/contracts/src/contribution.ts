@@ -186,3 +186,35 @@ export type TaskPaneLayoutDto = z.infer<typeof taskPaneLayoutDto>;
 
 /** The single `ui_preference.key` the split is stored under. */
 export const TASK_PANE_PREFERENCE_KEY = "task-pane-layout";
+
+/**
+ * The Tasks the sidebar remembers having shown you, most recent first (spec F03 follow-on).
+ *
+ * A Task page has no list of its own to return to — the board and the issue list both leave it
+ * the moment you navigate away, so a Task you left five minutes ago is otherwise gone until you
+ * re-find it by hand. Kept apart from the task-pane split for the same reason that pair stays
+ * apart from the surface layout: two callers is not yet a pattern, and this is a third one with
+ * its own shape (an ordered id list, not a layout).
+ *
+ * Capped rather than unbounded: this is a memory aid for what you just left, not a history. Five
+ * is enough to survive a short detour through Settings or another Task and small enough that the
+ * list at the top of the sidebar never competes with the section it sits above.
+ */
+export const RECENT_TASKS_MAX = 5;
+
+export const recentTaskIdsSchema = z.array(idSchema).max(RECENT_TASKS_MAX);
+export type RecentTaskIds = z.infer<typeof recentTaskIdsSchema>;
+
+export const recordRecentTaskInput = z.object({ taskId: idSchema });
+export type RecordRecentTaskInput = z.infer<typeof recordRecentTaskInput>;
+
+/** Echoes the identity back for the same reason `taskPaneLayoutDto` does (Principle V). */
+export const recentTasksDto = z.object({
+  workspaceId: idSchema,
+  userId: idSchema,
+  taskIds: recentTaskIdsSchema,
+});
+export type RecentTasksDto = z.infer<typeof recentTasksDto>;
+
+/** The single `ui_preference.key` the list is stored under. */
+export const RECENT_TASKS_PREFERENCE_KEY = "recent-tasks";

@@ -4,10 +4,15 @@ import { UserCheck } from "lucide-react";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { trpc } from "@/trpc/react";
+import {
+  SectionStatus,
+  SettingsEmpty,
+  SettingsField,
+  SettingsLoading,
+  SettingsSection,
+} from "./settings-shell";
 
 /**
  * Who you are on each connected provider (spec F23 FR-11) — what `assignee:@me` resolves to.
@@ -72,106 +77,112 @@ export function ProviderIdentitySection() {
 
   const connected = integrations.data ?? [];
 
+  const named = connected.filter((i) => storedFor(i.id) !== null).length;
+
   return (
-    <Card id="provider-identity" className="scroll-mt-16">
-      <CardHeader>
-        <CardTitle>Your provider logins</CardTitle>
-        <CardDescription>
-          What <code className="font-mono text-xs">@me</code> means in a project filter. Each
-          connection&apos;s token belongs to the workspace, not to you — it names whoever issued it
-          — so your own login on that provider is something you state here.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-6">
-        {connected.length === 0 ? (
-          <p className="text-muted-foreground text-sm">
-            No integration connected yet. Connect one above, then say who you are on it.
-          </p>
-        ) : (
-          <ul className="space-y-4">
-            {connected.map((integration) => {
-              const stored = storedFor(integration.id);
-              const value = typed[integration.id] ?? stored ?? "";
-              const trimmed = value.trim();
-              const inputId = `provider-login-${integration.id}`;
-              return (
-                <li key={integration.id} className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <Badge variant="secondary">
-                      {integration.provider} · {integration.baseUrl ?? "cloud"}
-                    </Badge>
-                    {stored && (
-                      <span className="flex items-center gap-1 text-muted-foreground text-xs">
-                        <UserCheck aria-hidden className="size-3.5" /> {stored}
-                      </span>
-                    )}
-                  </div>
-                  <form
-                    className="flex flex-wrap items-end gap-3"
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      if (!trimmed) return;
-                      save.mutate({ integrationId: integration.id, login: trimmed });
-                    }}
-                  >
-                    <div className="grid gap-2">
-                      <Label htmlFor={inputId}>Your login on {integration.provider}</Label>
-                      <Input
-                        id={inputId}
-                        className="w-64"
-                        value={value}
-                        placeholder="the name in your profile URL"
-                        onChange={(e) =>
-                          setTyped((current) => ({ ...current, [integration.id]: e.target.value }))
-                        }
-                      />
-                    </div>
-                    <Button
-                      type="submit"
-                      size="sm"
-                      loading={save.isPending && save.variables?.integrationId === integration.id}
-                      disabled={!trimmed || trimmed === stored}
-                    >
-                      Save
-                    </Button>
-                    {stored && (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        loading={
-                          clear.isPending && clear.variables?.integrationId === integration.id
-                        }
-                        onClick={() => clear.mutate({ integrationId: integration.id })}
-                      >
-                        Forget
-                      </Button>
-                    )}
-                  </form>
-                  {!stored && (
-                    /* Named as a consequence rather than as a warning: an unstated mapping is a
-                       perfectly ordinary state, it just makes one tab match nothing. */
-                    <p className="text-muted-foreground text-xs">
-                      Until this is set, <code className="font-mono">assignee:@me</code> matches no
-                      rows in projects from this connection.
-                    </p>
+    <SettingsSection
+      caption="What @me means in a project filter. Each connection’s token belongs to the workspace, not to you — it names whoever issued it — so your own login on that provider is something you state here."
+      id="provider-identity"
+      status={
+        integrations.isSuccess && identities.isSuccess ? (
+          // The one that is *not* set is the interesting one: it is the connection whose
+          // `assignee:@me` silently matches nothing.
+          <SectionStatus tone={named < connected.length ? "waiting" : "idle"}>
+            {connected.length === 0 ? "No connections" : `${named} of ${connected.length} named`}
+          </SectionStatus>
+        ) : null
+      }
+      title="Your provider logins"
+    >
+      {integrations.isPending ? (
+        <SettingsLoading rows={2} />
+      ) : connected.length === 0 ? (
+        <SettingsEmpty>
+          No integration connected yet. Connect one first, then say who you are on it.
+        </SettingsEmpty>
+      ) : (
+        <ul className="-mx-1 divide-y">
+          {connected.map((integration) => {
+            const stored = storedFor(integration.id);
+            const value = typed[integration.id] ?? stored ?? "";
+            const trimmed = value.trim();
+            const inputId = `provider-login-${integration.id}`;
+            return (
+              <li className="space-y-2 px-1 py-3 first:pt-0 last:pb-0" key={integration.id}>
+                <div className="flex items-center gap-2">
+                  <Badge variant="secondary">
+                    {integration.provider} · {integration.baseUrl ?? "cloud"}
+                  </Badge>
+                  {stored ? (
+                    <span className="flex items-center gap-1 text-muted-foreground text-xs">
+                      <UserCheck aria-hidden className="size-3.5" /> {stored}
+                    </span>
+                  ) : (
+                    <SectionStatus tone="waiting">Not set</SectionStatus>
                   )}
-                </li>
-              );
-            })}
-          </ul>
-        )}
-        {save.error && (
-          <p className="text-destructive text-sm" role="alert">
-            {save.error.message}
-          </p>
-        )}
-        {clear.error && (
-          <p className="text-destructive text-sm" role="alert">
-            {clear.error.message}
-          </p>
-        )}
-      </CardContent>
-    </Card>
+                </div>
+                <form
+                  className="flex flex-wrap items-end gap-3"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (!trimmed) return;
+                    save.mutate({ integrationId: integration.id, login: trimmed });
+                  }}
+                >
+                  <SettingsField htmlFor={inputId} label={`Your login on ${integration.provider}`}>
+                    <Input
+                      className="w-64"
+                      id={inputId}
+                      onChange={(e) =>
+                        setTyped((current) => ({ ...current, [integration.id]: e.target.value }))
+                      }
+                      placeholder="the name in your profile URL"
+                      value={value}
+                    />
+                  </SettingsField>
+                  <Button
+                    disabled={!trimmed || trimmed === stored}
+                    loading={save.isPending && save.variables?.integrationId === integration.id}
+                    size="sm"
+                    type="submit"
+                  >
+                    Save
+                  </Button>
+                  {stored && (
+                    <Button
+                      loading={clear.isPending && clear.variables?.integrationId === integration.id}
+                      onClick={() => clear.mutate({ integrationId: integration.id })}
+                      size="sm"
+                      type="button"
+                      variant="ghost"
+                    >
+                      Forget
+                    </Button>
+                  )}
+                </form>
+                {!stored && (
+                  /* Named as a consequence rather than as a warning: an unstated mapping is a
+                     perfectly ordinary state, it just makes one tab match nothing. */
+                  <p className="text-muted-foreground text-xs">
+                    Until this is set, <code className="font-mono">assignee:@me</code> matches no
+                    rows in projects from this connection.
+                  </p>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {save.error && (
+        <p className="text-destructive text-sm" role="alert">
+          {save.error.message}
+        </p>
+      )}
+      {clear.error && (
+        <p className="text-destructive text-sm" role="alert">
+          {clear.error.message}
+        </p>
+      )}
+    </SettingsSection>
   );
 }

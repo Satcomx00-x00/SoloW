@@ -3,12 +3,12 @@
 import { arrangeContributions } from "@solow/core";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { useSurfaceLayout } from "@/hooks/use-surface-layout";
 import { statusItemRegistry } from "@/lib/contributions";
 import "@/lib/contributions-boot";
+import { SectionStatus, SettingsEmpty, SettingsSection } from "./settings-shell";
 
 /**
  * Arrange the status bar (issue #3, AC-3).
@@ -45,69 +45,70 @@ export function StatusBarSection() {
   const order = groups.flatMap((group) => group.items.map((item) => item.id));
   const hidden = new Set(layout.hidden);
 
+  const shown = order.filter((id) => !hidden.has(id)).length;
+
   return (
-    <Card id="status-bar" className="scroll-mt-16">
-      <CardHeader>
-        <CardTitle>Status bar</CardTitle>
-        <CardDescription>
-          Choose which segments the status bar shows and the order they appear in. Segments are
-          contributed by features, so this list grows as the app does.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {order.length === 0 ? (
-          <p className="text-muted-foreground text-sm">
-            Nothing contributes to the status bar yet.
-          </p>
-        ) : (
-          groups.map(({ heading, items }) =>
-            items.length === 0 ? null : (
-              <section key={heading} aria-label={`${heading} of the status bar`}>
-                <h3 className="mb-1.5 text-2xs text-muted-foreground uppercase tracking-wide">
-                  {heading}
-                </h3>
-                <ul className="divide-y rounded-md border">
-                  {items.map((item, index) => {
-                    const inputId = `status-item-${item.id}`;
-                    return (
-                      <li key={item.id} className="flex items-center gap-3 px-3 py-2">
-                        <Checkbox
-                          id={inputId}
-                          checked={!hidden.has(item.id)}
-                          onCheckedChange={(checked) => setVisible(item.id, checked === true)}
-                        />
-                        <Label htmlFor={inputId} className="flex-1 font-normal">
-                          {item.render.label}
-                        </Label>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-sm"
-                          aria-label={`Move ${item.render.label} up`}
-                          disabled={index === 0}
-                          onClick={() => move(order, item.id, -1)}
-                        >
-                          <ChevronUp aria-hidden />
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-sm"
-                          aria-label={`Move ${item.render.label} down`}
-                          disabled={index === items.length - 1}
-                          onClick={() => move(order, item.id, 1)}
-                        >
-                          <ChevronDown aria-hidden />
-                        </Button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </section>
-            ),
-          )
-        )}
-      </CardContent>
-    </Card>
+    <SettingsSection
+      caption="Choose which segments the status bar shows and the order they appear in. Segments are contributed by features, so this list grows as the app does."
+      id="status-bar"
+      status={<SectionStatus>{`${shown} of ${order.length} shown`}</SectionStatus>}
+      title="Status bar"
+    >
+      {order.length === 0 ? (
+        <SettingsEmpty>Nothing contributes to the status bar yet.</SettingsEmpty>
+      ) : (
+        groups.map(({ heading, items }) =>
+          items.length === 0 ? null : (
+            <section aria-label={`${heading} of the status bar`} key={heading}>
+              {/*
+                `h3` under the section's own `h2`, not under the page `h1`. The heading outline
+                used to jump straight from h1 to h3 here — the in-page detector caught it, and it
+                is the same defect as the card titles that were never headings at all.
+              */}
+              <h3 className="mb-1.5 font-medium text-2xs text-muted-foreground uppercase tracking-[0.14em]">
+                {heading}
+              </h3>
+              <ul className="-mx-1 divide-y">
+                {items.map((item, index) => {
+                  const inputId = `status-item-${item.id}`;
+                  return (
+                    <li className="flex items-center gap-3 px-1 py-2" key={item.id}>
+                      <Checkbox
+                        checked={!hidden.has(item.id)}
+                        id={inputId}
+                        onCheckedChange={(checked) => setVisible(item.id, checked === true)}
+                      />
+                      <Label className="flex-1 font-normal text-sm" htmlFor={inputId}>
+                        {item.render.label}
+                      </Label>
+                      <Button
+                        aria-label={`Move ${item.render.label} up`}
+                        disabled={index === 0}
+                        onClick={() => move(order, item.id, -1)}
+                        size="icon-sm"
+                        type="button"
+                        variant="ghost"
+                      >
+                        <ChevronUp aria-hidden />
+                      </Button>
+                      <Button
+                        aria-label={`Move ${item.render.label} down`}
+                        disabled={index === items.length - 1}
+                        onClick={() => move(order, item.id, 1)}
+                        size="icon-sm"
+                        type="button"
+                        variant="ghost"
+                      >
+                        <ChevronDown aria-hidden />
+                      </Button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          ),
+        )
+      )}
+    </SettingsSection>
   );
 }

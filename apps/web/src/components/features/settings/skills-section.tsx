@@ -4,14 +4,6 @@ import type { SkillDto, SkillSource } from "@solow/contracts";
 import { BookOpen, Download, FileArchive, FileText, FolderOpen, Plus } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -26,6 +18,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/trpc/react";
 import { ImportSkillsDialog } from "./import-skills-dialog";
 import { LibraryEmpty, LibraryForm, LibraryQueryState, LibraryRow } from "./library-ui";
+import { SectionStatus, SettingsLoading, SettingsSection } from "./settings-shell";
 
 /**
  * The Skill library (spec F24): the playbooks a harness reads before it works.
@@ -69,12 +62,16 @@ export function SkillsSection() {
 
   const list: SkillDto[] = skills.data ?? [];
   const usable = !skills.error;
+  const enabledCount = list.filter((skill) => skill.enabled).length;
   const hasFiles = (e: React.DragEvent) => Array.from(e.dataTransfer.types).includes("Files");
 
   return (
-    <Card
-      id="skills"
-      className="relative scroll-mt-16"
+    // The drop target is a wrapper rather than the section itself: dragging a .zip anywhere over
+    // this block should import it, and `SettingsSection` owns its own two-column grid.
+    //
+    // biome-ignore lint/a11y/noStaticElementInteractions: a drop zone has no ARIA role of its own, and every import it offers is also reachable from the keyboard through the Import dialog beside it — this is an enhancement over that button, never the only route.
+    <div
+      className="relative"
       onDragEnter={(e) => {
         if (!usable || !hasFiles(e)) return;
         e.preventDefault();
@@ -106,15 +103,20 @@ export function SkillsSection() {
           Drop the .zip to import the Skills in it
         </div>
       )}
-      <CardHeader>
-        <CardTitle>Skills</CardTitle>
-        <CardDescription>
-          Playbooks a harness reads before it works — written here, or kept in a directory on this
-          machine. <em>Every harness</em> loads one into every run; otherwise only the Workflow
-          Steps that name it do.
-        </CardDescription>
+      <SettingsSection
+        caption="Playbooks a harness reads before it works — written here, or kept in a directory on this machine. Every harness loads an enabled one into every run; otherwise only the Workflow Steps that name it do."
+        id="skills"
+        status={
+          skills.isSuccess ? (
+            <SectionStatus tone={enabledCount > 0 ? "active" : "idle"}>
+              {list.length === 0 ? "None yet" : `${enabledCount} of ${list.length} enabled`}
+            </SectionStatus>
+          ) : null
+        }
+        title="Skills"
+      >
         {usable && !adding && (
-          <CardAction className="flex items-center gap-2">
+          <div className="flex items-center gap-2">
             <ImportSkillsDialog
               onImported={(count, skipped) => setImported({ count, skipped })}
               droppedFile={dropped}
@@ -126,17 +128,16 @@ export function SkillsSection() {
                 </Button>
               }
             />
-            <Button type="button" variant="outline" size="sm" onClick={() => setAdding(true)}>
+            <Button onClick={() => setAdding(true)} size="sm" type="button" variant="outline">
               <Plus aria-hidden />
               New skill
             </Button>
-          </CardAction>
+          </div>
         )}
-      </CardHeader>
-      <CardContent className="space-y-4">
         <LibraryQueryState error={skills.error} />
+        {skills.isPending && <SettingsLoading rows={2} />}
         {imported && (
-          <p className="text-sm text-state-done" role="status">
+          <p className="text-feedback-ok text-sm" role="status">
             Imported {imported.count} skill{imported.count === 1 ? "" : "s"}
             {imported.skipped > 0 &&
               ` · ${imported.skipped} skipped (already here, or no SKILL.md any more)`}
@@ -145,7 +146,7 @@ export function SkillsSection() {
         )}
 
         {usable && list.length > 0 && (
-          <ul className="divide-y rounded-lg border" aria-label="Skills">
+          <ul aria-label="Skills" className="-mx-1 divide-y">
             {list.map((skill) => (
               <LibraryRow
                 key={skill.id}
@@ -185,7 +186,7 @@ export function SkillsSection() {
           />
         )}
         {(update.error || remove.error) && (
-          <p className="font-mono text-state-failed text-xs" role="alert">
+          <p className="font-mono text-feedback-error text-xs" role="alert">
             {(update.error ?? remove.error)?.message}
           </p>
         )}
@@ -282,13 +283,13 @@ export function SkillsSection() {
               </Button>
             </div>
             {create.error && (
-              <p className="font-mono text-state-failed text-xs" role="alert">
+              <p className="font-mono text-feedback-error text-xs" role="alert">
                 {create.error.message}
               </p>
             )}
           </LibraryForm>
         )}
-      </CardContent>
-    </Card>
+      </SettingsSection>
+    </div>
   );
 }

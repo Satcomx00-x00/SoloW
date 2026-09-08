@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import {
   CommonErrorCode,
+  ExecutorProfileErrorCode,
   HarnessCatalogErrorCode,
   HarnessProfileErrorCode,
 } from "@solow/contracts";
@@ -8,10 +9,13 @@ import { harnessProfile, session, sessionUsage, workflow, workflowStep } from "@
 import { createTestDb, type TestDb } from "@solow/db/testing";
 import { eq } from "drizzle-orm";
 import {
+  createExecutorProfile,
   createHarnessCatalogEntry,
   createHarnessProfile,
+  deleteExecutorProfile,
   deleteHarnessProfile,
   getHarnessProfile,
+  listExecutorProfiles,
   listHarnessCatalog,
   updateHarnessProfile,
 } from "./profile.js";
@@ -39,6 +43,8 @@ describe("Harness Profile usage and deletion", () => {
       taskCount: 0,
       workflowStepCount: 0,
       sessionUsageCount: 0,
+      runningCount: 0,
+      parkedCount: 0,
     });
   });
 
@@ -313,5 +319,66 @@ describe("updateHarnessProfile", () => {
     });
     // Principle V: the tenant key comes from the context, so another Workspace finds nothing.
     expect(!result.ok && result.error).toBe(CommonErrorCode.NotFound);
+  });
+});
+
+/**
+ * Executor Profile deletion. `task.executor_profile_id` is a real NOT NULL foreign key, so the
+ * point of these two is the same as the Harness Profile pair above: the refusal must be a named
+ * product error decided before the delete statement, not a raw constraint violation.
+ */
+describe("Executor Profile deletion", () => {
+  let db: TestDb;
+  beforeEach(() => {
+    db = createTestDb();
+  });
+
+  it("deletes an Executor Profile no Task names", async () => {
+    const g = await seedWorkspaceGraph(db, "acme");
+    const ctx = ctxFor(db, g.workspaceId);
+    const created = await createExecutorProfile(ctx, {
+      name: "Spare box",
+      config: { kind: "local", env: {} },
+    });
+    if (!created.ok) throw new Error("seed failed");
+
+    const deleted = await deleteExecutorProfile(ctx, { id: created.data.id });
+    expect(deleted.ok).toBe(true);
+
+    const remaining = await listExecutorProfiles(ctx, {});
+    expect(remaining.ok && remaining.data.items.some((p) => p.id === created.data.id)).toBe(false);
+  });
+
+  it("refuses to delete an Executor Profile a Task still names", async () => {
+    const g = await seedWorkspaceGraph(db, "acme");
+    const ctx = ctxFor(db, g.workspaceId);
+    const issue = await seedIssue(db, g.workspaceId, { title: "Needs the executor" });
+    const made = await createTaskRecord(ctx, {
+      issueId: issue.id,
+      title: "Runs somewhere",
+      agentProfileId: g.agentProfileId,
+      executorProfileId: g.executorProfileId,
+      repositories: [{ repositoryId: g.repositoryId }],
+      state: "backlog",
+    });
+    if (!made.ok) throw new Error("seed failed");
+
+    expect(await deleteExecutorProfile(ctx, { id: g.executorProfileId })).toEqual({
+      ok: false,
+      error: ExecutorProfileErrorCode.InUse,
+    });
+  });
+
+  it("refuses an Executor Profile that is not this Workspace's", async () => {
+    const mine = await seedWorkspaceGraph(db, "acme");
+    const theirs = await seedWorkspaceGraph(db, "other");
+    const ctx = ctxFor(db, mine.workspaceId);
+
+    // Principle V: a tenant may not reach across, and the refusal is "not found" rather than
+    // "in use" — the row does not exist as far as this Workspace is concerned.
+    expect(await deleteExecutorProfile(ctx, { id: theirs.executorProfileId })).toEqual({
+      ok: false,
+      error: CommonErrorCode.NotFound,
+    });
   });
 });

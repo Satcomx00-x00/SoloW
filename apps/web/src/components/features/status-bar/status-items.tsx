@@ -1,8 +1,17 @@
 "use client";
 
+import type { TaskDto } from "@solow/contracts";
 import { CircleUser, FlaskConical, GitBranch, RefreshCw } from "lucide-react";
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { useTaskBinding } from "@/components/features/task/workflow-steps";
 import { useRelativeAge } from "@/components/hooks/use-relative-age";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useAppContext } from "@/lib/app-context";
 import { contribute, statusItemRegistry } from "@/lib/contributions";
 import { countLabel, pageRows, WHOLE_PAGE } from "@/lib/paged";
@@ -69,29 +78,101 @@ function TaskCountItem() {
   );
 }
 
-function RunningTasksItem() {
-  const tasks = trpc.task.list.useQuery({ ...WHOLE_PAGE });
-  const { rows, truncated } = pageRows(tasks.data);
-  const running = rows.filter((t) => t.state === "running").length;
-  if (running === 0) return null;
+/** How many tabs show before the rest fold into "+N more" — enough for a quiet day, not a flood. */
+const MAX_VISIBLE_TASK_TABS = 4;
+
+/**
+ * One Task, as a tab: its lifecycle colour, which Step it is on if it is on one, and its name.
+ *
+ * Its own component rather than inlined into the list below, for the same reason every other
+ * per-row component in this app is: `useTaskBinding` is a hook, and a hook cannot be called from
+ * inside the `.map()` that produces one of these per Task.
+ */
+function TaskTab({ task }: { task: TaskDto }) {
+  const binding = useTaskBinding(task);
+  // The position a Step's own `position` field carries is 0-based; the number a reader counts
+  // Steps by is not — see `workflow-steps.tsx`'s `stepStatuses` for the sibling computation.
+  const step = binding ? binding.currentStep.position + 1 : null;
+  const style = STATE_STYLE[task.state];
+  // The Issue's own number, not the Task's title (user request 2026-09-08): the number is what
+  // the rest of the product already uses to name a row of work (the project table, the issue
+  // panel), so a tab reads the same identifier a reader would go looking for elsewhere. Falls
+  // back to the title for an Issue this Workspace created itself and never mirrored — the same
+  // fallback the project table's own row menu takes for a row with no provider number.
+  const issue = trpc.issue.get.useQuery({ id: task.issueId });
+  const number = issue.data?.externalNumber ?? null;
   return (
-    <span className={cn("flex items-center gap-1.5", STATE_STYLE.running.textClassName)}>
-      <span className="size-1.5 rounded-full bg-current" aria-hidden />
-      {countLabel(running, truncated)} running
-    </span>
+    <Link
+      href={`/task/${task.id}`}
+      title={task.title}
+      className={cn(
+        "flex min-w-0 items-center gap-1 transition-colors hover:text-foreground",
+        style.textClassName,
+      )}
+    >
+      <span className="size-1.5 shrink-0 rounded-full bg-current" aria-hidden />
+      {/* Only when there is one. A Task on no Workflow gets no digit invented in its place —
+          see the decision this followed: the step is the exception, not a slot every tab reserves. */}
+      {step !== null && <span className="shrink-0 font-semibold tabular-nums">{step}</span>}
+      <span className="max-w-28 shrink-0 truncate font-mono tabular-nums">
+        {number !== null ? `#${number}` : task.title}
+      </span>
+    </Link>
   );
 }
 
-/** The only thing on this bar a person has to act on, so it is the only thing lit. */
-function AwaitingReviewItem() {
+/**
+ * Every Task that is Running or in Review, as individual tabs (spec F03 follow-on) — the two
+ * states someone is either watching happen or is the one person who can move past. This is what
+ * `RunningTasksItem` and `AwaitingReviewItem` used to say as bare counts ("3 running", "1
+ * awaiting review"); saying the same fact twice, once as a count and once as a list, is noise the
+ * "state at a glance" design this bar is built around does not need — a tab already carries its
+ * own state in its colour, so the count these replaced is redundant once the tabs are on screen.
+ *
+ * Workspace-wide, matching how every other segment on this bar already reads (issue #3): the
+ * footer is global chrome, not scoped to whichever Project's pages happen to be open.
+ *
+ * Parked and Failed stay out. Both are non-terminal, but neither is *live* the way these two are
+ * — a Parked Task resumes on its own when its quota clears, and a Failed one waits for someone to
+ * open it and decide, not to glance at a footer. Running is happening now; Review is the one
+ * state that is on this bar specifically because it is waiting on a person.
+ */
+function TaskTabsItem() {
   const tasks = trpc.task.list.useQuery({ ...WHOLE_PAGE });
-  const { rows, truncated } = pageRows(tasks.data);
-  const review = rows.filter((t) => t.state === "review").length;
-  if (review === 0) return null;
+  const { rows } = pageRows(tasks.data);
+  const active = rows
+    .filter((t) => t.state === "running" || t.state === "review")
+    // Running before Review — the one actually moving is the more urgent glance — and within
+    // each, the most recently touched first, so a tab that just changed state is not buried
+    // behind one that has sat there all day.
+    .sort((a, b) => {
+      if (a.state !== b.state) return a.state === "running" ? -1 : 1;
+      return b.updatedAt.localeCompare(a.updatedAt);
+    });
+  if (active.length === 0) return null;
+
+  const visible = active.slice(0, MAX_VISIBLE_TASK_TABS);
+  const overflow = active.slice(MAX_VISIBLE_TASK_TABS);
+
   return (
-    <span className={cn("flex items-center gap-1.5", STATE_STYLE.review.textClassName)}>
-      <span className="size-1.5 rounded-full bg-current" aria-hidden />
-      {countLabel(review, truncated)} awaiting review
+    <span className="flex items-center gap-3">
+      {visible.map((t) => (
+        <TaskTab key={t.id} task={t} />
+      ))}
+      {overflow.length > 0 && (
+        <DropdownMenu>
+          <DropdownMenuTrigger className="text-muted-foreground transition-colors hover:text-foreground">
+            +{overflow.length} more
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" side="top">
+            {overflow.map((t) => (
+              <DropdownMenuItem key={t.id} asChild>
+                <TaskTab task={t} />
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
     </span>
   );
 }
@@ -273,15 +354,14 @@ contribute(statusItemRegistry, {
 });
 
 contribute(statusItemRegistry, {
-  id: "status.running",
-  priority: 20,
-  render: { label: "Running tasks", slot: "right", Component: RunningTasksItem },
-});
-
-contribute(statusItemRegistry, {
-  id: "status.review",
-  priority: 30,
-  render: { label: "Tasks awaiting review", slot: "right", Component: AwaitingReviewItem },
+  id: "status.active-tasks",
+  // Left, not right (user request 2026-09-08): what is running right now is the thing worth a
+  // glance, and the left side is where a reader's eye already lands first on this bar — the far
+  // right is reserved for the sync action, the one segment that is a control rather than a
+  // reading. Priority 25 keeps it after the identity segments (10/20) and before nothing else
+  // sits on this side, which is what puts it in the bar's centre-left.
+  priority: 25,
+  render: { label: "Running and in-review tasks", slot: "left", Component: TaskTabsItem },
 });
 
 contribute(statusItemRegistry, {

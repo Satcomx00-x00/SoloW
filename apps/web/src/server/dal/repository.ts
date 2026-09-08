@@ -2,12 +2,14 @@ import "server-only";
 import {
   CommonErrorCode,
   type ConnectRepositoryInput,
+  type DisconnectRepositoryInput,
   err,
   IntegrationErrorCode,
   type ListRepositoriesInput,
   ok,
   type RepositoryAssigneeDto,
   type RepositoryDto,
+  RepositoryErrorCode,
   type RepositoryIssueTypeDto,
   type RepositoryLabelDto,
   type RepositoryListDto,
@@ -16,7 +18,18 @@ import {
   type SeedDefaultLabelsResult,
   type UpdateRepositorySetupInput,
 } from "@solow/contracts";
-import { decryptForScmSync, integration, issue, repository, secret } from "@solow/db";
+import {
+  changeRequest,
+  decryptForScmSync,
+  integration,
+  issue,
+  projectRepository,
+  repository,
+  repositoryBranch,
+  repositoryLabel,
+  secret,
+  taskRepository,
+} from "@solow/db";
 import {
   DEFAULT_LABEL_TAXONOMY,
   isProviderInstalled,
@@ -39,7 +52,15 @@ async function enrichmentFor(
   rows: Array<{ id: string; integrationId: string | null }>,
 ): Promise<Map<string, RepositoryEnrichment>> {
   const map = new Map<string, RepositoryEnrichment>(
-    rows.map((r) => [r.id, { provider: null, integrationBaseUrl: null, issueCount: 0 }]),
+    rows.map((r) => [
+      r.id,
+      {
+        provider: null,
+        integrationBaseUrl: null,
+        issueCount: 0,
+        usage: { taskCount: 0, projectCount: 0, changeRequestCount: 0 },
+      },
+    ]),
   );
 
   const integrationIds = [...new Set(rows.map((r) => r.integrationId).filter((id) => id !== null))];
@@ -78,9 +99,126 @@ async function enrichmentFor(
       const enrichment = map.get(repositoryId);
       if (enrichment) enrichment.issueCount = n;
     }
+
+    /*
+     * The other three holders, so Settings can say what to detach before offering Disconnect.
+     *
+     * One grouped count per table, in parallel, over the ids already in hand — the same batching
+     * the Issue count above uses, for the same reason: the Repositories section renders every row
+     * at once, and a per-row query here would be one round trip per repository on every load.
+     */
+    const [taskCounts, projectCounts, changeCounts] = await Promise.all([
+      ctx.db
+        .select({ repositoryId: taskRepository.repositoryId, n: count() })
+        .from(taskRepository)
+        .where(
+          and(
+            eq(taskRepository.workspaceId, ctx.workspaceId),
+            inArray(taskRepository.repositoryId, repositoryIds),
+          ),
+        )
+        .groupBy(taskRepository.repositoryId),
+      ctx.db
+        .select({ repositoryId: projectRepository.repositoryId, n: count() })
+        .from(projectRepository)
+        .where(
+          and(
+            eq(projectRepository.workspaceId, ctx.workspaceId),
+            inArray(projectRepository.repositoryId, repositoryIds),
+          ),
+        )
+        .groupBy(projectRepository.repositoryId),
+      ctx.db
+        .select({ repositoryId: changeRequest.repositoryId, n: count() })
+        .from(changeRequest)
+        .where(
+          and(
+            eq(changeRequest.workspaceId, ctx.workspaceId),
+            inArray(changeRequest.repositoryId, repositoryIds),
+          ),
+        )
+        .groupBy(changeRequest.repositoryId),
+    ]);
+    for (const { repositoryId, n } of taskCounts) {
+      const e = map.get(repositoryId);
+      if (e?.usage) e.usage.taskCount = n;
+    }
+    for (const { repositoryId, n } of projectCounts) {
+      const e = map.get(repositoryId);
+      if (e?.usage) e.usage.projectCount = n;
+    }
+    for (const { repositoryId, n } of changeCounts) {
+      const e = map.get(repositoryId);
+      if (e?.usage) e.usage.changeRequestCount = n;
+    }
   }
 
   return map;
+}
+
+/**
+ * Disconnect a Repository that nothing holds any more.
+ *
+ * There was no delete path at all: an Owner could connect a repository by mistyping a local path
+ * and the row was permanent. On a product whose whole premise is that the compute and the data are
+ * yours, a list you can only append to is the wrong shape.
+ *
+ * **Refused rather than cascaded.** A Repository is where a harness is allowed to write, and the
+ * Issues, Tasks and Change Requests pointing at it are the record of what it wrote. Deleting it out
+ * from under them would not tidy a Workspace, it would erase the provenance of work that already
+ * went through the review gate — so this refuses and names what to detach, exactly as
+ * `deleteSecret` and `deleteHarnessProfile` do on their own tables.
+ *
+ * What it *does* remove without asking is the two pure mirrors: branches and labels are re-read
+ * from the provider on every sync and hold no decision of anyone's. They are not data being
+ * destroyed, they are a cache being dropped — and they are also real foreign keys with no cascade,
+ * so leaving them would make the delete fail as a raw constraint violation.
+ */
+export async function disconnectRepository(
+  ctx: RequestContext,
+  input: DisconnectRepositoryInput,
+): Promise<
+  Result<RepositoryDto, typeof CommonErrorCode.NotFound | typeof RepositoryErrorCode.InUse>
+> {
+  const [row] = await ctx.db
+    .select()
+    .from(repository)
+    .where(and(eq(repository.workspaceId, ctx.workspaceId), eq(repository.id, input.id)))
+    .limit(1);
+  if (!row) return err(CommonErrorCode.NotFound);
+
+  const enrichment = (await enrichmentFor(ctx, [row])).get(row.id);
+  const held = enrichment?.usage ?? { taskCount: 0, projectCount: 0, changeRequestCount: 0 };
+  if (
+    (enrichment?.issueCount ?? 0) > 0 ||
+    held.taskCount > 0 ||
+    held.projectCount > 0 ||
+    held.changeRequestCount > 0
+  ) {
+    return err(RepositoryErrorCode.InUse);
+  }
+
+  await ctx.db
+    .delete(repositoryBranch)
+    .where(
+      and(
+        eq(repositoryBranch.workspaceId, ctx.workspaceId),
+        eq(repositoryBranch.repositoryId, row.id),
+      ),
+    );
+  await ctx.db
+    .delete(repositoryLabel)
+    .where(
+      and(
+        eq(repositoryLabel.workspaceId, ctx.workspaceId),
+        eq(repositoryLabel.repositoryId, row.id),
+      ),
+    );
+  await ctx.db
+    .delete(repository)
+    .where(and(eq(repository.workspaceId, ctx.workspaceId), eq(repository.id, row.id)));
+
+  return ok(repositoryToDto(row, enrichment));
 }
 
 export async function getRepository(

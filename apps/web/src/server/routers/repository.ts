@@ -1,6 +1,7 @@
 import "server-only";
 import {
   connectRepositoryInput,
+  disconnectRepositoryInput,
   listRepositoriesInput,
   listRepositoryLabelsInput,
   listRepositoryMembersInput,
@@ -17,6 +18,7 @@ import {
 import { z } from "zod";
 import {
   connectRepository,
+  disconnectRepository,
   listRepositories,
   listRepositoryAssignees,
   listRepositoryIssueTypes,
@@ -55,6 +57,20 @@ export const repositoryRouter = router({
     .input(listRepositoriesInput)
     .output(repositoryListDto)
     .query(async ({ ctx, input }) => unwrap(await listRepositories(ctx.rctx, input))),
+  disconnect: ownerProcedure
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/repository.disconnect",
+        tags: ["repository"],
+        protect: true,
+        summary:
+          "Disconnect a Repository nothing holds any more. Refused while an Issue, a Task attachment, a Project or a mirrored Change Request still points at it — those are the record of what a harness did there.",
+      },
+    })
+    .input(disconnectRepositoryInput)
+    .output(repositoryDto)
+    .mutation(async ({ ctx, input }) => unwrap(await disconnectRepository(ctx.rctx, input))),
   updateSetup: ownerProcedure
     .meta({
       openapi: {

@@ -8,10 +8,20 @@ import {
   type TaskState,
 } from "@solow/contracts";
 import { unsatisfiedDependencies } from "@solow/core";
-import { ArrowRight, KeyRound, Link2, Play, RotateCcw, Trash2, TriangleAlert } from "lucide-react";
+import {
+  ArrowRight,
+  KeyRound,
+  Link2,
+  Play,
+  RotateCcw,
+  Trash2,
+  TriangleAlert,
+  X,
+} from "lucide-react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ConfirmDialog } from "@/components/features/confirm-action";
 import { DeleteTaskAction } from "@/components/features/task/delete-task-action";
 import { Button } from "@/components/ui/button";
@@ -148,6 +158,9 @@ export function Board({
   unassigned?: boolean | undefined;
 } = {}) {
   const utils = trpc.useUtils();
+  // Which lifecycle column to scroll to on arrival, from the sidebar's `?column=` links — see
+  // the effect near the return below.
+  const targetColumn = useSearchParams().get("column");
   const tasksQuery = trpc.task.list.useQuery({
     ...WHOLE_PAGE,
     ...(projectId ? { projectId } : {}),
@@ -265,6 +278,47 @@ export function Board({
   );
   useWorkspaceEvents(onStatus);
 
+  /**
+   * Land on the column the sidebar sent you here for (`?column=<state>`, see `BoardNav`).
+   *
+   * The board's own counted rows used to be read-only — the one counted list in the app whose
+   * rows did not act as filters, unlike the identical shape on Issues. Since a column here is
+   * never hidden or reordered the way an Issues status can be, "filter" would only ever narrow to
+   * what is already the whole board; what a click can usefully do is bring a column back into
+   * view on a lifecycle strip wide enough to scroll off-screen, so that is what this does.
+   *
+   * Keyed on the param's own value, not just mounted once: a reader already on the board who
+   * clicks a *different* lifecycle row in the sidebar changes the query on an already-mounted
+   * page, and a mount-only effect would never scroll for it.
+   *
+   * Also keyed on both loading flags, which looks redundant next to the guard just below but is
+   * load-bearing: on the very first render the columns have not painted yet — `Board` returns
+   * `<BoardSkeleton />` while `tasksQuery`/`dependenciesQuery` are in flight — so `targetColumn`
+   * is already at its final value the one time this effect finds no element in the DOM. Without
+   * the loading flags as dependencies, nothing tells it to look again once the real columns land,
+   * and arriving on `?column=` would silently do nothing. Observed exactly that way before this
+   * comment existed.
+   *
+   * Placed above the loading guard below, with every other hook in this component: a hook after
+   * an early return is a hook React sometimes skips, which it detects as a change in hook order
+   * and refuses.
+   */
+  // The two loading flags are re-trigger signals, not values the body reads — see the comment
+  // above for why the effect has to run again once they flip from true to false.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional re-trigger, not a read
+  useEffect(() => {
+    if (!targetColumn) return;
+    const el = document.getElementById(`board-column-${targetColumn}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", inline: "start", block: "nearest" });
+    // A brief lit edge, not a permanent one: the reader asked "where is it", not "mark this
+    // column forever". `ring-2` rather than a background wash, so it reads against any column's
+    // own tint.
+    el.classList.add("ring-2", "ring-ring/60");
+    const timer = setTimeout(() => el.classList.remove("ring-2", "ring-ring/60"), 1600);
+    return () => clearTimeout(timer);
+  }, [targetColumn, tasksQuery.isLoading, dependenciesQuery.isLoading]);
+
   // Both queries, not just the Tasks: readiness is derived from the edges, so a board drawn
   // before they land would render every blocked card undimmed, lockless and launchable. The
   // absence of edge data is not evidence that nothing is blocked — wait for it, and if it never
@@ -323,10 +377,20 @@ export function Board({
     ]),
   );
 
-  const busy = move.isPending || launch.isPending || retry.isPending;
   const actionError = move.error ?? launch.error ?? retry.error ?? submitForReview.error;
-  // Spin only the card that was clicked. `busy` still blocks the rest, but a global spinner
-  // would claim every task on the board is doing something when one of them is.
+  /**
+   * Only the card that was clicked is busy.
+   *
+   * There used to be a board-wide `busy` next to this, ORed across the three mutations and passed
+   * to `disabled` on every card's controls — so launching one Task greyed out Launch on all the
+   * others. On a board whose entire premise is running several harnesses at once, that made the
+   * product's central gesture serial: six Ready Tasks meant six waits.
+   *
+   * Nothing depended on it. The mutations are independent server-side, and the one collision
+   * worth having — two launches racing a Harness Profile's concurrency cap — is refused by
+   * `task.launch` and lands in the banner below as a sentence. A disabled button was never what
+   * enforced the cap; it only hid the refusal by preventing the second click.
+   */
   const pendingOn = (id: string) =>
     (move.isPending && move.variables?.id === id) ||
     (launch.isPending && launch.variables?.id === id) ||
@@ -370,7 +434,7 @@ export function Board({
         <Button
           aria-label={`Delete ${task.title}`}
           className="ml-auto text-muted-foreground hover:text-destructive"
-          disabled={busy}
+          disabled={pendingOn(task.id)}
           onClick={open}
           size="xs"
           variant="ghost"
@@ -417,7 +481,6 @@ export function Board({
         key={`retry-${task.id}`}
         size="xs"
         variant="outline"
-        disabled={busy}
         loading={pendingOn(task.id)}
         onClick={() => retry.mutate({ id: task.id })}
       >
@@ -433,7 +496,6 @@ export function Board({
           <Button
             size="xs"
             variant="outline"
-            disabled={busy}
             loading={pendingOn(task.id)}
             onClick={() => move.mutate({ id: task.id, to: "ready" })}
           >
@@ -471,12 +533,7 @@ export function Board({
       }
       return (
         <>
-          <Button
-            size="xs"
-            disabled={busy}
-            loading={pendingOn(task.id)}
-            onClick={() => requestLaunch(task)}
-          >
+          <Button size="xs" loading={pendingOn(task.id)} onClick={() => requestLaunch(task)}>
             <Play /> Launch
           </Button>
           {blockedByAction(task)}
@@ -500,6 +557,26 @@ export function Board({
   // letting the rest through (which is how `TASK_CONCURRENCY_CAP_REACHED` ended up on screen).
   const actionMessage = taskActionMessage(actionError?.message);
   const errorMessage = dragError ?? actionMessage;
+
+  /**
+   * Put the banner away.
+   *
+   * It had no dismiss: a refused drag left its sentence above the columns until the next drag
+   * cleared it, and a refused action left one until the next action of the same kind replaced it.
+   * So a message about a Task the Owner had already dealt with sat over the board indefinitely,
+   * and the only way to be rid of it was to do something else that could also fail.
+   *
+   * Both halves have to go. `dragError` is ours to clear; the action half is derived from the
+   * mutations' own `error`, so it comes back on the next render unless the mutation that owns it
+   * is reset. Resetting all four is safe — none of them is in flight while its error is showing.
+   */
+  const dismissError = () => {
+    setDragError(null);
+    move.reset();
+    launch.reset();
+    retry.reset();
+    submitForReview.reset();
+  };
 
   return (
     <BoardReferencesProvider value={references}>
@@ -529,13 +606,24 @@ export function Board({
         </div>
       ) : null}
       {errorMessage ? (
-        <p
-          className="mx-4 mt-3 flex items-center gap-2 rounded-lg border border-state-failed/30 bg-state-failed/10 px-3 py-2 text-state-failed text-sm"
+        <div
+          className="mx-4 mt-3 flex items-start gap-2 rounded-lg border border-state-failed/30 bg-state-failed/10 py-2 pr-2 pl-3 text-state-failed text-sm"
           role="alert"
         >
-          <TriangleAlert className="size-3.5 shrink-0" aria-hidden />
-          {errorMessage}
-        </p>
+          <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+          {/* `min-w-0` so a long refusal wraps inside the banner instead of pushing the dismiss
+              button off its end. */}
+          <p className="min-w-0 flex-1">{errorMessage}</p>
+          <Button
+            aria-label="Dismiss"
+            className="-my-0.5 shrink-0 text-state-failed hover:bg-state-failed/15 hover:text-state-failed"
+            onClick={dismissError}
+            size="icon-sm"
+            variant="ghost"
+          >
+            <X />
+          </Button>
+        </div>
       ) : null}
       {tasks.length === 0 ? (
         <BoardEmpty />

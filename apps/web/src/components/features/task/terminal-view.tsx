@@ -151,14 +151,17 @@ export function TerminalView({
   }, [activeMatch]);
 
   return (
-    <div className="surface-edge flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-[oklch(0.13_0.008_265)]">
+    // A container, because the one thing the toolbar below has to respond to is *its own* width:
+    // this panel is sized by a draggable divider, so a viewport breakpoint knows nothing about
+    // how much room the strip actually has.
+    <div className="@container surface-edge flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-terminal">
       {/*
         A fixed-height strip, not a row that sizes to whatever is in it: the find bar swaps a
         button for an input and back, and a bar that grew and shrank with them would shove the
         transcript up and down every time you pressed ⌘F. `h-9` is the tallest thing it ever
         holds, so nothing inside can clip it and nothing moves when the contents change.
       */}
-      <div className="flex h-9 shrink-0 items-center gap-2 border-b bg-black/25 px-2">
+      <div className="flex h-9 shrink-0 items-center gap-2 overflow-hidden border-b bg-black/25 px-2">
         {/*
           A toggle, drawn as one. The label stays put and the dot carries the state — a button
           whose *text* changes between "on" and "off" makes you read it to find out what pressing
@@ -175,7 +178,7 @@ export function TerminalView({
             if (next) scrollToBottom();
           }}
           className={cn(
-            "inline-flex h-6 items-center gap-1.5 rounded-md px-1.5 text-2xs transition-colors duration-100 hover:bg-white/5",
+            "inline-flex h-6 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-1.5 text-2xs transition-colors duration-100 hover:bg-white/5",
             following ? "text-foreground/80" : "text-muted-foreground",
           )}
         >
@@ -197,24 +200,30 @@ export function TerminalView({
               setFollowing(true);
               scrollToBottom();
             }}
-            className="inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-2xs text-muted-foreground transition-colors duration-100 hover:bg-white/5 hover:text-foreground"
+            className="inline-flex h-6 shrink-0 items-center gap-1 whitespace-nowrap rounded-md px-1.5 text-2xs text-muted-foreground transition-colors duration-100 hover:bg-white/5 hover:text-foreground"
           >
-            <ArrowDown aria-hidden className="size-3" /> Jump to latest
+            <ArrowDown aria-hidden className="size-3" />
+            {/* The label is what goes when the panel is narrow, never the control. `sr-only`
+                rather than `hidden`, so the button keeps the same accessible name at every
+                width — an icon-only control that renames itself is a control screen-reader
+                users have to relearn per layout. */}
+            <span className="sr-only @sm:not-sr-only">Jump to latest</span>
           </button>
         )}
 
-        <div className="ml-auto flex items-center gap-1.5">
+        <div className="ml-auto flex min-w-0 items-center gap-1.5">
           <button
             type="button"
             aria-pressed={showThinking}
             title={showThinking ? "Hide the harness's thinking" : "Show the harness's thinking"}
             onClick={() => setShowThinking((v) => !v)}
             className={cn(
-              "inline-flex h-6 items-center gap-1.5 rounded-md px-1.5 text-2xs transition-colors duration-100 hover:bg-white/5",
+              "inline-flex h-6 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-1.5 text-2xs transition-colors duration-100 hover:bg-white/5",
               showThinking ? "text-foreground/80" : "text-muted-foreground line-through",
             )}
           >
-            <Brain aria-hidden className="size-3" /> Thinking
+            <Brain aria-hidden className="size-3" />
+            <span className="sr-only @sm:not-sr-only">Thinking</span>
           </button>
           {searchOpen ? (
             <>
@@ -236,7 +245,7 @@ export function TerminalView({
                   }}
                   placeholder="Find in terminal"
                   aria-label="Find in terminal"
-                  className="h-6 w-52 rounded-md pl-7 font-mono text-2xs"
+                  className="h-6 w-28 rounded-md pl-7 font-mono text-2xs @sm:w-52"
                 />
               </div>
               <span
@@ -287,12 +296,14 @@ export function TerminalView({
             <button
               type="button"
               onClick={openSearch}
-              className="inline-flex h-6 items-center gap-1.5 rounded-md px-1.5 text-2xs text-muted-foreground transition-colors duration-100 hover:bg-white/5 hover:text-foreground"
+              className="inline-flex h-6 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-1.5 text-2xs text-muted-foreground transition-colors duration-100 hover:bg-white/5 hover:text-foreground"
             >
-              <Search aria-hidden className="size-3" /> Find
+              <Search aria-hidden className="size-3" />
+              <span className="sr-only @sm:not-sr-only">Find</span>
               {/* The shortcut, stated rather than discovered — the same idiom the command
-                  palette and the create menu already use. */}
-              <kbd className="ml-0.5 font-mono text-[10px] text-muted-foreground/60 tracking-widest">
+                  palette and the create menu already use. It is the first thing to go when the
+                  panel is narrow: a hint nobody can read is not a hint. */}
+              <kbd className="ml-0.5 hidden font-mono text-2xs text-muted-foreground/60 tracking-widest @sm:inline">
                 ⌘F
               </kbd>
             </button>
