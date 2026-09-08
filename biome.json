@@ -10,6 +10,8 @@
       "!specs",
       "!.specify",
       "!.claude",
+      "!.github/skills",
+      "!**/.impeccable",
       "!apps/web/openapi.json",
       "!apps/web/src/components/ui",
       "!apps/web/src/app/globals.css"

@@ -22,13 +22,19 @@ export async function connectRepository(page: Page, name: string, location: stri
   // Wait for the list to actually resolve before deciding. Reading visibility straight after
   // navigating would answer "not there yet" while the query is still in flight, and every test
   // that did so would connect another copy of the same repository.
-  await expect(page.getByLabel("Connected repositories")).toBeVisible();
-  const badge = page.getByText(`${name} · local_path`);
-  if (await badge.isVisible()) return;
+  const connected = page.getByLabel("Connected repositories");
+  await expect(connected).toBeVisible();
+  const row = connected.getByText(name, { exact: true });
+  if (await row.isVisible()) return;
+  // The form sits behind a disclosure, closed by default once a Repository already exists — open
+  // it before reaching for fields inside it, which is why "Name"/"Location" alone are not enough
+  // once this is not the first connection of the run.
+  const toggle = page.getByRole("button", { name: "Connect a repository" });
+  if ((await toggle.getAttribute("aria-expanded")) === "false") await toggle.click();
   await page.getByLabel("Name").last().fill(name);
   await page.getByLabel("Location").fill(location);
   await page.getByRole("button", { name: "Connect repository" }).click();
-  await expect(badge).toBeVisible();
+  await expect(row).toBeVisible();
 }
 
 async function pickOption(page: Page, label: string, option: string): Promise<void> {

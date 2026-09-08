@@ -96,87 +96,94 @@ export function RepositoriesSection() {
     >
       {list.isPending ? (
         <SettingsLoading rows={3} />
-      ) : rows.length === 0 ? (
-        <SettingsEmpty>
-          No repositories connected yet. A harness needs one before it has anywhere to work.
-        </SettingsEmpty>
       ) : (
-        <SettingsRows>
-          {rows.map((r) => {
-            const holders = describeHolders(r);
-            const open = expanded === r.id;
-            return (
-              <SettingsRow
-                actions={
-                  <>
-                    {/*
+        // Labelled so a caller can wait for the query to have resolved — empty included — before
+        // deciding whether a Repository is already connected, rather than reading "not there yet"
+        // off a list that just has not fetched (e2e's own `connectRepository` does exactly this).
+        <section aria-label="Connected repositories">
+          {rows.length === 0 ? (
+            <SettingsEmpty>
+              No repositories connected yet. A harness needs one before it has anywhere to work.
+            </SettingsEmpty>
+          ) : (
+            <SettingsRows>
+              {rows.map((r) => {
+                const holders = describeHolders(r);
+                const open = expanded === r.id;
+                return (
+                  <SettingsRow
+                    actions={
+                      <>
+                        {/*
                       One open at a time, and closed by default. Every repository used to render
                       its whole setup-files editor inline and unconditionally, which is what made
                       this card taller than three screens on a workspace with seven of them. The
                       count on the button is what you actually want at a glance.
                     */}
-                    <Button
-                      aria-expanded={open}
-                      onClick={() => setExpanded(open ? null : r.id)}
-                      size="sm"
-                      type="button"
-                      variant="ghost"
-                    >
-                      <ChevronDown className={open ? "rotate-180" : undefined} />
-                      {r.setupFilePatterns.length} setup{" "}
-                      {r.setupFilePatterns.length === 1 ? "file" : "files"}
-                    </Button>
-                    <span
-                      className="inline-flex"
-                      title={
-                        holders
-                          ? `Held by ${holders}. Detach those before disconnecting.`
-                          : undefined
-                      }
-                    >
-                      <ConfirmAction
-                        confirmLabel="Disconnect"
-                        description="SoloW forgets where this repository is and drops its mirrored branches and labels. Nothing on disk is touched, no commit is lost, and reconnecting the same location restores it — the mirrors are re-read on the next sync."
-                        disabled={holders !== ""}
-                        onConfirm={() => disconnect.mutate({ id: r.id })}
-                        title={`Disconnect "${r.name}"?`}
-                        trigger={
-                          <Button
-                            aria-label={`Disconnect ${r.name}`}
+                        <Button
+                          aria-expanded={open}
+                          onClick={() => setExpanded(open ? null : r.id)}
+                          size="sm"
+                          type="button"
+                          variant="ghost"
+                        >
+                          <ChevronDown className={open ? "rotate-180" : undefined} />
+                          {r.setupFilePatterns.length} setup{" "}
+                          {r.setupFilePatterns.length === 1 ? "file" : "files"}
+                        </Button>
+                        <span
+                          className="inline-flex"
+                          title={
+                            holders
+                              ? `Held by ${holders}. Detach those before disconnecting.`
+                              : undefined
+                          }
+                        >
+                          <ConfirmAction
+                            confirmLabel="Disconnect"
+                            description="SoloW forgets where this repository is and drops its mirrored branches and labels. Nothing on disk is touched, no commit is lost, and reconnecting the same location restores it — the mirrors are re-read on the next sync."
                             disabled={holders !== ""}
-                            loading={disconnect.isPending && disconnect.variables?.id === r.id}
-                            size="icon-sm"
-                            type="button"
-                            variant="ghost"
-                          >
-                            <Unplug />
-                          </Button>
-                        }
-                      />
-                    </span>
-                  </>
-                }
-                key={r.id}
-                meta={<span className="font-mono">{r.location}</span>}
-                status={
-                  <Badge variant="secondary">
-                    {r.provider ?? (r.source === "local_path" ? "local" : "remote")}
-                  </Badge>
-                }
-                title={r.name}
-              >
-                {open ? (
-                  <div className="mt-3 space-y-3 rounded-lg bg-muted/30 p-3">
-                    <SeedDefaultLabelsButton provider={r.provider} repositoryId={r.id} />
-                    {/* Per-repository, because which files a harness needs is a property of the
+                            onConfirm={() => disconnect.mutate({ id: r.id })}
+                            title={`Disconnect "${r.name}"?`}
+                            trigger={
+                              <Button
+                                aria-label={`Disconnect ${r.name}`}
+                                disabled={holders !== ""}
+                                loading={disconnect.isPending && disconnect.variables?.id === r.id}
+                                size="icon-sm"
+                                type="button"
+                                variant="ghost"
+                              >
+                                <Unplug />
+                              </Button>
+                            }
+                          />
+                        </span>
+                      </>
+                    }
+                    key={r.id}
+                    meta={<span className="font-mono">{r.location}</span>}
+                    status={
+                      <Badge variant="secondary">
+                        {r.provider ?? (r.source === "local_path" ? "local" : "remote")}
+                      </Badge>
+                    }
+                    title={r.name}
+                  >
+                    {open ? (
+                      <div className="mt-3 space-y-3 rounded-lg bg-muted/30 p-3">
+                        <SeedDefaultLabelsButton provider={r.provider} repositoryId={r.id} />
+                        {/* Per-repository, because which files a harness needs is a property of the
                         repository, not of the Workspace (issue #52). */}
-                    <SetupFileRows patterns={r.setupFilePatterns} repositoryId={r.id} />
-                  </div>
-                ) : null}
-              </SettingsRow>
-            );
-          })}
-        </SettingsRows>
+                        <SetupFileRows patterns={r.setupFilePatterns} repositoryId={r.id} />
+                      </div>
+                    ) : null}
+                  </SettingsRow>
+                );
+              })}
+            </SettingsRows>
+          )}
+        </section>
       )}
 
       {disconnect.error && (
