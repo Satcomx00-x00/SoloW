@@ -7868,6 +7868,28 @@
                       "type": "integer",
                       "minimum": 0
                     },
+                    "usage": {
+                      "type": "object",
+                      "properties": {
+                        "taskCount": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "projectCount": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "changeRequestCount": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "taskCount",
+                        "projectCount",
+                        "changeRequestCount"
+                      ]
+                    },
                     "setupFilePatterns": {
                       "type": "array",
                       "items": {
@@ -7893,6 +7915,7 @@
                     "provider",
                     "integrationBaseUrl",
                     "issueCount",
+                    "usage",
                     "setupFilePatterns",
                     "createdAt",
                     "updatedAt"
@@ -9568,6 +9591,213 @@
                     "workspaceId",
                     "userId",
                     "layout"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/preference.getRecentTasks": {
+      "get": {
+        "operationId": "preference-getRecentTasks",
+        "summary": "The signed-in user's recently visited Tasks, most recent first. Empty when nothing is saved.",
+        "tags": [
+          "preference"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "workspaceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "userId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "taskIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "maxItems": 5
+                    }
+                  },
+                  "required": [
+                    "workspaceId",
+                    "userId",
+                    "taskIds"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.NOT_FOUND"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/preference.recordRecentTask": {
+      "post": {
+        "operationId": "preference-recordRecentTask",
+        "summary": "Move a Task to the front of the signed-in user's recent list.",
+        "tags": [
+          "preference"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "taskId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "taskId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "workspaceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "userId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "taskIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "maxItems": 5
+                    }
+                  },
+                  "required": [
+                    "workspaceId",
+                    "userId",
+                    "taskIds"
                   ]
                 }
               }
@@ -12223,12 +12453,22 @@
                         "sessionUsageCount": {
                           "type": "integer",
                           "minimum": 0
+                        },
+                        "runningCount": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "parkedCount": {
+                          "type": "integer",
+                          "minimum": 0
                         }
                       },
                       "required": [
                         "taskCount",
                         "workflowStepCount",
-                        "sessionUsageCount"
+                        "sessionUsageCount",
+                        "runningCount",
+                        "parkedCount"
                       ]
                     },
                     "createdAt": {
@@ -12403,12 +12643,22 @@
                               "sessionUsageCount": {
                                 "type": "integer",
                                 "minimum": 0
+                              },
+                              "runningCount": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "parkedCount": {
+                                "type": "integer",
+                                "minimum": 0
                               }
                             },
                             "required": [
                               "taskCount",
                               "workflowStepCount",
-                              "sessionUsageCount"
+                              "sessionUsageCount",
+                              "runningCount",
+                              "parkedCount"
                             ]
                           },
                           "createdAt": {
@@ -12630,12 +12880,22 @@
                         "sessionUsageCount": {
                           "type": "integer",
                           "minimum": 0
+                        },
+                        "runningCount": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "parkedCount": {
+                          "type": "integer",
+                          "minimum": 0
                         }
                       },
                       "required": [
                         "taskCount",
                         "workflowStepCount",
-                        "sessionUsageCount"
+                        "sessionUsageCount",
+                        "runningCount",
+                        "parkedCount"
                       ]
                     },
                     "createdAt": {
@@ -12806,12 +13066,22 @@
                         "sessionUsageCount": {
                           "type": "integer",
                           "minimum": 0
+                        },
+                        "runningCount": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "parkedCount": {
+                          "type": "integer",
+                          "minimum": 0
                         }
                       },
                       "required": [
                         "taskCount",
                         "workflowStepCount",
-                        "sessionUsageCount"
+                        "sessionUsageCount",
+                        "runningCount",
+                        "parkedCount"
                       ]
                     },
                     "createdAt": {
@@ -14174,6 +14444,326 @@
                         "additionalProperties": false
                       }
                     ]
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "local",
+                        "docker",
+                        "ssh",
+                        "cloud"
+                      ]
+                    },
+                    "config": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "local"
+                              ]
+                            },
+                            "prepareScript": {
+                              "type": "string",
+                              "maxLength": 20000
+                            },
+                            "env": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "string"
+                              },
+                              "default": {}
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "env"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "docker"
+                              ]
+                            },
+                            "image": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "mounts": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "source": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "target": {
+                                    "type": "string",
+                                    "pattern": "^/"
+                                  },
+                                  "readOnly": {
+                                    "type": "boolean",
+                                    "default": false
+                                  }
+                                },
+                                "required": [
+                                  "source",
+                                  "target",
+                                  "readOnly"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "maxItems": 32,
+                              "default": []
+                            },
+                            "network": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "cpus": {
+                              "type": "number",
+                              "minimum": 0,
+                              "exclusiveMinimum": true,
+                              "maximum": 1024
+                            },
+                            "memoryMb": {
+                              "type": "integer",
+                              "minimum": 6
+                            },
+                            "prepareScript": {
+                              "type": "string",
+                              "maxLength": 20000
+                            },
+                            "env": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "string"
+                              },
+                              "default": {}
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "image",
+                            "mounts",
+                            "env"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "ssh"
+                              ]
+                            },
+                            "host": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "port": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 65535,
+                              "default": 22
+                            },
+                            "user": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "keySecretId": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "prepareScript": {
+                              "type": "string",
+                              "maxLength": 20000
+                            },
+                            "env": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "string"
+                              },
+                              "default": {}
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "host",
+                            "port",
+                            "user",
+                            "keySecretId",
+                            "env"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": [
+                                "cloud"
+                              ]
+                            },
+                            "provider": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "region": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "size": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "credentialSecretId": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "prepareScript": {
+                              "type": "string",
+                              "maxLength": 20000
+                            },
+                            "env": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "string"
+                              },
+                              "default": {}
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "provider",
+                            "size",
+                            "credentialSecretId",
+                            "env"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "kind",
+                    "config",
+                    "createdAt",
+                    "updatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/profile.executor.delete": {
+      "post": {
+        "operationId": "profile-executor-delete",
+        "summary": "Delete an Executor Profile no Task names. Refused while one still does — a finished run has to keep being able to say which machine produced it.",
+        "tags": [
+          "profile"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
                   }
                 },
                 "required": [
@@ -19668,6 +20258,28 @@
                       "type": "integer",
                       "minimum": 0
                     },
+                    "usage": {
+                      "type": "object",
+                      "properties": {
+                        "taskCount": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "projectCount": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "changeRequestCount": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "taskCount",
+                        "projectCount",
+                        "changeRequestCount"
+                      ]
+                    },
                     "setupFilePatterns": {
                       "type": "array",
                       "items": {
@@ -19693,6 +20305,7 @@
                     "provider",
                     "integrationBaseUrl",
                     "issueCount",
+                    "usage",
                     "setupFilePatterns",
                     "createdAt",
                     "updatedAt"
@@ -19825,6 +20438,28 @@
                             "type": "integer",
                             "minimum": 0
                           },
+                          "usage": {
+                            "type": "object",
+                            "properties": {
+                              "taskCount": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "projectCount": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "changeRequestCount": {
+                                "type": "integer",
+                                "minimum": 0
+                              }
+                            },
+                            "required": [
+                              "taskCount",
+                              "projectCount",
+                              "changeRequestCount"
+                            ]
+                          },
                           "setupFilePatterns": {
                             "type": "array",
                             "items": {
@@ -19850,6 +20485,7 @@
                           "provider",
                           "integrationBaseUrl",
                           "issueCount",
+                          "usage",
                           "setupFilePatterns",
                           "createdAt",
                           "updatedAt"
@@ -19905,6 +20541,182 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/error.NOT_FOUND"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/repository.disconnect": {
+      "post": {
+        "operationId": "repository-disconnect",
+        "summary": "Disconnect a Repository nothing holds any more. Refused while an Issue, a Task attachment, a Project or a mirrored Change Request still points at it — those are the record of what a harness did there.",
+        "tags": [
+          "repository"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string",
+                      "enum": [
+                        "local_path",
+                        "remote_url"
+                      ]
+                    },
+                    "location": {
+                      "type": "string"
+                    },
+                    "integrationId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
+                    "externalFullName": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "provider": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "integrationBaseUrl": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "issueCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "usage": {
+                      "type": "object",
+                      "properties": {
+                        "taskCount": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "projectCount": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "changeRequestCount": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "taskCount",
+                        "projectCount",
+                        "changeRequestCount"
+                      ]
+                    },
+                    "setupFilePatterns": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "source",
+                    "location",
+                    "integrationId",
+                    "externalFullName",
+                    "provider",
+                    "integrationBaseUrl",
+                    "issueCount",
+                    "usage",
+                    "setupFilePatterns",
+                    "createdAt",
+                    "updatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
                 }
               }
             }
@@ -20009,6 +20821,28 @@
                       "type": "integer",
                       "minimum": 0
                     },
+                    "usage": {
+                      "type": "object",
+                      "properties": {
+                        "taskCount": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "projectCount": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "changeRequestCount": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "taskCount",
+                        "projectCount",
+                        "changeRequestCount"
+                      ]
+                    },
                     "setupFilePatterns": {
                       "type": "array",
                       "items": {
@@ -20034,6 +20868,7 @@
                     "provider",
                     "integrationBaseUrl",
                     "issueCount",
+                    "usage",
                     "setupFilePatterns",
                     "createdAt",
                     "updatedAt"
