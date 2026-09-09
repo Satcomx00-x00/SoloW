@@ -33,6 +33,7 @@ function step(id: string, name: string, position: number, rank: string): Workflo
     branch: null,
     mcpServerIds: [],
     skillIds: [],
+    permissionMode: null,
     createdAt: AT,
     updatedAt: AT,
   };
@@ -180,6 +181,35 @@ describe("WorkflowsView", () => {
     });
   });
 
+  it("writes a prompt in a dialog, and sends nothing when the dialog is dismissed", async () => {
+    // The node only reads the prompt back in two lines; the whole of it is written in the dialog,
+    // which discards its draft on Cancel rather than saving it the way the fields on the card do.
+    const { log } = renderWithTrpc(
+      <WorkflowsView />,
+      handlersFor({ "workflow.updateStep": () => PIPELINE }),
+    );
+
+    fireEvent.click(await screen.findByLabelText("Edit the prompt for Plan"));
+    const editor = await screen.findByLabelText("Prompt for Plan");
+    expect((editor as HTMLTextAreaElement).value).toBe("Plan it.");
+
+    fireEvent.change(editor, { target: { value: "Plan it, thoroughly." } });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(log.calls.filter((c) => c.path === "workflow.updateStep")).toHaveLength(0);
+
+    fireEvent.click(await screen.findByLabelText("Edit the prompt for Plan"));
+    fireEvent.change(await screen.findByLabelText("Prompt for Plan"), {
+      target: { value: "Plan it, thoroughly." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save prompt" }));
+
+    await waitFor(() => {
+      const calls = log.calls.filter((c) => c.path === "workflow.updateStep");
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.input).toEqual({ stepId: "s1", promptTemplate: "Plan it, thoroughly." });
+    });
+  });
+
   it("turns a branch on with both exits pointing where the step already went", async () => {
     // So that switching the branch on changes nothing until a target is chosen: the default is
     // the rank successor on both sides, and a placeholder question the operator will replace.
@@ -188,6 +218,13 @@ describe("WorkflowsView", () => {
       handlersFor({ "workflow.updateStep": () => PIPELINE }),
     );
 
+    // Branching lives on the node's toolbar, which is revealed by pointing at the node — the
+    // same gesture a person makes, and the reason the button is not a permanent row on the card.
+    const node = (await screen.findAllByLabelText(/^Name of step \d+$/))[1]?.closest(
+      "[data-step-id]",
+    );
+    if (!node) throw new Error("step 2 has no node");
+    fireEvent.pointerEnter(node);
     fireEvent.click(await screen.findByLabelText("Branch Implement on a condition"));
 
     await waitFor(() => {
@@ -201,6 +238,58 @@ describe("WorkflowsView", () => {
         },
       });
     });
+  });
+
+  it("sets how much a step's harness may do, on the node rather than in settings", async () => {
+    // A Step is a harness launch, so its permission posture sits with the servers and Skills it
+    // loads. `null` is the default and means "whatever the harness profile says".
+    const { log } = renderWithTrpc(
+      <WorkflowsView />,
+      handlersFor({ "workflow.updateStep": () => PIPELINE }),
+    );
+
+    const permissions = await screen.findByLabelText("Permissions for Plan");
+    expect(permissions.textContent).toContain("Same as the harness profile");
+
+    // happy-dom cannot drive a Radix select's pointer dance; the change is asserted through the
+    // component's own handler, which is the part this surface owns.
+    fireEvent.keyDown(permissions, { key: "Enter" });
+    const option = await screen.findByRole("option", { name: "Read only, change nothing" });
+    fireEvent.click(option);
+
+    await waitFor(() => {
+      const call = log.calls.find((c) => c.path === "workflow.updateStep");
+      expect(call?.input).toEqual({ stepId: "s1", permissionMode: "plan" });
+    });
+  });
+
+  it("keeps removing a step on the toolbar, not on the card, and behind a confirmation", async () => {
+    // The trash used to sit in every node's header — a permanent invitation, on a surface where
+    // the neighbouring control is a text field. It is on the hover toolbar now, and still asks.
+    const { log } = renderWithTrpc(
+      <WorkflowsView />,
+      handlersFor({ "workflow.deleteStep": () => PIPELINE }),
+    );
+
+    const node = (await screen.findAllByLabelText(/^Name of step \d+$/))[0]?.closest(
+      "[data-step-id]",
+    );
+    if (!node) throw new Error("step 1 has no node");
+    expect(screen.queryByLabelText("Remove Plan")).toBeNull();
+
+    fireEvent.pointerEnter(node);
+    fireEvent.click(await screen.findByLabelText("Remove Plan"));
+    // Nothing is sent on the trigger alone: the confirmation is the act.
+    expect(log.calls.some((c) => c.path === "workflow.deleteStep")).toBe(false);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Remove step" }));
+    await waitFor(
+      () => {
+        const call = log.calls.find((c) => c.path === "workflow.deleteStep");
+        expect(call?.input).toEqual({ stepId: "s1" });
+      },
+      { timeout: 3000 },
+    );
   });
 
   it("draws a branching step with its condition and its two exits, and lets the branch go", async () => {
@@ -370,5 +459,40 @@ describe("WorkflowsView", () => {
     renderWithTrpc(<WorkflowsView />, handlersFor());
 
     expect(await screen.findByText("WIP")).toBeTruthy();
+  });
+});
+
+describe("branching on the harness's outcome", () => {
+  it("offers the outcome condition, and saves it pointed at `blocked` until told otherwise", async () => {
+    const branched: WorkflowWithStepsDto = {
+      ...PIPELINE,
+      steps: PIPELINE.steps.map((s) =>
+        s.id === "s3"
+          ? {
+              ...s,
+              branch: {
+                when: { kind: "agent-decides", question: "Does it need another pass?" },
+                thenStepId: "s2",
+                elseStepId: null,
+              },
+            }
+          : s,
+      ),
+    };
+    const { log } = renderWithTrpc(
+      <WorkflowsView />,
+      handlersFor({ "workflow.get": () => branched, "workflow.updateStep": () => PIPELINE }),
+    );
+
+    fireEvent.click(await screen.findByLabelText("Condition"));
+    fireEvent.click(await screen.findByText("Harness reported an outcome"));
+
+    await waitFor(() => {
+      const call = log.calls.find((c) => c.path === "workflow.updateStep");
+      expect(call?.input).toEqual({
+        stepId: "s3",
+        branch: { when: { kind: "outcome", is: "blocked" }, thenStepId: "s2", elseStepId: null },
+      });
+    });
   });
 });

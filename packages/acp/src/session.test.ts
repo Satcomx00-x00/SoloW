@@ -235,6 +235,10 @@ describe("startAcpSession — capability refusal (AC-2)", () => {
     expect(peer.methods).not.toContain("session/load");
     expect(outcome.ok).toBe(false);
     expect(outcome.error).toContain("loadSession");
+    // And it did not quietly do the other thing instead: a caller resuming deliberately is told
+    // the run failed, not handed a fresh conversation wearing the same shape.
+    expect(peer.methods).not.toContain("session/new");
+    expect(await session.resumed).toBe(false);
   });
 
   it("sends session/load when the agent did advertise it", async () => {
@@ -245,6 +249,8 @@ describe("startAcpSession — capability refusal (AC-2)", () => {
     await session.outcome;
     expect(peer.methods).toContain("session/load");
     expect(peer.methods).not.toContain("session/new");
+    expect(await session.sessionId).toBe("old-session");
+    expect(await session.resumed).toBe(true);
   });
 
   it("never selects a mode the agent did not offer", async () => {
@@ -292,6 +298,94 @@ describe("startAcpSession — capability refusal (AC-2)", () => {
     const outcome = await session.outcome;
     expect(outcome.ok).toBe(false);
     expect(outcome.error).toContain("protocol version 0");
+  });
+});
+
+/**
+ * Carrying a conversation across a re-spawn.
+ *
+ * The orchestrator loses a harness process whenever a durable step is redriven, an execution
+ * budget runs out, or it restarts — and until this the replacement started the same brief over
+ * with no memory of the work. Two things had to be true before resuming was worth doing: a
+ * resumed session is configured like a new one, and asking to resume can never be what fails a
+ * round.
+ */
+describe("startAcpSession — resuming a conversation", () => {
+  const canLoad = { agentCapabilities: { loadSession: true } };
+  const advertises = {
+    modes: { availableModes: [{ id: "plan", name: "Plan" }] },
+    models: { availableModels: [{ modelId: "claude-opus-4" }] },
+  };
+
+  it("pins the Profile's mode and model on a resumed session, not only on a new one", async () => {
+    /*
+     * The defect this covers was an omission rather than a mistake: the resume branch simply did
+     * not have the pin block the new-session branch had, so a round that resumed came back on
+     * whatever the agent defaults to while the Profile still read as though its pins held. That
+     * is the silent substitution AC-3 forbids, arrived at by a shorter code path.
+     */
+    const { session, peer } = drive(
+      { ...canLoad, ...advertises },
+      { resumeSessionId: "old-session", modeId: "plan", modelId: "claude-opus-4" },
+    );
+    await session.outcome;
+
+    expect(peer.methods).toContain("session/load");
+    expect(peer.methods).toContain("session/set_mode");
+    expect(peer.methods).toContain("session/set_model");
+  });
+
+  it("reports what a resumed agent advertised, so a cache is not blanked by resuming", async () => {
+    const { session, updates } = drive({ ...canLoad, ...advertises }, { resumeSessionId: "old" });
+    await session.outcome;
+
+    expect(updates.filter((u) => u.kind === "capabilities")).toEqual([
+      { kind: "capabilities", models: ["claude-opus-4"], modes: ["plan"] },
+    ]);
+  });
+
+  it("starts a new session, and says so, when the agent cannot load and the caller allowed it", async () => {
+    // The orchestrator's posture: the conversation is worth trying for and not worth the round.
+    const { session, peer } = drive(
+      {},
+      { resumeSessionId: "old-session", resumeFallback: "new_session" },
+    );
+    const outcome = await session.outcome;
+
+    expect(outcome.ok).toBe(true);
+    expect(peer.methods).not.toContain("session/load");
+    expect(peer.methods).toContain("session/new");
+    // The whole point of the fallback: the caller can tell what it got, so it can decide which
+    // brief the harness deserved — and so the run log can say a fresh conversation was started.
+    expect(await session.resumed).toBe(false);
+    expect(await session.sessionId).toBe("acp-session-1");
+  });
+
+  it("still resumes, rather than falling back, when the agent can load", async () => {
+    // The fallback is a floor, not a preference: an agent that advertised `loadSession` is loaded.
+    const { session, peer } = drive(canLoad, {
+      resumeSessionId: "old-session",
+      resumeFallback: "new_session",
+    });
+    await session.outcome;
+
+    expect(peer.methods).toContain("session/load");
+    expect(peer.methods).not.toContain("session/new");
+    expect(await session.resumed).toBe(true);
+  });
+
+  it("still hard-fails for a caller that asked for no fallback", async () => {
+    // The default is unchanged, deliberately: a caller resuming on purpose is told the agent
+    // cannot, rather than handed something else and left to notice.
+    const { session } = drive({}, { resumeSessionId: "old-session", resumeFallback: "fail" });
+    expect((await session.outcome).ok).toBe(false);
+    expect(await session.resumed).toBe(false);
+  });
+
+  it("says a session it opened fresh was not resumed", async () => {
+    const { session } = drive({});
+    await session.outcome;
+    expect(await session.resumed).toBe(false);
   });
 });
 

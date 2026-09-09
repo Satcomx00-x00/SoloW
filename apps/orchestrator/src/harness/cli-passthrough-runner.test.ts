@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createLocalExecutor } from "../executor/local.js";
 import { CliPassthroughRunner } from "./cli-passthrough-runner.js";
-import type { HarnessHandle, HarnessStreamEvent } from "./runner.js";
+import type { HarnessHandle, HarnessStartOpts, HarnessStreamEvent } from "./runner.js";
 
 /**
  * A plain CLI as a harness (issue #21), driving a real child process through the real `Executor`
@@ -37,7 +37,12 @@ async function fakeHarness(dir: string, body: string): Promise<string> {
   return path;
 }
 
-async function run(body: string, prompt = "fix the latch") {
+async function run(
+  body: string,
+  prompt = "fix the latch",
+  /** Per-round facts a test wants to vary — a conversation to carry on, so far. */
+  over: Partial<HarnessStartOpts> = {},
+) {
   workdir = await mkdtemp(join(tmpdir(), "solow-passthrough-"));
   const events: HarnessStreamEvent[] = [];
   const command = await fakeHarness(workdir, body);
@@ -50,6 +55,7 @@ async function run(body: string, prompt = "fix the latch") {
     worktreeName: null,
     prompt,
     onEvent: (e) => events.push(e),
+    ...over,
   });
   return { events, workdir };
 }
@@ -66,7 +72,7 @@ describe("CliPassthroughRunner", () => {
     const { events } = await run('echo "args: $*"');
 
     const result = await handle?.outcome;
-    expect(result).toEqual({ kind: "completed" });
+    expect(result).toEqual({ kind: "completed", stopReason: "end_turn" });
     expect(transcript(events)).toContain("--flag");
     expect(transcript(events)).toContain("fix the latch");
   });
@@ -94,7 +100,7 @@ describe("CliPassthroughRunner", () => {
   it("fails on a non-zero exit, and keeps stderr's reason out of the transcript", async () => {
     const { events } = await run('echo "partial work"; echo "boom" >&2; exit 3');
 
-    expect(await handle?.outcome).toEqual({ kind: "failed", signal: {} });
+    expect(await handle?.outcome).toEqual({ kind: "failed", signal: {}, stopReason: "error" });
     // stderr carries progress bars and warnings too; interleaving it would make the transcript
     // unreadable. The work the harness did say is still there.
     expect(transcript(events)).toContain("partial work");
@@ -106,7 +112,12 @@ describe("CliPassthroughRunner", () => {
     const { events } = await run('echo "usage limit reached" >&2; exit 1');
     await handle?.outcome;
 
-    expect(await handle?.outcome).toEqual({ kind: "failed", signal: { quotaExhausted: true } });
+    // A plain CLI has no vocabulary for *why* it exited non-zero — `error` is all it can say.
+    expect(await handle?.outcome).toEqual({
+      kind: "failed",
+      signal: { quotaExhausted: true },
+      stopReason: "error",
+    });
     expect(transcript(events)).not.toContain("usage limit");
   });
 
@@ -133,6 +144,24 @@ describe("CliPassthroughRunner", () => {
     await run("sleep 30");
     await handle?.stop();
 
-    expect(await handle?.outcome).toEqual({ kind: "completed" });
+    expect(await handle?.outcome).toEqual({ kind: "completed", stopReason: "cancelled" });
+  });
+
+  it("ignores a conversation to resume, runs anyway, and says it resumed nothing", async () => {
+    /*
+     * A plain CLI has no conversation and no flag for one, so there is nothing to honour and
+     * nothing to invent. Refusing the round over it would be worse than running it: the brief is
+     * the whole brief either way, which is the one thing this protocol has always been good at.
+     * The setting itself is named for the operator by `unsupportedLaunchSettings`.
+     */
+    const { events } = await run('echo "ran regardless"', "fix the latch", {
+      resumeSessionId: "sess-abc",
+    });
+
+    expect(await handle?.outcome).toEqual({ kind: "completed", stopReason: "end_turn" });
+    expect(await handle?.resumed).toBe(false);
+    expect(transcript(events)).toContain("ran regardless");
+    // Not smuggled onto the command line either — the brief is still the last argument.
+    expect(transcript(events)).not.toContain("sess-abc");
   });
 });

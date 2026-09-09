@@ -9,7 +9,10 @@ import { type ClaudeUpdate, encodeUserTurn, parseStreamLine, toUpdates } from ".
  *
  * **`--worktree` is not optional.** Several Tasks run against one repository at the same time,
  * and two harnesses editing one working tree would corrupt each other's changes (Principle II).
- * The flag is added by `buildArgs`, not by the caller, so no call site can leave it off.
+ * The flag is added by `buildArgs`, not by the caller, so no call site can leave it off. The one
+ * thing that displaces it is `--resume`, which names a conversation that already has a worktree
+ * of its own — the isolation is the same worktree, reached by remembering it rather than by
+ * making it.
  *
  * This module never spawns the process itself — the caller supplies `spawn` (issue #1's
  * `Executor.spawn` in the orchestrator). That keeps this package harness-protocol-only and leaves
@@ -66,6 +69,13 @@ export interface ClaudeSessionOptions {
   permissionMode: string;
   /** The model id to launch with, or absent to let the CLI choose (issue #94). */
   model?: string;
+  /**
+   * The CLI's own id for a conversation to carry on, or absent to start a new one.
+   *
+   * What `sessionId` reported on an earlier run. It takes precedence over `worktreeName` — see
+   * `buildArgs` for why the two cannot both be honoured.
+   */
+  resumeSessionId?: string;
   onUpdate: (update: ClaudeUpdate) => void;
   onStderr?: (text: string) => void;
 }
@@ -74,15 +84,33 @@ export interface ClaudeSessionOptions {
  * The arguments SoloW requires, in front of any configured extras.
  *
  * Exported so a test can assert the shape without spawning anything — in particular that
- * `--worktree` is always present, which is the guarantee the rest of the system leans on.
+ * `--worktree` is always present, which is the guarantee the rest of the system leans on, and
+ * that the one thing that displaces it displaces it completely.
  */
 export function buildArgs(options: {
   worktreeName: string | null;
   permissionMode: string;
   /** The model id to launch with, or absent to let the CLI choose. */
   model?: string;
+  /** A conversation to carry on. Wins over `worktreeName` outright — see below. */
+  resumeSessionId?: string;
   extraArgs?: string[];
 }): string[] {
+  /*
+   * `--resume` and `--worktree` are mutually exclusive, and `--resume` wins.
+   *
+   * Not a preference — the flags contradict each other. A conversation being resumed was already
+   * had somewhere, and that somewhere is a worktree the CLI made on the round that started it.
+   * Asking for a worktree as well would either fail outright or branch a *second* one from the
+   * base ref, and the harness would then carry on its conversation in a directory with none of
+   * the work it remembers doing. The caller cannot be trusted to have suppressed the name
+   * itself: the worktree name is derived from the Task and is the same on every round, so a
+   * lifecycle resuming round three would pass both without meaning anything by it.
+   *
+   * Resume is therefore the stronger statement, and it is honoured whole. `resumed` on the
+   * runner's handle is what tells the rest of the system which of the two it got.
+   */
+  const resuming = options.resumeSessionId !== undefined;
   return [
     // Non-interactive, streaming both directions.
     "--print",
@@ -92,9 +120,12 @@ export function buildArgs(options: {
     "stream-json",
     // Without this the CLI refuses to emit stream-json on stdout.
     "--verbose",
-    // The isolation guarantee: one worktree per Task, named after it. Omitted only when the
-    // caller is already inside that worktree and is continuing the same Task.
-    ...(options.worktreeName ? ["--worktree", options.worktreeName] : []),
+    // Carrying on a conversation the CLI already has, in the worktree it already made for it.
+    ...(options.resumeSessionId ? ["--resume", options.resumeSessionId] : []),
+    // The isolation guarantee: one worktree per Task, named after it. Omitted when the caller is
+    // already inside that worktree and continuing the same Task, and when `--resume` says the
+    // CLI has one of its own to go back to.
+    ...(options.worktreeName && !resuming ? ["--worktree", options.worktreeName] : []),
     // A headless run has nobody to answer a permission prompt; the worktree and the review gate
     // are the safety boundary instead (see the orchestrator's runner for the reasoning).
     "--permission-mode",
@@ -120,6 +151,13 @@ export interface ClaudeSession {
    * caller must treat as a failure to establish an isolated workspace rather than ignore.
    */
   workspacePath: Promise<string | null>;
+  /**
+   * The CLI's own id for this conversation, from the same init event. What `claude --resume`
+   * takes; null if the CLI never said. Resolved the moment it is known rather than at exit, so a
+   * caller can record it while the run is still live — a run that dies is exactly the one whose
+   * id is worth having.
+   */
+  sessionId: Promise<string | null>;
   /** Queue another user turn. False once the session has finished. */
   send(text: string): boolean;
   stop(): Promise<void>;
@@ -139,6 +177,7 @@ export function startClaudeSession(
         worktreeName: options.worktreeName,
         permissionMode: options.permissionMode,
         ...(options.model ? { model: options.model } : {}),
+        ...(options.resumeSessionId ? { resumeSessionId: options.resumeSessionId } : {}),
         ...(options.extraArgs ? { extraArgs: options.extraArgs } : {}),
       }),
     ],
@@ -162,6 +201,11 @@ export function startClaudeSession(
     resolveWorkspace = resolve;
   });
   let workspaceSettled = false;
+  let resolveSessionId: (id: string | null) => void = () => {};
+  const sessionId = new Promise<string | null>((resolve) => {
+    resolveSessionId = resolve;
+  });
+  let sessionIdSettled = false;
 
   let finished = false;
   let stopped = false;
@@ -195,6 +239,10 @@ export function startClaudeSession(
             workspaceSettled = true;
             resolveWorkspace(update.cwd);
           }
+          if (update.kind === "session" && !sessionIdSettled) {
+            sessionIdSettled = true;
+            resolveSessionId(update.sessionId);
+          }
           if (update.kind === "result") {
             last = { ok: update.ok, subtype: update.subtype, text: update.text };
           }
@@ -208,6 +256,10 @@ export function startClaudeSession(
       workspaceSettled = true;
       resolveWorkspace(null);
     }
+    if (!sessionIdSettled) {
+      sessionIdSettled = true;
+      resolveSessionId(null);
+    }
     await proc.exited;
 
     if (stopped) return { ok: true, subtype: "stopped", text: null };
@@ -219,6 +271,7 @@ export function startClaudeSession(
   return {
     outcome,
     workspacePath,
+    sessionId,
     stderrTail: () => stderrTail,
     send(text: string) {
       if (finished || stopped) return false;

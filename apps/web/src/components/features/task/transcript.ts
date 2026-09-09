@@ -322,6 +322,28 @@ function fromLive(e: TaskEvent): Normalised | null {
 }
 
 /**
+ * Whether a live frame belongs in a transcript narrowed to one Workflow Step.
+ *
+ * The persisted half of the transcript is narrowed by the server — `session.get` takes the Step
+ * id and returns only that Step's rows — and this is the same question asked of the frames that
+ * arrive after the query ran. It has to be asked here rather than left to the server, because a
+ * socket does not re-answer a query: without it, selecting a Step would scope everything already
+ * recorded and then let the *next* Step's output stream in underneath it.
+ *
+ * Two things are deliberately kept whichever Step is selected. `status` and `mirror` carry no
+ * Step at all — neither is a log row, and a Task's state belongs to the Task — and a log frame
+ * whose `workflowStepId` is absent or null is unattributed: a Task on no Workflow, a row written
+ * before the column existed, an orchestrator older than it. Unattributed is not a Step of its
+ * own, so it cannot be filtered *to* one either; dropping those would blank the terminal of
+ * every run that predates the column, which is the opposite of a fix.
+ */
+export function inStepScope(event: TaskEvent, stepId: string | null): boolean {
+  if (stepId === null) return true;
+  const on = "workflowStepId" in event ? event.workflowStepId : undefined;
+  return on === undefined || on === null || on === stepId;
+}
+
+/**
  * Build the transcript.
  *
  * `live` is appended after `persisted` and deduplicated against it, so an event the socket

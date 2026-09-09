@@ -8,6 +8,7 @@ import {
   type CreateWorkflowInput,
   type DeleteWorkflowStepInput,
   err,
+  type ImportWorkflowInput,
   ok,
   type RenameWorkflowInput,
   type ReorderWorkflowStepInput,
@@ -16,24 +17,30 @@ import {
   type TaskWorkflowBindingDto,
   type UpdateWorkflowStepInput,
   type WorkflowAdvanceDto,
+  type WorkflowDocument,
   type WorkflowDto,
   WorkflowErrorCode,
+  type WorkflowImportDto,
   type WorkflowListDto,
   type WorkflowStepBranch,
   type WorkflowWithStepsDto,
 } from "@solow/contracts";
 import {
   appendRank,
+  planWorkflowImport,
   rankBetween,
   rankForMove,
   resumeWorkflowCursor,
   sortSteps,
   validateWorkflowGraph,
+  workflowToDocument,
 } from "@solow/core";
 import {
   advanceTaskWorkflow as advanceTaskWorkflowIn,
   harnessProfile,
   loadTaskWorkflowRun,
+  mcpServer,
+  skill,
   stepsToDto,
   task,
   workflow,
@@ -198,6 +205,194 @@ export async function deleteWorkflow(
 }
 
 /**
+ * A Workflow as a portable document (`workflowDocumentSchema`).
+ *
+ * The three catalogues are read whole rather than by the ids the Steps happen to use: a Workspace
+ * has tens of these rows, not thousands, and one query each is cheaper than an `IN` list built
+ * from a set union — and it keeps this function a read of the Workspace rather than a read
+ * derived from the Steps it is already holding.
+ */
+export async function exportWorkflow(
+  ctx: RequestContext,
+  id: string,
+): Promise<Result<WorkflowDocument, NotFound>> {
+  const found = await getWorkflowWithSteps(ctx, id);
+  if (!found.ok) return err(found.error);
+
+  const byId = (rows: readonly { id: string; name: string }[]) =>
+    new Map(rows.map((row) => [row.id, row.name]));
+
+  const profiles = await ctx.db
+    .select({ id: harnessProfile.id, name: harnessProfile.name })
+    .from(harnessProfile)
+    .where(eq(harnessProfile.workspaceId, ctx.workspaceId));
+  const servers = await ctx.db
+    .select({ id: mcpServer.id, name: mcpServer.name })
+    .from(mcpServer)
+    .where(eq(mcpServer.workspaceId, ctx.workspaceId));
+  const skills = await ctx.db
+    .select({ id: skill.id, name: skill.name })
+    .from(skill)
+    .where(eq(skill.workspaceId, ctx.workspaceId));
+
+  return ok(
+    workflowToDocument(found.data, found.data.steps, {
+      harnessProfile: byId(profiles),
+      mcpServer: byId(servers),
+      skill: byId(skills),
+    }),
+  );
+}
+
+/**
+ * Write an imported document as a new Workflow, resolved against this Workspace's catalogues.
+ *
+ * One `immediate` transaction, like every other ordering write here: a half-written pipeline —
+ * a Workflow row with three of its five Steps — is not a state the designer can show or the
+ * operator can fix, and the unique name is claimed by the same statement that uses it.
+ *
+ * Branches are written in a **second pass**. A branch names Steps by index because the document
+ * has no ids; the ids only exist once the rows are inserted, so the first pass writes every Step
+ * with no branch and the second re-points them. Doing it in one pass would mean either inserting
+ * backwards — impossible for a branch that points forwards — or minting ids by hand.
+ *
+ * The new Workflow stays at version 1. The version counter is "how many times has this definition
+ * been edited underneath an attached Task", and the answer for a Workflow that has existed for a
+ * millisecond is none; bumping it once per Step would make a five-Step import look like a
+ * pipeline someone had already revised five times.
+ */
+export async function importWorkflow(
+  ctx: RequestContext,
+  input: ImportWorkflowInput,
+): Promise<Result<WorkflowImportDto, StepWriteError>> {
+  const written = ctx.db.transaction(
+    (
+      tx,
+    ): Result<
+      { workflowId: string; unmatched: Omit<WorkflowImportDto, "workflow"> },
+      StepWriteError
+    > => {
+      const catalog = {
+        harnessProfiles: tx
+          .select({ id: harnessProfile.id, name: harnessProfile.name })
+          .from(harnessProfile)
+          .where(eq(harnessProfile.workspaceId, ctx.workspaceId))
+          .all(),
+        mcpServers: tx
+          .select({ id: mcpServer.id, name: mcpServer.name })
+          .from(mcpServer)
+          .where(eq(mcpServer.workspaceId, ctx.workspaceId))
+          .all(),
+        skills: tx
+          .select({ id: skill.id, name: skill.name })
+          .from(skill)
+          .where(eq(skill.workspaceId, ctx.workspaceId))
+          .all(),
+      };
+
+      // A caller-named fallback is still a caller-supplied id, so it is resolved through this
+      // Workspace before it can be written to every Step (Principle V).
+      if (
+        input.fallbackHarnessProfileId !== undefined &&
+        !catalog.harnessProfiles.some((p) => p.id === input.fallbackHarnessProfileId)
+      ) {
+        return err(CommonErrorCode.NotFound);
+      }
+
+      const taken = tx
+        .select({ name: workflow.name })
+        .from(workflow)
+        .where(eq(workflow.workspaceId, ctx.workspaceId))
+        .all()
+        .map((row) => row.name);
+
+      const plan = planWorkflowImport(input.document, catalog, {
+        name: input.name,
+        fallbackProfileId: input.fallbackHarnessProfileId,
+        taken,
+      });
+      if (!plan) return err(WorkflowErrorCode.NoHarnessProfile);
+
+      const [created] = tx
+        .insert(workflow)
+        .values({
+          workspaceId: ctx.workspaceId,
+          name: plan.name,
+          description: plan.description,
+        })
+        .returning()
+        .all();
+      if (!created) return err(CommonErrorCode.ValidationFailed);
+
+      const ids: string[] = [];
+      let rank: string | null = null;
+      for (const step of plan.steps) {
+        rank = appendRank(rank);
+        const [row] = tx
+          .insert(workflowStep)
+          .values({
+            workspaceId: ctx.workspaceId,
+            workflowId: created.id,
+            rank,
+            name: step.name,
+            agentProfileId: step.agentProfileId,
+            promptTemplate: step.promptTemplate,
+            gate: step.gate,
+            advanceOn: step.advanceOn,
+            onEnter: step.onEnter,
+            branch: null,
+            mcpServerIds: step.mcpServerIds,
+            skillIds: step.skillIds,
+            permissionMode: step.permissionMode,
+          })
+          .returning({ id: workflowStep.id })
+          .all();
+        if (!row) return err(CommonErrorCode.ValidationFailed);
+        ids.push(row.id);
+      }
+
+      plan.steps.forEach((step, index) => {
+        if (!step.branch) return;
+        const target = (at: number | null) => (at === null ? null : (ids[at] ?? null));
+        const self = ids[index];
+        const branch: WorkflowStepBranch = {
+          when: step.branch.when,
+          thenStepId: target(step.branch.thenStep),
+          elseStepId: target(step.branch.elseStep),
+        };
+        // A branch onto its own Step is refused on write for a reason that survives the trip —
+        // it would move no cursor, defeating the `StaleCursor` replay guard — so a document
+        // carrying one loses that side rather than importing an unrunnable pipeline.
+        if (branch.thenStepId === self) branch.thenStepId = null;
+        if (branch.elseStepId === self) branch.elseStepId = null;
+        tx.update(workflowStep)
+          .set({ branch })
+          .where(
+            and(eq(workflowStep.workspaceId, ctx.workspaceId), eq(workflowStep.id, self ?? "")),
+          )
+          .run();
+      });
+
+      return ok({
+        workflowId: created.id,
+        unmatched: {
+          unmatchedHarnessProfiles: plan.unmatchedHarnessProfiles,
+          unmatchedMcpServers: plan.unmatchedMcpServers,
+          unmatchedSkills: plan.unmatchedSkills,
+        },
+      });
+    },
+    { behavior: "immediate" },
+  );
+  if (!written.ok) return err(written.error);
+
+  const created = await getWorkflowWithSteps(ctx, written.data.workflowId);
+  return created.ok
+    ? ok({ workflow: created.data, ...written.data.unmatched })
+    : err(created.error);
+}
+
+/**
  * What a Step write can refuse with: a missing or cross-tenant id, a stale order, or a row the
  * driver declined to insert. One alias rather than four signatures that drift apart.
  */
@@ -325,6 +520,7 @@ export async function addWorkflowStep(
           branch: input.branch ?? null,
           mcpServerIds: [...new Set(input.mcpServerIds ?? [])],
           skillIds: [...new Set(input.skillIds ?? [])],
+          permissionMode: input.permissionMode ?? null,
         })
         .returning()
         .all();
@@ -429,6 +625,16 @@ export async function updateWorkflowStep(
           patch.skillIds = nextSkills;
         }
       }
+      // Null is a value here, not an absence: it hands the posture back to the Harness Profile.
+      // So the test is `!== undefined`, and `!== step.permissionMode` is what keeps a form saved
+      // twice from bumping the version and raising drift on every attached Task.
+      if (
+        input.permissionMode !== undefined &&
+        input.permissionMode !== (step.permissionMode ?? null)
+      ) {
+        patch.permissionMode = input.permissionMode;
+      }
+
       if (Object.keys(patch).length === 0) return ok(step.workflowId);
 
       tx.update(workflowStep)

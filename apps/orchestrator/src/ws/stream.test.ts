@@ -246,7 +246,8 @@ describe("handleClientFrame (operator input and stop)", () => {
     const state = {
       inputs: [] as string[],
       stopped: false,
-      outcome: Promise.resolve({ kind: "completed" as const }),
+      outcome: Promise.resolve({ kind: "completed" as const, stopReason: "end_turn" as const }),
+      harnessSessionId: Promise.resolve(null),
       workspacePath: Promise.resolve<string | null>("/wt/solow-task-1"),
       async send(text: string) {
         state.inputs.push(text);
@@ -358,7 +359,8 @@ describe("handleClientFrame (permission answers)", () => {
   function permissionHarness(answer: PermissionAnswer = "answered") {
     const answers: Array<{ requestId: string; optionId: string }> = [];
     const handle: HarnessHandle = {
-      outcome: Promise.resolve({ kind: "completed" as const }),
+      outcome: Promise.resolve({ kind: "completed" as const, stopReason: "end_turn" as const }),
+      harnessSessionId: Promise.resolve(null),
       workspacePath: Promise.resolve<string | null>("/wt/solow-task-1"),
       async send() {
         return true;
@@ -474,7 +476,8 @@ describe("handleClientFrame (permission answers)", () => {
       taskId: "task-1",
       sessionId: "sess-1",
       handle: {
-        outcome: Promise.resolve({ kind: "completed" as const }),
+        outcome: Promise.resolve({ kind: "completed" as const, stopReason: "end_turn" as const }),
+        harnessSessionId: Promise.resolve(null),
         workspacePath: Promise.resolve<string | null>("/wt/solow-task-1"),
         async send() {
           return true;

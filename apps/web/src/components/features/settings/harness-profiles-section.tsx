@@ -687,6 +687,17 @@ export function HarnessProfilesSection() {
           </p>
           <div className="grid gap-2">
             <Label htmlFor="harness-permission">Permission mode</Label>
+            {/*
+              The Profile's answer is the *fallback* now: a Workflow Step sets its own posture on
+              its node, beside the MCP servers and Skills it loads, because a Step is a harness
+              launch and the posture is one of its launch parameters. What is left here is what
+              decides for a Step that says nothing, and for the run that has no Step at all — a
+              Task following no Workflow — which is why the field could move without leaving.
+            */}
+            <p className="text-muted-foreground text-xs leading-relaxed">
+              Used by a task running on no workflow, and by any workflow step that has not chosen
+              its own — a step sets this on its node, next to the servers and skills it loads.
+            </p>
             <Select
               value={permissionMode}
               onValueChange={(v) => setPermissionMode(v as HarnessPermissionMode)}

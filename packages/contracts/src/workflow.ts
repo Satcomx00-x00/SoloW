@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { idSchema, timestampsSchema } from "./common.js";
+import { harnessPermissionModeSchema } from "./profile.js";
+import { taskCompletionOutcomeSchema } from "./widget.js";
 
 /**
  * Workflows — an ordered pipeline of Steps, each run by its own Harness Profile (issue #5, spec
@@ -63,10 +65,17 @@ export type WorkflowStepAutomation = z.infer<typeof workflowStepAutomationSchema
  *    that does not answer has not affirmed the condition, and that counts as `no`.
  *  - `produced-changes`: the Step left a diff behind. The same fact `auto-unless-changes` reads,
  *    corroborated the same way — the caller's claim is a floor, the Session log is the answer.
+ *  - `outcome`: **how the harness said its run ended** — the `task_complete` declaration's
+ *    `outcome`, which the run loop already hands the advance for the gate. `blocked` is the one
+ *    this exists for: a harness that stopped because it could not go on used to reach the review
+ *    gate looking exactly like one that finished, and the only way to route it to a person or an
+ *    escalation Step was to ask a second question in prose. A harness that declared nothing has
+ *    no outcome, and matches none.
  */
 export const workflowStepConditionSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("agent-decides"), question: z.string().min(1).max(500) }),
   z.object({ kind: z.literal("produced-changes") }),
+  z.object({ kind: z.literal("outcome"), is: taskCompletionOutcomeSchema }),
 ]);
 export type WorkflowStepCondition = z.infer<typeof workflowStepConditionSchema>;
 
@@ -90,6 +99,24 @@ export const workflowStepBranchSchema = z.object({
   elseStepId: idSchema.nullable(),
 });
 export type WorkflowStepBranch = z.infer<typeof workflowStepBranchSchema>;
+
+/**
+ * How much the harness of one Step may do without asking — the Step's own answer, or null for
+ * "whatever its Harness Profile says" (spec F05's `permissionMode`, on a Step).
+ *
+ * It belongs here as well as on the Profile because **a Step is a harness launch**: a Task under
+ * a Workflow starts a fresh session at every Step, with that Step's Profile, that Step's MCP
+ * servers and Skills, and that Step's brief. The permission posture is a launch parameter exactly
+ * like those, and wanting a *plan* Step and a *build* Step on the same Profile is the ordinary
+ * case, not an exotic one — before this it took two Profiles differing in one enum, each with its
+ * own credential binding and concurrency cap.
+ *
+ * Null rather than a default so that adding the column changed no pipeline's behaviour, and so
+ * that a Step which has no opinion keeps following its Profile when the Profile is re-postured.
+ * The Profile keeps the field, and keeps deciding, for the run that has no Step at all — a Task
+ * on no Workflow — which is why moving it here could not mean removing it there.
+ */
+export const workflowStepPermissionModeSchema = harnessPermissionModeSchema.nullable();
 
 /**
  * Workflow error codes.
@@ -154,6 +181,13 @@ export const WorkflowErrorCode = {
   GraphInvalid: "WORKFLOW_GRAPH_INVALID",
   /** A Step names an MCP server or a Skill that is not in this Workspace's libraries. */
   ToolNotInWorkspace: "WORKFLOW_TOOL_NOT_IN_WORKSPACE",
+  /**
+   * An imported document's Steps have nowhere to run: this Workspace has no Harness Profile at
+   * all, so there is not even a fallback to point them at. Refused whole rather than written as
+   * a pipeline of Steps with a null harness, which the schema does not allow and the runner
+   * could not start.
+   */
+  NoHarnessProfile: "WORKFLOW_NO_HARNESS_PROFILE",
 } as const;
 export type WorkflowErrorCode = (typeof WorkflowErrorCode)[keyof typeof WorkflowErrorCode];
 
@@ -201,6 +235,8 @@ export const addWorkflowStepInput = z.object({
    */
   mcpServerIds: z.array(idSchema).max(64).optional(),
   skillIds: z.array(idSchema).max(64).optional(),
+  /** Null, or absent, leaves the posture to the Step's Harness Profile. */
+  permissionMode: workflowStepPermissionModeSchema.optional(),
   afterStepId: idSchema.nullable().optional(),
 });
 export type AddWorkflowStepInput = z.infer<typeof addWorkflowStepInput>;
@@ -218,6 +254,8 @@ export const updateWorkflowStepInput = z.object({
   /** The whole list, replaced — the same rule as a Task's repositories. */
   mcpServerIds: z.array(idSchema).max(64).optional(),
   skillIds: z.array(idSchema).max(64).optional(),
+  /** Null hands the posture back to the Harness Profile; a value overrides it for this Step. */
+  permissionMode: workflowStepPermissionModeSchema.optional(),
 });
 export type UpdateWorkflowStepInput = z.infer<typeof updateWorkflowStepInput>;
 
@@ -284,6 +322,13 @@ export const advanceTaskWorkflowInput = z.object({
   producedChanges: z.boolean().default(false),
   handoff: z.string().max(20000).optional(),
   /**
+   * How the harness said the Step ended, for an `outcome` branch to read. Absent when it said
+   * nothing — which no outcome condition matches, by the same rule that reads a missing
+   * `DECISION` line as `no`. A report, like `handoff`: it moves the cursor only where the Step's
+   * own rules let a report do that, and it never stands in for a decision.
+   */
+  outcome: taskCompletionOutcomeSchema.optional(),
+  /**
    * Which durable step is making this call — an idempotency key, defaulted so an API caller
    * outside the run loop needs no opinion about it.
    *
@@ -318,6 +363,7 @@ export const workflowStepDto = z
     branch: workflowStepBranchSchema.nullable(),
     mcpServerIds: z.array(idSchema),
     skillIds: z.array(idSchema),
+    permissionMode: workflowStepPermissionModeSchema,
   })
   .merge(timestampsSchema);
 export type WorkflowStepDto = z.infer<typeof workflowStepDto>;
@@ -387,15 +433,180 @@ export type WorkflowAdvanceStatus = z.infer<typeof workflowAdvanceStatusSchema>;
 export const workflowDetachDto = z.object({ taskId: idSchema });
 export type WorkflowDetachDto = z.infer<typeof workflowDetachDto>;
 
+/**
+ * Which way out of the Step the advance took, or would have. `next` is the rank successor of an
+ * unbranched Step; `then`/`else` are a branch's two; null when the Step was held on a signal it
+ * does not advance on, so no exit was chosen at all.
+ */
+export const workflowStepExitKindSchema = z.enum(["next", "then", "else"]);
+export type WorkflowStepExitKind = z.infer<typeof workflowStepExitKindSchema>;
+
+/**
+ * *Why* an advance answered the way it did — the facts the rule read, stated once by the rule
+ * that read them (F03, "decisions when changing Step").
+ *
+ * The advance used to return a status and a cursor and nothing else, so a Task that sat at
+ * `awaiting-decision` could not say which gate held it, and a branch that went back to
+ * "Implement" left no record of the answer that sent it there. This is that record. It is what
+ * the run loop writes into the Session log as a `workflow_decision`, and it is derived from the
+ * same evaluation that moved the cursor — never re-evaluated by whoever displays it.
+ */
+export const workflowAdvanceExplanationSchema = z.object({
+  gate: workflowStepGateSchema,
+  /** Did this Step's gate ask for a person, given what happened on it? */
+  needsApproval: z.boolean(),
+  /** The Step's branch condition and how it evaluated, or null for an unbranched Step. */
+  condition: z.object({ when: workflowStepConditionSchema, holds: z.boolean() }).nullable(),
+  exit: workflowStepExitKindSchema.nullable(),
+});
+export type WorkflowAdvanceExplanation = z.infer<typeof workflowAdvanceExplanationSchema>;
+
 export const workflowAdvanceDto = z.object({
   taskId: idSchema,
   status: workflowAdvanceStatusSchema,
   /** The Step the Task sits on after the call — unchanged unless the status is `advanced`. */
   currentStepId: idSchema,
   brief: z.string(),
+  explanation: workflowAdvanceExplanationSchema,
 });
 export type WorkflowAdvanceDto = z.infer<typeof workflowAdvanceDto>;
 
 /** What `workflow.authoringGuide` returns: the rules and the tool sequence, as markdown. */
 export const workflowAuthoringGuideDto = z.object({ markdown: z.string() });
 export type WorkflowAuthoringGuideDto = z.infer<typeof workflowAuthoringGuideDto>;
+
+/**
+ * A Workflow as a portable document — what `workflow.export` writes and `workflow.import` reads,
+ * so a pipeline can be shared between Workspaces, between instances, or checked into a repo.
+ *
+ * Every id is gone. A Workflow's ids are meaningless outside the Workspace that minted them: the
+ * Harness Profile a Step runs on, the MCP servers and Skills it loads, and the Steps a branch
+ * targets are all rows of a database the reader does not have. So the document names what it can
+ * name portably — **profiles, servers and Skills by name; branch targets by their index in
+ * `steps`** — and the import resolves those against the Workspace it lands in.
+ *
+ * That resolution is lossy by construction, and the format is honest about which way it fails:
+ * an unmatched *tool* is dropped and reported, because a Skill is additive and a pipeline without
+ * it still runs; an unmatched *harness profile* falls back to one that exists and is reported,
+ * because a Step with no harness is not a Step. Neither silently succeeds — see `workflowImportDto`.
+ *
+ * Deliberately absent: `version`, `createdAt`, timestamps, and any note of where the export came
+ * from. This is a *definition*, not a snapshot of a row — the version counter belongs to the
+ * Workflow the import creates, which has been edited zero times.
+ */
+export const WORKFLOW_DOCUMENT_FORMAT = "solow.workflow";
+export const WORKFLOW_DOCUMENT_VERSION = 1;
+
+/**
+ * A branch in a document. `thenStep`/`elseStep` are indices into the document's own `steps`
+ * array — null still means *the pipeline ends here*, exactly as `thenStepId` does on the row.
+ *
+ * An index rather than a name: Step names are not unique within a Workflow, and a document whose
+ * branch resolved to whichever "Review" came first would reorder a pipeline on import without
+ * saying so.
+ */
+export const workflowDocumentBranchSchema = z.object({
+  when: workflowStepConditionSchema,
+  thenStep: z.number().int().nonnegative().nullable(),
+  elseStep: z.number().int().nonnegative().nullable(),
+});
+export type WorkflowDocumentBranch = z.infer<typeof workflowDocumentBranchSchema>;
+
+/**
+ * One Step of a document. Field names follow `addWorkflowStepInput` wherever the field survives
+ * the trip unchanged, so the document reads like the API that will replay it; only the three
+ * that cannot travel as ids are renamed to say they are names.
+ */
+export const workflowDocumentStepSchema = z.object({
+  name: z.string().min(1).max(120),
+  /** The Harness Profile this Step runs on, by name. */
+  harnessProfile: z.string().min(1).max(120),
+  promptTemplate: z.string().max(20000).default(""),
+  gate: workflowStepGateSchema.default("human"),
+  advanceOn: workflowAdvanceOnSchema.default("review"),
+  onEnter: workflowStepAutomationSchema.nullable().default(null),
+  branch: workflowDocumentBranchSchema.nullable().default(null),
+  /** Library items loaded on top of the Workspace-wide ones, by name (spec F24). */
+  mcpServers: z.array(z.string().min(1).max(200)).max(64).default([]),
+  skills: z.array(z.string().min(1).max(200)).max(64).default([]),
+  /**
+   * Travels as itself: unlike a profile or a Skill, a permission mode is not a name that has to
+   * resolve against anything in the importing Workspace — it is one of three fixed postures, and
+   * it means the same thing everywhere. Null is "whatever the profile says", which is also what
+   * it means on the way out.
+   */
+  permissionMode: workflowStepPermissionModeSchema.default(null),
+});
+export type WorkflowDocumentStep = z.infer<typeof workflowDocumentStepSchema>;
+
+/**
+ * `format` and `version` are literals rather than free strings so that pointing the import at the
+ * wrong JSON — a `package.json`, another product's pipeline — fails at the boundary with a shape
+ * error, instead of importing a Workflow named `undefined` with no Steps.
+ *
+ * A branch index that names no Step is refused here too. It is the one cross-field rule the
+ * document has, and checking it at the edge means neither the DAL nor the designer has to hold an
+ * opinion about a target that was never writable in the first place.
+ */
+export const workflowDocumentSchema = z
+  .object({
+    format: z.literal(WORKFLOW_DOCUMENT_FORMAT),
+    version: z.literal(WORKFLOW_DOCUMENT_VERSION),
+    name: z.string().min(1).max(120),
+    description: z.string().max(2000).nullable().default(null),
+    steps: z.array(workflowDocumentStepSchema).min(1).max(200),
+  })
+  .superRefine((doc, ctx) => {
+    doc.steps.forEach((step, index) => {
+      if (!step.branch) return;
+      for (const key of ["thenStep", "elseStep"] as const) {
+        const target = step.branch[key];
+        if (target !== null && target >= doc.steps.length) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["steps", index, "branch", key],
+            message: `branch target ${target} names no step`,
+          });
+        }
+      }
+    });
+  });
+export type WorkflowDocument = z.infer<typeof workflowDocumentSchema>;
+
+export const exportWorkflowInput = z.object({ id: idSchema });
+export type ExportWorkflowInput = z.infer<typeof exportWorkflowInput>;
+
+/**
+ * `name` overrides the document's own, which is what makes importing a pipeline twice possible:
+ * Workflow names are unique per Workspace, so a second import of the same document would collide.
+ * Omitted, the import takes the document's name and suffixes it — "Ship (2)" — rather than
+ * refusing, because the operator asked for the pipeline, not for the name.
+ *
+ * `fallbackHarnessProfileId` is where Steps land whose named profile this Workspace does not have.
+ * Omitted, the import uses the first Harness Profile by name. Either way the substitution is
+ * reported back, never silent.
+ */
+export const importWorkflowInput = z.object({
+  document: workflowDocumentSchema,
+  name: z.string().min(1).max(120).optional(),
+  fallbackHarnessProfileId: idSchema.optional(),
+});
+export type ImportWorkflowInput = z.infer<typeof importWorkflowInput>;
+
+/**
+ * What the import created and what it could not carry across.
+ *
+ * The unresolved names are the point of returning anything more than the Workflow: an import that
+ * quietly re-pointed four Steps at the wrong harness looks identical, in the designer, to one that
+ * matched everything — until it runs.
+ */
+export const workflowImportDto = z.object({
+  workflow: workflowWithStepsDto,
+  /** Harness Profile names the document asked for that this Workspace has nothing called. */
+  unmatchedHarnessProfiles: z.array(z.string()),
+  /** MCP server names dropped from the Steps that asked for them. */
+  unmatchedMcpServers: z.array(z.string()),
+  /** Skill names dropped from the Steps that asked for them. */
+  unmatchedSkills: z.array(z.string()),
+});
+export type WorkflowImportDto = z.infer<typeof workflowImportDto>;

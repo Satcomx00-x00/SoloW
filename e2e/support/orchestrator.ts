@@ -9,6 +9,7 @@ import { createLocalExecutor } from "../../apps/orchestrator/src/executor/local.
 import { harnessRegistry } from "../../apps/orchestrator/src/harness/registry.js";
 import type {
   HarnessHandle,
+  HarnessOutcome,
   HarnessRunner,
   HarnessStartOpts,
 } from "../../apps/orchestrator/src/harness/runner.js";
@@ -71,8 +72,8 @@ class FixtureHarnessRunner implements HarnessRunner {
       resolveWorkspace = resolve;
     });
 
-    let finish: (outcome: { kind: "completed" }) => void = () => {};
-    const outcome = new Promise<{ kind: "completed" }>((resolve) => {
+    let finish: (outcome: HarnessOutcome) => void = () => {};
+    const outcome = new Promise<HarnessOutcome>((resolve) => {
       finish = resolve;
     });
 
@@ -101,18 +102,20 @@ class FixtureHarnessRunner implements HarnessRunner {
       writeFileSync(join(worktree, "visible.txt"), `${visible}\n`);
       opts.onEvent({ kind: "stdout", channel: "assistant", text: `harness edited ${label}\n` });
 
-      if (!opts.prompt.includes(STEERABLE)) finish({ kind: "completed" });
+      if (!opts.prompt.includes(STEERABLE)) finish({ kind: "completed", stopReason: "end_turn" });
     })();
 
     return {
       outcome,
       workspacePath,
+      // A fake with no conversation store behind it — nothing to resume.
+      harnessSessionId: Promise.resolve(null),
       send: async (text: string) => {
         const path = await workspacePath;
         if (!path) return false;
         writeFileSync(join(path, "steered.txt"), `${text}\n`);
         opts.onEvent({ kind: "stdout", channel: "user", text: `harness received: ${text}\n` });
-        finish({ kind: "completed" });
+        finish({ kind: "completed", stopReason: "end_turn" });
         return true;
       },
       stop: async () => {
@@ -121,7 +124,7 @@ class FixtureHarnessRunner implements HarnessRunner {
           channel: "system",
           text: "harness stopped by the operator\n",
         });
-        finish({ kind: "completed" });
+        finish({ kind: "completed", stopReason: "cancelled" });
       },
     };
   }

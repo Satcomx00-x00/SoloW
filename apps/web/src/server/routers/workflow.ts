@@ -8,8 +8,10 @@ import {
   deleteWorkflowInput,
   deleteWorkflowStepInput,
   detachTaskWorkflowInput,
+  exportWorkflowInput,
   getTaskWorkflowInput,
   getWorkflowInput,
+  importWorkflowInput,
   listWorkflowsInput,
   renameWorkflowInput,
   reorderWorkflowStepInput,
@@ -18,7 +20,9 @@ import {
   workflowAdvanceDto,
   workflowAuthoringGuideDto,
   workflowDetachDto,
+  workflowDocumentSchema,
   workflowDto,
+  workflowImportDto,
   workflowListDto,
   workflowWithStepsDto,
 } from "@solow/contracts";
@@ -33,8 +37,10 @@ import {
   deleteWorkflow,
   deleteWorkflowStep,
   detachTaskWorkflow,
+  exportWorkflow,
   getTaskWorkflowBinding,
   getWorkflowWithSteps,
+  importWorkflow,
   listWorkflows,
   renameWorkflow,
   reorderWorkflowStep,
@@ -143,6 +149,36 @@ export const workflowRouter = router({
       unwrap(await deleteWorkflow(ctx.rctx, input.id));
       return unwrap(await listWorkflows(ctx.rctx));
     }),
+
+  export: workflowProcedure
+    .meta({
+      openapi: {
+        method: "GET",
+        path: "/workflow.export",
+        tags: ["workflow"],
+        protect: true,
+        summary:
+          "Read a Workflow as a portable document, for sharing or checking into a repository. Ids are replaced by names — the Harness Profile each Step runs on, the MCP servers and Skills it loads — and branch targets by their index in the step list, so the document means the same thing in another Workspace. Feed it back to workflow.import.",
+      },
+    })
+    .input(exportWorkflowInput)
+    .output(workflowDocumentSchema)
+    .query(async ({ ctx, input }) => unwrap(await exportWorkflow(ctx.rctx, input.id))),
+
+  import: workflowProcedure
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/workflow.import",
+        tags: ["workflow"],
+        protect: true,
+        summary:
+          "Create a Workflow from an exported document. Names are resolved against this Workspace: a Harness Profile with no match falls back to fallbackHarnessProfileId, or to the first profile, and an MCP server or Skill with no match is dropped from the Step that asked for it — every substitution is listed in the reply. The name is suffixed rather than refused when this Workspace already has one, so the same document can be imported twice.",
+      },
+    })
+    .input(importWorkflowInput)
+    .output(workflowImportDto)
+    .mutation(async ({ ctx, input }) => unwrap(await importWorkflow(ctx.rctx, input))),
 
   addStep: workflowProcedure
     .meta({

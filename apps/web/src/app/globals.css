@@ -634,6 +634,11 @@
   --xy-controls-button-border-color: var(--border);
   --xy-controls-box-shadow: none;
   --xy-attribution-background-color: transparent;
+  /* The minimap is chrome like the controls are, so it takes the card's ink and the same border. */
+  --xy-minimap-background-color: var(--card);
+  --xy-minimap-mask-background-color: color-mix(in oklch, var(--background) 70%, transparent);
+  --xy-minimap-node-background-color: var(--muted-foreground);
+  --xy-minimap-node-stroke-color: transparent;
 }
 .workflow-canvas .react-flow__node {
   /* The node's chrome is the card inside it; the `+` hangs off that card's edge. */
@@ -774,6 +779,27 @@
 }
 /* While an exit is in hand, every place it could land says so; the one under the pointer says
    it loudest. React Flow adds `valid` to the handle the pointer is snapped to. */
+/*
+ * What the pointer has to hit, versus what the eye has to see. The dot stays 10px — it is a mark
+ * on the card's edge, not a control competing with the fields inside it — but a branch exit is
+ * the one thing on this canvas you *drag*, and a 10px drag target on a 320px card is a miss
+ * waiting to happen. The pad is invisible and 24px.
+ */
+.workflow-canvas .react-flow__handle::after {
+  content: "";
+  position: absolute;
+  inset: -7px;
+  border-radius: 9999px;
+}
+/*
+ * And it says it is draggable when you are near it: only the two connectable exits — `next` is
+ * `isConnectable={false}`, because rank order is not a thing to drag elsewhere — and only while
+ * the pointer is on the card, so a row of six pipelines is not six pairs of lit dots.
+ */
+.workflow-canvas .react-flow__node:hover .react-flow__handle.source.connectable {
+  background: var(--foreground);
+  transform: translate(50%, -50%) scale(1.25);
+}
 .workflow-canvas--connecting .react-flow__handle.target {
   box-shadow: 0 0 0 4px color-mix(in oklch, var(--foreground) 22%, transparent);
   animation: workflow-handle-breathe 1.2s ease-in-out infinite;

@@ -27,6 +27,24 @@ export const todoItemSchema = z.object({
 });
 export type TodoItem = z.infer<typeof todoItemSchema>;
 
+/**
+ * Which Workflow Step the harness was running when this frame was produced.
+ *
+ * Spread into every variant that comes off the session log rather than declared nine times: the
+ * frames below already repeat `taskId`, `sessionId` and `seq`, and a tenth repetition of a field
+ * whose whole point is that it means the same thing everywhere is how one variant ends up
+ * nullable and another optional. `status` and `mirror` do not carry it — neither is a log row,
+ * and a Task's state belongs to the Task rather than to whichever Step it happened to reach.
+ *
+ * Optional *and* nullable, and the two say different things. Absent means the producer of this
+ * frame does not speak Steps at all — an orchestrator older than the column, a `diff` frame
+ * published straight from the run loop. Null means it does, and there is genuinely no Step: a
+ * Task on no Workflow, or a row written before the column existed. A client segmenting the
+ * transcript treats both as unattributed; nothing here is ever renamed or removed, so a client
+ * that has never heard of Steps reads exactly the frames it always did.
+ */
+const stepScoped = { workflowStepId: idSchema.nullable().optional() };
+
 export const taskEventSchema = z.discriminatedUnion("kind", [
   /**
    * A line of harness output, with the channel it came from.
@@ -40,6 +58,7 @@ export const taskEventSchema = z.discriminatedUnion("kind", [
    */
   z.object({
     kind: z.literal("stdout"),
+    ...stepScoped,
     taskId: idSchema,
     sessionId: idSchema,
     seq: z.number().int().nonnegative(),
@@ -62,6 +81,7 @@ export const taskEventSchema = z.discriminatedUnion("kind", [
    */
   z.object({
     kind: z.literal("tool_use"),
+    ...stepScoped,
     taskId: idSchema,
     sessionId: idSchema,
     seq: z.number().int().nonnegative(),
@@ -73,6 +93,7 @@ export const taskEventSchema = z.discriminatedUnion("kind", [
   /** How a tool call finished. Correlated to its call by `callId`, truncated by the producer. */
   z.object({
     kind: z.literal("tool_result"),
+    ...stepScoped,
     taskId: idSchema,
     sessionId: idSchema,
     seq: z.number().int().nonnegative(),
@@ -83,6 +104,7 @@ export const taskEventSchema = z.discriminatedUnion("kind", [
   }),
   z.object({
     kind: z.literal("diff"),
+    ...stepScoped,
     taskId: idSchema,
     sessionId: idSchema,
     diffRef: idSchema,
@@ -94,6 +116,7 @@ export const taskEventSchema = z.discriminatedUnion("kind", [
    */
   z.object({
     kind: z.literal("permission_request"),
+    ...stepScoped,
     taskId: idSchema,
     sessionId: idSchema,
     seq: z.number().int().nonnegative(),
@@ -107,6 +130,7 @@ export const taskEventSchema = z.discriminatedUnion("kind", [
   /** How that permission was settled, and by whom — so the log can tell the two apart. */
   z.object({
     kind: z.literal("permission_resolved"),
+    ...stepScoped,
     taskId: idSchema,
     sessionId: idSchema,
     seq: z.number().int().nonnegative(),
@@ -121,6 +145,7 @@ export const taskEventSchema = z.discriminatedUnion("kind", [
    */
   z.object({
     kind: z.literal("widget"),
+    ...stepScoped,
     taskId: idSchema,
     sessionId: idSchema,
     seq: z.number().int().nonnegative(),
@@ -137,6 +162,7 @@ export const taskEventSchema = z.discriminatedUnion("kind", [
    */
   z.object({
     kind: z.literal("todos"),
+    ...stepScoped,
     taskId: idSchema,
     sessionId: idSchema,
     seq: z.number().int().nonnegative(),
@@ -145,6 +171,7 @@ export const taskEventSchema = z.discriminatedUnion("kind", [
   /** What a person answered — published so every open client settles the same widget at once. */
   z.object({
     kind: z.literal("widget_response"),
+    ...stepScoped,
     taskId: idSchema,
     sessionId: idSchema,
     seq: z.number().int().nonnegative(),

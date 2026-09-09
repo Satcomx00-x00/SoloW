@@ -118,7 +118,7 @@ export const sessionRouter = router({
         tags: ["session"],
         protect: true,
         summary:
-          "Fetch one Session with its event log — minus any range a compaction summary stands in for, which session.eventRange reads back — the diff captured at the review gate for each Repository the Task works in, and any recorded decision.",
+          "Fetch one Session with its event log — minus any range a compaction summary stands in for, which session.eventRange reads back — the diff captured at the review gate for each Repository the Task works in, and any recorded decision. Pass workflowStepId to narrow the events to one Workflow Step.",
       },
     })
     .input(getSessionInput)
@@ -126,6 +126,24 @@ export const sessionRouter = router({
     .query(async ({ ctx, input }) => {
       const session = unwrap(await getSessionById(ctx.rctx, input.sessionId));
       const events = unwrap(await listSessionEvents(ctx.rctx, input.sessionId));
+      /*
+       * The Step filter narrows the transcript and nothing else.
+       *
+       * `diffs` and `cursor` below are computed from the whole log on purpose: the fork cursor
+       * hashes every event up to its `seq`, so one taken over a Step's slice would be a promise
+       * about a history that does not exist, and the review gate's captures are picked out of
+       * wherever in the run they landed. So the unfiltered read above stays, and a scoped request
+       * pays one extra query rather than making the Session's own facts depend on which Step the
+       * caller happened to be looking at. Unscoped — every request the app makes today — issues
+       * exactly the one query it always did.
+       */
+      const scoped = input.workflowStepId
+        ? unwrap(
+            await listSessionEvents(ctx.rctx, input.sessionId, {
+              workflowStepId: input.workflowStepId,
+            }),
+          )
+        : events;
       const summaries = unwrap(await listSessionSummaries(ctx.rctx, input.sessionId));
       const review = unwrap(await getReviewForSession(ctx.rctx, input.sessionId));
       // The Task is read for its attachment order alone — position 0 is what "primary" means,
@@ -151,7 +169,7 @@ export const sessionRouter = router({
         diffs,
         // The primary Repository's change, for a caller that only ever wanted "the diff".
         diff: diffs[0] ?? null,
-        events: events.filter((e) => !summarised(e.seq)).map(toEventDto),
+        events: scoped.filter((e) => !summarised(e.seq)).map(toEventDto),
         summaries: summaries.map(toSummaryDto),
         cursor,
         review,
@@ -242,6 +260,7 @@ const toEventDto = (e: TypedSessionEvent) => ({
   seq: e.seq,
   kind: e.kind,
   payload: e.payload,
+  workflowStepId: e.workflowStepId,
   at: e.at,
 });
 

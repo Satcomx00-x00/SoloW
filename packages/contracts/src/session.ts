@@ -3,13 +3,68 @@ import { idSchema, sessionStateSchema, taskStateSchema } from "./common.js";
 import { todoItemSchema } from "./events.js";
 import { reviewDto } from "./review.js";
 import { taskCompletionOutcomeSchema, widgetSchema } from "./widget.js";
+import {
+  workflowAdvanceOnSchema,
+  workflowAdvanceStatusSchema,
+  workflowStepConditionSchema,
+  workflowStepGateSchema,
+} from "./workflow.js";
 
 /** Read contracts for harness Sessions and their streamed event log (spec F09/F10). */
+
+/**
+ * Why a harness stopped, in one vocabulary across every protocol SoloW drives.
+ *
+ * Each protocol says this in its own words — Claude Code's `result.subtype` (`success`,
+ * `error_max_turns`, `error_during_execution`), ACP's `stopReason` (`end_turn`, `max_tokens`,
+ * `max_turn_requests`, `refusal`, `cancelled`) — and the runner seam used to flatten all of it to
+ * "completed or failed". That lost the one distinction the lifecycle most needs: a harness that
+ * *finished* and one that *ran out* (of turns, of tokens) exit the same way and were read the
+ * same way, so a run cut off mid-task reached the review gate as "changes ready". Normalised
+ * here, once, so the run loop, the reclaim sweep and a future resume all read the same word.
+ *
+ *  - `end_turn`   — the harness finished what it was doing. The ordinary ending.
+ *  - `max_turns`  — it hit a turn budget with work still to do.
+ *  - `max_tokens` — it hit a token or context budget with work still to do.
+ *  - `refusal`    — it declined to continue (a permission refused, a policy).
+ *  - `cancelled`  — an operator or the run stopped it. Not a fault: partial work still reaches review.
+ *  - `error`      — it reported an error of its own.
+ *  - `no_result`  — the process ended without ever saying how — it died.
+ *  - `unknown`    — it said something this build does not recognise. Kept rather than guessed at.
+ */
+export const harnessStopReasonSchema = z.enum([
+  "end_turn",
+  "max_turns",
+  "max_tokens",
+  "refusal",
+  "cancelled",
+  "error",
+  "no_result",
+  "unknown",
+]);
+export type HarnessStopReason = z.infer<typeof harnessStopReasonSchema>;
+
+/**
+ * A stop that means "there was more to do" — the harness was cut off by a budget, not by its own
+ * judgement. The one question every consumer of a stop reason asks first, answered once.
+ */
+export function stopReasonMeansTruncated(reason: HarnessStopReason): boolean {
+  return reason === "max_turns" || reason === "max_tokens";
+}
 
 export const getTaskSessionsInput = z.object({ taskId: idSchema });
 export type GetTaskSessionsInput = z.infer<typeof getTaskSessionsInput>;
 
-export const getSessionInput = z.object({ sessionId: idSchema });
+/**
+ * `workflowStepId` narrows the transcript to one Workflow Step (and is ignored by a Session that
+ * ran under no Workflow, whose events carry no Step). Only the events narrow: `cursor`, `diffs`
+ * and `review` in the response are facts about the whole Session, and a request scoped to one
+ * Step must not quietly change what they say.
+ */
+export const getSessionInput = z.object({
+  sessionId: idSchema,
+  workflowStepId: idSchema.optional(),
+});
 export type GetSessionInput = z.infer<typeof getSessionInput>;
 
 export const sessionDto = z.object({
@@ -221,6 +276,14 @@ export const sessionEventPayloadSchema = z.discriminatedUnion("kind", [
     outcome: taskCompletionOutcomeSchema.optional(),
     /** The harness's own words, when it left any. */
     summary: z.string().max(2000).optional(),
+    /**
+     * Why the harness process stopped, in the protocol-independent vocabulary of
+     * `harnessStopReasonSchema`. Distinct from `outcome`, which is what the harness *said* about
+     * its work: a harness can declare `changes_ready` and then be cut off by a turn budget, and a
+     * reader that only had the declaration would not know. Optional because rows written before
+     * the seam carried it still have to parse.
+     */
+    stopReason: harnessStopReasonSchema.optional(),
   }),
   /**
    * What a person answered. Logged as its own record rather than folded into the widget's row,
@@ -233,6 +296,41 @@ export const sessionEventPayloadSchema = z.discriminatedUnion("kind", [
     widgetId: z.string().min(1),
     values: z.array(z.string()),
     text: z.string().nullish(),
+  }),
+  /**
+   * A Step reporting in, and what the Workflow decided about it (F03, "decisions when changing
+   * Step").
+   *
+   * The transcript could show a harness finishing and then, some time later, a different harness
+   * starting on a different brief, with nothing between them saying which Step ended, which
+   * gate it met, how its branch condition evaluated or why the cursor went where it went — and
+   * a Task held at `awaiting-decision` looked, in the log, exactly like one that had simply
+   * stopped. This is the record of that decision, written by the run loop at the moment the
+   * advance transaction returns, from the explanation that transaction itself produced. Nothing
+   * here is re-derived by a reader; a reader that disagreed with the advance would be a second
+   * rules engine.
+   *
+   * Names travel alongside ids because the log outlives the definition: a Step renamed or
+   * deleted after this Task ran must not turn its history into a list of dangling ids.
+   */
+  z.object({
+    kind: z.literal("workflow_decision"),
+    stepId: idSchema,
+    stepName: z.string(),
+    /** Which signal reported the Step finished. */
+    signal: workflowAdvanceOnSchema,
+    gate: workflowStepGateSchema,
+    /** Whether the Step's gate asked for a person, given what happened on it. */
+    needsApproval: z.boolean(),
+    /** The Step's branch condition and how it evaluated; null for an unbranched Step. */
+    condition: z.object({ when: workflowStepConditionSchema, holds: z.boolean() }).nullable(),
+    status: workflowAdvanceStatusSchema,
+    /** Where the cursor went — set only when `status` is `advanced`. */
+    nextStepId: idSchema.nullable(),
+    nextStepName: z.string().nullable(),
+    /** The facts the rule read, so the record can be checked against the declaration above it. */
+    outcome: taskCompletionOutcomeSchema.nullable(),
+    producedChanges: z.boolean(),
   }),
 ]);
 export type SessionEventPayload = z.infer<typeof sessionEventPayloadSchema>;
@@ -252,6 +350,7 @@ export const sessionEventKindSchema = z.enum([
   "widget_response",
   "todos",
   "agent_done",
+  "workflow_decision",
 ]);
 export type SessionEventKind = z.infer<typeof sessionEventKindSchema>;
 
@@ -301,6 +400,23 @@ export const sessionEventDto = z.object({
   /** Always equal to `payload.kind` — the column and the payload cannot disagree. */
   kind: sessionEventKindSchema,
   payload: sessionEventPayloadSchema,
+  /**
+   * The Workflow Step that produced this event, so a client can group a Session's log by Step
+   * without asking again per Step.
+   *
+   * Null covers two populations a reader has to treat the same way: a Task that ran under no
+   * Workflow, and every event written before the log recorded this at all — the table is
+   * append-only, so those rows can never be given an answer. Both are "unattributed", never a
+   * Step of their own.
+   *
+   * Optional as well as nullable, matching `taskEventSchema`'s field of the same name so the
+   * persisted row and the live frame make one promise rather than two. `session.get` always
+   * sends it, so what a reader gets from the API is `string | null`; the optionality is for
+   * everything that builds one of these without a Session behind it — a fixture, a caller
+   * written before the field — which should not have to answer a question about a Workflow it
+   * has nothing to do with. Absent and null mean the same thing to a consumer: unattributed.
+   */
+  workflowStepId: idSchema.nullable().optional(),
   at: z.string().datetime(),
 });
 export type SessionEventDto = z.infer<typeof sessionEventDto>;

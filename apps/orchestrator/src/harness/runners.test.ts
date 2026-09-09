@@ -137,4 +137,25 @@ describe("unsupportedLaunchSettings", () => {
       expect(reported.some((r) => r.startsWith("mode "))).toBe(!pins.mode);
     }
   });
+
+  it("names a conversation a plain CLI has no way to carry on", () => {
+    // Same rule, a setting that comes from the round rather than from the Profile: the run goes
+    // ahead — a passthrough harness given the whole brief still does the work — and the operator
+    // is told why the transcript starts from nothing instead of being left to wonder.
+    expect(unsupportedLaunchSettings("cli_passthrough", { resumeSessionId: "sess-abc" })).toEqual([
+      "the harness's previous conversation",
+    ]);
+  });
+
+  it("says nothing about a conversation the protocol can carry on", () => {
+    // `claude --resume` and ACP's `session/load`. Both are honoured, so neither is reported.
+    expect(unsupportedLaunchSettings("acp", { resumeSessionId: "sess-abc" })).toEqual([]);
+    expect(
+      unsupportedLaunchSettings("claude_code_stream_json", { resumeSessionId: "sess-abc" }),
+    ).toEqual([]);
+  });
+
+  it("says nothing about a round that asked to resume nothing", () => {
+    expect(unsupportedLaunchSettings("cli_passthrough", { resumeSessionId: null })).toEqual([]);
+  });
 });

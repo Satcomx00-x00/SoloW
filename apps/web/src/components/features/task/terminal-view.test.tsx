@@ -262,3 +262,49 @@ describe("thinking toggle", () => {
     expect(screen.getByText("no results")).toBeDefined();
   });
 });
+
+/**
+ * The terminal saying it is showing one Workflow Step rather than the whole run.
+ *
+ * The failure this prevents is quiet: a pipeline's terminal, scoped to one Step, holding twelve
+ * lines looks exactly like a run that only ever did twelve lines of work. Nothing on the page
+ * contradicts that reading unless this line does.
+ */
+describe("TerminalView scoped to a Step", () => {
+  const scope = { name: "Implement", position: 2, total: 3, current: true };
+
+  it("names the Step and says where the rest of the run went", () => {
+    renderTerminal({ scope });
+    expect(screen.getByText(/Showing/).textContent).toContain("Implement");
+    expect(screen.getByText(/step 2 of 3/)).toBeDefined();
+    expect(screen.getByText(/The rest of this run is under the other steps/)).toBeDefined();
+  });
+
+  it("says nothing at all about scope when there is none", () => {
+    renderTerminal();
+    expect(screen.queryByText(/The rest of this run/)).toBeNull();
+  });
+
+  it("becomes the strip's tabpanel only when a strip is driving it", () => {
+    const { unmount } = renderTerminal({ panelId: "p", labelledBy: "tab-1" });
+    const panel = screen.getByRole("tabpanel");
+    expect(panel.getAttribute("id")).toBe("p");
+    expect(panel.getAttribute("aria-labelledby")).toBe("tab-1");
+    unmount();
+
+    renderTerminal();
+    expect(screen.queryByRole("tabpanel")).toBeNull();
+  });
+
+  it("calls an empty Step empty, rather than inviting a launch or claiming a start", () => {
+    // Two wrong answers were available here: "launch the task to start a run" on a Task that is
+    // already running, and "Launching…" over a Step the run finished two Steps ago.
+    renderTerminal({ rows: [], scope: { ...scope, current: false }, isRunning: true });
+    expect(screen.getByText("No harness output recorded for Implement.")).toBeDefined();
+  });
+
+  it("still says the harness is starting when the run is on the Step being shown", () => {
+    renderTerminal({ rows: [], scope, isRunning: true });
+    expect(screen.queryByText(/No harness output recorded/)).toBeNull();
+  });
+});

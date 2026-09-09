@@ -6,6 +6,8 @@ import {
   parseSessionEventPayload,
   reviewDecisionSchema,
   type SessionEventPayload,
+  stopReasonMeansTruncated,
+  type TaskCompletionOutcome,
   TaskErrorCode,
   type TaskState,
   type TodoItem,
@@ -63,9 +65,11 @@ import {
   nextSessionEventSeq,
   nextSessionUsageSeq,
   readTaskState,
+  recordHarnessSessionId,
   recordSessionUsage,
   recordTaskCompletion,
   recordWorktree,
+  resolveResumeHarnessSessionId,
   setSessionState,
   setTaskRepositoryResultBranch,
   setTaskState,
@@ -174,6 +178,12 @@ interface RunLeg {
   harnessProfile: TaskRunContext["harnessProfile"];
   harnessCatalog: TaskRunContext["harnessCatalog"];
   /**
+   * What the Step said about how much its harness may do without asking, or null for "whatever
+   * the Profile says". On the leg beside the Profile because it is resolved against it — see
+   * `launchSettingsFor` — and because a Step boundary has to be able to change it.
+   */
+  permissionMode: WorkflowStepDto["permissionMode"];
+  /**
    * The Step's prompt with the previous Step's handoff already prepended — `buildStepBrief`'s
    * output, carried from `loadTaskWorkflowRun` or from the advance DTO and never re-derived here.
    * One string, built in one place, so the API's preview and the harness's prompt cannot drift.
@@ -199,9 +209,14 @@ type LegAdvance =
  * Workflow the Profile changes at a Step boundary and the launch settings have to change with it
  * — a Step pinned to a planning model must not be launched with the previous Step's pin.
  */
-function launchSettingsFor(profile: TaskRunContext["harnessProfile"]): HarnessLaunchSettings {
+function launchSettingsFor(leg: RunLeg): HarnessLaunchSettings {
+  const profile = leg.harnessProfile;
   return {
-    permissionMode: profile.permissionMode,
+    // The Step's posture wins where it has one, because a Step *is* a harness launch: the same
+    // Profile is deliberately used for a `plan` Step and a `bypassPermissions` Step of one
+    // pipeline. Null — and every Task on no Workflow, which has no Step — falls back to the
+    // Profile, which is why the Profile keeps the field.
+    permissionMode: leg.permissionMode ?? profile.permissionMode,
     ...(profile.model ? { model: profile.model } : {}),
     ...(profile.modeId ? { modeId: profile.modeId } : {}),
   };
@@ -235,6 +250,29 @@ const reviewData = z.object({
 });
 
 const MAX_REVIEW_ROUNDS = 5;
+
+/**
+ * How many extra rounds a harness may have to carry on a conversation its own budget cut short.
+ *
+ * A separate budget from `MAX_REVIEW_ROUNDS` because it answers a different question.
+ * `roundsOnStep` is the *reviewer's* patience: how many times a person is willing to send work
+ * back before the run gives up on them. This is the *model's*: how many times a harness that ran
+ * out of turns or context mid-task may pick the same conversation up and keep going. Spending one
+ * out of the other is how a Task that simply had a lot to do arrives at review with the reviewer's
+ * rounds already gone, and how a Task the reviewer keeps rejecting quietly gets extra attempts.
+ *
+ * Three. One is not a budget — a harness that hits `max_turns` has usually only just started, and
+ * the first continuation is the ordinary case this whole mechanism exists for. Ten would let a
+ * `max_tokens` stop — a conversation whose context is genuinely full, and which will therefore
+ * truncate again a few turns after every resume — spend the run going round in a circle nobody is
+ * watching. Three is enough for a long job to finish and few enough that a conversation which is
+ * not converging reaches a person while there is still something for them to decide.
+ *
+ * Exhausting it is not a failure and never throws: the round falls through to exactly the path a
+ * finished round takes, with a notice saying the budget was spent, so the operator is given the
+ * work and the reason rather than a stall.
+ */
+const MAX_AUTO_CONTINUE_ROUNDS = 3;
 
 /**
  * The longest Workflow this run loop will walk (issue #5).
@@ -726,7 +764,23 @@ export async function runTaskLifecycle(
    * copy on every retry. Failure to record is swallowed: a Task must not fail because its
    * narration did not land.
    */
-  const recordTransition = async (from: TaskState, to: TaskState, reason?: string) => {
+  const recordTransition = async (
+    from: TaskState,
+    to: TaskState,
+    /**
+     * The Workflow Step in force when the Task moved, or null for a Task on no Workflow.
+     *
+     * Passed at every call site rather than read from a variable this helper closes over, and
+     * that is not fastidiousness: `recordTransition` is defined before the run has resolved a
+     * Step at all — the first transitions it writes are entry failures — while `leg`, the run
+     * loop's own binding, is rebound in place at each Step boundary and does not exist in this
+     * scope. A captured copy would therefore be either unreachable or a second, staler answer to
+     * a question `leg` already answers. Naming it here makes each call state which Step its
+     * transition belongs to, and the compiler ask.
+     */
+    workflowStepId: string | null,
+    reason?: string,
+  ) => {
     try {
       // `seq` is read back as max+1, so the `(session_id, seq)` unique index cannot make a
       // second attempt a no-op the way it does for the harness's own events — a retry would simply
@@ -746,6 +800,7 @@ export async function runTaskLifecycle(
       await appendSessionEvent(db, workspaceId, {
         sessionId,
         seq: await nextSessionEventSeq(db, workspaceId, sessionId),
+        workflowStepId,
         payload: { kind: "state", from, to, ...(reason ? { reason } : {}) },
       });
     } catch (cause) {
@@ -763,12 +818,18 @@ export async function runTaskLifecycle(
   const failRun = async (
     stepId: string,
     reason: string,
+    /**
+     * The Workflow Step being failed under. Ahead of `from` in the list on purpose: `from` has a
+     * default that most call sites take, and a required parameter behind it would force every one
+     * of them to restate the default just to reach this.
+     */
+    workflowStepId: string | null,
     /** The state being left. The row's own at entry; `running` once the loop is turning. */
     from: TaskState = ctx.task.state,
   ): Promise<{ taskId: string; result: string }> => {
     await step.run(stepId, async () => {
       await setTaskState(db, workspaceId, taskId, "failed", { failureReason: reason });
-      await recordTransition(from, "failed", reason);
+      await recordTransition(from, "failed", workflowStepId, reason);
     });
     logStateTransition(log, { workspaceId, taskId, from, to: "failed" });
     announce("failed");
@@ -804,13 +865,15 @@ export async function runTaskLifecycle(
      * re-run work an Owner has already paid a harness for, at the moment they are least able to
      * notice; the honest answer is a failed Task with the reason on it.
      */
-    return await failRun("workflow-unresumable", "workflow_unresumable");
+    // No Step: the cursor names one this Workflow no longer contains, so there is no Step this
+    // failure honestly belongs to.
+    return await failRun("workflow-unresumable", "workflow_unresumable", null);
   }
   const wf = resumedWorkflow?.ok ? resumedWorkflow.data : null;
   if (wf && wf.steps.length > MAX_WORKFLOW_STEPS) {
     // Refused, never truncated: running the first `MAX_WORKFLOW_STEPS` of a longer pipeline
     // would drop the rest of an Owner's process and report the Task done.
-    return await failRun("workflow-too-long", "workflow_too_long");
+    return await failRun("workflow-too-long", "workflow_too_long", wf.currentStep.id);
   }
 
   /**
@@ -832,7 +895,11 @@ export async function runTaskLifecycle(
   if (stepHarnesses && !stepHarnesses.ok) {
     // A Profile or catalog row a Step names is gone. Failing by name beats launching the Step
     // under some other harness, which is the only alternative that keeps the run going.
-    return await failRun("workflow-agents-missing", "workflow_step_agent_missing");
+    return await failRun(
+      "workflow-agents-missing",
+      "workflow_step_agent_missing",
+      wf?.currentStep.id ?? null,
+    );
   }
   const stepHarnessByProfileId = new Map(
     (stepHarnesses?.ok ? stepHarnesses.harnesses : []).map(
@@ -848,6 +915,7 @@ export async function runTaskLifecycle(
     advanceOn: null,
     harnessProfile: ctx.harnessProfile,
     harnessCatalog: ctx.harnessCatalog,
+    permissionMode: null,
     stepBrief: null,
   });
 
@@ -866,12 +934,19 @@ export async function runTaskLifecycle(
       advanceOn: workflowStep.advanceOn,
       harnessProfile: bound.harnessProfile,
       harnessCatalog: bound.harnessCatalog,
+      permissionMode: workflowStep.permissionMode,
       stepBrief: brief,
     };
   };
 
   const entryLeg = wf ? legForStep(wf.currentStep, wf.brief) : legForTask();
-  if (!entryLeg) return await failRun("workflow-agents-missing", "workflow_step_agent_missing");
+  if (!entryLeg) {
+    return await failRun(
+      "workflow-agents-missing",
+      "workflow_step_agent_missing",
+      wf?.currentStep.id ?? null,
+    );
+  }
 
   /**
    * A Harness Profile names the protocol its catalog row declares, and only some protocols have
@@ -894,7 +969,7 @@ export async function runTaskLifecycle(
    * through the one seam that already existed for the permission mode. Under a Workflow this is
    * the entry Step's Profile; a Step boundary rebuilds it, and re-emits the notice below.
    */
-  const launchSettings: HarnessLaunchSettings = launchSettingsFor(entryLeg.harnessProfile);
+  const launchSettings: HarnessLaunchSettings = launchSettingsFor(entryLeg);
 
   /*
    * A setting this protocol cannot carry is **said**, never dropped (issue #94 AC-3).
@@ -915,6 +990,7 @@ export async function runTaskLifecycle(
       await appendSessionEvent(db, workspaceId, {
         sessionId,
         seq: await nextSessionEventSeq(db, workspaceId, sessionId),
+        workflowStepId: entryLeg.stepId,
         payload: { kind: "notice", text: unsupportedLaunchSettingsNotice(protocol, unsupported) },
       });
     });
@@ -930,7 +1006,7 @@ export async function runTaskLifecycle(
     const reason = missingDriverReason(ctx.executorProfile.kind);
     await step.run("executor-unavailable", async () => {
       await setTaskState(db, workspaceId, taskId, "failed", { failureReason: reason });
-      await recordTransition(ctx.task.state, "failed", reason);
+      await recordTransition(ctx.task.state, "failed", entryLeg.stepId, reason);
     });
     logStateTransition(log, { workspaceId, taskId, from: ctx.task.state, to: "failed" });
     announce("failed");
@@ -1047,7 +1123,7 @@ export async function runTaskLifecycle(
       // gates above do: split apart, an Inngest retry appends a second copy of the transition.
       await step.run("executor-unavailable-docker", async () => {
         await setTaskState(db, workspaceId, taskId, "failed", { failureReason: probe.reason });
-        await recordTransition(ctx.task.state, "failed", probe.reason);
+        await recordTransition(ctx.task.state, "failed", entryLeg.stepId, probe.reason);
       });
       logStateTransition(log, { workspaceId, taskId, from: ctx.task.state, to: "failed" });
       announce("failed");
@@ -1092,7 +1168,7 @@ export async function runTaskLifecycle(
       const reason = missingHarnessRunnerReason(undrivenProtocol ?? protocol);
       await step.run("agent-runner-unavailable", async () => {
         await setTaskState(db, workspaceId, taskId, "failed", { failureReason: reason });
-        await recordTransition(ctx.task.state, "failed", reason);
+        await recordTransition(ctx.task.state, "failed", entryLeg.stepId, reason);
       });
       logStateTransition(log, { workspaceId, taskId, from: ctx.task.state, to: "failed" });
       announce("failed");
@@ -1193,7 +1269,7 @@ export async function runTaskLifecycle(
       const reason = `${TaskErrorCode.RepositoryUnreachable}: ${preparation.repositoryName}`;
       await step.run("prepare-failed", async () => {
         await setTaskState(db, workspaceId, taskId, "failed", { failureReason: reason });
-        await recordTransition(ctx.task.state, "failed", reason);
+        await recordTransition(ctx.task.state, "failed", entryLeg.stepId, reason);
       });
       logStateTransition(log, { workspaceId, taskId, from: ctx.task.state, to: "failed" });
       announce("failed");
@@ -1300,7 +1376,7 @@ export async function runTaskLifecycle(
         const reason = `could not provision an isolated worktree for repository ${provisioning.repositoryName}`;
         await step.run("provision-failed", async () => {
           await setTaskState(db, workspaceId, taskId, "failed", { failureReason: reason });
-          await recordTransition("running", "failed", reason);
+          await recordTransition("running", "failed", entryLeg.stepId, reason);
         });
         logStateTransition(log, { workspaceId, taskId, from: "running", to: "failed" });
         announce("failed");
@@ -1420,6 +1496,23 @@ export async function runTaskLifecycle(
      * no rounds left and stop without saying why.
      */
     let roundsOnStep = 0;
+    /**
+     * How many rounds this Step has spent carrying on a conversation the harness's own budget cut
+     * short, since the last round a reviewer was shown (`MAX_AUTO_CONTINUE_ROUNDS`).
+     *
+     * Reset wherever `roundsOnStep` is — at a Step boundary — and also on any round that does not
+     * auto-continue: reaching the review gate is the harness having finished a stretch of work,
+     * and the next stretch starts with its own budget rather than the remains of the last one's.
+     */
+    let autoContinues = 0;
+    /**
+     * Whether the round about to start is one of those, rather than one the reviewer asked for.
+     *
+     * A flag rather than a comparison against `autoContinues`, because the loop has to answer two
+     * different questions from it: whether to spend one of the reviewer's rounds (it must not),
+     * and what to tell the harness about why it is being started again.
+     */
+    let continuingTruncated = false;
 
     /**
      * Report the current Step finished, and read what the shared transaction decided (AC-2).
@@ -1442,14 +1535,52 @@ export async function runTaskLifecycle(
         signal: WorkflowAdvanceOn;
         producedChanges: boolean;
         handoff?: string;
+        outcome?: TaskCompletionOutcome;
       },
     ): Promise<LegAdvance> => {
       // `call: id` is the durable step's own name, and it is what lets the terminal Step tell a
       // re-run of *this* call apart from the other call site asking for a second gate. See
       // `advanceTaskWorkflowInput.call`.
-      const reported = await step.run(id, () =>
-        advanceTaskWorkflow(db, workspaceId, { taskId, call: id, ...input }),
-      );
+      //
+      // The decision is written into the Session log inside the same durable step as the advance
+      // that made it, from the explanation that advance returned — so the record and the cursor
+      // cannot disagree, and a replayed step body (memoized) writes it exactly once.
+      const reported = await step.run(id, async () => {
+        const result = await advanceTaskWorkflow(db, workspaceId, { taskId, call: id, ...input });
+        if (!result.ok) return result;
+        const nameOf = (stepId: string | null) =>
+          stepId === null ? null : (wf?.steps.find((s) => s.id === stepId)?.name ?? stepId);
+        const advanced = result.data.status === "advanced";
+        const payload: SessionEventPayload = {
+          kind: "workflow_decision",
+          stepId: input.fromStepId,
+          stepName: nameOf(input.fromStepId) ?? input.fromStepId,
+          signal: input.signal,
+          gate: result.data.explanation.gate,
+          needsApproval: result.data.explanation.needsApproval,
+          condition: result.data.explanation.condition,
+          status: result.data.status,
+          nextStepId: advanced ? result.data.currentStepId : null,
+          nextStepName: advanced ? nameOf(result.data.currentStepId) : null,
+          outcome: input.outcome ?? null,
+          producedChanges: input.producedChanges,
+        };
+        const seq = await nextSessionEventSeq(db, workspaceId, sessionId);
+        // The Step the decision is *about* — the one being finished — never the one it advances
+        // to. A decision filed under the next Step would open that Step's transcript with the
+        // verdict on work its reader has not been shown, and the previous Step's would end
+        // without saying how it ended. `nextStepId` in the payload is where the onward move is
+        // recorded; this column is where the event belongs.
+        await appendSessionEvent(db, workspaceId, {
+          sessionId,
+          seq,
+          workflowStepId: input.fromStepId,
+          payload,
+        });
+        const frame = toTaskEvent(payload, taskId, sessionId, seq, input.fromStepId);
+        if (frame) deps.hub.publish(channel, frame);
+        return result;
+      });
       if (reported.ok) {
         return reported.data.status === "advanced"
           ? { kind: "advanced", stepId: reported.data.currentStepId, brief: reported.data.brief }
@@ -1496,11 +1627,19 @@ export async function runTaskLifecycle(
          * This is the *only* thing drift costs a durable run. The step ids carry no Step ordinal,
          * so an edit cannot invalidate a memo, and there is deliberately no drift refusal at entry.
          */
-        return await failRun(`workflow-step-unknown-${round}`, "workflow_step_unknown", "running");
+        // The Step being left, not the one the cursor landed on: binding that Step is exactly
+        // what this run could not do, so filing the failure under its id would put the record in
+        // a transcript that is otherwise empty.
+        return await failRun(
+          `workflow-step-unknown-${round}`,
+          "workflow_step_unknown",
+          leg.stepId,
+          "running",
+        );
       }
       const rebuiltRunner = deps.runner(
         nextLeg.harnessCatalog.protocol,
-        launchSettingsFor(nextLeg.harnessProfile),
+        launchSettingsFor(nextLeg),
         executor,
       );
       if (!rebuiltRunner) {
@@ -1510,6 +1649,7 @@ export async function runTaskLifecycle(
         return await failRun(
           `workflow-runner-missing-${round}`,
           missingHarnessRunnerReason(nextLeg.harnessCatalog.protocol),
+          nextLeg.stepId,
           "running",
         );
       }
@@ -1520,6 +1660,17 @@ export async function runTaskLifecycle(
         await clearTaskCompletion(db, workspaceId, taskId);
         // A Step that advanced is not awaiting review, whatever `to-review` left behind.
         await setSessionState(db, workspaceId, sessionId, "active");
+        /*
+         * And Step N's *conversation* must not be offered to Step N+1's harness.
+         *
+         * One Session spans the whole pipeline, so `harness_session_id` still names the
+         * conversation the previous Step was having — different work, briefed differently, often
+         * on a different protocol under a different Profile. A round that resumes is a round that
+         * is sent a continuation instruction *instead of* a brief, so carrying the id across a
+         * Step boundary is how Step 2's harness would never hear what Step 2 asks of it. Cleared
+         * for the same reason and in the same breath as the declaration above.
+         */
+        await recordHarnessSessionId(db, workspaceId, sessionId, null);
         // Read, never assumed from `ctx.task.state`. `to-review` deliberately does not move the
         // Task into `review`, so at an agent-signal advance the row is usually still `running`
         // and no transition is due — writing one anyway would put a `review → running` pair in
@@ -1527,7 +1678,9 @@ export async function runTaskLifecycle(
         const state = await readTaskState(db, workspaceId, taskId);
         if (state === "review") {
           await setTaskState(db, workspaceId, taskId, "running");
-          await recordTransition("review", "running", "workflow_step_advanced");
+          // The Step being entered, not the one just finished: this transition is the first
+          // thing the new Step's transcript has to say for itself.
+          await recordTransition("review", "running", nextLeg.stepId, "workflow_step_advanced");
           return "running" as TaskState;
         }
         return (state ?? "running") as TaskState;
@@ -1539,13 +1692,14 @@ export async function runTaskLifecycle(
       // id, so the bare one stays exactly what a Task with no Workflow emits.
       const legUnsupported = unsupportedLaunchSettings(
         nextLeg.harnessCatalog.protocol,
-        launchSettingsFor(nextLeg.harnessProfile),
+        launchSettingsFor(nextLeg),
       );
       if (legUnsupported.length > 0) {
         await step.run(`launch-settings-unsupported-${round}`, async () => {
           await appendSessionEvent(db, workspaceId, {
             sessionId,
             seq: await nextSessionEventSeq(db, workspaceId, sessionId),
+            workflowStepId: nextLeg.stepId,
             payload: {
               kind: "notice",
               text: unsupportedLaunchSettingsNotice(
@@ -1560,6 +1714,8 @@ export async function runTaskLifecycle(
       leg = nextLeg;
       runner = rebuiltRunner;
       roundsOnStep = 0;
+      autoContinues = 0;
+      continuingTruncated = false;
       // The previous Step's review feedback is not the next Step's brief. Left set, Step 2 would
       // open with "your previous attempt was not accepted" about work it did not do.
       pendingFeedback = undefined;
@@ -1574,22 +1730,41 @@ export async function runTaskLifecycle(
      * different number of iterations would reach a different step id than the journal holds.
      */
     const stepCount = wf ? wf.steps.length : 1;
-    const maxRounds = MAX_REVIEW_ROUNDS * Math.max(1, stepCount);
+    /**
+     * The outer bound on the loop, which is now two budgets deep rather than one.
+     *
+     * Every round the reviewer is entitled to may itself be continued `MAX_AUTO_CONTINUE_ROUNDS`
+     * times, so the worst case is the product — not the sum, and certainly not `MAX_REVIEW_ROUNDS`
+     * alone. Leaving it at the old value is the subtle version of the bug this whole change is
+     * about: auto-continue rounds would silently eat the reviewer's, and a Task that used its
+     * continuations early would fall out of the bottom of the loop with nothing recorded and
+     * nothing said. It is a sanity bound on a bounded thing, not a second policy — the two budgets
+     * below decide what actually happens.
+     */
+    const maxRounds = MAX_REVIEW_ROUNDS * (1 + MAX_AUTO_CONTINUE_ROUNDS) * Math.max(1, stepCount);
     for (let round = 0; round < maxRounds; round++) {
-      // With no Workflow: stepCount 1, maxRounds 5, `roundsOnStep === round + 1`, and this never
-      // fires — rounds 0 to 4 exactly as before. With one: the budget is per Step and resets at
-      // every advance, so a Step that exhausts it stops the run rather than the pipeline running
-      // on into the next Step with the reviewer's patience already spent.
-      if (roundsOnStep >= MAX_REVIEW_ROUNDS) break;
-      roundsOnStep += 1;
-      const brief = harnessBrief(
-        ctx,
-        pendingFeedback,
-        briefWorkspaces(ctx, primaryBinding, wt, provisionedByAttachment),
-        leg.stepBrief !== null && leg.stepName !== null
-          ? { name: leg.stepName, brief: leg.stepBrief }
-          : undefined,
-      );
+      /*
+       * A round carrying on a truncated conversation is the model's, not the reviewer's: it
+       * neither spends `roundsOnStep` nor may be stopped by it. `MAX_AUTO_CONTINUE_ROUNDS` is what
+       * bounds it, and it is checked where the decision to continue is made rather than here.
+       *
+       * With no Workflow and nothing truncated: stepCount 1, `roundsOnStep === round + 1`, and
+       * this never fires — rounds 0 to 4 exactly as before. With one: the budget is per Step and
+       * resets at every advance, so a Step that exhausts it stops the run rather than the pipeline
+       * running on into the next Step with the reviewer's patience already spent.
+       */
+      if (!continuingTruncated) {
+        if (roundsOnStep >= MAX_REVIEW_ROUNDS) break;
+        roundsOnStep += 1;
+      }
+      /*
+       * Read once and cleared here, so nothing below can mistake "the round that just started was
+       * a continuation" for "the round that just ended asked for one". Run-local rather than
+       * durable, and deterministic under replay for the same reason the loop itself is: it is
+       * derived only from the memoized results of earlier rounds.
+       */
+      const continuation = continuingTruncated;
+      continuingTruncated = false;
       const run = await step.run(`agent-run-${round}`, async () => {
         /*
          * The credential for the Profile *this leg* runs under (AC-3).
@@ -1634,6 +1809,18 @@ export async function runTaskLifecycle(
         // chained to keep log order identical to stream order.
         let seq = await nextSessionEventSeq(db, workspaceId, sessionId);
         let writes: Promise<unknown> = Promise.resolve();
+
+        /**
+         * The Workflow Step every event of *this* round belongs to.
+         *
+         * Read once, here, rather than off `leg` inside `emit`. A Step boundary rebinds `leg` in
+         * place, and the appends below are a fire-and-forget chain — the last of a round's writes
+         * can still be settling when the loop has already taken the advance. Reading `leg` at
+         * write time would then file the tail of one Step's transcript under the next Step, which
+         * is exactly the attribution this column exists to get right. A round never spans two
+         * Steps, so one read is the whole truth for it.
+         */
+        const stepInForce = leg.stepId;
 
         /**
          * The run outlived the rows it writes into.
@@ -1787,10 +1974,17 @@ export async function runTaskLifecycle(
             rawPayload.kind,
             redactPayload(rawPayload, needles),
           );
-          const frame = toTaskEvent(payload, taskId, sessionId, at);
+          const frame = toTaskEvent(payload, taskId, sessionId, at, stepInForce);
           if (frame) deps.hub.publish(channel, frame);
           writes = writes
-            .then(() => appendSessionEvent(db, workspaceId, { sessionId, seq: at, payload }))
+            .then(() =>
+              appendSessionEvent(db, workspaceId, {
+                sessionId,
+                seq: at,
+                workflowStepId: stepInForce,
+                payload,
+              }),
+            )
             .catch((cause) =>
               isMissingParentRow(cause)
                 ? abandon("session-event-append")
@@ -2044,12 +2238,60 @@ export async function runTaskLifecycle(
           emit({ kind: "notice", text: `Loaded from the libraries: ${loaded.loaded.join(", ")}.` });
         }
 
+        /*
+         * The harness conversation this round should carry on, if there is one to carry on.
+         *
+         * Read **here, inside the step body**, and that placement is the whole of why resume
+         * works at all. `step.run` memoizes its *return value*: a read hoisted into a durable step
+         * of its own would answer once, on the attempt that had not yet learned the id, and every
+         * redrive after that would be handed the journal's `null` — which is precisely the case
+         * resume exists for. A step *body* re-executes on a redrive, so this read re-executes with
+         * it and sees the id the dying attempt recorded mid-run. Same reasoning as the credential
+         * above, arrived at from the other direction.
+         */
+        const resumeSessionId = await resolveResumeHarnessSessionId(
+          db,
+          workspaceId,
+          taskId,
+          sessionId,
+        );
+
+        /*
+         * Two briefs, because the round has to commit to one before it can know which is right.
+         *
+         * `prompt` is a start option; `resumed` is only knowable after the handshake. Asking is
+         * not getting — an ACP agent that never advertised `loadSession` starts a new session
+         * rather than failing the round — so the round briefs on what it *asked for* and corrects
+         * on what it *got*, below. `fullBrief` is exactly today's brief, byte for byte, and is
+         * what a round with nothing to resume sends.
+         */
+        const stepSection =
+          leg.stepBrief !== null && leg.stepName !== null
+            ? { name: leg.stepName, brief: leg.stepBrief }
+            : undefined;
+        const fullBrief = harnessBrief(
+          ctx,
+          pendingFeedback,
+          briefWorkspaces(ctx, primaryBinding, wt, provisionedByAttachment),
+          stepSection,
+        );
+        const brief = resumeSessionId
+          ? harnessBrief(
+              ctx,
+              pendingFeedback,
+              [],
+              stepSection,
+              continuation ? "turn_budget" : "interruption",
+            )
+          : fullBrief;
+
         const handle = runner.start({
           command,
           args: [...args, ...loaded.extraArgs],
           cwd: resuming ? resuming.path : repoPath,
           env: shaped.data,
           worktreeName: resuming ? null : worktreeNameForTask(taskId),
+          ...(resumeSessionId ? { resumeSessionId } : {}),
           prompt: brief,
           ...(loaded.mcpServers.length > 0 ? { mcpServers: loaded.mcpServers } : {}),
           onEvent: (e) => {
@@ -2136,6 +2378,70 @@ export async function runTaskLifecycle(
         // Hand the reported path to the turn capture the moment the harness states it — the capture
         // is already running by now, waiting on exactly this.
         void handle.workspacePath.then(announcePath, () => announcePath(null));
+        // And the harness's own conversation id, the moment *it* is known — on the narration
+        // chain, so a run must not fail because its bookkeeping did not land, and before the run
+        // ends, because a run that dies is the one whose id is worth having (`recordHarnessSessionId`).
+        void handle.harnessSessionId.then(
+          (id) => {
+            if (!id) return;
+            writes = writes
+              .then(() => recordHarnessSessionId(db, workspaceId, sessionId, id))
+              .catch((cause) =>
+                isMissingParentRow(cause)
+                  ? abandon("harness-session-record")
+                  : captureException(log, cause, { stage: "harness-session-record" }),
+              );
+          },
+          () => {},
+        );
+
+        /*
+         * What the resume actually did — written into the log either way.
+         *
+         * The two outcomes are not interchangeable. One round is a harness carrying on a
+         * conversation it remembers; the other is a fresh harness that has just been handed the
+         * whole brief in a worktree already holding somebody's work. A reviewer reading the
+         * transcript afterwards has to be able to tell which they are looking at, and a recovery
+         * that silently changed what the harness knows is exactly the invisible behaviour this
+         * file refuses everywhere else.
+         *
+         * Awaited rather than chained, because the answer decides what this harness is told next.
+         * Every runner resolves it, including on the paths where the handshake failed, and a
+         * runner that omits the member reads as `false` — the honest answer for a protocol with no
+         * conversation to load.
+         */
+        if (resumeSessionId) {
+          const resumed = (await handle.resumed) ?? false;
+          if (resumed) {
+            emit({
+              kind: "notice",
+              text: continuation
+                ? "Continued the previous conversation: the harness had reached its budget with work still to do, so it picked up where it left off rather than starting over."
+                : "Continued the previous conversation: this round re-attached to the harness session the last one was having, so nothing it had already worked out was lost.",
+            });
+          } else {
+            /*
+             * The brief this round committed to at start turned out to be the wrong one, and the
+             * only correction available is the next turn — `prompt` was spent. That is the same
+             * channel an operator's steering takes, so it reaches the harness as a message rather
+             * than as a second launch.
+             *
+             * A refusal is possible and is said rather than swallowed: a protocol with no
+             * steering channel is also one that reports no conversation id, so it should never
+             * have been handed a resume in the first place — and if it was, the operator is told
+             * what the harness is actually working from instead of being left to infer it from a
+             * round that produced nothing.
+             */
+            const delivered = await handle.send(fullBrief);
+            emit({
+              kind: "notice",
+              text: delivered
+                ? "Could not continue the previous conversation; the harness started from the brief instead, which was re-sent in full."
+                : "Could not continue the previous conversation, and this harness would not accept the brief as a follow-up turn — it is working from a continuation instruction alone. Expect little from this round.",
+            });
+          }
+        }
+
         // Publish the handle for the lifetime of the run so the hub can deliver the operator's
         // input or stop to *this* harness (TASK-022), and withdraw it the moment the run ends.
         const deregister = deps.registry.register(workspaceId, {
@@ -2212,6 +2518,7 @@ export async function runTaskLifecycle(
             kind: "failed" as const,
             cls: classifyRunFailure(outcome.signal),
             worktree: adopted,
+            stopReason: outcome.stopReason,
           };
         }
         // Across every worktree, not just the primary: a round that only touched a secondary
@@ -2243,13 +2550,23 @@ export async function runTaskLifecycle(
          */
         // The widget's summary, with a branch answer the harness wrote in its final message
         // carried in when the summary has none — this is what the next Step is briefed with.
-        const summary = carryHarnessDecision(completion.widget?.summary ?? null, assistantText);
+        // The widget's own `decision` field outranks anything read off prose — see
+        // `carryHarnessDecision`.
+        const summary = carryHarnessDecision(
+          completion.widget?.summary ?? null,
+          assistantText,
+          completion.widget?.decision ?? null,
+        );
         emit({
           kind: "agent_done",
           changed,
           branch: adopted.branch,
           ...(completion.widget ? { outcome: completion.widget.outcome } : {}),
           ...(summary ? { summary } : {}),
+          // Why the *process* stopped, beside what the harness *said* — the two can disagree, and
+          // a declared `changes_ready` under a `max_turns` is exactly the disagreement worth
+          // keeping (`harnessStopReasonSchema`).
+          stopReason: outcome.stopReason,
         });
 
         return {
@@ -2258,6 +2575,7 @@ export async function runTaskLifecycle(
           worktree: adopted,
           outcome: completion.widget?.outcome ?? null,
           summary,
+          stopReason: outcome.stopReason,
         };
       });
 
@@ -2323,7 +2641,7 @@ export async function runTaskLifecycle(
              * guessing at it here would be the same overreach in the other direction.
              */
             await setTaskState(db, workspaceId, taskId, "parked", { failureReason: null });
-            await recordTransition("running", "parked");
+            await recordTransition("running", "parked", leg.stepId);
           });
           logStateTransition(log, { workspaceId, taskId, from: "running", to: "parked" });
           announce("parked");
@@ -2374,13 +2692,75 @@ export async function runTaskLifecycle(
         // credential_expired or hard failure: pause/stop with the reason preserved.
         await step.run(`fail-${round}`, async () => {
           await setTaskState(db, workspaceId, taskId, "failed", { failureReason: run.cls });
-          await recordTransition("running", "failed", run.cls);
+          await recordTransition("running", "failed", leg.stepId, run.cls);
         });
         logStateTransition(log, { workspaceId, taskId, from: "running", to: "failed" });
         announce("failed");
         captureException(log, new Error(`task run failed: ${run.cls}`), { failureReason: run.cls });
         return { taskId, result: run.cls };
       }
+
+      /*
+       * The harness ran out; it did not finish. So the run gives it more rather than presenting a
+       * half-done change to a reviewer as "changes ready".
+       *
+       * Both halves of the condition carry weight. `stopReasonMeansTruncated` is the *process*
+       * saying it hit a turn or token budget with work still to do; `run.outcome === null` is the
+       * *harness* never having declared a `task_complete`. A harness that declared and then hit a
+       * budget has said what it thinks it did, and that declaration belongs to the operator —
+       * only a round that ran out with nothing to say for itself is one this run may continue on
+       * its own authority. That pairing is the disagreement `agent_done` records and this is the
+       * one place that acts on it.
+       *
+       * Nothing is recorded and nothing moves: no completion row, no `awaiting_review`, no
+       * `waitForEvent`. The Task stays `running`, the worktrees stay where they are, and the next
+       * round picks the same conversation back up — `harness_session_id` was written mid-run by
+       * the round that just stopped, so `resolveResumeHarnessSessionId` finds it with no extra
+       * plumbing and the brief becomes "carry straight on" rather than the whole thing again.
+       */
+      if (stopReasonMeansTruncated(run.stopReason) && run.outcome === null) {
+        const spent = autoContinues >= MAX_AUTO_CONTINUE_ROUNDS;
+        // The word the harness would use for what it ran out of. `max_tokens` is a full context,
+        // not a spent turn allowance, and telling an operator the wrong one sends them looking at
+        // the wrong setting.
+        const budget = run.stopReason === "max_tokens" ? "context budget" : "turn budget";
+        /*
+         * One step id for both outcomes, because exactly one of them fires per round — which is
+         * what keeps the `agent-run-N` / `auto-continue-N` / `to-review-N` sequence identical on
+         * every replay of the same history. Published as well as appended: an operator watching
+         * live must see "the harness hit its budget; continuing" at the moment it happens, not a
+         * mysterious second round with the explanation waiting for them on a reconnect.
+         */
+        await step.run(`auto-continue-${round}`, async () => {
+          const payload: SessionEventPayload = {
+            kind: "notice",
+            text: spent
+              ? `The harness hit its ${budget} again after ${MAX_AUTO_CONTINUE_ROUNDS} continuations. This run has stopped continuing it and is putting the work in front of you as it stands — it is unfinished, whatever the summary says.`
+              : `The harness hit its ${budget} with work still to do, so this run is continuing the same conversation instead of sending it for review (continuation ${autoContinues + 1} of ${MAX_AUTO_CONTINUE_ROUNDS}).`,
+          };
+          const seq = await nextSessionEventSeq(db, workspaceId, sessionId);
+          await appendSessionEvent(db, workspaceId, {
+            sessionId,
+            seq,
+            workflowStepId: leg.stepId,
+            payload,
+          });
+          const frame = toTaskEvent(payload, taskId, sessionId, seq, leg.stepId);
+          if (frame) deps.hub.publish(channel, frame);
+        });
+        if (!spent) {
+          autoContinues += 1;
+          continuingTruncated = true;
+          continue;
+        }
+        // Budget spent: fall through to exactly the path a finished round takes. Never a throw and
+        // never a stall — the operator gets the work, the declaration `to-review` writes for it,
+        // and the notice above saying why it is only this far along (a legible outcome they can
+        // act on: approve what is there, or send it back for another five rounds of their own).
+      }
+      // Whatever happens below, this stretch of work is over. The next one that runs out of budget
+      // starts with its own continuations rather than the remains of this one's.
+      autoContinues = 0;
 
       /*
        * The harness has finished. It does not follow that the Task is in review.
@@ -2425,6 +2805,7 @@ export async function runTaskLifecycle(
             await appendSessionEvent(db, workspaceId, {
               sessionId,
               seq: await nextSessionEventSeq(db, workspaceId, sessionId),
+              workflowStepId: leg.stepId,
               payload: {
                 kind: "diff",
                 diffRef: entry.worktree.branch,
@@ -2465,12 +2846,14 @@ export async function runTaskLifecycle(
             signal: "agent-signal",
             producedChanges: run.outcome === "changes_ready",
             ...(run.summary ? { handoff: run.summary } : {}),
+            ...(run.outcome ? { outcome: run.outcome } : {}),
           },
         );
         if (reported.kind === "failed") {
           return await failRun(
             `workflow-advance-failed-${round}`,
             "workflow_advance_failed",
+            leg.stepId,
             "running",
           );
         }
@@ -2536,12 +2919,14 @@ export async function runTaskLifecycle(
               signal: leg.advanceOn,
               producedChanges: run.outcome === "changes_ready",
               ...(run.summary ? { handoff: run.summary } : {}),
+              ...(run.outcome ? { outcome: run.outcome } : {}),
             },
           );
           if (reported.kind === "failed") {
             return await failRun(
               `workflow-advance-failed-${round}`,
               "workflow_advance_failed",
+              leg.stepId,
               "review",
             );
           }
@@ -2564,6 +2949,7 @@ export async function runTaskLifecycle(
               await appendSessionEvent(db, workspaceId, {
                 sessionId,
                 seq: await nextSessionEventSeq(db, workspaceId, sessionId),
+                workflowStepId: leg.stepId,
                 payload: {
                   kind: "notice",
                   text: `This step reported ${reported.status} rather than completing, so nothing was integrated. Approve this step again to move the workflow on.`,
@@ -2648,6 +3034,7 @@ export async function runTaskLifecycle(
             await appendSessionEvent(db, workspaceId, {
               sessionId,
               seq: await nextSessionEventSeq(db, workspaceId, sessionId),
+              workflowStepId: leg.stepId,
               payload: {
                 kind: "notice",
                 text: [
@@ -2663,7 +3050,7 @@ export async function runTaskLifecycle(
             await setTaskState(db, workspaceId, taskId, "failed", {
               failureReason: PARTIAL_INTEGRATION_REASON,
             });
-            await recordTransition("review", "failed", PARTIAL_INTEGRATION_REASON);
+            await recordTransition("review", "failed", leg.stepId, PARTIAL_INTEGRATION_REASON);
             await setSessionState(db, workspaceId, sessionId, "closed", {
               endedAt: new Date().toISOString(),
             });
@@ -2671,7 +3058,7 @@ export async function runTaskLifecycle(
           }
 
           await setTaskState(db, workspaceId, taskId, "done");
-          await recordTransition("review", "done");
+          await recordTransition("review", "done", leg.stepId);
           await setSessionState(db, workspaceId, sessionId, "closed", {
             endedAt: new Date().toISOString(),
           });
@@ -2698,7 +3085,7 @@ export async function runTaskLifecycle(
         await step.run(`reject-${round}`, async () => {
           for (const entry of gate) await worktreeOps.discard(entry.worktree.path);
           await setTaskState(db, workspaceId, taskId, "ready");
-          await recordTransition("review", "ready");
+          await recordTransition("review", "ready", leg.stepId);
         });
         /*
          * A rejection is not a Step completion, so the cursor deliberately does not move — but the
@@ -2735,7 +3122,7 @@ export async function runTaskLifecycle(
         const reason = "blocked_by_dependency";
         await step.run(`resume-blocked-${round}`, async () => {
           await setTaskState(db, workspaceId, taskId, "failed", { failureReason: reason });
-          await recordTransition("review", "failed", reason);
+          await recordTransition("review", "failed", leg.stepId, reason);
         });
         logStateTransition(log, { workspaceId, taskId, from: "review", to: "failed" });
         announce("failed");
@@ -2756,7 +3143,7 @@ export async function runTaskLifecycle(
         // The previous round's declaration does not describe the round about to start. Left in
         // place, the board would keep offering to review work that is being rewritten as you look.
         await clearTaskCompletion(db, workspaceId, taskId);
-        await recordTransition("review", "running");
+        await recordTransition("review", "running", leg.stepId);
       });
       logStateTransition(log, { workspaceId, taskId, from: "review", to: "running" });
       announce("running");
@@ -2976,6 +3363,20 @@ function widgetTitle(widget: Widget): string | undefined {
 }
 
 /**
+ * Why a round is carrying on a conversation the harness already has, rather than opening one.
+ *
+ *  - `interruption` — the process was lost and re-attached: an orchestrator restart, an Inngest
+ *    redrive, an exhausted execution budget, a reclaim. The conversation survived; the process
+ *    did not, and the harness has no way of knowing that from the inside.
+ *  - `turn_budget` — the harness stopped because it ran out of turns or context with work still
+ *    to do (`stopReasonMeansTruncated`), and the run is giving it more.
+ *
+ * Named rather than a boolean because the two need different sentences: one asks the harness to
+ * re-read where it left the worktree, the other asks it to carry straight on.
+ */
+export type BriefContinuation = "interruption" | "turn_budget";
+
+/**
  * The brief handed to the harness. Round one is the Issue and the Task; later rounds lead with the
  * reviewer's feedback, because that — not the original brief — is what still needs doing.
  *
@@ -2999,7 +3400,35 @@ export function harnessBrief(
    * section names the Step so a harness reading a transcript can tell which one it is answering.
    */
   step?: { name: string; brief: string } | undefined,
+  /**
+   * Present when this round was handed to a harness that still holds the conversation — a resume
+   * that actually took (`HarnessHandle.resumed`).
+   *
+   * It replaces the brief rather than adding to it, and that is the point. Everything above —
+   * the Task, the Issue, the repositories, the Step — is already in that conversation's context,
+   * put there by the round that opened it. Re-sending it invites a harness which is half way
+   * through the work to read it as a fresh instruction and start over, which is exactly the loss
+   * this whole mechanism exists to prevent. The reviewer's feedback is the one thing that is
+   * genuinely new, so it is the one thing that survives.
+   *
+   * Built here rather than concatenated at the call site for the reason this function's own
+   * contract states: the brief is one string built in one place, and two places that assemble it
+   * are two that drift.
+   */
+  continuing?: BriefContinuation | undefined,
 ): string {
+  if (continuing) {
+    const parts = [
+      `# Continue\n${
+        continuing === "turn_budget"
+          ? "You stopped because you reached your turn budget, not because the work was finished. Everything you need is already in this conversation — carry straight on from where you left off."
+          : "Your process was interrupted and has been re-attached to this conversation. Everything you need is already in it. Check the worktree for the state you left it in, then carry on — do not start the task again."
+      }`,
+    ];
+    // The one thing the conversation cannot already contain: a decision made after it stopped.
+    if (feedback !== undefined) parts.push(reviewFeedbackSection(feedback));
+    return parts.join("\n\n");
+  }
   // Widgets are taught, not assumed: a harness emits one only because the brief told it how, so
   // the flag that draws them is the same flag that explains them (`ctx.widgetsEnabled`).
   const parts = [`# Task\n${ctx.task.title}`, `# Issue\n${ctx.issue.title}`];
@@ -3034,16 +3463,28 @@ export function harnessBrief(
   // first — and since each round is a fresh process with no memory of the last, the harness was
   // handed the original instructions in a worktree already holding its own rejected work, with
   // nothing anywhere telling it the work had been turned down.
-  if (feedback !== undefined) {
-    const detail = feedback.trim();
-    parts.push(
-      detail
-        ? `# Review feedback\nYour previous attempt was not accepted. Address this feedback:\n${detail}`
-        : "# Review feedback\nYour previous attempt was not accepted. The reviewer left no notes. The worktree still holds that attempt — reconsider it rather than repeating it.",
-    );
-  }
+  if (feedback !== undefined) parts.push(reviewFeedbackSection(feedback));
   if (ctx.widgetsEnabled) parts.push(`# Widgets\n${WIDGET_BRIEF_INSTRUCTIONS}`);
   return parts.join("\n\n");
+}
+
+/**
+ * A rejection is announced whether or not the reviewer wrote anything. `undefined` is round one
+ * and says nothing; an empty string is "rejected, no words", which the review gate produces on
+ * every Request changes. Without this the redo brief was byte-identical to the first — and since
+ * a round used to be a fresh process with no memory of the last, the harness was handed the
+ * original instructions in a worktree already holding its own rejected work, with nothing
+ * anywhere telling it the work had been turned down.
+ *
+ * One function because a resumed round sends this section and nothing else, and a reviewer's
+ * words reading differently depending on whether the conversation survived would be a difference
+ * with no meaning behind it.
+ */
+function reviewFeedbackSection(feedback: string): string {
+  const detail = feedback.trim();
+  return detail
+    ? `# Review feedback\nYour previous attempt was not accepted. Address this feedback:\n${detail}`
+    : "# Review feedback\nYour previous attempt was not accepted. The reviewer left no notes. The worktree still holds that attempt — reconsider it rather than repeating it.";
 }
 
 export const taskRun = inngest.createFunction(

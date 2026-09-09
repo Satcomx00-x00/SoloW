@@ -17,15 +17,19 @@ import { createTestDb, type TestDb } from "@solow/db/testing";
 import { and, eq } from "drizzle-orm";
 import { PARK_SLEEP_MS, REVIEW_WAIT_TIMEOUT } from "./inngest/functions/task-run.js";
 import {
+  MAX_AUTOMATIC_RECOVERIES,
   PARK_WINDOW_MS,
   RECLAIM_STALE_MS,
   RECOVERED_REASON,
+  RELAUNCHED_LOST_REASON,
+  RELAUNCHED_TRUNCATED_REASON,
   REVIEW_WAIT_MS,
   reclaimOrphanedRuns,
   reportStrandedParks,
   reportStrandedReviews,
   STRANDED_PARK_REASON,
 } from "./reconcile.js";
+import { createRelauncher, type RelaunchTarget } from "./relaunch.js";
 
 /**
  * Reclaim a Task left `running` by a process that is provably gone (see `reconcile.ts`'s own
@@ -135,6 +139,25 @@ function fakeRegistry(live: ReadonlySet<string> = new Set()) {
       live.has(`${workspaceId}:${taskId}`)
         ? { taskId, sessionId: "sess-live", handle: {} as never }
         : undefined,
+  };
+}
+
+/**
+ * An engine that records what it was asked to relaunch, and optionally refuses.
+ *
+ * Refusing is not an edge case dressed up as one: the sweep decides a run is gone precisely when
+ * the machinery around it is unwell, so "the send did not land" is a likely shape of the same
+ * incident — and it is the only thing standing between an unreachable engine and a Task whose log
+ * claims it was restarted three times.
+ */
+function fakeRelauncher(opts: { refuses?: boolean } = {}) {
+  const targets: RelaunchTarget[] = [];
+  return {
+    targets,
+    async relaunch(target: RelaunchTarget) {
+      targets.push(target);
+      if (opts.refuses) throw new Error("engine unreachable");
+    },
   };
 }
 
@@ -459,6 +482,397 @@ describe("reclaimOrphanedRuns when a previous sweep already closed the Session",
     const [row] = await db.select().from(task).where(eq(task.id, "task-reswept"));
     expect(row?.state).toBe("ready");
     expect(row?.failureReason).toBeNull();
+  });
+});
+
+/**
+ * Automatic recovery: the sweep putting a lost run back rather than leaving a button for a person.
+ *
+ * Everything above this describe ends in a Task somebody has to come and press Retry on, and the
+ * incident this file opens with is exactly what that costs — ninety minutes of a Task that had
+ * already stopped being alive. A Task must never lose a Session, and it must not need an operator
+ * to get one back: a round that stopped mid-work is re-emitted to the engine, against the Session
+ * row it was already writing into, and only a Task that has spent its budget falls to the ladder.
+ *
+ * The cases below are as much about what is *not* relaunched as what is. Two runs in one worktree
+ * is worse than any stale verdict, so the two signals guarding the reclaim guard this too, and a
+ * run that declared itself finished belongs to a reviewer rather than to the engine.
+ */
+describe("reclaimOrphanedRuns automatic recovery", () => {
+  /** A `running` Task whose run went missing mid-work, having produced nothing to show for it. */
+  async function seedLost(db: TestDb, taskId: string) {
+    return seedTask(db, { taskId });
+  }
+
+  /** The same, with the marker a harness writes when its process ends. */
+  async function seedMarker(
+    db: TestDb,
+    taskId: string,
+    stopReason?: "end_turn" | "max_turns" | "max_tokens",
+  ) {
+    const { sessionId } = await seedTask(db, { taskId });
+    await db.insert(sessionEvent).values({
+      id: `ev-done-${taskId}`,
+      workspaceId: WS,
+      sessionId,
+      seq: 0,
+      kind: "agent_done",
+      payload: {
+        kind: "agent_done",
+        changed: true,
+        branch: `solow/${taskId}`,
+        ...(stopReason ? { stopReason } : {}),
+      },
+      at: new Date().toISOString(),
+    });
+    return sessionId;
+  }
+
+  it("relaunches a lost run instead of filing it as a failure", async () => {
+    const db = createTestDb();
+    const { sessionId } = await seedLost(db, "task-lost");
+    const relaunch = fakeRelauncher();
+
+    const count = await reclaimOrphanedRuns(db, fakeRegistry(), fakeHub(), LONG_AFTER, relaunch);
+
+    expect(count).toBe(1);
+    expect(relaunch.targets).toEqual([{ workspaceId: WS, taskId: "task-lost", sessionId }]);
+    const [row] = await db.select().from(task).where(eq(task.id, "task-lost"));
+    // Still running, because a run is starting in it. Anything else would be the board saying a
+    // Task is over while a harness is booting inside it.
+    expect(row?.state).toBe("running");
+    expect(row?.failureReason).toBeNull();
+  });
+
+  it("relaunches against the Session the lost run already had, never a new one", async () => {
+    /*
+     * The single most load-bearing assertion here. Session rows are created in one place — the web
+     * app's `createSession` — and a sweep that made its own would be a second, invisible producer
+     * of the row a Task's whole history hangs off. Reuse is also what makes this a recovery:
+     * `session.harness_session_id` is on that row, so the relaunched run can pick the harness's own
+     * conversation up rather than reading the brief again from cold, and the transcript stays one
+     * log instead of two halves with nothing saying they are the same work.
+     */
+    const db = createTestDb();
+    const { sessionId } = await seedLost(db, "task-same-session");
+    const relaunch = fakeRelauncher();
+
+    await reclaimOrphanedRuns(db, fakeRegistry(), fakeHub(), LONG_AFTER, relaunch);
+
+    expect(relaunch.targets[0]?.sessionId).toBe(sessionId);
+    const sessions = await db.select().from(session).where(eq(session.taskId, "task-same-session"));
+    expect(sessions).toHaveLength(1);
+    // And it is left open: the relaunched run writes into it, and a closed Session is a run that
+    // ended. The reclaim path closes it; this one must not.
+    expect(sessions[0]?.state).not.toBe("closed");
+    expect(sessions[0]?.endedAt).toBeNull();
+  });
+
+  it("says in the Session log that the system restarted the work, and why", async () => {
+    // A recovery an operator cannot see is indistinguishable from a Task that mysteriously
+    // restarted itself. The record is a `running → running` transition because that is what
+    // happened — the Task did not move, the run inside it was replaced.
+    const db = createTestDb();
+    const { sessionId } = await seedLost(db, "task-narrated");
+
+    await reclaimOrphanedRuns(db, fakeRegistry(), fakeHub(), LONG_AFTER, fakeRelauncher());
+
+    const events = await db
+      .select()
+      .from(sessionEvent)
+      .where(and(eq(sessionEvent.sessionId, sessionId), eq(sessionEvent.kind, "state")));
+    expect(events).toHaveLength(1);
+    expect(events[0]?.payload).toMatchObject({
+      from: "running",
+      to: "running",
+      reason: RELAUNCHED_LOST_REASON,
+    });
+  });
+
+  it("recovers a round its budget cut short, rather than sending it to a reviewer", async () => {
+    /*
+     * The marker is written when the harness *process* ends, and a harness out of turns ends
+     * exactly as one that finished does. Read without `stopReason` this is a completion: the Task
+     * gets a `completedAt`, the Session goes to `awaiting_review`, and somebody opens a half-done
+     * change with nothing anywhere saying it is half-done. The harness had more to do and knows
+     * where it got to, which is the best case there is for continuing the same conversation.
+     */
+    const db = createTestDb();
+    const sessionId = await seedMarker(db, "task-truncated", "max_turns");
+    const relaunch = fakeRelauncher();
+
+    const count = await reclaimOrphanedRuns(db, fakeRegistry(), fakeHub(), LONG_AFTER, relaunch);
+
+    expect(count).toBe(1);
+    expect(relaunch.targets).toHaveLength(1);
+    const [row] = await db.select().from(task).where(eq(task.id, "task-truncated"));
+    expect(row?.state).toBe("running");
+    // Not finished: nothing declared this round done, so nothing may record it as done.
+    expect(row?.completedAt).toBeNull();
+    const [live] = await db.select().from(session).where(eq(session.id, sessionId));
+    expect(live?.state).not.toBe("awaiting_review");
+  });
+
+  it("names truncation as its own cause, distinct from a run that went missing", async () => {
+    // Three of one is a Task with a lot of work in it; three of the other is something wrong with
+    // the machinery underneath it. Only one of those is worth being woken for.
+    const db = createTestDb();
+    const sessionId = await seedMarker(db, "task-budget", "max_tokens");
+
+    await reclaimOrphanedRuns(db, fakeRegistry(), fakeHub(), LONG_AFTER, fakeRelauncher());
+
+    const events = await db
+      .select()
+      .from(sessionEvent)
+      .where(and(eq(sessionEvent.sessionId, sessionId), eq(sessionEvent.kind, "state")));
+    expect(events[0]?.payload).toMatchObject({ reason: RELAUNCHED_TRUNCATED_REASON });
+  });
+
+  it("leaves a run that genuinely finished for its reviewer, and relaunches nothing", async () => {
+    // The rung recovery must never reach. `end_turn` is the harness saying it stopped because it
+    // was done, and opening the gate is a person's one job (Principle I) — restarting the work
+    // underneath them would be the sweep overruling the only decision it does not get to make.
+    const db = createTestDb();
+    const sessionId = await seedMarker(db, "task-done", "end_turn");
+    const relaunch = fakeRelauncher();
+
+    await reclaimOrphanedRuns(db, fakeRegistry(), fakeHub(), LONG_AFTER, relaunch);
+
+    expect(relaunch.targets).toEqual([]);
+    const [row] = await db.select().from(task).where(eq(task.id, "task-done"));
+    expect(row?.completedAt).not.toBeNull();
+    const [live] = await db.select().from(session).where(eq(session.id, sessionId));
+    expect(live?.state).toBe("awaiting_review");
+    const [{ payload } = { payload: null }] = await db
+      .select()
+      .from(sessionEvent)
+      .where(and(eq(sessionEvent.sessionId, sessionId), eq(sessionEvent.kind, "state")));
+    expect(payload).toMatchObject({ reason: RECOVERED_REASON });
+  });
+
+  it("never relaunches a run the registry still has", async () => {
+    // The first of the two signals, and the conclusive one. Relaunching a healthy run puts a
+    // second harness in its worktree with no precedence between them — worse than any verdict
+    // this sweep could write, and the reason recovery is guarded by exactly the rules the reclaim
+    // is rather than by looser ones of its own.
+    const db = createTestDb();
+    await seedLost(db, "task-alive");
+    const relaunch = fakeRelauncher();
+
+    const count = await reclaimOrphanedRuns(
+      db,
+      fakeRegistry(new Set([`${WS}:task-alive`])),
+      fakeHub(),
+      LONG_AFTER,
+      relaunch,
+    );
+
+    expect(count).toBe(0);
+    expect(relaunch.targets).toEqual([]);
+  });
+
+  it("never relaunches a run that has simply not spoken for a moment", async () => {
+    // The second signal: the gap between two durable steps is milliseconds wide in the happy
+    // path, and a sweep firing inside one would relaunch a run that is about to finish.
+    const db = createTestDb();
+    await seedLost(db, "task-fresh");
+    const relaunch = fakeRelauncher();
+
+    const count = await reclaimOrphanedRuns(
+      db,
+      fakeRegistry(),
+      fakeHub(),
+      () => new Date(),
+      relaunch,
+    );
+
+    expect(count).toBe(0);
+    expect(relaunch.targets).toEqual([]);
+  });
+
+  it("gives up after the budget and files the Task legibly", async () => {
+    /*
+     * The bound, and why there has to be one: a run that dies for a reason relaunching cannot fix
+     * — an executor that will not build, a harness binary that is not there — would otherwise be
+     * relaunched by every sweep for the life of the process, invisibly, since the Task reads
+     * `running` throughout either way.
+     *
+     * Each pass here is a full sweep, so the budget is counted the way production counts it: off
+     * the relaunch records in the Session's own log, which is also where an operator reads it.
+     */
+    const db = createTestDb();
+    await seedLost(db, "task-hopeless");
+    const relaunch = fakeRelauncher();
+
+    for (let pass = 0; pass <= MAX_AUTOMATIC_RECOVERIES; pass += 1) {
+      await reclaimOrphanedRuns(db, fakeRegistry(), fakeHub(), LONG_AFTER, relaunch);
+    }
+
+    expect(relaunch.targets).toHaveLength(MAX_AUTOMATIC_RECOVERIES);
+    const [row] = await db.select().from(task).where(eq(task.id, "task-hopeless"));
+    // Today's behaviour, unchanged, once the system has run out of things to try: a stated
+    // failure with a one-click Retry — and a Retry opens a new Session, which is a person
+    // deciding to spend a fresh budget rather than the system granting itself one.
+    expect(row?.state).toBe("failed");
+    expect(row?.failureReason).toBe("interrupted");
+  });
+
+  it("sends a spent truncated round to ready, never to review", async () => {
+    // The fall-through the truncation rule owes an answer to. Out of budget, a cut-off round is
+    // still not a finished one: `ready` with `interrupted` is the true sentence about it, and the
+    // work is captured and readable, so nothing is buried in Failed either.
+    const db = createTestDb();
+    const sessionId = await seedMarker(db, "task-spent", "max_turns");
+    await db.insert(sessionEvent).values({
+      id: "ev-diff-task-spent",
+      workspaceId: WS,
+      sessionId,
+      seq: 1,
+      kind: "diff",
+      payload: {
+        kind: "diff",
+        diffRef: "solow/task-spent",
+        files: [{ path: "a.ts", status: "modified", additions: 1, deletions: 0 }],
+        patch: "",
+        truncated: false,
+      },
+      at: new Date().toISOString(),
+    });
+    const relaunch = fakeRelauncher();
+
+    for (let pass = 0; pass <= MAX_AUTOMATIC_RECOVERIES; pass += 1) {
+      await reclaimOrphanedRuns(db, fakeRegistry(), fakeHub(), LONG_AFTER, relaunch);
+    }
+
+    const [row] = await db.select().from(task).where(eq(task.id, "task-spent"));
+    expect(row?.state).toBe("ready");
+    expect(row?.completedAt).toBeNull();
+  });
+
+  it("falls back to today's behaviour when the engine will not take the event", async () => {
+    // A relaunch the engine did not accept is not a relaunch: recording one would leave a Task
+    // reading `running` with nothing coming, which is the exact condition this whole file exists
+    // to end. The failure is the report — it is what an operator can see and act on.
+    const db = createTestDb();
+    const { sessionId } = await seedLost(db, "task-unreachable");
+    const relaunch = fakeRelauncher({ refuses: true });
+
+    await reclaimOrphanedRuns(db, fakeRegistry(), fakeHub(), LONG_AFTER, relaunch);
+
+    expect(relaunch.targets).toHaveLength(1);
+    const [row] = await db.select().from(task).where(eq(task.id, "task-unreachable"));
+    expect(row?.state).toBe("failed");
+    expect(row?.failureReason).toBe("interrupted");
+    // And no budget spent on an attempt that never left the building.
+    const events = await db
+      .select()
+      .from(sessionEvent)
+      .where(and(eq(sessionEvent.sessionId, sessionId), eq(sessionEvent.kind, "state")));
+    expect(events).toHaveLength(1);
+    expect(events[0]?.payload).toMatchObject({ to: "failed" });
+  });
+
+  it("does not relaunch into a Session a previous sweep already closed", async () => {
+    // A relaunch writes into the Session it names, so there has to be one still open to write
+    // into. A Task with none is a Task whose run ended somewhere this sweep cannot continue —
+    // the evidence in that closed log still decides between `ready` and `failed`, as before.
+    const db = createTestDb();
+    const { sessionId } = await seedLost(db, "task-closed");
+    await db.update(session).set({ state: "closed" }).where(eq(session.id, sessionId));
+    const relaunch = fakeRelauncher();
+
+    await reclaimOrphanedRuns(db, fakeRegistry(), fakeHub(), LONG_AFTER, relaunch);
+
+    expect(relaunch.targets).toEqual([]);
+    const [row] = await db.select().from(task).where(eq(task.id, "task-closed"));
+    expect(row?.state).toBe("failed");
+  });
+
+  it("reclaims nothing automatically when the caller has no engine to relaunch into", async () => {
+    // The sweep is driven with no relauncher throughout the rest of this file, and that has to
+    // keep meaning "the terminal ladder" rather than "recovery, silently skipped": production
+    // wires it in `reconcileSweep`, so the only way to lose it is to edit that wiring.
+    const db = createTestDb();
+    await seedLost(db, "task-no-engine");
+
+    await reclaimOrphanedRuns(db, fakeRegistry(), fakeHub(), LONG_AFTER);
+
+    const [row] = await db.select().from(task).where(eq(task.id, "task-no-engine"));
+    expect(row?.state).toBe("failed");
+  });
+
+  it("is wired into the sweep the orchestrator actually runs", async () => {
+    /*
+     * The one assertion here that is not about a row, and it reads source text for the reason
+     * `reap.test.ts` does the same thing about the schedule: the wiring lives in
+     * `startWebSocketServer`'s sweep, which opens a socket and waits `RECONCILE_GRACE_MS` before
+     * its first pass, so driving it would cost the suite twenty seconds and a port.
+     *
+     * It exists because every case above passes an engine in by hand, and a `relaunch` argument is
+     * optional — so the whole of automatic recovery could be deleted from production by removing
+     * one argument in `index.ts`, with this file entirely green. That is the regression this pins,
+     * and nothing about how the sweep is written.
+     */
+    const source = await Bun.file(new URL("./index.ts", import.meta.url)).text();
+    const from = source.indexOf("export async function reconcileSweep(");
+    const to = source.indexOf("function sweepFailed(");
+    expect(from).toBeGreaterThan(-1);
+    expect(to).toBeGreaterThan(from);
+
+    const body = source.slice(from, to);
+    expect(body).toContain("reclaimOrphanedRuns(");
+    // A relauncher on every pass, and a default behind it so the field being absent from
+    // `WsServerDeps` cannot quietly turn recovery off.
+    expect(body).toMatch(/reclaimOrphanedRuns\([^)]*relaunch[^)]*\)/s);
+    expect(source).toContain("defaultRelauncher()");
+  });
+});
+
+/**
+ * The relauncher itself, tested here because it exists only for the sweep above.
+ *
+ * One behaviour, and it is the one that keeps recovery from being worse than the problem.
+ */
+describe("createRelauncher", () => {
+  it("cancels whatever might still be in there before it launches anything", async () => {
+    /*
+     * The two signals cannot rule out every false positive — a run merely silent for longer than
+     * the window reads exactly like a run that is gone — so a bare launch would occasionally put a
+     * second harness into a worktree that already has one, with no precedence between them. The
+     * stop is `taskRun`'s own `cancelOn` channel, and sending it first makes the sweep's verdict
+     * true instead of racing it.
+     *
+     * Ordered, awaited sends rather than a `Promise.all`: Inngest matches a cancellation against
+     * runs already in flight, so a stop that is strictly earlier cannot reach the run the launch
+     * creates. Reversed or raced, the recovery would occasionally cancel itself.
+     */
+    const sent: Array<{ name: string; data: Record<string, unknown> }> = [];
+    const target = { workspaceId: WS, taskId: "task-1", sessionId: "sess-task-1" };
+
+    await createRelauncher(async (payload) => {
+      sent.push(payload);
+    }).relaunch(target);
+
+    expect(sent.map((e) => e.name)).toEqual(["task.stop.requested", "task.launch.requested"]);
+    // Exactly the payload `launchData` in task-run.ts parses, and the shape the web app's
+    // `enqueueTaskRun` puts on the wire — a fourth field would be dropped, a missing one fails
+    // the run at its first step.
+    expect(sent[1]?.data).toEqual({ ...target });
+  });
+
+  it("does not launch when the engine refused the cancellation", async () => {
+    // Launching after a stop that did not land is the double-run this ordering exists to prevent.
+    const sent: string[] = [];
+
+    const relaunch = createRelauncher(async (payload) => {
+      sent.push(payload.name);
+      throw new Error("engine unreachable");
+    });
+
+    await expect(
+      relaunch.relaunch({ workspaceId: WS, taskId: "task-1", sessionId: "sess-task-1" }),
+    ).rejects.toThrow("engine unreachable");
+    expect(sent).toEqual(["task.stop.requested"]);
   });
 });
 

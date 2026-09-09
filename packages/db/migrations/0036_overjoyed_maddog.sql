@@ -1,0 +1,1 @@
+ALTER TABLE `session` ADD `harness_session_id` text;

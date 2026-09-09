@@ -12,7 +12,7 @@ import {
   toStreamEvent,
   worktreeNameForTask,
 } from "./claude-code-runner.js";
-import type { HarnessHandle, HarnessStreamEvent } from "./runner.js";
+import type { HarnessHandle, HarnessStartOpts, HarnessStreamEvent } from "./runner.js";
 
 /**
  * Claude Code driven as SoloW's harness (task TASK-014), against a real child process
@@ -31,7 +31,12 @@ afterEach(async () => {
   workdir = undefined;
 });
 
-async function run(script: FakeClaudeScript = {}, prompt = "fix the latch") {
+async function run(
+  script: FakeClaudeScript = {},
+  prompt = "fix the latch",
+  /** Per-round facts a test wants to vary — a conversation to carry on, so far. */
+  over: Partial<HarnessStartOpts> = {},
+) {
   workdir = await mkdtemp(join(tmpdir(), "solow-cc-"));
   const events: HarnessStreamEvent[] = [];
   const command = await writeFakeClaudeBin(workdir, { cwd: workdir, ...script });
@@ -43,6 +48,7 @@ async function run(script: FakeClaudeScript = {}, prompt = "fix the latch") {
     worktreeName: worktreeNameForTask("task-1"),
     prompt,
     onEvent: (e) => events.push(e),
+    ...over,
   });
   return { handle, events, workdir };
 }
@@ -60,7 +66,7 @@ describe("ClaudeCodeRunner", () => {
       turns: [{ tools: ["Edit"], text: ["patched latch.ts"] }],
     });
 
-    expect(await h.outcome).toEqual({ kind: "completed" });
+    expect(await h.outcome).toEqual({ kind: "completed", stopReason: "end_turn" });
     // Usage rides alongside each block and is asserted separately, below.
     expect(events.filter((e) => e.kind !== "usage")).toEqual([
       // The id and the arguments now survive the adapter — without them the transcript could
@@ -84,7 +90,7 @@ describe("ClaudeCodeRunner", () => {
     });
 
     expect(await h.send("also add a regression test")).toBe(true);
-    expect(await h.outcome).toEqual({ kind: "completed" });
+    expect(await h.outcome).toEqual({ kind: "completed", stopReason: "end_turn" });
     expect(events.flatMap((e) => (e.kind === "stdout" ? [e.text] : []))).toContain(
       "added the test",
     );
@@ -148,7 +154,11 @@ describe("ClaudeCodeRunner", () => {
       dieEarly: true,
       stderr: "API error: usage limit reached, resets at 18:00\n",
     });
-    expect(await h.outcome).toEqual({ kind: "failed", signal: { quotaExhausted: true } });
+    expect(await h.outcome).toEqual({
+      kind: "failed",
+      signal: { quotaExhausted: true },
+      stopReason: "no_result",
+    });
   });
 
   it("classifies an unrecognised crash as a plain failure", async () => {
@@ -288,5 +298,46 @@ describe("createStreamMapper", () => {
       channel: "system",
       text: "\nRound one.\n",
     });
+  });
+});
+
+describe("what the run says about how it stopped", () => {
+  it("reports the CLI's own conversation id, so the run can be resumed later", async () => {
+    // `fake-session` is what the fake CLI announces in its init event.
+    const { handle: h } = await run({ turns: [{ text: ["ok"] }] });
+    expect(await h.harnessSessionId).toBe("fake-session");
+    await h.outcome;
+  });
+
+  it("tells a turn budget apart from a finished run — the same exit, a different word", async () => {
+    // The CLI reports `error_max_turns` as an error result. Before the seam carried a stop
+    // reason this was indistinguishable from any other failure, and a run cut off with work
+    // left to do went to the board looking like a crash.
+    const { handle: h } = await run({ turns: [{ text: ["half"] }], failWith: "error_max_turns" });
+    expect(await h.outcome).toEqual({ kind: "failed", signal: {}, stopReason: "max_turns" });
+  });
+
+  it("calls an operator's stop cancelled, never an error", async () => {
+    const { handle: h } = await run({ turns: [{ text: ["working"] }, { text: ["more"] }] });
+    await h.stop();
+    expect(await h.outcome).toEqual({ kind: "completed", stopReason: "cancelled" });
+  });
+
+  it("says whether the round carried a conversation on or started one", async () => {
+    /*
+     * Read off the launch, because the launch is all stream-JSON offers: the CLI states a session
+     * id either way and never says which of the two that id is. What `--resume` actually did to
+     * the argv is asserted in `buildArgs`' own tests — the fake CLI here ignores its arguments,
+     * so a run that succeeded would prove nothing about them.
+     */
+    const { handle: fresh } = await run({ turns: [{ text: ["ok"] }] });
+    expect(await fresh.resumed).toBe(false);
+    await fresh.outcome;
+
+    const { handle: carried } = await run({ turns: [{ text: ["ok"] }] }, "carry on", {
+      resumeSessionId: "sess-abc",
+    });
+    expect(await carried.resumed).toBe(true);
+    await carried.outcome;
   });
 });

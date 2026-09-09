@@ -64,6 +64,7 @@ export function stepToDto(row: WorkflowStepRow, position: number): WorkflowStepD
     branch: row.branch ?? null,
     mcpServerIds: row.mcpServerIds ?? [],
     skillIds: row.skillIds ?? [],
+    permissionMode: row.permissionMode ?? null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -298,6 +299,10 @@ export async function advanceTaskWorkflow(
         unspentApproval,
         approvalAlreadySpent,
         handoff: reported ?? null,
+        // A report, read by an `outcome` branch and nothing else. Not corroborated the way
+        // `producedChanges` is, because there is nothing to corroborate it against: the
+        // declaration is the harness's own account, and the Session log holds the same words.
+        outcome: input.outcome ?? null,
       });
       if (!advance.ok) return err(advance.error);
 
@@ -337,6 +342,7 @@ export async function advanceTaskWorkflow(
         status: advance.data.status,
         currentStepId: landed.id,
         brief: buildStepBrief(landed, handoff, steps),
+        explanation: advance.data.explanation,
       });
     },
     { behavior: "immediate" },

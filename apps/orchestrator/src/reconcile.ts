@@ -1,5 +1,5 @@
-import type { TaskCompletionOutcome } from "@solow/contracts";
-import { parseSessionEventPayload } from "@solow/contracts";
+import type { HarnessStopReason, TaskCompletionOutcome } from "@solow/contracts";
+import { parseSessionEventPayload, stopReasonMeansTruncated } from "@solow/contracts";
 import { INTERRUPTED_REASON, STRANDED_REVIEW_REASON } from "@solow/core";
 import { type Db, review, session, sessionEvent, task } from "@solow/db";
 import { and, desc, eq, isNull, ne } from "drizzle-orm";
@@ -11,6 +11,7 @@ import {
   setTaskState,
 } from "./data.js";
 import type { HarnessRegistry } from "./harness/registry.js";
+import type { RunRelauncher } from "./relaunch.js";
 import type { EventHub } from "./ws/hub.js";
 
 /**
@@ -52,6 +53,19 @@ import type { EventHub } from "./ws/hub.js";
  * window and then resumes would be reclaimed — but the alternative (a Task stuck showing
  * "running" with no way to act on it) is strictly worse, and reclaiming always leaves a one-click
  * Retry, never data loss: the worktree and its commits are untouched.
+ *
+ * **A one-click Retry is a person, though, and a person is not a guarantee.** Everything above
+ * describes a sweep whose best outcome is a button somebody has to be there to press: the Task
+ * stops lying about being alive, and then waits. For the Owner who reported the original incident
+ * that is the same ninety minutes in a different colour. So a run this sweep finds lost is now
+ * *put back* before it is filed — `recoverRun` below re-emits the launch event through the
+ * orchestrator's own Inngest client, against the Session row the lost run was already writing
+ * into, and the ladder that ends in `failed` is what happens when that cannot be done or has been
+ * done too often.
+ *
+ * The two signals guard the relaunch exactly as they guard the reclaim, and they have to: putting
+ * a second run underneath a healthy one is a worse failure than any verdict, which is why
+ * `createRelauncher` cancels before it launches rather than trusting the signals on their own.
  */
 
 /**
@@ -68,9 +82,27 @@ export async function reclaimOrphanedRuns(
   registry: Pick<HarnessRegistry, "get">,
   hub: Pick<EventHub, "publish" | "boardChannel" | "taskChannel">,
   now: () => Date = () => new Date(),
+  /**
+   * Where a lost run is put back, or nothing.
+   *
+   * Optional because "there is an engine to relaunch into" is a fact about the caller, not about
+   * this function — `reconcileSweep` in `index.ts` is the one production caller and supplies the
+   * real client, while a test that wants the terminal ladder simply does not. Omitting it is not
+   * a silent downgrade in production: the sweep defaults it there, so losing the wiring takes an
+   * edit to that default rather than a forgotten argument.
+   */
+  relaunch?: RunRelauncher,
 ): Promise<number> {
   const running = await db
-    .select({ id: task.id, workspaceId: task.workspaceId, updatedAt: task.updatedAt })
+    .select({
+      id: task.id,
+      workspaceId: task.workspaceId,
+      updatedAt: task.updatedAt,
+      // The Step the Task was on when it went quiet, so the records this sweep writes land in the
+      // same part of the transcript as everything else that Step produced. Read from the Task
+      // because the run that knew it is exactly what is no longer there to ask.
+      workflowStepId: task.workflowStepId,
+    })
     .from(task)
     .where(eq(task.state, "running"));
 
@@ -137,11 +169,34 @@ export async function reclaimOrphanedRuns(
      *
      * What none of the three does is capture a diff: the worktree deps belong to the run, so a
      * sweep can only read what the run already wrote down.
+     *
+     * **And 2 and 3 are both preceded by a relaunch, because both of them describe a round that
+     * still has work in it.** Only rung 1 is a finished piece of work; the other two are a round
+     * that stopped in the middle, and handing those to a person as a Retry is asking somebody to
+     * do by hand what the engine was supposed to do by itself.
      */
     const finished = evidenceIn ? await completionMarker(db, evidenceIn) : null;
     const endedAt = now().toISOString();
 
-    if (finished) {
+    /*
+     * A round the harness's own budget cut short is not rung 1, whatever its marker says.
+     *
+     * `agent_done` is written when the harness *process* ends, and a harness that ran out of turns
+     * or context ends exactly as one that finished does — so the marker alone reads a truncation
+     * as a completed piece of work and sends it to a reviewer, who opens a half-done change with
+     * nothing anywhere saying it is half-done. `stopReason` is the field that tells them apart and
+     * it has been on the payload, unread, since the seam that added it; `stopReasonMeansTruncated`
+     * is the one answer to "was there more to do", asked here and nowhere else in this file.
+     *
+     * A truncated round therefore drops through to the recovery below, where continuing the same
+     * conversation is precisely the right move: the harness has more to say and knows where it
+     * got to. If recovery is unavailable or spent it re-enters the ladder below rung 1, so a
+     * truncation with work behind it reads `ready` / `interrupted` — the true sentence about it —
+     * rather than a completion it never claimed.
+     */
+    const truncated = finished?.stopReason ? stopReasonMeansTruncated(finished.stopReason) : false;
+
+    if (finished && !truncated) {
       await recordTaskCompletion(db, row.workspaceId, row.id, {
         outcome: finished.outcome ?? "changes_ready",
         summary: finished.summary ?? null,
@@ -154,6 +209,7 @@ export async function reclaimOrphanedRuns(
         await appendSessionEvent(db, row.workspaceId, {
           sessionId: live.id,
           seq: await nextSessionEventSeq(db, row.workspaceId, live.id),
+          workflowStepId: row.workflowStepId,
           payload: { kind: "state", from: "running", to: "running", reason: RECOVERED_REASON },
         });
       }
@@ -162,6 +218,28 @@ export async function reclaimOrphanedRuns(
       announce(hub, row, "running", endedAt);
       reclaimed += 1;
       continue;
+    }
+
+    /*
+     * Before anything is filed: put the run back.
+     *
+     * Reached only for a round that stopped mid-work — a truncation, or a run that vanished with
+     * or without a change to show for it — never for one that declared itself finished, which
+     * belongs to a reviewer and not to the engine.
+     *
+     * `live` is required rather than `evidenceIn`, and that is the one precondition worth stating:
+     * a relaunch writes into the Session it names, so there has to be a Session that is still open
+     * to write into. A Task whose newest Session a previous sweep already closed is a Task whose
+     * run ended somewhere this sweep can no longer continue — it falls to the ladder below, where
+     * the evidence in that closed log still decides between `ready` and `failed`.
+     */
+    if (live && relaunch) {
+      const cause = truncated ? RELAUNCHED_TRUNCATED_REASON : RELAUNCHED_LOST_REASON;
+      const recovered = await recoverRun(db, relaunch, hub, row, live.id, cause, endedAt);
+      if (recovered) {
+        reclaimed += 1;
+        continue;
+      }
     }
 
     const produced = evidenceIn ? await capturedChange(db, evidenceIn) : false;
@@ -175,6 +253,7 @@ export async function reclaimOrphanedRuns(
         await appendSessionEvent(db, row.workspaceId, {
           sessionId: live.id,
           seq: await nextSessionEventSeq(db, row.workspaceId, live.id),
+          workflowStepId: row.workflowStepId,
           payload: { kind: "state", from: "running", to: "ready", reason: INTERRUPTED_REASON },
         });
       }
@@ -194,6 +273,7 @@ export async function reclaimOrphanedRuns(
       await appendSessionEvent(db, row.workspaceId, {
         sessionId: live.id,
         seq: await nextSessionEventSeq(db, row.workspaceId, live.id),
+        workflowStepId: row.workflowStepId,
         payload: { kind: "state", from: "running", to: "failed", reason: INTERRUPTED_REASON },
       });
     }
@@ -497,12 +577,154 @@ async function latestActivity(db: Db, sessionId: string, startedAt: string): Pro
 export const RECOVERED_REASON = "recovered_after_restart";
 
 /**
+ * The two reasons an automatic relaunch writes into the Session log, and why there are two.
+ *
+ * A single "relaunched" would satisfy the log and tell an operator nothing: the two causes look
+ * identical on the board and are not the same event at all. `relaunched_after_truncation` says the
+ * harness was cut off by its own budget and the system carried the conversation on — expected,
+ * cheap, and the run was healthy right up to the moment it stopped. `relaunched_after_loss` says
+ * the run went missing: the engine dropped it, or the process it was in died. A Task that shows
+ * three of the first is a Task with a lot to do; a Task that shows three of the second has
+ * something wrong with the machinery under it, and only the second one is worth being woken for.
+ *
+ * Both are written as a `running → running` transition, which is exactly what happened — the
+ * relaunch does not move the Task, it replaces the run inside it — and both are written to the
+ * *same* Session as everything else the round produced, so the record of the restart sits in the
+ * transcript directly under the last thing the lost run said.
+ */
+export const RELAUNCHED_TRUNCATED_REASON = "relaunched_after_truncation";
+export const RELAUNCHED_LOST_REASON = "relaunched_after_loss";
+
+/**
+ * How many times this sweep will relaunch one Session's run before it gives up and files it.
+ *
+ * **A bound is not optional here, and the shape of the danger is what picks the number.** A Task
+ * whose run dies for a reason relaunching cannot fix — a worktree the executor cannot build in, a
+ * profile pointing at a binary that is not there — would otherwise be relaunched by every sweep
+ * for the life of the process, and each attempt costs a container build. Nothing about that loop
+ * is visible on the board either: the Task reads `running` throughout, which is precisely what an
+ * unbounded version would be indistinguishable from.
+ *
+ * Three, for two reasons that agree. It is the same budget Inngest gives the function itself
+ * (`retries: 2`, so three attempts) — this is the *outer* loop of the same idea, redriving a run
+ * the engine has lost rather than a step that threw, and having the two differ by an order of
+ * magnitude would mean one of the two numbers had no thinking behind it. And it is bounded in
+ * wall-clock by construction: a relaunched run must go silent for a further `RECLAIM_STALE_MS`
+ * before this sweep can reach it again, so three attempts is at least half an hour of a Task
+ * genuinely trying, not a tight spin.
+ *
+ * **Its durable home is the Session log, which is also where an operator reads it.** No new column
+ * and no new table: the count *is* the relaunch records written below, so the thing that bounds
+ * recovery and the thing that explains it are the same rows, and they cannot disagree the way a
+ * counter beside them eventually would. It survives a restart because the log does.
+ *
+ * That makes the budget per **Session** rather than per Task, which is the right grain and not an
+ * accident of storage. A new Session is only ever created by a person launching the Task
+ * (`createSession`, from the web app), so a human Retry starts a fresh budget — a decision made by
+ * somebody looking at the failure, which is exactly the event that should be allowed to try again.
+ * What cannot happen is the system granting itself that reset, because it never makes a Session.
+ */
+export const MAX_AUTOMATIC_RECOVERIES = 3;
+
+/**
+ * Put the run back on the engine, and say so — or answer false and leave it to the ladder.
+ *
+ * The order of the three writes is the whole of the correctness here:
+ *
+ *  1. **Ask first, record after.** A relaunch that the engine did not accept must not spend a
+ *     recovery or leave a log line claiming a restart nobody performed; the Task falls through to
+ *     `ready`/`failed` in the same pass, which is the legible outcome an operator can act on. The
+ *     opposite order buys a Task that says it was relaunched three times and never was.
+ *  2. **The record before the row.** Appending the transition is what resets `latestActivity` for
+ *     this Session — the sweep's own second signal — so the relaunched run gets a full
+ *     `RECLAIM_STALE_MS` to register before anything looks at it again. Without it the next sweep
+ *     sixty seconds later would read the same silence and relaunch on top of a run that is booting.
+ *  3. **The row last, and left at `running`.** The Task is running: a run is starting in it. The
+ *     write is for `updatedAt` rather than the state — `reap.ts` measures its own quiet window from
+ *     a Task row's last write whatever that row says, so touching the row is what keeps the reaper
+ *     off the container the relaunched run is about to adopt. `failureReason` is cleared for a Task
+ *     that carries a verdict from an earlier pass, so the board does not show a live run as broken.
+ */
+async function recoverRun(
+  db: Db,
+  relaunch: RunRelauncher,
+  hub: Pick<EventHub, "publish" | "boardChannel" | "taskChannel">,
+  row: { id: string; workspaceId: string; workflowStepId: string | null },
+  sessionId: string,
+  reason: string,
+  at: string,
+): Promise<boolean> {
+  if ((await recoveriesSpent(db, row.workspaceId, sessionId)) >= MAX_AUTOMATIC_RECOVERIES) {
+    return false;
+  }
+
+  try {
+    await relaunch.relaunch({ workspaceId: row.workspaceId, taskId: row.id, sessionId });
+  } catch {
+    // Swallowed rather than logged, because the fall-through *is* the report: an unreachable
+    // engine ends this pass with a Task that says `failed`/`interrupted` and offers a Retry, which
+    // is both the old behaviour and the only thing an operator could act on anyway. Rethrowing
+    // would instead abandon every Task after this one in the same sweep.
+    return false;
+  }
+
+  await appendSessionEvent(db, row.workspaceId, {
+    sessionId,
+    seq: await nextSessionEventSeq(db, row.workspaceId, sessionId),
+    workflowStepId: row.workflowStepId,
+    payload: { kind: "state", from: "running", to: "running", reason },
+  });
+  await setTaskState(db, row.workspaceId, row.id, "running", { failureReason: null });
+  announce(hub, row, "running", at);
+  return true;
+}
+
+/**
+ * How much of this Session's recovery budget has been spent, counted from the log that spends it.
+ *
+ * Read as "relaunch records in this Session", not "relaunch records at the head of it": the run
+ * each relaunch starts writes turns, diffs and transitions of its own on top, and every one of
+ * those is a sign the relaunch worked rather than evidence it did not happen.
+ *
+ * A whole-Session scan rather than a `count`, because the payload is JSON and the reason lives
+ * inside it — a `where` on it would be hand-written SQL over a column shape `@solow/contracts`
+ * owns. The set is a Session's state transitions, which is single digits for the life of a Task.
+ */
+async function recoveriesSpent(db: Db, workspaceId: string, sessionId: string): Promise<number> {
+  const rows = await db
+    .select({ payload: sessionEvent.payload })
+    .from(sessionEvent)
+    .where(
+      and(
+        eq(sessionEvent.workspaceId, workspaceId),
+        eq(sessionEvent.sessionId, sessionId),
+        eq(sessionEvent.kind, "state"),
+      ),
+    );
+  let spent = 0;
+  for (const { payload } of rows) {
+    const parsed = parseSessionEventPayload("state", payload);
+    if (parsed.kind !== "state") continue;
+    if (parsed.reason === RELAUNCHED_TRUNCATED_REASON || parsed.reason === RELAUNCHED_LOST_REASON) {
+      spent += 1;
+    }
+  }
+  return spent;
+}
+
+/**
  * The `agent_done` this Session ended on, if it ended on one.
  *
  * Read as "the newest marker in the log", not "the last event is a marker": a harness's final turn
  * and the compaction step both land after it, and neither of them means the harness did not finish.
- * There is no ambiguity to resolve — a marker is only ever written once the harness has stopped
- * having completed, so its presence is the fact, whatever came afterwards.
+ * There is no ambiguity to resolve — a marker is only ever written once the harness has stopped,
+ * so its presence is the fact, whatever came afterwards.
+ *
+ * **What its presence is not is proof that the harness was done**, and `stopReason` is the field
+ * that says which it was. It has always travelled on this payload and this reader dropped it,
+ * which is how a round cut off by a turn budget reached a reviewer wearing a completion. Carried
+ * out whole and judged by the caller, beside the other evidence, rather than folded into a boolean
+ * here: this function's job is to report the marker, not to decide what the sweep does about it.
  */
 async function completionMarker(
   db: Db,
@@ -511,6 +733,7 @@ async function completionMarker(
   branch: string;
   outcome: TaskCompletionOutcome | null;
   summary: string | null;
+  stopReason: HarnessStopReason | null;
 } | null> {
   const [newest] = await db
     .select({ payload: sessionEvent.payload })
@@ -525,6 +748,7 @@ async function completionMarker(
     branch: parsed.branch,
     outcome: parsed.outcome ?? null,
     summary: parsed.summary ?? null,
+    stopReason: parsed.stopReason ?? null,
   };
 }
 

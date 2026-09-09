@@ -1,0 +1,1 @@
+ALTER TABLE `workflow_step` ADD `permission_mode` text;

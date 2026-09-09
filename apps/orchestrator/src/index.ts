@@ -22,6 +22,7 @@ import { inngest } from "./inngest/client.js";
 import { handleEventPost } from "./inngest/events.js";
 import { INNGEST_FUNCTIONS, inngestServeHandler } from "./inngest/serve.js";
 import { reclaimOrphanedRuns, reportStrandedParks, reportStrandedReviews } from "./reconcile.js";
+import { defaultRelauncher, type RunRelauncher } from "./relaunch.js";
 import { hub } from "./ws/hub.js";
 import { attachSubscriber } from "./ws/replay.js";
 
@@ -377,7 +378,24 @@ export interface SweepDeps {
   db: Db;
   registry: Pick<HarnessRegistry, "get">;
   dockerHost: Executor;
+  /**
+   * Where a lost run is put back — the orchestrator's own Inngest client unless a test says
+   * otherwise.
+   *
+   * Optional, and defaulted at the call site rather than here, because `WsServerDeps` satisfies
+   * this interface structurally and knows nothing about relaunching: a required field would break
+   * that, and a field the server has to remember to populate would mean production recovery
+   * depended on a struct literal two hundred lines away staying in step.
+   */
+  relaunch?: RunRelauncher;
 }
+
+/**
+ * Built once for the process rather than per sweep. `defaultRelauncher` closes over the singleton
+ * Inngest client, so a fresh one every sixty seconds would allocate a wrapper to say the same
+ * thing — and the constant is also the one place to look to answer "is automatic recovery wired".
+ */
+const RELAUNCHER = defaultRelauncher();
 
 /**
  * One pass of the reconciliation sweep, in two phases: everything that writes a verdict onto a
@@ -406,6 +424,13 @@ export interface SweepDeps {
  * by the same sweep call that condemned it, reproduced here in one pass. Verified live end to end
  * for the park case: first sweep stamps and keeps, a later sweep removes.
  *
+ * **A Task the first arm *relaunches* rather than condemns depends on that ordering twice over.**
+ * It is left reading `running` with its row freshly written, so the reaper sees a state on
+ * `RUN_MAY_HOLD` and a quiet window that has not started — a container the incoming run is about
+ * to adopt through `ensureContainer`, and the one thing it must not lose. Run concurrently, the
+ * reaper could read that row as the previous pass left it: `running`, silent for ten minutes,
+ * nothing registered. That is exactly the arithmetic that removes a live container.
+ *
  * What the ordering still buys is that the reaper reads a table this pass has finished writing
  * rather than one it is racing — reproduced on Docker 29.7.2, where the concurrent version read a
  * row before the stranded-park stamp landed and reasoned from a table already out of date.
@@ -424,11 +449,17 @@ export async function reconcileSweep(
   now: () => Date = () => new Date(),
 ): Promise<void> {
   await Promise.all([
-    reclaimOrphanedRuns(deps.db, deps.registry, hub, now).then((count) => {
-      if (count > 0) {
-        console.log(`[solow/orchestrator] reclaimed ${count} orphaned running task(s)`);
-      }
-    }),
+    // The relauncher is what turns this arm from "stop the Task lying about being alive" into
+    // "start it again" — see `reclaimOrphanedRuns`. Handed in on every pass so that removing
+    // automatic recovery has to be an edit here, where the sweep is assembled, rather than an
+    // argument somebody forgot.
+    reclaimOrphanedRuns(deps.db, deps.registry, hub, now, deps.relaunch ?? RELAUNCHER).then(
+      (count) => {
+        if (count > 0) {
+          console.log(`[solow/orchestrator] reclaimed ${count} orphaned running task(s)`);
+        }
+      },
+    ),
     // The second way a run goes missing: a Task at the gate whose decision was recorded and never
     // applied, because the run holding the wait is gone.
     reportStrandedReviews(deps.db, deps.registry, hub, now).then((count) => {

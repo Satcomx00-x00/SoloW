@@ -5,6 +5,7 @@ import type { SessionEventDto, TaskEvent } from "@solow/contracts";
 import {
   buildTranscript,
   harnessActivity,
+  inStepScope,
   openPermission,
   type TextRow,
   type ToolRow,
@@ -28,6 +29,52 @@ const liveText = (
   channel: TaskEvent extends { channel: infer C } ? C : never = "assistant" as never,
   sessionId = "s1",
 ): TaskEvent => ({ kind: "stdout", taskId: "t1", sessionId, seq, text, channel }) as TaskEvent;
+
+/**
+ * Which live frames belong on a transcript narrowed to one Workflow Step.
+ *
+ * The server narrows the persisted half; this is the same question asked of everything that
+ * arrives after the query ran, and the interesting half of the answer is what it refuses to
+ * drop. A Session spans a whole pipeline, but a log row that names no Step is not a row from
+ * some other Step — it is a row from a Task, or a build, that never recorded Steps at all.
+ */
+describe("inStepScope", () => {
+  const stepped = (seq: number, workflowStepId?: string | null): TaskEvent =>
+    ({
+      kind: "stdout",
+      taskId: "t1",
+      sessionId: "s1",
+      seq,
+      text: "x",
+      channel: "assistant",
+      ...(workflowStepId === undefined ? {} : { workflowStepId }),
+    }) as TaskEvent;
+
+  it("keeps everything when nothing is selected", () => {
+    expect(inStepScope(stepped(0, "st-1"), null)).toBe(true);
+    expect(inStepScope(stepped(1), null)).toBe(true);
+  });
+
+  it("keeps the selected Step's frames and drops the other Steps'", () => {
+    expect(inStepScope(stepped(0, "st-1"), "st-1")).toBe(true);
+    expect(inStepScope(stepped(1, "st-2"), "st-1")).toBe(false);
+  });
+
+  it("keeps an unattributed frame under any scope, absent or null alike", () => {
+    // Null is a Task on no Workflow or a row older than the column; absent is a producer that
+    // never spoke Steps. Neither is a Step, so neither can be filtered to one — and dropping
+    // them would blank the terminal of every run that predates this.
+    expect(inStepScope(stepped(0, null), "st-1")).toBe(true);
+    expect(inStepScope(stepped(1), "st-1")).toBe(true);
+  });
+
+  it("keeps the frames that are not log rows at all", () => {
+    // `status` carries no Step by contract: a Task's state belongs to the Task, not to whichever
+    // Step it happened to reach.
+    const status = { kind: "status", taskId: "t1", state: "running", at: "" } as TaskEvent;
+    expect(inStepScope(status, "st-1")).toBe(true);
+  });
+});
 
 describe("buildTranscript", () => {
   it("shows an event once when the query and the replay both deliver it", () => {

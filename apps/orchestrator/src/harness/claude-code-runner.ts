@@ -1,4 +1,5 @@
 import { type ClaudeSession, type ClaudeUpdate, startClaudeSession } from "@solow/claude-code";
+import type { HarnessStopReason } from "@solow/contracts";
 import { detectFailureSignal, type FailureSignal } from "@solow/core";
 import type { Executor } from "../executor/types.js";
 import type {
@@ -26,7 +27,9 @@ import type {
  * the concurrency story: several Tasks run against one repository at a time, and two harnesses
  * editing a single working tree would overwrite each other (Principle II). Because Claude Code
  * creates the worktree, SoloW does not — it adopts the path the session reports, and the
- * rest of the lifecycle (diff, commit on approve, discard on reject, cleanup) targets that.
+ * rest of the lifecycle (diff, commit on approve, discard on reject, cleanup) targets that. A
+ * round that resumes a conversation is the one exception, and not a hole in the guarantee: the
+ * conversation it resumes has that same worktree already.
  *
  * Turn model. The session stays open, so operator input from the review terminal is written
  * straight into it as another user turn — no queueing between turns, unlike ACP.
@@ -80,6 +83,13 @@ export class ClaudeCodeRunner implements HarnessRunner {
           env: opts.env,
           spawn: (cmd, spawnOpts) => this.options.executor.spawn(cmd, spawnOpts),
           worktreeName: opts.worktreeName,
+          /*
+           * Passed alongside `worktreeName` rather than instead of it, and `buildArgs` resolves
+           * the contradiction: `--resume` names a conversation that already has a worktree, so
+           * `--worktree` is suppressed there. Sorting that out here as well would put the same
+           * rule in two places, and the one that matters is the one nearest the argv.
+           */
+          ...(opts.resumeSessionId ? { resumeSessionId: opts.resumeSessionId } : {}),
           permissionMode: this.options.permissionMode ?? DEFAULT_PERMISSION_MODE,
           ...(this.options.model ? { model: this.options.model } : {}),
           onUpdate: (update) => {
@@ -95,8 +105,11 @@ export class ClaudeCodeRunner implements HarnessRunner {
       // the lifecycle waiting on a session that was never created.
       const signal = detectFailureSignal(cause instanceof Error ? cause.message : String(cause));
       return {
-        outcome: Promise.resolve<HarnessOutcome>({ kind: "failed", signal }),
+        outcome: Promise.resolve<HarnessOutcome>({ kind: "failed", signal, stopReason: "error" }),
         workspacePath: Promise.resolve(null),
+        harnessSessionId: Promise.resolve(null),
+        // Nothing was resumed because nothing was launched.
+        resumed: Promise.resolve(false),
         send: async () => false,
         stop: async () => {},
       };
@@ -106,13 +119,26 @@ export class ClaudeCodeRunner implements HarnessRunner {
     const outcome: Promise<HarnessOutcome> = live.outcome.then((result) => {
       // A stop is an operator decision, not a fault: the partial work stays in the worktree and
       // goes to review like any other completed run (Principle I).
-      if (stopRequested || result.ok) return { kind: "completed" };
-      return { kind: "failed", signal: signalFor(result.subtype, live.stderrTail()) };
+      if (stopRequested) return { kind: "completed", stopReason: "cancelled" };
+      const stopReason = stopReasonFor(result.subtype);
+      if (result.ok) return { kind: "completed", stopReason };
+      return { kind: "failed", signal: signalFor(result.subtype, live.stderrTail()), stopReason };
     });
 
     return {
       outcome,
       workspacePath: live.workspacePath,
+      harnessSessionId: live.sessionId,
+      /*
+       * Answered from the argv, because the argv is the whole of what stream-JSON lets us know.
+       *
+       * The CLI states its session id in the init event but never says whether that id was one it
+       * loaded or one it minted, and it reports a conversation it could not find as an ordinary
+       * failed run rather than as a fallback. So this is "the CLI was launched with `--resume`",
+       * which is exactly as much as is true — a resume that did not take fails the round, and the
+       * lifecycle sees a failure rather than a fresh session mislabelled as a resumed one.
+       */
+      resumed: Promise.resolve(opts.resumeSessionId !== undefined),
       async send(text: string) {
         const accepted = live.send(text);
         // The operator's own message has no producer on the CLI's own stream — `stream-json`
@@ -130,6 +156,32 @@ export class ClaudeCodeRunner implements HarnessRunner {
         await live.stop();
       },
     };
+  }
+}
+
+/**
+ * The CLI's `result.subtype`, in the one vocabulary every runner reports in.
+ *
+ * `success` is the ordinary end of a turn. `error_max_turns` is the one that matters most: the
+ * CLI stops with work left to do and reports it as an error, and before this the lifecycle could
+ * not tell it from a crash. `stopped` and `no_result` are this package's own synthetic subtypes
+ * (see `startClaudeSession`). Anything else the CLI may say — its subtypes are not an enum it
+ * publishes — is kept as `unknown` rather than guessed at.
+ */
+export function stopReasonFor(subtype: string | null): HarnessStopReason {
+  switch (subtype) {
+    case "success":
+      return "end_turn";
+    case "error_max_turns":
+      return "max_turns";
+    case "error_during_execution":
+      return "error";
+    case "stopped":
+      return "cancelled";
+    case "no_result":
+      return "no_result";
+    default:
+      return "unknown";
   }
 }
 

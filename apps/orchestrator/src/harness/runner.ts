@@ -1,5 +1,6 @@
 /// <reference types="bun-types" />
 import type { AcpMcpServer } from "@solow/acp";
+import type { HarnessStopReason } from "@solow/contracts";
 import type { FailureSignal } from "@solow/core";
 
 /**
@@ -77,7 +78,16 @@ export type HarnessStreamEvent =
 /** Who produced a line: the model, its reasoning, the operator, or the machinery. */
 export type HarnessTextChannel = "assistant" | "thinking" | "user" | "system";
 
-export type HarnessOutcome = { kind: "completed" } | { kind: "failed"; signal: FailureSignal };
+/**
+ * How a run ended, and *why the process stopped* — two different facts (see
+ * `harnessStopReasonSchema`). `completed` is not "finished": a harness cut off by its turn
+ * budget completes, with `stopReason: "max_turns"`, and the lifecycle is the party that decides
+ * what that means for the Task. `stopReason` is required so a runner cannot omit it: every
+ * protocol has a word for this, and the seam used to be where that word was thrown away.
+ */
+export type HarnessOutcome =
+  | { kind: "completed"; stopReason: HarnessStopReason }
+  | { kind: "failed"; signal: FailureSignal; stopReason: HarnessStopReason };
 
 /**
  * What became of an operator's answer to a permission (issue #58, AC-4).
@@ -110,6 +120,20 @@ export interface HarnessStartOpts {
    * throwing away everything the earlier round produced.
    */
   worktreeName: string | null;
+  /**
+   * The harness's own id for a conversation to carry on this round, or absent to start fresh.
+   *
+   * Per round, not per runner, because that is what it is: the same harness, same Profile and
+   * same Executor produce a round that resumes and a round that does not. A Task's first round
+   * has nothing to resume; a round after an orchestrator restart, an Inngest redrive or an
+   * exhausted execution budget is the same brief handed to a process with no memory of having
+   * worked on it, and `session.harness_session_id` is the id that ends that.
+   *
+   * Asking is not getting. A protocol may have no conversation to name (`cli_passthrough`), and
+   * a harness may not be able to load one it does name — so what actually happened is reported
+   * back on the handle as `resumed`, and the caller decides what brief that deserves.
+   */
+  resumeSessionId?: string;
   /** What the harness is asked to do this round — the Task brief, plus any review feedback. */
   prompt: string;
   /**
@@ -131,6 +155,28 @@ export interface HarnessHandle {
    * treat as a failure to isolate rather than carry on regardless.
    */
   workspacePath: Promise<string | null>;
+  /**
+   * The harness's own id for this conversation, once it says so — Claude Code's `session_id`,
+   * ACP's session id. `null` for a protocol that has none, or a harness that never reached its
+   * handshake. Resolved as soon as it is known, never held for exit: the id is worth most for a
+   * run that dies, and the lifecycle records it on the same fire-and-forget chain as the rest of
+   * the harness's narration.
+   */
+  harnessSessionId: Promise<string | null>;
+  /**
+   * Whether this round picked up the conversation `resumeSessionId` named, or started a new one.
+   *
+   * The two need different briefs — a harness that remembers the work does not need it described
+   * again, and one that does not remember it cannot be told "carry on" — so the caller has to be
+   * able to tell them apart, and the run log has to be able to say which happened. Asking is not
+   * getting: a harness may not be able to load the conversation, and the honest answer to that is
+   * a fresh session that says so rather than a failed round.
+   *
+   * Optional, and absent reads as `false`: a protocol with no conversation to resume has no
+   * opinion to state, in the same spirit as `respondPermission` being simply absent where there
+   * is nobody to ask. Every runner in the product answers it.
+   */
+  resumed?: Promise<boolean>;
   /**
    * Operator input from the review terminal (TASK-022), delivered as another turn. Resolves
    * `false` when the run has already finished and the input could not be accepted.
@@ -159,9 +205,24 @@ export class FakeHarnessRunner implements HarnessRunner {
   readonly inputs: string[] = [];
   /** Worktree names the lifecycle asked for — `null` on a resume round, which asks for none. */
   readonly worktreeNames: (string | null)[] = [];
+  /**
+   * Conversation ids the lifecycle asked to carry on, in order — `null` for a round that started
+   * fresh. Assert on these to check *which* round was told to resume, and with what.
+   */
+  readonly resumeSessionIds: (string | null)[] = [];
+  /**
+   * Whether the fake honours a resume it is given. Set false to script the harness that was
+   * handed a conversation and could not load it, which is the case `resumed` exists to make
+   * visible — the round still runs, on a new conversation.
+   */
+  resumes = true;
   /** Permission answers that reached the harness, so the AC-4 round trip is assertable. */
   readonly permissionAnswers: Array<{ requestId: string; optionId: string }> = [];
   stopped = false;
+  /** How the fake says its process stopped; a test sets this to script a truncated run. */
+  stopReason: HarnessStopReason = "end_turn";
+  /** The conversation id the fake reports, or null to behave like a protocol that has none. */
+  harnessSessionId: string | null = "fake-harness-session";
 
   constructor(
     private readonly script: HarnessStreamEvent[] = [
@@ -174,12 +235,15 @@ export class FakeHarnessRunner implements HarnessRunner {
   start(opts: HarnessStartOpts): HarnessHandle {
     this.prompts.push(opts.prompt);
     this.worktreeNames.push(opts.worktreeName);
+    this.resumeSessionIds.push(opts.resumeSessionId ?? null);
     for (const e of this.script) opts.onEvent(e);
     return {
-      outcome: Promise.resolve<HarnessOutcome>({ kind: "completed" }),
+      outcome: Promise.resolve<HarnessOutcome>({ kind: "completed", stopReason: this.stopReason }),
       workspacePath: Promise.resolve<string | null>(
         this.workspace ? this.workspace(opts) : (opts.worktreeName ?? opts.cwd),
       ),
+      harnessSessionId: Promise.resolve(this.harnessSessionId),
+      resumed: Promise.resolve(this.resumes && opts.resumeSessionId !== undefined),
       send: async (text: string) => {
         this.inputs.push(text);
         opts.onEvent({ kind: "stdout", channel: "user", text });

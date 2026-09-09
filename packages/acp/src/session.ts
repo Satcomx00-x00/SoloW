@@ -14,6 +14,7 @@ import {
   advertisedOptions,
   permissionRequestSchema,
   promptResultSchema,
+  sessionLoadResultSchema,
   sessionNewResultSchema,
   textPrompt,
   toUpdates,
@@ -22,8 +23,9 @@ import {
 /**
  * An ACP session over a child process's stdio (Decision 0003, issue #58).
  *
- * `initialize` → `session/new` → `session/prompt` → `session/update` → `session/cancel`, framed
- * as newline-delimited JSON-RPC 2.0. Deliberately shaped as a mirror of `startClaudeSession` so
+ * `initialize` → `session/new` (or `session/load`, to resume) → `session/prompt` →
+ * `session/update` → `session/cancel`, framed as newline-delimited JSON-RPC 2.0. Deliberately
+ * shaped as a mirror of `startClaudeSession` so
  * the two adapters behind `HarnessRunner` read the same way and diverge only where the protocols
  * genuinely do.
  *
@@ -121,13 +123,30 @@ export interface AcpSessionOptions {
   /** Resume a previous session. Requires the agent to have advertised `loadSession` (AC-2). */
   resumeSessionId?: string;
   /**
+   * What to do when `resumeSessionId` was given but the agent never advertised `loadSession`.
+   *
+   * `"fail"` — the default, and what every caller before this got — refuses the run rather than
+   * quietly doing something other than what was asked. That is the right posture for a caller
+   * resuming *deliberately*: a session it cannot load is a session whose contents it will not
+   * get, and carrying on would answer a different question.
+   *
+   * `"new_session"` is for the caller that wants the conversation but does not need it. The
+   * orchestrator re-spawns a harness whenever a step is redriven or an execution budget runs
+   * out, and there losing the conversation costs a re-read of the worktree while failing the
+   * round costs the round. Which of the two happened is never guessed at — `resumed` says.
+   */
+  resumeFallback?: "fail" | "new_session";
+  /**
    * MCP servers the agent is told about when its session is created or loaded (spec F24). The
    * protocol's own channel for them — nothing is written to disk on the agent's behalf.
    */
   mcpServers?: AcpMcpServer[];
-  /** Session mode to select. Only sent when the agent listed it in `session/new` (AC-2). */
+  /**
+   * Session mode to select. Only sent when the agent listed it in the result of `session/new` or
+   * `session/load`, whichever opened this session (AC-2).
+   */
   modeId?: string;
-  /** Model to select. Only sent when the agent listed it in `session/new`, same rule as the mode. */
+  /** Model to select. Only sent when the agent listed it, same rule as the mode. */
   modelId?: string;
   /**
    * Distinguishes this run's permission ids from every other run of the same Task. Defaults to
@@ -149,6 +168,17 @@ export interface AcpSession {
   outcome: Promise<AcpOutcome>;
   /** The agent's session id once `session/new` succeeded; null if it never did. */
   sessionId: Promise<string | null>;
+  /**
+   * Whether this handshake picked an existing conversation back up (`session/load`) or opened a
+   * new one (`session/new`).
+   *
+   * A separate fact from `sessionId`, which is a string either way, and one the caller cannot
+   * infer from having asked: `resumeFallback: "new_session"` means asking is not the same as
+   * getting. The brief a resumed agent needs is not the brief a fresh one needs, so the caller
+   * has to be able to tell — and a run log that says which of the two happened is the only way
+   * to read a transcript that starts mid-thought.
+   */
+  resumed: Promise<boolean>;
   /**
    * Queue another user turn, once the handshake has put the Task brief in front of it.
    *
@@ -214,6 +244,11 @@ export function startAcpSession(options: AcpSessionOptions, prompt: string): Acp
   let resolveSessionId: (id: string | null) => void = () => {};
   const sessionIdPromise = new Promise<string | null>((resolve) => {
     resolveSessionId = resolve;
+  });
+  let resumed = false;
+  let resolveResumed: (yes: boolean) => void = () => {};
+  const resumedPromise = new Promise<boolean>((resolve) => {
+    resolveResumed = resolve;
   });
 
   let finished = false;
@@ -340,16 +375,48 @@ export function startAcpSession(options: AcpSessionOptions, prompt: string): Acp
       const negotiated = negotiate(initResult);
       caps = negotiated;
 
-      if (options.resumeSessionId) {
+      /*
+       * Load the conversation the caller named, or open a new one — and either way, carry on
+       * into the same advertise-and-pin block below.
+       *
+       * The two used to be separate paths, and the resume path was the shorter one in ways
+       * nobody chose: it never read the load result, never told the caller what the agent
+       * advertised, and never sent the Harness Profile's mode and model pins. A resumed run
+       * therefore came back on whatever the agent defaults to, silently — the exact substitution
+       * the advertised-only rule exists to prevent, arrived at by omission instead of by guess.
+       *
+       * A `session/load` result carries the same `modes` and `models` a `session/new` result does
+       * (there is nothing else for a resumed client to read them from), so reading it is all the
+       * fix takes. An agent whose load result lists nothing still gets no pin — that is the same
+       * rule as before, not a new gap.
+       */
+      const resumeSessionId = options.resumeSessionId;
+      let advertised: { models: string[]; modes: string[] };
+      /*
+       * An agent that cannot load is asked to load anyway unless the caller opted out.
+       *
+       * `requireCapability` below throws, and a throw here fails the whole round. That is right
+       * for a caller resuming deliberately and wrong for one merely trying to — see
+       * `resumeFallback`. The condition is written so the default, no `resumeFallback` at all,
+       * reaches `requireCapability` exactly as it always did.
+       */
+      if (
+        resumeSessionId !== undefined &&
+        (negotiated.loadSession || options.resumeFallback !== "new_session")
+      ) {
         // Guarded, not attempted: an agent that never advertised `loadSession` would answer
         // this with an error mid-run, after the process is already up and billing.
         requireCapability(negotiated, "loadSession");
-        await peer.request(AcpMethod.SessionLoad, {
-          sessionId: options.resumeSessionId,
-          cwd: options.cwd,
-          mcpServers: options.mcpServers ?? [],
-        });
-        sessionId = options.resumeSessionId;
+        const loaded = sessionLoadResultSchema.parse(
+          await peer.request(AcpMethod.SessionLoad, {
+            sessionId: resumeSessionId,
+            cwd: options.cwd,
+            mcpServers: options.mcpServers ?? [],
+          }),
+        );
+        sessionId = resumeSessionId;
+        resumed = true;
+        advertised = advertisedOptions(loaded);
       } else {
         const created = sessionNewResultSchema.parse(
           await peer.request(AcpMethod.SessionNew, {
@@ -358,32 +425,34 @@ export function startAcpSession(options: AcpSessionOptions, prompt: string): Acp
           }),
         );
         sessionId = created.sessionId;
-        /*
-         * Report what the agent advertised, before anything is chosen from it (issue #94 AC-2).
-         *
-         * This is the only moment the lists exist: an ACP agent says what it offers in the
-         * `session/new` result and nowhere else, so a consumer that wants to cache them for a
-         * picker has exactly this update to read. Which key it says it in is the agent's business
-         * — `advertisedOptions` reads both shapes.
-         */
-        const advertised = advertisedOptions(created);
-        if (advertised.models.length > 0 || advertised.modes.length > 0) {
-          options.onUpdate({ kind: "capabilities", ...advertised });
-        }
-        /*
-         * A pin is only ever sent for an id the agent itself offered — SoloW never invents one
-         * and hopes (AC-2). That guard is also what makes `session/set_model` safe to send at
-         * all: an agent that advertises no models is an agent this never speaks it to.
-         */
-        if (options.modeId && advertised.modes.includes(options.modeId)) {
-          await peer.request(AcpMethod.SessionSetMode, { sessionId, modeId: options.modeId });
-        }
-        if (options.modelId && advertised.models.includes(options.modelId)) {
-          await peer.request(AcpMethod.SessionSetModel, { sessionId, modelId: options.modelId });
-        }
+        advertised = advertisedOptions(created);
+      }
+
+      /*
+       * Report what the agent advertised, before anything is chosen from it (issue #94 AC-2).
+       *
+       * This is the only moment the lists exist: an ACP agent says what it offers in the result
+       * of the call that opened the session and nowhere else, so a consumer that wants to cache
+       * them for a picker has exactly this update to read. Which key it says it in is the
+       * agent's business — `advertisedOptions` reads both shapes.
+       */
+      if (advertised.models.length > 0 || advertised.modes.length > 0) {
+        options.onUpdate({ kind: "capabilities", ...advertised });
+      }
+      /*
+       * A pin is only ever sent for an id the agent itself offered — SoloW never invents one
+       * and hopes (AC-2). That guard is also what makes `session/set_model` safe to send at
+       * all: an agent that advertises no models is an agent this never speaks it to.
+       */
+      if (options.modeId && advertised.modes.includes(options.modeId)) {
+        await peer.request(AcpMethod.SessionSetMode, { sessionId, modeId: options.modeId });
+      }
+      if (options.modelId && advertised.models.includes(options.modelId)) {
+        await peer.request(AcpMethod.SessionSetModel, { sessionId, modelId: options.modelId });
       }
 
       resolveSessionId(sessionId);
+      resolveResumed(resumed);
       options.onUpdate({ kind: "session", sessionId, cwd: options.cwd });
 
       // The brief goes on the queue before anything else can: `ready` is what `send` waits for,
@@ -429,6 +498,9 @@ export function startAcpSession(options: AcpSessionOptions, prompt: string): Acp
     } finally {
       finished = true;
       resolveSessionId(sessionId);
+      // A handshake that never got this far resumed nothing, and a caller awaiting the answer
+      // must not be left holding a promise the failure path forgot to settle.
+      resolveResumed(resumed);
       settle();
     }
 
@@ -451,6 +523,7 @@ export function startAcpSession(options: AcpSessionOptions, prompt: string): Acp
   return {
     outcome,
     sessionId: sessionIdPromise,
+    resumed: resumedPromise,
     stderrTail: () => stderrTail,
     capabilities: () => caps,
     async send(text: string) {

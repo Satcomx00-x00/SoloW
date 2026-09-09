@@ -53,6 +53,7 @@ describe("session DAL — the typed log (issue #2)", () => {
     const written = await appendSessionEvent(ctx, {
       sessionId,
       seq: 0,
+      workflowStepId: null,
       payload: { kind: "user_turn", text: "fix the latch" },
     });
     expect(written.ok).toBe(true);
@@ -82,6 +83,7 @@ describe("session DAL — the typed log (issue #2)", () => {
       appendSessionEvent(ctx, {
         sessionId,
         seq: 0,
+        workflowStepId: null,
         payload: { kind: "stdout", text: "working" } as never,
       }),
     ).rejects.toThrow();
@@ -95,6 +97,7 @@ describe("session DAL — the typed log (issue #2)", () => {
       await appendSessionEvent(ctx, {
         sessionId,
         seq,
+        workflowStepId: null,
         payload: { kind: "assistant_turn", text: `line ${seq}`, thinking: false },
       });
     }
@@ -121,6 +124,7 @@ describe("session DAL — the typed log (issue #2)", () => {
       await appendSessionEvent(ctx, {
         sessionId,
         seq,
+        workflowStepId: null,
         payload: { kind: "assistant_turn", text: `line ${seq}`, thinking: false },
       });
     }
@@ -149,6 +153,7 @@ describe("session DAL — the typed log (issue #2)", () => {
     await appendSessionEvent(ctx, {
       sessionId,
       seq: 0,
+      workflowStepId: null,
       payload: { kind: "assistant_turn", text: "line 0", thinking: false },
     });
     const cursor = await sessionForkCursor(ctx, sessionId);
@@ -172,6 +177,7 @@ describe("session DAL — the typed log (issue #2)", () => {
     await appendSessionEvent(alpha.ctx, {
       sessionId: alpha.sessionId,
       seq: 0,
+      workflowStepId: null,
       payload: { kind: "assistant_turn", text: "line 0", thinking: false },
     });
 
@@ -181,12 +187,80 @@ describe("session DAL — the typed log (issue #2)", () => {
     expect(!theirs.ok && theirs.error).toBe("NOT_FOUND");
   });
 
+  it("narrows the log to one Workflow Step, and reads the whole log when asked for none", async () => {
+    /*
+     * A Session spans the whole pipeline, so "show me this Step" used to mean "read every Step's
+     * output and throw most of it away". Both halves matter equally: the filter has to return
+     * only that Step's rows, and no filter has to return exactly what it always did — the fork
+     * cursor hashes the whole log, and a default that quietly narrowed would make every cursor a
+     * promise about a history that does not exist.
+     */
+    const { ctx, sessionId } = await seedSession(db, "acme");
+    await appendSessionEvent(ctx, {
+      sessionId,
+      seq: 0,
+      // Written before the Step column existed, or by a Task on no Workflow — the two shapes a
+      // reader has to treat as unattributed rather than as a Step of their own.
+      workflowStepId: null,
+      payload: { kind: "assistant_turn", text: "unattributed", thinking: false },
+    });
+    await appendSessionEvent(ctx, {
+      sessionId,
+      seq: 1,
+      workflowStepId: "step-plan",
+      payload: { kind: "assistant_turn", text: "planning", thinking: false },
+    });
+    await appendSessionEvent(ctx, {
+      sessionId,
+      seq: 2,
+      workflowStepId: "step-build",
+      payload: { kind: "assistant_turn", text: "building", thinking: false },
+    });
+    await appendSessionEvent(ctx, {
+      sessionId,
+      seq: 3,
+      workflowStepId: "step-build",
+      payload: { kind: "assistant_turn", text: "still building", thinking: false },
+    });
+
+    const scoped = await listSessionEvents(ctx, sessionId, { workflowStepId: "step-build" });
+    expect(scoped.ok && scoped.data.map((e) => e.seq)).toEqual([2, 3]);
+
+    const everything = await listSessionEvents(ctx, sessionId);
+    expect(everything.ok && everything.data.map((e) => e.seq)).toEqual([0, 1, 2, 3]);
+    expect(everything.ok && everything.data.map((e) => e.workflowStepId)).toEqual([
+      null,
+      "step-plan",
+      "step-build",
+      "step-build",
+    ]);
+  });
+
+  it("does not read another Workspace's Step through the filter (Principle V)", async () => {
+    // The Step id narrows; it never widens. Beta naming alpha's Session and alpha's Step still
+    // meets the Workspace predicate first.
+    const alpha = await seedSession(db, "alpha");
+    const beta = await seedSession(db, "beta");
+    await appendSessionEvent(alpha.ctx, {
+      sessionId: alpha.sessionId,
+      seq: 0,
+      workflowStepId: "step-build",
+      payload: { kind: "assistant_turn", text: "building", thinking: false },
+    });
+
+    const theirs = await listSessionEvents(beta.ctx, alpha.sessionId, {
+      workflowStepId: "step-build",
+    });
+    expect(theirs.ok && theirs.data).toHaveLength(0);
+  });
+
   it("reads back one summarised range and nothing outside it", async () => {
     const { ctx, sessionId } = await seedSession(db, "acme");
     for (let seq = 0; seq < 5; seq++) {
       await appendSessionEvent(ctx, {
         sessionId,
         seq,
+        workflowStepId: null,
         payload: { kind: "assistant_turn", text: `line ${seq}`, thinking: false },
       });
     }
@@ -201,6 +275,7 @@ describe("session DAL — the typed log (issue #2)", () => {
     await appendSessionEvent(alpha.ctx, {
       sessionId: alpha.sessionId,
       seq: 0,
+      workflowStepId: null,
       payload: { kind: "assistant_turn", text: "line 0", thinking: false },
     });
 

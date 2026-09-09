@@ -21,11 +21,13 @@ import type {
  * handshake to negotiate, no tool vocabulary to map, and nothing to pin — which is exactly why
  * it works for a CLI nobody wrote an adapter for.
  *
- * **What it deliberately is not.** No tool calls, no permission requests, no usage. A passthrough
- * harness's output arrives as assistant text and nothing else, because inventing structure from an
- * arbitrary CLI's stdout would be guessing — and a transcript that says a tool ran when the
- * runner merely saw a line that looked like one is worse than a plain transcript. The Owner is
- * told this before choosing (`HARNESS_PROTOCOLS.cli_passthrough.hint`).
+ * **What it deliberately is not.** No tool calls, no permission requests, no usage, and no
+ * conversation to come back to. A passthrough harness's output arrives as assistant text and
+ * nothing else, because inventing structure from an arbitrary CLI's stdout would be guessing —
+ * and a transcript that says a tool ran when the runner merely saw a line that looked like one is
+ * worse than a plain transcript. The Owner is told this before choosing
+ * (`HARNESS_PROTOCOLS.cli_passthrough.hint`), and a resume it cannot honour is named by
+ * `unsupportedLaunchSettings` rather than dropped in silence.
  *
  * The isolation guarantee is unchanged: the lifecycle provisions the worktree and passes it as
  * `cwd`, exactly as it does for ACP (Principle II).
@@ -150,13 +152,15 @@ export class CliPassthroughRunner implements HarnessRunner {
       await drained(streams);
       answered = true;
 
-      if (code === 0) return { kind: "completed" };
       /*
        * A stop is not a failure. The operator ended the run deliberately, and whatever the
        * process exited with on the way out describes how it was ended, not what it did — the
        * same rule both other runners follow so partial work still reaches review.
        */
-      if (stopped) return { kind: "completed" };
+      if (stopped) return { kind: "completed", stopReason: "cancelled" };
+      // An exit status is all a plain CLI says about how it ended: zero is the end of its turn,
+      // anything else is an error of its own. It has no way to say it ran out of anything.
+      if (code === 0) return { kind: "completed", stopReason: "end_turn" };
 
       /*
        * stderr is the only evidence a plain CLI gives about *why* it failed, so it is what the
@@ -165,13 +169,25 @@ export class CliPassthroughRunner implements HarnessRunner {
        * stays a plain failure rather than being guessed at.
        */
       const signal: FailureSignal = detectFailureSignal(stderrTail);
-      return { kind: "failed", signal };
+      return { kind: "failed", signal, stopReason: "error" };
     })();
 
     return {
       outcome,
       // SoloW provisioned the worktree and passed it as `cwd`; there is nothing to adopt.
       workspacePath: Promise.resolve(opts.cwd),
+      // A plain CLI has no conversation to come back to, so there is no id to keep.
+      harnessSessionId: Promise.resolve(null),
+      /*
+       * And so nothing was resumed, whatever `opts.resumeSessionId` said.
+       *
+       * `false` rather than a throw or a refused launch: a run one round of which happens to
+       * carry an id from a protocol that has none is still a run worth doing, and the brief it
+       * gets is simply the whole brief. The setting being unhonourable is reported to the
+       * operator by `unsupportedLaunchSettings`, which is where every other setting this
+       * protocol cannot carry is already named.
+       */
+      resumed: Promise.resolve(false),
       async send(text: string) {
         if (stopped) return false;
         try {
