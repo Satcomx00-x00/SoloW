@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { type AcpScript, writeFakeAcpBin } from "@solow/acp/testing";
 import { createLocalExecutor } from "../executor/local.js";
 import { AcpRunner, toStreamEvent } from "./acp-runner.js";
-import type { HarnessHandle, HarnessStreamEvent } from "./runner.js";
+import type { HarnessHandle, HarnessStartOpts, HarnessStreamEvent } from "./runner.js";
 
 /**
  * The ACP client driving a real child process through the real `Executor` (issue #58) — a
@@ -33,6 +33,8 @@ async function run(
     PATH: process.env["PATH"] ?? "",
     CLAUDE_CODE_OAUTH_TOKEN: "the-credential",
   },
+  /** Per-round facts a test wants to vary — a conversation to carry on, so far. */
+  over: Partial<HarnessStartOpts> = {},
 ) {
   workdir = await mkdtemp(join(tmpdir(), "solow-acp-"));
   const events: HarnessStreamEvent[] = [];
@@ -49,6 +51,7 @@ async function run(
     worktreeName: null,
     prompt: "fix the latch",
     onEvent: (e) => events.push(e),
+    ...over,
   });
   return { handle, events, workdir };
 }
@@ -62,7 +65,7 @@ describe("AcpRunner", () => {
       turns: [{ toolCalls: ["Edit src/latch.ts"], text: ["patched latch.ts"] }],
     });
 
-    expect(await h.outcome).toEqual({ kind: "completed" });
+    expect(await h.outcome).toEqual({ kind: "completed", stopReason: "end_turn" });
     expect(events.filter((e) => e.kind !== "usage")).toEqual([
       // ACP carried the id and the status all along; this seam used to drop both, so a
       // `tool_call_update` arrived looking like a second, unrelated call.
@@ -88,7 +91,7 @@ describe("AcpRunner", () => {
     });
 
     expect(await h.send("also add a regression test")).toBe(true);
-    expect(await h.outcome).toEqual({ kind: "completed" });
+    expect(await h.outcome).toEqual({ kind: "completed", stopReason: "end_turn" });
     expect(stdout(events)).toContain("added the test");
   });
 
@@ -143,7 +146,11 @@ describe("AcpRunner", () => {
       dieEarly: true,
       stderr: "API error: usage limit reached, resets at 18:00\n",
     });
-    expect(await h.outcome).toEqual({ kind: "failed", signal: { quotaExhausted: true } });
+    expect(await h.outcome).toEqual({
+      kind: "failed",
+      signal: { quotaExhausted: true },
+      stopReason: "no_result",
+    });
   });
 
   it("classifies an unrecognised crash as a plain failure", async () => {
@@ -195,7 +202,7 @@ describe("AcpRunner permissions (AC-4)", () => {
     expect(JSON.stringify(request)).not.toContain("never-leaves-the-harness");
 
     expect(await h.respondPermission?.(request?.requestId ?? "", "allow")).toBe("answered");
-    expect(await h.outcome).toEqual({ kind: "completed" });
+    expect(await h.outcome).toEqual({ kind: "completed", stopReason: "end_turn" });
 
     expect(events.find((e) => e.kind === "permission_resolved")).toEqual({
       kind: "permission_resolved",
@@ -236,7 +243,7 @@ describe("AcpRunner permissions (AC-4)", () => {
     ]);
 
     expect(await h.respondPermission?.(request?.requestId ?? "", "allow")).toBe("answered");
-    expect(await h.outcome).toEqual({ kind: "completed" });
+    expect(await h.outcome).toEqual({ kind: "completed", stopReason: "end_turn" });
   });
 
   it("refuses when nobody answers, rather than granting what nobody was asked about", async () => {
@@ -279,7 +286,7 @@ describe("AcpRunner permissions (AC-4)", () => {
       onEvent: (e) => events.push(e),
     });
 
-    expect(await handle.outcome).toEqual({ kind: "completed" });
+    expect(await handle.outcome).toEqual({ kind: "completed", stopReason: "end_turn" });
     expect(events.find((e) => e.kind === "permission_resolved")).toMatchObject({
       optionId: "allow",
       decidedBy: "policy",
@@ -344,5 +351,64 @@ describe("toStreamEvent", () => {
     expect(
       toStreamEvent({ kind: "result", ok: false, stopReason: "refusal", error: null }),
     ).toEqual({ kind: "stdout", channel: "system", text: "\n[refusal]\n" });
+  });
+});
+
+describe("what the run says about how it stopped", () => {
+  it("reports the agent's session id, so the run can be loaded again later", async () => {
+    const { handle: h } = await run({ turns: [{ text: ["ok"] }] });
+    expect(await h.harnessSessionId).toBe("acp-session-1");
+    await h.outcome;
+  });
+
+  it("carries a token budget as a completed turn that was cut short", async () => {
+    // ACP says `max_tokens` on a turn that ended for want of context, and counts it a success.
+    // The lifecycle is the party that decides what a truncated success means for the Task.
+    const { handle: h } = await run({ turns: [{ text: ["half"], stopReason: "max_tokens" }] });
+    expect(await h.outcome).toEqual({ kind: "completed", stopReason: "max_tokens" });
+  });
+
+  it("names a refusal as such", async () => {
+    const { handle: h } = await run({ turns: [{ text: ["no"], stopReason: "refusal" }] });
+    expect(await h.outcome).toEqual({ kind: "failed", signal: {}, stopReason: "refusal" });
+  });
+});
+
+/**
+ * Carrying the conversation across a re-spawn.
+ *
+ * The lifecycle loses this process every time a durable step is redriven or an execution budget
+ * runs out. What it needs from the runner is narrow: use the id when the harness can, do not fail
+ * the round when it cannot, and say which of the two happened.
+ */
+describe("resuming a conversation", () => {
+  it("picks up the conversation it was given, and says it did", async () => {
+    const { handle: h } = await run({ agentCapabilities: { loadSession: true } }, undefined, {
+      resumeSessionId: "old-session",
+    });
+
+    expect(await h.outcome).toEqual({ kind: "completed", stopReason: "end_turn" });
+    expect(await h.resumed).toBe(true);
+    // The loaded id, not a new one — this is the conversation the lifecycle recorded last round.
+    expect(await h.harnessSessionId).toBe("old-session");
+  });
+
+  it("starts a fresh conversation rather than failing, when the harness cannot load one", async () => {
+    /*
+     * The runner's own decision, and the reason it does not simply pass the id through: the
+     * client hard-fails by default, which would turn "we tried to keep the context" into "the
+     * round did not run". A harness with no memory of the work still does the work.
+     */
+    const { handle: h } = await run({}, undefined, { resumeSessionId: "old-session" });
+
+    expect(await h.outcome).toEqual({ kind: "completed", stopReason: "end_turn" });
+    expect(await h.resumed).toBe(false);
+    expect(await h.harnessSessionId).toBe("acp-session-1");
+  });
+
+  it("reports a round that was never asked to resume as a fresh one", async () => {
+    const { handle: h } = await run({ agentCapabilities: { loadSession: true } });
+    await h.outcome;
+    expect(await h.resumed).toBe(false);
   });
 });

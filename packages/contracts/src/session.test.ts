@@ -68,6 +68,34 @@ const VARIANTS: Array<[string, SessionEventPayload]> = [
       truncated: false,
     },
   ],
+  [
+    "the harness's completion marker, with why its process stopped",
+    {
+      kind: "agent_done",
+      changed: true,
+      branch: "solow/task-1",
+      outcome: "changes_ready",
+      summary: "Pinned it.",
+      stopReason: "max_turns",
+    },
+  ],
+  [
+    "a workflow decision",
+    {
+      kind: "workflow_decision",
+      stepId: "step-review",
+      stepName: "Review",
+      signal: "agent-signal",
+      gate: "auto",
+      needsApproval: false,
+      condition: { when: { kind: "outcome", is: "blocked" }, holds: true },
+      status: "advanced",
+      nextStepId: "step-escalate",
+      nextStepName: "Escalate",
+      outcome: "blocked",
+      producedChanges: false,
+    },
+  ],
 ];
 
 describe("sessionEventPayloadSchema", () => {
@@ -80,6 +108,31 @@ describe("sessionEventPayloadSchema", () => {
 
   it("refuses a payload whose kind is not one the log records", () => {
     expect(sessionEventPayloadSchema.safeParse({ kind: "stdout", text: "hi" }).success).toBe(false);
+  });
+
+  it("still reads a completion marker written before stop reasons existed", () => {
+    // The marker has to work without the harness's cooperation, and without this build's: a row
+    // from an older orchestrator carries no `stopReason` and must parse exactly as it always did.
+    expect(
+      sessionEventPayloadSchema.parse({
+        kind: "agent_done",
+        changed: false,
+        branch: "solow/task-1",
+      }),
+    ).toEqual({ kind: "agent_done", changed: false, branch: "solow/task-1" });
+  });
+
+  it("refuses a stop reason outside the shared vocabulary rather than storing a protocol's own word", () => {
+    // `error_max_turns` is Claude Code's word; the log stores `max_turns`. A runner that forgot
+    // to normalise must fail here, not produce a row every reader has to special-case.
+    expect(
+      sessionEventPayloadSchema.safeParse({
+        kind: "agent_done",
+        changed: false,
+        branch: "solow/task-1",
+        stopReason: "error_max_turns",
+      }).success,
+    ).toBe(false);
   });
 
   it("refuses an assistant turn that does not say whether it was thinking", () => {

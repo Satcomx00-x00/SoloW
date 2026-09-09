@@ -34,20 +34,34 @@ describe("toTaskEvent", () => {
     // answer that happens to start with a bullet, and forced every client to parse presentation
     // back out of the text. The channel is data; the marker, if any, is the terminal's choice.
     expect(
-      toTaskEvent({ kind: "assistant_turn", text: "considering", thinking: true }, "t", "s", 4),
+      toTaskEvent(
+        { kind: "assistant_turn", text: "considering", thinking: true },
+        "t",
+        "s",
+        4,
+        null,
+      ),
     ).toEqual({
       kind: "stdout",
       taskId: "t",
+      workflowStepId: null,
       sessionId: "s",
       seq: 4,
       text: "considering",
       channel: "thinking",
     });
     expect(
-      toTaskEvent({ kind: "assistant_turn", text: "considering", thinking: false }, "t", "s", 4),
+      toTaskEvent(
+        { kind: "assistant_turn", text: "considering", thinking: false },
+        "t",
+        "s",
+        4,
+        null,
+      ),
     ).toEqual({
       kind: "stdout",
       taskId: "t",
+      workflowStepId: null,
       sessionId: "s",
       seq: 4,
       text: "considering",
@@ -59,12 +73,16 @@ describe("toTaskEvent", () => {
     // All three used to arrive as an untagged `stdout` frame, so the terminal rendered them
     // identically and could not, for instance, render markdown for prose but not for a mode
     // switch. Telling them apart on the wire is what makes that possible at all.
-    expect(toTaskEvent({ kind: "user_turn", text: "steer left" }, "t", "s", 1)).toMatchObject({
-      kind: "stdout",
-      text: "steer left",
-      channel: "user",
-    });
-    expect(toTaskEvent({ kind: "notice", text: "mode: acceptEdits" }, "t", "s", 2)).toMatchObject({
+    expect(toTaskEvent({ kind: "user_turn", text: "steer left" }, "t", "s", 1, null)).toMatchObject(
+      {
+        kind: "stdout",
+        text: "steer left",
+        channel: "user",
+      },
+    );
+    expect(
+      toTaskEvent({ kind: "notice", text: "mode: acceptEdits" }, "t", "s", 2, null),
+    ).toMatchObject({
       kind: "stdout",
       text: "mode: acceptEdits",
       channel: "system",
@@ -78,13 +96,20 @@ describe("toTaskEvent", () => {
         "t",
         "s",
         2,
+        null,
       ),
     ).toMatchObject({ kind: "tool_use", name: "Edit", callId: "c1", input: { file_path: "a.ts" } });
   });
 
   it("gives a tool result a wire form at all — it previously had none", () => {
     expect(
-      toTaskEvent({ kind: "tool_result", callId: "c1", ok: false, output: "boom" }, "t", "s", 3),
+      toTaskEvent(
+        { kind: "tool_result", callId: "c1", ok: false, output: "boom" },
+        "t",
+        "s",
+        3,
+        null,
+      ),
     ).toMatchObject({ kind: "tool_result", callId: "c1", ok: false, output: "boom" });
   });
 
@@ -101,10 +126,12 @@ describe("toTaskEvent", () => {
         "t",
         "s",
         3,
+        null,
       ),
     ).toEqual({
       kind: "permission_request",
       taskId: "t",
+      workflowStepId: null,
       sessionId: "s",
       seq: 3,
       toolCallId: null,
@@ -127,10 +154,12 @@ describe("toTaskEvent", () => {
         "t",
         "s",
         7,
+        null,
       ),
     ).toEqual({
       kind: "todos",
       taskId: "t",
+      workflowStepId: null,
       sessionId: "s",
       seq: 7,
       items: [{ content: "Record the list", status: "in_progress", activeForm: "Recording" }],
@@ -138,7 +167,9 @@ describe("toTaskEvent", () => {
   });
 
   it("has no wire form for a record nothing streams", () => {
-    expect(toTaskEvent({ kind: "state", from: "running", to: "review" }, "t", "s", 5)).toBeNull();
+    expect(
+      toTaskEvent({ kind: "state", from: "running", to: "review" }, "t", "s", 5, null),
+    ).toBeNull();
     expect(
       toTaskEvent(
         {
@@ -152,6 +183,7 @@ describe("toTaskEvent", () => {
         "t",
         "s",
         6,
+        null,
       ),
     ).toBeNull();
   });
@@ -203,7 +235,9 @@ describe("attachSubscriber (typed log, unchanged wire)", () => {
   });
 
   /** Rows exactly as the log holds them — `kind` and payload passed straight through. */
-  async function seed(rows: Array<{ seq: number; kind: string; payload: unknown }>) {
+  async function seed(
+    rows: Array<{ seq: number; kind: string; payload: unknown; workflowStepId?: string }>,
+  ) {
     for (const row of rows) {
       await db.insert(sessionEvent).values({
         id: `ev-${row.seq}`,
@@ -212,6 +246,9 @@ describe("attachSubscriber (typed log, unchanged wire)", () => {
         seq: row.seq,
         kind: row.kind,
         payload: row.payload,
+        // Left unset by default, which is a row written before the column existed — the
+        // population the reconnect path has to keep replaying unchanged.
+        ...(row.workflowStepId ? { workflowStepId: row.workflowStepId } : {}),
       });
     }
   }
@@ -233,6 +270,31 @@ describe("attachSubscriber (typed log, unchanged wire)", () => {
     return sent;
   }
 
+  it("hands a reconnecting client the Step each row was produced under", async () => {
+    /*
+     * The whole point of the column reaching the wire: a client that drops its socket mid-run
+     * and comes back has to be able to rebuild the same per-Step transcript it had, without
+     * re-deriving Step boundaries from the `workflow_decision` lines scattered through the log.
+     *
+     * The unattributed row is seeded alongside deliberately. It is what every row written before
+     * this column existed looks like, and it must still replay — as `null`, which a client reads
+     * as "no Step", never as a Step of its own.
+     */
+    await seed([
+      { seq: 0, kind: "assistant_turn", payload: { kind: "assistant_turn", text: "planning\n" } },
+      {
+        seq: 1,
+        kind: "assistant_turn",
+        payload: { kind: "assistant_turn", text: "building\n" },
+        workflowStepId: "step-build",
+      },
+    ]);
+
+    expect(
+      (await replay()).map((f) => ("workflowStepId" in f ? f.workflowStepId : undefined)),
+    ).toEqual([null, "step-build"]);
+  });
+
   it("replays a row written before the typed union as the frame it always produced", async () => {
     await seed([
       { seq: 0, kind: "stdout", payload: { text: "line 0\n" } },
@@ -243,6 +305,8 @@ describe("attachSubscriber (typed log, unchanged wire)", () => {
       {
         kind: "stdout",
         taskId: "task-1",
+        // A row from before the column existed replays as unattributed, never as a Step.
+        workflowStepId: null,
         sessionId: "sess-1",
         seq: 0,
         text: "line 0\n",
@@ -251,6 +315,7 @@ describe("attachSubscriber (typed log, unchanged wire)", () => {
       {
         kind: "tool_use",
         taskId: "task-1",
+        workflowStepId: null,
         sessionId: "sess-1",
         seq: 1,
         name: "Edit",
@@ -269,6 +334,7 @@ describe("attachSubscriber (typed log, unchanged wire)", () => {
       {
         kind: "stdout",
         taskId: "task-1",
+        workflowStepId: null,
         sessionId: "sess-1",
         seq: 0,
         text: "line 0\n",
@@ -303,5 +369,67 @@ describe("attachSubscriber (typed log, unchanged wire)", () => {
     // Replay reads the events, not the summaries, and compaction never touched the events —
     // so a summarised session replays losslessly and the review gate keeps its evidence.
     expect(await replay()).toEqual(before);
+  });
+});
+
+describe("a workflow decision on the wire", () => {
+  it("reaches the terminal as one machine line, worded once for live and replay alike", () => {
+    const frame = toTaskEvent(
+      {
+        kind: "workflow_decision",
+        stepId: "s-review",
+        stepName: "Review",
+        signal: "agent-signal",
+        gate: "auto",
+        needsApproval: false,
+        condition: { when: { kind: "outcome", is: "blocked" }, holds: true },
+        status: "advanced",
+        nextStepId: "s-escalate",
+        nextStepName: "Escalate",
+        outcome: "blocked",
+        producedChanges: false,
+      },
+      "t",
+      "s",
+      9,
+      // The Step the decision is *about*. Not `nextStepId`: this line closes the transcript of
+      // the Step that just finished, and filing it under the Step being entered would open that
+      // Step's transcript with a verdict on work its reader has not seen.
+      "s-review",
+    );
+    expect(frame).toEqual({
+      kind: "stdout",
+      taskId: "t",
+      workflowStepId: "s-review",
+      sessionId: "s",
+      seq: 9,
+      channel: "system",
+      text: 'Workflow: step "Review" finished (the harness signalled done). Condition did the harness report `blocked`? → yes. Advanced to "Escalate".',
+    });
+  });
+
+  it("segments by the Step the decision closes, not the one it opens", () => {
+    /*
+     * The flattening to a `stdout` line is kept, so the only thing that can carry the Step here
+     * is the column beside the frame. Red under a projection that reads `stepId` out of the
+     * payload for this kind and leaves every other kind unattributed, and red under one that
+     * files the decision under `nextStepId` — where it would head the *next* Step's transcript.
+     */
+    const decision = {
+      kind: "workflow_decision",
+      stepId: "s-build",
+      stepName: "Build",
+      signal: "review",
+      gate: "human",
+      needsApproval: true,
+      condition: null,
+      status: "advanced",
+      nextStepId: "s-ship",
+      nextStepName: "Ship",
+      outcome: null,
+      producedChanges: true,
+    } as const;
+    const frame = toTaskEvent(decision, "t", "s", 3, "s-build");
+    expect(frame).toMatchObject({ kind: "stdout", workflowStepId: "s-build" });
   });
 });

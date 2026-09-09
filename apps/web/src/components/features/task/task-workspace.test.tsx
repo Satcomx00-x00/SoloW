@@ -9,6 +9,7 @@ import {
 } from "@solow/contracts";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import {
+  type CallLog,
   type FakeSocket,
   type Handlers,
   installFakeWebSocket,
@@ -869,13 +870,19 @@ describe("TaskWorkspace workflow steps", () => {
     const strip = await screen.findByRole("region", { name: "Workflow progress" });
     expect(strip.textContent).toContain("Implement & review");
     expect(strip.textContent).toContain("Step 2 of 3");
-    const items = within(strip).getAllByRole("listitem");
+    // The steps are the strip's tabs now — the `<li>`s stepped aside (role="presentation") so the
+    // tablist could own its tabs directly, which takes them out of the listitem role they used to
+    // be found by. The status still rides on the same element; it is read off the slot instead.
+    const items = Array.from(strip.querySelectorAll("[data-slot='step']"));
     expect(items.map((li) => li.getAttribute("data-status"))).toEqual([
       "done",
       "running",
       "upcoming",
     ]);
-    expect(items[1]?.getAttribute("aria-current")).toBe("step");
+    // `aria-current` still means one thing only: this is where the run is. It rides on the tab
+    // rather than on the presentational `<li>`, which is out of the accessibility tree.
+    const tabs = within(strip).getAllByRole("tab");
+    expect(tabs.map((t) => t.getAttribute("aria-current"))).toEqual([null, null, "step", null]);
   });
 
   it("marks the last Step done once the Task is, rather than leaving it current forever", async () => {
@@ -886,7 +893,7 @@ describe("TaskWorkspace workflow steps", () => {
     });
 
     const strip = await screen.findByRole("region", { name: "Workflow progress" });
-    const items = within(strip).getAllByRole("listitem");
+    const items = Array.from(strip.querySelectorAll("[data-slot='step']"));
     expect(items.map((li) => li.getAttribute("data-status"))).toEqual(["done", "done", "done"]);
   });
 
@@ -899,5 +906,259 @@ describe("TaskWorkspace workflow steps", () => {
     await screen.findByText(/Review actions become available|Approve/);
     expect(screen.queryByRole("region", { name: "Workflow progress" })).toBeNull();
     expect(log.calls.some((c) => c.path === "workflow.taskBinding")).toBe(false);
+  });
+});
+
+/**
+ * One Step in the terminal at a time (the user's report: "all the step harness content in the
+ * same terminal ... causing terminal interface loading problems").
+ *
+ * A Session spans the whole pipeline, so the fix is a narrowing that reaches the *server* — the
+ * assertions below are mostly about what was asked for, not what was rendered, because filtering
+ * on arrival would still transfer and hold every Step's output and fix nothing. The rendering
+ * assertions cover the other half: frames that arrive after the query ran have to obey the same
+ * scope, and the frames that carry no Step at all have to survive it.
+ */
+describe("TaskWorkspace step-scoped terminal", () => {
+  const step = (id: string, name: string, position: number) => ({
+    id,
+    workflowId: "wf-1",
+    name,
+    position,
+    rank: `r${position}`,
+    agentProfileId: "harness-1",
+    promptTemplate: "Do it.",
+    gate: "human" as const,
+    advanceOn: "review" as const,
+    onEnter: null,
+    branch: null,
+    mcpServerIds: [],
+    skillIds: [],
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  });
+  const steps = [step("st-1", "Implement", 0), step("st-2", "Review", 1), step("st-3", "Ship", 2)];
+  const binding = (current: string) => ({
+    taskId: TASK_ID,
+    workflowId: "wf-1",
+    workflowName: "Implement & review",
+    attachedVersion: 1,
+    currentVersion: 1,
+    definitionDrifted: false,
+    currentStep: steps.find((s) => s.id === current),
+    steps,
+    handoff: null,
+    brief: "Do it.",
+  });
+
+  /** A bound Task sitting on `current`, with an empty log — the queries are what is under test. */
+  const bound = (current: string, over: Handlers = {}): Handlers => ({
+    "task.get": () => task({ state: "running", workflowId: "wf-1", workflowStepId: current }),
+    "workflow.taskBinding": () => binding(current),
+    "session.listForTask": () => [session],
+    "session.get": () => detail(),
+    "stream.ticket": () => ({
+      url: "ws://hub.test/?ticket=t",
+      expiresAt: "2026-01-01T00:01:00.000Z",
+    }),
+    ...over,
+  });
+
+  const sessionGets = (log: CallLog) => log.calls.filter((c) => c.path === "session.get");
+
+  it("opens on the Step the run is on, and asks for only that Step's log", async () => {
+    const { log } = renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, bound("st-2"));
+
+    await screen.findByRole("region", { name: "Workflow progress" });
+    await waitFor(() => expect(sessionGets(log).length).toBeGreaterThan(0));
+    // Every request, not just the last: a first unscoped fetch superseded a moment later would
+    // pull the whole pipeline over the wire once per page load, which is the cost being removed.
+    for (const call of sessionGets(log)) {
+      expect(call.input).toEqual({ sessionId: SESSION_ID, workflowStepId: "st-2" });
+    }
+  });
+
+  it("says which Step it is showing, so a short transcript is not read as a short run", async () => {
+    renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, bound("st-2"));
+
+    const panel = await screen.findByRole("tabpanel");
+    expect(panel.textContent).toContain("Showing");
+    expect(panel.textContent).toContain("step 2 of 3");
+    expect(panel.textContent).toContain("The rest of this run is under the other steps.");
+  });
+
+  it("re-asks the server, scoped, when a Step is clicked", async () => {
+    const { log } = renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, bound("st-2"));
+
+    fireEvent.click(await screen.findByRole("tab", { name: /Implement/ }));
+
+    await waitFor(() =>
+      expect(sessionGets(log).at(-1)?.input).toEqual({
+        sessionId: SESSION_ID,
+        workflowStepId: "st-1",
+      }),
+    );
+    // The tab that is selected and the tab the run is on are two different tabs now, and each
+    // says so in its own attribute.
+    const implement = screen.getByRole("tab", { name: /Implement/ });
+    expect(implement.getAttribute("aria-selected")).toBe("true");
+    expect(implement.getAttribute("aria-current")).toBeNull();
+    expect(screen.getByRole("tab", { name: /Review/ }).getAttribute("aria-current")).toBe("step");
+  });
+
+  it("asks for the whole run again, in the words it always used, when told to", async () => {
+    const { log } = renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, bound("st-2"));
+
+    fireEvent.click(await screen.findByRole("tab", { name: "Whole run" }));
+
+    // No `workflowStepId` key at all, not a null one: the unscoped request has to stay the exact
+    // request this page made before any of this existed.
+    await waitFor(() => expect(sessionGets(log).at(-1)?.input).toEqual({ sessionId: SESSION_ID }));
+    // ...and with nothing narrowed, the terminal stops claiming it is narrowed.
+    await waitFor(() => expect(screen.queryByText(/The rest of this run/)).toBeNull());
+  });
+
+  it("follows the run as it advances — until the operator picks a Step, after which it stays put", async () => {
+    let current = "st-1";
+    const { log } = renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
+      ...bound("st-1"),
+      "task.get": () =>
+        task({ state: "running", workflowId: "wf-1", workflowStepId: current as string }),
+      "workflow.taskBinding": () => binding(current),
+    });
+
+    await waitFor(() =>
+      expect(sessionGets(log).at(-1)?.input).toEqual({
+        sessionId: SESSION_ID,
+        workflowStepId: "st-1",
+      }),
+    );
+    await waitFor(() => expect(sockets[0]).toBeDefined());
+
+    // A Step advancing announces the Task's state, which is what re-reads the binding.
+    current = "st-2";
+    act(() =>
+      sockets[0]?.emit({
+        kind: "status",
+        taskId: TASK_ID,
+        state: "running",
+        at: "2026-01-01T00:00:05.000Z",
+      }),
+    );
+    await waitFor(() =>
+      expect(sessionGets(log).at(-1)?.input).toEqual({
+        sessionId: SESSION_ID,
+        workflowStepId: "st-2",
+      }),
+    );
+
+    // Now the operator chooses. From here the run may go where it likes; the screen does not.
+    fireEvent.click(await screen.findByRole("tab", { name: /Implement/ }));
+    await waitFor(() =>
+      expect(sessionGets(log).at(-1)?.input).toEqual({
+        sessionId: SESSION_ID,
+        workflowStepId: "st-1",
+      }),
+    );
+
+    current = "st-3";
+    act(() =>
+      sockets[0]?.emit({
+        kind: "status",
+        taskId: TASK_ID,
+        state: "running",
+        at: "2026-01-01T00:00:09.000Z",
+      }),
+    );
+    await screen.findByRole("tab", { name: /Ship/ });
+    await waitFor(() =>
+      expect(screen.getByRole("tab", { name: /Ship/ }).getAttribute("aria-current")).toBe("step"),
+    );
+    // The cursor moved twice and the terminal is still on the Step that was asked for.
+    expect(screen.getByRole("tab", { name: /Implement/ }).getAttribute("aria-selected")).toBe(
+      "true",
+    );
+    expect(sessionGets(log).at(-1)?.input).toEqual({
+      sessionId: SESSION_ID,
+      workflowStepId: "st-1",
+    });
+  });
+
+  it("keeps another Step's live output out, and everything unattributed in", async () => {
+    renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, bound("st-2"));
+    await screen.findByRole("region", { name: "Workflow progress" });
+    await waitFor(() => expect(sockets[0]).toBeDefined());
+
+    const line = (seq: number, text: string, workflowStepId?: string | null) => ({
+      kind: "stdout",
+      taskId: TASK_ID,
+      sessionId: SESSION_ID,
+      seq,
+      text,
+      channel: "assistant",
+      ...(workflowStepId === undefined ? {} : { workflowStepId }),
+    });
+
+    act(() => {
+      sockets[0]?.emit(line(1, "belongs to the review step", "st-2"));
+      sockets[0]?.emit(line(2, "belongs to the implement step", "st-1"));
+      // Null and absent are the same answer — unattributed — and neither is a Step to filter to.
+      // An orchestrator older than the column sends the second; a Task on no Workflow, the first.
+      sockets[0]?.emit(line(3, "written before Steps were recorded", null));
+      sockets[0]?.emit(line(4, "from a producer that never heard of Steps"));
+    });
+
+    expect(await screen.findByText(/belongs to the review step/)).toBeDefined();
+    expect(await screen.findByText(/written before Steps were recorded/)).toBeDefined();
+    expect(await screen.findByText(/from a producer that never heard of Steps/)).toBeDefined();
+    expect(screen.queryByText(/belongs to the implement step/)).toBeNull();
+  });
+
+  it("is operable from the keyboard, one tab stop for the whole strip", async () => {
+    // A strip of a dozen steps that each swallowed a Tab press would put the terminal below it a
+    // dozen presses away, so the tabs share one stop and the arrows walk them (WAI-ARIA APG).
+    // Activation is manual — arrowing to a Step must not fire a query for it on the way past.
+    const { log } = renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, bound("st-2"));
+
+    const review = await screen.findByRole("tab", { name: /Review/ });
+    const tabs = screen.getAllByRole("tab");
+    // Exactly one of them is reachable by Tab: the selected one.
+    expect(tabs.map((t) => t.getAttribute("tabindex"))).toEqual(["-1", "-1", "0", "-1"]);
+
+    review.focus();
+    const scoped = sessionGets(log).length;
+    fireEvent.keyDown(review, { key: "ArrowLeft" });
+    expect(document.activeElement).toBe(screen.getByRole("tab", { name: /Implement/ }));
+    expect(sessionGets(log)).toHaveLength(scoped);
+
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: "Home" });
+    expect(document.activeElement).toBe(screen.getByRole("tab", { name: "Whole run" }));
+    // Wrapping, so the far end of a long strip is one press away from either end of it.
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: "ArrowLeft" });
+    expect(document.activeElement).toBe(screen.getByRole("tab", { name: /Ship/ }));
+  });
+
+  it("leaves a Task on no Workflow exactly as it was", async () => {
+    const { log } = renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
+      "task.get": () => task({ state: "running" }),
+      "session.listForTask": () => [session],
+      "session.get": () =>
+        detail([{ kind: "assistant_turn", text: "patched latch.ts", thinking: false }]),
+      "stream.ticket": () => ({
+        url: "ws://hub.test/?ticket=t",
+        expiresAt: "2026-01-01T00:01:00.000Z",
+      }),
+    });
+
+    await screen.findByText(/patched latch.ts/);
+    // No strip, so no tabs, so no panel pretending to be one half of a relationship with them —
+    // and the transcript request is the one this page has always made.
+    expect(screen.queryByRole("tablist")).toBeNull();
+    expect(screen.queryByRole("tab")).toBeNull();
+    expect(screen.queryByRole("tabpanel")).toBeNull();
+    expect(screen.queryByText(/The rest of this run/)).toBeNull();
+    for (const call of sessionGets(log)) {
+      expect(call.input).toEqual({ sessionId: SESSION_ID });
+    }
   });
 });

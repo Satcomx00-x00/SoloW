@@ -22156,7 +22156,7 @@
     "/session.get": {
       "get": {
         "operationId": "session-get",
-        "summary": "Fetch one Session with its event log — minus any range a compaction summary stands in for, which session.eventRange reads back — the diff captured at the review gate for each Repository the Task works in, and any recorded decision.",
+        "summary": "Fetch one Session with its event log — minus any range a compaction summary stands in for, which session.eventRange reads back — the diff captured at the review gate for each Repository the Task works in, and any recorded decision. Pass workflowStepId to narrow the events to one Workflow Step.",
         "tags": [
           "session"
         ],
@@ -22174,6 +22174,14 @@
               "minLength": 1
             },
             "required": true
+          },
+          {
+            "in": "query",
+            "name": "workflowStepId",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
           }
         ],
         "responses": {
@@ -22259,7 +22267,8 @@
                               "widget",
                               "widget_response",
                               "todos",
-                              "agent_done"
+                              "agent_done",
+                              "workflow_decision"
                             ]
                           },
                           "payload": {
@@ -22936,6 +22945,13 @@
                                           "summary": {
                                             "type": "string",
                                             "maxLength": 2000
+                                          },
+                                          "decision": {
+                                            "type": "string",
+                                            "enum": [
+                                              "yes",
+                                              "no"
+                                            ]
                                           }
                                         },
                                         "required": [
@@ -23049,6 +23065,19 @@
                                   "summary": {
                                     "type": "string",
                                     "maxLength": 2000
+                                  },
+                                  "stopReason": {
+                                    "type": "string",
+                                    "enum": [
+                                      "end_turn",
+                                      "max_turns",
+                                      "max_tokens",
+                                      "refusal",
+                                      "cancelled",
+                                      "error",
+                                      "no_result",
+                                      "unknown"
+                                    ]
                                   }
                                 },
                                 "required": [
@@ -23086,8 +23115,168 @@
                                   "widgetId",
                                   "values"
                                 ]
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "workflow_decision"
+                                    ]
+                                  },
+                                  "stepId": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "stepName": {
+                                    "type": "string"
+                                  },
+                                  "signal": {
+                                    "type": "string",
+                                    "enum": [
+                                      "agent-signal",
+                                      "review"
+                                    ]
+                                  },
+                                  "gate": {
+                                    "type": "string",
+                                    "enum": [
+                                      "human",
+                                      "auto",
+                                      "auto-unless-changes"
+                                    ]
+                                  },
+                                  "needsApproval": {
+                                    "type": "boolean"
+                                  },
+                                  "condition": {
+                                    "type": "object",
+                                    "nullable": true,
+                                    "properties": {
+                                      "when": {
+                                        "oneOf": [
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "kind": {
+                                                "type": "string",
+                                                "enum": [
+                                                  "agent-decides"
+                                                ]
+                                              },
+                                              "question": {
+                                                "type": "string",
+                                                "minLength": 1,
+                                                "maxLength": 500
+                                              }
+                                            },
+                                            "required": [
+                                              "kind",
+                                              "question"
+                                            ]
+                                          },
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "kind": {
+                                                "type": "string",
+                                                "enum": [
+                                                  "produced-changes"
+                                                ]
+                                              }
+                                            },
+                                            "required": [
+                                              "kind"
+                                            ]
+                                          },
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "kind": {
+                                                "type": "string",
+                                                "enum": [
+                                                  "outcome"
+                                                ]
+                                              },
+                                              "is": {
+                                                "type": "string",
+                                                "enum": [
+                                                  "changes_ready",
+                                                  "nothing_to_do",
+                                                  "blocked"
+                                                ]
+                                              }
+                                            },
+                                            "required": [
+                                              "kind",
+                                              "is"
+                                            ]
+                                          }
+                                        ]
+                                      },
+                                      "holds": {
+                                        "type": "boolean"
+                                      }
+                                    },
+                                    "required": [
+                                      "when",
+                                      "holds"
+                                    ]
+                                  },
+                                  "status": {
+                                    "type": "string",
+                                    "enum": [
+                                      "advanced",
+                                      "awaiting-decision",
+                                      "held",
+                                      "completed"
+                                    ]
+                                  },
+                                  "nextStepId": {
+                                    "type": "string",
+                                    "nullable": true,
+                                    "minLength": 1
+                                  },
+                                  "nextStepName": {
+                                    "type": "string",
+                                    "nullable": true
+                                  },
+                                  "outcome": {
+                                    "type": "string",
+                                    "nullable": true,
+                                    "enum": [
+                                      "changes_ready",
+                                      "nothing_to_do",
+                                      "blocked",
+                                      null
+                                    ]
+                                  },
+                                  "producedChanges": {
+                                    "type": "boolean"
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "stepId",
+                                  "stepName",
+                                  "signal",
+                                  "gate",
+                                  "needsApproval",
+                                  "condition",
+                                  "status",
+                                  "nextStepId",
+                                  "nextStepName",
+                                  "outcome",
+                                  "producedChanges"
+                                ]
                               }
                             ]
+                          },
+                          "workflowStepId": {
+                            "type": "string",
+                            "nullable": true,
+                            "minLength": 1
                           },
                           "at": {
                             "type": "string",
@@ -23487,7 +23676,8 @@
                           "widget",
                           "widget_response",
                           "todos",
-                          "agent_done"
+                          "agent_done",
+                          "workflow_decision"
                         ]
                       },
                       "payload": {
@@ -24164,6 +24354,13 @@
                                       "summary": {
                                         "type": "string",
                                         "maxLength": 2000
+                                      },
+                                      "decision": {
+                                        "type": "string",
+                                        "enum": [
+                                          "yes",
+                                          "no"
+                                        ]
                                       }
                                     },
                                     "required": [
@@ -24277,6 +24474,19 @@
                               "summary": {
                                 "type": "string",
                                 "maxLength": 2000
+                              },
+                              "stopReason": {
+                                "type": "string",
+                                "enum": [
+                                  "end_turn",
+                                  "max_turns",
+                                  "max_tokens",
+                                  "refusal",
+                                  "cancelled",
+                                  "error",
+                                  "no_result",
+                                  "unknown"
+                                ]
                               }
                             },
                             "required": [
@@ -24314,8 +24524,168 @@
                               "widgetId",
                               "values"
                             ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "workflow_decision"
+                                ]
+                              },
+                              "stepId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "stepName": {
+                                "type": "string"
+                              },
+                              "signal": {
+                                "type": "string",
+                                "enum": [
+                                  "agent-signal",
+                                  "review"
+                                ]
+                              },
+                              "gate": {
+                                "type": "string",
+                                "enum": [
+                                  "human",
+                                  "auto",
+                                  "auto-unless-changes"
+                                ]
+                              },
+                              "needsApproval": {
+                                "type": "boolean"
+                              },
+                              "condition": {
+                                "type": "object",
+                                "nullable": true,
+                                "properties": {
+                                  "when": {
+                                    "oneOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": [
+                                              "agent-decides"
+                                            ]
+                                          },
+                                          "question": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 500
+                                          }
+                                        },
+                                        "required": [
+                                          "kind",
+                                          "question"
+                                        ]
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": [
+                                              "produced-changes"
+                                            ]
+                                          }
+                                        },
+                                        "required": [
+                                          "kind"
+                                        ]
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": [
+                                              "outcome"
+                                            ]
+                                          },
+                                          "is": {
+                                            "type": "string",
+                                            "enum": [
+                                              "changes_ready",
+                                              "nothing_to_do",
+                                              "blocked"
+                                            ]
+                                          }
+                                        },
+                                        "required": [
+                                          "kind",
+                                          "is"
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  "holds": {
+                                    "type": "boolean"
+                                  }
+                                },
+                                "required": [
+                                  "when",
+                                  "holds"
+                                ]
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "advanced",
+                                  "awaiting-decision",
+                                  "held",
+                                  "completed"
+                                ]
+                              },
+                              "nextStepId": {
+                                "type": "string",
+                                "nullable": true,
+                                "minLength": 1
+                              },
+                              "nextStepName": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "outcome": {
+                                "type": "string",
+                                "nullable": true,
+                                "enum": [
+                                  "changes_ready",
+                                  "nothing_to_do",
+                                  "blocked",
+                                  null
+                                ]
+                              },
+                              "producedChanges": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "stepId",
+                              "stepName",
+                              "signal",
+                              "gate",
+                              "needsApproval",
+                              "condition",
+                              "status",
+                              "nextStepId",
+                              "nextStepName",
+                              "outcome",
+                              "producedChanges"
+                            ]
                           }
                         ]
+                      },
+                      "workflowStepId": {
+                        "type": "string",
+                        "nullable": true,
+                        "minLength": 1
                       },
                       "at": {
                         "type": "string",
@@ -24580,7 +24950,8 @@
                           "widget",
                           "widget_response",
                           "todos",
-                          "agent_done"
+                          "agent_done",
+                          "workflow_decision"
                         ]
                       },
                       "payload": {
@@ -25257,6 +25628,13 @@
                                       "summary": {
                                         "type": "string",
                                         "maxLength": 2000
+                                      },
+                                      "decision": {
+                                        "type": "string",
+                                        "enum": [
+                                          "yes",
+                                          "no"
+                                        ]
                                       }
                                     },
                                     "required": [
@@ -25370,6 +25748,19 @@
                               "summary": {
                                 "type": "string",
                                 "maxLength": 2000
+                              },
+                              "stopReason": {
+                                "type": "string",
+                                "enum": [
+                                  "end_turn",
+                                  "max_turns",
+                                  "max_tokens",
+                                  "refusal",
+                                  "cancelled",
+                                  "error",
+                                  "no_result",
+                                  "unknown"
+                                ]
                               }
                             },
                             "required": [
@@ -25407,8 +25798,168 @@
                               "widgetId",
                               "values"
                             ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "workflow_decision"
+                                ]
+                              },
+                              "stepId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "stepName": {
+                                "type": "string"
+                              },
+                              "signal": {
+                                "type": "string",
+                                "enum": [
+                                  "agent-signal",
+                                  "review"
+                                ]
+                              },
+                              "gate": {
+                                "type": "string",
+                                "enum": [
+                                  "human",
+                                  "auto",
+                                  "auto-unless-changes"
+                                ]
+                              },
+                              "needsApproval": {
+                                "type": "boolean"
+                              },
+                              "condition": {
+                                "type": "object",
+                                "nullable": true,
+                                "properties": {
+                                  "when": {
+                                    "oneOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": [
+                                              "agent-decides"
+                                            ]
+                                          },
+                                          "question": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 500
+                                          }
+                                        },
+                                        "required": [
+                                          "kind",
+                                          "question"
+                                        ]
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": [
+                                              "produced-changes"
+                                            ]
+                                          }
+                                        },
+                                        "required": [
+                                          "kind"
+                                        ]
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": [
+                                              "outcome"
+                                            ]
+                                          },
+                                          "is": {
+                                            "type": "string",
+                                            "enum": [
+                                              "changes_ready",
+                                              "nothing_to_do",
+                                              "blocked"
+                                            ]
+                                          }
+                                        },
+                                        "required": [
+                                          "kind",
+                                          "is"
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  "holds": {
+                                    "type": "boolean"
+                                  }
+                                },
+                                "required": [
+                                  "when",
+                                  "holds"
+                                ]
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "advanced",
+                                  "awaiting-decision",
+                                  "held",
+                                  "completed"
+                                ]
+                              },
+                              "nextStepId": {
+                                "type": "string",
+                                "nullable": true,
+                                "minLength": 1
+                              },
+                              "nextStepName": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "outcome": {
+                                "type": "string",
+                                "nullable": true,
+                                "enum": [
+                                  "changes_ready",
+                                  "nothing_to_do",
+                                  "blocked",
+                                  null
+                                ]
+                              },
+                              "producedChanges": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "stepId",
+                              "stepName",
+                              "signal",
+                              "gate",
+                              "needsApproval",
+                              "condition",
+                              "status",
+                              "nextStepId",
+                              "nextStepName",
+                              "outcome",
+                              "producedChanges"
+                            ]
                           }
                         ]
+                      },
+                      "workflowStepId": {
+                        "type": "string",
+                        "nullable": true,
+                        "minLength": 1
                       },
                       "at": {
                         "type": "string",
@@ -25941,6 +26492,29 @@
                                     "required": [
                                       "kind"
                                     ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "outcome"
+                                        ]
+                                      },
+                                      "is": {
+                                        "type": "string",
+                                        "enum": [
+                                          "changes_ready",
+                                          "nothing_to_do",
+                                          "blocked"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "is"
+                                    ]
                                   }
                                 ]
                               },
@@ -25975,6 +26549,16 @@
                               "minLength": 1
                             }
                           },
+                          "permissionMode": {
+                            "type": "string",
+                            "nullable": true,
+                            "enum": [
+                              "acceptEdits",
+                              "plan",
+                              "bypassPermissions",
+                              null
+                            ]
+                          },
                           "createdAt": {
                             "type": "string",
                             "format": "date-time"
@@ -25998,6 +26582,7 @@
                           "branch",
                           "mcpServerIds",
                           "skillIds",
+                          "permissionMode",
                           "createdAt",
                           "updatedAt"
                         ]
@@ -26462,6 +27047,887 @@
         }
       }
     },
+    "/workflow.export": {
+      "get": {
+        "operationId": "workflow-export",
+        "summary": "Read a Workflow as a portable document, for sharing or checking into a repository. Ids are replaced by names — the Harness Profile each Step runs on, the MCP servers and Skills it loads — and branch targets by their index in the step list, so the document means the same thing in another Workspace. Feed it back to workflow.import.",
+        "tags": [
+          "workflow"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "format": {
+                      "type": "string",
+                      "enum": [
+                        "solow.workflow"
+                      ]
+                    },
+                    "version": {
+                      "type": "number",
+                      "enum": [
+                        1
+                      ]
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 120
+                    },
+                    "description": {
+                      "type": "string",
+                      "nullable": true,
+                      "maxLength": 2000,
+                      "default": null
+                    },
+                    "steps": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 120
+                          },
+                          "harnessProfile": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 120
+                          },
+                          "promptTemplate": {
+                            "type": "string",
+                            "maxLength": 20000,
+                            "default": ""
+                          },
+                          "gate": {
+                            "type": "string",
+                            "enum": [
+                              "human",
+                              "auto",
+                              "auto-unless-changes"
+                            ],
+                            "default": "human"
+                          },
+                          "advanceOn": {
+                            "type": "string",
+                            "enum": [
+                              "agent-signal",
+                              "review"
+                            ],
+                            "default": "review"
+                          },
+                          "onEnter": {
+                            "type": "object",
+                            "nullable": true,
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 64
+                              },
+                              "config": {
+                                "type": "object",
+                                "additionalProperties": {},
+                                "default": {}
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "config"
+                            ],
+                            "default": null
+                          },
+                          "branch": {
+                            "type": "object",
+                            "nullable": true,
+                            "properties": {
+                              "when": {
+                                "oneOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "agent-decides"
+                                        ]
+                                      },
+                                      "question": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 500
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "question"
+                                    ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "produced-changes"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "kind"
+                                    ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "outcome"
+                                        ]
+                                      },
+                                      "is": {
+                                        "type": "string",
+                                        "enum": [
+                                          "changes_ready",
+                                          "nothing_to_do",
+                                          "blocked"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "is"
+                                    ]
+                                  }
+                                ]
+                              },
+                              "thenStep": {
+                                "type": "integer",
+                                "nullable": true,
+                                "minimum": 0
+                              },
+                              "elseStep": {
+                                "type": "integer",
+                                "nullable": true,
+                                "minimum": 0
+                              }
+                            },
+                            "required": [
+                              "when",
+                              "thenStep",
+                              "elseStep"
+                            ],
+                            "default": null
+                          },
+                          "mcpServers": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 200
+                            },
+                            "maxItems": 64,
+                            "default": []
+                          },
+                          "skills": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 200
+                            },
+                            "maxItems": 64,
+                            "default": []
+                          },
+                          "permissionMode": {
+                            "type": "string",
+                            "nullable": true,
+                            "enum": [
+                              "acceptEdits",
+                              "plan",
+                              "bypassPermissions",
+                              null
+                            ],
+                            "default": null
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "harnessProfile",
+                          "promptTemplate",
+                          "gate",
+                          "advanceOn",
+                          "onEnter",
+                          "branch",
+                          "mcpServers",
+                          "skills",
+                          "permissionMode"
+                        ]
+                      },
+                      "minItems": 1,
+                      "maxItems": 200
+                    }
+                  },
+                  "required": [
+                    "format",
+                    "version",
+                    "name",
+                    "description",
+                    "steps"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.NOT_FOUND"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workflow.import": {
+      "post": {
+        "operationId": "workflow-import",
+        "summary": "Create a Workflow from an exported document. Names are resolved against this Workspace: a Harness Profile with no match falls back to fallbackHarnessProfileId, or to the first profile, and an MCP server or Skill with no match is dropped from the Step that asked for it — every substitution is listed in the reply. The name is suffixed rather than refused when this Workspace already has one, so the same document can be imported twice.",
+        "tags": [
+          "workflow"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "document": {
+                    "type": "object",
+                    "properties": {
+                      "format": {
+                        "type": "string",
+                        "enum": [
+                          "solow.workflow"
+                        ]
+                      },
+                      "version": {
+                        "type": "number",
+                        "enum": [
+                          1
+                        ]
+                      },
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 120
+                      },
+                      "description": {
+                        "type": "string",
+                        "nullable": true,
+                        "maxLength": 2000,
+                        "default": null
+                      },
+                      "steps": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "name": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120
+                            },
+                            "harnessProfile": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 120
+                            },
+                            "promptTemplate": {
+                              "type": "string",
+                              "maxLength": 20000,
+                              "default": ""
+                            },
+                            "gate": {
+                              "type": "string",
+                              "enum": [
+                                "human",
+                                "auto",
+                                "auto-unless-changes"
+                              ],
+                              "default": "human"
+                            },
+                            "advanceOn": {
+                              "type": "string",
+                              "enum": [
+                                "agent-signal",
+                                "review"
+                              ],
+                              "default": "review"
+                            },
+                            "onEnter": {
+                              "type": "object",
+                              "nullable": true,
+                              "properties": {
+                                "kind": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 64
+                                },
+                                "config": {
+                                  "type": "object",
+                                  "additionalProperties": {},
+                                  "default": {}
+                                }
+                              },
+                              "required": [
+                                "kind"
+                              ],
+                              "default": null
+                            },
+                            "branch": {
+                              "type": "object",
+                              "nullable": true,
+                              "properties": {
+                                "when": {
+                                  "oneOf": [
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "kind": {
+                                          "type": "string",
+                                          "enum": [
+                                            "agent-decides"
+                                          ]
+                                        },
+                                        "question": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 500
+                                        }
+                                      },
+                                      "required": [
+                                        "kind",
+                                        "question"
+                                      ]
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "kind": {
+                                          "type": "string",
+                                          "enum": [
+                                            "produced-changes"
+                                          ]
+                                        }
+                                      },
+                                      "required": [
+                                        "kind"
+                                      ]
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "kind": {
+                                          "type": "string",
+                                          "enum": [
+                                            "outcome"
+                                          ]
+                                        },
+                                        "is": {
+                                          "type": "string",
+                                          "enum": [
+                                            "changes_ready",
+                                            "nothing_to_do",
+                                            "blocked"
+                                          ]
+                                        }
+                                      },
+                                      "required": [
+                                        "kind",
+                                        "is"
+                                      ]
+                                    }
+                                  ]
+                                },
+                                "thenStep": {
+                                  "type": "integer",
+                                  "nullable": true,
+                                  "minimum": 0
+                                },
+                                "elseStep": {
+                                  "type": "integer",
+                                  "nullable": true,
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "when",
+                                "thenStep",
+                                "elseStep"
+                              ],
+                              "default": null
+                            },
+                            "mcpServers": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "maxItems": 64,
+                              "default": []
+                            },
+                            "skills": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "maxItems": 64,
+                              "default": []
+                            },
+                            "permissionMode": {
+                              "type": "string",
+                              "nullable": true,
+                              "enum": [
+                                "acceptEdits",
+                                "plan",
+                                "bypassPermissions",
+                                null
+                              ],
+                              "default": null
+                            }
+                          },
+                          "required": [
+                            "name",
+                            "harnessProfile"
+                          ]
+                        },
+                        "minItems": 1,
+                        "maxItems": 200
+                      }
+                    },
+                    "required": [
+                      "format",
+                      "version",
+                      "name",
+                      "steps"
+                    ]
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "fallbackHarnessProfileId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "document"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "workflow": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "description": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "version": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "exclusiveMinimum": true
+                        },
+                        "stepCount": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "steps": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "workflowId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "position": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "rank": {
+                                "type": "string"
+                              },
+                              "agentProfileId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "promptTemplate": {
+                                "type": "string"
+                              },
+                              "gate": {
+                                "type": "string",
+                                "enum": [
+                                  "human",
+                                  "auto",
+                                  "auto-unless-changes"
+                                ]
+                              },
+                              "advanceOn": {
+                                "type": "string",
+                                "enum": [
+                                  "agent-signal",
+                                  "review"
+                                ]
+                              },
+                              "onEnter": {
+                                "type": "object",
+                                "nullable": true,
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 64
+                                  },
+                                  "config": {
+                                    "type": "object",
+                                    "additionalProperties": {},
+                                    "default": {}
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "config"
+                                ]
+                              },
+                              "branch": {
+                                "type": "object",
+                                "nullable": true,
+                                "properties": {
+                                  "when": {
+                                    "oneOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": [
+                                              "agent-decides"
+                                            ]
+                                          },
+                                          "question": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 500
+                                          }
+                                        },
+                                        "required": [
+                                          "kind",
+                                          "question"
+                                        ]
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": [
+                                              "produced-changes"
+                                            ]
+                                          }
+                                        },
+                                        "required": [
+                                          "kind"
+                                        ]
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": [
+                                              "outcome"
+                                            ]
+                                          },
+                                          "is": {
+                                            "type": "string",
+                                            "enum": [
+                                              "changes_ready",
+                                              "nothing_to_do",
+                                              "blocked"
+                                            ]
+                                          }
+                                        },
+                                        "required": [
+                                          "kind",
+                                          "is"
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  "thenStepId": {
+                                    "type": "string",
+                                    "nullable": true,
+                                    "minLength": 1
+                                  },
+                                  "elseStepId": {
+                                    "type": "string",
+                                    "nullable": true,
+                                    "minLength": 1
+                                  }
+                                },
+                                "required": [
+                                  "when",
+                                  "thenStepId",
+                                  "elseStepId"
+                                ]
+                              },
+                              "mcpServerIds": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              },
+                              "skillIds": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              },
+                              "permissionMode": {
+                                "type": "string",
+                                "nullable": true,
+                                "enum": [
+                                  "acceptEdits",
+                                  "plan",
+                                  "bypassPermissions",
+                                  null
+                                ]
+                              },
+                              "createdAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "updatedAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "workflowId",
+                              "name",
+                              "position",
+                              "rank",
+                              "agentProfileId",
+                              "promptTemplate",
+                              "gate",
+                              "advanceOn",
+                              "onEnter",
+                              "branch",
+                              "mcpServerIds",
+                              "skillIds",
+                              "permissionMode",
+                              "createdAt",
+                              "updatedAt"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name",
+                        "description",
+                        "version",
+                        "stepCount",
+                        "createdAt",
+                        "updatedAt",
+                        "steps"
+                      ]
+                    },
+                    "unmatchedHarnessProfiles": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "unmatchedMcpServers": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "unmatchedSkills": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "workflow",
+                    "unmatchedHarnessProfiles",
+                    "unmatchedMcpServers",
+                    "unmatchedSkills"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/workflow.addStep": {
       "post": {
         "operationId": "workflow-addStep",
@@ -26571,6 +28037,29 @@
                             "required": [
                               "kind"
                             ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "outcome"
+                                ]
+                              },
+                              "is": {
+                                "type": "string",
+                                "enum": [
+                                  "changes_ready",
+                                  "nothing_to_do",
+                                  "blocked"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "is"
+                            ]
                           }
                         ]
                       },
@@ -26606,6 +28095,16 @@
                       "minLength": 1
                     },
                     "maxItems": 64
+                  },
+                  "permissionMode": {
+                    "type": "string",
+                    "nullable": true,
+                    "enum": [
+                      "acceptEdits",
+                      "plan",
+                      "bypassPermissions",
+                      null
+                    ]
                   },
                   "afterStepId": {
                     "type": "string",
@@ -26762,6 +28261,29 @@
                                     "required": [
                                       "kind"
                                     ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "outcome"
+                                        ]
+                                      },
+                                      "is": {
+                                        "type": "string",
+                                        "enum": [
+                                          "changes_ready",
+                                          "nothing_to_do",
+                                          "blocked"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "is"
+                                    ]
                                   }
                                 ]
                               },
@@ -26796,6 +28318,16 @@
                               "minLength": 1
                             }
                           },
+                          "permissionMode": {
+                            "type": "string",
+                            "nullable": true,
+                            "enum": [
+                              "acceptEdits",
+                              "plan",
+                              "bypassPermissions",
+                              null
+                            ]
+                          },
                           "createdAt": {
                             "type": "string",
                             "format": "date-time"
@@ -26819,6 +28351,7 @@
                           "branch",
                           "mcpServerIds",
                           "skillIds",
+                          "permissionMode",
                           "createdAt",
                           "updatedAt"
                         ]
@@ -26991,6 +28524,29 @@
                             "required": [
                               "kind"
                             ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "outcome"
+                                ]
+                              },
+                              "is": {
+                                "type": "string",
+                                "enum": [
+                                  "changes_ready",
+                                  "nothing_to_do",
+                                  "blocked"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "is"
+                            ]
                           }
                         ]
                       },
@@ -27026,6 +28582,16 @@
                       "minLength": 1
                     },
                     "maxItems": 64
+                  },
+                  "permissionMode": {
+                    "type": "string",
+                    "nullable": true,
+                    "enum": [
+                      "acceptEdits",
+                      "plan",
+                      "bypassPermissions",
+                      null
+                    ]
                   }
                 },
                 "required": [
@@ -27175,6 +28741,29 @@
                                     "required": [
                                       "kind"
                                     ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "outcome"
+                                        ]
+                                      },
+                                      "is": {
+                                        "type": "string",
+                                        "enum": [
+                                          "changes_ready",
+                                          "nothing_to_do",
+                                          "blocked"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "is"
+                                    ]
                                   }
                                 ]
                               },
@@ -27209,6 +28798,16 @@
                               "minLength": 1
                             }
                           },
+                          "permissionMode": {
+                            "type": "string",
+                            "nullable": true,
+                            "enum": [
+                              "acceptEdits",
+                              "plan",
+                              "bypassPermissions",
+                              null
+                            ]
+                          },
                           "createdAt": {
                             "type": "string",
                             "format": "date-time"
@@ -27232,6 +28831,7 @@
                           "branch",
                           "mcpServerIds",
                           "skillIds",
+                          "permissionMode",
                           "createdAt",
                           "updatedAt"
                         ]
@@ -27478,6 +29078,29 @@
                                     "required": [
                                       "kind"
                                     ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "outcome"
+                                        ]
+                                      },
+                                      "is": {
+                                        "type": "string",
+                                        "enum": [
+                                          "changes_ready",
+                                          "nothing_to_do",
+                                          "blocked"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "is"
+                                    ]
                                   }
                                 ]
                               },
@@ -27512,6 +29135,16 @@
                               "minLength": 1
                             }
                           },
+                          "permissionMode": {
+                            "type": "string",
+                            "nullable": true,
+                            "enum": [
+                              "acceptEdits",
+                              "plan",
+                              "bypassPermissions",
+                              null
+                            ]
+                          },
                           "createdAt": {
                             "type": "string",
                             "format": "date-time"
@@ -27535,6 +29168,7 @@
                           "branch",
                           "mcpServerIds",
                           "skillIds",
+                          "permissionMode",
                           "createdAt",
                           "updatedAt"
                         ]
@@ -27769,6 +29403,29 @@
                                     "required": [
                                       "kind"
                                     ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "outcome"
+                                        ]
+                                      },
+                                      "is": {
+                                        "type": "string",
+                                        "enum": [
+                                          "changes_ready",
+                                          "nothing_to_do",
+                                          "blocked"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "is"
+                                    ]
                                   }
                                 ]
                               },
@@ -27803,6 +29460,16 @@
                               "minLength": 1
                             }
                           },
+                          "permissionMode": {
+                            "type": "string",
+                            "nullable": true,
+                            "enum": [
+                              "acceptEdits",
+                              "plan",
+                              "bypassPermissions",
+                              null
+                            ]
+                          },
                           "createdAt": {
                             "type": "string",
                             "format": "date-time"
@@ -27826,6 +29493,7 @@
                           "branch",
                           "mcpServerIds",
                           "skillIds",
+                          "permissionMode",
                           "createdAt",
                           "updatedAt"
                         ]
@@ -28059,6 +29727,29 @@
                                   "required": [
                                     "kind"
                                   ]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "outcome"
+                                      ]
+                                    },
+                                    "is": {
+                                      "type": "string",
+                                      "enum": [
+                                        "changes_ready",
+                                        "nothing_to_do",
+                                        "blocked"
+                                      ]
+                                    }
+                                  },
+                                  "required": [
+                                    "kind",
+                                    "is"
+                                  ]
                                 }
                               ]
                             },
@@ -28093,6 +29784,16 @@
                             "minLength": 1
                           }
                         },
+                        "permissionMode": {
+                          "type": "string",
+                          "nullable": true,
+                          "enum": [
+                            "acceptEdits",
+                            "plan",
+                            "bypassPermissions",
+                            null
+                          ]
+                        },
                         "createdAt": {
                           "type": "string",
                           "format": "date-time"
@@ -28116,6 +29817,7 @@
                         "branch",
                         "mcpServerIds",
                         "skillIds",
+                        "permissionMode",
                         "createdAt",
                         "updatedAt"
                       ]
@@ -28224,6 +29926,29 @@
                                     "required": [
                                       "kind"
                                     ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "outcome"
+                                        ]
+                                      },
+                                      "is": {
+                                        "type": "string",
+                                        "enum": [
+                                          "changes_ready",
+                                          "nothing_to_do",
+                                          "blocked"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "is"
+                                    ]
                                   }
                                 ]
                               },
@@ -28258,6 +29983,16 @@
                               "minLength": 1
                             }
                           },
+                          "permissionMode": {
+                            "type": "string",
+                            "nullable": true,
+                            "enum": [
+                              "acceptEdits",
+                              "plan",
+                              "bypassPermissions",
+                              null
+                            ]
+                          },
                           "createdAt": {
                             "type": "string",
                             "format": "date-time"
@@ -28281,6 +30016,7 @@
                           "branch",
                           "mcpServerIds",
                           "skillIds",
+                          "permissionMode",
                           "createdAt",
                           "updatedAt"
                         ]
@@ -28604,6 +30340,29 @@
                                   "required": [
                                     "kind"
                                   ]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "outcome"
+                                      ]
+                                    },
+                                    "is": {
+                                      "type": "string",
+                                      "enum": [
+                                        "changes_ready",
+                                        "nothing_to_do",
+                                        "blocked"
+                                      ]
+                                    }
+                                  },
+                                  "required": [
+                                    "kind",
+                                    "is"
+                                  ]
                                 }
                               ]
                             },
@@ -28638,6 +30397,16 @@
                             "minLength": 1
                           }
                         },
+                        "permissionMode": {
+                          "type": "string",
+                          "nullable": true,
+                          "enum": [
+                            "acceptEdits",
+                            "plan",
+                            "bypassPermissions",
+                            null
+                          ]
+                        },
                         "createdAt": {
                           "type": "string",
                           "format": "date-time"
@@ -28661,6 +30430,7 @@
                         "branch",
                         "mcpServerIds",
                         "skillIds",
+                        "permissionMode",
                         "createdAt",
                         "updatedAt"
                       ]
@@ -28769,6 +30539,29 @@
                                     "required": [
                                       "kind"
                                     ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "outcome"
+                                        ]
+                                      },
+                                      "is": {
+                                        "type": "string",
+                                        "enum": [
+                                          "changes_ready",
+                                          "nothing_to_do",
+                                          "blocked"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "is"
+                                    ]
                                   }
                                 ]
                               },
@@ -28803,6 +30596,16 @@
                               "minLength": 1
                             }
                           },
+                          "permissionMode": {
+                            "type": "string",
+                            "nullable": true,
+                            "enum": [
+                              "acceptEdits",
+                              "plan",
+                              "bypassPermissions",
+                              null
+                            ]
+                          },
                           "createdAt": {
                             "type": "string",
                             "format": "date-time"
@@ -28826,6 +30629,7 @@
                           "branch",
                           "mcpServerIds",
                           "skillIds",
+                          "permissionMode",
                           "createdAt",
                           "updatedAt"
                         ]
@@ -29073,6 +30877,29 @@
                                   "required": [
                                     "kind"
                                   ]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "outcome"
+                                      ]
+                                    },
+                                    "is": {
+                                      "type": "string",
+                                      "enum": [
+                                        "changes_ready",
+                                        "nothing_to_do",
+                                        "blocked"
+                                      ]
+                                    }
+                                  },
+                                  "required": [
+                                    "kind",
+                                    "is"
+                                  ]
                                 }
                               ]
                             },
@@ -29107,6 +30934,16 @@
                             "minLength": 1
                           }
                         },
+                        "permissionMode": {
+                          "type": "string",
+                          "nullable": true,
+                          "enum": [
+                            "acceptEdits",
+                            "plan",
+                            "bypassPermissions",
+                            null
+                          ]
+                        },
                         "createdAt": {
                           "type": "string",
                           "format": "date-time"
@@ -29130,6 +30967,7 @@
                         "branch",
                         "mcpServerIds",
                         "skillIds",
+                        "permissionMode",
                         "createdAt",
                         "updatedAt"
                       ]
@@ -29238,6 +31076,29 @@
                                     "required": [
                                       "kind"
                                     ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "outcome"
+                                        ]
+                                      },
+                                      "is": {
+                                        "type": "string",
+                                        "enum": [
+                                          "changes_ready",
+                                          "nothing_to_do",
+                                          "blocked"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "is"
+                                    ]
                                   }
                                 ]
                               },
@@ -29272,6 +31133,16 @@
                               "minLength": 1
                             }
                           },
+                          "permissionMode": {
+                            "type": "string",
+                            "nullable": true,
+                            "enum": [
+                              "acceptEdits",
+                              "plan",
+                              "bypassPermissions",
+                              null
+                            ]
+                          },
                           "createdAt": {
                             "type": "string",
                             "format": "date-time"
@@ -29295,6 +31166,7 @@
                           "branch",
                           "mcpServerIds",
                           "skillIds",
+                          "permissionMode",
                           "createdAt",
                           "updatedAt"
                         ]
@@ -29409,6 +31281,14 @@
                     "type": "string",
                     "maxLength": 20000
                   },
+                  "outcome": {
+                    "type": "string",
+                    "enum": [
+                      "changes_ready",
+                      "nothing_to_do",
+                      "blocked"
+                    ]
+                  },
                   "call": {
                     "type": "string",
                     "minLength": 1,
@@ -29452,13 +31332,120 @@
                     },
                     "brief": {
                       "type": "string"
+                    },
+                    "explanation": {
+                      "type": "object",
+                      "properties": {
+                        "gate": {
+                          "type": "string",
+                          "enum": [
+                            "human",
+                            "auto",
+                            "auto-unless-changes"
+                          ]
+                        },
+                        "needsApproval": {
+                          "type": "boolean"
+                        },
+                        "condition": {
+                          "type": "object",
+                          "nullable": true,
+                          "properties": {
+                            "when": {
+                              "oneOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "agent-decides"
+                                      ]
+                                    },
+                                    "question": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 500
+                                    }
+                                  },
+                                  "required": [
+                                    "kind",
+                                    "question"
+                                  ]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "produced-changes"
+                                      ]
+                                    }
+                                  },
+                                  "required": [
+                                    "kind"
+                                  ]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "outcome"
+                                      ]
+                                    },
+                                    "is": {
+                                      "type": "string",
+                                      "enum": [
+                                        "changes_ready",
+                                        "nothing_to_do",
+                                        "blocked"
+                                      ]
+                                    }
+                                  },
+                                  "required": [
+                                    "kind",
+                                    "is"
+                                  ]
+                                }
+                              ]
+                            },
+                            "holds": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "when",
+                            "holds"
+                          ]
+                        },
+                        "exit": {
+                          "type": "string",
+                          "nullable": true,
+                          "enum": [
+                            "next",
+                            "then",
+                            "else",
+                            null
+                          ]
+                        }
+                      },
+                      "required": [
+                        "gate",
+                        "needsApproval",
+                        "condition",
+                        "exit"
+                      ]
                     }
                   },
                   "required": [
                     "taskId",
                     "status",
                     "currentStepId",
-                    "brief"
+                    "brief",
+                    "explanation"
                   ]
                 }
               }

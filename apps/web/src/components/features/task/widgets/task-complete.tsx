@@ -55,6 +55,13 @@ export function TaskComplete({
           {widget.summary}
         </p>
       )}
+      {widget.decision && (
+        // The answer to the Step's branch question, as a fact of the report — it is what the
+        // workflow routes on, so a reviewer should be able to see it without reading for it.
+        <p className="font-mono text-2xs text-foreground/70">
+          Decision: <span className="font-semibold">{widget.decision}</span>
+        </p>
+      )}
     </section>
   );
 }

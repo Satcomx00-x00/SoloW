@@ -133,16 +133,41 @@ export function createHarnessRunner(
 }
 
 /**
+ * Which protocols can be handed a conversation to carry on (`HarnessStartOpts.resumeSessionId`).
+ *
+ * Kept here rather than beside `pins` and `canRequestPermission` in the contracts, and
+ * deliberately: those exist because the Harness Profile form has to make the same judgement while
+ * an Owner is choosing, and a resume is nothing an Owner ever chooses — it is a per-round fact the
+ * lifecycle discovers when a re-spawn has thrown a conversation away. A descriptor field for it
+ * would put a question in front of the form that nothing on the form can answer.
+ *
+ * stream-json takes `claude --resume`, ACP has `session/load`, and a plain CLI has neither a
+ * conversation nor a word for one. The `Record<HarnessProtocol, …>` is what stops a fourth
+ * protocol arriving without an answer.
+ */
+const PROTOCOL_RESUMES_CONVERSATIONS: Record<HarnessProtocol, boolean> = {
+  claude_code_stream_json: true,
+  acp: true,
+  cli_passthrough: false,
+};
+
+/**
  * The launch settings this protocol cannot carry, named.
  *
  * A Profile can pin a model and a mode; a protocol speaks one, the other, or neither. Dropping
  * the ones it cannot express would be the silent substitution AC-3 exists to forbid — a run that
  * quietly used a different model than the Profile asked for, with nothing on screen to say so.
  * So the lifecycle asks this and says what it could not honour.
+ *
+ * A conversation to resume is the same question asked of a different kind of setting, so it is
+ * answered here rather than through a second seam of its own: it comes from the round instead of
+ * from the Profile, but "the protocol cannot carry this and the run went ahead anyway" is exactly
+ * one fact, and an operator reading a transcript that starts from nothing deserves to find the
+ * reason in the same place.
  */
 export function unsupportedLaunchSettings(
   protocol: HarnessProtocol,
-  settings: { model?: string | null; modeId?: string | null },
+  settings: { model?: string | null; modeId?: string | null; resumeSessionId?: string | null },
 ): string[] {
   /*
    * Read from the contracts rather than restated here: the Harness Profile form has to make the
@@ -155,5 +180,11 @@ export function unsupportedLaunchSettings(
   const unsupported: string[] = [];
   if (!pins.mode && settings.modeId) unsupported.push(`mode "${settings.modeId}"`);
   if (!pins.model && settings.model) unsupported.push(`model "${settings.model}"`);
+  // A protocol this build has never heard of resumes nothing, the same way it pins nothing —
+  // `PROTOCOL_RESUMES_CONVERSATIONS` is exhaustive over the enum, and the enum is not exhaustive
+  // over the `agent_catalog.protocol` column.
+  if (!PROTOCOL_RESUMES_CONVERSATIONS[protocol] && settings.resumeSessionId) {
+    unsupported.push("the harness's previous conversation");
+  }
   return unsupported;
 }

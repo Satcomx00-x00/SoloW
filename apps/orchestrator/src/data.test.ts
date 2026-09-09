@@ -23,10 +23,13 @@ import {
   listSessionLog,
   listSessionSummaries,
   listSessionUsage,
+  listTaskEventsSince,
   loadTaskRunContext,
   loadWorkflowStepHarnesses,
   nextSessionUsageSeq,
+  recordHarnessSessionId,
   recordSessionUsage,
+  resolveResumeHarnessSessionId,
   setTaskRepositoryResultBranch,
   setTaskState,
 } from "./data.js";
@@ -602,10 +605,11 @@ describe("session log (issue #2)", () => {
     await db.insert(session).values({ id: "sess-1", workspaceId: WS, taskId: "task-1" });
   }
 
-  const append = (db: TestDb, seq: number, text: string) =>
+  const append = (db: TestDb, seq: number, text: string, workflowStepId: string | null = null) =>
     appendSessionEvent(db, WS, {
       sessionId: "sess-1",
       seq,
+      workflowStepId,
       payload: { kind: "assistant_turn", text, thinking: false },
     });
 
@@ -624,6 +628,7 @@ describe("session log (issue #2)", () => {
     await appendSessionEvent(db, WS, {
       sessionId: "sess-1",
       seq: 0,
+      workflowStepId: null,
       payload: { kind: "tool_call", name: "Edit", callId: null },
     });
 
@@ -640,6 +645,7 @@ describe("session log (issue #2)", () => {
       appendSessionEvent(db, WS, {
         sessionId: "sess-1",
         seq: 0,
+        workflowStepId: null,
         // The shape the log used to accept without complaint, and which every reader then had
         // to guess at (issue #2, AC-1).
         payload: { kind: "stdout", text: "working" } as never,
@@ -752,6 +758,39 @@ describe("session log (issue #2)", () => {
     await compactSession(db, WS, "sess-1", { threshold: 20, tail: 10 });
 
     expect(await listSessionSummaries(db, OTHER_WS, "sess-1")).toHaveLength(0);
+  });
+
+  it("writes the Workflow Step each event was produced under, and null where there is none", async () => {
+    /*
+     * One Session spans the whole pipeline, so without this column the only way to tell Step 2's
+     * output from Step 1's is to count `workflow_decision` rows and hope none is missing. Null is
+     * a first-class answer here, not an omission: a Task on no Workflow genuinely has no Step.
+     */
+    const db = createTestDb();
+    await seedSession(db);
+    await append(db, 0, "before any workflow");
+    await append(db, 1, "under the build step", "step-build");
+
+    const rows = await rawRows(db);
+    expect(rows.map((r) => r.workflowStepId)).toEqual([null, "step-build"]);
+  });
+
+  it("carries the Step through the replay read, so a reconnecting client can segment", async () => {
+    const db = createTestDb();
+    await seedSession(db);
+    await append(db, 0, "unattributed");
+    await append(db, 1, "under the build step", "step-build");
+
+    const events = await listTaskEventsSince(db, WS, "task-1", -1);
+    expect(events.map((e) => e.workflowStepId)).toEqual([null, "step-build"]);
+  });
+
+  it("does not replay another Workspace's events (Principle V)", async () => {
+    const db = createTestDb();
+    await seedSession(db);
+    await append(db, 0, "under the build step", "step-build");
+
+    expect(await listTaskEventsSince(db, OTHER_WS, "task-1", -1)).toEqual([]);
   });
 });
 
@@ -894,5 +933,96 @@ describe("resolving the Harness Profile behind every Workflow Step", () => {
     const resolved = await loadWorkflowStepHarnesses(db, WS, ["ap-other"]);
 
     expect(resolved).toEqual({ ok: false, missingHarnessProfileId: "ap-other" });
+  });
+});
+
+/**
+ * Which harness conversation a round about to start should carry on.
+ *
+ * The read that makes `session.harness_session_id` worth writing. It has never been read back, so
+ * every recovery — a restart, a redrive, an exhausted execution budget, an operator's Retry — was
+ * a fresh process handed the same brief with no memory of having worked on it.
+ */
+describe("resolveResumeHarnessSessionId", () => {
+  async function seedSession(
+    db: TestDb,
+    row: { id: string; harnessSessionId?: string; startedAt: string; workspaceId?: string },
+  ) {
+    await db.insert(session).values({
+      id: row.id,
+      workspaceId: row.workspaceId ?? WS,
+      taskId: "task-1",
+      state: "active",
+      startedAt: row.startedAt,
+      ...(row.harnessSessionId ? { harnessSessionId: row.harnessSessionId } : {}),
+    });
+  }
+
+  it("prefers the conversation this Session recorded mid-run", async () => {
+    // The case that matters: a redrive runs in the *same* Session, against the row the dying
+    // attempt already stamped. The older Session's id is present and must lose to it.
+    const db = createTestDb();
+    await seed(db);
+    await seedSession(db, {
+      id: "sess-old",
+      harnessSessionId: "old-conv",
+      startedAt: "2026-01-01",
+    });
+    await seedSession(db, {
+      id: "sess-now",
+      harnessSessionId: "live-conv",
+      startedAt: "2026-02-01",
+    });
+
+    expect(await resolveResumeHarnessSessionId(db, WS, "task-1", "sess-now")).toBe("live-conv");
+  });
+
+  it("falls back to the newest prior Session that has one", async () => {
+    // An operator's Retry opens a fresh Session row, so the first read answers null — and
+    // re-reading the harness's own conversation beats re-reading the brief that produced it.
+    const db = createTestDb();
+    await seed(db);
+    await seedSession(db, { id: "sess-1", harnessSessionId: "first", startedAt: "2026-01-01" });
+    await seedSession(db, { id: "sess-2", harnessSessionId: "second", startedAt: "2026-02-01" });
+    // Newer than both, and never got as far as a handshake: it must not shadow the ones that did.
+    await seedSession(db, { id: "sess-3", startedAt: "2026-03-01" });
+
+    expect(await resolveResumeHarnessSessionId(db, WS, "task-1", "sess-3")).toBe("second");
+  });
+
+  it("answers null when nothing on this Task has ever reported a conversation", async () => {
+    const db = createTestDb();
+    await seed(db);
+    await seedSession(db, { id: "sess-1", startedAt: "2026-01-01" });
+
+    expect(await resolveResumeHarnessSessionId(db, WS, "task-1", "sess-1")).toBeNull();
+  });
+
+  it("never reaches a conversation belonging to another Workspace (Principle V)", async () => {
+    // A conversation id is a handle onto a harness's own store. The tenant key is the whole of
+    // what stops one Workspace naming another's.
+    const db = createTestDb();
+    await seed(db);
+    await seedSession(db, {
+      id: "sess-other",
+      harnessSessionId: "not-yours",
+      startedAt: "2026-01-01",
+      workspaceId: OTHER_WS,
+    });
+    await seedSession(db, { id: "sess-mine", startedAt: "2026-02-01" });
+
+    expect(await resolveResumeHarnessSessionId(db, WS, "task-1", "sess-mine")).toBeNull();
+  });
+
+  it("forgets the conversation when it is recorded as null", async () => {
+    // What a Workflow Step boundary needs: Step 2 is different work, briefed differently, and a
+    // round that resumes is a round that is not sent its Step's brief.
+    const db = createTestDb();
+    await seed(db);
+    await seedSession(db, { id: "sess-1", harnessSessionId: "step-one", startedAt: "2026-01-01" });
+
+    await recordHarnessSessionId(db, WS, "sess-1", null);
+
+    expect(await resolveResumeHarnessSessionId(db, WS, "task-1", "sess-1")).toBeNull();
   });
 });

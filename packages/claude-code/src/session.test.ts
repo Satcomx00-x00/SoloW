@@ -113,6 +113,44 @@ describe("buildArgs", () => {
     expect(args.slice(-2)).toEqual(["--model", "opus"]);
     expect(args).toContain("--worktree");
   });
+
+  it("names the conversation to carry on", () => {
+    const args = buildArgs({
+      worktreeName: null,
+      permissionMode: "acceptEdits",
+      resumeSessionId: "sess-abc",
+    });
+    const at = args.indexOf("--resume");
+    expect(at).toBeGreaterThanOrEqual(0);
+    expect(args[at + 1]).toBe("sess-abc");
+  });
+
+  it("drops --worktree when resuming, even though the caller still named one", () => {
+    /*
+     * The precedence that matters, asserted here rather than end to end because the fake CLI in
+     * `testing.ts` ignores its arguments — a run that "worked" would prove nothing about them.
+     *
+     * The caller genuinely does pass both: the worktree name is derived from the Task and is the
+     * same string on every round, so the lifecycle resuming round three hands over a name it
+     * attaches no meaning to. Honouring both would branch a second worktree from the base ref and
+     * put the resumed conversation in a directory with none of the work it remembers.
+     */
+    const args = buildArgs({
+      worktreeName: "solow-task-7",
+      permissionMode: "acceptEdits",
+      resumeSessionId: "sess-abc",
+    });
+    expect(args).toContain("--resume");
+    expect(args).not.toContain("--worktree");
+    expect(args).not.toContain("solow-task-7");
+  });
+
+  it("still asks for the worktree on a round that resumes nothing", () => {
+    // The isolation guarantee is displaced by `--resume` and by nothing else.
+    const args = buildArgs({ worktreeName: "solow-task-7", permissionMode: "acceptEdits" });
+    expect(args).toContain("--worktree");
+    expect(args).not.toContain("--resume");
+  });
 });
 
 describe("startClaudeSession", () => {

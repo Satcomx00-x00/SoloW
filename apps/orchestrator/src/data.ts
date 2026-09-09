@@ -30,7 +30,7 @@ import {
   workspace,
   worktree,
 } from "@solow/db";
-import { and, asc, desc, eq, gt, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, ne } from "drizzle-orm";
 
 /**
  * Orchestrator-side data access. Scoped by workspaceId (the tenant key travels on the
@@ -585,6 +585,83 @@ export async function updateHarnessCatalogCapabilities(
     .where(and(eq(harnessCatalog.workspaceId, workspaceId), eq(harnessCatalog.id, agentCatalogId)));
 }
 
+/**
+ * Remember the harness's own id for the conversation this Session's current round is running
+ * (`session.harness_session_id`'s comment says why). Written the moment the harness reports it,
+ * on the run's fire-and-forget chain: the id is worth most for a run that dies, and one recorded
+ * only at a clean exit would be missing exactly then.
+ */
+export async function recordHarnessSessionId(
+  db: Db,
+  workspaceId: string,
+  sessionId: string,
+  /**
+   * `null` forgets the conversation rather than recording one, which is what a Workflow Step
+   * boundary needs: Step 2 is different work, briefed differently, and often run by a different
+   * harness under a different protocol. Left in place, the id Step 1's harness wrote would be
+   * offered to Step 2's as a conversation to carry on — and a round that carries one on is a
+   * round that is *not* sent its Step's brief. See `resolveResumeHarnessSessionId`.
+   */
+  harnessSessionId: string | null,
+): Promise<void> {
+  await db
+    .update(session)
+    .set({ harnessSessionId })
+    .where(and(eq(session.workspaceId, workspaceId), eq(session.id, sessionId)));
+}
+
+/**
+ * The harness conversation the round about to start should carry on, or null to start fresh.
+ *
+ * Two reads, in this order, and the order *is* the decision:
+ *
+ *  1. **This Session's own `harness_session_id`.** The case that matters, and the reason that
+ *     column is written mid-run rather than at a clean exit: a redrive of `agent-run-N` after an
+ *     orchestrator restart, an Inngest retry, or an exhausted execution budget runs in the *same*
+ *     Session, against a row the dying attempt already stamped with the conversation it was
+ *     having. The reclaim sweep re-enqueues against the same Session too, so an automatically
+ *     recovered run lands here as well. This is the whole of "a Task must never lose a session":
+ *     the same brief handed to a process with no memory becomes the same conversation, continued.
+ *  2. **The newest prior Session of the same Task that has one.** An operator's Retry opens a
+ *     fresh Session row, so (1) answers null for it. The alternative there is not "resume
+ *     nothing", it is "re-read the brief" — and the harness's own record of what it already tried,
+ *     in the worktree the retry will find, is strictly more informative than the brief that
+ *     produced it. Newest first because only the latest attempt describes that worktree.
+ *
+ * Workspace-scoped like every other read in this module (Principle V). A conversation id is a
+ * handle onto a harness's own store, and no Task may name one belonging to another Workspace.
+ */
+export async function resolveResumeHarnessSessionId(
+  db: Db,
+  workspaceId: string,
+  taskId: string,
+  sessionId: string,
+): Promise<string | null> {
+  const [current] = await db
+    .select({ harnessSessionId: session.harnessSessionId })
+    .from(session)
+    .where(and(eq(session.workspaceId, workspaceId), eq(session.id, sessionId)))
+    .limit(1);
+  if (current?.harnessSessionId) return current.harnessSessionId;
+
+  const [prior] = await db
+    .select({ harnessSessionId: session.harnessSessionId })
+    .from(session)
+    .where(
+      and(
+        eq(session.workspaceId, workspaceId),
+        eq(session.taskId, taskId),
+        ne(session.id, sessionId),
+        isNotNull(session.harnessSessionId),
+      ),
+    )
+    // `session_task_started` is exactly this ordering, which is why the fallback costs an index
+    // read rather than a scan of every Session the Task has ever had.
+    .orderBy(desc(session.startedAt))
+    .limit(1);
+  return prior?.harnessSessionId ?? null;
+}
+
 export async function setSessionState(
   db: Db,
   workspaceId: string,
@@ -631,10 +708,25 @@ export function isMissingParentRow(cause: unknown): boolean {
   return code === "SQLITE_CONSTRAINT_FOREIGNKEY" || code === "23503";
 }
 
+/**
+ * `workflowStepId` is required rather than optional, and never defaulted.
+ *
+ * Every one of the callers below sits somewhere in the run loop that already knows which Step it
+ * is running — the entry leg, the rebound `leg`, or the Step a `workflow_decision` is about. An
+ * optional field would let a new append site say nothing and land a null that reads exactly like
+ * "this Task has no Workflow", which is the one distinction the column exists to make. Making it
+ * explicit costs a `null` at the sites that genuinely have no Step and buys a compiler error at
+ * the sites that forgot.
+ */
 export async function appendSessionEvent(
   db: Db,
   workspaceId: string,
-  input: { sessionId: string; seq: number; payload: SessionEventPayload },
+  input: {
+    sessionId: string;
+    seq: number;
+    workflowStepId: string | null;
+    payload: SessionEventPayload;
+  },
 ): Promise<void> {
   const payload = sessionEventPayloadSchema.parse(input.payload);
   await db
@@ -645,6 +737,7 @@ export async function appendSessionEvent(
       seq: input.seq,
       kind: payload.kind,
       payload,
+      workflowStepId: input.workflowStepId,
     })
     .onConflictDoNothing();
 }
@@ -849,6 +942,12 @@ export async function nextSessionEventSeq(
 export interface ReplayEvent {
   sessionId: string;
   seq: number;
+  /**
+   * The Workflow Step this event was produced under, or null for a Task on no Workflow — and for
+   * every row written before the column existed, which is why a client segmenting on it has to
+   * treat null as "unattributed" rather than as a Step of its own.
+   */
+  workflowStepId: string | null;
   payload: SessionEventPayload;
 }
 
@@ -877,6 +976,7 @@ export async function listTaskEventsSince(
       seq: sessionEvent.seq,
       kind: sessionEvent.kind,
       payload: sessionEvent.payload,
+      workflowStepId: sessionEvent.workflowStepId,
     })
     .from(sessionEvent)
     .where(
@@ -894,6 +994,7 @@ export async function listTaskEventsSince(
   return rows.map((r) => ({
     sessionId: r.sessionId,
     seq: r.seq,
+    workflowStepId: r.workflowStepId,
     payload: parseSessionEventPayload(r.kind, r.payload),
   }));
 }

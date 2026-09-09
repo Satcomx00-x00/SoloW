@@ -1,4 +1,5 @@
 import { type AcpSession, type AcpUpdate, startAcpSession } from "@solow/acp";
+import type { HarnessStopReason } from "@solow/contracts";
 import { detectFailureSignal, type FailureSignal } from "@solow/core";
 import type { Executor } from "../executor/types.js";
 import {
@@ -75,6 +76,19 @@ export class AcpRunner implements HarnessRunner {
           cwd: opts.cwd,
           env: opts.env,
           ...(opts.mcpServers && opts.mcpServers.length > 0 ? { mcpServers: opts.mcpServers } : {}),
+          /*
+           * Resume if the harness can, start fresh if it cannot — never fail the round over it.
+           *
+           * `startAcpSession` hard-fails by default, which is right for a caller resuming
+           * deliberately. This one is not: the orchestrator resumes because a re-spawn threw the
+           * conversation away, and an agent that never advertised `loadSession` would then turn
+           * "we tried to keep the context" into "the round did not run". Losing the conversation
+           * costs the harness a re-read of its own worktree; losing the round costs the Task.
+           * Which of the two happened travels back on `resumed`, so nothing has to guess.
+           */
+          ...(opts.resumeSessionId
+            ? { resumeSessionId: opts.resumeSessionId, resumeFallback: "new_session" as const }
+            : {}),
           ...(this.options.modeId ? { modeId: this.options.modeId } : {}),
           ...(this.options.modelId ? { modelId: this.options.modelId } : {}),
           spawn: (cmd, spawnOpts) => this.options.executor.spawn(cmd, spawnOpts),
@@ -131,8 +145,11 @@ export class AcpRunner implements HarnessRunner {
       // the lifecycle waiting on a session that was never created.
       const signal = detectFailureSignal(cause instanceof Error ? cause.message : String(cause));
       return {
-        outcome: Promise.resolve<HarnessOutcome>({ kind: "failed", signal }),
+        outcome: Promise.resolve<HarnessOutcome>({ kind: "failed", signal, stopReason: "error" }),
         workspacePath: Promise.resolve(opts.cwd),
+        harnessSessionId: Promise.resolve(null),
+        // Nothing was loaded because nothing was started.
+        resumed: Promise.resolve(false),
         send: async () => false,
         stop: async () => {},
       };
@@ -144,8 +161,10 @@ export class AcpRunner implements HarnessRunner {
       inbox.close();
       // A stop is an operator decision, not a fault: the partial work stays in the worktree and
       // goes to review like any other completed run (Principle I).
-      if (stopRequested || result.ok) return { kind: "completed" };
-      return { kind: "failed", signal: signalFor(result, live.stderrTail()) };
+      if (stopRequested) return { kind: "completed", stopReason: "cancelled" };
+      const stopReason = stopReasonFor(result);
+      if (result.ok) return { kind: "completed", stopReason };
+      return { kind: "failed", signal: signalFor(result, live.stderrTail()), stopReason };
     });
 
     return {
@@ -153,6 +172,8 @@ export class AcpRunner implements HarnessRunner {
       // Known up front, but still a promise: the shape of `HarnessHandle` is set by the protocol
       // that has to discover it, and two shapes would buy nothing.
       workspacePath: Promise.resolve<string | null>(opts.cwd),
+      harnessSessionId: live.sessionId,
+      resumed: live.resumed,
       async send(text: string) {
         const accepted = await live.send(text);
         // Same reasoning as `ClaudeCodeRunner.send` (see its comment): nothing on the harness's own
@@ -172,6 +193,38 @@ export class AcpRunner implements HarnessRunner {
         await live.stop();
       },
     };
+  }
+}
+
+/**
+ * ACP's `stopReason`, in the one vocabulary every runner reports in.
+ *
+ * `end_turn`, `max_tokens`, `max_turn_requests`, `refusal` and `cancelled` are the protocol's
+ * own words; `no_result` is this client's synthetic one for a session that ended outside a turn
+ * (see `@solow/acp`'s `startAcpSession`). A session that failed with an error and no stop reason
+ * is an `error`; a word the protocol adds later is kept as `unknown` rather than guessed at.
+ */
+export function stopReasonFor(result: {
+  stopReason: string | null;
+  error: string | null;
+}): HarnessStopReason {
+  switch (result.stopReason) {
+    case "end_turn":
+      return "end_turn";
+    case "max_tokens":
+      return "max_tokens";
+    case "max_turn_requests":
+      return "max_turns";
+    case "refusal":
+      return "refusal";
+    case "cancelled":
+      return "cancelled";
+    case "no_result":
+      return "no_result";
+    case null:
+      return result.error !== null ? "error" : "no_result";
+    default:
+      return "unknown";
   }
 }
 

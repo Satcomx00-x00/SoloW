@@ -1,11 +1,12 @@
 "use client";
 
 import type { IssueStatus, TaskState } from "@solow/contracts";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, Upload } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { type ReactNode, Suspense, useEffect, useRef, useState } from "react";
 import { ConfirmAction } from "@/components/features/confirm-action";
+import { ImportWorkflowDialog } from "@/components/features/workflows/workflow-transfer";
 import { Button } from "@/components/ui/button";
 import { CreateDisclosure } from "@/components/ui/create-disclosure";
 import { Input } from "@/components/ui/input";
@@ -399,6 +400,22 @@ function WorkflowsNav() {
               </p>
             )}
           </form>
+          {/* The other way a pipeline comes into being: someone else's, as a file. It sits under
+              the create form rather than beside the list because importing *is* creating one. */}
+          <ImportWorkflowDialog
+            trigger={
+              <Button
+                className="w-full"
+                disabled={failed}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                <Upload aria-hidden />
+                Import from file
+              </Button>
+            }
+          />
         </CreateDisclosure>
       </div>
     </div>

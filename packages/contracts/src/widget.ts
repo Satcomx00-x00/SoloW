@@ -264,12 +264,26 @@ export const taskCompletionOutcomeSchema = z.enum([
 ]);
 export type TaskCompletionOutcome = z.infer<typeof taskCompletionOutcomeSchema>;
 
+/**
+ * The harness's answer to its Step's branch question (`agent-decides`), when it has one.
+ *
+ * The structured twin of the `DECISION: yes|no` line `readHarnessDecision` reads off prose. The
+ * line was the only channel at first, and it is fragile in the way prose is: a harness that
+ * reasons its way to an answer writes the word more than once, paraphrases it, or puts it in
+ * the message and not in the summary that travels as the handoff. A field on the declaration
+ * the harness already has to emit cannot be paraphrased, and it is read first.
+ */
+export const harnessDecisionSchema = z.enum(["yes", "no"]);
+export type HarnessDecision = z.infer<typeof harnessDecisionSchema>;
+
 /** The harness reporting how its run ended (`task_complete`). Presentational — nothing to answer. */
 export const taskCompleteWidget = z.object({
   kind: z.literal("task_complete"),
   outcome: taskCompletionOutcomeSchema,
   /** What the harness wants the reviewer to know before opening the diff. */
   summary: z.string().max(2000).optional(),
+  /** Its answer to the Step's branch question, where the Step asked one. See `harnessDecisionSchema`. */
+  decision: harnessDecisionSchema.optional(),
 });
 
 /**

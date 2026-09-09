@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, Brain, ChevronDown, ChevronUp, Search, X } from "lucide-react";
+import { ArrowDown, Brain, ChevronDown, ChevronUp, Layers, Search, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,6 +11,21 @@ import { HarnessActivityLine, LaunchingPanel } from "./harness-activity";
 import { findMatches, stepMatch } from "./terminal-search";
 import { harnessActivity, type TranscriptRow } from "./transcript";
 import { Transcript } from "./transcript-view";
+
+/** What the terminal has been narrowed to, in the words the strip above it already uses. */
+export interface TerminalScope {
+  /** The Step's name, exactly as its tab reads. */
+  name: string;
+  /** One-based, and the total — the same "Step 2 of 3" the strip's header states. */
+  position: number;
+  total: number;
+  /**
+   * Whether the run is on this Step. An empty terminal means two different things either side of
+   * that line: a harness still starting up, or a Step that has not produced anything (yet, or at
+   * all) — and "Launching…" over a Step the run finished two Steps ago would be a lie.
+   */
+  current: boolean;
+}
 
 /**
  * The terminal: the transcript, plus the two controls a log viewer is unusable without.
@@ -34,6 +49,11 @@ import { Transcript } from "./transcript-view";
  * block — and a settled transcript looks the same whether the harness is composing or has hung. So
  * the foot of the list carries a line naming what is happening, and an empty terminal under a
  * running Task says the harness is starting rather than inviting the operator to start it again.
+ *
+ * **Saying what it is showing.** A `scope` means the rows are one Workflow Step's, not the whole
+ * run's — and a transcript is the one panel where that cannot be left implicit. Twelve lines
+ * scrolled to the bottom look exactly like a run that did twelve lines of work; the caption says
+ * otherwise, and sits outside the scroll region so it is still saying it at the bottom.
  */
 export function TerminalView({
   rows,
@@ -41,6 +61,9 @@ export function TerminalView({
   isRunning = false,
   onRespondPermission,
   onRespondWidget,
+  panelId,
+  labelledBy,
+  scope,
 }: {
   rows: readonly TranscriptRow[];
   /** How many earlier events a summary stands in for, if any. */
@@ -49,6 +72,12 @@ export function TerminalView({
   isRunning?: boolean;
   onRespondPermission: (requestId: string, optionId: string) => void;
   onRespondWidget?: ((widgetId: string, values: string[], text?: string) => void) | undefined;
+  /** Set only when a Workflow strip is driving this panel, which makes it that strip's tabpanel. */
+  panelId?: string | undefined;
+  /** The id of the tab currently showing this panel. */
+  labelledBy?: string | undefined;
+  /** The Workflow Step the rows were narrowed to, or omitted for the whole run. */
+  scope?: TerminalScope | undefined;
 }) {
   const viewport = useRef<HTMLDivElement | null>(null);
   const [following, setFollowing] = useState(true);
@@ -154,7 +183,15 @@ export function TerminalView({
     // A container, because the one thing the toolbar below has to respond to is *its own* width:
     // this panel is sized by a draggable divider, so a viewport breakpoint knows nothing about
     // how much room the strip actually has.
-    <div className="@container surface-edge flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-terminal">
+    <div
+      className="@container surface-edge flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-terminal"
+      // A tabpanel only when a Workflow strip is actually driving it, and all three attributes
+      // arrive together or not at all: a Task on no Workflow has no tabs, and a panel announcing
+      // itself as one half of a relationship that does not exist is worse than a plain container.
+      {...(panelId
+        ? { id: panelId, role: "tabpanel" as const, "aria-labelledby": labelledBy }
+        : {})}
+    >
       {/*
         A fixed-height strip, not a row that sizes to whatever is in it: the find bar swaps a
         button for an input and back, and a bar that grew and shrank with them would shove the
@@ -311,6 +348,24 @@ export function TerminalView({
         </div>
       </div>
 
+      {/*
+        Outside the ScrollArea on purpose. The whole point of this line is to be read by someone
+        who has scrolled to the bottom of a short transcript and is about to conclude the run did
+        very little; a caption that scrolled away with the first screenful would be absent at
+        exactly the moment it is needed. It names where the rest of the run went rather than
+        offering a second way back to it — the tabs a few pixels above are that control, and
+        two controls for one act is how a strip stops being read at all.
+      */}
+      {scope && (
+        <p className="flex shrink-0 items-center gap-1.5 border-b bg-black/10 px-3 py-1.5 text-2xs text-muted-foreground">
+          <Layers aria-hidden className="size-3 shrink-0" />
+          <span className="min-w-0 truncate">
+            Showing <span className="font-medium text-foreground/80">{scope.name}</span> — step{" "}
+            {scope.position} of {scope.total}. The rest of this run is under the other steps.
+          </span>
+        </p>
+      )}
+
       <ScrollArea className="min-h-0 flex-1" viewportRef={viewport} onViewportScroll={onScroll}>
         {rows.length > 0 ? (
           <>
@@ -333,6 +388,10 @@ export function TerminalView({
               </div>
             )}
           </>
+        ) : scope && !(isRunning && scope.current) ? (
+          // Empty *for this Step*, which is not the same claim as an empty run — and the invitation
+          // to launch would be wrong twice over on a Step of a Task that is already running.
+          <EmptyPanel label={`No harness output recorded for ${scope.name}.`} />
         ) : isRunning ? (
           <LaunchingPanel />
         ) : (

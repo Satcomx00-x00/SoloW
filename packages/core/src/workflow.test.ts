@@ -1,12 +1,17 @@
 /// <reference types="bun-types" />
 
 import { describe, expect, it } from "bun:test";
-import { WorkflowErrorCode, type WorkflowStepGate } from "@solow/contracts";
+import {
+  WorkflowErrorCode,
+  type WorkflowStepBranch,
+  type WorkflowStepGate,
+} from "@solow/contracts";
 import {
   advanceWorkflowStep,
   appendRank,
   buildStepBrief,
   carryHarnessDecision,
+  describeWorkflowDecision,
   evaluateStepCondition,
   rankBetween,
   rankForMove,
@@ -15,6 +20,7 @@ import {
   sortSteps,
   stepExits,
   validateWorkflowGraph,
+  type WorkflowDecisionRecord,
   type WorkflowStepOutcome,
   type WorkflowStepRule,
 } from "./workflow.js";
@@ -244,26 +250,38 @@ describe("resuming a workflow", () => {
 describe("advancing a task through its steps", () => {
   it("moves an auto-gated middle step on to the next one when the harness signals", () => {
     const advance = unwrap(advanceWorkflowStep(pipeline("auto"), "plan", outcome()));
-    expect(advance).toEqual({ status: "advanced", stepId: "implement", consumedApproval: false });
+    expect(advance).toMatchObject({
+      status: "advanced",
+      stepId: "implement",
+      consumedApproval: false,
+    });
   });
 
   it("holds a human-gated step until a decision is recorded, however the harness signalled", () => {
     const steps = pipeline("human");
     expect(unwrap(advanceWorkflowStep(steps, "plan", outcome())).status).toBe("awaiting-decision");
     const decided = unwrap(advanceWorkflowStep(steps, "plan", outcome({ unspentApproval: true })));
-    expect(decided).toEqual({ status: "advanced", stepId: "implement", consumedApproval: true });
+    expect(decided).toMatchObject({
+      status: "advanced",
+      stepId: "implement",
+      consumedApproval: true,
+    });
   });
 
   it("lets auto-unless-changes through when the step produced nothing to look at", () => {
     const steps = pipeline("auto-unless-changes");
     const clean = unwrap(advanceWorkflowStep(steps, "plan", outcome({ producedChanges: false })));
-    expect(clean).toEqual({ status: "advanced", stepId: "implement", consumedApproval: false });
+    expect(clean).toMatchObject({
+      status: "advanced",
+      stepId: "implement",
+      consumedApproval: false,
+    });
   });
 
   it("stops auto-unless-changes when the step did produce changes", () => {
     const steps = pipeline("auto-unless-changes");
     const dirty = unwrap(advanceWorkflowStep(steps, "plan", outcome({ producedChanges: true })));
-    expect(dirty).toEqual({
+    expect(dirty).toMatchObject({
       status: "awaiting-decision",
       stepId: "plan",
       consumedApproval: false,
@@ -281,7 +299,7 @@ describe("advancing a task through its steps", () => {
       step("implement", "2", "auto", "agent-signal"),
     ];
     const held = unwrap(advanceWorkflowStep(steps, "plan", outcome({ signal: "agent-signal" })));
-    expect(held).toEqual({ status: "held", stepId: "plan", consumedApproval: false });
+    expect(held).toMatchObject({ status: "held", stepId: "plan", consumedApproval: false });
   });
 
   it("advances a review-gated step when the review signal arrives", () => {
@@ -292,7 +310,11 @@ describe("advancing a task through its steps", () => {
     const advance = unwrap(
       advanceWorkflowStep(steps, "plan", outcome({ signal: "review", unspentApproval: true })),
     );
-    expect(advance).toEqual({ status: "advanced", stepId: "implement", consumedApproval: true });
+    expect(advance).toMatchObject({
+      status: "advanced",
+      stepId: "implement",
+      consumedApproval: true,
+    });
   });
 
   it("refuses to advance a step that is not in the workflow", () => {
@@ -307,7 +329,7 @@ describe("advancing a task through its steps", () => {
     (gate) => {
       const steps = pipeline(gate);
       const undecided = unwrap(advanceWorkflowStep(steps, "review", outcome()));
-      expect(undecided).toEqual({
+      expect(undecided).toMatchObject({
         status: "awaiting-decision",
         stepId: "review",
         consumedApproval: false,
@@ -316,7 +338,7 @@ describe("advancing a task through its steps", () => {
       const decided = unwrap(
         advanceWorkflowStep(steps, "review", outcome({ unspentApproval: true })),
       );
-      expect(decided).toEqual({
+      expect(decided).toMatchObject({
         status: "completed",
         stepId: "review",
         consumedApproval: true,
@@ -343,7 +365,7 @@ describe("advancing a task through its steps", () => {
     const first = unwrap(
       advanceWorkflowStep(steps, "only", outcome({ signal: "review", unspentApproval: true })),
     );
-    expect(first).toEqual({ status: "completed", stepId: "only", consumedApproval: true });
+    expect(first).toMatchObject({ status: "completed", stepId: "only", consumedApproval: true });
 
     // The world the first pass left: that approval is now the Task's recorded decision, so it is
     // no longer *unspent* — it is spent, by this same call.
@@ -354,7 +376,7 @@ describe("advancing a task through its steps", () => {
         outcome({ signal: "review", unspentApproval: false, approvalAlreadySpent: true }),
       ),
     );
-    expect(replay).toEqual({ status: "completed", stepId: "only", consumedApproval: false });
+    expect(replay).toMatchObject({ status: "completed", stepId: "only", consumedApproval: false });
   });
 
   it("does not complete the last step on a decision that is not an approval it already spent", () => {
@@ -393,7 +415,7 @@ describe("advancing a task through its steps", () => {
           outcome({ producedChanges: true, unspentApproval: false }),
         ),
       );
-      expect(second).toEqual({
+      expect(second).toMatchObject({
         status: "awaiting-decision",
         stepId: "implement",
         consumedApproval: false,
@@ -415,13 +437,21 @@ describe("advancing a task through its steps", () => {
     const advance = unwrap(
       advanceWorkflowStep(steps, "plan", outcome({ signal: "review", unspentApproval: true })),
     );
-    expect(advance).toEqual({ status: "advanced", stepId: "implement", consumedApproval: true });
+    expect(advance).toMatchObject({
+      status: "advanced",
+      stepId: "implement",
+      consumedApproval: true,
+    });
   });
 
   it("spends nothing on an auto gate, so a pipeline of them still costs exactly one decision", () => {
     const steps = pipeline("auto");
     const advance = unwrap(advanceWorkflowStep(steps, "plan", outcome({ unspentApproval: true })));
-    expect(advance).toEqual({ status: "advanced", stepId: "implement", consumedApproval: false });
+    expect(advance).toMatchObject({
+      status: "advanced",
+      stepId: "implement",
+      consumedApproval: false,
+    });
   });
 });
 
@@ -477,6 +507,202 @@ describe("a step's condition", () => {
     ).toBe(false);
     expect(evaluateStepCondition(changed, { handoff: null, producedChanges: true })).toBe(true);
   });
+
+  it("reads an outcome condition off the harness's declaration, and matches nothing on silence", () => {
+    const blocked = { kind: "outcome", is: "blocked" } as const;
+    expect(
+      evaluateStepCondition(blocked, { handoff: null, producedChanges: false, outcome: "blocked" }),
+    ).toBe(true);
+    expect(
+      evaluateStepCondition(blocked, {
+        handoff: null,
+        producedChanges: true,
+        outcome: "changes_ready",
+      }),
+    ).toBe(false);
+    // A harness that declared nothing has not said it was blocked — the same rule that reads a
+    // missing DECISION line as no.
+    expect(evaluateStepCondition(blocked, { handoff: null, producedChanges: false })).toBe(false);
+    expect(
+      evaluateStepCondition(blocked, { handoff: null, producedChanges: false, outcome: null }),
+    ).toBe(false);
+  });
+
+  it("takes the widget's own decision field over anything written in prose", () => {
+    // The structured answer wins, and it lands in the handoff as the same line every reader
+    // already understands.
+    expect(carryHarnessDecision("Reviewed.", "…\nDECISION: no", "yes")).toBe(
+      "Reviewed.\n\nDECISION: yes",
+    );
+    expect(carryHarnessDecision("Done.\nDECISION: no", null, "yes")).toBe(
+      "Done.\nDECISION: no\n\nDECISION: yes",
+    );
+    expect(readHarnessDecision(carryHarnessDecision("Done.\nDECISION: no", null, "yes"))).toBe(
+      "yes",
+    );
+    // Already the answer of record: nothing is appended twice.
+    expect(carryHarnessDecision("Done.\nDECISION: yes", null, "yes")).toBe("Done.\nDECISION: yes");
+    expect(carryHarnessDecision(null, null, "no")).toBe("DECISION: no");
+    // No field given: exactly the prose rules as before.
+    expect(carryHarnessDecision("Done.", "DECISION: no", null)).toBe("Done.\n\nDECISION: no");
+  });
+});
+
+describe("what an advance says about itself", () => {
+  const rules = (branch: WorkflowStepBranch | null) => [
+    { id: "review", rank: "1", gate: "auto" as const, advanceOn: "agent-signal" as const, branch },
+    { id: "implement", rank: "2", gate: "human" as const, advanceOn: "review" as const },
+    { id: "escalate", rank: "3", gate: "human" as const, advanceOn: "review" as const },
+  ];
+  const outcome = (over: Partial<WorkflowStepOutcome> = {}): WorkflowStepOutcome => ({
+    signal: "agent-signal",
+    producedChanges: false,
+    unspentApproval: false,
+    approvalAlreadySpent: false,
+    handoff: null,
+    ...over,
+  });
+
+  it("names the exit an unbranched step took", () => {
+    const advance = unwrap(advanceWorkflowStep(rules(null), "review", outcome()));
+    expect(advance.explanation).toEqual({
+      gate: "auto",
+      needsApproval: false,
+      condition: null,
+      exit: "next",
+    });
+  });
+
+  it("records the condition it evaluated and the branch it chose", () => {
+    const branch: WorkflowStepBranch = {
+      when: { kind: "outcome", is: "blocked" },
+      thenStepId: "escalate",
+      elseStepId: "implement",
+    };
+    const stuck = unwrap(
+      advanceWorkflowStep(rules(branch), "review", outcome({ outcome: "blocked" })),
+    );
+    expect(stuck.stepId).toBe("escalate");
+    expect(stuck.explanation).toEqual({
+      gate: "auto",
+      needsApproval: false,
+      condition: { when: branch.when, holds: true },
+      exit: "then",
+    });
+    const fine = unwrap(
+      advanceWorkflowStep(rules(branch), "review", outcome({ outcome: "changes_ready" })),
+    );
+    expect(fine.stepId).toBe("implement");
+    expect(fine.explanation.condition).toEqual({ when: branch.when, holds: false });
+    expect(fine.explanation.exit).toBe("else");
+  });
+
+  it("says what the gate would have asked even when the step was held on the wrong signal", () => {
+    const held = unwrap(
+      advanceWorkflowStep(rules(null), "implement", outcome({ signal: "agent-signal" })),
+    );
+    expect(held.status).toBe("held");
+    expect(held.explanation).toEqual({
+      gate: "human",
+      needsApproval: true,
+      condition: null,
+      exit: null,
+    });
+  });
+
+  it("says a person is needed when a human gate holds", () => {
+    const waiting = unwrap(
+      advanceWorkflowStep(rules(null), "implement", outcome({ signal: "review" })),
+    );
+    expect(waiting.status).toBe("awaiting-decision");
+    expect(waiting.explanation.needsApproval).toBe(true);
+    expect(waiting.explanation.exit).toBe("next");
+  });
+});
+
+describe("describing a workflow decision", () => {
+  const record = (over: Partial<WorkflowDecisionRecord> = {}): WorkflowDecisionRecord => ({
+    kind: "workflow_decision",
+    stepId: "review",
+    stepName: "Review",
+    signal: "agent-signal",
+    gate: "auto",
+    needsApproval: false,
+    condition: null,
+    status: "advanced",
+    nextStepId: "implement",
+    nextStepName: "Implement",
+    outcome: "changes_ready",
+    producedChanges: false,
+    ...over,
+  });
+
+  it("says which step finished, on what, and where the task went", () => {
+    expect(describeWorkflowDecision(record())).toBe(
+      'Workflow: step "Review" finished (the harness signalled done). Advanced to "Implement".',
+    );
+  });
+
+  it("states the condition it read and the answer it got", () => {
+    expect(
+      describeWorkflowDecision(
+        record({
+          condition: {
+            when: { kind: "agent-decides", question: "Does it need another pass?" },
+            holds: true,
+          },
+        }),
+      ),
+    ).toContain('Condition "Does it need another pass?" → yes.');
+    expect(
+      describeWorkflowDecision(
+        record({ condition: { when: { kind: "outcome", is: "blocked" }, holds: false } }),
+      ),
+    ).toContain("Condition did the harness report `blocked`? → no.");
+    expect(
+      describeWorkflowDecision(
+        record({ condition: { when: { kind: "produced-changes" }, holds: true } }),
+      ),
+    ).toContain("Condition did the step produce changes? → yes.");
+  });
+
+  it("explains a wait and a hold in the gate's own terms", () => {
+    expect(
+      describeWorkflowDecision(
+        record({
+          status: "awaiting-decision",
+          gate: "human",
+          needsApproval: true,
+          nextStepId: null,
+          nextStepName: null,
+        }),
+      ),
+    ).toContain("Gate: a person decides before the task moves on.");
+    expect(
+      describeWorkflowDecision(
+        record({
+          status: "awaiting-decision",
+          gate: "auto-unless-changes",
+          needsApproval: true,
+          producedChanges: true,
+          nextStepId: null,
+          nextStepName: null,
+        }),
+      ),
+    ).toContain("the step produced changes, so a person decides");
+    expect(
+      describeWorkflowDecision(
+        record({ status: "held", signal: "review", nextStepId: null, nextStepName: null }),
+      ),
+    ).toBe(
+      'Workflow: step "Review" finished (a review landed). Held: this step advances on the harness\'s signal, not on this.',
+    );
+    expect(
+      describeWorkflowDecision(
+        record({ status: "completed", nextStepId: null, nextStepName: null }),
+      ),
+    ).toContain("the workflow is complete");
+  });
 });
 
 describe("branching on a condition", () => {
@@ -488,7 +714,11 @@ describe("branching on a condition", () => {
         outcome({ handoff: "Needs a design.\nDECISION: yes" }),
       ),
     );
-    expect(advance).toEqual({ status: "advanced", stepId: "design", consumedApproval: false });
+    expect(advance).toMatchObject({
+      status: "advanced",
+      stepId: "design",
+      consumedApproval: false,
+    });
   });
 
   it("takes the no branch otherwise, skipping the steps in between", () => {
@@ -499,7 +729,11 @@ describe("branching on a condition", () => {
         outcome({ handoff: "Straightforward.\nDECISION: no" }),
       ),
     );
-    expect(advance).toEqual({ status: "advanced", stepId: "implement", consumedApproval: false });
+    expect(advance).toMatchObject({
+      status: "advanced",
+      stepId: "implement",
+      consumedApproval: false,
+    });
   });
 
   it("can send the task back to an earlier step", () => {
@@ -510,7 +744,11 @@ describe("branching on a condition", () => {
         outcome({ handoff: "Missing tests.\nDECISION: yes" }),
       ),
     );
-    expect(advance).toEqual({ status: "advanced", stepId: "implement", consumedApproval: false });
+    expect(advance).toMatchObject({
+      status: "advanced",
+      stepId: "implement",
+      consumedApproval: false,
+    });
   });
 
   it("treats a null target as the end of the pipeline, which still needs a decision", () => {
@@ -519,7 +757,7 @@ describe("branching on a condition", () => {
     const undecided = unwrap(
       advanceWorkflowStep(steps, "review", outcome({ handoff: "Looks good.\nDECISION: no" })),
     );
-    expect(undecided).toEqual({
+    expect(undecided).toMatchObject({
       status: "awaiting-decision",
       stepId: "review",
       consumedApproval: false,
@@ -531,7 +769,11 @@ describe("branching on a condition", () => {
         outcome({ handoff: "Looks good.\nDECISION: no", unspentApproval: true }),
       ),
     );
-    expect(decided).toEqual({ status: "completed", stepId: "review", consumedApproval: true });
+    expect(decided).toMatchObject({
+      status: "completed",
+      stepId: "review",
+      consumedApproval: true,
+    });
   });
 
   it("still applies the step's own gate to the move a branch chose", () => {
@@ -547,7 +789,7 @@ describe("branching on a condition", () => {
         outcome({ handoff: "DECISION: yes", unspentApproval: true }),
       ),
     );
-    expect(decided).toEqual({ status: "advanced", stepId: "design", consumedApproval: true });
+    expect(decided).toMatchObject({ status: "advanced", stepId: "design", consumedApproval: true });
   });
 
   it("follows the rank order again from a step that has no branch", () => {

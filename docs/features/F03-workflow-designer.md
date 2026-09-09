@@ -132,6 +132,50 @@ it is how an operator gets from one shape to the next.
   can design a pipeline. `workflow.advanceTask` and `workflow.acknowledgeDrift` stay withheld:
   the gates are a person's to open. The two library *lists* are exposed so a Step can name items
   by id; library writes stay signed-in.
+- **A node is a form only when you are close enough to fill one.** Below 0.72 zoom every Step
+  card collapses to what a pipeline is *read* for — ordinal, name, harness, gate and advance rule,
+  a branch mark, a problem count — and the fields come back on the way in (React Flow's contextual
+  zoom). Six nodes each drawing three selects, a prompt, two library pickers and a branch form was
+  a wall of controls with the pipeline somewhere behind it, at a zoom where none of them could be
+  read anyway. The two acts that are *about* a Step rather than fields of it — removing it, and
+  making it branch — moved off the card onto a `NodeToolbar` revealed by pointing at the node, so
+  the trash is no longer a permanent invitation beside a text field and a compact node is still
+  operable. Handles stay pinned at fixed offsets from the card's top in both modes, so the
+  pipeline's main line is a line whatever a node is showing. A `MiniMap` appears past three Steps,
+  each Step in its own dot colour, pannable and zoomable. (FR-4)
+- **One axis, from the start pill to the end pill.** A node's position names its left edge and its
+  vertical *middle* (React Flow's `nodeOrigin`), so every node is strung on one horizontal line
+  however tall it happens to be. It used to be a fixed 112px measured down from each card's top,
+  with every card top-aligned: that kept the *line* straight but hung the nodes off it — an edge
+  entered a tall card near its top and a short one near its bottom, and the 24px pills sat
+  wherever that offset happened to fall. The handles moved with it, from pixel offsets to the
+  card's own middle, and the two edge lanes that route around the row (`yes` over, `no` under)
+  now measure both sides of it. The alternative — subtracting half of each card's measured height
+  — works, but makes the layout depend on a measurement that arrives a frame after the render
+  needing it; telling React Flow what a position *means* is the same statement made once, and its
+  own `fitView`, minimap and bounds arithmetic account for it.
+- **A branch exit is named at both ends.** The `yes`/`no` chip moved off the inside of the card —
+  where 6px from the right border put it on top of the handle dot, on top of the branch form's
+  full-width selects, and, for `yes`, on top of the `+` in the gap, since the exit, its badge and
+  the insert button all sat on the main line — out onto the stub of the edge it names, lifted
+  clear of the line so the dash runs underneath it. The badge on an edge routed around the row
+  moved from the middle of its run to the end it *arrives* at (`laneLabelX`): the middle of a run
+  spanning four cards is above whichever card is halfway along it and says nothing about either
+  end, while the leaving end is already named by the chip. A `yes` that loops back to *Implement*
+  now reads `yes` where it leaves and `yes` where it lands, and can be traced from either.
+- **A pipeline is a file you can share** (FR-7). `workflow.export` returns the Workflow as a
+  portable JSON document and `workflow.import` writes one back, with the Export button in the
+  Workflow inspector and *Import from file* under *New workflow* in the sidebar. The document
+  carries **no ids**: the Harness Profile a Step runs on, and the MCP servers and Skills it loads,
+  travel **by name**, and a branch's targets travel as **indices** into the document's own step
+  list — so the same file means the same pipeline in another Workspace or another instance, and
+  reads well enough to edit by hand and check into a repository. Resolution on the way in is lossy
+  by construction and says which way it failed: an unmatched Skill or MCP server is **dropped**
+  (a Step runs without it), an unmatched Harness Profile **falls back** to one that exists (a Step
+  without a harness is not a Step), and every substitution comes back in the reply for the
+  operator to re-point on the canvas. A name the Workspace already uses is suffixed — *Ship (2)* —
+  rather than refused, so the same document imports twice. The imported Workflow starts at version
+  1: it has been edited zero times.
 - **Three pipelines by default** — *Implement & review* (a reviewer harness decides whether another
   pass is needed), *Plan, then build* (a plan you approve, then the build), *Bug fix* (reproduce,
   fix, verify, looping while the bug still reproduces). Seeded once the Workspace has its first
@@ -156,25 +200,49 @@ The model, its seam and the designing canvas ship; the monitor does not. Concret
   the Workspace-wide items are checked and locked there, the rest are the Step's own. Every id is
   checked against the Workspace's libraries before it is written (`WORKFLOW_TOOL_NOT_IN_WORKSPACE`),
   and an item a Step names cannot be deleted from its library.
+- **A Step sets its own permission posture** (spec F05's `permissionMode`, on the Step).
+  `workflow_step.permission_mode`, chosen on the node under *Launches with*, beside the MCP
+  servers and Skills that Step loads — because **a Step is a harness launch**: a Task under a
+  Workflow starts a fresh session at every Step with that Step's Profile, that Step's servers and
+  Skills and that Step's brief, and how much that harness may do without asking is a launch
+  parameter exactly like those. Wanting a *plan* Step and a *build* Step on one Harness Profile is
+  the ordinary shape of a pipeline; before this it took two Profiles differing in a single enum,
+  each with its own credential binding and concurrency cap. **Null is the default and means
+  "whatever the Profile says"** — so the column changed no existing pipeline, and a Step with no
+  opinion keeps following its Profile when the Profile is re-postured. The Profile keeps the field
+  and keeps deciding for the run that has no Step at all — a Task following no Workflow — which is
+  why moving it onto the node could not mean removing it from Settings; what changed there is that
+  it now says it is the fallback. The posture travels in an exported document as itself rather
+  than as a name to resolve: it is one of three fixed values and means the same in any Workspace.
 - **A Step can branch on a condition** (FR-2's *Condition*, in the shape this pipeline can
   answer). It is a property of a Harness Step rather than a Step kind of its own — a Condition node
   would be a row with no harness, no prompt and no gate, and every rule that reads a Step would have
   to learn to skip it. `workflow_step.branch` holds a condition and two targets: when the
   condition holds, the Task goes to `thenStepId`, otherwise to `elseStepId`. Either target may be
   null, meaning *the pipeline ends here*, and either may name an **earlier** Step — "changes
-  requested, go back and implement" is the branch most worth having. Two conditions exist, and
-  neither fetches evidence the advance transaction does not already hold, so a Condition never
+  requested, go back and implement" is the branch most worth having. Three conditions exist, and
+  none fetches evidence the advance transaction does not already hold, so a Condition never
   becomes a second rules engine. **`agent-decides` is the one the feature is for: the harness
   answers the question.** The operator phrases it ("Does the implementation need another pass?");
-  `buildStepBrief` appends it to the Step's brief under *Decision to make*, with the exact line to
-  answer on (`DECISION: yes` / `DECISION: no`) and what each answer leads to; the harness — the
-  party that has just read the code — answers at the end of its final message, and the advance
-  reads the last such line off the handoff (`readHarnessDecision`). The handoff is the
-  `task_complete` widget's summary; an answer the harness wrote in its message but not in that
-  summary is carried into it by the run loop (`carryHarnessDecision`), because the first live run
-  did exactly that and the answer would otherwise have been lost. No answer is not an affirmation and counts
-  as `no`, and the brief says so. `produced-changes` is the other: the same corroborated fact
-  `auto-unless-changes` reads. A Step without a branch still goes to its rank successor, so every
+  `buildStepBrief` appends it to the Step's brief under *Decision to make*, with where to answer
+  and what each answer leads to; the harness — the party that has just read the code — answers in
+  the `decision` field of its `task_complete` widget (`"yes"` / `"no"`), which is read first, or
+  on a `DECISION: yes` / `DECISION: no` line at the end of its final message. Either way the
+  answer travels in the handoff as that line, and the advance reads the last one off it
+  (`readHarnessDecision`). The handoff is the widget's summary; an answer the harness gave in the
+  widget's field or wrote in its message but not in that summary is carried into it by the run
+  loop (`carryHarnessDecision`), because the first live run did exactly that and the answer would
+  otherwise have been lost. No answer is not an affirmation and counts as `no`, and the brief
+  says so. `produced-changes` is the second: the same corroborated fact `auto-unless-changes`
+  reads. `outcome` is the third: how the harness declared its run ended (`changes_ready`,
+  `nothing_to_do`, `blocked`), read off the same `task_complete` widget — so a Step whose harness
+  stopped because it could not go on can be routed to a person or an escalation Step rather than
+  arriving at the review gate looking like finished work. A harness that declared nothing
+  matches no outcome. **Every advance writes a `workflow_decision` record into the Session log**
+  — which Step reported in, on which signal, what its gate asked, how its condition evaluated
+  and where the cursor went — produced by the same evaluation that moved the cursor, so a Task
+  held at a gate or sent back down a branch explains itself in its own transcript instead of
+  looking like a run that stopped. A Step without a branch still goes to its rank successor, so every
   pipeline written before branches existed walks exactly as it did. A null target lands in the
   same terminal rule as running off the last Step — Principle I holds however a Task reaches the
   end. The canvas draws a branching Step with a `yes` and a `no` exit; an edge that skips or goes

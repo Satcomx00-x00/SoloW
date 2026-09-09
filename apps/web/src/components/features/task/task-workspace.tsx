@@ -45,10 +45,10 @@ import { LaunchTaskDialog, useWorkflowChoices } from "./launch-task-dialog";
 import { groupChanges, summariseConsequences } from "./review-groups";
 import { SplitPane } from "./split-pane";
 import { TaskAdvance } from "./task-advance";
-import { TerminalView } from "./terminal-view";
+import { type TerminalScope, TerminalView } from "./terminal-view";
 import { latestTodos, TodoList } from "./todo-list";
-import { buildTranscript } from "./transcript";
-import { WorkflowSteps } from "./workflow-steps";
+import { buildTranscript, inStepScope } from "./transcript";
+import { selectedTabId, TERMINAL_PANEL_ID, useStepScope, WorkflowSteps } from "./workflow-steps";
 
 /**
  * What the harness said about how its run ended, in the header.
@@ -146,11 +146,27 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   const task = trpc.task.get.useQuery({ id: taskId });
   // Back goes to the board of the Project holding this Task's Issue (see `useBackToProject`).
   const back = useBackToProject(task.data?.issueId, "/board");
+  /**
+   * Which Workflow Step the terminal is showing — the strip below owns the gesture, this owns
+   * the consequence (see `useStepScope`).
+   *
+   * Above the Session queries because it is an *argument* to them. A Session spans the whole
+   * pipeline, and filtering its events after they arrived would still transfer every Step's
+   * output and hold all of it in memory — which is the entire problem. Null means the whole run,
+   * and is what every Task on no Workflow gets: the request is then byte-for-byte the one this
+   * page has always made.
+   */
+  const scope = useStepScope(task.data ?? null);
   const sessions = trpc.session.listForTask.useQuery({ taskId });
   const latest = sessions.data?.[0];
   const detail = trpc.session.get.useQuery(
-    { sessionId: latest?.id ?? "" },
-    { enabled: Boolean(latest?.id) },
+    {
+      sessionId: latest?.id ?? "",
+      ...(scope.selected ? { workflowStepId: scope.selected } : {}),
+    },
+    // Held until the scope is settled: firing unscoped and refiring a moment later would fetch
+    // the whole pipeline exactly once per page load, which is the cost being removed.
+    { enabled: Boolean(latest?.id) && scope.settled },
   );
 
   /**
@@ -228,7 +244,25 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   // would make the memo below miss every time and rebuild the whole transcript per render —
   // reintroducing, quietly, the cost this replaced.
   const events = detail.data?.events ?? NO_EVENTS;
-  const rows = useMemo(() => buildTranscript(events, live.events), [events, live.events]);
+  /**
+   * The live half of the same narrowing.
+   *
+   * `session.get` answered a question at a moment; the socket keeps answering it, and a Step
+   * scope that the server applied and the stream did not would show one Step's history with the
+   * next Step's output arriving underneath it. `inStepScope` owns which frames survive — briefly:
+   * anything carrying no Step at all does, because unattributed is not a Step to be filtered to.
+   *
+   * `live.events` is returned as-is when nothing is selected, so the unscoped page allocates no
+   * array and the memo below sees the identity it always did.
+   */
+  const liveEvents = useMemo(
+    () =>
+      scope.selected === null
+        ? live.events
+        : live.events.filter((event) => inStepScope(event, scope.selected)),
+    [live.events, scope.selected],
+  );
+  const rows = useMemo(() => buildTranscript(events, liveEvents), [events, liveEvents]);
 
   /**
    * The harness's own plan, read from both of the page's sources for the same reason `rows` is.
@@ -242,6 +276,12 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
    * the list is never the older of the two. The narrowing to the session on screen is the part
    * that is not obvious — `seq` restarts per Session, and a replay reaching back into an earlier
    * review round would otherwise let that round's final list win on array position alone.
+   *
+   * The live side reads `live.events` rather than the Step-scoped copy on purpose: a plan is the
+   * harness's, not a Step's, and the panel it feeds sits in the Changes column, which is about
+   * the whole Session the way `diffs` and `review` are. The persisted fallback does narrow with
+   * the terminal — it is the same `events` — which is the honest reading of a reopened run: the
+   * last plan *that Step* published. Live wins whenever there is a live run to have one.
    */
   const liveSessionId = latest?.id;
   const todos = useMemo(() => {
@@ -357,6 +397,23 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   // compacted Session no longer ships the events its summaries stand in for, so the terminal
   // says what it is missing rather than quietly starting mid-run.
   const elided = summaries.reduce((n, s) => n + s.eventCount, 0);
+  /**
+   * What the terminal says it is showing, when it is showing one Step of several.
+   *
+   * Nothing at all on the whole run — including every Task on no Workflow, where `selected` is
+   * always null. A caption saying "showing everything" over a terminal that has only ever shown
+   * everything is a line an operator learns to stop reading.
+   */
+  const selectedStep = scope.stepped.findIndex((s) => s.step.id === scope.selected);
+  const terminalScope: TerminalScope | null =
+    selectedStep === -1
+      ? null
+      : {
+          name: scope.stepped[selectedStep]?.step.name ?? "",
+          position: selectedStep + 1,
+          total: scope.stepped.length,
+          current: scope.stepped[selectedStep]?.current ?? false,
+        };
   const inReview = t.state === "review";
   const canDecide = inReview && !decide.isPending;
   // Steering only makes sense while a harness is actually working; once the Task is in review
@@ -545,8 +602,11 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
         </div>
       </div>
 
-      {/* Which Step of its Workflow the run is on, when it is on one (spec F03). */}
-      <WorkflowSteps task={t} />
+      {/*
+        Which Step of its Workflow the run is on, when it is on one (spec F03) — and, since the
+        strip became the terminal's tablist, which Step's output is on screen.
+      */}
+      <WorkflowSteps scope={scope} />
 
       {moveMessage ? (
         <p
@@ -575,6 +635,12 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
               // Answering means reaching a live harness, so the control is offered only while
               // there is one: a finished run keeps its widgets as a record.
               {...(isRunning ? { onRespondWidget: live.respondWidget } : {})}
+              // The other half of the strip's tablist. Only when there is a strip: a Task on no
+              // Workflow has no tabs, so the terminal is a plain panel exactly as before.
+              {...(scope.binding
+                ? { panelId: TERMINAL_PANEL_ID, labelledBy: selectedTabId(scope.selected) }
+                : {})}
+              {...(terminalScope ? { scope: terminalScope } : {})}
             />
 
             <HarnessComposer

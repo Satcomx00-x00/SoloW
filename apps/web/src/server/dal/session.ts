@@ -116,7 +116,18 @@ export async function setSessionState(
  */
 export async function appendSessionEvent(
   ctx: RequestContext,
-  input: { sessionId: string; seq: number; payload: SessionEventPayload },
+  input: {
+    sessionId: string;
+    seq: number;
+    /**
+     * The Workflow Step in force, or null when there is none. Required rather than optional for
+     * the reason the orchestrator's copy of this helper states: an omitted field would land a
+     * null that reads exactly like "this Task has no Workflow", which is the one distinction the
+     * column exists to make.
+     */
+    workflowStepId: string | null;
+    payload: SessionEventPayload;
+  },
 ): Promise<Result<void>> {
   const payload = sessionEventPayloadSchema.parse(input.payload);
   await ctx.db.insert(sessionEvent).values({
@@ -125,19 +136,43 @@ export async function appendSessionEvent(
     seq: input.seq,
     kind: payload.kind,
     payload,
+    workflowStepId: input.workflowStepId,
   });
   return ok(undefined);
 }
 
+/**
+ * A Session's log, oldest first — optionally narrowed to the one Workflow Step that produced it.
+ *
+ * The filter is pushed into the query rather than applied to the rows afterwards because the
+ * thing it exists to fix is size: one Session spans a whole pipeline, and a terminal showing a
+ * single Step should not have to read (or ship) every other Step's output to find it.
+ *
+ * Omitting it reads the whole log, byte for byte what this function always returned — which is
+ * what `sessionForkCursor` and `listSessionEventsFrom` below depend on, since a hash taken over a
+ * Step's worth of a log is not a fork point for the log.
+ */
 export async function listSessionEvents(
   ctx: RequestContext,
   sessionId: string,
+  filter?: {
+    /**
+     * A Step id narrows to the events that Step produced. Never used to *find* a Session: the
+     * `session_id` and Workspace predicates below still do that, so an id from another Workspace
+     * narrows to nothing rather than reaching across the boundary (Principle V).
+     */
+    workflowStepId?: string;
+  },
 ): Promise<Result<TypedSessionEvent[]>> {
   const rows = await ctx.db
     .select()
     .from(sessionEvent)
     .where(
-      and(eq(sessionEvent.workspaceId, ctx.workspaceId), eq(sessionEvent.sessionId, sessionId)),
+      and(
+        eq(sessionEvent.workspaceId, ctx.workspaceId),
+        eq(sessionEvent.sessionId, sessionId),
+        ...(filter?.workflowStepId ? [eq(sessionEvent.workflowStepId, filter.workflowStepId)] : []),
+      ),
     )
     .orderBy(asc(sessionEvent.seq));
   return ok(rows.map(typed));

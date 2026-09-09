@@ -973,6 +973,17 @@ describe("the sweep it is an arm of", () => {
       { name: "solow-preflight", taskId: "task-preflight", runId: sessionId },
     ]);
     /*
+     * With an engine reachable, the reclaim arm would put this run back rather than condemn it —
+     * that is `reconcile.test.ts`'s subject, and it would leave nothing here for the reaper to
+     * reason about. An engine that refuses is the case this one is about: the sweep falls through
+     * to the verdict it has always written, and the question is whether the container goes with
+     * it. Injected rather than left to the sweep's default so the suite never reaches a real
+     * Inngest endpoint to discover that it cannot.
+     */
+    const relaunch = {
+      relaunch: () => Promise.reject(new Error("engine unreachable")),
+    };
+    /*
      * The one place in this file where a row is back-dated rather than the clock moved, and it has
      * to be. What is being modelled is a *long preflight*, and its length is the Session's age —
      * while the row whose staleness rule is under test, `task.updatedAt`, has to be the one the
@@ -987,7 +998,10 @@ describe("the sweep it is an arm of", () => {
       .set({ startedAt: new Date(Date.now() - RECLAIM_STALE_MS * 2).toISOString() })
       .where(eq(session.id, sessionId));
 
-    await reconcileSweep({ db, registry: fakeRegistry(), dockerHost: host.executor }, NOW);
+    await reconcileSweep(
+      { db, registry: fakeRegistry(), dockerHost: host.executor, relaunch },
+      NOW,
+    );
 
     /*
      * Half of this is the hazard, stated rather than fixed. Ten minutes of that silence is all
@@ -1015,7 +1029,7 @@ describe("the sweep it is an arm of", () => {
      * the hazard is closed.
      */
     await reconcileSweep(
-      { db, registry: fakeRegistry(), dockerHost: host.executor },
+      { db, registry: fakeRegistry(), dockerHost: host.executor, relaunch },
       () => new Date(Date.now() + RECLAIM_STALE_MS * 3),
     );
     expect(host.removed).toEqual(["solow-preflight"]);

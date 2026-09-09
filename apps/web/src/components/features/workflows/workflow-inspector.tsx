@@ -5,6 +5,7 @@ import { Plus, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { ConfirmAction } from "@/components/features/confirm-action";
+import { ExportWorkflowButton } from "@/components/features/workflows/workflow-transfer";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -221,6 +222,8 @@ function Properties({ workflow }: { workflow: WorkflowWithStepsDto }) {
           </div>
         ))}
       </dl>
+
+      <ExportWorkflowButton workflow={workflow} />
 
       <ConfirmAction
         title={`Delete “${workflow.name}”?`}

@@ -84,6 +84,35 @@ describe("parseWidget", () => {
   });
 });
 
+describe("task_complete's decision field", () => {
+  it("carries the harness's answer to its step's question", () => {
+    const widget = parseWidget({
+      kind: "task_complete",
+      outcome: "changes_ready",
+      decision: "yes",
+    });
+    expect(widget).toEqual({ kind: "task_complete", outcome: "changes_ready", decision: "yes" });
+  });
+
+  it("is optional, so a harness that was asked nothing declares as it always did", () => {
+    expect(
+      parseWidget({ kind: "task_complete", outcome: "blocked", summary: "No token." }),
+    ).toEqual({
+      kind: "task_complete",
+      outcome: "blocked",
+      summary: "No token.",
+    });
+  });
+
+  it("refuses an answer that is not yes or no, rather than reading it as one", () => {
+    // "maybe" must not become a silent `no` — the whole point of the field is that it cannot be
+    // paraphrased the way the prose line could.
+    expect(
+      parseWidget({ kind: "task_complete", outcome: "changes_ready", decision: "maybe" }).kind,
+    ).toBe("unsupported");
+  });
+});
+
 describe("widgetExpectsResponse", () => {
   it("is true for the widgets that wait on a person", () => {
     expect(widgetExpectsResponse(ask())).toBe(true);

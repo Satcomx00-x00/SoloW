@@ -12,6 +12,7 @@ import {
   type RepositorySource,
   TaskErrorCode,
   WIDGET_ANSWER_PREFIX,
+  type WorkflowStepCondition,
 } from "@solow/contracts";
 import { CREDENTIAL_EXPIRED_REASON } from "@solow/core";
 import {
@@ -304,13 +305,14 @@ class DeclaringRunner implements HarnessRunner {
     });
     return {
       outcome,
+      harnessSessionId: Promise.resolve(null),
       workspacePath: Promise.resolve<string | null>(
         opts.worktreeName ? `/wt/${opts.worktreeName}` : opts.cwd,
       ),
       send: async () => true,
       stop: async () => {
         this.stops += 1;
-        settle({ kind: "completed" });
+        settle({ kind: "completed", stopReason: "end_turn" });
       },
     };
   }
@@ -329,6 +331,23 @@ class ScriptedRunner implements HarnessRunner {
   /** Where each run was pointed, and what worktree it was asked to make (null = none). */
   readonly cwds: string[] = [];
   readonly worktreeNames: (string | null)[] = [];
+  /**
+   * Conversation ids the lifecycle asked each run to carry on — `null` for a round that started
+   * fresh. Assert on these to check *which* round was told to resume, and with what.
+   */
+  readonly resumeSessionIds: (string | null)[] = [];
+  /** Everything delivered as a follow-up turn, including a brief re-sent after a failed resume. */
+  readonly sends: string[] = [];
+  /**
+   * Whether this fake honours a resume it is handed. False scripts the harness that was given a
+   * conversation and could not load it — an ACP agent with no `loadSession` — which is the case
+   * `HarnessHandle.resumed` exists to make visible.
+   */
+  resumes = true;
+  /** Whether a follow-up turn is accepted, so the refused-correction path is reachable. */
+  accepts = true;
+  /** The conversation id every run of this fake reports, so its persistence is assertable. */
+  harnessSessionId: string | null = "scripted-session";
   constructor(
     private readonly outcomes: HarnessOutcome[],
     /** Events each run emits, so a test can script a harness asking for a permission (#58). */
@@ -343,16 +362,24 @@ class ScriptedRunner implements HarnessRunner {
     this.envs.push(opts.env);
     this.cwds.push(opts.cwd);
     this.worktreeNames.push(opts.worktreeName);
+    this.resumeSessionIds.push(opts.resumeSessionId ?? null);
     for (const event of this.events) opts.onEvent(event);
-    const outcome = this.outcomes.shift() ?? { kind: "completed" };
+    const outcome = this.outcomes.shift() ?? { kind: "completed", stopReason: "end_turn" };
     return {
       outcome: Promise.resolve(outcome),
+      harnessSessionId: Promise.resolve(this.harnessSessionId),
+      // Asking is not getting: a fake told to resume answers what it actually did, the way a real
+      // runner does, so the lifecycle's two briefs are both reachable from a test.
+      resumed: Promise.resolve(this.resumes && opts.resumeSessionId !== undefined),
       // The worktree the harness reports: the one it was asked to create, or — when resuming —
       // the one it is already running in.
       workspacePath: Promise.resolve<string | null>(
         opts.worktreeName ? `/wt/${opts.worktreeName}` : opts.cwd,
       ),
-      send: async () => true,
+      send: async (text: string) => {
+        this.sends.push(text);
+        return this.accepts;
+      },
       stop: async () => {
         this.stops += 1;
       },
@@ -555,7 +582,7 @@ describe("runTaskLifecycle (integration)", () => {
   it("approve → commits onto a branch and marks the Task Done (Principle I)", async () => {
     const ids = freshIds();
     await seedRun(db, ids);
-    const runner = new ScriptedRunner([{ kind: "completed" }]);
+    const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps, spies } = makeDeps(db, runner, nullStream());
 
     const result = await runTaskLifecycle(deps, {
@@ -573,7 +600,7 @@ describe("runTaskLifecycle (integration)", () => {
   it("reject → discards worktree changes and returns the Task to Ready", async () => {
     const ids = freshIds();
     await seedRun(db, ids);
-    const runner = new ScriptedRunner([{ kind: "completed" }]);
+    const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps, spies } = makeDeps(db, runner, nullStream());
 
     await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["reject"]) });
@@ -586,7 +613,10 @@ describe("runTaskLifecycle (integration)", () => {
   it("request_changes loops the harness, then approve completes it", async () => {
     const ids = freshIds();
     await seedRun(db, ids);
-    const runner = new ScriptedRunner([{ kind: "completed" }, { kind: "completed" }]);
+    const runner = new ScriptedRunner([
+      { kind: "completed", stopReason: "end_turn" },
+      { kind: "completed", stopReason: "end_turn" },
+    ]);
     const { deps, spies } = makeDeps(db, runner, nullStream());
 
     await runTaskLifecycle(deps, {
@@ -604,8 +634,8 @@ describe("runTaskLifecycle (integration)", () => {
     await seedRun(db, ids);
     // Round 0 fails with quota → park; round 1 completes → review → approve.
     const runner = new ScriptedRunner([
-      { kind: "failed", signal: { quotaExhausted: true } },
-      { kind: "completed" },
+      { kind: "failed", stopReason: "error", signal: { quotaExhausted: true } },
+      { kind: "completed", stopReason: "end_turn" },
     ]);
     const { deps } = makeDeps(db, runner, nullStream());
 
@@ -628,8 +658,8 @@ describe("runTaskLifecycle (integration)", () => {
     const ids = freshIds();
     await seedRun(db, ids);
     const runner = new ScriptedRunner([
-      { kind: "failed", signal: { quotaExhausted: true } },
-      { kind: "completed" },
+      { kind: "failed", stopReason: "error", signal: { quotaExhausted: true } },
+      { kind: "completed", stopReason: "end_turn" },
     ]);
 
     /*
@@ -678,8 +708,8 @@ describe("runTaskLifecycle (integration)", () => {
     const ids = freshIds();
     await seedRun(db, ids);
     const runner = new ScriptedRunner([
-      { kind: "failed", signal: { quotaExhausted: true } },
-      { kind: "completed" },
+      { kind: "failed", stopReason: "error", signal: { quotaExhausted: true } },
+      { kind: "completed", stopReason: "end_turn" },
     ]);
 
     /*
@@ -720,8 +750,8 @@ describe("runTaskLifecycle (integration)", () => {
     const ids = freshIds();
     await seedRun(db, ids);
     const runner = new ScriptedRunner([
-      { kind: "failed", signal: { quotaExhausted: true } },
-      { kind: "completed" },
+      { kind: "failed", stopReason: "error", signal: { quotaExhausted: true } },
+      { kind: "completed", stopReason: "end_turn" },
     ]);
 
     /*
@@ -772,7 +802,7 @@ describe("runTaskLifecycle (integration)", () => {
   it("hard failure → Task Failed with the worktree preserved (not cleaned)", async () => {
     const ids = freshIds();
     await seedRun(db, ids);
-    const runner = new ScriptedRunner([{ kind: "failed", signal: {} }]);
+    const runner = new ScriptedRunner([{ kind: "failed", stopReason: "error", signal: {} }]);
     const { deps, spies } = makeDeps(db, runner, nullStream());
 
     const result = await runTaskLifecycle(deps, {
@@ -792,8 +822,16 @@ describe("runTaskLifecycle (integration)", () => {
     await seedRun(db, a);
     await seedRun(db, b);
 
-    const depsA = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
-    const depsB = makeDeps(db, new ScriptedRunner([{ kind: "failed", signal: {} }]), nullStream());
+    const depsA = makeDeps(
+      db,
+      new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]),
+      nullStream(),
+    );
+    const depsB = makeDeps(
+      db,
+      new ScriptedRunner([{ kind: "failed", stopReason: "error", signal: {} }]),
+      nullStream(),
+    );
 
     const [resA, resB] = await Promise.all([
       runTaskLifecycle(depsA.deps, { event: { data: a }, step: scriptedStep(["approve"]) }),
@@ -809,7 +847,11 @@ describe("runTaskLifecycle (integration)", () => {
   it("persists streamed harness events so a reconnecting client can replay them (TASK-018)", async () => {
     const ids = freshIds();
     await seedRun(db, ids);
-    const { deps } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+    const { deps } = makeDeps(
+      db,
+      new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]),
+      nullStream(),
+    );
 
     await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
@@ -832,7 +874,14 @@ describe("runTaskLifecycle (integration)", () => {
   it("numbers events across rounds so replay resumes where the client left off", async () => {
     const ids = freshIds();
     await seedRun(db, ids);
-    const runner = new ScriptedRunner([{ kind: "completed" }, { kind: "completed" }]);
+    const runner = new ScriptedRunner([
+      { kind: "completed", stopReason: "end_turn" },
+      { kind: "completed", stopReason: "end_turn" },
+    ]);
+    // A protocol with no conversation to come back to, so round two resumes nothing and writes no
+    // notice about having done so. This test is about one `seq` sequence across rounds; the
+    // resume notices have their own tests, and counting them here would make this one about them.
+    runner.harnessSessionId = null;
     const { deps } = makeDeps(db, runner, nullStream());
 
     await runTaskLifecycle(deps, {
@@ -861,7 +910,11 @@ describe("runTaskLifecycle (integration)", () => {
   it("announces Task state changes on the Workspace board channel", async () => {
     const ids = freshIds();
     await seedRun(db, ids);
-    const { deps, spies } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+    const { deps, spies } = makeDeps(
+      db,
+      new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]),
+      nullStream(),
+    );
 
     await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
@@ -877,7 +930,11 @@ describe("runTaskLifecycle (integration)", () => {
     // went to both; the status was the one that did not.
     const ids = freshIds();
     await seedRun(db, ids);
-    const { deps, spies } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+    const { deps, spies } = makeDeps(
+      db,
+      new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]),
+      nullStream(),
+    );
 
     await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
@@ -893,7 +950,11 @@ describe("runTaskLifecycle (integration)", () => {
     const b = freshIds();
     await seedRun(db, a);
     await seedRun(db, b);
-    const { deps } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+    const { deps } = makeDeps(
+      db,
+      new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]),
+      nullStream(),
+    );
 
     await runTaskLifecycle(deps, { event: { data: a }, step: scriptedStep(["approve"]) });
 
@@ -915,7 +976,11 @@ describe("runTaskLifecycle (integration)", () => {
         cb();
       },
     });
-    const { deps } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), stream);
+    const { deps } = makeDeps(
+      db,
+      new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]),
+      stream,
+    );
 
     await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
@@ -935,7 +1000,7 @@ describe("runTaskLifecycle (integration)", () => {
     const ids = freshIds();
     await seedRun(db, ids);
     const runner = new ScriptedRunner(
-      [{ kind: "completed" }],
+      [{ kind: "completed", stopReason: "end_turn" }],
       [
         { kind: "stdout", channel: "assistant", text: "patched latch.ts" },
         { kind: "stdout", channel: "thinking", text: "considering" },
@@ -996,7 +1061,7 @@ describe("runTaskLifecycle (integration)", () => {
     const ids = freshIds();
     await seedRun(db, ids);
     const runner = new ScriptedRunner(
-      [{ kind: "completed" }],
+      [{ kind: "completed", stopReason: "end_turn" }],
       [
         {
           kind: "tool_use",
@@ -1042,7 +1107,11 @@ describe("runTaskLifecycle (integration)", () => {
      */
     const ids = freshIds();
     await seedRun(db, ids);
-    const { deps } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+    const { deps } = makeDeps(
+      db,
+      new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]),
+      nullStream(),
+    );
 
     await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
@@ -1071,7 +1140,11 @@ describe("runTaskLifecycle (integration)", () => {
     // review twice.
     const ids = freshIds();
     await seedRun(db, ids);
-    const { deps } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+    const { deps } = makeDeps(
+      db,
+      new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]),
+      nullStream(),
+    );
 
     await runTaskLifecycle(deps, {
       event: { data: ids },
@@ -1093,7 +1166,11 @@ describe("runTaskLifecycle (integration)", () => {
   it("records a state event at each transition it announces", async () => {
     const ids = freshIds();
     await seedRun(db, ids);
-    const { deps } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+    const { deps } = makeDeps(
+      db,
+      new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]),
+      nullStream(),
+    );
 
     await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
@@ -1123,7 +1200,7 @@ describe("runTaskLifecycle (integration)", () => {
       .where(eq(secret.id, `secret-${ids.taskId}`));
     const ciphertext = stored?.ciphertext ?? "unreachable";
     const runner = new ScriptedRunner(
-      [{ kind: "completed" }],
+      [{ kind: "completed", stopReason: "end_turn" }],
       [
         { kind: "stdout", channel: "assistant", text: "$ echo $CLAUDE_CODE_OAUTH_TOKEN" },
         { kind: "stdout", channel: "assistant", text: "oauth-token\n" },
@@ -1165,7 +1242,7 @@ describe("runTaskLifecycle (integration)", () => {
     const ids = freshIds();
     await seedRun(db, ids, { agentProtocol: "acp" });
     const runner = new ScriptedRunner(
-      [{ kind: "completed" }],
+      [{ kind: "completed", stopReason: "end_turn" }],
       [
         {
           kind: "permission_request",
@@ -1204,7 +1281,7 @@ describe("runTaskLifecycle (integration)", () => {
     }));
     const { deps } = makeDeps(
       db,
-      new ScriptedRunner([{ kind: "completed" }], chatter),
+      new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }], chatter),
       nullStream(),
     );
 
@@ -1243,7 +1320,10 @@ describe("the brief the harness is given", () => {
   it("carries the reviewer's feedback into the next round", async () => {
     const ids = freshIds();
     await seedRun(db, ids);
-    const runner = new ScriptedRunner([{ kind: "completed" }, { kind: "completed" }]);
+    const runner = new ScriptedRunner([
+      { kind: "completed", stopReason: "end_turn" },
+      { kind: "completed", stopReason: "end_turn" },
+    ]);
     const { deps } = makeDeps(db, runner, nullStream());
 
     await runTaskLifecycle(deps, {
@@ -1268,7 +1348,10 @@ describe("the brief the harness is given", () => {
     // already holds its own rejected work, with nothing anywhere saying it was turned down.
     const ids = freshIds();
     await seedRun(db, ids);
-    const runner = new ScriptedRunner([{ kind: "completed" }, { kind: "completed" }]);
+    const runner = new ScriptedRunner([
+      { kind: "completed", stopReason: "end_turn" },
+      { kind: "completed", stopReason: "end_turn" },
+    ]);
     const { deps } = makeDeps(db, runner, nullStream());
 
     await runTaskLifecycle(deps, {
@@ -1283,7 +1366,7 @@ describe("the brief the harness is given", () => {
   it("describes the Task and its Issue so the harness knows what to do", async () => {
     const ids = freshIds();
     await seedRun(db, ids);
-    const runner = new ScriptedRunner([{ kind: "completed" }]);
+    const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps } = makeDeps(db, runner, nullStream());
 
     await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
@@ -1302,10 +1385,14 @@ describe("the brief the harness is given", () => {
       start(opts: HarnessStartOpts): HarnessHandle {
         opts.onEvent({ kind: "stdout", channel: "assistant", text: "working" });
         return {
-          outcome: Promise.resolve({ kind: "completed" } as HarnessOutcome).then((o) => {
+          outcome: Promise.resolve({
+            kind: "completed",
+            stopReason: "end_turn",
+          } as HarnessOutcome).then((o) => {
             seen.push(registry.get(ids.workspaceId, ids.taskId) !== undefined);
             return o;
           }),
+          harnessSessionId: Promise.resolve(null),
           workspacePath: Promise.resolve<string | null>(
             opts.worktreeName ? `/wt/${opts.worktreeName}` : opts.cwd,
           ),
@@ -1358,7 +1445,11 @@ describe("the diff a reviewer is shown", () => {
   it("is captured at the review gate and persisted to the session log", async () => {
     const ids = freshIds();
     await seedRun(db, ids);
-    const { deps } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+    const { deps } = makeDeps(
+      db,
+      new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]),
+      nullStream(),
+    );
 
     await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
@@ -1378,7 +1469,11 @@ describe("the diff a reviewer is shown", () => {
     // disk it would be gone by the time anyone looked at the finished Task.
     const ids = freshIds();
     await seedRun(db, ids);
-    const { deps, spies } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+    const { deps, spies } = makeDeps(
+      db,
+      new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]),
+      nullStream(),
+    );
 
     await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
@@ -1396,7 +1491,7 @@ describe("the diff a reviewer is shown", () => {
     const ids = freshIds();
     await seedRun(db, ids);
     const runner = new ScriptedRunner(
-      [{ kind: "completed" }],
+      [{ kind: "completed", stopReason: "end_turn" }],
       [{ kind: "stdout", channel: "assistant", text: "edited it" }, usageEvent("msg-1")],
     );
     const { deps } = makeDeps(db, runner, nullStream());
@@ -1426,7 +1521,7 @@ describe("the diff a reviewer is shown", () => {
     const ids = freshIds();
     await seedRun(db, ids);
     const runner = new ScriptedRunner(
-      [{ kind: "completed" }],
+      [{ kind: "completed", stopReason: "end_turn" }],
       [usageEvent("msg-1"), usageEvent("msg-2"), usageEvent("msg-3")],
     );
     const { deps, spies } = makeDeps(db, runner, nullStream());
@@ -1446,7 +1541,10 @@ describe("the diff a reviewer is shown", () => {
   it("a mid-run capture failure neither fails the run nor stops the gate capturing", async () => {
     const ids = freshIds();
     await seedRun(db, ids);
-    const runner = new ScriptedRunner([{ kind: "completed" }], [usageEvent("msg-1")]);
+    const runner = new ScriptedRunner(
+      [{ kind: "completed", stopReason: "end_turn" }],
+      [usageEvent("msg-1")],
+    );
     const { deps, ops } = makeDeps(db, runner, nullStream());
     let calls = 0;
     const flaky: TaskRunDeps = {
@@ -1478,7 +1576,11 @@ describe("the diff a reviewer is shown", () => {
     // shown" rather than stranding the Task short of the gate.
     const ids = freshIds();
     await seedRun(db, ids);
-    const { deps, ops } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+    const { deps, ops } = makeDeps(
+      db,
+      new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]),
+      nullStream(),
+    );
     const failing: TaskRunDeps = {
       ...deps,
       worktree: () => ({
@@ -1516,7 +1618,7 @@ describe("the diff a reviewer is shown", () => {
       await seedRun(db, ids, {
         executorConfig: { kind: "docker", image: "oven/bun:1.3", mounts: [], env: {} },
       });
-      const runner = new ScriptedRunner([{ kind: "completed" }]);
+      const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
       const { deps, executor } = makeDeps(db, runner, nullStream());
       const built: Array<{ kind: string; opts: ExecutorFactoryOpts }> = [];
 
@@ -1603,7 +1705,7 @@ describe("the diff a reviewer is shown", () => {
 
       /** Run one Task to completion and keep the mounts its container was described with. */
       const mountsFor = async (ids: Ids): Promise<ExecutorFactoryOpts> => {
-        const runner = new ScriptedRunner([{ kind: "completed" }]);
+        const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
         const { deps, executor } = makeDeps(db, runner, nullStream());
         let built: ExecutorFactoryOpts | undefined;
         const result = await runTaskLifecycle(
@@ -1666,7 +1768,7 @@ describe("the diff a reviewer is shown", () => {
         executorConfig: { kind: "docker", image: "oven/bun:1.3", mounts: [], env: {} },
       });
       const reason = 'Docker is not available on this host: the "docker" command was not found';
-      const runner = new ScriptedRunner([{ kind: "completed" }]);
+      const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
       const { deps, ops, spies, executor } = makeDeps(db, runner, nullStream());
       let cloned = false;
       ops.prepare = async (p) => {
@@ -1704,7 +1806,7 @@ describe("the diff a reviewer is shown", () => {
       await seedRun(db, ids, {
         executorConfig: { kind: "local", env: { BUILD_FLAVOUR: "debug" } },
       });
-      const runner = new ScriptedRunner([{ kind: "completed" }]);
+      const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
       const { deps } = makeDeps(db, runner, nullStream());
 
       await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
@@ -1722,7 +1824,7 @@ describe("the diff a reviewer is shown", () => {
           env: { ANTHROPIC_API_KEY: "sk-metered" } as Record<string, string>,
         },
       });
-      const runner = new ScriptedRunner([{ kind: "completed" }]);
+      const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
       const { deps } = makeDeps(db, runner, nullStream());
 
       await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
@@ -1789,7 +1891,10 @@ describe("resuming a Task that has become blocked (issue #6)", () => {
     const ids = freshIds();
     await seedRun(db, ids);
     await blockerFor(ids, "backlog");
-    const runner = new ScriptedRunner([{ kind: "completed" }, { kind: "completed" }]);
+    const runner = new ScriptedRunner([
+      { kind: "completed", stopReason: "end_turn" },
+      { kind: "completed", stopReason: "end_turn" },
+    ]);
     const { deps } = makeDeps(db, runner, nullStream());
 
     const result = await runTaskLifecycle(deps, {
@@ -1808,7 +1913,10 @@ describe("resuming a Task that has become blocked (issue #6)", () => {
     const ids = freshIds();
     await seedRun(db, ids);
     await blockerFor(ids, "done");
-    const runner = new ScriptedRunner([{ kind: "completed" }, { kind: "completed" }]);
+    const runner = new ScriptedRunner([
+      { kind: "completed", stopReason: "end_turn" },
+      { kind: "completed", stopReason: "end_turn" },
+    ]);
     const { deps } = makeDeps(db, runner, nullStream());
 
     const result = await runTaskLifecycle(deps, {
@@ -1833,7 +1941,10 @@ describe("resuming a Task that has become blocked (issue #6)", () => {
       .update(taskDependency)
       .set({ workspaceId: `other-${ids.taskId}` })
       .where(eq(taskDependency.blockedByTaskId, blockerId));
-    const runner = new ScriptedRunner([{ kind: "completed" }, { kind: "completed" }]);
+    const runner = new ScriptedRunner([
+      { kind: "completed", stopReason: "end_turn" },
+      { kind: "completed", stopReason: "end_turn" },
+    ]);
     const { deps } = makeDeps(db, runner, nullStream());
 
     const result = await runTaskLifecycle(deps, {
@@ -1858,7 +1969,11 @@ describe("setup files copied into the harness's worktree (issue #52)", () => {
   it("copies them into the worktree the harness reported, from the Repository the Owner has", async () => {
     const ids = freshIds();
     await seedRun(db, ids, { setupFilePatterns: [".env", "config/local.json"] });
-    const { deps, spies } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+    const { deps, spies } = makeDeps(
+      db,
+      new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]),
+      nullStream(),
+    );
 
     await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
@@ -1879,7 +1994,11 @@ describe("setup files copied into the harness's worktree (issue #52)", () => {
   it("does not ask when the Repository configured no patterns", async () => {
     const ids = freshIds();
     await seedRun(db, ids);
-    const { deps, spies } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+    const { deps, spies } = makeDeps(
+      db,
+      new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]),
+      nullStream(),
+    );
 
     await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
@@ -1891,7 +2010,10 @@ describe("setup files copied into the harness's worktree (issue #52)", () => {
     await seedRun(db, ids, { setupFilePatterns: [".env"] });
     const { deps, spies } = makeDeps(
       db,
-      new ScriptedRunner([{ kind: "completed" }, { kind: "completed" }]),
+      new ScriptedRunner([
+        { kind: "completed", stopReason: "end_turn" },
+        { kind: "completed", stopReason: "end_turn" },
+      ]),
       nullStream(),
     );
 
@@ -1907,7 +2029,11 @@ describe("setup files copied into the harness's worktree (issue #52)", () => {
   it("subtracts the patterns from every diff and commit (AC-4)", async () => {
     const ids = freshIds();
     await seedRun(db, ids, { setupFilePatterns: [".env"] });
-    const { deps, spies } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+    const { deps, spies } = makeDeps(
+      db,
+      new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]),
+      nullStream(),
+    );
 
     await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
@@ -1927,7 +2053,11 @@ describe("setup files copied into the harness's worktree (issue #52)", () => {
         cb();
       },
     });
-    const { deps, ops } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), stream);
+    const { deps, ops } = makeDeps(
+      db,
+      new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]),
+      stream,
+    );
     // A copy that partly failed is the only case that logs at all — and the warning must still
     // say nothing about which files were involved.
     ops.seed = async () => ({ copied: 1, unmatched: ["absent.env"], failed: 1 });
@@ -1959,7 +2089,8 @@ describe("the worktree a Task runs in", () => {
       this.asked.push({ cwd: opts.cwd, worktreeName: opts.worktreeName });
       opts.onEvent({ kind: "stdout", channel: "assistant", text: "working" });
       return {
-        outcome: Promise.resolve<HarnessOutcome>({ kind: "completed" }),
+        outcome: Promise.resolve<HarnessOutcome>({ kind: "completed", stopReason: "end_turn" }),
+        harnessSessionId: Promise.resolve(null),
         workspacePath: Promise.resolve<string | null>(
           opts.worktreeName ? `/wt/${opts.worktreeName}` : opts.cwd,
         ),
@@ -1983,7 +2114,7 @@ describe("the worktree a Task runs in", () => {
       // A hard failure preserves the worktree, so the row can be observed still active.
       const { deps } = makeDeps(
         db,
-        new ScriptedRunner([{ kind: "failed", signal: {} }]),
+        new ScriptedRunner([{ kind: "failed", stopReason: "error", signal: {} }]),
         nullStream(),
       );
 
@@ -2003,7 +2134,7 @@ describe("the worktree a Task runs in", () => {
       await seedRun(db, ids, { agentProtocol: "acp" });
       const { deps } = makeDeps(
         db,
-        new ScriptedRunner([{ kind: "failed", signal: {} }]),
+        new ScriptedRunner([{ kind: "failed", stopReason: "error", signal: {} }]),
         nullStream(),
       );
 
@@ -2019,7 +2150,7 @@ describe("the worktree a Task runs in", () => {
       await seedRun(db, ids);
       const { deps, spies } = makeDeps(
         db,
-        new ScriptedRunner([{ kind: "completed" }]),
+        new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]),
         nullStream(),
       );
 
@@ -2036,7 +2167,11 @@ describe("the worktree a Task runs in", () => {
     it("does not double a row when the round that adopts it runs twice", async () => {
       const ids = freshIds();
       await seedRun(db, ids);
-      const { deps } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+      const { deps } = makeDeps(
+        db,
+        new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]),
+        nullStream(),
+      );
 
       await runTaskLifecycle(deps, {
         event: { data: ids },
@@ -2092,7 +2227,8 @@ describe("the worktree a Task runs in", () => {
       start(opts: HarnessStartOpts): HarnessHandle {
         opts.onEvent({ kind: "stdout", channel: "assistant", text: "working" });
         return {
-          outcome: Promise.resolve<HarnessOutcome>({ kind: "completed" }),
+          outcome: Promise.resolve<HarnessOutcome>({ kind: "completed", stopReason: "end_turn" }),
+          harnessSessionId: Promise.resolve(null),
           workspacePath: Promise.resolve<string | null>(null),
           send: async () => true,
           stop: async () => {},
@@ -2150,7 +2286,7 @@ describe("the worktree a Task runs in", () => {
        * one the switch happened to reach.
        */
       await seedRun(db, ids, { agentProtocol: "protocol_from_a_newer_build" as HarnessProtocol });
-      const runner = new ScriptedRunner([{ kind: "completed" }]);
+      const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
       const { deps, spies } = makeDeps(db, runner, nullStream());
 
       const result = await runTaskLifecycle(deps, {
@@ -2169,7 +2305,7 @@ describe("the worktree a Task runs in", () => {
     it("launches the harness with the command the catalog row declares, not a global env var", async () => {
       const ids = freshIds();
       await seedRun(db, ids);
-      const runner = new ScriptedRunner([{ kind: "completed" }]);
+      const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
       const { deps } = makeDeps(db, runner, nullStream());
 
       await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
@@ -2182,7 +2318,7 @@ describe("the worktree a Task runs in", () => {
     it("strips the metered variable this catalog row names, not a hardcoded one", async () => {
       const ids = freshIds();
       await seedRun(db, ids);
-      const runner = new ScriptedRunner([{ kind: "completed" }]);
+      const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
       const { deps } = makeDeps(db, runner, nullStream());
 
       await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
@@ -2213,7 +2349,7 @@ describe("a Task driven over ACP (issue #58)", () => {
   it("runs instead of failing, now that a runner speaks the protocol", async () => {
     const ids = freshIds();
     await seedRun(db, ids, { agentProtocol: "acp" });
-    const runner = new ScriptedRunner([{ kind: "completed" }]);
+    const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps, spies } = makeDeps(db, runner, nullStream());
 
     const result = await runTaskLifecycle(deps, {
@@ -2231,7 +2367,7 @@ describe("a Task driven over ACP (issue #58)", () => {
     // unchanged (Principle II) — only who runs `git worktree add` moves.
     const ids = freshIds();
     await seedRun(db, ids, { agentProtocol: "acp" });
-    const runner = new ScriptedRunner([{ kind: "completed" }]);
+    const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps, spies } = makeDeps(db, runner, nullStream());
 
     await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
@@ -2244,7 +2380,7 @@ describe("a Task driven over ACP (issue #58)", () => {
   it("leaves the Claude Code path creating its own worktree, exactly as before", async () => {
     const ids = freshIds();
     await seedRun(db, ids);
-    const runner = new ScriptedRunner([{ kind: "completed" }]);
+    const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps, spies } = makeDeps(db, runner, nullStream());
 
     await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
@@ -2263,7 +2399,7 @@ describe("a Task driven over ACP (issue #58)", () => {
         env: { ANTHROPIC_API_KEY: "sk-metered" } as Record<string, string>,
       },
     });
-    const runner = new ScriptedRunner([{ kind: "completed" }]);
+    const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps } = makeDeps(db, runner, nullStream());
 
     await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
@@ -2276,7 +2412,7 @@ describe("a Task driven over ACP (issue #58)", () => {
     const ids = freshIds();
     await seedRun(db, ids, { agentProtocol: "acp" });
     const runner = new ScriptedRunner(
-      [{ kind: "completed" }],
+      [{ kind: "completed", stopReason: "end_turn" }],
       [
         {
           kind: "permission_request",
@@ -2316,7 +2452,10 @@ describe("a Task driven over ACP (issue #58)", () => {
     // reach a second run at all — the step used to throw before anything could be recorded.
     const ids = freshIds();
     await seedRun(db, ids, { agentProtocol: "acp" });
-    const runner = new ScriptedRunner([{ kind: "completed" }, { kind: "completed" }]);
+    const runner = new ScriptedRunner([
+      { kind: "completed", stopReason: "end_turn" },
+      { kind: "completed", stopReason: "end_turn" },
+    ]);
     const { deps, spies } = makeDeps(db, runner, nullStream());
 
     const rejected = await runTaskLifecycle(deps, {
@@ -2347,7 +2486,7 @@ describe("a Task driven over ACP (issue #58)", () => {
     // failureReason — the one outcome an operator can neither read nor act on.
     const ids = freshIds();
     await seedRun(db, ids, { agentProtocol: "acp" });
-    const runner = new ScriptedRunner([{ kind: "completed" }]);
+    const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps, ops, spies } = makeDeps(db, runner, nullStream());
     ops.provision = async () => {
       throw new Error("fatal: a branch named 'solow/task-1' already exists");
@@ -2372,7 +2511,11 @@ describe("a Task driven over ACP (issue #58)", () => {
     // The detail belongs in the log, not in a column the UI renders.
     const ids = freshIds();
     await seedRun(db, ids, { agentProtocol: "acp" });
-    const { deps, ops } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+    const { deps, ops } = makeDeps(
+      db,
+      new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]),
+      nullStream(),
+    );
     ops.provision = async () => {
       throw new Error("command failed (128): git -c credential.helper=echo password=$TOKEN");
     };
@@ -2404,7 +2547,11 @@ describe("a Task spanning several Repositories (issue #7)", () => {
   it("AC-2: provisions one isolated worktree per attached (repository, branch) pair", async () => {
     const ids = freshIds();
     await seedRun(db, ids, { agentProtocol: "acp", ...twoRepositories });
-    const { deps, spies } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+    const { deps, spies } = makeDeps(
+      db,
+      new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]),
+      nullStream(),
+    );
 
     await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
@@ -2420,7 +2567,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
   it("AC-2: still lets the Claude Code harness make its own primary, and makes the rest itself", async () => {
     const ids = freshIds();
     await seedRun(db, ids, twoRepositories);
-    const runner = new ScriptedRunner([{ kind: "completed" }]);
+    const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps, spies } = makeDeps(db, runner, nullStream());
 
     await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
@@ -2446,7 +2593,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
     await seedRun(db, ids, { agentProtocol: "acp", ...twoRepositories });
     const { deps, ops, spies } = makeDeps(
       db,
-      new ScriptedRunner([{ kind: "completed" }]),
+      new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]),
       nullStream(),
     );
     const secondary = `/wt/solow-task-${ids.taskId}--${attachmentId(ids.taskId, "lib")}`;
@@ -2489,7 +2636,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
   it("AC-3: fails the Task naming the Repository it could not prepare, before any harness starts", async () => {
     const ids = freshIds();
     await seedRun(db, ids, twoRepositories);
-    const runner = new ScriptedRunner([{ kind: "completed" }]);
+    const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps, ops, spies } = makeDeps(db, runner, nullStream());
     ops.prepare = async (p) => {
       // The kind of failure no retry can fix, which is what makes it answerable now.
@@ -2519,7 +2666,11 @@ describe("a Task spanning several Repositories (issue #7)", () => {
     // A failed clone echoes back the credential-helper argument list (Principle IV).
     const ids = freshIds();
     await seedRun(db, ids, twoRepositories);
-    const { deps, ops } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+    const { deps, ops } = makeDeps(
+      db,
+      new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]),
+      nullStream(),
+    );
     ops.prepare = async () => {
       throw new Error("command failed (128): git -c credential.helper=echo password=$TOKEN");
     };
@@ -2541,7 +2692,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
     // same Task honoured theirs.
     const ids = freshIds();
     await seedRun(db, ids, { baseRef: "release/2.1" });
-    const runner = new ScriptedRunner([{ kind: "completed" }]);
+    const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps, spies } = makeDeps(db, runner, nullStream());
 
     await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
@@ -2561,7 +2712,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
   it("AC-1: branches the primary itself when its attachment names a checkout branch", async () => {
     const ids = freshIds();
     await seedRun(db, ids, { checkoutBranch: "release/2.1-fix" });
-    const runner = new ScriptedRunner([{ kind: "completed" }]);
+    const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps, spies } = makeDeps(db, runner, nullStream());
 
     await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
@@ -2584,7 +2735,14 @@ describe("a Task spanning several Repositories (issue #7)", () => {
     await seedRun(db, ids, {
       extraRepositories: [{ key: "lib", name: "shared-lib", checkoutBranch: "feature/lib" }],
     });
-    const runner = new ScriptedRunner([{ kind: "completed" }, { kind: "completed" }]);
+    const runner = new ScriptedRunner([
+      { kind: "completed", stopReason: "end_turn" },
+      { kind: "completed", stopReason: "end_turn" },
+    ]);
+    // No conversation to carry on, so both rounds are briefed in full. A round that *does* resume
+    // is deliberately sent a continuation instruction instead of a brief, which would make this
+    // assertion about resume rather than about the branch the brief names.
+    runner.harnessSessionId = null;
     const { deps } = makeDeps(db, runner, nullStream());
 
     await runTaskLifecycle(deps, {
@@ -2616,7 +2774,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
         { key: "docs", name: "docs" },
       ],
     });
-    const runner = new ScriptedRunner([{ kind: "completed" }]);
+    const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps, ops, spies } = makeDeps(db, runner, nullStream());
     const provision = ops.provision;
     ops.provision = async (params) => {
@@ -2643,7 +2801,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
     // them: one clone timeout failed the Task permanently on attempt zero (Principle III).
     const ids = freshIds();
     await seedRun(db, ids, twoRepositories);
-    const runner = new ScriptedRunner([{ kind: "completed" }]);
+    const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps, ops } = makeDeps(db, runner, nullStream());
     ops.prepare = async () => {
       throw new Error("fatal: unable to access remote: could not resolve host");
@@ -2663,7 +2821,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
   it("AC-3: names the Repository once the retries are gone", async () => {
     const ids = freshIds();
     await seedRun(db, ids, twoRepositories);
-    const runner = new ScriptedRunner([{ kind: "completed" }]);
+    const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps, ops } = makeDeps(db, runner, nullStream());
     ops.prepare = async () => {
       throw new Error("fatal: unable to access remote: could not resolve host");
@@ -2686,7 +2844,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
   it("AC-3: names the Repository whose worktree could not be created", async () => {
     const ids = freshIds();
     await seedRun(db, ids, { agentProtocol: "acp", ...twoRepositories });
-    const runner = new ScriptedRunner([{ kind: "completed" }]);
+    const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps, ops } = makeDeps(db, runner, nullStream());
     ops.provision = async (p) => {
       if (p.attachmentId) throw new Error("fatal: branch already checked out");
@@ -2713,7 +2871,11 @@ describe("a Task spanning several Repositories (issue #7)", () => {
       agentProtocol: "acp",
       extraRepositories: [{ key: "lib", name: "shared-lib", checkoutBranch: `solow/lib-only` }],
     });
-    const { deps, spies } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+    const { deps, spies } = makeDeps(
+      db,
+      new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]),
+      nullStream(),
+    );
 
     await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
@@ -2734,7 +2896,11 @@ describe("a Task spanning several Repositories (issue #7)", () => {
   it("AC-4: one repository failing to capture costs only its own group", async () => {
     const ids = freshIds();
     await seedRun(db, ids, { agentProtocol: "acp", ...twoRepositories });
-    const { deps, ops } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+    const { deps, ops } = makeDeps(
+      db,
+      new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]),
+      nullStream(),
+    );
     const realDiff = ops.diff;
     ops.diff = async (path, patterns) => {
       if (path.includes("--")) throw new Error("git exploded");
@@ -2756,7 +2922,11 @@ describe("a Task spanning several Repositories (issue #7)", () => {
   it("AC-4: approve commits every worktree and records each attachment's result branch", async () => {
     const ids = freshIds();
     await seedRun(db, ids, { agentProtocol: "acp", ...twoRepositories });
-    const { deps, spies } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+    const { deps, spies } = makeDeps(
+      db,
+      new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]),
+      nullStream(),
+    );
 
     await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
@@ -2779,7 +2949,11 @@ describe("a Task spanning several Repositories (issue #7)", () => {
   it("AC-4: reject discards every worktree, and cleanup removes every worktree", async () => {
     const ids = freshIds();
     await seedRun(db, ids, { agentProtocol: "acp", ...twoRepositories });
-    const { deps, spies } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+    const { deps, spies } = makeDeps(
+      db,
+      new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]),
+      nullStream(),
+    );
 
     await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["reject"]) });
 
@@ -2798,7 +2972,11 @@ describe("a Task spanning several Repositories (issue #7)", () => {
         { key: "lib", name: "shared-lib", setupFilePatterns: ["config/local.json"] },
       ],
     });
-    const { deps, spies } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+    const { deps, spies } = makeDeps(
+      db,
+      new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]),
+      nullStream(),
+    );
 
     await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
@@ -2816,7 +2994,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
     // why this is a test with a name rather than an assumption behind an index.
     const ids = freshIds();
     await seedRun(db, ids, { agentProtocol: "acp", ...twoRepositories });
-    const runner = new ScriptedRunner([{ kind: "completed" }]);
+    const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps } = makeDeps(db, runner, nullStream());
 
     await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
@@ -2832,7 +3010,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
     // The brief an existing Task gets is unchanged by this refactor.
     const ids = freshIds();
     await seedRun(db, ids);
-    const runner = new ScriptedRunner([{ kind: "completed" }]);
+    const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps } = makeDeps(db, runner, nullStream());
 
     await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
@@ -2857,7 +3035,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
       .update(taskRepository)
       .set({ position: 1 })
       .where(eq(taskRepository.id, attachmentId(ids.taskId)));
-    const runner = new ScriptedRunner([{ kind: "completed" }]);
+    const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps } = makeDeps(db, runner, nullStream());
 
     await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
@@ -2874,8 +3052,16 @@ describe("a Task spanning several Repositories (issue #7)", () => {
     const b = freshIds();
     await seedRun(db, a, { agentProtocol: "acp", ...twoRepositories });
     await seedRun(db, b, { agentProtocol: "acp", ...twoRepositories });
-    const depsA = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
-    const depsB = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+    const depsA = makeDeps(
+      db,
+      new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]),
+      nullStream(),
+    );
+    const depsB = makeDeps(
+      db,
+      new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]),
+      nullStream(),
+    );
 
     await Promise.all([
       runTaskLifecycle(depsA.deps, { event: { data: a }, step: scriptedStep(["approve"]) }),
@@ -2913,7 +3099,7 @@ describe("approving a multi-Repository Task that changed only some of them", () 
     });
     const { deps, ops, spies } = makeDeps(
       db,
-      new ScriptedRunner([{ kind: "completed" }]),
+      new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]),
       nullStream(),
     );
     // The harness worked in the primary and never went near the secondary.
@@ -2960,7 +3146,7 @@ describe("task-run permission mode", () => {
       .set({ permissionMode: "bypassPermissions" })
       .where(eq(harnessProfile.id, (await seededProfileId(db, ids)) ?? ""));
 
-    const runner = new ScriptedRunner([{ kind: "completed" }]);
+    const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps } = makeDeps(db, runner, nullStream());
     const asked: Array<string | undefined> = [];
     const wrapped = {
@@ -2981,7 +3167,7 @@ describe("task-run permission mode", () => {
   it("leaves a Profile that never chose one on the cautious default", async () => {
     const ids = freshIds();
     await seedRun(db, ids);
-    const runner = new ScriptedRunner([{ kind: "completed" }]);
+    const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps } = makeDeps(db, runner, nullStream());
     const asked: Array<string | undefined> = [];
     const wrapped = {
@@ -3031,7 +3217,7 @@ describe("task-run widgets", () => {
     await enableWidgets(ids);
     const report = '{"kind":"task_complete","outcome":"nothing_to_do","summary":"Already pinned."}';
     const runner = new ScriptedRunner(
-      [{ kind: "completed" }],
+      [{ kind: "completed", stopReason: "end_turn" }],
       [
         {
           kind: "stdout",
@@ -3062,7 +3248,7 @@ describe("task-run widgets", () => {
     await seedRun(db, ids);
     await enableWidgets(ids);
     const runner = new ScriptedRunner(
-      [{ kind: "completed" }],
+      [{ kind: "completed", stopReason: "end_turn" }],
       [
         {
           kind: "stdout",
@@ -3102,14 +3288,14 @@ describe("task-run widgets", () => {
     const ids = freshIds();
     await seedRun(db, ids);
     await enableWidgets(ids);
-    const runner = new ScriptedRunner([{ kind: "completed" }]);
+    const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps } = makeDeps(db, runner, nullStream());
     await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
     expect(runner.prompts[0]).toContain("solow:widget");
 
     const off = freshIds();
     await seedRun(db, off);
-    const quiet = new ScriptedRunner([{ kind: "completed" }]);
+    const quiet = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps: offDeps } = makeDeps(db, quiet, nullStream());
     await runTaskLifecycle(offDeps, { event: { data: off }, step: scriptedStep(["approve"]) });
     // A Workspace without the flag gets the brief it always got, byte for byte.
@@ -3120,7 +3306,7 @@ describe("task-run widgets", () => {
     const ids = freshIds();
     await seedRun(db, ids);
     const runner = new ScriptedRunner(
-      [{ kind: "completed" }],
+      [{ kind: "completed", stopReason: "end_turn" }],
       [
         {
           kind: "stdout",
@@ -3151,7 +3337,7 @@ describe("task-run widgets", () => {
     await seedRun(db, ids);
     await enableWidgets(ids);
     const runner = new ScriptedRunner(
-      [{ kind: "completed" }],
+      [{ kind: "completed", stopReason: "end_turn" }],
       [
         {
           kind: "stdout",
@@ -3195,7 +3381,7 @@ describe("task-run when its Session is deleted mid-run", () => {
     await db.delete(session).where(eq(session.id, ids.sessionId));
 
     const runner = new ScriptedRunner(
-      [{ kind: "completed" }],
+      [{ kind: "completed", stopReason: "end_turn" }],
       [
         { kind: "stdout", channel: "assistant", text: "still working" },
         { kind: "stdout", channel: "assistant", text: "and still going" },
@@ -3224,7 +3410,7 @@ describe("task-run when its Session is deleted mid-run", () => {
   it("leaves an ordinary run untouched", async () => {
     const ids = freshIds();
     await seedRun(db, ids);
-    const runner = new ScriptedRunner([{ kind: "completed" }]);
+    const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps } = makeDeps(db, runner, nullStream());
 
     const result = await runTaskLifecycle(deps, {
@@ -3326,7 +3512,7 @@ describe("the harness's completion declaration", () => {
     await seedRun(db, ids);
     await enableWidgets(ids);
     const runner = new ScriptedRunner(
-      [{ kind: "completed" }],
+      [{ kind: "completed", stopReason: "end_turn" }],
       [declaration("changes_ready", "Pinned 6 dependencies")],
     );
     const { deps } = makeDeps(db, runner, nullStream());
@@ -3344,7 +3530,10 @@ describe("the harness's completion declaration", () => {
     const ids = freshIds();
     await seedRun(db, ids);
     await enableWidgets(ids);
-    const runner = new ScriptedRunner([{ kind: "completed" }], [declaration("changes_ready")]);
+    const runner = new ScriptedRunner(
+      [{ kind: "completed", stopReason: "end_turn" }],
+      [declaration("changes_ready")],
+    );
     const { deps, spies } = makeDeps(db, runner, nullStream());
 
     await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
@@ -3359,7 +3548,7 @@ describe("the harness's completion declaration", () => {
     await seedRun(db, ids);
     await enableWidgets(ids);
     const runner = new ScriptedRunner(
-      [{ kind: "completed" }],
+      [{ kind: "completed", stopReason: "end_turn" }],
       [declaration("nothing_to_do"), declaration("changes_ready", "actually did something")],
     );
     const { deps } = makeDeps(db, runner, nullStream());
@@ -3375,7 +3564,10 @@ describe("the harness's completion declaration", () => {
     const ids = freshIds();
     await seedRun(db, ids);
     await enableWidgets(ids);
-    const runner = new ScriptedRunner([{ kind: "completed" }], [declaration("nothing_to_do")]);
+    const runner = new ScriptedRunner(
+      [{ kind: "completed", stopReason: "end_turn" }],
+      [declaration("nothing_to_do")],
+    );
     const { deps } = makeDeps(db, runner, nullStream());
 
     await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
@@ -3474,7 +3666,11 @@ describe("a Harness Profile's launch settings", () => {
 
   /** What the lifecycle asked the runner factory to build. */
   async function settingsFor(ids: Ids): Promise<HarnessLaunchSettings[]> {
-    const { deps } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+    const { deps } = makeDeps(
+      db,
+      new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]),
+      nullStream(),
+    );
     const asked: HarnessLaunchSettings[] = [];
     const wrapped = {
       ...deps,
@@ -3564,7 +3760,7 @@ describe("caching what a harness advertises", () => {
     const ids = freshIds();
     await seedRun(db, ids, { agentProtocol: "acp" });
     const runner = new ScriptedRunner(
-      [{ kind: "completed" }],
+      [{ kind: "completed", stopReason: "end_turn" }],
       [
         { kind: "capabilities", models: ["claude-opus-4"], modes: ["plan", "code"] },
         { kind: "stdout", channel: "assistant", text: "working" },
@@ -3590,7 +3786,7 @@ describe("caching what a harness advertises", () => {
       .set({ capabilities: { models: ["retired-model"], modes: ["old"] } })
       .where(eq(harnessCatalog.id, `catalog-${ids.taskId}`));
     const runner = new ScriptedRunner(
-      [{ kind: "completed" }],
+      [{ kind: "completed", stopReason: "end_turn" }],
       [{ kind: "capabilities", models: ["claude-opus-4"], modes: [] }],
     );
     const { deps } = makeDeps(db, runner, nullStream());
@@ -3609,7 +3805,11 @@ describe("caching what a harness advertises", () => {
       .update(harnessCatalog)
       .set({ capabilities: { models: ["claude-opus-4"], modes: ["plan"] } })
       .where(eq(harnessCatalog.id, `catalog-${ids.taskId}`));
-    const { deps } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+    const { deps } = makeDeps(
+      db,
+      new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]),
+      nullStream(),
+    );
 
     await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
@@ -3646,6 +3846,8 @@ describe("a Task following a Workflow", () => {
     promptTemplate: string;
     gate?: "human" | "auto" | "auto-unless-changes";
     advanceOn?: "agent-signal" | "review";
+    /** A branch, naming its targets by Step key — resolved to ids once every Step exists. */
+    branch?: { when: WorkflowStepCondition; thenStep: string | null; elseStep: string | null };
     /** The binary this Step's harness launches — how AC-3 becomes observable in `HarnessStartOpts`. */
     command: string;
     /**
@@ -3655,6 +3857,12 @@ describe("a Task following a Workflow", () => {
      * its own and then assert that the *other* Step's runner was never started.
      */
     permissionMode: "acceptEdits" | "plan" | "bypassPermissions";
+    /**
+     * What the *Step* asked to launch as, if anything — `workflow_step.permission_mode`, which
+     * overrides the Profile's. Absent means the Step has no opinion and the Profile decides,
+     * which is the ordinary value and what every existing fixture above relies on.
+     */
+    stepPermissionMode?: "acceptEdits" | "plan" | "bypassPermissions" | null;
   }
 
   /**
@@ -3715,8 +3923,25 @@ describe("a Task following a Workflow", () => {
         promptTemplate: seed.promptTemplate,
         gate: seed.gate ?? "human",
         advanceOn: seed.advanceOn ?? "review",
+        permissionMode: seed.stepPermissionMode ?? null,
       });
       stepIds.push(stepId);
+    }
+    // Branches last, once every target has an id.
+    for (const [index, seed] of steps.entries()) {
+      if (!seed.branch) continue;
+      const idOf = (key: string | null) =>
+        key === null ? null : (stepIds[steps.findIndex((s) => s.key === key)] ?? null);
+      await db
+        .update(workflowStep)
+        .set({
+          branch: {
+            when: seed.branch.when,
+            thenStepId: idOf(seed.branch.thenStep),
+            elseStepId: idOf(seed.branch.elseStep),
+          },
+        })
+        .where(eq(workflowStep.id, stepIds[index] as string));
     }
     if (opts.attach !== false) {
       await db.update(task).set({ workflowId, workflowVersion: 1 }).where(eq(task.id, ids.taskId));
@@ -3847,8 +4072,20 @@ describe("a Task following a Workflow", () => {
       },
     ]);
 
-    const planner = new ScriptedRunner([{ kind: "completed" }], [declares("the plan, in full")]);
-    const builder = new ScriptedRunner([{ kind: "completed" }], [declares("built it")]);
+    const planner = new ScriptedRunner(
+      [{ kind: "completed", stopReason: "end_turn" }],
+      [declares("the plan, in full")],
+    );
+    const builder = new ScriptedRunner(
+      [{ kind: "completed", stopReason: "end_turn" }],
+      [declares("built it")],
+    );
+    // Neither harness leaves a conversation behind, so the restart is briefed from the row alone —
+    // which is what this test is about. A Step 2 harness that *could* be resumed is sent a
+    // continuation instruction rather than a brief, and the handoff it is asserting on is already
+    // in the conversation being continued.
+    planner.harnessSessionId = null;
+    builder.harnessSessionId = null;
     const first = makeDeps(db, planner, nullStream());
     first.deps.runner = runnersByMode({ plan: planner, acceptEdits: builder });
 
@@ -3864,8 +4101,14 @@ describe("a Task following a Workflow", () => {
     expect(afterFirst?.workflowPendingHandoff).toBeNull();
 
     // A cold restart: no journal, no memo, new runners. Nothing carries over but the row.
-    const plannerAgain = new ScriptedRunner([{ kind: "completed" }], [declares("replanned")]);
-    const builderAgain = new ScriptedRunner([{ kind: "completed" }], [declares("built again")]);
+    const plannerAgain = new ScriptedRunner(
+      [{ kind: "completed", stopReason: "end_turn" }],
+      [declares("replanned")],
+    );
+    const builderAgain = new ScriptedRunner(
+      [{ kind: "completed", stopReason: "end_turn" }],
+      [declares("built again")],
+    );
     const second = makeDeps(db, builderAgain, nullStream());
     second.deps.runner = runnersByMode({ plan: plannerAgain, acceptEdits: builderAgain });
 
@@ -3893,6 +4136,90 @@ describe("a Task following a Workflow", () => {
     expect(step1).toBeTruthy();
   });
 
+  it("launches each Step at the posture the Step asked for, not its Profile's", async () => {
+    /*
+     * A Step *is* a harness launch (spec F05, on the Step). The case this exists for is one
+     * Harness Profile driving a planning Step and a building Step of the same pipeline — before
+     * `workflow_step.permission_mode` that took two Profiles differing in a single enum, each with
+     * its own credential binding and concurrency cap.
+     *
+     * Both Steps here sit on Profiles set to `bypassPermissions`; the Steps override that in
+     * opposite directions, and what the runner factory is handed is what the *Step* said.
+     */
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const auto = { gate: "auto" as const, advanceOn: "agent-signal" as const };
+    await seedWorkflow(ids, [
+      {
+        key: "a",
+        command: "one",
+        permissionMode: "bypassPermissions",
+        stepPermissionMode: "plan",
+        promptTemplate: "A.",
+        ...auto,
+      },
+      {
+        key: "b",
+        command: "two",
+        permissionMode: "bypassPermissions",
+        stepPermissionMode: "acceptEdits",
+        promptTemplate: "B.",
+        ...auto,
+      },
+    ]);
+
+    const { deps } = makeDeps(
+      db,
+      new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]),
+      nullStream(),
+    );
+    const asked: string[] = [];
+    const wrapped = {
+      ...deps,
+      runner: (_protocol: HarnessProtocol, settings: HarnessLaunchSettings) => {
+        asked.push(settings.permissionMode);
+        return new ScriptedRunner(
+          [{ kind: "completed", stopReason: "end_turn" }],
+          [declares(`${settings.permissionMode} done`)],
+        );
+      },
+    };
+    await runTaskLifecycle(wrapped, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    expect(asked).toEqual(["plan", "acceptEdits"]);
+  });
+
+  it("falls back to the Profile for a Step that stated no posture", async () => {
+    // Null is the ordinary value and the reason the Profile keeps the field: a Step with no
+    // opinion follows its Profile, and so does every Task on no Workflow, which has no Step.
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const auto = { gate: "auto" as const, advanceOn: "agent-signal" as const };
+    await seedWorkflow(ids, [
+      { key: "a", command: "one", permissionMode: "plan", promptTemplate: "A.", ...auto },
+    ]);
+
+    const { deps } = makeDeps(
+      db,
+      new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]),
+      nullStream(),
+    );
+    const asked: string[] = [];
+    const wrapped = {
+      ...deps,
+      runner: (_protocol: HarnessProtocol, settings: HarnessLaunchSettings) => {
+        asked.push(settings.permissionMode);
+        return new ScriptedRunner(
+          [{ kind: "completed", stopReason: "end_turn" }],
+          [declares("a done")],
+        );
+      },
+    };
+    await runTaskLifecycle(wrapped, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    expect(asked).toEqual(["plan"]);
+  });
+
   it("does not integrate anything while three auto Steps advance themselves", async () => {
     /*
      * THE GATE-BYPASS TEST, first half (Definition of Done, AC-4).
@@ -3916,9 +4243,18 @@ describe("a Task following a Workflow", () => {
       },
     ]);
 
-    const a = new ScriptedRunner([{ kind: "completed" }], [declares("a done")]);
-    const b = new ScriptedRunner([{ kind: "completed" }], [declares("b done")]);
-    const c = new ScriptedRunner([{ kind: "completed" }], [declares("c done")]);
+    const a = new ScriptedRunner(
+      [{ kind: "completed", stopReason: "end_turn" }],
+      [declares("a done")],
+    );
+    const b = new ScriptedRunner(
+      [{ kind: "completed", stopReason: "end_turn" }],
+      [declares("b done")],
+    );
+    const c = new ScriptedRunner(
+      [{ kind: "completed", stopReason: "end_turn" }],
+      [declares("c done")],
+    );
     const { deps, spies } = makeDeps(db, a, nullStream());
     deps.runner = runnersByMode({ plan: a, acceptEdits: b, bypassPermissions: c });
 
@@ -3979,7 +4315,10 @@ describe("a Task following a Workflow", () => {
       actorUserId: "owner",
     });
 
-    const solo = new ScriptedRunner([{ kind: "completed" }], [declares("done")]);
+    const solo = new ScriptedRunner(
+      [{ kind: "completed", stopReason: "end_turn" }],
+      [declares("done")],
+    );
     const { deps, spies } = makeDeps(db, solo, nullStream());
     deps.runner = runnersByMode({ plan: solo });
 
@@ -4033,8 +4372,14 @@ describe("a Task following a Workflow", () => {
       },
     ]);
 
-    const planner = new ScriptedRunner([{ kind: "completed" }], [declares("planned")]);
-    const shipper = new ScriptedRunner([{ kind: "completed" }], [declares("shipped")]);
+    const planner = new ScriptedRunner(
+      [{ kind: "completed", stopReason: "end_turn" }],
+      [declares("planned")],
+    );
+    const shipper = new ScriptedRunner(
+      [{ kind: "completed", stopReason: "end_turn" }],
+      [declares("shipped")],
+    );
     const { deps, spies } = makeDeps(db, planner, nullStream());
     deps.runner = runnersByMode({ plan: planner, acceptEdits: shipper });
 
@@ -4078,8 +4423,14 @@ describe("a Task following a Workflow", () => {
       },
     ]);
 
-    const planner = new ScriptedRunner([{ kind: "completed" }], [declares("a plan nobody wanted")]);
-    const builder = new ScriptedRunner([{ kind: "completed" }], [declares("never runs")]);
+    const planner = new ScriptedRunner(
+      [{ kind: "completed", stopReason: "end_turn" }],
+      [declares("a plan nobody wanted")],
+    );
+    const builder = new ScriptedRunner(
+      [{ kind: "completed", stopReason: "end_turn" }],
+      [declares("never runs")],
+    );
     const { deps } = makeDeps(db, planner, nullStream());
     deps.runner = runnersByMode({ plan: planner, acceptEdits: builder });
 
@@ -4127,10 +4478,13 @@ describe("a Task following a Workflow", () => {
       },
     ]);
 
-    const planner = new ScriptedRunner([{ kind: "completed" }], [declares("planned")]);
+    const planner = new ScriptedRunner(
+      [{ kind: "completed", stopReason: "end_turn" }],
+      [declares("planned")],
+    );
     // The second Step's harness dies, which ends the run right after the advance — the only moment
     // at which "the session is active again" is observable before `to-review` moves it on.
-    const builder = new ScriptedRunner([{ kind: "failed", signal: {} }]);
+    const builder = new ScriptedRunner([{ kind: "failed", stopReason: "error", signal: {} }]);
     const { deps } = makeDeps(db, planner, nullStream());
     deps.runner = runnersByMode({ plan: planner, acceptEdits: builder });
 
@@ -4156,6 +4510,344 @@ describe("a Task following a Workflow", () => {
     expect(row?.completedSummary).toBeNull();
     const [sess] = await db.select().from(session).where(eq(session.id, ids.sessionId)).limit(1);
     expect(sess?.state).toBe("active");
+  });
+
+  /** The harness's declaration with any extra field — the `decision` the branch reads. */
+  const declaresWith = (widget: Record<string, unknown>): HarnessStreamEvent => ({
+    kind: "stdout",
+    channel: "assistant",
+    text: [
+      "```solow:widget",
+      JSON.stringify({ kind: "task_complete", outcome: "changes_ready", ...widget }),
+      "```",
+    ].join("\n"),
+  });
+
+  /** Every record the run wrote to its Session log, in order. */
+  async function logOf(ids: Ids): Promise<Record<string, unknown>[]> {
+    return (
+      await db
+        .select()
+        .from(sessionEvent)
+        .where(eq(sessionEvent.sessionId, ids.sessionId))
+        .orderBy(asc(sessionEvent.seq))
+    ).map((e) => e.payload as Record<string, unknown>);
+  }
+
+  /** The same rows, with the column that says which Step produced each of them. */
+  async function attributedLog(ids: Ids) {
+    return (
+      await db
+        .select()
+        .from(sessionEvent)
+        .where(eq(sessionEvent.sessionId, ids.sessionId))
+        .orderBy(asc(sessionEvent.seq))
+    ).map((e) => ({
+      kind: e.kind,
+      workflowStepId: e.workflowStepId,
+      payload: e.payload as Record<string, unknown>,
+    }));
+  }
+
+  it("files every event under the Step in force, and the decision under the Step it closes", async () => {
+    /*
+     * THE ATTRIBUTION TEST.
+     *
+     * One Session spans the whole pipeline, so before the column a transcript was Step 3's output
+     * sitting directly under Step 1's with nothing to tell them apart. What is asserted is the
+     * boundary: the same Session, two Steps, and each Step's own words filed under it — including
+     * the state transition the advance writes, which belongs to the Step being entered.
+     *
+     * The `workflow_decision` is the case worth stating outright. It carries a `stepId` inside
+     * its payload *and* a `nextStepId`, so there are two plausible answers and only one right
+     * one: the Step being finished. Filed under the next Step it would open that Step's
+     * transcript with the verdict on work its reader has not been shown.
+     */
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const [plan, build] = await seedWorkflow(ids, [
+      {
+        key: "plan",
+        command: "planner",
+        permissionMode: "plan",
+        promptTemplate: "Plan.",
+        gate: "auto",
+        advanceOn: "review",
+      },
+      {
+        key: "build",
+        command: "builder",
+        permissionMode: "acceptEdits",
+        promptTemplate: "Build.",
+        gate: "human",
+        advanceOn: "review",
+      },
+    ]);
+
+    const planner = new ScriptedRunner(
+      [{ kind: "completed", stopReason: "end_turn" }],
+      [{ kind: "stdout", channel: "assistant", text: "planning\n" }, declares("the plan")],
+    );
+    const builder = new ScriptedRunner(
+      [{ kind: "completed", stopReason: "end_turn" }],
+      [{ kind: "stdout", channel: "assistant", text: "building\n" }, declares("built it")],
+    );
+    const { deps } = makeDeps(db, planner, nullStream());
+    deps.runner = runnersByMode({ plan: planner, acceptEdits: builder });
+
+    await runTaskLifecycle(deps, {
+      event: { data: ids },
+      step: decidingStep(ids, ["approve", "approve"]),
+    });
+
+    const rows = await attributedLog(ids);
+    const said = (text: string) =>
+      rows
+        .filter((r) => String(r.payload["text"] ?? "").includes(text))
+        .map((r) => r.workflowStepId);
+    expect(said("planning")).toEqual([plan as string]);
+    expect(said("building")).toEqual([build as string]);
+
+    const decisions = rows.filter((r) => r.kind === "workflow_decision");
+    expect(decisions[0]?.workflowStepId).toBe(plan as string);
+    expect(decisions[0]?.payload["nextStepId"]).toBe(build as string);
+
+    // Nothing a Workflow run writes is left unattributed — a null here would put that row in
+    // every Step's view or in none of them, depending on how the terminal reads it.
+    expect(rows.filter((r) => r.workflowStepId === null)).toEqual([]);
+  });
+
+  it("writes no Step at all for a Task that runs under no Workflow", async () => {
+    /*
+     * The reason the column is nullable, stated as a test. A Task with no Workflow has no Step,
+     * and inventing a synthetic one to keep the column populated would make "unattributed" and
+     * "step one of one" indistinguishable to every reader.
+     */
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const runner = new ScriptedRunner(
+      [{ kind: "completed", stopReason: "end_turn" }],
+      [{ kind: "stdout", channel: "assistant", text: "working alone\n" }, declares("done")],
+    );
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    await runTaskLifecycle(deps, {
+      event: { data: ids },
+      step: decidingStep(ids, ["approve"]),
+    });
+
+    const rows = await attributedLog(ids);
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.map((r) => r.workflowStepId)).toEqual(rows.map(() => null));
+  });
+
+  it("routes on the outcome the harness declared, and writes the decision into the log", async () => {
+    /*
+     * A harness that stops because it *cannot* go on used to arrive at the review gate looking
+     * exactly like one that finished. With an `outcome` branch the Step sends it to an
+     * escalation Step instead — and the transcript says so, in a record produced by the same
+     * evaluation that moved the cursor.
+     */
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const [, build, escalate] = await seedWorkflow(ids, [
+      {
+        key: "try",
+        command: "one",
+        permissionMode: "plan",
+        promptTemplate: "Try it.",
+        gate: "auto",
+        advanceOn: "agent-signal",
+        branch: {
+          when: { kind: "outcome", is: "blocked" },
+          thenStep: "escalate",
+          elseStep: "build",
+        },
+      },
+      {
+        key: "build",
+        command: "two",
+        permissionMode: "acceptEdits",
+        promptTemplate: "Build.",
+        gate: "human",
+        advanceOn: "review",
+      },
+      {
+        key: "escalate",
+        command: "three",
+        permissionMode: "bypassPermissions",
+        promptTemplate: "Ask a person.",
+        gate: "human",
+        advanceOn: "review",
+      },
+    ]);
+
+    const trier = new ScriptedRunner(
+      [{ kind: "completed", stopReason: "end_turn" }],
+      [declares("No registry token.", "blocked")],
+    );
+    const builder = new ScriptedRunner(
+      [{ kind: "completed", stopReason: "end_turn" }],
+      [declares("built")],
+    );
+    const escalator = new ScriptedRunner(
+      [{ kind: "completed", stopReason: "end_turn" }],
+      [declares("escalated")],
+    );
+    const { deps, spies } = makeDeps(db, trier, nullStream());
+    deps.runner = runnersByMode({
+      plan: trier,
+      acceptEdits: builder,
+      bypassPermissions: escalator,
+    });
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: decidingStep(ids, []) });
+
+    // The branch was taken: the escalation Step ran, the ordinary successor never did.
+    expect((await taskRow(ids.taskId))?.workflowStepId).toBe(escalate as string);
+    expect(escalator.starts).toBe(1);
+    expect(builder.starts).toBe(0);
+    expect(build).toBeTruthy();
+
+    // And the decision is on the record, with the facts it rested on.
+    const decisions = (await logOf(ids)).filter((p) => p.kind === "workflow_decision");
+    expect(decisions).toHaveLength(1);
+    expect(decisions[0]).toMatchObject({
+      stepName: "try",
+      signal: "agent-signal",
+      gate: "auto",
+      status: "advanced",
+      nextStepId: escalate,
+      nextStepName: "escalate",
+      outcome: "blocked",
+      producedChanges: false,
+      condition: { when: { kind: "outcome", is: "blocked" }, holds: true },
+    });
+    // Said to whoever is watching, too — as a machine line, not buried in a state change.
+    const line = spies.published.find(
+      (p) =>
+        p.event.kind === "stdout" &&
+        p.event.channel === "system" &&
+        String(p.event.text).includes('step "try" finished'),
+    );
+    expect(String(line?.event.text)).toContain('Advanced to "escalate"');
+  });
+
+  it("reads the harness's answer off its declaration's decision field, with no line in the prose", async () => {
+    // The structured twin of the DECISION line: a harness that answers on the widget and never
+    // writes the word in its message still takes the branch it chose.
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const [, implement] = await seedWorkflow(ids, [
+      {
+        key: "review",
+        command: "reviewer",
+        permissionMode: "plan",
+        promptTemplate: "Review it.",
+        gate: "auto",
+        advanceOn: "agent-signal",
+        branch: {
+          when: { kind: "agent-decides", question: "Does it need another pass?" },
+          thenStep: "implement",
+          elseStep: null,
+        },
+      },
+      {
+        key: "implement",
+        command: "builder",
+        permissionMode: "acceptEdits",
+        promptTemplate: "Implement the notes.",
+        gate: "human",
+        advanceOn: "review",
+      },
+    ]);
+
+    const reviewer = new ScriptedRunner(
+      [{ kind: "completed", stopReason: "end_turn" }],
+      [declaresWith({ summary: "Two nits to fix.", decision: "yes" })],
+    );
+    const builder = new ScriptedRunner(
+      [{ kind: "completed", stopReason: "end_turn" }],
+      [declares("fixed")],
+    );
+    const { deps } = makeDeps(db, reviewer, nullStream());
+    deps.runner = runnersByMode({ plan: reviewer, acceptEdits: builder });
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: decidingStep(ids, []) });
+
+    const row = await taskRow(ids.taskId);
+    expect(row?.workflowStepId).toBe(implement as string);
+    expect(builder.starts).toBe(1);
+    // Carried into the handoff as the line every reader already understands.
+    expect(row?.workflowHandoff).toBe("Two nits to fix.\n\nDECISION: yes");
+    expect(builder.prompts[0]).toContain("Two nits to fix.");
+    const decision = (await logOf(ids)).find((p) => p.kind === "workflow_decision");
+    expect(decision).toMatchObject({
+      status: "advanced",
+      condition: {
+        when: { kind: "agent-decides", question: "Does it need another pass?" },
+        holds: true,
+      },
+    });
+  });
+
+  it("writes down why a human-gated step is waiting, in the gate's own terms", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    await seedWorkflow(ids, [
+      {
+        key: "only",
+        command: "solo",
+        permissionMode: "plan",
+        promptTemplate: "Do it.",
+        gate: "human",
+        advanceOn: "agent-signal",
+      },
+    ]);
+    const solo = new ScriptedRunner(
+      [{ kind: "completed", stopReason: "end_turn" }],
+      [declares("done")],
+    );
+    const { deps, spies } = makeDeps(db, solo, nullStream());
+    deps.runner = runnersByMode({ plan: solo });
+
+    const result = await runTaskLifecycle(deps, {
+      event: { data: ids },
+      step: decidingStep(ids, []),
+    });
+
+    expect(result.result).toBe("review_timeout");
+    const decision = (await logOf(ids)).find((p) => p.kind === "workflow_decision");
+    expect(decision).toMatchObject({
+      stepName: "only",
+      gate: "human",
+      needsApproval: true,
+      status: "awaiting-decision",
+      nextStepId: null,
+      nextStepName: null,
+      condition: null,
+    });
+    const line = spies.published.find(
+      (p) => p.event.kind === "stdout" && String(p.event.text).includes('step "only" finished'),
+    );
+    expect(String(line?.event.text)).toContain("a person decides before the task moves on");
+  });
+
+  it("keeps why the harness stopped beside its declaration, and the conversation it was in", async () => {
+    // A `max_turns` under a `changes_ready` is a disagreement worth keeping: the harness said it
+    // finished, the protocol says it was cut off. Both go in the marker. The harness's own
+    // session id goes on the Session row, which is what a later resume will read.
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const runner = new ScriptedRunner([{ kind: "completed", stopReason: "max_turns" }]);
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    const marker = (await logOf(ids)).find((p) => p.kind === "agent_done");
+    expect(marker?.stopReason).toBe("max_turns");
+    const [row] = await db.select().from(session).where(eq(session.id, ids.sessionId));
+    expect(row?.harnessSessionId).toBe("scripted-session");
   });
 
   it("fails legibly when the cursor names a Step this Workflow does not contain", async () => {
@@ -4185,7 +4877,7 @@ describe("a Task following a Workflow", () => {
       .set({ workflowStepId: strayStep as string })
       .where(eq(task.id, ids.taskId));
 
-    const runner = new ScriptedRunner([{ kind: "completed" }]);
+    const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps } = makeDeps(db, runner, nullStream());
 
     const result = await runTaskLifecycle(deps, {
@@ -4216,7 +4908,7 @@ describe("a Task following a Workflow", () => {
       })),
     );
 
-    const runner = new ScriptedRunner([{ kind: "completed" }]);
+    const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps } = makeDeps(db, runner, nullStream());
 
     const result = await runTaskLifecycle(deps, {
@@ -4249,7 +4941,7 @@ describe("a Task following a Workflow", () => {
       .set({ agentProfileId: `harness-${other.taskId}` })
       .where(eq(workflowStep.id, `wf-${ids.taskId}-step-a`));
 
-    const runner = new ScriptedRunner([{ kind: "completed" }]);
+    const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps } = makeDeps(db, runner, nullStream());
 
     const result = await runTaskLifecycle(deps, {
@@ -4280,7 +4972,7 @@ describe("a Task following a Workflow", () => {
       { enabled: false },
     );
 
-    const own = new ScriptedRunner([{ kind: "completed" }]);
+    const own = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps, spies } = makeDeps(db, own, nullStream());
 
     const result = await runTaskLifecycle(deps, {
@@ -4325,9 +5017,18 @@ describe("a Task following a Workflow", () => {
       },
     ]);
 
-    const a = new ScriptedRunner([{ kind: "completed" }], [declares("a done")]);
-    const b = new ScriptedRunner([{ kind: "completed" }], [declares("b done")]);
-    const c = new ScriptedRunner([{ kind: "completed" }], [declares("c done")]);
+    const a = new ScriptedRunner(
+      [{ kind: "completed", stopReason: "end_turn" }],
+      [declares("a done")],
+    );
+    const b = new ScriptedRunner(
+      [{ kind: "completed", stopReason: "end_turn" }],
+      [declares("b done")],
+    );
+    const c = new ScriptedRunner(
+      [{ kind: "completed", stopReason: "end_turn" }],
+      [declares("c done")],
+    );
     const { deps } = makeDeps(db, a, nullStream());
     deps.runner = runnersByMode({ plan: a, acceptEdits: b, bypassPermissions: c });
 
@@ -4373,7 +5074,10 @@ describe("a Task following a Workflow", () => {
       },
     ]);
 
-    const solo = new ScriptedRunner([{ kind: "completed" }], [declares("done")]);
+    const solo = new ScriptedRunner(
+      [{ kind: "completed", stopReason: "end_turn" }],
+      [declares("done")],
+    );
     const { deps, spies } = makeDeps(db, solo, nullStream());
     deps.runner = runnersByMode({ plan: solo });
 
@@ -4422,8 +5126,14 @@ describe("a Task following a Workflow", () => {
       { key: "b", command: "two", permissionMode: "acceptEdits", promptTemplate: "B." },
     ]);
 
-    const a = new ScriptedRunner([{ kind: "completed" }], [declares("a done")]);
-    const b = new ScriptedRunner([{ kind: "completed" }], [declares("b done")]);
+    const a = new ScriptedRunner(
+      [{ kind: "completed", stopReason: "end_turn" }],
+      [declares("a done")],
+    );
+    const b = new ScriptedRunner(
+      [{ kind: "completed", stopReason: "end_turn" }],
+      [declares("b done")],
+    );
     const { deps } = makeDeps(db, a, nullStream());
     deps.runner = runnersByMode({ plan: a, acceptEdits: b });
 
@@ -4493,7 +5203,11 @@ describe("a Task on no Workflow", () => {
   async function idsFor(decisions: ScriptedDecision[]): Promise<string[]> {
     const ids = freshIds();
     await seedRun(db, ids);
-    const { deps } = makeDeps(db, new ScriptedRunner([{ kind: "completed" }]), nullStream());
+    const { deps } = makeDeps(
+      db,
+      new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]),
+      nullStream(),
+    );
     const emitted: string[] = [];
     await runTaskLifecycle(deps, {
       event: { data: ids },
@@ -4596,7 +5310,7 @@ describe("the harness libraries a run is handed (spec F24)", () => {
       .where(eq(workspace.id, ids.workspaceId));
     await seedLibraries(ids.workspaceId, true);
 
-    const runner = new ScriptedRunner([{ kind: "completed" }]);
+    const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps } = makeDeps(db, runner, nullStream());
     const started: HarnessStartOpts[] = [];
     const wrapped: TaskRunDeps = {
@@ -4651,7 +5365,7 @@ describe("the harness libraries a run is handed (spec F24)", () => {
     await seedRun(db, ids);
     await seedLibraries(ids.workspaceId, true);
 
-    const runner = new ScriptedRunner([{ kind: "completed" }]);
+    const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps } = makeDeps(db, runner, nullStream());
     const started: HarnessStartOpts[] = [];
     const wrapped: TaskRunDeps = {
@@ -4669,5 +5383,162 @@ describe("the harness libraries a run is handed (spec F24)", () => {
 
     expect(started[0]?.args).toEqual([]);
     expect(await stat(join(root, ids.taskId, ".solow-libraries")).catch(() => null)).toBeNull();
+  });
+});
+
+/**
+ * Resume and auto-continue: "a Task must never lose a session, and must recover the ones it does".
+ *
+ * Two halves of one guarantee, meeting in one column. `session.harness_session_id` is written the
+ * moment the harness reports it, so a round that dies has *already* recorded the conversation it
+ * was having — and the round that replaces it reads that id back instead of handing the same brief
+ * to a process with no memory of having worked on it. Auto-continue is the case where nothing died
+ * at all: the harness ran out of turns, and the run gives it more rather than presenting half a
+ * change to a reviewer as "changes ready".
+ */
+describe("resuming the harness conversation", () => {
+  let db: TestDb;
+
+  beforeAll(() => {
+    process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 3).toString("base64");
+  });
+
+  beforeEach(() => {
+    db = createTestDb();
+  });
+
+  /** Every notice the run wrote, in order — where a recovery has to say what it did. */
+  async function notices(sessionId: string): Promise<string[]> {
+    const rows = await db
+      .select()
+      .from(sessionEvent)
+      .where(eq(sessionEvent.sessionId, sessionId))
+      .orderBy(asc(sessionEvent.seq));
+    return rows
+      .filter((row) => row.kind === "notice")
+      .map((row) => (row.payload as { text: string }).text);
+  }
+
+  it("hands a redriven round the conversation the attempt before it recorded", async () => {
+    // `retryingStep` runs one step *body* twice, which is what an Inngest redrive is — and what an
+    // orchestrator restart and an exhausted execution budget both look like from in here. The
+    // first pass got as far as recording the conversation id; the second must find it.
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const runner = new ScriptedRunner([
+      { kind: "completed", stopReason: "end_turn" },
+      { kind: "completed", stopReason: "end_turn" },
+    ]);
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    await runTaskLifecycle(deps, {
+      event: { data: ids },
+      step: retryingStep(["approve"], "agent-run-0"),
+    });
+
+    expect(runner.starts).toBe(2);
+    expect(runner.resumeSessionIds).toEqual([null, "scripted-session"]);
+    // And having resumed, it is told to carry on rather than handed the brief a second time.
+    expect(runner.prompts[1]).toContain("# Continue");
+    expect(runner.prompts[1]).not.toContain("# Task");
+    expect(await notices(ids.sessionId)).toContain(
+      "Continued the previous conversation: this round re-attached to the harness session the last one was having, so nothing it had already worked out was lost.",
+    );
+  });
+
+  it("asks a first round to resume nothing, and briefs it in full", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    expect(runner.resumeSessionIds).toEqual([null]);
+    expect(runner.prompts[0]).toContain("# Task");
+    // Nothing was resumed, so there is nothing to say about a resume. A notice per round about a
+    // recovery that did not happen is noise in the one place an operator reads for signal.
+    expect(await notices(ids.sessionId)).toEqual([]);
+  });
+
+  it("continues a truncated round instead of presenting it as changes ready", async () => {
+    // The defect this exists for: a harness cut off by its turn budget completes, so the run
+    // recorded `changes_ready` and put unfinished work in front of a reviewer as if it were done.
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const runner = new ScriptedRunner([
+      { kind: "completed", stopReason: "max_turns" },
+      { kind: "completed", stopReason: "end_turn" },
+    ]);
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    // One review decision, and it is enough: a truncated round must not reach the gate at all, so
+    // the only decision this run asks for belongs to the round that actually finished.
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    expect(runner.starts).toBe(2);
+    expect(runner.resumeSessionIds).toEqual([null, "scripted-session"]);
+    expect(runner.prompts[1]).toContain("turn budget");
+    expect((await notices(ids.sessionId))[0]).toBe(
+      "The harness hit its turn budget with work still to do, so this run is continuing the same conversation instead of sending it for review (continuation 1 of 3).",
+    );
+    expect(await taskState(db, ids.taskId)).toBe("done");
+  });
+
+  it("bounds the continuations, then hands the operator an outcome they can act on", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const runner = new ScriptedRunner([
+      { kind: "completed", stopReason: "max_turns" },
+      { kind: "completed", stopReason: "max_turns" },
+      { kind: "completed", stopReason: "max_tokens" },
+      { kind: "completed", stopReason: "max_turns" },
+      // Never reached: the budget is three continuations, so the fourth truncated round is the
+      // one that goes to review rather than the one that starts a fifth harness.
+      { kind: "completed", stopReason: "end_turn" },
+    ]);
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    expect(runner.starts).toBe(4);
+    const said = await notices(ids.sessionId);
+    // A full context is not a spent turn allowance, and the log says which one it was.
+    expect(said).toContain(
+      "The harness hit its context budget with work still to do, so this run is continuing the same conversation instead of sending it for review (continuation 3 of 3).",
+    );
+    // Exhausting the budget is not a stall and not a failure: the work reaches the gate with the
+    // reason it is only this far along written beside it.
+    expect(said.at(-1)).toBe(
+      "The harness hit its turn budget again after 3 continuations. This run has stopped continuing it and is putting the work in front of you as it stands — it is unfinished, whatever the summary says.",
+    );
+    expect(await taskState(db, ids.taskId)).toBe("done");
+  });
+
+  it("re-sends the full brief, and says so, when the harness could not resume", async () => {
+    // An ACP agent that never advertised `loadSession` starts a new session rather than failing
+    // the round. The round had already committed to a continuation instruction — `prompt` is a
+    // start option and `resumed` is only knowable after the handshake — so the correction is the
+    // next turn, and the log says which of the two happened.
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const runner = new ScriptedRunner([
+      { kind: "completed", stopReason: "end_turn" },
+      { kind: "completed", stopReason: "end_turn" },
+    ]);
+    runner.resumes = false;
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    await runTaskLifecycle(deps, {
+      event: { data: ids },
+      step: scriptedStep([{ decision: "request_changes", feedback: "again" }, "approve"]),
+    });
+
+    expect(runner.resumeSessionIds).toEqual([null, "scripted-session"]);
+    expect(runner.sends[0]).toContain("# Task");
+    expect(runner.sends[0]).toContain("# Review feedback");
+    expect(await notices(ids.sessionId)).toContain(
+      "Could not continue the previous conversation; the harness started from the brief instead, which was re-sent in full.",
+    );
   });
 });

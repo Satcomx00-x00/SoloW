@@ -5,6 +5,9 @@ import {
   END_NODE_ID,
   END_NODE_Y,
   endNodePosition,
+  laneLabelX,
+  MAIN_LINE_Y,
+  NODE_ORIGIN,
   nextStepName,
   placeSteps,
   reorderFromDrop,
@@ -37,6 +40,7 @@ function step(id: string, rank: string): WorkflowStepDto {
     branch: null,
     mcpServerIds: [],
     skillIds: [],
+    permissionMode: null,
     createdAt: AT,
     updatedAt: AT,
   };
@@ -51,7 +55,17 @@ describe("placeSteps", () => {
     const placed = placeSteps(STEPS);
     expect(placed.map((p) => p.step.id)).toEqual(["s1", "s2", "s3"]);
     expect(placed.map((p) => p.x)).toEqual([0, PITCH, 2 * PITCH]);
-    expect(placed.every((p) => p.y === 0)).toBe(true);
+  });
+
+  it("puts every node on one axis, from the start pill to the end pill", () => {
+    // The pipeline reads as one horizontal line with nodes strung on it, and a position names a
+    // node's *middle* (`NODE_ORIGIN`) rather than its top — so a card with a branch form, which
+    // is half again as tall as one without, still lines up with its neighbours and with both
+    // pills instead of hanging off the line at its own depth.
+    expect(placeSteps(STEPS).map((p) => p.y)).toEqual([MAIN_LINE_Y, MAIN_LINE_Y, MAIN_LINE_Y]);
+    expect(startNodePosition().y).toBe(MAIN_LINE_Y);
+    expect(endNodePosition(STEPS).y).toBe(MAIN_LINE_Y);
+    expect(NODE_ORIGIN).toEqual([0, 0.5]);
   });
 });
 
@@ -114,6 +128,25 @@ describe("stepEdges", () => {
     expect(endNodePosition(STEPS)).toEqual({ x: 3 * PITCH, y: END_NODE_Y });
     expect(endNodePosition([])).toEqual({ x: 0, y: END_NODE_Y });
     expect(startNodePosition()).toEqual({ x: -(STEP_NODE_GAP + START_NODE_WIDTH), y: END_NODE_Y });
+  });
+});
+
+describe("laneLabelX", () => {
+  it("puts the badge at the end the edge arrives at, whichever way the run travels", () => {
+    // Forward: the run leaves at 100 and lands at 500, so the badge sits just before 500.
+    expect(laneLabelX(100, 500, 26)).toBe(474);
+    // Backward — the loop worth having, "changes requested, go back and implement" — reads the
+    // same way: the badge is where the edge comes back down, not where it left.
+    expect(laneLabelX(500, 100, 26)).toBe(126);
+  });
+
+  it("falls back to the midpoint on a run too short to inset into", () => {
+    expect(laneLabelX(100, 120, 26)).toBe(110);
+    expect(laneLabelX(120, 100, 26)).toBe(110);
+  });
+
+  it("has an answer for a run of no length at all", () => {
+    expect(laneLabelX(100, 100, 26)).toBe(100);
   });
 });
 

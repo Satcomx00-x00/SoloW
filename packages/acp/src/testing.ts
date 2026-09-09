@@ -149,7 +149,14 @@ class ScriptedAgent {
           authMethods: [],
         };
       }
-      case AcpMethod.SessionNew: {
+      /*
+       * Both ways into a session, answered alike — because a real agent answers them alike. ACP's
+       * `session/load` result carries the same `modes` and `models` as `session/new`, minus the id
+       * the client just supplied, and a fake that dropped them would let a resumed session's pins
+       * regress without a test noticing.
+       */
+      case AcpMethod.SessionNew:
+      case AcpMethod.SessionLoad: {
         this.cwd = typeof p["cwd"] === "string" ? p["cwd"] : this.cwd;
         if (this.script.writeEnvNames) {
           await Bun.write(
@@ -158,13 +165,13 @@ class ScriptedAgent {
           );
         }
         return {
-          sessionId: "acp-session-1",
+          ...(method === AcpMethod.SessionNew ? { sessionId: "acp-session-1" } : {}),
           ...(this.script.modes ? { modes: this.script.modes } : {}),
           ...(this.script.models ? { models: this.script.models } : {}),
         };
       }
-      case AcpMethod.SessionLoad:
       case AcpMethod.SessionSetMode:
+      case AcpMethod.SessionSetModel:
         return {};
       case AcpMethod.SessionPrompt:
         return await this.runTurn();

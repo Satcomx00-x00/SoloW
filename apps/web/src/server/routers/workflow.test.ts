@@ -32,7 +32,14 @@ function ctx(db: TestDb, workspaceId: string, flags?: Partial<BaseContext["flagO
   return {
     db,
     session: { workspaceId, userId: "user-1" },
-    flagOverrides: { "ff-core-program": true, "ff-workflows": true, ...flags },
+    // `ff-agent-libraries` because a Step loads MCP servers and Skills, and a shared document
+    // has to carry those by name — see the export/import suite.
+    flagOverrides: {
+      "ff-core-program": true,
+      "ff-workflows": true,
+      "ff-agent-libraries": true,
+      ...flags,
+    },
   } satisfies BaseContext;
 }
 
@@ -1023,6 +1030,273 @@ describe("workflows", () => {
       expect(await errMessage(() => c.workflow.deleteStep({ stepId: steps(wf, 0) }))).toBe(
         WorkflowErrorCode.StepInUse,
       );
+    });
+  });
+
+  describe("a step's permission posture (spec F05, on the Step)", () => {
+    it("defaults to null, which means the step's harness profile decides", async () => {
+      const { newPipeline } = await fixture(db, "acme");
+      const wf = await newPipeline("Ship");
+      expect(wf.steps.map((s) => s.permissionMode)).toEqual([null, null, null]);
+    });
+
+    it("lets two steps of one pipeline run the same profile at different postures", async () => {
+      // The case the field exists for: planning and building on one Harness Profile. Before this
+      // it took two Profiles differing in a single enum, each with its own credential binding.
+      const { c, planner } = await fixture(db, "acme");
+      const wf = await c.workflow.create({ name: "Plan then build" });
+      await c.workflow.addStep({
+        workflowId: wf.id,
+        name: "Plan",
+        agentProfileId: planner.id,
+        permissionMode: "plan",
+      });
+      const both = await c.workflow.addStep({
+        workflowId: wf.id,
+        name: "Build",
+        agentProfileId: planner.id,
+        permissionMode: "bypassPermissions",
+      });
+
+      expect(both.steps.map((s) => s.permissionMode)).toEqual(["plan", "bypassPermissions"]);
+      expect(new Set(both.steps.map((s) => s.agentProfileId)).size).toBe(1);
+    });
+
+    it("hands the posture back to the profile when it is set to null", async () => {
+      const { c, planner } = await fixture(db, "acme");
+      const wf = await c.workflow.addStep({
+        workflowId: (await c.workflow.create({ name: "Ship" })).id,
+        name: "Plan",
+        agentProfileId: planner.id,
+        permissionMode: "plan",
+      });
+      const after = await c.workflow.updateStep({
+        stepId: steps(wf, 0),
+        permissionMode: null,
+      });
+      expect(after.steps[0]?.permissionMode).toBeNull();
+    });
+
+    it("does not bump the version for a posture set to the value it already had", async () => {
+      // Null is a value here, not an absence, so the no-op check has to compare against null too
+      // — a form saved twice must not raise drift on every attached Task.
+      const { c, newPipeline } = await fixture(db, "acme");
+      const wf = await newPipeline("Ship");
+      await c.workflow.updateStep({ stepId: steps(wf, 0), permissionMode: null });
+      expect((await c.workflow.get({ id: wf.id })).version).toBe(wf.version);
+
+      await c.workflow.updateStep({ stepId: steps(wf, 0), permissionMode: "plan" });
+      const bumped = (await c.workflow.get({ id: wf.id })).version;
+      expect(bumped).toBeGreaterThan(wf.version);
+      await c.workflow.updateStep({ stepId: steps(wf, 0), permissionMode: "plan" });
+      expect((await c.workflow.get({ id: wf.id })).version).toBe(bumped);
+    });
+
+    it("travels in an exported document and lands unchanged in another Workspace", async () => {
+      const { c, planner } = await fixture(db, "acme");
+      const wf = await c.workflow.create({ name: "Ship" });
+      await c.workflow.addStep({
+        workflowId: wf.id,
+        name: "Plan",
+        agentProfileId: planner.id,
+        permissionMode: "plan",
+      });
+      await c.workflow.addStep({ workflowId: wf.id, name: "Build", agentProfileId: planner.id });
+
+      const doc = await c.workflow.export({ id: wf.id });
+      expect(doc.steps.map((s) => s.permissionMode)).toEqual(["plan", null]);
+
+      const other = await fixture(db, "beta");
+      const imported = await other.c.workflow.import({ document: doc });
+      // A posture is one of three fixed values, not a name to resolve — so unlike a Skill it
+      // cannot fail to match, and it arrives whatever the target Workspace has in it.
+      expect(imported.workflow.steps.map((s) => s.permissionMode)).toEqual(["plan", null]);
+    });
+  });
+
+  describe("sharing a pipeline — export and import", () => {
+    /** A Workflow with a branch and a library load on it: everything a document has to carry. */
+    async function shareable(c: Awaited<ReturnType<typeof fixture>>["c"], profileIds: string[]) {
+      const server = await c.library.mcp.create({
+        name: "playwright",
+        transport: { kind: "stdio", command: "npx", args: ["-y", "@playwright/mcp"] },
+      });
+      const sk = await c.library.skill.create({
+        name: "impeccable",
+        description: "Frontend design review.",
+        source: { kind: "inline", body: "# impeccable" },
+      });
+      const wf = await c.workflow.create({ name: "Ship" });
+      await c.workflow.addStep({
+        workflowId: wf.id,
+        name: "Implement",
+        agentProfileId: profileIds[0] as string,
+        promptTemplate: "Build it.",
+        gate: "auto",
+        advanceOn: "agent-signal",
+        mcpServerIds: [server.id],
+        skillIds: [sk.id],
+      });
+      const both = await c.workflow.addStep({
+        workflowId: wf.id,
+        name: "Review",
+        agentProfileId: profileIds[1] as string,
+        promptTemplate: "Review it.",
+      });
+      // "Changes requested, go back and implement" — a branch pointing at an earlier Step, which
+      // is the case a document has to express without ids.
+      await c.workflow.updateStep({
+        stepId: steps(both, 1),
+        branch: {
+          when: { kind: "produced-changes" },
+          thenStepId: steps(both, 0),
+          elseStepId: null,
+        },
+      });
+      return await c.workflow.get({ id: wf.id });
+    }
+
+    it("exports a document that names harnesses and tools, and carries no workspace ids", async () => {
+      const { c, planner, reviewer } = await fixture(db, "acme");
+      const wf = await shareable(c, [planner.id, reviewer.id]);
+
+      const doc = await c.workflow.export({ id: wf.id });
+
+      expect(doc.name).toBe("Ship");
+      expect(doc.steps.map((s) => s.harnessProfile)).toEqual(["Opus", "Codex"]);
+      expect(doc.steps[0]?.mcpServers).toEqual(["playwright"]);
+      expect(doc.steps[0]?.skills).toEqual(["impeccable"]);
+      expect(doc.steps[1]?.branch).toEqual({
+        when: { kind: "produced-changes" },
+        thenStep: 0,
+        elseStep: null,
+      });
+      // The point of the format: nothing in it is an id of the Workspace it left.
+      const serialised = JSON.stringify(doc);
+      for (const id of [wf.id, steps(wf, 0), steps(wf, 1), planner.id, reviewer.id]) {
+        expect(serialised).not.toContain(id);
+      }
+    });
+
+    it("rebuilds the pipeline in another Workspace, re-pointing every reference at local rows", async () => {
+      const { c } = await fixture(db, "acme");
+      const wf = await shareable(c, [
+        (await c.profile.agent.list({ limit: 50 })).items[0]?.id ?? "",
+        (await c.profile.agent.list({ limit: 50 })).items[1]?.id ?? "",
+      ]);
+      const doc = await c.workflow.export({ id: wf.id });
+
+      // A second Workspace with the same profile names and the same skill, but none of the ids.
+      const other = await fixture(db, "beta");
+      const localSkill = await other.c.library.skill.create({
+        name: "impeccable",
+        description: "Frontend design review.",
+        source: { kind: "inline", body: "# impeccable" },
+      });
+
+      const imported = await other.c.workflow.import({ document: doc });
+
+      expect(imported.workflow.name).toBe("Ship");
+      expect(imported.workflow.steps.map((s) => s.name)).toEqual(["Implement", "Review"]);
+      expect(imported.workflow.steps.map((s) => s.promptTemplate)).toEqual([
+        "Build it.",
+        "Review it.",
+      ]);
+      // The branch that pointed backwards points at the *imported* first Step, not the original.
+      expect(imported.workflow.steps[1]?.branch?.thenStepId).toBe(
+        imported.workflow.steps[0]?.id ?? "",
+      );
+      expect(imported.workflow.steps[0]?.skillIds).toEqual([localSkill.id]);
+      // Beta has no `playwright` server, so the Step loses it — and is told so.
+      expect(imported.workflow.steps[0]?.mcpServerIds).toEqual([]);
+      expect(imported.unmatchedMcpServers).toEqual(["playwright"]);
+      expect(imported.unmatchedHarnessProfiles).toEqual([]);
+      // A freshly imported definition has been edited zero times.
+      expect(imported.workflow.version).toBe(1);
+    });
+
+    it("substitutes a harness it does not have, and names the one it could not honour", async () => {
+      const { c, planner, reviewer } = await fixture(db, "acme");
+      const doc = await c.workflow.export({
+        id: (await shareable(c, [planner.id, reviewer.id])).id,
+      });
+      const renamed = { ...doc, steps: doc.steps.map((s) => ({ ...s, harnessProfile: "Gemini" })) };
+
+      const other = await fixture(db, "beta");
+      const imported = await other.c.workflow.import({ document: renamed });
+
+      expect(imported.unmatchedHarnessProfiles).toEqual(["Gemini"]);
+      // Every Step still names a harness — a Step without one could not run at all.
+      const local = (await other.c.profile.agent.list({ limit: 50 })).items.map((p) => p.id);
+      for (const step of imported.workflow.steps) expect(local).toContain(step.agentProfileId);
+    });
+
+    it("puts every Step on the fallback the caller chose, when the document's names are unknown", async () => {
+      const { c, planner, reviewer } = await fixture(db, "acme");
+      const doc = await c.workflow.export({
+        id: (await shareable(c, [planner.id, reviewer.id])).id,
+      });
+      const other = await fixture(db, "beta");
+      const imported = await other.c.workflow.import({
+        document: { ...doc, steps: doc.steps.map((s) => ({ ...s, harnessProfile: "Gemini" })) },
+        fallbackHarnessProfileId: other.reviewer.id,
+      });
+      expect(imported.workflow.steps.map((s) => s.agentProfileId)).toEqual([
+        other.reviewer.id,
+        other.reviewer.id,
+      ]);
+    });
+
+    it("refuses a fallback profile from another Workspace before anything is written", async () => {
+      const { c, planner, reviewer } = await fixture(db, "acme");
+      const doc = await c.workflow.export({
+        id: (await shareable(c, [planner.id, reviewer.id])).id,
+      });
+      const other = await fixture(db, "beta");
+      const before = (await other.c.workflow.list({})).length;
+
+      expect(
+        await errMessage(() =>
+          other.c.workflow.import({ document: doc, fallbackHarnessProfileId: planner.id }),
+        ),
+      ).toBe(CommonErrorCode.NotFound);
+      // Refused inside the transaction, so not even the Workflow row survives it.
+      expect(await other.c.workflow.list({})).toHaveLength(before);
+    });
+
+    it("suffixes the name rather than colliding, so the same document imports twice", async () => {
+      const { c, planner, reviewer } = await fixture(db, "acme");
+      const doc = await c.workflow.export({
+        id: (await shareable(c, [planner.id, reviewer.id])).id,
+      });
+
+      // Back into the Workspace it came from, where "Ship" is already taken.
+      expect((await c.workflow.import({ document: doc })).workflow.name).toBe("Ship (2)");
+      expect((await c.workflow.import({ document: doc })).workflow.name).toBe("Ship (3)");
+      expect((await c.workflow.import({ document: doc, name: "Ours" })).workflow.name).toBe("Ours");
+    });
+
+    it("produces a pipeline a Task can actually be attached to — the graph rules still hold", async () => {
+      const { c, planner, reviewer } = await fixture(db, "acme");
+      const doc = await c.workflow.export({
+        id: (await shareable(c, [planner.id, reviewer.id])).id,
+      });
+      const other = await fixture(db, "beta");
+      const imported = await other.c.workflow.import({ document: doc });
+      const t = await other.newTask("Wire the latch");
+
+      const binding = await other.c.workflow.attachTask({
+        taskId: t.id,
+        workflowId: imported.workflow.id,
+      });
+      expect(binding.currentStep.name).toBe("Implement");
+    });
+
+    it("does not export another Workspace's workflow", async () => {
+      const { c, planner, reviewer } = await fixture(db, "acme");
+      const wf = await shareable(c, [planner.id, reviewer.id]);
+      const other = await fixture(db, "beta");
+      expect(await errCode(() => other.c.workflow.export({ id: wf.id }))).toBe("NOT_FOUND");
     });
   });
 

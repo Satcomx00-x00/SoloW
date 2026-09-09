@@ -719,6 +719,17 @@ export const workflowStep = sqliteTable(
       .notNull()
       .default(sql`'[]'`),
     skillIds: text("skill_ids", { mode: "json" }).$type<string[]>().notNull().default(sql`'[]'`),
+    /**
+     * How much this Step's harness may do without asking (spec F05), or **null for whatever its
+     * Harness Profile says**.
+     *
+     * On the Step because a Step *is* a harness launch: a Task under a Workflow starts a fresh
+     * session at every Step with that Step's Profile, its MCP servers, its Skills and its brief,
+     * and the posture is a launch parameter exactly like those. Nullable rather than defaulted so
+     * the column changed no existing pipeline, and so a Step with no opinion keeps following its
+     * Profile when the Profile is re-postured.
+     */
+    permissionMode: text("permission_mode").$type<HarnessPermissionMode>(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -1145,6 +1156,19 @@ export const session = sqliteTable(
       .references(() => task.id),
     state: text("state").$type<SessionState>().notNull().default("active"),
     diffRef: text("diff_ref"),
+    /**
+     * The harness's *own* id for this conversation — Claude Code's `session_id`, ACP's session
+     * id — as the harness reported it at its handshake. Null until it does, and for a protocol
+     * that has none (a plain CLI).
+     *
+     * SoloW's Session and the harness's are two different things with one name: this row is the
+     * durable record of a run, the harness's is a conversation living in its own store. Keeping
+     * the harness's id is what makes that conversation reachable again — `claude --resume`,
+     * ACP `session/load` — instead of every recovery being a fresh process re-reading the brief.
+     * Overwritten each round: every round starts a new harness process, and only the newest
+     * conversation is the one worth continuing.
+     */
+    harnessSessionId: text("harness_session_id"),
     startedAt: createdAt(),
     endedAt: text("ended_at"),
   },
@@ -1164,9 +1188,43 @@ export const sessionEvent = sqliteTable(
     seq: integer("seq").notNull(),
     kind: text("kind").notNull(),
     payload: text("payload", { mode: "json" }).notNull(),
+    /**
+     * The Workflow Step in force when this event was produced.
+     *
+     * One Session spans a whole pipeline — every Step, every review round — so without this the
+     * transcript is one unbounded list in which Step 3's output sits directly under Step 1's
+     * with nothing to tell them apart. The run loop already holds the Step it is running
+     * (`leg.stepId` in `task-run.ts`); this is that value written down, so a reader can ask the
+     * log which Step produced a line instead of inferring it from the `workflow_decision` rows
+     * scattered through it.
+     *
+     * Nullable, for two populations that genuinely have no answer: a Task on no Workflow never
+     * had a Step, and every row written before this column existed cannot be given one — the
+     * table is append-only by design (see `session_summary` below for why that matters), so
+     * there is no backfill that would not be a rewrite of history.
+     *
+     * **Deliberately not a foreign key.** `deleteWorkflowStep` clears `task.workflow_step_id`
+     * before removing the row precisely because that column *is* a foreign key; it can do that
+     * because a Task's current Step is mutable state. A transcript is not. Constraining this
+     * column would leave two options at Step deletion, and both are wrong: refuse the delete —
+     * making a Workflow uneditable for as long as any Session that ever ran it exists — or null
+     * the column out, which silently rewrites finished transcripts to say the work belonged to
+     * no Step. Holding the id of a Step that has since been deleted is the honest record: the
+     * event really was produced under it, and a reader that cannot resolve the id shows the
+     * events ungrouped rather than mislabelled.
+     */
+    workflowStepId: text("workflow_step_id"),
     at: createdAt(),
   },
-  (t) => ({ bySeq: uniqueIndex("session_event_seq").on(t.sessionId, t.seq) }),
+  (t) => ({
+    bySeq: uniqueIndex("session_event_seq").on(t.sessionId, t.seq),
+    /**
+     * The step-scoped read (`listSessionEvents` with a filter). Prefixed by `session_id` because
+     * every query here is Session-scoped first — a Step id is only ever asked about inside one
+     * Session's log, and the unique index above cannot serve it since `seq` sits between the two.
+     */
+    byStep: index("session_event_step").on(t.sessionId, t.workflowStepId),
+  }),
 );
 
 /**

@@ -29,16 +29,41 @@ Step on its own harness session, and the handoff (summary, diff, decision) trave
    - \`advanceOn\` — \`"agent-signal"\` (the harness says it is done) or \`"review"\` (a review lands).
    - \`mcpServerIds\` / \`skillIds\` — library items loaded for this Step on top of the
      Workspace-wide ones (\`library_mcp_list\`, \`library_skill_list\`). Additive; ids only.
+   - \`permissionMode\` — how much *this Step's* harness may do without asking:
+     \`"plan"\` (read and reason, change nothing), \`"acceptEdits"\` (edit its worktree, ask for
+     the rest — and a headless run has nobody to ask, so anything needing the shell or the network
+     stalls), or \`"bypassPermissions"\` (never asks). Omit it, or send null, to use the Step's
+     Harness Profile's own setting. A Step is a harness launch, so this is a launch parameter like
+     the two above: a planning Step and a building Step can share one Profile and differ here.
 4. \`workflow_updateStep\` with \`branch\` — after every Step exists, add the conditions:
-   \`{ when, thenStepId, elseStepId }\`, where \`when\` is either
-   \`{ kind: "agent-decides", question: "…?" }\` (the Step's harness answers yes or no at the end of
-   its run) or \`{ kind: "produced-changes" }\` (the Step left a diff). \`thenStepId\` and
+   \`{ when, thenStepId, elseStepId }\`, where \`when\` is one of
+   \`{ kind: "agent-decides", question: "…?" }\` (the Step's harness answers yes or no — in its
+   \`task_complete\` widget's \`decision\` field, or a \`DECISION: yes|no\` line at the end of its
+   run), \`{ kind: "produced-changes" }\` (the Step left a diff), or
+   \`{ kind: "outcome", is: "changes_ready" | "nothing_to_do" | "blocked" }\` (how the harness
+   declared its run ended — \`blocked\` routes a Step that could not finish to a person or an
+   escalation Step instead of the review gate). \`thenStepId\` and
    \`elseStepId\` are Step ids of this Workflow, or \`null\` for "the pipeline ends". A backward
    target makes a loop; the run loop bounds loops, so a "needs another pass?" → back to
    "Implement" branch is the normal shape of a review.
 5. \`workflow_reorderStep\` — move a Step: \`{ stepId, afterStepId, beforeStepId }\`, nulls for the ends.
 6. \`workflow_attachTask\` — \`{ taskId, workflowId }\` binds a Task (backlog or ready) to the
    pipeline; \`task_launch\` then starts it at the first Step. \`workflow_detachTask\` unbinds.
+
+Two more, for a pipeline that already exists somewhere else:
+
+- \`workflow_export\` — \`{ id }\` returns the Workflow as a portable document: no ids, harnesses
+  and library items named, branch targets as indices into its own step list. It is the thing to
+  hand someone, or to check into a repository beside the code it builds.
+- \`workflow_import\` — \`{ document, name?, fallbackHarnessProfileId? }\` writes one back. Names
+  are matched against this Workspace: an unmatched Harness Profile falls back (to
+  \`fallbackHarnessProfileId\`, else the first profile) and an unmatched MCP server or Skill is
+  dropped from the Step that asked for it. The reply lists every substitution — read it, and
+  re-point those Steps with \`workflow_updateStep\` rather than assuming the pipeline arrived
+  intact. A name this Workspace already uses is suffixed, never refused.
+
+Prefer these to rebuilding a pipeline Step by Step when you already have its document: an import
+is one call and cannot mistype a branch.
 
 ## Rules the graph must satisfy (the API refuses what breaks them)
 

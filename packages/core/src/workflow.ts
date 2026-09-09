@@ -1,12 +1,17 @@
 import {
   err,
+  type HarnessDecision,
   ok,
   type Result,
+  type SessionEventPayload,
+  type TaskCompletionOutcome,
+  type WorkflowAdvanceExplanation,
   type WorkflowAdvanceOn,
   type WorkflowAdvanceStatus,
   WorkflowErrorCode,
   type WorkflowStepBranch,
   type WorkflowStepCondition,
+  type WorkflowStepExitKind,
   type WorkflowStepGate,
 } from "@solow/contracts";
 
@@ -229,6 +234,12 @@ export interface WorkflowStepOutcome {
    * no answer can be found in.
    */
   handoff: string | null;
+  /**
+   * How the harness said its run ended — its `task_complete` declaration's `outcome` — for an
+   * `outcome` branch to read. Absent or null when it declared nothing, which no outcome
+   * condition matches: silence is not `blocked` any more than it is `yes`.
+   */
+  outcome?: TaskCompletionOutcome | null;
 }
 
 /**
@@ -265,11 +276,23 @@ export function readHarnessDecision(handoff: string | null): "yes" | "no" | null
  * the branch fell back to "no answer". A harness's final message is as much its report as the
  * widget's summary, so an answer found there is carried over when the summary has none. The
  * summary's own line wins when both exist: it was written last, as the report of record.
+ *
+ * `declared` is the widget's own `decision` field, and it outranks both: a structured answer on
+ * the declaration cannot be paraphrased, cannot be a sentence *about* the format, and cannot
+ * disagree with itself the way prose written twice can. It is written into the handoff as the
+ * same `DECISION:` line, last, so `readHarnessDecision` reads one vocabulary whichever channel
+ * the answer arrived on — and so an older reader of the handoff sees exactly what it always did.
  */
 export function carryHarnessDecision(
   summary: string | null,
   finalText: string | null,
+  declared: HarnessDecision | null = null,
 ): string | null {
+  if (declared !== null) {
+    if (readHarnessDecision(summary) === declared) return summary;
+    const line = `${DECISION_MARKER} ${declared}`;
+    return summary ? `${summary.trimEnd()}\n\n${line}` : line;
+  }
   if (readHarnessDecision(summary) !== null) return summary;
   const answer = readHarnessDecision(finalText);
   if (answer === null) return summary;
@@ -289,13 +312,15 @@ export function carryHarnessDecision(
  */
 export function evaluateStepCondition(
   condition: WorkflowStepCondition,
-  outcome: Pick<WorkflowStepOutcome, "handoff" | "producedChanges">,
+  outcome: Pick<WorkflowStepOutcome, "handoff" | "producedChanges" | "outcome">,
 ): boolean {
   switch (condition.kind) {
     case "agent-decides":
       return readHarnessDecision(outcome.handoff) === "yes";
     case "produced-changes":
       return outcome.producedChanges;
+    case "outcome":
+      return (outcome.outcome ?? null) === condition.is;
   }
 }
 
@@ -425,6 +450,12 @@ export interface WorkflowAdvance {
    * integrated with nobody having seen its diff. An approval buys the move it caused and no other.
    */
   consumedApproval: boolean;
+  /**
+   * The facts this answer rests on, stated by the rule that read them — see
+   * `workflowAdvanceExplanationSchema`. The run loop writes it into the Session log so a Task
+   * held at a gate, or sent back down a branch, can say why in its own transcript.
+   */
+  explanation: WorkflowAdvanceExplanation;
 }
 
 /** Does this Step's gate require a human's approval, given what happened on it? */
@@ -461,18 +492,37 @@ export function advanceWorkflowStep(
   const current = ordered[index];
   if (!current) return err(WorkflowErrorCode.StepNotInWorkflow);
 
+  // Read once, up front, and carried on every answer below. The gate's own reading is stated
+  // even on a `held`, where it did not apply: the record says what the Step *would* have asked,
+  // which is what an operator wondering why nothing moved wants to know.
+  const needsApproval = gateNeedsApproval(current.gate, outcome);
+  const condition = current.branch
+    ? { when: current.branch.when, holds: evaluateStepCondition(current.branch.when, outcome) }
+    : null;
+  const explain = (exit: WorkflowStepExitKind | null): WorkflowAdvanceExplanation => ({
+    gate: current.gate,
+    needsApproval,
+    condition,
+    exit,
+  });
+
   if (outcome.signal !== current.advanceOn) {
-    return ok({ status: "held", stepId: current.id, consumedApproval: false });
+    return ok({
+      status: "held",
+      stepId: current.id,
+      consumedApproval: false,
+      explanation: explain(null),
+    });
   }
 
   // The rank successor unless the Step branches, in which case the condition picks the target.
   // A null target is "the pipeline ends here", and it lands in the same terminal rule as running
   // off the end of the list — which is what keeps Principle I in one place.
   let next: WorkflowStepRule | undefined;
-  if (current.branch) {
-    const targetId = evaluateStepCondition(current.branch.when, outcome)
-      ? current.branch.thenStepId
-      : current.branch.elseStepId;
+  let exit: WorkflowStepExitKind;
+  if (current.branch && condition) {
+    exit = condition.holds ? "then" : "else";
+    const targetId = condition.holds ? current.branch.thenStepId : current.branch.elseStepId;
     if (targetId !== null) {
       next = ordered.find((step) => step.id === targetId);
       // The DAL refuses a branch to a Step outside the Workflow, so this is a Step deleted since
@@ -480,25 +530,36 @@ export function advanceWorkflowStep(
       if (!next) return err(WorkflowErrorCode.StepNotInWorkflow);
     }
   } else {
+    exit = "next";
     next = ordered[index + 1];
   }
+  const explanation = explain(exit);
   if (!next) {
     if (outcome.unspentApproval) {
-      return ok({ status: "completed", stepId: current.id, consumedApproval: true });
+      return ok({ status: "completed", stepId: current.id, consumedApproval: true, explanation });
     }
     // The replay. `consumedApproval` is false because the first pass already spent it — saying
     // true would rewrite the same id over itself, which is harmless but claims a second spend
     // that never happened. This branch is why the terminal Step is safe to re-execute at all:
     // see `approvalAlreadySpent`.
     if (outcome.approvalAlreadySpent) {
-      return ok({ status: "completed", stepId: current.id, consumedApproval: false });
+      return ok({ status: "completed", stepId: current.id, consumedApproval: false, explanation });
     }
-    return ok({ status: "awaiting-decision", stepId: current.id, consumedApproval: false });
+    return ok({
+      status: "awaiting-decision",
+      stepId: current.id,
+      consumedApproval: false,
+      explanation,
+    });
   }
 
-  const needsApproval = gateNeedsApproval(current.gate, outcome);
   if (needsApproval && !outcome.unspentApproval) {
-    return ok({ status: "awaiting-decision", stepId: current.id, consumedApproval: false });
+    return ok({
+      status: "awaiting-decision",
+      stepId: current.id,
+      consumedApproval: false,
+      explanation,
+    });
   }
   // A move a human's approval *triggered* spends that approval, whatever the gate thought it
   // needed. Without the second clause an approval that released nothing is never marked spent,
@@ -507,6 +568,7 @@ export function advanceWorkflowStep(
     status: "advanced",
     stepId: next.id,
     consumedApproval: needsApproval || (outcome.signal === "review" && outcome.unspentApproval),
+    explanation,
   });
 }
 
@@ -548,19 +610,32 @@ export function buildStepBrief(
   const parts = carried ? [HANDOFF_HEADING, carried, template] : [template];
 
   const branch = step.branch;
+  const nameOf = (id: string | null) =>
+    (id !== null && steps.find((s) => s.id === id)?.name) || null;
+  const leads = (name: string | null) =>
+    name ? `the pipeline continues with "${name}"` : "the pipeline ends";
   if (branch?.when.kind === "agent-decides") {
-    const nameOf = (id: string | null) =>
-      (id !== null && steps.find((s) => s.id === id)?.name) || null;
     const then = nameOf(branch.thenStepId);
     const otherwise = nameOf(branch.elseStepId);
-    const leads = (name: string | null) =>
-      name ? `the pipeline continues with "${name}"` : "the pipeline ends";
     parts.push(
       DECISION_HEADING,
       [
         `Before you finish, decide: ${branch.when.question.trim()}`,
-        `Answer on a line of its own, exactly \`${DECISION_MARKER} yes\` or \`${DECISION_MARKER} no\`, at the end of your final message — and in your closing summary too, if you write one.`,
+        `Answer in the \`decision\` field of your \`task_complete\` widget ("yes" or "no"), and on a line of its own, exactly \`${DECISION_MARKER} yes\` or \`${DECISION_MARKER} no\`, at the end of your final message.`,
         `If yes, ${leads(then)}; if no, ${leads(otherwise)}. No answer counts as no.`,
+      ].join("\n"),
+    );
+  } else if (branch?.when.kind === "outcome") {
+    // Told, not merely applied: the harness is about to declare an outcome anyway, and a
+    // pipeline that quietly routed on it would have the harness deciding something it was never
+    // told it was deciding.
+    const then = nameOf(branch.thenStepId);
+    const otherwise = nameOf(branch.elseStepId);
+    parts.push(
+      DECISION_HEADING,
+      [
+        `This step branches on how you report your run: if your \`task_complete\` widget's outcome is \`${branch.when.is}\`, ${leads(then)}; otherwise ${leads(otherwise)}.`,
+        "Report the outcome that is true, not the one that leads where you would prefer to go.",
       ].join("\n"),
     );
   }
@@ -568,4 +643,55 @@ export function buildStepBrief(
     .filter((part) => part.length > 0)
     .join("\n\n")
     .trim();
+}
+
+/** The `workflow_decision` record, as the Session log stores it. */
+export type WorkflowDecisionRecord = Extract<SessionEventPayload, { kind: "workflow_decision" }>;
+
+/**
+ * A `workflow_decision` in one line, for the terminal.
+ *
+ * The record is structured so a reader can check it; this is the sentence the transcript shows
+ * beside the harness's own output, composed here — once — rather than by each client, so the
+ * live wire and a reconnect's replay say the same thing (issue #2, AC-5). It names the Step, the
+ * signal, the gate's reading and the branch's, and where the cursor went: everything an
+ * operator staring at a Task that did not move would otherwise have to guess.
+ */
+export function describeWorkflowDecision(record: WorkflowDecisionRecord): string {
+  const signal =
+    record.signal === "agent-signal" ? "the harness signalled done" : "a review landed";
+  const parts = [`Workflow: step "${record.stepName}" finished (${signal}).`];
+  if (record.condition) {
+    const { when, holds } = record.condition;
+    const asked =
+      when.kind === "agent-decides"
+        ? `"${when.question}"`
+        : when.kind === "produced-changes"
+          ? "did the step produce changes?"
+          : `did the harness report \`${when.is}\`?`;
+    parts.push(`Condition ${asked} → ${holds ? "yes" : "no"}.`);
+  }
+  switch (record.status) {
+    case "advanced":
+      parts.push(`Advanced to "${record.nextStepName ?? record.nextStepId ?? "?"}".`);
+      break;
+    case "completed":
+      parts.push("Last step — the workflow is complete.");
+      break;
+    case "awaiting-decision":
+      parts.push(
+        record.gate === "human"
+          ? "Gate: a person decides before the task moves on."
+          : record.gate === "auto-unless-changes"
+            ? "Gate: the step produced changes, so a person decides before the task moves on."
+            : "The last step needs a person's approval before anything integrates.",
+      );
+      break;
+    case "held":
+      parts.push(
+        `Held: this step advances on ${record.signal === "agent-signal" ? "a review" : "the harness's signal"}, not on this.`,
+      );
+      break;
+  }
+  return parts.join(" ");
 }

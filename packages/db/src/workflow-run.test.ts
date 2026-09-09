@@ -1,6 +1,6 @@
 /// <reference types="bun-types" />
 import { beforeEach, describe, expect, it } from "bun:test";
-import { WorkflowErrorCode } from "@solow/contracts";
+import { WorkflowErrorCode, type WorkflowStepCondition } from "@solow/contracts";
 import { appendRank } from "@solow/core";
 import { eq } from "drizzle-orm";
 import { ensureDefaultHarnessCatalog } from "./harness-catalog-defaults.js";
@@ -44,6 +44,8 @@ interface Pipeline {
 type StepSpec = {
   gate?: "human" | "auto" | "auto-unless-changes";
   advanceOn?: "review" | "agent-signal";
+  /** Resolved against the seeded ids once they exist — a branch names Steps by index here. */
+  branch?: { when: WorkflowStepCondition; thenStep: number | null; elseStep: number | null };
 };
 
 let db: TestDb;
@@ -126,6 +128,22 @@ async function pipeline(name: string, specs: StepSpec[]): Promise<Pipeline> {
       .returning();
     if (!step) throw new Error("failed to seed step");
     stepIds.push(step.id);
+  }
+
+  // Branches are written once every Step has an id to point at.
+  for (const [index, spec] of specs.entries()) {
+    if (!spec.branch) continue;
+    const target = (at: number | null) => (at === null ? null : (stepIds[at] ?? null));
+    await db
+      .update(workflowStep)
+      .set({
+        branch: {
+          when: spec.branch.when,
+          thenStepId: target(spec.branch.thenStep),
+          elseStepId: target(spec.branch.elseStep),
+        },
+      })
+      .where(eq(workflowStep.id, stepIds[index] as string));
   }
 
   await db
@@ -337,6 +355,71 @@ describe("advancing a task's workflow", () => {
     });
     expect(result.ok && result.data.status).toBe("awaiting-decision");
     expect((await taskRow(p.taskId)).workflowStepId).toBe(stepId(p, 0));
+  });
+});
+
+describe("branching on the outcome the harness declared", () => {
+  const blockedGoesToStep3 = {
+    when: { kind: "outcome", is: "blocked" } as const,
+    thenStep: 2,
+    elseStep: 1,
+  };
+
+  it("sends a blocked step to its escalation, and a finished one down the ordinary path", async () => {
+    const p = await pipeline("outcome-then", [{ branch: blockedGoesToStep3 }, {}, {}]);
+
+    const stuck = await advanceTaskWorkflow(db, p.workspaceId, {
+      taskId: p.taskId,
+      fromStepId: stepId(p, 0),
+      signal: "agent-signal",
+      producedChanges: false,
+      handoff: "No credentials for the registry.",
+      outcome: "blocked",
+    });
+    expect(stuck.ok && stuck.data.status).toBe("advanced");
+    expect((await taskRow(p.taskId)).workflowStepId).toBe(stepId(p, 2));
+
+    const q = await pipeline("outcome-else", [{ branch: blockedGoesToStep3 }, {}, {}]);
+    const fine = await advanceTaskWorkflow(db, q.workspaceId, {
+      taskId: q.taskId,
+      fromStepId: stepId(q, 0),
+      signal: "agent-signal",
+      producedChanges: true,
+      outcome: "changes_ready",
+    });
+    expect(fine.ok && fine.data.status).toBe("advanced");
+    expect((await taskRow(q.taskId)).workflowStepId).toBe(stepId(q, 1));
+  });
+
+  it("matches no outcome for a harness that declared nothing", async () => {
+    const p = await pipeline("outcome-silent", [{ branch: blockedGoesToStep3 }, {}, {}]);
+
+    const result = await advanceTaskWorkflow(db, p.workspaceId, {
+      taskId: p.taskId,
+      fromStepId: stepId(p, 0),
+      signal: "agent-signal",
+      producedChanges: false,
+    });
+    expect(result.ok && result.data.status).toBe("advanced");
+    expect((await taskRow(p.taskId)).workflowStepId).toBe(stepId(p, 1));
+  });
+
+  it("returns the facts it read, so the caller can write them down without re-evaluating", async () => {
+    const p = await pipeline("outcome-explained", [{ branch: blockedGoesToStep3 }, {}, {}]);
+
+    const result = await advanceTaskWorkflow(db, p.workspaceId, {
+      taskId: p.taskId,
+      fromStepId: stepId(p, 0),
+      signal: "agent-signal",
+      producedChanges: false,
+      outcome: "blocked",
+    });
+    expect(result.ok && result.data.explanation).toEqual({
+      gate: "auto",
+      needsApproval: false,
+      condition: { when: { kind: "outcome", is: "blocked" }, holds: true },
+      exit: "then",
+    });
   });
 });
 

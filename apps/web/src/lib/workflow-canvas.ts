@@ -26,17 +26,35 @@ export const START_NODE_ID = "start";
 export const END_NODE_ID = "end";
 
 /**
- * The y every Step is entered and left on, measured from the top of its card.
+ * The pipeline's axis: the one horizontal line every node is centred on, from the start pill to
+ * the end pill. Zero, because it is the origin the whole row is hung from.
  *
- * A fixed offset rather than the card's vertical middle, because cards are top-aligned and not
- * the same height — one with a branch form is half again as tall as one without — and a middle
- * that moves with the height turns the pipeline's main line into a staircase, with the `+` on
- * each gap no longer sitting on the edge it inserts into. Every entry, the plain exit and the
- * `Yes` exit share this line; the `No` exit hangs below it.
+ * It used to be a fixed 112px measured down from the top of each card, with every card
+ * top-aligned at y = 0. That kept the *line* straight while hanging the nodes off it: an edge
+ * entered a tall card near its top and a short one near its bottom, and the 24px start and end
+ * pills sat wherever 112px happened to fall on their neighbours. Centring is what makes the row
+ * read as one line with things strung along it — which is also why `placeSteps` now takes the
+ * measured heights: a node's `y` is a fact about how tall it turned out to be, and only the DOM
+ * knows that.
+ *
+ * Every entry, the plain exit and the `Yes` exit sit on this line; the `No` exit hangs below it.
  */
-export const MAIN_LINE_Y = 112;
-/** The start and end pills are 24px tall; their top is placed so their handle lands on the main line. */
-export const END_NODE_Y = MAIN_LINE_Y - 12;
+export const MAIN_LINE_Y = 0;
+
+/**
+ * What a node's position *means*: its left edge, and its vertical **middle** (React Flow's
+ * `nodeOrigin`). This one number is what centres the row.
+ *
+ * The alternative was to keep the default top-left origin and subtract half of each card's
+ * measured height — which works, but makes the layout depend on a measurement that only exists
+ * one frame after the render that needs it, and makes every card that grows a branch form
+ * recompute the whole row. Telling React Flow where a position points is the same statement made
+ * once, and its own bounds arithmetic — `fitView`, the minimap, the viewport — accounts for it.
+ */
+export const NODE_ORIGIN: [number, number] = [0, 0.5];
+
+/** The pills at the two ends sit on the axis like everything else does. */
+export const END_NODE_Y = MAIN_LINE_Y;
 /** How wide the start pill is, so it can sit one gap before the first Step. */
 export const START_NODE_WIDTH = 64;
 
@@ -108,14 +126,35 @@ export interface StepPlacement {
   y: number;
 }
 
-/** Left to right, in rank order, one row. A linear pipeline reads the way it runs. */
+/**
+ * Left to right, in rank order, one row, every node on the axis. A linear pipeline reads the way
+ * it runs, and — because a position points at a node's middle (`NODE_ORIGIN`) — a card that is
+ * twice as tall as its neighbour still lines up with it.
+ */
 export function placeSteps(steps: readonly WorkflowStepDto[]): StepPlacement[] {
   return sortSteps(steps).map((step, index) => ({
     step,
     index,
     x: index * (STEP_NODE_WIDTH + STEP_NODE_GAP),
-    y: 0,
+    y: MAIN_LINE_Y,
   }));
+}
+
+/**
+ * Where a badge sits on an edge routed around the row: at the end the edge *arrives* at.
+ *
+ * `from` is where the run leaves the source's side, `to` where it turns back down into its
+ * target — so for a backward edge `to` is the smaller of the two and the inset points the other
+ * way. The middle of a run spanning four cards is above whichever card happens to be halfway
+ * along it and says nothing about either end; the leaving end is already named by the chip on the
+ * node's own edge, which leaves the arriving end as the one worth spending a badge on.
+ *
+ * Clamped to the midpoint when the run is shorter than twice the inset, so a badge never lands
+ * past the corner it was measured back from.
+ */
+export function laneLabelX(from: number, to: number, inset: number): number {
+  const towardSource = Math.sign(from - to) || 1;
+  return to + towardSource * Math.min(inset, Math.abs(from - to) / 2);
 }
 
 export interface StepMove {

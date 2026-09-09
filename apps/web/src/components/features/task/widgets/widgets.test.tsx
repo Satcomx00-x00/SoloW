@@ -238,3 +238,30 @@ describe("ShowWidget", () => {
     expect(container.querySelector("iframe")?.getAttribute("referrerpolicy")).toBe("no-referrer");
   });
 });
+
+describe("the harness's completion report", () => {
+  it("shows the answer the harness gave to its step's question", () => {
+    const Renderer = rendererFor("task_complete");
+    render(
+      <Renderer
+        widget={{
+          kind: "task_complete",
+          outcome: "changes_ready",
+          summary: "Done.",
+          decision: "yes",
+        }}
+        response={null}
+      />,
+    );
+    expect(screen.getByText("Decision:")).toBeDefined();
+    expect(screen.getByText("yes")).toBeDefined();
+  });
+
+  it("says nothing about a decision when the harness was asked for none", () => {
+    const Renderer = rendererFor("task_complete");
+    render(
+      <Renderer widget={{ kind: "task_complete", outcome: "nothing_to_do" }} response={null} />,
+    );
+    expect(screen.queryByText("Decision:")).toBeNull();
+  });
+});

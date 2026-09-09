@@ -75,6 +75,19 @@ export const sessionNewResultSchema = z
 export type SessionNewResult = z.infer<typeof sessionNewResultSchema>;
 
 /**
+ * `session/load`'s result — the same advertised lists, without the id the client just supplied.
+ *
+ * Derived from the `session/new` shape rather than restated, because the two results say the same
+ * thing about the agent and an agent that grows a new way of advertising its models must be read
+ * identically on both paths. Resuming used to read this result not at all, which is precisely how
+ * a resumed session lost the Harness Profile's pins: with nothing advertised, the advertised-only
+ * rule below had nothing to match and every pin was skipped.
+ */
+export const sessionLoadResultSchema = sessionNewResultSchema.partial({ sessionId: true });
+
+export type SessionLoadResult = z.infer<typeof sessionLoadResultSchema>;
+
+/**
  * What the agent said it offers, from whichever shape it said it in.
  *
  * Ids, not display names — an id is what `session/set_mode`, `session/set_model` and a Profile's
@@ -83,7 +96,7 @@ export type SessionNewResult = z.infer<typeof sessionNewResultSchema>;
  * while still sending the other, and a probe that changed its answer on that would be reporting
  * the wire format instead of the agent.
  */
-export function advertisedOptions(created: SessionNewResult): {
+export function advertisedOptions(created: SessionLoadResult): {
   models: string[];
   modes: string[];
 } {

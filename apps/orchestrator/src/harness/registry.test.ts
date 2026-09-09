@@ -20,7 +20,8 @@ function fakeHandle(): HarnessHandle & {
     inputs: [] as string[],
     stopped: false,
     answers: [] as Array<{ requestId: string; optionId: string }>,
-    outcome: Promise.resolve({ kind: "completed" as const }),
+    outcome: Promise.resolve({ kind: "completed" as const, stopReason: "end_turn" as const }),
+    harnessSessionId: Promise.resolve(null),
     workspacePath: Promise.resolve<string | null>("/wt/task-1"),
     async send(text: string) {
       state.inputs.push(text);
@@ -40,7 +41,8 @@ function fakeHandle(): HarnessHandle & {
 /** A runner whose protocol has no permission channel — Claude Code's stream-JSON, in practice. */
 function handleWithoutPermissions(): HarnessHandle {
   return {
-    outcome: Promise.resolve({ kind: "completed" as const }),
+    outcome: Promise.resolve({ kind: "completed" as const, stopReason: "end_turn" as const }),
+    harnessSessionId: Promise.resolve(null),
     workspacePath: Promise.resolve<string | null>("/wt/task-1"),
     async send() {
       return true;
