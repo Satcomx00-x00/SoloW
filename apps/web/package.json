@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "bun --bun next dev --port 5000 --turbopack",
+    "dev": "bun --bun next dev --port 5000",
     "build": "bun --bun next build",
     "start": "bun --bun next start --port 5000",
     "typecheck": "tsc --noEmit",

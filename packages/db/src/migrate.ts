@@ -1,6 +1,7 @@
 /// <reference types="bun-types" />
 
 import { Database } from "bun:sqlite";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { drizzle } from "drizzle-orm/bun-sqlite";
@@ -36,7 +37,35 @@ export function runMigrations(): void {
   sqlite.close();
 }
 
+/**
+ * `bun run db:migrate` from a shell that is not `scripts/dev.sh`. `dbEnv()` validates the
+ * whole DB env, `SOLOW_SECRET_KEY` included — a migration touches no encrypted column, but the
+ * schema module reads the same env — so the bare command died on a Zod error before doing
+ * anything. The same fallback `scripts/flag.ts` uses: the key dev.sh generated, and the
+ * database dev.sh points at, only when the operator has not set either (a deployment always
+ * has). `SOLOW_SQLITE_PATH` matters as much as the key: the default is relative to the working
+ * directory, and `bun run --filter @solow/db` runs from `packages/db`, where a silent default
+ * would have migrated a brand-new, empty database beside the source.
+ */
+function loadDevEnv(): void {
+  const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+  if (!process.env.SOLOW_SQLITE_PATH) {
+    process.env.SOLOW_SQLITE_PATH = join(root, ".solow", "solow.db");
+  }
+  if (process.env.SOLOW_SECRET_KEY) return;
+  const keyFile = join(root, ".solow", "dev-secret.key");
+  if (!existsSync(keyFile)) {
+    console.error(
+      `SOLOW_SECRET_KEY is not set and ${keyFile} does not exist.\n` +
+        "Start the stack once with `bun run dev` to generate it, or export the key yourself.",
+    );
+    process.exit(1);
+  }
+  process.env.SOLOW_SECRET_KEY = readFileSync(keyFile, "utf8").trim();
+}
+
 if (import.meta.main) {
+  loadDevEnv();
   runMigrations();
-  console.log("migrations applied");
+  console.log(`migrations applied to ${process.env.SOLOW_SQLITE_PATH}`);
 }
