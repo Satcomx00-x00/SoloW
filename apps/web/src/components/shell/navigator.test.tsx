@@ -117,6 +117,20 @@ describe("Navigator — Workflows list", () => {
     expect(screen.getByRole("textbox", { name: "Workflow name" })).toBeDefined();
   });
 
+  it("offers the store beside the file import, under the create form", async () => {
+    renderWithTrpc(
+      <Navigator workspaceName="Acme" />,
+      baseHandlers({
+        "workflow.list": () => [
+          { id: "wf-1", name: "Plan, build, review", stepCount: 3, version: 2 },
+        ],
+      }),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "New workflow" }));
+    expect(screen.getByRole("button", { name: "Import from file" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Browse the store" })).toBeDefined();
+  });
+
   it("opens the create field by default when there are no pipelines yet", async () => {
     renderWithTrpc(<Navigator workspaceName="Acme" />, baseHandlers({ "workflow.list": () => [] }));
 

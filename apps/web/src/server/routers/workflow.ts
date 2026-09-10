@@ -12,6 +12,7 @@ import {
   getTaskWorkflowInput,
   getWorkflowInput,
   importWorkflowInput,
+  installWorkflowFromStoreInput,
   listWorkflowsInput,
   renameWorkflowInput,
   reorderWorkflowStepInput,
@@ -24,9 +25,11 @@ import {
   workflowDto,
   workflowImportDto,
   workflowListDto,
+  workflowStoreInstallDto,
+  workflowStoreListDto,
   workflowWithStepsDto,
 } from "@solow/contracts";
-import { WORKFLOW_AUTHORING_GUIDE } from "@solow/core";
+import { WORKFLOW_AUTHORING_GUIDE, WORKFLOW_STORE, workflowStoreSkills } from "@solow/core";
 import { z } from "zod";
 import {
   acknowledgeTaskWorkflowDrift,
@@ -41,6 +44,7 @@ import {
   getTaskWorkflowBinding,
   getWorkflowWithSteps,
   importWorkflow,
+  installWorkflowFromStore,
   listWorkflows,
   renameWorkflow,
   reorderWorkflowStep,
@@ -179,6 +183,47 @@ export const workflowRouter = router({
     .input(importWorkflowInput)
     .output(workflowImportDto)
     .mutation(async ({ ctx, input }) => unwrap(await importWorkflow(ctx.rctx, input))),
+
+  store: workflowProcedure
+    .meta({
+      openapi: {
+        method: "GET",
+        path: "/workflow.store",
+        tags: ["workflow"],
+        protect: true,
+        summary:
+          "List the Workflow store: curated pipelines — everyday delivery, review, refactoring, bug-fixing, quality and maintenance shapes, and Spec Kit, Superpowers and OpenSpec as pipelines — each with the Steps it has and the Skills it brings. Install one with workflow.installFromStore.",
+      },
+    })
+    .input(z.object({}))
+    .output(workflowStoreListDto)
+    .query(() =>
+      WORKFLOW_STORE.map((entry) => ({
+        id: entry.id,
+        title: entry.title,
+        description: entry.description,
+        category: entry.category,
+        vendor: entry.vendor,
+        homepage: entry.homepage,
+        steps: entry.steps.map((step) => step.name),
+        skills: workflowStoreSkills(entry).map((skill) => skill.name),
+      })),
+    ),
+
+  installFromStore: workflowProcedure
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/workflow.installFromStore",
+        tags: ["workflow"],
+        protect: true,
+        summary:
+          "Install a pipeline from the store onto one Harness Profile. The Skills its Steps name are added to the library first — by name, only where the library has nothing of that name, so Skills imported from the method's own repository are kept and bound to — as inline text, switched off. Then the entry is imported like a document: the name is suffixed rather than refused when this Workspace already has one.",
+      },
+    })
+    .input(installWorkflowFromStoreInput)
+    .output(workflowStoreInstallDto)
+    .mutation(async ({ ctx, input }) => unwrap(await installWorkflowFromStore(ctx.rctx, input))),
 
   addStep: workflowProcedure
     .meta({

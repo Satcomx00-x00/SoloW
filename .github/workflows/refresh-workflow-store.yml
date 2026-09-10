@@ -1,0 +1,70 @@
+name: Refresh the Workflow store
+
+# The Workflow store's Skills are vendored from the repositories that own them (Spec Kit,
+# Superpowers, OpenSpec — `WORKFLOW_STORE_SOURCES` in @solow/core). Every build fetches them
+# fresh (verify.yml, publish.yml), so a release is never stale; this job keeps the *committed*
+# baseline — what a checkout builds from offline — current too, so `git diff` on a pull request
+# shows a contributor's change and not a week of upstream drift.
+#
+# It commits straight to main when something moved upstream: the change is a generated file
+# that `make store-check` has just validated, and a pull request to merge by hand would be the
+# manual step this exists to remove. The push triggers Verify like any other commit.
+
+on:
+  schedule:
+    # Daily, off the hour, so it does not queue behind everyone else's midnight jobs.
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  BUN_VERSION: "1.3.14"
+
+concurrency:
+  group: refresh-workflow-store
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    name: Fetch upstream Skills and commit what changed
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Sync the Workflow store from its upstream repositories
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: make store-sync
+
+      - name: Validate the Workflow store
+        run: make store-check
+
+      - name: The catalog still resolves every Skill it names
+        run: cd packages/core && bun test src/workflow-store
+
+      - name: Commit the refreshed store, if anything moved
+        run: |
+          set -eu
+          file=packages/core/src/workflow-store/vendored.generated.json
+          if git diff --quiet -- "$file"; then
+            echo "Workflow store is up to date."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$file"
+          git commit -m "chore(store): refresh vendored Skills from upstream" \
+            -m "$(bun -e 'const s=require("./packages/core/src/workflow-store/vendored.generated.json");for(const [id,src] of Object.entries(s.sources)) if(src.commit) console.log(`${id}: ${src.repository}@${src.commit.slice(0,12)}`)')"
+          git push origin HEAD:main

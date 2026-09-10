@@ -610,3 +610,44 @@ export const workflowImportDto = z.object({
   unmatchedSkills: z.array(z.string()),
 });
 export type WorkflowImportDto = z.infer<typeof workflowImportDto>;
+
+/**
+ * Installing a pipeline from the store (`WORKFLOW_STORE` in `@solow/core`). `entryId` names the
+ * catalog entry; `harnessProfileId` is the Profile every Step runs on, chosen here because the
+ * catalog has no opinion about harnesses. `name` overrides the entry's title, for the same reason
+ * `importWorkflowInput.name` exists: the store is the ordinary way to install a pipeline twice.
+ */
+export const installWorkflowFromStoreInput = z.object({
+  entryId: z.string().min(1).max(120),
+  harnessProfileId: idSchema,
+  name: z.string().min(1).max(120).optional(),
+});
+export type InstallWorkflowFromStoreInput = z.infer<typeof installWorkflowFromStoreInput>;
+
+/**
+ * What the install wrote. The Skills are named both ways because the difference is the point:
+ * a `reused` Skill is one the library already held under that name — the upstream one, imported
+ * from the method's repository — and the bundled text was *not* written over it.
+ */
+export const workflowStoreInstallDto = z.object({
+  workflow: workflowWithStepsDto,
+  /** Bundled Skills the library had nothing called, written as inline text, switched off. */
+  createdSkills: z.array(z.string()),
+  /** Skills the library already held by name; the Steps bind to those. */
+  reusedSkills: z.array(z.string()),
+});
+export type WorkflowStoreInstallDto = z.infer<typeof workflowStoreInstallDto>;
+
+/** One store entry, as `workflow.store` lists it: enough to choose and to install by id. */
+export const workflowStoreEntryDto = z.object({
+  id: z.string(),
+  title: z.string(),
+  description: z.string(),
+  category: z.string(),
+  vendor: z.string(),
+  homepage: z.string(),
+  steps: z.array(z.string()),
+  skills: z.array(z.string()),
+});
+export const workflowStoreListDto = z.array(workflowStoreEntryDto);
+export type WorkflowStoreEntryDto = z.infer<typeof workflowStoreEntryDto>;

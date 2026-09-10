@@ -9,6 +9,7 @@ import {
   type DeleteWorkflowStepInput,
   err,
   type ImportWorkflowInput,
+  type InstallWorkflowFromStoreInput,
   ok,
   type RenameWorkflowInput,
   type ReorderWorkflowStepInput,
@@ -23,6 +24,7 @@ import {
   type WorkflowImportDto,
   type WorkflowListDto,
   type WorkflowStepBranch,
+  type WorkflowStoreInstallDto,
   type WorkflowWithStepsDto,
 } from "@solow/contracts";
 import {
@@ -33,6 +35,9 @@ import {
   resumeWorkflowCursor,
   sortSteps,
   validateWorkflowGraph,
+  workflowStoreDocument,
+  workflowStoreEntry,
+  workflowStoreSkills,
   workflowToDocument,
 } from "@solow/core";
 import {
@@ -48,7 +53,7 @@ import {
 } from "@solow/db";
 import { and, asc, eq, sql } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
-import { checkStepTools } from "./harness-library.js";
+import { checkStepTools, createSkill } from "./harness-library.js";
 
 /**
  * Workflow persistence (issue #5, spec F03).
@@ -390,6 +395,78 @@ export async function importWorkflow(
   return created.ok
     ? ok({ workflow: created.data, ...written.data.unmatched })
     : err(created.error);
+}
+
+/**
+ * Install a pipeline from the store: the catalog entry as a document, imported onto one Harness
+ * Profile, with the Skills its Steps name added to the library first.
+ *
+ * The Skills go in **by name, only where the library has nothing of that name** — never
+ * overwritten. That rule is what makes the store a way of loading Spec Kit, Superpowers or
+ * OpenSpec without bundling them: an operator who imported the method's own Skills from its
+ * repository beforehand gets a pipeline bound to those, and the condensed text the catalog
+ * carries is only the fallback. Every bundled Skill is written switched off, like everything
+ * the store writes: a Step names it, so it is loaded where it is needed and nowhere else.
+ *
+ * Two writes rather than one transaction, deliberately: `createSkill` is the library's own
+ * write and keeps its rule (one name, one row), and `importWorkflow` is the document's, with
+ * its own. A Skill left behind by an import that then failed is an ordinary library row the
+ * operator can see and remove — not a half-written pipeline, which is the state the import's
+ * transaction exists to prevent.
+ */
+export async function installWorkflowFromStore(
+  ctx: RequestContext,
+  input: InstallWorkflowFromStoreInput,
+): Promise<Result<WorkflowStoreInstallDto, StepWriteError>> {
+  const entry = workflowStoreEntry(input.entryId);
+  if (!entry) return err(CommonErrorCode.NotFound);
+
+  const [profile] = await ctx.db
+    .select({ id: harnessProfile.id, name: harnessProfile.name })
+    .from(harnessProfile)
+    .where(
+      and(
+        eq(harnessProfile.workspaceId, ctx.workspaceId),
+        eq(harnessProfile.id, input.harnessProfileId),
+      ),
+    )
+    .limit(1);
+  if (!profile) return err(CommonErrorCode.NotFound);
+
+  const held = new Set(
+    (
+      await ctx.db
+        .select({ name: skill.name })
+        .from(skill)
+        .where(eq(skill.workspaceId, ctx.workspaceId))
+    ).map((row) => row.name),
+  );
+  const createdSkills: string[] = [];
+  const reusedSkills: string[] = [];
+  for (const bundled of workflowStoreSkills(entry)) {
+    if (held.has(bundled.name)) {
+      reusedSkills.push(bundled.name);
+      continue;
+    }
+    const created = await createSkill(ctx, {
+      name: bundled.name,
+      description: bundled.description,
+      source: { kind: "inline", body: bundled.body },
+      enabled: false,
+    });
+    if (!created.ok) return err(CommonErrorCode.ValidationFailed);
+    createdSkills.push(bundled.name);
+  }
+
+  const imported = await importWorkflow(ctx, {
+    document: workflowStoreDocument(entry, profile.name),
+    ...(input.name !== undefined ? { name: input.name } : {}),
+    // Every Step names this profile, so nothing should fall back; the id is passed anyway so a
+    // second profile that happens to share the name cannot make the resolution a coin flip.
+    fallbackHarnessProfileId: profile.id,
+  });
+  if (!imported.ok) return err(imported.error);
+  return ok({ workflow: imported.data.workflow, createdSkills, reusedSkills });
 }
 
 /**

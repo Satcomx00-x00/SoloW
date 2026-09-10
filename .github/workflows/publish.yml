@@ -109,6 +109,16 @@ jobs:
 
       # The same gates `verify.yml` runs on every PR. Repeated here rather than assumed: a tag
       # can be pushed at any commit, including one that never went through a pull request.
+      # The published package carries the Workflow store's Skills as they are upstream on the
+      # day it is built (see verify.yml). Fetched before the gates, so they run on what ships.
+      - name: Sync the Workflow store from its upstream repositories
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: make store-sync
+
+      - name: Validate the Workflow store
+        run: make store-check
+
       - name: Lint (Biome)
         run: make lint
 

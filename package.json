@@ -30,13 +30,15 @@
     "db:bootstrap": "bun run --filter @solow/db db:bootstrap",
     "openapi:gen": "bun run --filter @solow/web openapi:gen",
     "openapi:check": "turbo run openapi:check",
+    "store:sync": "bun run scripts/sync-workflow-store.ts sync",
+    "store:check": "bun run scripts/sync-workflow-store.ts check",
     "smoke:docker": "sh scripts/smoke-docker-executor.sh",
     "e2e": "playwright test",
     "e2e:critical": "playwright test --grep @critical",
     "audit": "bun run scripts/audit.ts",
     "audit:executor-boundary": "bun run scripts/audit-executor-boundary.ts",
     "secretscan": "gitleaks detect --source . --no-banner --redact",
-    "verify": "bun run lint && turbo run typecheck test openapi:check && bun test scripts && bun run audit && bun run audit:executor-boundary",
+    "verify": "bun run lint && bun run store:check && turbo run typecheck test openapi:check && bun test scripts && bun run audit && bun run audit:executor-boundary",
     "flag": "bun run scripts/flag.ts"
   },
   "devDependencies": {

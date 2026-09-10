@@ -12,3 +12,4 @@ export * from "./task.js";
 export * from "./workflow.js";
 export * from "./workflow-document.js";
 export * from "./workflow-guide.js";
+export * from "./workflow-store/index.js";

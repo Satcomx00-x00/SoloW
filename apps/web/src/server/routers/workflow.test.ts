@@ -2,6 +2,7 @@
 
 import { beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { CommonErrorCode, WorkflowErrorCode } from "@solow/contracts";
+import { VENDORED_STORE, WORKFLOW_STORE, workflowStoreDocument } from "@solow/core";
 import {
   ensureDefaultHarnessCatalog,
   issue as issueTable,
@@ -1404,6 +1405,160 @@ describe("workflows", () => {
       const { wsId } = await fixture(db, "acme");
       const off = caller(db, wsId, { "ff-core-program": false });
       expect(await errMessage(() => off.workflow.list({}))).toBe(CommonErrorCode.FlagDisabled);
+    });
+  });
+
+  describe("the Workflow store", () => {
+    it("lists the catalog with the Steps each entry has and the Skills it brings", async () => {
+      const { c } = await fixture(db, "acme");
+      const store = await c.workflow.store({});
+      const speckit = store.find((e) => e.id === "speckit-sdd");
+      expect(speckit?.steps[0]).toBe("Specify");
+      expect(speckit?.skills).toContain("speckit-specify");
+    });
+
+    it("installs an entry onto the chosen profile, adding its Skills to the library switched off", async () => {
+      const { c, reviewer } = await fixture(db, "acme");
+      const installed = await c.workflow.installFromStore({
+        entryId: "security-review",
+        harnessProfileId: reviewer.id,
+      });
+      expect(installed.createdSkills).toEqual(["security-review-checklist"]);
+      expect(installed.reusedSkills).toEqual([]);
+      expect(installed.workflow.name).toBe("Security review");
+      expect(installed.workflow.steps.map((s) => s.agentProfileId)).toEqual([
+        reviewer.id,
+        reviewer.id,
+        reviewer.id,
+      ]);
+
+      const skills = await c.library.skill.list({});
+      const checklist = skills.find((s) => s.name === "security-review-checklist");
+      expect(checklist?.enabled).toBe(false);
+      // Every Step of the entry names the Skill, and every one of them is bound to the row.
+      expect(installed.workflow.steps.every((s) => s.skillIds.includes(checklist?.id ?? ""))).toBe(
+        true,
+      );
+      // The branch survived the trip: the re-audit loops back to the fix.
+      const reaudit = installed.workflow.steps[2];
+      expect(reaudit?.branch?.thenStepId).toBe(steps(installed.workflow, 1));
+      expect(reaudit?.branch?.elseStepId).toBeNull();
+    });
+
+    it("keeps a Skill the library already holds by name — the upstream one wins over the bundled text", async () => {
+      const { c, implementer } = await fixture(db, "acme");
+      const upstream = await c.library.skill.create({
+        name: "test-driven-development",
+        description: "The real one, imported from the plugin repository.",
+        source: { kind: "path", path: "/srv/skills/superpowers/skills/test-driven-development" },
+      });
+      const installed = await c.workflow.installFromStore({
+        entryId: "superpowers-debugging",
+        harnessProfileId: implementer.id,
+      });
+      expect(installed.reusedSkills).toEqual(["test-driven-development"]);
+      expect(installed.createdSkills).toEqual([
+        "systematic-debugging",
+        "verification-before-completion",
+      ]);
+      const fix = installed.workflow.steps[1];
+      expect(fix?.skillIds).toContain(upstream.id);
+      const kept = (await c.library.skill.list({})).find(
+        (s) => s.name === "test-driven-development",
+      );
+      expect(kept?.source).toEqual({
+        kind: "path",
+        path: "/srv/skills/superpowers/skills/test-driven-development",
+      });
+    });
+
+    it("installs the same entry twice under a suffixed name, creating no second Skill", async () => {
+      const { c, planner } = await fixture(db, "acme");
+      const first = await c.workflow.installFromStore({
+        entryId: "speckit-sdd",
+        harnessProfileId: planner.id,
+      });
+      const second = await c.workflow.installFromStore({
+        entryId: "speckit-sdd",
+        harnessProfileId: planner.id,
+      });
+      expect(first.createdSkills.length).toBe(7);
+      expect(second.createdSkills).toEqual([]);
+      expect(second.reusedSkills.length).toBe(7);
+      expect(second.workflow.name).toBe(`${first.workflow.name} (2)`);
+      const named = await c.workflow.installFromStore({
+        entryId: "speckit-sdd",
+        harnessProfileId: planner.id,
+        name: "SDD for the API",
+      });
+      expect(named.workflow.name).toBe("SDD for the API");
+    });
+
+    it("writes the vendored text — description and body, byte for byte — into each Skill it creates", async () => {
+      const { c, planner } = await fixture(db, "acme");
+      const installed = await c.workflow.installFromStore({
+        entryId: "openspec-change",
+        harnessProfileId: planner.id,
+      });
+      const skills = await c.library.skill.list({});
+      for (const name of installed.createdSkills) {
+        const row = skills.find((s) => s.name === name);
+        const vendored = VENDORED_STORE.skills[name];
+        if (!vendored) throw new Error(`${name} is not vendored`);
+        expect(row?.description).toBe(vendored.description);
+        expect(row?.source).toEqual({ kind: "inline", body: vendored.body });
+        expect(row?.enabled).toBe(false);
+      }
+      // Upstream text, not a summary of it: OpenSpec's own words are in the library.
+      expect(skills.find((s) => s.name === "openspec-propose")?.source).toMatchObject({
+        body: expect.stringContaining("openspec"),
+      });
+    });
+
+    it("installs the entry exactly as the catalog's document says — gates, postures, prompts, branches — for every entry", async () => {
+      const { c, planner } = await fixture(db, "acme");
+      for (const entry of WORKFLOW_STORE) {
+        const installed = await c.workflow.installFromStore({
+          entryId: entry.id,
+          harnessProfileId: planner.id,
+        });
+        const document = workflowStoreDocument(entry, "Opus");
+        const exported = await c.workflow.export({ id: installed.workflow.id });
+        // The name may be suffixed (the seeds are already there); everything else round-trips.
+        expect({ ...exported, name: document.name }).toEqual(document);
+      }
+    });
+
+    it("is withheld with the rest of the namespace when workflows are off", async () => {
+      const { c, planner, wsId } = await fixture(db, "acme");
+      const off = caller(db, wsId, { "ff-workflows": false });
+      expect(await errMessage(() => off.workflow.store({}))).toBe(CommonErrorCode.FlagDisabled);
+      expect(
+        await errMessage(() =>
+          off.workflow.installFromStore({ entryId: "hotfix", harnessProfileId: planner.id }),
+        ),
+      ).toBe(CommonErrorCode.FlagDisabled);
+      expect((await c.workflow.list({})).map((w) => w.name)).not.toContain("Hotfix");
+    });
+
+    it("refuses an unknown entry, and another Workspace's profile, before writing anything", async () => {
+      const { c, planner } = await fixture(db, "acme");
+      const other = await fixture(db, "beta");
+      expect(
+        await errMessage(() =>
+          c.workflow.installFromStore({ entryId: "no-such-entry", harnessProfileId: planner.id }),
+        ),
+      ).toBe(CommonErrorCode.NotFound);
+      expect(
+        await errMessage(() =>
+          other.c.workflow.installFromStore({ entryId: "hotfix", harnessProfileId: planner.id }),
+        ),
+      ).toBe(CommonErrorCode.NotFound);
+      // The defaults seeded with the profile are there; the store entry is not.
+      expect((await other.c.workflow.list({})).map((w) => w.name)).not.toContain("Hotfix");
+      expect((await other.c.library.skill.list({})).map((s) => s.name)).not.toContain(
+        "security-review-checklist",
+      );
     });
   });
 });

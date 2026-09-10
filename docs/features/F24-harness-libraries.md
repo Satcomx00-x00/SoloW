@@ -68,6 +68,9 @@ each harness runtime is handed it, because Claude Code and an ACP agent take it 
   documentation, search, data, cloud and productivity servers, and a gateway entry) installed with
   one click. An entry that needs a credential asks for a Secret; the install writes an ordinary
   server row, switched off. Reviewed in pull requests, never fetched from a registry at run time.
+- **Skills that arrive with a pipeline.** The Workflow store ([F03](./F03-workflow-designer.md))
+  writes the Skills its Steps name — as inline text, switched off — only where the library has
+  nothing of that name, so a Skill imported from a method's own repository is kept and bound to.
 - **Remote endpoints**: the `http` transport takes any Streamable HTTP or SSE URL — a hosted
   server, or a gateway such as agentgateway's `/mcp`. A Secret in a header may carry a `prefix`
   (`Bearer `) written in front of the decrypted value at run time.

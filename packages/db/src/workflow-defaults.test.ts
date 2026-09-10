@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { beforeEach, describe, expect, it } from "bun:test";
-import { validateWorkflowGraph } from "@solow/core";
+import { validateWorkflowGraph, workflowStoreDocument } from "@solow/core";
 import { asc, eq } from "drizzle-orm";
 import { ensureDefaultHarnessCatalog } from "./harness-catalog-defaults.js";
 import { harnessProfile, secret, workflow, workflowStep, workspace } from "./schema.js";
@@ -46,7 +46,7 @@ describe("ensureDefaultWorkflows", () => {
     expect(await ensureDefaultWorkflows(db, wsId)).toEqual({ seeded: 3 });
 
     const workflows = await db.select().from(workflow).where(eq(workflow.workspaceId, wsId));
-    expect(workflows.map((w) => w.name)).toEqual(DEFAULT_WORKFLOWS.map((w) => w.name));
+    expect(workflows.map((w) => w.name)).toEqual(DEFAULT_WORKFLOWS.map((w) => w.title));
     for (const wf of workflows) {
       const steps = await db
         .select()
@@ -72,6 +72,47 @@ describe("ensureDefaultWorkflows", () => {
     });
     const plan = (await db.select().from(workflowStep).where(eq(workflowStep.name, "Plan")))[0];
     expect([plan?.gate, plan?.advanceOn]).toEqual(["human", "review"]);
+  });
+
+  it("writes exactly what the store entry says, so the seed and the store cannot disagree", async () => {
+    await seedProfile("Harness#1");
+    await ensureDefaultWorkflows(db, wsId);
+    for (const seed of DEFAULT_WORKFLOWS) {
+      const document = workflowStoreDocument(seed, "Harness#1");
+      const [wf] = await db.select().from(workflow).where(eq(workflow.name, document.name));
+      expect(wf?.description).toBe(document.description);
+      const steps = await db
+        .select()
+        .from(workflowStep)
+        .where(eq(workflowStep.workflowId, wf?.id ?? ""))
+        .orderBy(asc(workflowStep.rank));
+      const ids = steps.map((s) => s.id);
+      expect(
+        steps.map((s) => ({
+          name: s.name,
+          promptTemplate: s.promptTemplate,
+          gate: s.gate,
+          advanceOn: s.advanceOn,
+          permissionMode: s.permissionMode,
+          branch: s.branch
+            ? {
+                when: s.branch.when,
+                thenStep: s.branch.thenStepId === null ? null : ids.indexOf(s.branch.thenStepId),
+                elseStep: s.branch.elseStepId === null ? null : ids.indexOf(s.branch.elseStepId),
+              }
+            : null,
+        })),
+      ).toEqual(
+        document.steps.map((s) => ({
+          name: s.name,
+          promptTemplate: s.promptTemplate,
+          gate: s.gate,
+          advanceOn: s.advanceOn,
+          permissionMode: s.permissionMode,
+          branch: s.branch,
+        })),
+      );
+    }
   });
 
   it("seeds once, and never into a Workspace that already has a Workflow of its own", async () => {

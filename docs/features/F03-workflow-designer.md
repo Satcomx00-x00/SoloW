@@ -163,6 +163,43 @@ it is how an operator gets from one shape to the next.
   spanning four cards is above whichever card is halfway along it and says nothing about either
   end, while the leaving end is already named by the chip. A `yes` that loops back to *Implement*
   now reads `yes` where it leaves and `yes` where it lands, and can be traced from either.
+- **A pipeline can come from the store.** *Browse the store* under *New workflow* in the sidebar
+  opens a curated catalog in `@solow/core` (`WORKFLOW_STORE`, the `MCP_STORE` idea applied to
+  Workflows): everyday shapes — plan/build/test/review, review-then-fix, two independent
+  reviewers, a security review, refactor safely, simplify a module, migrate callers, hotfix, a
+  flaky-test hunt, red/green/refactor, raise test coverage, a performance pass, a dependency
+  upgrade, document a module, onboard a codebase — and three **methods as pipelines**: GitHub's
+  **Spec Kit** (specify → clarify → plan → tasks → analyze → implement → verify, a Remediate loop
+  behind the analysis), **Superpowers** (brainstorm → plan → execute test-first → verify → review
+  → finish the branch, plus its systematic-debugging loop) and **OpenSpec** (explore → propose →
+  apply → verify → archive). An entry is a recipe: its Steps with their gates, branches and
+  permission postures, and the **names** of the Skills those Steps read.
+  `workflow.installFromStore` takes the entry and the Harness Profile every Step runs on, adds
+  each Skill to the library **only where the library has nothing of that name** — switched off,
+  loaded by the Steps that name it — and then imports the entry as a document, so the same
+  name-suffixing and the same rules apply. The three pipelines a fresh Workspace is seeded with
+  are store entries marked `seed`, so the seed and the store cannot disagree, and a deleted
+  default can be taken back from the store. `workflow.store` lists the catalog.
+- **The Skills' text is the owners', fetched at build time — never typed into the repository.**
+  `WORKFLOW_STORE_SOURCES` (`@solow/core`) is the reviewed manifest: for each source, the
+  repository and ref on GitHub and the files that become Skills — Spec Kit's
+  `templates/commands/*.md` (turned into Skills the way `specify init` turns them into commands),
+  Superpowers' and OpenSpec's `skills/*/SKILL.md` under their own names — plus SoloW's own three
+  (`packages/core/src/workflow-store/skills/*.md`: the security and refactoring checklists, and
+  `speckit-verify`, the one Spec Kit phase upstream has no command for).
+  `scripts/sync-workflow-store.ts` fetches each file at the commit the ref resolves to, validates
+  it (a library name, a description, a body that is markdown and not a stub or an error page),
+  and writes `vendored.generated.json` with the commit of every source and a hash of every body;
+  the catalog reads that file. **CI fetches before it builds** (`make store-sync` in Verify and in
+  Publish), so a release carries the upstream text of the day, and a source that cannot be
+  fetched or fails validation fails the build — a stale copy is never shipped silently.
+  `make store-check` is the offline gate, in `make verify` and in CI: the generated file exists,
+  matches the manifest, holds every Skill the catalog names, and has not been edited by hand. The
+  generated file is committed as the baseline a checkout builds from offline, and a scheduled
+  workflow (`refresh-workflow-store.yml`, daily) re-syncs and commits it when upstream moved, so
+  nobody refreshes it by hand. A Skill that reaches for a sibling file of its upstream directory
+  (Superpowers' `code-reviewer.md`, for one) still reads best from a directory import of the
+  whole plugin, which the name rule above then binds to.
 - **A pipeline is a file you can share** (FR-7). `workflow.export` returns the Workflow as a
   portable JSON document and `workflow.import` writes one back, with the Export button in the
   Workflow inspector and *Import from file* under *New workflow* in the sidebar. The document

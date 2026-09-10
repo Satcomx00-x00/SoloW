@@ -6,7 +6,8 @@ SHELL := bash
 .PHONY: help install clean build lint format typecheck test smoke smoke-tarball smoke-docker \
 	test-docker-live e2e e2e-critical \
 	audit audit-executor-boundary secretscan verify dev dev-web flags \
-	dev-orchestrator update db-generate db-migrate db-bootstrap openapi openapi-check
+	dev-orchestrator update db-generate db-migrate db-bootstrap openapi openapi-check \
+	store-sync store-check
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -30,9 +31,9 @@ format: ## Auto-format the codebase with Biome
 typecheck: ## Typecheck every workspace package
 	bun run typecheck
 
-build: install lint typecheck db-generate openapi-check ## Install, lint, typecheck, migrations, OpenAPI
+build: install store-sync lint typecheck db-generate openapi-check ## Install, sync the Workflow store, lint, typecheck, migrations, OpenAPI
 	cd apps/web && bun --bun run build
-	@echo "build complete (lint + typecheck + migrations + openapi + SPA bundle)."
+	@echo "build complete (store + lint + typecheck + migrations + openapi + SPA bundle)."
 
 
 test: ## Run all unit tests (per-package, picks up each bunfig preload)
@@ -95,7 +96,7 @@ secretscan: ## Scan the repository and its history for committed secrets
 # both *skip* on a machine with no daemon, which is right for a laptop and wrong for CI, so
 # `.github/workflows/verify.yml` sets `SMOKE_DOCKER_REQUIRED=1` for both and a CI run with no
 # daemon fails there instead.
-verify: lint typecheck test smoke smoke-docker test-docker-live openapi-check audit audit-executor-boundary audit-provider-branching secretscan e2e ## Every quality gate, in order
+verify: lint store-check typecheck test smoke smoke-docker test-docker-live openapi-check audit audit-executor-boundary audit-provider-branching secretscan e2e ## Every quality gate, in order
 	@echo "all quality gates passed"
 
 dev: ## Start ALL services (web :5000 + orchestrator :5001 + Inngest Dev Server :8288) with hot reload; auto-migrates+seeds
@@ -128,3 +129,14 @@ openapi: ## Generate openapi.json from the tRPC routers
 
 openapi-check: ## Fail if openapi.json is stale (CI gate)
 	bun run openapi:check
+
+# The Workflow store's Skills are fetched from the repositories that own them (Spec Kit,
+# Superpowers, OpenSpec) into packages/core/src/workflow-store/vendored.generated.json — never
+# typed into this repository. `store-sync` needs the network and is what CI runs before it builds;
+# `store-check` is offline and fails when the generated file is missing, hand-edited, or does not
+# match the manifest (`WORKFLOW_STORE_SOURCES`) and the catalog.
+store-sync: ## Fetch the Workflow store's Skills from their upstream repositories (needs network)
+	bun run store:sync
+
+store-check: ## Fail if the vendored Workflow store is missing, edited by hand, or out of step with its manifest (CI gate)
+	bun run store:check

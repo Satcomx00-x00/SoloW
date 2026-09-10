@@ -1,11 +1,12 @@
 "use client";
 
 import type { IssueStatus, TaskState } from "@solow/contracts";
-import { Plus, Trash2, Upload } from "lucide-react";
+import { Plus, Store, Trash2, Upload } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { type ReactNode, Suspense, useEffect, useRef, useState } from "react";
 import { ConfirmAction } from "@/components/features/confirm-action";
+import { WorkflowStoreDialog } from "@/components/features/workflows/workflow-store-dialog";
 import { ImportWorkflowDialog } from "@/components/features/workflows/workflow-transfer";
 import { Button } from "@/components/ui/button";
 import { CreateDisclosure } from "@/components/ui/create-disclosure";
@@ -413,6 +414,23 @@ function WorkflowsNav() {
               >
                 <Upload aria-hidden />
                 Import from file
+              </Button>
+            }
+          />
+          {/* And the third: a ready-made one from the catalog, which is also how Spec Kit,
+              Superpowers and OpenSpec arrive as pipelines. */}
+          <WorkflowStoreDialog
+            installed={list}
+            trigger={
+              <Button
+                className="w-full"
+                disabled={failed}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                <Store aria-hidden />
+                Browse the store
               </Button>
             }
           />

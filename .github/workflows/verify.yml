@@ -50,6 +50,18 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # The Workflow store's Skills come from the repositories that own them — Spec Kit,
+      # Superpowers, OpenSpec — fetched here, at the revision each is at today, so every gate
+      # below runs against the text a release would ship. A source that cannot be fetched or
+      # fails validation fails the build; a stale copy is never built silently.
+      - name: Sync the Workflow store from its upstream repositories
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: make store-sync
+
+      - name: Validate the Workflow store
+        run: make store-check
+
       # `make typecheck` / `make test` run through Turborepo, which skips a package whose inputs
       # hash the same as a previous run. Restoring its cache from the last run on this branch, or
       # from any run failing that, is what makes a one-package change cost one package's checks.

@@ -13,6 +13,7 @@
       "!.github/skills",
       "!**/.impeccable",
       "!apps/web/openapi.json",
+      "!packages/core/src/workflow-store/vendored.generated.json",
       "!apps/web/src/components/ui",
       "!apps/web/src/app/globals.css"
     ]
