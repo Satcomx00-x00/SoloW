@@ -16,6 +16,10 @@ const env = { ...process.env, ...E2E_ENV } as Record<string, string>;
 export default defineConfig({
   testDir: "./e2e",
   testMatch: /.*\.spec\.ts/,
+  // The control check (`e2e/control/`) is a host-side gate run by hand before a commit to main
+  // — `make control-check` — not a CI suite: one long walk down the product's main line, with
+  // the same servers and fixture as the rest. Ignored unless that target asks for it.
+  testIgnore: process.env["SOLOW_CONTROL_CHECK"] === "1" ? [] : ["**/control/**"],
   fullyParallel: false,
   workers: 1,
   forbidOnly: !!process.env["CI"],

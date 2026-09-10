@@ -4,7 +4,7 @@
 SHELL := bash
 .DEFAULT_GOAL := help
 .PHONY: help install clean build lint format typecheck test smoke smoke-tarball smoke-docker \
-	test-docker-live e2e e2e-critical \
+	test-docker-live e2e e2e-critical control-check \
 	audit audit-executor-boundary secretscan verify dev dev-web flags \
 	dev-orchestrator update db-generate db-migrate db-bootstrap openapi openapi-check \
 	store-sync store-check
@@ -75,6 +75,13 @@ e2e: ## Run the Playwright E2E suite (boots the SPA + an orchestrator harness)
 
 e2e-critical: ## Run only the @critical isolation E2E — this one blocks merge
 	bunx playwright test --grep @critical
+
+# Not a CI gate: the operator's own check, on this host, before a commit to main that touches
+# the loop. One test walks the main line end to end — Project, Issue, a two-Step Workflow drawn
+# on the canvas, a Task launched through it, every Step's output, approval onto a branch, the
+# Issue closed, everything removed — against the same servers and fixture the E2E suite boots.
+control-check: ## Walk the product's main line end to end on this host (not run in CI)
+	SOLOW_CONTROL_CHECK=1 bunx playwright test --grep @control
 
 audit: ## Dependency audit at the project severity threshold
 	bun run audit

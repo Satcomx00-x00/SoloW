@@ -35,6 +35,7 @@
     "smoke:docker": "sh scripts/smoke-docker-executor.sh",
     "e2e": "playwright test",
     "e2e:critical": "playwright test --grep @critical",
+    "e2e:control": "SOLOW_CONTROL_CHECK=1 playwright test --grep @control",
     "audit": "bun run scripts/audit.ts",
     "audit:executor-boundary": "bun run scripts/audit-executor-boundary.ts",
     "secretscan": "gitleaks detect --source . --no-banner --redact",
