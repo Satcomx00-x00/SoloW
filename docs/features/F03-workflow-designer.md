@@ -287,7 +287,13 @@ The model, its seam and the designing canvas ship; the monitor does not. Concret
   pipeline written before branches existed walks exactly as it did. A null target lands in the
   same terminal rule as running off the last Step — Principle I holds however a Task reaches the
   end. The canvas draws a branching Step with a `yes` and a `no` exit; an edge that skips or goes
-  back is routed around the row, and a null target is an edge to the `End` node.
+  back is routed around the row, and a null target is an edge to the `End` node. Every edit to a
+  branch sends the whole branch (the server checks the two targets together), and the editor
+  merges each edit into the last branch it *sent*, not into the row it was last shown: two quick
+  edits — the condition, then a target — used to lose the first when the second landed before the
+  refresh, which the branching control check caught. The canvas's automatic fit never drops below
+  the zoom at which a card is editable (`workflow-canvas-zoom.ts`): a `+` that re-fit the view
+  used to hand the operator a card they could not name.
 - **Step order is a lexicographic rank string**, not a position. Inserting a Step in the middle
   writes exactly one row and renumbers nothing; a reorder names the two Steps the moved one lands
   between, and is refused as stale if those two are no longer adjacent.

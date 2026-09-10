@@ -4791,6 +4791,61 @@ describe("a Task following a Workflow", () => {
     });
   });
 
+  /**
+   * The `produced-changes` branch reads the corroborated fact, not the harness's claim. A harness
+   * that declares no outcome claims nothing — `run.outcome` is null, so the claim sent is `false`
+   * — and the branching control check caught a Step that had written files taking the "no"
+   * exit on exactly that. The server's own `diff` record is what the rule reads, and what the
+   * decision record writes down.
+   */
+  it("routes a produced-changes branch on the server's diff record when the harness declared nothing", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const [implement, review] = await seedWorkflow(ids, [
+      {
+        key: "implement",
+        command: "builder",
+        permissionMode: "acceptEdits",
+        promptTemplate: "Implement it.",
+        gate: "auto",
+        advanceOn: "agent-signal",
+        branch: { when: { kind: "produced-changes" }, thenStep: "review", elseStep: null },
+      },
+      {
+        key: "review",
+        command: "reviewer",
+        permissionMode: "plan",
+        promptTemplate: "Review it.",
+        gate: "human",
+        advanceOn: "review",
+      },
+    ]);
+    // Neither harness says a word about how it ended: no `task_complete`, no outcome, no claim.
+    const builder = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }], []);
+    const reviewer = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }], []);
+    const { deps } = makeDeps(db, builder, nullStream());
+    deps.runner = runnersByMode({ acceptEdits: builder, plan: reviewer });
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: decidingStep(ids, []) });
+
+    // The fake worktree reports a modified file, so the log holds a `diff` naming one — the
+    // record the rule corroborates against — and the Task went on to Review, not to the end.
+    const row = await taskRow(ids.taskId);
+    expect(row?.workflowStepId).toBe(review as string);
+    expect(reviewer.starts).toBe(1);
+    const decision = (await logOf(ids)).find(
+      (p) => p.kind === "workflow_decision" && p["stepId"] === implement,
+    );
+    expect(decision).toMatchObject({
+      status: "advanced",
+      nextStepId: review,
+      condition: { when: { kind: "produced-changes" }, holds: true },
+      // What the rule read, not the `false` the run loop was able to claim.
+      producedChanges: true,
+      outcome: null,
+    });
+  });
+
   it("writes down why a human-gated step is waiting, in the gate's own terms", async () => {
     const ids = freshIds();
     await seedRun(db, ids);

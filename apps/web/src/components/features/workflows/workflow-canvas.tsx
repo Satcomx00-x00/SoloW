@@ -100,6 +100,7 @@ import {
   stepEdges,
 } from "@/lib/workflow-canvas";
 import { trpc } from "@/trpc/react";
+import { COMPACT_ZOOM, FIT_VIEW } from "./workflow-canvas-zoom";
 
 /**
  * The Workflow designer as a node graph (issue #5 AC-1, F03 FR-1/FR-4, Decision 0007).
@@ -200,26 +201,8 @@ type Profile = { id: string; name: string };
  * wide screen reads as a mistake, and never *shrunk* past 0.6, because a fit that makes the
  * forms unreadable is not a fit. A long pipeline is pannable; a tiny one is useless.
  */
-const FIT_VIEW = { padding: 0.15, maxZoom: 1, minZoom: 0.6 };
-
 /** Every edge ends in an arrowhead: a pipeline has a direction, and a dash alone has none. */
 const ARROW = { type: MarkerType.ArrowClosed, width: 14, height: 14 } as const;
-
-/**
- * Below this zoom a Step node stops being a form and becomes a card that only *says* what the
- * Step is — contextual zoom, the React Flow pattern for exactly this.
- *
- * The node graph's problem at six Steps was never the graph, it was that every node drew its
- * whole form at every zoom: three selects, a prompt, two library pickers and a branch, times
- * six, is a wall of controls with the pipeline somewhere behind it. Zoomed out nobody is editing
- * a gate; they are reading the shape of the pipeline, and the fields are noise at a size where
- * they cannot be read anyway.
- *
- * 0.72 rather than a round number: it is just under the zoom `FIT_VIEW` settles on for a
- * four-Step pipeline, so the fit that opens the surface still shows the forms, and stepping back
- * to take in a longer one is what collapses them.
- */
-const COMPACT_ZOOM = 0.72;
 
 /** How long the node toolbar survives the pointer leaving, so crossing the gap to it is possible. */
 const TOOLBAR_LINGER_MS = 140;
@@ -289,7 +272,7 @@ const SCROLLING_FIELD = "nodrag nowheel";
  * position. The question of an `agent-decides` condition saves on blur like the prompt does; the
  * selects save on change like the gate does.
  */
-function BranchFields({
+export function BranchFields({
   step,
   siblings,
   save,
@@ -302,6 +285,23 @@ function BranchFields({
   const savedQuestion = branch?.when.kind === "agent-decides" ? branch.when.question : "";
   const [question, setQuestion] = useState(savedQuestion);
   useEffect(() => setQuestion(savedQuestion), [savedQuestion]);
+  /*
+   * Latest-wins. Every save carries the whole branch, so each field merges its change into a
+   * base — and that base is the last branch this editor *sent*, not the prop, which lags a round
+   * trip behind. Merging into the prop lost the first of two quick edits: the Condition set to
+   * "produced changes", then "If yes" picked before the refresh landed, and the target's save
+   * carried the prop's `agent-decides` back to the server. The branching control check caught
+   * it; an operator working down the fields is just as quick.
+   */
+  const latest = useRef(branch);
+  useEffect(() => {
+    latest.current = branch;
+  }, [branch]);
+  const put = (next: WorkflowStepBranch) => {
+    latest.current = next;
+    save(next);
+  };
+  const base = () => latest.current ?? branch;
 
   // Turning a branch *on* is the node toolbar's job now (`StepTools`): a full-width button for a
   // thing most Steps never become was the last row of every card, and it read as a field.
@@ -319,7 +319,9 @@ function BranchFields({
           value={value}
           onValueChange={(v) => {
             const id = v === END_TARGET ? null : v;
-            save(kind === "then" ? { ...branch, thenStepId: id } : { ...branch, elseStepId: id });
+            const b = base();
+            if (!b) return;
+            put(kind === "then" ? { ...b, thenStepId: id } : { ...b, elseStepId: id });
           }}
         >
           <SelectTrigger id={`step-${kind}-${step.id}`} className={`${FIELD} h-7 w-full text-xs`}>
@@ -362,8 +364,10 @@ function BranchFields({
           value={branch.when.kind}
           onValueChange={(v) => {
             const kind = v as WorkflowStepCondition["kind"];
-            save({
-              ...branch,
+            const b = base();
+            if (!b) return;
+            put({
+              ...b,
               when:
                 kind === "agent-decides"
                   ? { kind, question: question.trim() || PLACEHOLDER_QUESTION }
@@ -401,7 +405,8 @@ function BranchFields({
               const trimmed = question.trim();
               if (!trimmed) return setQuestion(savedQuestion);
               if (trimmed !== savedQuestion) {
-                save({ ...branch, when: { kind: "agent-decides", question: trimmed } });
+                const b = base();
+                if (b) put({ ...b, when: { kind: "agent-decides", question: trimmed } });
               }
             }}
           />
@@ -418,9 +423,10 @@ function BranchFields({
           </Label>
           <Select
             value={branch.when.is}
-            onValueChange={(v) =>
-              save({ ...branch, when: { kind: "outcome", is: v as TaskCompletionOutcome } })
-            }
+            onValueChange={(v) => {
+              const b = base();
+              if (b) put({ ...b, when: { kind: "outcome", is: v as TaskCompletionOutcome } });
+            }}
           >
             <SelectTrigger id={`step-outcome-${step.id}`} className={`${FIELD} h-7 w-full text-xs`}>
               <SelectValue />
