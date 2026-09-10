@@ -504,6 +504,7 @@ export function advanceWorkflowStep(
     needsApproval,
     condition,
     exit,
+    producedChanges: outcome.producedChanges,
   });
 
   if (outcome.signal !== current.advanceOn) {

@@ -1563,7 +1563,8 @@ export async function runTaskLifecycle(
           nextStepId: advanced ? result.data.currentStepId : null,
           nextStepName: advanced ? nameOf(result.data.currentStepId) : null,
           outcome: input.outcome ?? null,
-          producedChanges: input.producedChanges,
+          // The fact the rule read — the claim, corroborated — not the claim as it was sent.
+          producedChanges: result.data.explanation.producedChanges,
         };
         const seq = await nextSessionEventSeq(db, workspaceId, sessionId);
         // The Step the decision is *about* — the one being finished — never the one it advances

@@ -31909,13 +31909,17 @@
                             "else",
                             null
                           ]
+                        },
+                        "producedChanges": {
+                          "type": "boolean"
                         }
                       },
                       "required": [
                         "gate",
                         "needsApproval",
                         "condition",
-                        "exit"
+                        "exit",
+                        "producedChanges"
                       ]
                     }
                   },

@@ -278,12 +278,19 @@ export async function advanceTaskWorkflow(
         decision?.decision === "approve" &&
         decision.id === row.workflowDecisionId &&
         row.workflowDecisionCall === spentHere;
-      // Only the `auto-unless-changes` gate reads this, so the corroborating scan is only paid
-      // for when it can change the answer — and only when the claim is the one worth checking.
+      // Two rules read this — the `auto-unless-changes` gate and the `produced-changes` branch —
+      // and both have to read the same corroborated fact (spec F03). The scan is paid for only
+      // when one of them can change the answer, and only when the claim is the one worth
+      // checking: a harness that declared no outcome claims `false`, which is exactly the claim a
+      // Step that wrote two files must not be taken at its word on. Corroborating for the gate
+      // alone sent every such Step down a branch's "no" exit — found by the branching control
+      // check, on a Step whose gate was `auto`.
+      const readsChanges =
+        resumed.data.gate === "auto-unless-changes" ||
+        resumed.data.branch?.when.kind === "produced-changes";
       const producedChanges =
         input.producedChanges ||
-        (resumed.data.gate === "auto-unless-changes" &&
-          taskHasRecordedChanges(tx, workspaceId, input.taskId));
+        (readsChanges && taskHasRecordedChanges(tx, workspaceId, input.taskId));
 
       // The Step's own summary is held apart from the one it was given until the cursor actually
       // moves. A Step that reports in behind a closed gate is replayed later by a caller that no

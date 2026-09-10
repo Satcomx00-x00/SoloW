@@ -458,6 +458,12 @@ export const workflowAdvanceExplanationSchema = z.object({
   /** The Step's branch condition and how it evaluated, or null for an unbranched Step. */
   condition: z.object({ when: workflowStepConditionSchema, holds: z.boolean() }).nullable(),
   exit: workflowStepExitKindSchema.nullable(),
+  /**
+   * Whether the Step produced changes, *as the rules read it*: the harness's claim, corroborated
+   * by the server's own `diff` record when a gate or a branch depends on it. Reported so the
+   * decision record can carry the fact the rule used rather than the claim it was handed.
+   */
+  producedChanges: z.boolean(),
 });
 export type WorkflowAdvanceExplanation = z.infer<typeof workflowAdvanceExplanationSchema>;
 

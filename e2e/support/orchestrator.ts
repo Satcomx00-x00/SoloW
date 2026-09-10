@@ -48,6 +48,48 @@ import { PATHS, PORTS } from "./fixture.js";
 const STEERABLE = "[steerable]";
 
 /**
+ * Markers a Step's prompt can carry to script what the fixture harness *reports* — the two
+ * things a Workflow condition reads (`@solow/core`'s `conditionHolds`), sent the way a real
+ * harness sends them: a `task_complete` widget fenced in its output.
+ *
+ *   [outcome:blocked]      report that outcome (`changes_ready`, `nothing_to_do`, `blocked`)
+ *   [decide:yes]           answer the Step's branch question with yes (or no)
+ *   [decide:yes x2]        yes the first two times this Task reaches this Step, then no —
+ *                          a loop that ends, which is what a backward branch needs to be tested
+ *
+ * The count is per Task and per marker, in memory: the orchestrator process outlives the run,
+ * and a file in the worktree would show up in the diff a reviewer is asked to read.
+ */
+const DECIDE = /\[decide:(yes|no)(?:\s+x(\d+))?\]/;
+const OUTCOME = /\[outcome:(changes_ready|nothing_to_do|blocked)\]/;
+const decisionsGiven = new Map<string, number>();
+
+/** The widget a scripted prompt asks for, or null when the prompt scripts nothing. */
+function scriptedReport(
+  prompt: string,
+  taskLabel: string,
+): { outcome: string; decision?: "yes" | "no"; summary: string } | null {
+  const decide = DECIDE.exec(prompt);
+  const outcome = OUTCOME.exec(prompt);
+  if (!decide && !outcome) return null;
+  const report: { outcome: string; decision?: "yes" | "no"; summary: string } = {
+    outcome: outcome?.[1] ?? "changes_ready",
+    summary: `fixture harness report for ${taskLabel}`,
+  };
+  if (decide) {
+    const key = `${taskLabel}|${decide[0]}`;
+    const given = decisionsGiven.get(key) ?? 0;
+    decisionsGiven.set(key, given + 1);
+    const times = decide[2] === undefined ? Number.POSITIVE_INFINITY : Number(decide[2]);
+    const scripted = decide[1] === "yes" ? "yes" : "no";
+    const other = scripted === "yes" ? "no" : "yes";
+    report.decision = given < times ? scripted : other;
+    report.summary += ` — DECISION: ${report.decision}`;
+  }
+  return report;
+}
+
+/**
  * Deterministic harness standing in for Claude Code.
  *
  * It does what `claude --worktree` does: creates its own git worktree off the repository it was
@@ -101,6 +143,18 @@ class FixtureHarnessRunner implements HarnessRunner {
         .join(",");
       writeFileSync(join(worktree, "visible.txt"), `${visible}\n`);
       opts.onEvent({ kind: "stdout", channel: "assistant", text: `harness edited ${label}\n` });
+
+      // A scripted Step reports through the same fenced widget Claude Code emits, so the run
+      // loop's own scanner, the completion record and the branch evaluation all run for real.
+      const report = scriptedReport(opts.prompt, label);
+      if (report) {
+        const widget = JSON.stringify({ kind: "task_complete", ...report });
+        opts.onEvent({
+          kind: "stdout",
+          channel: "assistant",
+          text: `\`\`\`solow:widget\n${widget}\n\`\`\`\n`,
+        });
+      }
 
       if (!opts.prompt.includes(STEERABLE)) finish({ kind: "completed", stopReason: "end_turn" });
     })();

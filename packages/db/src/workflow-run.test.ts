@@ -419,6 +419,65 @@ describe("branching on the outcome the harness declared", () => {
       needsApproval: false,
       condition: { when: { kind: "outcome", is: "blocked" }, holds: true },
       exit: "then",
+      producedChanges: false,
+    });
+  });
+});
+
+describe("branching on whether the step produced changes", () => {
+  const changesGoToStep2 = {
+    when: { kind: "produced-changes" } as const,
+    thenStep: 1,
+    elseStep: null,
+  };
+
+  /**
+   * The branch reads the same corroborated fact the `auto-unless-changes` gate reads (spec F03).
+   * It used to read the bare claim when the gate was `auto`, and a harness that declares no
+   * outcome claims `false` — so a Step that wrote two files took the "no" exit and ended the
+   * pipeline. Found by the branching control check.
+   */
+  it("corroborates a 'nothing changed' claim for the branch, whatever the gate", async () => {
+    const p = await pipeline("branch-corroborate", [{ branch: changesGoToStep2 }, {}]);
+    await db.insert(sessionEvent).values({
+      workspaceId: p.workspaceId,
+      sessionId: p.sessionId,
+      seq: 1,
+      kind: "diff",
+      payload: { files: ["src/latch.ts"] },
+    });
+
+    const result = await advanceTaskWorkflow(db, p.workspaceId, {
+      taskId: p.taskId,
+      fromStepId: stepId(p, 0),
+      signal: "agent-signal",
+      producedChanges: false,
+    });
+    expect(result.ok && result.data.status).toBe("advanced");
+    expect((await taskRow(p.taskId)).workflowStepId).toBe(stepId(p, 1));
+    // The record carries the fact the rule read, not the claim it was handed.
+    expect(result.ok && result.data.explanation).toEqual({
+      gate: "auto",
+      needsApproval: false,
+      condition: { when: { kind: "produced-changes" }, holds: true },
+      exit: "then",
+      producedChanges: true,
+    });
+  });
+
+  it("takes the 'no' exit only when neither the claim nor the log shows a change", async () => {
+    const p = await pipeline("branch-no-changes", [{ branch: changesGoToStep2 }, {}]);
+    const result = await advanceTaskWorkflow(db, p.workspaceId, {
+      taskId: p.taskId,
+      fromStepId: stepId(p, 0),
+      signal: "agent-signal",
+      producedChanges: false,
+    });
+    // A null "no" exit is the end of the pipeline, which needs a person (Principle I).
+    expect(result.ok && result.data.status).toBe("awaiting-decision");
+    expect(result.ok && result.data.explanation.condition).toEqual({
+      when: { kind: "produced-changes" },
+      holds: false,
     });
   });
 });

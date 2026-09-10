@@ -570,6 +570,7 @@ describe("what an advance says about itself", () => {
       needsApproval: false,
       condition: null,
       exit: "next",
+      producedChanges: false,
     });
   });
 
@@ -588,6 +589,7 @@ describe("what an advance says about itself", () => {
       needsApproval: false,
       condition: { when: branch.when, holds: true },
       exit: "then",
+      producedChanges: false,
     });
     const fine = unwrap(
       advanceWorkflowStep(rules(branch), "review", outcome({ outcome: "changes_ready" })),
@@ -607,6 +609,7 @@ describe("what an advance says about itself", () => {
       needsApproval: true,
       condition: null,
       exit: null,
+      producedChanges: false,
     });
   });
 

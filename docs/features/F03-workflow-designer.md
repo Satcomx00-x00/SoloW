@@ -271,7 +271,11 @@ The model, its seam and the designing canvas ship; the monitor does not. Concret
   loop (`carryHarnessDecision`), because the first live run did exactly that and the answer would
   otherwise have been lost. No answer is not an affirmation and counts as `no`, and the brief
   says so. `produced-changes` is the second: the same corroborated fact `auto-unless-changes`
-  reads. `outcome` is the third: how the harness declared its run ended (`changes_ready`,
+  reads — corroborated for the branch as well as for the gate, which it once was not: a Step whose
+  gate was `auto` read the harness's bare claim, and a harness that declares no outcome claims
+  `false`, so a Step that had written files took the "no" exit. The branching control check
+  (`make control-check`) is what caught it; the decision record now carries the value the rule
+  read (`explanation.producedChanges`), not the claim it was handed. `outcome` is the third: how the harness declared its run ended (`changes_ready`,
   `nothing_to_do`, `blocked`), read off the same `task_complete` widget — so a Step whose harness
   stopped because it could not go on can be routed to a person or an escalation Step rather than
   arriving at the review gate looking like finished work. A harness that declared nothing
