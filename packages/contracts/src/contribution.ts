@@ -218,3 +218,69 @@ export type RecentTasksDto = z.infer<typeof recentTasksDto>;
 
 /** The single `ui_preference.key` the list is stored under. */
 export const RECENT_TASKS_PREFERENCE_KEY = "recent-tasks";
+
+/**
+ * A reviewer's working state on one Task, per user (spec F10 follow-on).
+ *
+ * Two things a reviewer accumulates while reading a change and loses on a reload: which files
+ * they have already looked at, and what they mean to say about particular lines. Both belong to
+ * *one round* of *one Session* — a file ticked as viewed in round 1 has not been viewed in round
+ * 2, where it may be different, and a note on line 40 of a file the harness has since rewritten
+ * points at nothing. So the draft names the round it was written against, and a reader whose
+ * round has moved on treats the stored draft as empty rather than trusting it.
+ *
+ * A third row of `ui_preference`, keyed per Task, for the reason the Task pane split is one:
+ * it is a per-user convenience, never part of the record — the notes only become a fact when
+ * they are sent as the decision's `feedback`.
+ */
+export const REVIEW_DRAFT_MAX_VIEWED = 2000;
+export const REVIEW_DRAFT_MAX_NOTES = 200;
+
+export const reviewDraftFileSchema = z.object({
+  /** Null for a change captured before Repositories were named. */
+  repositoryId: z.string().nullable(),
+  path: z.string().min(1).max(1000),
+});
+export type ReviewDraftFile = z.infer<typeof reviewDraftFileSchema>;
+
+export const reviewNoteSchema = reviewDraftFileSchema.extend({
+  /** Which side of the diff the line number counts on. */
+  side: z.enum(["old", "new"]),
+  line: z.number().int().positive(),
+  text: z.string().min(1).max(2000),
+});
+export type ReviewNote = z.infer<typeof reviewNoteSchema>;
+
+export const reviewDraftSchema = z.object({
+  sessionId: idSchema,
+  round: z.number().int().positive(),
+  viewed: z.array(reviewDraftFileSchema).max(REVIEW_DRAFT_MAX_VIEWED),
+  notes: z.array(reviewNoteSchema).max(REVIEW_DRAFT_MAX_NOTES),
+  /** What the reviewer wants to say about the change as a whole. */
+  general: z.string().max(10_000),
+});
+export type ReviewDraft = z.infer<typeof reviewDraftSchema>;
+
+export const getReviewDraftInput = z.object({ taskId: idSchema });
+export type GetReviewDraftInput = z.infer<typeof getReviewDraftInput>;
+
+export const setReviewDraftInput = z.object({ taskId: idSchema, draft: reviewDraftSchema });
+export type SetReviewDraftInput = z.infer<typeof setReviewDraftInput>;
+
+export const clearReviewDraftInput = z.object({ taskId: idSchema });
+export type ClearReviewDraftInput = z.infer<typeof clearReviewDraftInput>;
+
+/** Echoes the identity back for the same reason `taskPaneLayoutDto` does (Principle V). */
+export const reviewDraftDto = z.object({
+  workspaceId: idSchema,
+  userId: idSchema,
+  taskId: idSchema,
+  /** Null when nothing is saved for this Task. */
+  draft: reviewDraftSchema.nullable(),
+});
+export type ReviewDraftDto = z.infer<typeof reviewDraftDto>;
+
+/** The `ui_preference.key` one Task's draft is stored under — namespaced like the surfaces. */
+export function reviewDraftPreferenceKey(taskId: string): string {
+  return `review-draft:${taskId}`;
+}

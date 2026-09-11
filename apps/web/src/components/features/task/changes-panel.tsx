@@ -1,6 +1,6 @@
 "use client";
 
-import type { ScmFileDto, TaskDiffDto, TaskRepositoryDto } from "@solow/contracts";
+import type { ReviewDraftFile, ScmFileDto, TaskDiffDto, TaskRepositoryDto } from "@solow/contracts";
 import { primaryTaskRepository } from "@solow/core";
 import { FileMinus, Lock, Scissors, TriangleAlert } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -8,7 +8,7 @@ import { scmFromCapturedDiff, splitPatchByFile } from "./captured-scm";
 import { summariseDiff } from "./change-summary";
 import { DiffEditor } from "./diff-editor";
 import { describeTarget, groupChanges, type ReviewGroup } from "./review-groups";
-import { SourceControlPanel } from "./source-control-panel";
+import { SourceControlPanel, type ViewedFiles } from "./source-control-panel";
 
 /**
  * The Changes column (spec F22).
@@ -24,7 +24,22 @@ import { SourceControlPanel } from "./source-control-panel";
 
 const CAPTURED_REASON = "Captured from the harness's last turn — read-only.";
 
-function RepositoryChanges({ diff }: { diff: TaskDiffDto }) {
+/**
+ * The reviewer's ticks, keyed across repositories (`draftFileKey` in `use-review-draft`).
+ * Undefined means no review is being drafted — an older round, say — and no boxes are shown.
+ */
+export interface ReviewTicks {
+  viewed: ReadonlySet<string>;
+  onToggle: (file: ReviewDraftFile) => void;
+}
+
+function RepositoryChanges({
+  diff,
+  ticks,
+}: {
+  diff: TaskDiffDto;
+  ticks?: ReviewTicks | undefined;
+}) {
   const [view, setView] = useState<"tree" | "list">("list");
   const [selected, setSelected] = useState<string | null>(null);
   const [mode, setMode] = useState<"split" | "inline">("split");
@@ -44,6 +59,23 @@ function RepositoryChanges({ diff }: { diff: TaskDiffDto }) {
   const patch = (selected && sections.get(selected)) || diff.patch;
   const noop = () => {};
   const summary = useMemo(() => summariseDiff(diff), [diff]);
+  // The panel speaks in paths; the draft keys files by repository as well, so a Task changing
+  // `src/index.ts` in two repositories keeps two ticks. Translated at this seam, once.
+  const repositoryId = diff.repositoryId ?? null;
+  const viewedFiles = useMemo<ViewedFiles | undefined>(
+    () =>
+      ticks
+        ? {
+            viewed: new Set(
+              diff.files
+                .map((f) => f.path)
+                .filter((path) => ticks.viewed.has(`${repositoryId ?? ""} ${path}`)),
+            ),
+            onToggleViewed: (path) => ticks.onToggle({ repositoryId, path }),
+          }
+        : undefined,
+    [ticks, diff.files, repositoryId],
+  );
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
@@ -61,6 +93,7 @@ function RepositoryChanges({ diff }: { diff: TaskDiffDto }) {
           onUnstage={noop}
           onDiscard={noop}
           onRefresh={noop}
+          viewedFiles={viewedFiles}
         />
       </div>
       {patch && (
@@ -183,8 +216,11 @@ export function ChangesPanel({
   repositories = [],
   repositoryName,
   captured = true,
+  ticks,
 }: {
   diffs: TaskDiffDto[];
+  /** The reviewer's viewed-ticks, when a review is being drafted against these diffs. */
+  ticks?: ReviewTicks | undefined;
   /** The Task's attachments, so a repository with no diff is still a group. */
   repositories?: readonly TaskRepositoryDto[];
   /**
@@ -213,7 +249,7 @@ export function ChangesPanel({
   // One group is the ordinary case and gets no heading: naming the repository you are already
   // inside is noise, and this is the shape the panel had before Tasks spanned several.
   if (groups.length === 1 && groups[0]?.diff) {
-    return <RepositoryChanges diff={groups[0].diff} />;
+    return <RepositoryChanges diff={groups[0].diff} ticks={ticks} />;
   }
   // A change outside the primary repository is the one thing a multi-repository approval most
   // often lands by surprise: the header names the primary's branch, the transcript is mostly
@@ -245,7 +281,7 @@ export function ChangesPanel({
         >
           <GroupHeading group={group} captured={captured} />
           {group.diff ? (
-            <RepositoryChanges diff={group.diff} />
+            <RepositoryChanges diff={group.diff} ticks={ticks} />
           ) : (
             // Said, not hidden. "Nothing changed here" is a consequence of the approval, and the
             // reviewer has to be able to see it without counting the groups — but only once it is

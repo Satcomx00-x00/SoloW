@@ -9846,6 +9846,683 @@
         }
       }
     },
+    "/preference.getReviewDraft": {
+      "get": {
+        "operationId": "preference-getReviewDraft",
+        "summary": "The signed-in user's review draft on a Task — files ticked as viewed and notes not yet sent — or null when there is none.",
+        "tags": [
+          "preference"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "taskId",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "workspaceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "userId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "taskId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "draft": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "sessionId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "round": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "exclusiveMinimum": true
+                        },
+                        "viewed": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "repositoryId": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "path": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 1000
+                              }
+                            },
+                            "required": [
+                              "repositoryId",
+                              "path"
+                            ]
+                          },
+                          "maxItems": 2000
+                        },
+                        "notes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "repositoryId": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "path": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 1000
+                              },
+                              "side": {
+                                "type": "string",
+                                "enum": [
+                                  "old",
+                                  "new"
+                                ]
+                              },
+                              "line": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "exclusiveMinimum": true
+                              },
+                              "text": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 2000
+                              }
+                            },
+                            "required": [
+                              "repositoryId",
+                              "path",
+                              "side",
+                              "line",
+                              "text"
+                            ]
+                          },
+                          "maxItems": 200
+                        },
+                        "general": {
+                          "type": "string",
+                          "maxLength": 10000
+                        }
+                      },
+                      "required": [
+                        "sessionId",
+                        "round",
+                        "viewed",
+                        "notes",
+                        "general"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "workspaceId",
+                    "userId",
+                    "taskId",
+                    "draft"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.NOT_FOUND"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/preference.setReviewDraft": {
+      "post": {
+        "operationId": "preference-setReviewDraft",
+        "summary": "Save the signed-in user's review draft on a Task, replacing what was there.",
+        "tags": [
+          "preference"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "taskId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "draft": {
+                    "type": "object",
+                    "properties": {
+                      "sessionId": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "round": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "exclusiveMinimum": true
+                      },
+                      "viewed": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "repositoryId": {
+                              "type": "string",
+                              "nullable": true
+                            },
+                            "path": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 1000
+                            }
+                          },
+                          "required": [
+                            "repositoryId",
+                            "path"
+                          ]
+                        },
+                        "maxItems": 2000
+                      },
+                      "notes": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "repositoryId": {
+                              "type": "string",
+                              "nullable": true
+                            },
+                            "path": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 1000
+                            },
+                            "side": {
+                              "type": "string",
+                              "enum": [
+                                "old",
+                                "new"
+                              ]
+                            },
+                            "line": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "exclusiveMinimum": true
+                            },
+                            "text": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 2000
+                            }
+                          },
+                          "required": [
+                            "repositoryId",
+                            "path",
+                            "side",
+                            "line",
+                            "text"
+                          ]
+                        },
+                        "maxItems": 200
+                      },
+                      "general": {
+                        "type": "string",
+                        "maxLength": 10000
+                      }
+                    },
+                    "required": [
+                      "sessionId",
+                      "round",
+                      "viewed",
+                      "notes",
+                      "general"
+                    ]
+                  }
+                },
+                "required": [
+                  "taskId",
+                  "draft"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "workspaceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "userId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "taskId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "draft": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "sessionId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "round": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "exclusiveMinimum": true
+                        },
+                        "viewed": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "repositoryId": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "path": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 1000
+                              }
+                            },
+                            "required": [
+                              "repositoryId",
+                              "path"
+                            ]
+                          },
+                          "maxItems": 2000
+                        },
+                        "notes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "repositoryId": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "path": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 1000
+                              },
+                              "side": {
+                                "type": "string",
+                                "enum": [
+                                  "old",
+                                  "new"
+                                ]
+                              },
+                              "line": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "exclusiveMinimum": true
+                              },
+                              "text": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 2000
+                              }
+                            },
+                            "required": [
+                              "repositoryId",
+                              "path",
+                              "side",
+                              "line",
+                              "text"
+                            ]
+                          },
+                          "maxItems": 200
+                        },
+                        "general": {
+                          "type": "string",
+                          "maxLength": 10000
+                        }
+                      },
+                      "required": [
+                        "sessionId",
+                        "round",
+                        "viewed",
+                        "notes",
+                        "general"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "workspaceId",
+                    "userId",
+                    "taskId",
+                    "draft"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/preference.clearReviewDraft": {
+      "post": {
+        "operationId": "preference-clearReviewDraft",
+        "summary": "Forget the signed-in user's review draft on a Task.",
+        "tags": [
+          "preference"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "taskId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "taskId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "workspaceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "userId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "taskId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "draft": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "sessionId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "round": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "exclusiveMinimum": true
+                        },
+                        "viewed": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "repositoryId": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "path": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 1000
+                              }
+                            },
+                            "required": [
+                              "repositoryId",
+                              "path"
+                            ]
+                          },
+                          "maxItems": 2000
+                        },
+                        "notes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "repositoryId": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "path": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 1000
+                              },
+                              "side": {
+                                "type": "string",
+                                "enum": [
+                                  "old",
+                                  "new"
+                                ]
+                              },
+                              "line": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "exclusiveMinimum": true
+                              },
+                              "text": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 2000
+                              }
+                            },
+                            "required": [
+                              "repositoryId",
+                              "path",
+                              "side",
+                              "line",
+                              "text"
+                            ]
+                          },
+                          "maxItems": 200
+                        },
+                        "general": {
+                          "type": "string",
+                          "maxLength": 10000
+                        }
+                      },
+                      "required": [
+                        "sessionId",
+                        "round",
+                        "viewed",
+                        "notes",
+                        "general"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "workspaceId",
+                    "userId",
+                    "taskId",
+                    "draft"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/task.create": {
       "post": {
         "operationId": "task-create",

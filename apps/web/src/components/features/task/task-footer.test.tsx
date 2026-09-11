@@ -131,6 +131,13 @@ describe("TaskFooter", () => {
     expect(calls).toHaveLength(2);
   });
 
+  it("says how much of the change was read, on the gate and never as a lock", () => {
+    renderFooter({ state: "review" }, { viewed: { viewed: 7, of: 12 } });
+    expect(screen.getByText(/7 of 12 files viewed/)).toBeDefined();
+    const approve = screen.getByRole("button", { name: "Approve" });
+    expect(approve.hasAttribute("disabled")).toBe(false);
+  });
+
   it("locks every decision while one is in flight", () => {
     renderFooter({ state: "review" }, { decidePending: "approve" });
     for (const name of ["Approve", "Request changes", "Reject"]) {

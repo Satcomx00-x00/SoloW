@@ -793,6 +793,67 @@ describe("the Changes tab of a multi-Repository Task", () => {
     });
   });
 
+  it("lets the reviewer tick files off as read, counts them at the gate, and remembers per round", async () => {
+    const { log } = renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
+      ...baseHandlers,
+      "session.get": () => ({
+        ...detailWithDiffs([
+          {
+            diffRef: "solow/task-1",
+            repositoryId: "repo-1",
+            repositoryName: "api",
+            files: [
+              { path: "src/a.ts", status: "modified", additions: 1, deletions: 0 },
+              { path: "src/b.ts", status: "modified", additions: 1, deletions: 0 },
+            ],
+            patch: "--- a/src/a.ts\n+++ b/src/a.ts\n",
+            truncated: false,
+          },
+        ]),
+        rounds: [{ index: 3, closedAtSeq: null, diffs: [], review: null }],
+      }),
+      // A draft from the round before: stale, so it must not count.
+      "preference.getReviewDraft": () => ({
+        workspaceId: "ws",
+        userId: "u",
+        taskId: TASK_ID,
+        draft: {
+          sessionId: SESSION_ID,
+          round: 2,
+          viewed: [{ repositoryId: "repo-1", path: "src/a.ts" }],
+          notes: [],
+          general: "",
+        },
+      }),
+      "preference.setReviewDraft": (input: unknown) => ({
+        workspaceId: "ws",
+        userId: "u",
+        taskId: TASK_ID,
+        draft: (input as { draft: unknown }).draft,
+      }),
+    });
+
+    await openChangesTab();
+    expect(await screen.findByText(/0 of 2 files viewed/)).toBeDefined();
+
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Mark src/a.ts viewed" }));
+    expect(await screen.findByText(/1 of 2 files viewed/)).toBeDefined();
+    await waitFor(() =>
+      expect(log.calls.filter((c) => c.path === "preference.setReviewDraft")).toHaveLength(1),
+    );
+    // Written against the round on screen, so the next round starts clean.
+    expect(log.calls.find((c) => c.path === "preference.setReviewDraft")?.input).toMatchObject({
+      taskId: TASK_ID,
+      draft: {
+        sessionId: SESSION_ID,
+        round: 3,
+        viewed: [{ repositoryId: "repo-1", path: "src/a.ts" }],
+      },
+    });
+    // Never a gate: Approve is still just Approve.
+    expect(screen.getByRole("button", { name: "Approve" }).hasAttribute("disabled")).toBe(false);
+  });
+
   it("shows a single Repository's change with no group header at all", async () => {
     // A single-Repository Task's Changes tab is unchanged by this refactor.
     renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {

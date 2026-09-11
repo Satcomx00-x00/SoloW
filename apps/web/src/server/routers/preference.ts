@@ -1,8 +1,12 @@
 import "server-only";
 import {
+  clearReviewDraftInput,
+  getReviewDraftInput,
   getSurfaceLayoutInput,
   recentTasksDto,
   recordRecentTaskInput,
+  reviewDraftDto,
+  setReviewDraftInput,
   setSurfaceLayoutInput,
   setTaskPaneLayoutInput,
   surfaceLayoutDto,
@@ -10,10 +14,13 @@ import {
 } from "@solow/contracts";
 import { z } from "zod";
 import {
+  clearReviewDraft,
   getRecentTasks,
+  getReviewDraft,
   getSurfaceLayout,
   getTaskPaneLayout,
   recordRecentTask,
+  setReviewDraft,
   setSurfaceLayout,
   setTaskPaneLayout,
 } from "../dal/preference.js";
@@ -115,4 +122,49 @@ export const preferenceRouter = router({
     .input(recordRecentTaskInput)
     .output(recentTasksDto)
     .mutation(async ({ ctx, input }) => unwrap(await recordRecentTask(ctx.rctx, input.taskId))),
+
+  getReviewDraft: ownerProcedure
+    .meta({
+      openapi: {
+        method: "GET",
+        path: "/preference.getReviewDraft",
+        tags: ["preference"],
+        protect: true,
+        summary:
+          "The signed-in user's review draft on a Task — files ticked as viewed and notes not yet sent — or null when there is none.",
+      },
+    })
+    .input(getReviewDraftInput)
+    .output(reviewDraftDto)
+    .query(async ({ ctx, input }) => unwrap(await getReviewDraft(ctx.rctx, input.taskId))),
+
+  setReviewDraft: ownerProcedure
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/preference.setReviewDraft",
+        tags: ["preference"],
+        protect: true,
+        summary: "Save the signed-in user's review draft on a Task, replacing what was there.",
+      },
+    })
+    .input(setReviewDraftInput)
+    .output(reviewDraftDto)
+    .mutation(async ({ ctx, input }) =>
+      unwrap(await setReviewDraft(ctx.rctx, input.taskId, input.draft)),
+    ),
+
+  clearReviewDraft: ownerProcedure
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/preference.clearReviewDraft",
+        tags: ["preference"],
+        protect: true,
+        summary: "Forget the signed-in user's review draft on a Task.",
+      },
+    })
+    .input(clearReviewDraftInput)
+    .output(reviewDraftDto)
+    .mutation(async ({ ctx, input }) => unwrap(await clearReviewDraft(ctx.rctx, input.taskId))),
 });

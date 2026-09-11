@@ -27,6 +27,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { TaskStateBadge } from "@/components/features/board/task-state-badge";
 import { ConfirmDialog } from "@/components/features/confirm-action";
 import { useBackToProject } from "@/components/features/shared/back-to-project";
+import { draftFileKey, useReviewDraft } from "@/components/hooks/use-review-draft";
 import { useTaskStream } from "@/components/hooks/use-task-stream";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -404,6 +405,8 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
       utils.task.get.invalidate({ id: taskId });
       utils.task.list.invalidate();
       if (latest?.id) utils.session.get.invalidate({ sessionId: latest.id });
+      // The decision is the record now; the draft that led to it is spent either way.
+      draft.reset();
     },
   });
 
@@ -525,6 +528,27 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
       ? roundPick.index
       : latestRound;
   const shownRound = rounds.find((r) => r.index === selectedRound) ?? null;
+  /**
+   * The reviewer's own state on the latest round: which files they have read (and, next, what
+   * they mean to say). Against `latest`, not `viewing` — a draft is only ever written for the
+   * round the gate would act on, and an older round or launch is read, not reviewed.
+   */
+  const draft = useReviewDraft(taskId, latest?.id ?? null, latestRound);
+  const viewedCount = useMemo(() => {
+    let n = 0;
+    for (const diff of capturedDiffs) {
+      for (const file of diff.files) {
+        if (
+          draft.viewed.has(
+            draftFileKey({ repositoryId: diff.repositoryId ?? null, path: file.path }),
+          )
+        )
+          n += 1;
+      }
+    }
+    return n;
+  }, [capturedDiffs, draft.viewed]);
+  const fileCount = capturedDiffs.reduce((n, d) => n + d.files.length, 0);
   const reviewGroups = useMemo(
     () => groupChanges(capturedDiffs, attachments, nameFor),
     [capturedDiffs, attachments, nameFor],
@@ -881,6 +905,10 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
                      * that the run got far enough to look.
                      */
                     captured={diffs.length > 0 || t.completedAt !== null}
+                    // Ticks only on the round the gate is about; an older round is read, not reviewed.
+                    {...(shownRound === null || shownRound.index === latestRound
+                      ? { ticks: { viewed: draft.viewed, onToggle: draft.toggleViewed } }
+                      : {})}
                   />
                 </div>
               </ScrollArea>
@@ -929,6 +957,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
         task={t}
         outstanding={dependencies.outstanding}
         consequences={summariseConsequences(reviewGroups)}
+        viewed={fileCount > 0 ? { viewed: viewedCount, of: fileCount } : null}
         decidePending={decide.isPending ? (decide.variables?.decision ?? null) : null}
         onDecide={runDecision}
         onLaunch={() => requestMove("running")}

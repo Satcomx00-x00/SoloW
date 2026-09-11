@@ -7,7 +7,11 @@ import {
   RECENT_TASKS_PREFERENCE_KEY,
   type RecentTasksDto,
   type Result,
+  type ReviewDraft,
+  type ReviewDraftDto,
   recentTaskIdsSchema,
+  reviewDraftPreferenceKey,
+  reviewDraftSchema,
   type SetSurfaceLayoutInput,
   type SurfaceKey,
   type SurfaceLayout,
@@ -199,4 +203,73 @@ export async function recordRecentTask(
     });
 
   return ok({ workspaceId: ctx.workspaceId, userId: ctx.userId, taskIds: next });
+}
+
+/**
+ * A reviewer's working state on one Task (spec F10 follow-on) — the same read-parse-or-default
+ * shape as the rest of this file. Null rather than an empty draft when nothing is saved, so the
+ * page can tell "never started" from "started and cleared" if it ever needs to; today both read
+ * the same. A draft written against a round that has since moved on is returned as stored — the
+ * *page* decides it is stale, because the page is what knows the current round.
+ */
+export async function getReviewDraft(
+  ctx: RequestContext,
+  taskId: string,
+): Promise<Result<ReviewDraftDto>> {
+  const [row] = await ctx.db
+    .select({ value: uiPreference.value })
+    .from(uiPreference)
+    .where(
+      and(
+        eq(uiPreference.workspaceId, ctx.workspaceId),
+        eq(uiPreference.userId, ctx.userId),
+        eq(uiPreference.key, reviewDraftPreferenceKey(taskId)),
+      ),
+    )
+    .limit(1);
+  const parsed = reviewDraftSchema.safeParse(row?.value);
+  return ok({
+    workspaceId: ctx.workspaceId,
+    userId: ctx.userId,
+    taskId,
+    draft: parsed.success ? parsed.data : null,
+  });
+}
+
+export async function setReviewDraft(
+  ctx: RequestContext,
+  taskId: string,
+  draft: ReviewDraft,
+): Promise<Result<ReviewDraftDto>> {
+  const now = new Date().toISOString();
+  await ctx.db
+    .insert(uiPreference)
+    .values({
+      workspaceId: ctx.workspaceId,
+      userId: ctx.userId,
+      key: reviewDraftPreferenceKey(taskId),
+      value: draft,
+    })
+    .onConflictDoUpdate({
+      target: [uiPreference.workspaceId, uiPreference.userId, uiPreference.key],
+      set: { value: draft, updatedAt: now },
+    });
+  return ok({ workspaceId: ctx.workspaceId, userId: ctx.userId, taskId, draft });
+}
+
+/** Forget the draft — on a decision, when its notes have become the record or been discarded. */
+export async function clearReviewDraft(
+  ctx: RequestContext,
+  taskId: string,
+): Promise<Result<ReviewDraftDto>> {
+  await ctx.db
+    .delete(uiPreference)
+    .where(
+      and(
+        eq(uiPreference.workspaceId, ctx.workspaceId),
+        eq(uiPreference.userId, ctx.userId),
+        eq(uiPreference.key, reviewDraftPreferenceKey(taskId)),
+      ),
+    );
+  return ok({ workspaceId: ctx.workspaceId, userId: ctx.userId, taskId, draft: null });
 }

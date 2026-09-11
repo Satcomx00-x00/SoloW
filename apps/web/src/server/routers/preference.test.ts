@@ -99,3 +99,58 @@ describe("preference.setSurfaceLayout", () => {
     ).toBe("BAD_REQUEST");
   });
 });
+
+describe("preference.getReviewDraft / setReviewDraft / clearReviewDraft", () => {
+  const draft = {
+    sessionId: "sess-1",
+    round: 2,
+    viewed: [{ repositoryId: "repo-1", path: "src/a.ts" }],
+    notes: [
+      { repositoryId: "repo-1", path: "src/a.ts", side: "new" as const, line: 12, text: "?" },
+    ],
+    general: "looks close",
+  };
+
+  it("is null until something is saved, then reads back what the same user saved, per Task", async () => {
+    const me = caller({ workspaceId, userId: "owner-acme" });
+    expect((await me.preference.getReviewDraft({ taskId: "task-1" })).draft).toBeNull();
+
+    await me.preference.setReviewDraft({ taskId: "task-1", draft });
+    expect((await me.preference.getReviewDraft({ taskId: "task-1" })).draft).toEqual(draft);
+    // Per Task: the draft on one is not the draft on another.
+    expect((await me.preference.getReviewDraft({ taskId: "task-2" })).draft).toBeNull();
+    // Per user: a colleague's reading is theirs.
+    const other = caller({ workspaceId, userId: "other-user" });
+    expect((await other.preference.getReviewDraft({ taskId: "task-1" })).draft).toBeNull();
+  });
+
+  it("replaces rather than merges, and forgets on clear", async () => {
+    const me = caller({ workspaceId, userId: "owner-acme" });
+    await me.preference.setReviewDraft({ taskId: "task-1", draft });
+    await me.preference.setReviewDraft({
+      taskId: "task-1",
+      draft: { ...draft, round: 3, viewed: [], notes: [] },
+    });
+    const after = (await me.preference.getReviewDraft({ taskId: "task-1" })).draft;
+    expect(after?.round).toBe(3);
+    expect(after?.viewed).toEqual([]);
+
+    await me.preference.clearReviewDraft({ taskId: "task-1" });
+    expect((await me.preference.getReviewDraft({ taskId: "task-1" })).draft).toBeNull();
+  });
+
+  it("refuses a note with no text and an unauthenticated caller", async () => {
+    const me = caller({ workspaceId, userId: "owner-acme" });
+    expect(
+      await errCode(() =>
+        me.preference.setReviewDraft({
+          taskId: "task-1",
+          draft: { ...draft, notes: [{ ...draft.notes[0]!, text: "" }] },
+        }),
+      ),
+    ).toBe("BAD_REQUEST");
+    expect(await errCode(() => caller(null).preference.getReviewDraft({ taskId: "task-1" }))).toBe(
+      "UNAUTHORIZED",
+    );
+  });
+});

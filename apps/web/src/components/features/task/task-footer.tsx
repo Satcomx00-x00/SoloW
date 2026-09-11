@@ -32,6 +32,7 @@ export function TaskFooter({
   task,
   outstanding = [],
   consequences,
+  viewed = null,
   decidePending,
   onDecide,
   onLaunch,
@@ -46,6 +47,8 @@ export function TaskFooter({
   outstanding?: readonly TaskDependencyDto[];
   /** What one Approve covers, already in words: "2 repositories, 2 branches, 14 files". */
   consequences: string;
+  /** How much of the change the reviewer has ticked off — never a gate, only a reminder. */
+  viewed?: { viewed: number; of: number } | null;
   /** The decision in flight, so its button spins and the other two lock (no double-approve). */
   decidePending: ReviewDecision | null;
   onDecide: (decision: ReviewDecision) => void;
@@ -64,6 +67,7 @@ export function TaskFooter({
     task,
     outstanding,
     consequences,
+    viewed,
     decidePending,
     onDecide,
     onLaunch,
@@ -164,13 +168,23 @@ function Row({ hint, children }: { hint: ReactNode; children: ReactNode }) {
  * So the scope of the single decision has to be legible, and a reviewer who approves without
  * scrolling the Changes column still sees it (issue #70 AC-2/AC-3).
  */
-function ReviewGate({ consequences, decidePending, onDecide }: FooterInput) {
+function ReviewGate({ consequences, viewed, decidePending, onDecide }: FooterInput) {
   const canDecide = decidePending === null;
+  // "7/12 viewed" on the button itself, where the eye is when it is about to press it. Never a
+  // block: a reviewer who has read the diff whole has no ticks and nothing to answer for.
+  const unread = viewed && viewed.viewed < viewed.of;
   return (
     <div className="space-y-2">
       <p className="flex items-center gap-1.5 text-muted-foreground text-xs">
         <GitBranch aria-hidden className="size-3.5 shrink-0" />
-        Approving covers {consequences}.
+        <span>
+          Approving covers {consequences}.
+          {viewed ? (
+            <span className={cn("ml-1", unread && "text-feedback-caution")}>
+              {viewed.viewed} of {viewed.of} files viewed.
+            </span>
+          ) : null}
+        </span>
       </p>
       <div className="flex flex-wrap items-center gap-2">
         <Button
@@ -180,6 +194,19 @@ function ReviewGate({ consequences, decidePending, onDecide }: FooterInput) {
           onClick={() => onDecide("approve")}
         >
           <Check /> Approve
+          {viewed ? (
+            // Decoration on the button; the sentence above carries the same fact in words, so the
+            // button's name stays "Approve" for anyone (or any check) that finds it by name.
+            <span
+              aria-hidden
+              className={cn(
+                "ml-1 font-mono text-2xs tabular-nums opacity-80",
+                unread && "text-feedback-caution",
+              )}
+            >
+              {viewed.viewed}/{viewed.of}
+            </span>
+          ) : null}
         </Button>
         <Button
           size="lg"

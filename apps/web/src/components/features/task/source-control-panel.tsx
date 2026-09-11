@@ -15,6 +15,7 @@ import {
 import { useState } from "react";
 import { ConfirmDialog } from "@/components/features/confirm-action";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { buildScmTree, type ScmTreeNode, splitPath } from "./source-control-tree";
 
@@ -56,6 +57,18 @@ export interface SourceControlActions {
   onUnstage: (paths: string[]) => void;
   onDiscard: (paths: string[]) => void;
   onRefresh: () => void;
+}
+
+/**
+ * Which files the reviewer has ticked off, and the tick itself (spec F10 follow-on).
+ *
+ * The reviewer's own state, not the harness's — which is why this row gets the app's checkbox
+ * where `todo-list.tsx` deliberately does not: here the person is the one who owns the mark.
+ * Optional as a pair: a live worktree has no review to tick through, and offers no box.
+ */
+export interface ViewedFiles {
+  viewed: ReadonlySet<string>;
+  onToggleViewed: (path: string) => void;
 }
 
 interface RowActionsProps extends SourceControlActions {
@@ -123,6 +136,7 @@ function FileRow({
   writable,
   onSelect,
   actions,
+  viewedFiles,
 }: {
   file: ScmFileDto;
   label: string;
@@ -132,7 +146,9 @@ function FileRow({
   writable: boolean;
   onSelect: (file: ScmFileDto) => void;
   actions: SourceControlActions;
+  viewedFiles?: ViewedFiles | undefined;
 }) {
+  const viewed = viewedFiles?.viewed.has(file.path) ?? false;
   return (
     <li className="group/row">
       <div
@@ -155,7 +171,11 @@ function FileRow({
           >
             {file.letter}
           </span>
-          <span className="min-w-0 truncate" title={file.path}>
+          {/* A viewed file reads quieter, so the ones still to read stand out from the list. */}
+          <span
+            className={cn("min-w-0 truncate", viewed && "text-muted-foreground")}
+            title={file.path}
+          >
             {label}
             {parent && <span className="ml-1.5 text-muted-foreground/60">{parent}</span>}
           </span>
@@ -171,6 +191,14 @@ function FileRow({
           </span>
         )}
         {file.binary && <span className="shrink-0 text-2xs text-muted-foreground/60">binary</span>}
+        {viewedFiles ? (
+          <Checkbox
+            aria-label={`Mark ${file.path} viewed`}
+            checked={viewed}
+            className="ml-1 shrink-0"
+            onCheckedChange={() => viewedFiles.onToggleViewed(file.path)}
+          />
+        ) : null}
         {writable && (
           <RowActions
             group={file.group}
@@ -192,6 +220,7 @@ function TreeNodes({
   writable,
   onSelect,
   actions,
+  viewedFiles,
 }: {
   nodes: ScmTreeNode[];
   depth: number;
@@ -199,6 +228,7 @@ function TreeNodes({
   writable: boolean;
   onSelect: (file: ScmFileDto) => void;
   actions: SourceControlActions;
+  viewedFiles?: ViewedFiles | undefined;
 }) {
   return (
     <>
@@ -220,6 +250,7 @@ function TreeNodes({
                 writable={writable}
                 onSelect={onSelect}
                 actions={actions}
+                viewedFiles={viewedFiles}
               />
             </ul>
           </li>
@@ -234,6 +265,7 @@ function TreeNodes({
             writable={writable}
             onSelect={onSelect}
             actions={actions}
+            viewedFiles={viewedFiles}
           />
         ),
       )}
@@ -272,6 +304,7 @@ export function SourceControlPanel({
   selectedPath,
   onSelect,
   busy = false,
+  viewedFiles,
   ...actions
 }: SourceControlActions & {
   worktree: ScmWorktreeDto;
@@ -280,6 +313,8 @@ export function SourceControlPanel({
   selectedPath: string | null;
   onSelect: (file: ScmFileDto) => void;
   busy?: boolean;
+  /** Present on a captured change under review; absent on a live worktree. */
+  viewedFiles?: ViewedFiles | undefined;
 }) {
   const [collapsed, setCollapsed] = useState<Partial<Record<ScmGroup, boolean>>>({});
   const [pendingDiscard, setPendingDiscard] = useState<ScmFileDto[] | null>(null);
@@ -400,6 +435,7 @@ export function SourceControlPanel({
                         writable={worktree.writable}
                         onSelect={onSelect}
                         actions={rowActions}
+                        viewedFiles={viewedFiles}
                       />
                     ) : (
                       files.map((file) => {
@@ -415,6 +451,7 @@ export function SourceControlPanel({
                             writable={worktree.writable}
                             onSelect={onSelect}
                             actions={rowActions}
+                            viewedFiles={viewedFiles}
                           />
                         );
                       })
