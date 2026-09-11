@@ -57,6 +57,7 @@ function renderFooter(
       onDecide={(d) => calls.push(`decide:${d}`)}
       onLaunch={() => calls.push("launch")}
       onRetry={() => calls.push("retry")}
+      onOpenReview={() => calls.push("open-review")}
       renewHref="/settings?section=secrets&renewSecret=anthropic"
       error={null}
       {...extra}
@@ -144,14 +145,32 @@ describe("TaskFooter", () => {
     }
   });
 
-  it("does not offer Open review a second time on a finished run — the header has the one", () => {
-    renderFooter({
+  it("opens the gate on a finished run from the foot, where the decisions are", () => {
+    const calls = renderFooter({
       state: "running",
       completedOutcome: "changes_ready",
       completedAt: "2026-01-01T00:00:00.000Z",
     });
+    fireEvent.click(screen.getByRole("button", { name: "Open review" }));
+    expect(calls).toEqual(["open-review"]);
+  });
+
+  it("offers the gate on a plan-only Workflow Step, and says the plan is what is reviewed", () => {
+    const calls = renderFooter({
+      state: "running",
+      completedOutcome: "nothing_to_do",
+      completedAt: "2026-01-01T00:00:00.000Z",
+      workflowId: "wf-1",
+      workflowStepId: "st-1",
+    });
+    expect(screen.getByText(/plan is ready/)).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Open review" }));
+    expect(calls).toEqual(["open-review"]);
+  });
+
+  it("offers nothing to open while the harness is still working", () => {
+    renderFooter({ state: "running" });
     expect(screen.queryByRole("button")).toBeNull();
-    expect(screen.getByText(/changes ready/i)).toBeDefined();
   });
 
   it("shows a refusal in words under whichever control produced it", () => {

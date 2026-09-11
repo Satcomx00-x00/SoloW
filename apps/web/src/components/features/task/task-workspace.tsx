@@ -13,7 +13,7 @@ import type {
   TaskState,
 } from "@solow/contracts";
 import { DEFAULT_TASK_PANE_LAYOUT, type TaskPaneLayout } from "@solow/contracts";
-import { canOpenReview, primaryTaskRepository } from "@solow/core";
+import { primaryTaskRepository } from "@solow/core";
 import {
   ArrowLeft,
   CheckCircle2,
@@ -62,8 +62,8 @@ import { selectedTabId, TERMINAL_PANEL_ID, useStepScope, WorkflowSteps } from ".
 /**
  * What the harness said about how its run ended, in the header.
  *
- * `changes_ready` reaches this only once the Task has left `running` — before that the same
- * outcome renders as the "Open review" control above.
+ * `changes_ready` on a `running` Task is also the footer's "Open review" moment; the header
+ * still names the outcome beside it.
  *
  * Each outcome carries its own glyph as well as its own words. One check-circle for all three
  * said "finished well" over a run that had given up, which is the same failure the labels here
@@ -776,24 +776,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
               where a plan-first Step reaches its gate with nothing changed and the gate is about
               the plan. A run that gave up has not finished.
             */}
-            {canOpenReview(t) && t.state === "running" ? (
-              // The app's own Button, not a styled `<button>`: it brings the control ladder, the
-              // one focus ring, the press, and — the reason it matters here — a loading state the
-              // component owns, so the gate cannot be opened twice while the first call is in
-              // flight. It keeps the done hue because it is the one control on this page that is
-              // about a run having succeeded.
-              <Button
-                size="sm"
-                variant="outline"
-                className="border-state-done/35 bg-state-done/12 text-state-done hover:border-state-done/50 hover:bg-state-done/20 hover:text-state-done"
-                loading={submitForReview.isPending}
-                onClick={() => submitForReview.mutate({ id: t.id })}
-                title={t.completedSummary ?? undefined}
-              >
-                <CheckCircle2 />
-                Open review
-              </Button>
-            ) : t.completedAt ? (
+            {t.completedAt ? (
               /*
                 All three outcomes, named — and drawn as the app's soft badge rather than a
                 hand-rolled 4px rectangle, which put two differently-shaped pills side by side in
@@ -802,6 +785,9 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
                 entered review, the header called it blocked while the transcript two inches below
                 said "Finished — changes ready". Observed on a real run: two opposite claims on one
                 screen, and the wrong one is the one in the header a reader trusts.
+
+                The control that opens the gate is in the footer, with the decisions — the header
+                only reports.
               */
               <CompletionBadge outcome={t.completedOutcome} />
             ) : null}
@@ -1025,6 +1011,8 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
         onDecide={runDecision}
         onLaunch={() => requestMove("running")}
         onRetry={() => retry.mutate({ id: t.id })}
+        onOpenReview={() => submitForReview.mutate({ id: t.id })}
+        openReviewPending={submitForReview.isPending}
         actionPending={move.isPending || launch.isPending || retry.isPending}
         renewHref={renewHref}
         error={footerMessage}

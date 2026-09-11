@@ -40,6 +40,8 @@ export function TaskFooter({
   onDecide,
   onLaunch,
   onRetry,
+  onOpenReview,
+  openReviewPending = false,
   actionPending = false,
   renewHref,
   error,
@@ -58,6 +60,9 @@ export function TaskFooter({
   onDecide: (decision: ReviewDecision) => void;
   onLaunch: () => void;
   onRetry: () => void;
+  /** Open the gate on a run that has declared itself finished (`canOpenReview`). */
+  onOpenReview: () => void;
+  openReviewPending?: boolean;
   /** A launch, retry or move in flight. */
   actionPending?: boolean;
   /** Where "Renew" goes for a credential-expired Task; null when the credential is unknown. */
@@ -76,6 +81,8 @@ export function TaskFooter({
     onDecide,
     onLaunch,
     onRetry,
+    onOpenReview,
+    openReviewPending,
     actionPending,
     renewHref,
   });
@@ -103,6 +110,7 @@ export function TaskFooter({
 type FooterInput = Omit<Parameters<typeof TaskFooter>[0], "error"> & {
   outstanding: readonly TaskDependencyDto[];
   actionPending: boolean;
+  openReviewPending: boolean;
 };
 
 function footerBody(input: FooterInput) {
@@ -125,18 +133,32 @@ function footerBody(input: FooterInput) {
         </p>
       );
     case "running":
-      // The harness declared it was finished and the header carries the one "Open review"
-      // control (the control checks expect exactly one on the page). The foot only says so —
-      // and says what the gate is about, which on a Workflow Step is the Step's outcome (a plan)
-      // rather than a change. "Working" is only true while nothing has been declared.
+      // The harness declared it was finished: the control that opens the gate sits here, with
+      // the sentence that says what the gate is about — on a Workflow Step the Step's outcome (a
+      // plan), otherwise the change. It used to be a small button in the header, and the person
+      // looking for the decision looked here, read a sentence about a button, and did not find
+      // it. One "Open review" on the page (the control checks find it by name), and it is this.
       if (canOpenReview(task)) {
         return (
-          <p className="flex items-center gap-1.5 text-muted-foreground text-sm">
-            <CheckCircle2 aria-hidden className="size-3.5 shrink-0 text-state-done" />
-            {task.completedOutcome === "changes_ready"
-              ? "Finished — changes ready. Open review above to decide on them."
-              : "Finished — nothing changed. Open review above to approve this step and move the workflow on."}
-          </p>
+          <Row
+            hint={
+              <span className="flex items-center gap-1.5">
+                <CheckCircle2 aria-hidden className="size-3.5 shrink-0 text-state-done" />
+                {task.completedOutcome === "changes_ready"
+                  ? "Finished — changes ready. Open the review to decide on them."
+                  : "Finished — the plan is ready and nothing changed. Open the review to approve this step and move the workflow on."}
+              </span>
+            }
+          >
+            <Button
+              size="lg"
+              loading={input.openReviewPending}
+              onClick={input.onOpenReview}
+              title={task.completedSummary ?? undefined}
+            >
+              <CheckCircle2 /> Open review
+            </Button>
+          </Row>
         );
       }
       if (task.completedAt !== null) {
