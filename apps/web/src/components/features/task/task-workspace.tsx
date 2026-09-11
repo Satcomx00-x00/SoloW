@@ -23,7 +23,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { TaskStateBadge } from "@/components/features/board/task-state-badge";
 import { ConfirmDialog } from "@/components/features/confirm-action";
 import { useBackToProject } from "@/components/features/shared/back-to-project";
@@ -97,17 +97,6 @@ const STREAM_TONE: Record<string, string> = {
   open: "text-feedback-ok",
   reconnecting: "text-feedback-caution",
   error: "text-feedback-error",
-};
-
-/** What the hub said about the last thing we sent, in words an operator can act on. */
-const ACK_MESSAGE: Record<string, string> = {
-  agent_not_running: "No harness is running for this task. Nothing was sent.",
-  frame_not_authorized: "This connection is not allowed to steer that task.",
-  frame_malformed: "The message could not be read by the orchestrator.",
-  // The harness is still running in all three of these; only the question is over.
-  permission_not_pending: "That request was already settled — by the deadline, or by someone else.",
-  permission_option_unknown: "The harness no longer offers that option.",
-  permission_unsupported: "This harness's protocol has no permission channel to answer on.",
 };
 
 /** How the last run ended, as the app's soft badge — one shape, one definition, like every other. */
@@ -212,6 +201,26 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   const onAck = useCallback((next: TaskInputAck) => setAck(next), []);
   const live = useTaskStream(taskId, { onEvent: onLive, onAck });
   const router = useRouter();
+  /**
+   * A steer typed while the stream was away (TASK-022).
+   *
+   * The socket blinks — a hub restart, a laptop lid — and `sendInput` drops what it cannot
+   * deliver. Rather than disable the box for those seconds, the workspace holds the one message
+   * here and sends it the moment the stream is back. One message, not a queue: a second send
+   * while the first is waiting replaces it, which is what an operator who has just rephrased
+   * wants. It is thrown away if the Task stops Running first, because then there is no harness
+   * for it to reach and a message that arrives at the *next* run would be steering blind.
+   */
+  const [queued, setQueued] = useState<string | null>(null);
+  const isRunning = task.data?.state === "running";
+  useEffect(() => {
+    if (queued === null) return;
+    if (!isRunning) {
+      setQueued(null);
+      return;
+    }
+    if (live.status === "open" && live.sendInput(queued)) setQueued(null);
+  }, [queued, isRunning, live.status, live.sendInput]);
 
   /**
    * The split between the run and the change under review — a per-user preference, so the
@@ -455,7 +464,6 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
         };
   // Steering only makes sense while a harness is actually working; once the Task is in review
   // the way to ask for more is "request changes", which is recorded (Principle I).
-  const isRunning = t.state === "running";
   const canSteer = isRunning && live.status === "open";
   // The primary attachment's branch (issue #7). The header has room for one line, so it names
   // the repository the harness actually ran in; the Changes tab is where every repository's own
@@ -499,9 +507,15 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
 
   const submitInput = () => {
     const text = input.trim();
-    if (!text || !canSteer) return;
+    if (!text || !isRunning) return;
     setAck(null);
-    if (live.sendInput(text)) setInput("");
+    // Straight through when there is a stream to send on; held for it otherwise.
+    if (canSteer && live.sendInput(text)) {
+      setInput("");
+      return;
+    }
+    setQueued(text);
+    setInput("");
   };
 
   return (
@@ -697,12 +711,10 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
               }}
               canSteer={canSteer}
               isRunning={isRunning}
+              queued={queued}
+              onDiscardQueued={() => setQueued(null)}
+              ackError={ack && !ack.ok ? (ack.error ?? "unknown") : null}
             />
-            {ack && !ack.ok && (
-              <p className="text-destructive text-xs" role="alert">
-                {ACK_MESSAGE[ack.error ?? ""] ?? "The orchestrator refused that message."}
-              </p>
-            )}
           </div>
         }
         onResize={(changesWidth) => savePane({ ...pane, changesWidth })}

@@ -440,6 +440,40 @@ describe("TaskWorkspace harness steering (TASK-022)", () => {
     await waitFor(() => expect(sockets[0]?.sent).toEqual([{ kind: "stop", taskId: TASK_ID }]));
   });
 
+  it("holds a message typed while the stream is away, and sends it once the stream is back", async () => {
+    renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, handlers("running"));
+    const box = (await screen.findByLabelText(/Message the harness/)) as HTMLTextAreaElement;
+    await waitFor(() => expect(box.hasAttribute("disabled")).toBe(false));
+    await waitFor(() =>
+      expect(
+        document.querySelector("[data-stream-status]")?.getAttribute("data-stream-status"),
+      ).toBe("open"),
+    );
+
+    // The hub goes away. The box stays open; the message is held, not dropped.
+    act(() => sockets[0]?.drop());
+    await waitFor(() =>
+      expect(
+        document.querySelector("[data-stream-status]")?.getAttribute("data-stream-status"),
+      ).not.toBe("open"),
+    );
+    expect(box.hasAttribute("disabled")).toBe(false);
+    fireEvent.change(box, { target: { value: "also bump the version" } });
+    fireEvent.click(screen.getByRole("button", { name: /Send/ }));
+    expect(await screen.findByText(/Queued — sends when the stream is back/)).toBeDefined();
+    expect(box.value).toBe("");
+    expect(sockets[0]?.sent).toEqual([]);
+
+    // The hub is back (the hook reconnects on its own): the held message goes, once.
+    await waitFor(() => expect(sockets.length).toBe(2), { timeout: 3000 });
+    await waitFor(() =>
+      expect(sockets[1]?.sent).toEqual([
+        { kind: "input", taskId: TASK_ID, data: "also bump the version" },
+      ]),
+    );
+    await waitFor(() => expect(screen.queryByText(/Queued — sends/)).toBeNull());
+  });
+
   it("tells the operator when the hub had no harness to give the input to", async () => {
     renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, handlers("running"));
     const box = (await screen.findByLabelText(/Message the harness/)) as HTMLInputElement;

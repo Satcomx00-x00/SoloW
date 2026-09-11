@@ -1,0 +1,143 @@
+/// <reference types="bun-types" />
+
+import { afterEach, describe, expect, it } from "bun:test";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { useState } from "react";
+import { matchSteers } from "./composer-steers";
+import { HarnessComposer } from "./harness-composer";
+
+/**
+ * The composer on its own: the keys that send and the keys that do not, the slash menu, and the
+ * two things the frame now says for itself — a message waiting for the stream, and the hub's
+ * refusal of the last one.
+ */
+
+afterEach(cleanup);
+
+function Harness({
+  canSteer = true,
+  isRunning = true,
+  queued = null,
+  ackError = null,
+  onSubmit,
+  onStop = () => {},
+}: {
+  canSteer?: boolean;
+  isRunning?: boolean;
+  queued?: string | null;
+  ackError?: string | null;
+  onSubmit: (value: string) => void;
+  onStop?: () => void;
+}) {
+  const [value, setValue] = useState("");
+  return (
+    <HarnessComposer
+      value={value}
+      onChange={setValue}
+      onSubmit={() => onSubmit(value)}
+      onStop={onStop}
+      canSteer={canSteer}
+      isRunning={isRunning}
+      queued={queued}
+      onDiscardQueued={() => {}}
+      ackError={ackError}
+    />
+  );
+}
+
+describe("HarnessComposer keys", () => {
+  it("sends on ⌘↩ / Ctrl↩ and breaks the line on a bare Enter", () => {
+    const sent: string[] = [];
+    render(<Harness onSubmit={(v) => sent.push(v)} />);
+    const box = screen.getByLabelText("Message the harness");
+
+    fireEvent.change(box, { target: { value: "first line" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(sent).toEqual([]);
+
+    fireEvent.keyDown(box, { key: "Enter", metaKey: true });
+    fireEvent.keyDown(box, { key: "Enter", ctrlKey: true });
+    expect(sent).toEqual(["first line", "first line"]);
+  });
+
+  it("is a textarea, so a steer can be a paragraph", () => {
+    render(<Harness onSubmit={() => {}} />);
+    expect(screen.getByLabelText("Message the harness").tagName).toBe("TEXTAREA");
+  });
+});
+
+describe("HarnessComposer slash steers", () => {
+  it("narrows by prefix: `/st` offers status and stop, nothing else", () => {
+    expect(matchSteers("/st").map((s) => s.command)).toEqual(["status", "stop"]);
+    expect(matchSteers("/").length).toBeGreaterThan(2);
+    // A slash inside a real message is the operator's own text.
+    expect(matchSteers("/status please")).toEqual([]);
+    expect(matchSteers("see /etc/hosts")).toEqual([]);
+  });
+
+  it("expands a picked steer into the box, and Escape clears the menu", () => {
+    render(<Harness onSubmit={() => {}} />);
+    const box = screen.getByLabelText("Message the harness") as HTMLTextAreaElement;
+
+    fireEvent.change(box, { target: { value: "/te" } });
+    const menu = screen.getByRole("listbox", { name: "Steers" });
+    expect(within(menu).getAllByRole("option")).toHaveLength(1);
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(box.value).toMatch(/test suite/);
+    expect(screen.queryByRole("listbox")).toBeNull();
+
+    fireEvent.change(box, { target: { value: "/" } });
+    fireEvent.keyDown(box, { key: "Escape" });
+    expect(box.value).toBe("");
+  });
+
+  it("walks the menu with the arrows and picks the highlighted row", () => {
+    render(<Harness onSubmit={() => {}} />);
+    const box = screen.getByLabelText("Message the harness") as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: "/" } });
+    fireEvent.keyDown(box, { key: "ArrowDown" });
+    fireEvent.keyDown(box, { key: "ArrowDown" });
+    fireEvent.keyDown(box, { key: "Tab" });
+    expect(box.value).toMatch(/Wrap up/);
+  });
+
+  it("/stop asks before stopping, exactly as the Stop button does", async () => {
+    let stopped = 0;
+    render(<Harness onSubmit={() => {}} onStop={() => stopped++} />);
+    const box = screen.getByLabelText("Message the harness") as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: "/stop" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(box.value).toBe("");
+    expect(await screen.findByRole("alertdialog")).toBeDefined();
+    expect(stopped).toBe(0);
+    fireEvent.click(screen.getByRole("button", { name: "Stop the harness" }));
+    expect(stopped).toBe(1);
+  });
+
+  it("offers no menu when there is no harness to steer", () => {
+    render(<Harness onSubmit={() => {}} isRunning={false} />);
+    const box = screen.getByLabelText("Message the harness");
+    expect(box.hasAttribute("disabled")).toBe(true);
+    expect(screen.queryByRole("listbox")).toBeNull();
+  });
+});
+
+describe("HarnessComposer frame", () => {
+  it("keeps the box open while the stream is away, and names the message waiting", () => {
+    render(<Harness onSubmit={() => {}} canSteer={false} queued="also bump the version" />);
+    const box = screen.getByLabelText("Message the harness");
+    expect(box.hasAttribute("disabled")).toBe(false);
+    expect(screen.getByText(/Queued — sends when the stream is back/).textContent).toContain(
+      "also bump the version",
+    );
+    // Stop needs a live socket; a queued stop would stop the wrong run.
+    expect(screen.getByRole("button", { name: /Stop/ }).hasAttribute("disabled")).toBe(true);
+  });
+
+  it("says the hub's refusal inside the frame, in words", () => {
+    render(<Harness onSubmit={() => {}} ackError="widget_not_pending" />);
+    const form = screen.getByRole("alert").closest("form");
+    expect(form).not.toBeNull();
+    expect(screen.getByRole("alert").textContent).toMatch(/already answered/);
+  });
+});

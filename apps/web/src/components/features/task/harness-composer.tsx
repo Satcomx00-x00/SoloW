@@ -1,9 +1,30 @@
 "use client";
 
-import { CornerDownLeft, Square } from "lucide-react";
-import { ConfirmAction } from "@/components/features/confirm-action";
+import { Clock, CornerDownLeft, Square, X } from "lucide-react";
+import { useEffect, useId, useState } from "react";
+import { ConfirmDialog } from "@/components/features/confirm-action";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
+import { type ComposerSteer, matchSteers } from "./composer-steers";
+
+/** What the hub said about the last thing we sent, in words an operator can act on. */
+const ACK_MESSAGE: Record<string, string> = {
+  agent_not_running: "No harness is running for this task. Nothing was sent.",
+  frame_not_authorized: "This connection is not allowed to steer that task.",
+  frame_malformed: "The message could not be read by the orchestrator.",
+  // The harness is still running in all of these; only the question is over.
+  permission_not_pending: "That request was already settled — by the deadline, or by someone else.",
+  permission_option_unknown: "The harness no longer offers that option.",
+  permission_unsupported: "This harness's protocol has no permission channel to answer on.",
+  widget_not_pending: "That question was already answered — by the deadline, or by someone else.",
+  widget_option_unknown: "The harness no longer offers that choice.",
+};
+
+/** The ack's error code as a sentence; the fallback for a code this build does not know. */
+export function ackMessage(error: string | undefined): string {
+  return ACK_MESSAGE[error ?? ""] ?? "The orchestrator refused that message.";
+}
 
 /**
  * Steering a live harness (TASK-022): the message box under the terminal, and the stop beside it.
@@ -15,6 +36,22 @@ import { Input } from "@/components/ui/input";
  * same one the operator's own turns now sit on in the transcript above: the whole right side of
  * this panel is "what you say", the left is "what the harness says".
  *
+ * **A field that grows.** A steer is often a paragraph — "no, the other config file, the one
+ * under `apps/`, and leave the lockfile alone" — and a single-line box made people write it as
+ * one breathless sentence. Enter now breaks the line; ⌘↩ (Ctrl↩) sends, and the frame says so.
+ *
+ * **A message that waits.** The socket blinks — a hub restart, a laptop lid — and for those
+ * seconds the box used to disable itself and say nothing about the message half-typed in it. A
+ * draft sent while the stream is away is *queued* in the frame instead, and goes the moment the
+ * stream is back (the workspace owns that flush, because it owns the socket). Only a Task that
+ * is no longer Running has nothing to steer, and then the box says that, as before.
+ *
+ * **The hub's answer, in the frame.** A refused send used to be reported by an orphan line
+ * under the form; it belongs inside the thing that was refused.
+ *
+ * **`/` for the usual asks.** Four canned steers (`composer-steers.ts`) behind a leading slash,
+ * so "run the tests" is three keystrokes rather than a sentence typed for the tenth time.
+ *
  * Extracted from the workspace so it can be rendered — and looked at — on its own.
  */
 export function HarnessComposer({
@@ -24,59 +61,197 @@ export function HarnessComposer({
   onStop,
   canSteer,
   isRunning,
+  queued = null,
+  onDiscardQueued,
+  ackError = null,
 }: {
   value: string;
   onChange: (value: string) => void;
   onSubmit: () => void;
   onStop: () => void;
-  /** False when there is no live harness to reach — the whole row goes quiet rather than lying. */
+  /** True while there is a live harness to reach *right now*: the message goes on send. */
   canSteer: boolean;
+  /** True while a harness exists to reach at all — a send with no stream is queued, not lost. */
   isRunning: boolean;
+  /** A message waiting for the stream to come back, shown until it goes. */
+  queued?: string | null;
+  onDiscardQueued?: (() => void) | undefined;
+  /** The hub's refusal of the last send, as its wire code; rendered in words. */
+  ackError?: string | null;
 }) {
+  const [isMac, setIsMac] = useState(false);
+  useEffect(() => setIsMac(navigator.platform.toLowerCase().includes("mac")), []);
+  const [stopOpen, setStopOpen] = useState(false);
+  const [highlighted, setHighlighted] = useState(0);
+  const listId = useId();
+
+  const steers = isRunning ? matchSteers(value) : [];
+  const menuOpen = steers.length > 0;
+  // The highlight is clamped, not reset: narrowing from `/` to `/st` keeps the cursor where it
+  // was when that row survived, and pulls it onto the last row when it did not.
+  const active = Math.min(highlighted, Math.max(steers.length - 1, 0));
+
+  const pick = (steer: ComposerSteer) => {
+    if (steer.action === "stop") {
+      onChange("");
+      setStopOpen(true);
+      return;
+    }
+    onChange(steer.text ?? "");
+  };
+
+  const submit = () => {
+    if (!value.trim() || !isRunning) return;
+    onSubmit();
+  };
+
   return (
     <form
       // Wraps rather than crushes. Send and Stop have a fixed appetite, so on a narrow run column
       // a single row spent the remainder on the field and left a box two characters wide; below
       // the field's floor the actions drop to their own line instead, which is the arrangement
       // that still lets someone type.
-      className="surface-edge flex flex-wrap items-center justify-end gap-2 rounded-xl border bg-card/60 p-2 transition-colors focus-within:border-ring/40"
+      className="surface-edge relative flex flex-wrap items-end justify-end gap-2 rounded-xl border bg-card/60 p-2 transition-colors focus-within:border-ring/40"
+      data-composer-state={canSteer ? "live" : isRunning ? "away" : "idle"}
       onSubmit={(e) => {
         e.preventDefault();
-        onSubmit();
+        submit();
       }}
     >
-      <label className="sr-only" htmlFor="harness-input">
-        Message the harness
-      </label>
-      <Input
-        id="harness-input"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        disabled={!canSteer}
-        placeholder={
-          isRunning
-            ? "Message the harness…"
-            : "The harness is not running, so there is nothing to steer."
-        }
-        // A floor, not a fixed width: without one the field's flex basis is its placeholder and it
-        // pushed Send and Stop out of the form; with one it holds 10rem and the actions wrap.
-        className="h-9 min-w-40 flex-1 border-0 bg-transparent text-sm shadow-none focus-visible:border-0"
-      />
-      <Button type="submit" disabled={!canSteer || !value.trim()}>
-        <CornerDownLeft /> Send
-      </Button>
-      <ConfirmAction
-        disabled={!canSteer}
+      <ConfirmDialog
+        open={stopOpen}
+        onOpenChange={setStopOpen}
         title="Stop the harness?"
         description="The harness stops where it is. Whatever it has already changed stays in the worktree and goes to review. Nothing is discarded."
         confirmLabel="Stop the harness"
         onConfirm={onStop}
-        trigger={
-          <Button type="button" variant="outline" disabled={!canSteer}>
-            <Square /> Stop
-          </Button>
-        }
       />
+      {menuOpen ? (
+        <div
+          id={listId}
+          role="listbox"
+          aria-label="Steers"
+          className="absolute inset-x-2 bottom-full mb-1 overflow-hidden rounded-lg border bg-popover p-1 shadow-md"
+        >
+          {steers.map((steer, index) => (
+            <div
+              key={steer.command}
+              id={`${listId}-${index}`}
+              role="option"
+              // Focus stays in the textarea; `aria-activedescendant` names the row instead.
+              tabIndex={-1}
+              aria-selected={index === active}
+              className={cn(
+                "flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-xs",
+                index === active ? "bg-accent text-accent-foreground" : "text-foreground/80",
+              )}
+              onMouseEnter={() => setHighlighted(index)}
+              onMouseDown={(e) => {
+                // Before the textarea loses focus, so the pick lands and the field keeps it.
+                e.preventDefault();
+                pick(steer);
+              }}
+            >
+              <span className="font-mono text-muted-foreground">/{steer.command}</span>
+              <span className="truncate">{steer.label}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      <div className="flex min-w-40 flex-1 flex-col gap-1">
+        <label className="sr-only" htmlFor="harness-input">
+          Message the harness
+        </label>
+        <Textarea
+          id="harness-input"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          disabled={!isRunning}
+          rows={1}
+          role={menuOpen ? "combobox" : undefined}
+          aria-controls={menuOpen ? listId : undefined}
+          aria-expanded={menuOpen ? true : undefined}
+          aria-activedescendant={menuOpen ? `${listId}-${active}` : undefined}
+          placeholder={
+            isRunning
+              ? canSteer
+                ? "Message the harness… ( / for the usual asks)"
+                : "The stream is away. A message sent now goes when it is back."
+              : "The harness is not running, so there is nothing to steer."
+          }
+          onKeyDown={(e) => {
+            if (menuOpen) {
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                setHighlighted((active + 1) % steers.length);
+                return;
+              }
+              if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setHighlighted((active - 1 + steers.length) % steers.length);
+                return;
+              }
+              if (e.key === "Enter" || e.key === "Tab") {
+                e.preventDefault();
+                const steer = steers[active];
+                if (steer) pick(steer);
+                return;
+              }
+              if (e.key === "Escape") {
+                e.preventDefault();
+                onChange("");
+                return;
+              }
+            }
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
+              submit();
+            }
+          }}
+          // A floor, not a fixed width, and a ceiling: the field grows with the draft until it
+          // would start eating the terminal above it, then scrolls.
+          className="max-h-40 min-h-9 resize-none border-0 bg-transparent px-1 py-2 text-sm shadow-none focus-visible:border-0"
+        />
+        {queued ? (
+          <p
+            className="flex items-center gap-1.5 px-1 text-2xs text-feedback-caution"
+            data-composer-queued
+          >
+            <Clock aria-hidden className="size-3 shrink-0" />
+            <span className="min-w-0 truncate">
+              Queued — sends when the stream is back: “{queued}”
+            </span>
+            {onDiscardQueued ? (
+              <button
+                type="button"
+                className="ml-auto inline-flex shrink-0 items-center gap-0.5 rounded px-1 text-muted-foreground hover:text-foreground"
+                onClick={onDiscardQueued}
+              >
+                <X aria-hidden className="size-3" /> Discard
+              </button>
+            ) : null}
+          </p>
+        ) : null}
+        {ackError ? (
+          <p className="px-1 text-2xs text-destructive" role="alert">
+            {ackMessage(ackError)}
+          </p>
+        ) : null}
+      </div>
+      <Button type="submit" disabled={!isRunning || !value.trim()}>
+        <CornerDownLeft /> Send
+        <kbd className="ml-0.5 font-mono text-2xs opacity-60 tracking-widest">
+          {isMac ? "⌘" : "Ctrl"}↩
+        </kbd>
+      </Button>
+      <Button
+        type="button"
+        variant="outline"
+        disabled={!canSteer}
+        onClick={() => setStopOpen(true)}
+      >
+        <Square /> Stop
+      </Button>
     </form>
   );
 }
