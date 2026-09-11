@@ -600,7 +600,7 @@ describe("the Changes tab of a multi-Repository Task", () => {
    * each test, so the cases below still read as "given the changes are on screen".
    */
   async function openChangesTab(): Promise<void> {
-    await screen.findByRole("complementary", { name: "Changes" });
+    await screen.findByRole("complementary", { name: "Review" });
   }
 
   const baseHandlers = {
@@ -886,8 +886,59 @@ describe("TaskWorkspace todo checklist", () => {
   it("shows no panel at all until the harness has published a plan", async () => {
     renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, handlers());
 
-    await screen.findByRole("complementary", { name: "Changes" });
+    await screen.findByRole("complementary", { name: "Review" });
     expect(screen.queryByRole("region", { name: "Harness plan" })).toBeNull();
+    // And the tab that would show it is there but disabled — never a heading over nothing.
+    expect(screen.getByRole("tab", { name: "Plan" }).hasAttribute("disabled")).toBe(true);
+  });
+
+  it("opens on the plan while the run is going, and on the change once one is captured", async () => {
+    let state: TaskDto["state"] = "running";
+    const diff: SessionEventPayload = {
+      kind: "diff",
+      diffRef: "solow/task-1",
+      files: [{ path: "src/latch.ts", status: "modified", additions: 3, deletions: 1 }],
+      patch: "diff --git a/src/latch.ts b/src/latch.ts\n",
+      truncated: false,
+    };
+    let payloads: SessionEventPayload[] = [{ kind: "todos", items }];
+    renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
+      "task.get": () => task({ state }),
+      "session.listForTask": () => [session],
+      "session.get": () => detail(payloads),
+      "stream.ticket": () => ({
+        url: "ws://hub.test/?ticket=t",
+        expiresAt: "2026-01-01T00:01:00.000Z",
+      }),
+    });
+
+    const plan = await screen.findByRole("tab", { name: /Plan/ });
+    await waitFor(() => expect(plan.getAttribute("aria-selected")).toBe("true"));
+    expect(screen.getByRole("region", { name: "Harness plan" })).toBeDefined();
+
+    // The reviewer's pick wins over the default, until the Task moves on.
+    fireEvent.click(screen.getByRole("tab", { name: /Changes/ }));
+    expect(screen.getByRole("tab", { name: /Changes/ }).getAttribute("aria-selected")).toBe("true");
+    fireEvent.click(plan);
+    expect(plan.getAttribute("aria-selected")).toBe("true");
+
+    // The run reaches its gate: the diff lands and the column turns to it.
+    state = "review";
+    payloads = [...payloads, diff];
+    await waitFor(() => expect(sockets[0]).toBeDefined());
+    act(() =>
+      sockets[0]?.emit({
+        kind: "status",
+        taskId: TASK_ID,
+        state: "review",
+        at: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("tab", { name: /Changes/ }).getAttribute("aria-selected")).toBe(
+        "true",
+      ),
+    );
   });
 
   it("follows the run: a list published mid-run lands without a reload", async () => {
@@ -1127,7 +1178,12 @@ describe("TaskWorkspace step-scoped terminal", () => {
   it("says which Step it is showing, so a short transcript is not read as a short run", async () => {
     renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, bound("st-2"));
 
-    const panel = await screen.findByRole("tabpanel");
+    // The terminal's panel, not the right column's — that has tabs of its own now.
+    const strip = await screen.findByRole("region", { name: "Workflow progress" });
+    const panelId = within(strip)
+      .getByRole("tab", { name: /Review/ })
+      .getAttribute("aria-controls");
+    const panel = document.getElementById(panelId ?? "") as HTMLElement;
     expect(panel.textContent).toContain("Showing");
     expect(panel.textContent).toContain("step 2 of 3");
     expect(panel.textContent).toContain("The rest of this run is under the other steps.");
@@ -1266,8 +1322,9 @@ describe("TaskWorkspace step-scoped terminal", () => {
     // Activation is manual — arrowing to a Step must not fire a query for it on the way past.
     const { log } = renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, bound("st-2"));
 
-    const review = await screen.findByRole("tab", { name: /Review/ });
-    const tabs = screen.getAllByRole("tab");
+    const strip = await screen.findByRole("region", { name: "Workflow progress" });
+    const review = within(strip).getByRole("tab", { name: /Review/ });
+    const tabs = within(strip).getAllByRole("tab");
     // Exactly one of them is reachable by Tab: the selected one.
     expect(tabs.map((t) => t.getAttribute("tabindex"))).toEqual(["-1", "-1", "0", "-1"]);
 
@@ -1297,11 +1354,14 @@ describe("TaskWorkspace step-scoped terminal", () => {
     });
 
     await screen.findByText(/patched latch.ts/);
-    // No strip, so no tabs, so no panel pretending to be one half of a relationship with them —
-    // and the transcript request is the one this page has always made.
-    expect(screen.queryByRole("tablist")).toBeNull();
-    expect(screen.queryByRole("tab")).toBeNull();
-    expect(screen.queryByRole("tabpanel")).toBeNull();
+    // No strip, so no Step tabs, so no panel pretending to be one half of a relationship with
+    // them — and the transcript request is the one this page has always made. (The right column
+    // has a tablist of its own; the terminal is the panel under test.)
+    expect(screen.queryByRole("region", { name: "Workflow progress" })).toBeNull();
+    expect(screen.queryByRole("tab", { name: "Whole run" })).toBeNull();
+    expect(document.getElementById("task-terminal-panel")?.getAttribute("role")).not.toBe(
+      "tabpanel",
+    );
     expect(screen.queryByText(/The rest of this run/)).toBeNull();
     for (const call of sessionGets(log)) {
       expect(call.input).toEqual({ sessionId: SESSION_ID });

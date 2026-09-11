@@ -16,7 +16,6 @@ import {
   CheckCircle2,
   CircleSlash,
   GitBranch,
-  ListChecks,
   OctagonAlert,
   Trash2,
   TriangleAlert,
@@ -109,6 +108,76 @@ function CompletionBadge({ outcome }: { outcome: string | null }) {
       <Icon aria-hidden />
       {completion.label}
     </Badge>
+  );
+}
+
+type RightTab = "changes" | "plan";
+const RIGHT_TAB_ID: Record<RightTab, string> = {
+  changes: "task-right-tab-changes",
+  plan: "task-right-tab-plan",
+};
+const RIGHT_PANEL_ID: Record<RightTab, string> = {
+  changes: "task-right-panel-changes",
+  plan: "task-right-panel-plan",
+};
+
+/**
+ * The right column's tab strip: Changes, Plan.
+ *
+ * Hand-rolled like the Workflow strip rather than Radix Tabs, because the strip sits in the
+ * column's header row and the panels in its body — two slots of `SplitPane`, and a Radix
+ * `TabsList` cannot live outside its root. The pattern is the one `workflow-steps.tsx` already
+ * uses: `aria-controls` from tab to panel, manual activation, and a count where one helps.
+ */
+function RightColumnTabs({
+  tab,
+  onPick,
+  files,
+  planItems,
+}: {
+  tab: RightTab;
+  onPick: (tab: RightTab) => void;
+  files: number;
+  planItems: number;
+}) {
+  const tabs: Array<{ id: RightTab; label: string; count: number; disabled: boolean }> = [
+    { id: "changes", label: "Changes", count: files, disabled: false },
+    { id: "plan", label: "Plan", count: planItems, disabled: planItems === 0 },
+  ];
+  return (
+    <div role="tablist" aria-label="Review column" className="flex min-w-0 items-center gap-1">
+      {tabs.map(({ id, label, count, disabled }) => {
+        const selected = tab === id;
+        return (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            id={RIGHT_TAB_ID[id]}
+            aria-controls={RIGHT_PANEL_ID[id]}
+            aria-selected={selected}
+            tabIndex={selected ? 0 : -1}
+            disabled={disabled}
+            title={disabled ? "The harness has published no plan yet" : undefined}
+            onClick={() => onPick(id)}
+            className={cn(
+              "inline-flex h-6 items-center gap-1.5 rounded-md px-1.5 font-medium text-2xs uppercase tracking-[0.14em] transition-colors",
+              selected
+                ? "bg-muted text-foreground ring-1 ring-border"
+                : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+              disabled && "opacity-50",
+            )}
+          >
+            {label}
+            {count > 0 ? (
+              <span className="rounded-full bg-background/60 px-1 font-mono text-[10px] normal-case tracking-normal">
+                {count}
+              </span>
+            ) : null}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -306,6 +375,17 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
     return latestTodos(events);
   }, [events, live.events, liveSessionId]);
 
+  /**
+   * Which of the right column's two tabs is showing.
+   *
+   * The column follows the Task by default — the plan while a run is in progress and nothing has
+   * been captured yet, the change once there is one to review — because that is the tab an
+   * operator would pick every time. A manual pick sticks until the Task changes state, which is
+   * when the default would have changed anyway; pinning it for longer would leave a reviewer who
+   * clicked Plan during the run staring at the plan when the diff lands.
+   */
+  const [tabPick, setTabPick] = useState<{ tab: RightTab; state: TaskState } | null>(null);
+
   const [input, setInput] = useState("");
   const decide = trpc.review.decide.useMutation({
     onSuccess: () => {
@@ -471,6 +551,10 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   const primary = t.repositories.length > 0 ? primaryTaskRepository(t.repositories) : null;
   const branch = primary?.resultBranch ?? latest?.diffRef ?? null;
   const diffs = capturedDiffs;
+  const autoTab = todos.length > 0 && diffs.length === 0 && isRunning ? "plan" : "changes";
+  const pickedTab = tabPick && tabPick.state === t.state ? tabPick.tab : autoTab;
+  // A plan tab with no plan under it is disabled, so a pick that outlived its list falls back.
+  const tab = pickedTab === "plan" && todos.length === 0 ? "changes" : pickedTab;
   const runDecision = (decision: "approve" | "reject" | "request_changes") => {
     if (!latest?.id) return;
     decide.mutate({ sessionId: latest.id, decision });
@@ -720,51 +804,79 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
         onResize={(changesWidth) => savePane({ ...pane, changesWidth })}
         onToggle={(changesCollapsed) => savePane({ ...pane, changesCollapsed })}
         right={
-          <ScrollArea className="h-full">
-            <div className="p-3">
-              {/*
-                The source-control panel (spec F22), one per Repository (issue #7 AC-4). A Task
-                can span several, and a reviewer shown one flat file list could not tell which
-                repository a path came from.
-              */}
-              <ChangesPanel
-                diffs={diffs}
-                repositories={attachments}
-                repositoryName={nameFor}
-                /*
-                 * The change is read once, when the run reaches its review gate — so before a
-                 * Task has ever got there, "no changes" is a claim nobody has checked. A capture
-                 * having happened is what `diffs` being non-empty means; a Task past the gate
-                 * with genuinely nothing to show is the other case, and `completedAt` is the tell
-                 * that the run got far enough to look.
-                 */
-                captured={diffs.length > 0 || t.completedAt !== null}
-              />
-
-              {/*
-                Plan under result, in the column that is already about what the harness did. The
-                two answer the reviewer's question from opposite ends — the diff says what has
-                landed, the checklist says what the harness still believes is outstanding — and a
-                reviewer looking at a half-finished change needs to know which of the two they
-                are seeing. It sits below because the change is what the panel is for; the plan
-                is context for it.
-
-                Nothing at all when the harness has published no list: `TodoList` renders `null` on
-                an empty one, and a heading over nothing would claim a plan exists.
-              */}
-              {todos.length > 0 ? (
-                <section aria-label="Harness plan" className="mt-4">
-                  <h2 className="mb-2 flex items-center gap-2 font-medium text-sm">
-                    <ListChecks className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-                    Plan
-                  </h2>
-                  <TodoList items={todos} />
-                </section>
-              ) : null}
+          <>
+            {/*
+              Both panels stay mounted and one is hidden, rather than unmounting the inactive one:
+              the Changes panel holds which file is open and how, and a reviewer who glanced at
+              the plan should come back to the diff exactly where they left it.
+            */}
+            <div
+              role="tabpanel"
+              id={RIGHT_PANEL_ID.changes}
+              aria-labelledby={RIGHT_TAB_ID.changes}
+              hidden={tab !== "changes"}
+              className="h-full"
+            >
+              <ScrollArea className="h-full">
+                <div className="p-3">
+                  {/*
+                    The source-control panel (spec F22), one per Repository (issue #7 AC-4). A Task
+                    can span several, and a reviewer shown one flat file list could not tell which
+                    repository a path came from.
+                  */}
+                  <ChangesPanel
+                    diffs={diffs}
+                    repositories={attachments}
+                    repositoryName={nameFor}
+                    /*
+                     * The change is read once, when the run reaches its review gate — so before a
+                     * Task has ever got there, "no changes" is a claim nobody has checked. A capture
+                     * having happened is what `diffs` being non-empty means; a Task past the gate
+                     * with genuinely nothing to show is the other case, and `completedAt` is the tell
+                     * that the run got far enough to look.
+                     */
+                    captured={diffs.length > 0 || t.completedAt !== null}
+                  />
+                </div>
+              </ScrollArea>
             </div>
-          </ScrollArea>
+            <div
+              role="tabpanel"
+              id={RIGHT_PANEL_ID.plan}
+              aria-labelledby={RIGHT_TAB_ID.plan}
+              hidden={tab !== "plan"}
+              className="h-full"
+            >
+              <ScrollArea className="h-full">
+                <div className="p-3">
+                  {/*
+                    The harness's own plan — what it still believes is outstanding — on a tab of its
+                    own beside the change, because the two answer the reviewer's question from
+                    opposite ends and are read at different moments: the plan while the run is
+                    going, the diff once it has stopped.
+
+                    Nothing at all when the harness has published no list: `TodoList` renders `null`
+                    on an empty one, and the tab is disabled so a heading over nothing is never shown.
+                  */}
+                  {todos.length > 0 ? (
+                    <section aria-label="Harness plan">
+                      <TodoList items={todos} />
+                    </section>
+                  ) : null}
+                </div>
+              </ScrollArea>
+            </div>
+          </>
         }
-        rightLabel="Changes"
+        rightHeading={
+          <RightColumnTabs
+            tab={tab}
+            onPick={(next) => setTabPick({ tab: next, state: t.state })}
+            files={diffs.reduce((n, d) => n + d.files.length, 0)}
+            planItems={todos.length}
+          />
+        }
+        rightLabel="Review"
         width={pane.changesWidth}
       />
 

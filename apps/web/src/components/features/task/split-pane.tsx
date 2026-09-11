@@ -23,6 +23,7 @@ export function SplitPane({
   left,
   right,
   rightLabel,
+  rightHeading,
   width,
   collapsed,
   onResize,
@@ -32,6 +33,11 @@ export function SplitPane({
   right: ReactNode;
   /** Names the right column for assistive technology and for the fold control. */
   rightLabel: string;
+  /**
+   * What the column's header row shows in place of its caption — a tab strip, when the column
+   * holds more than one thing. The caption still names the column to assistive technology.
+   */
+  rightHeading?: ReactNode;
   width: number;
   collapsed: boolean;
   /** Called once, on release — not per mouse move. */
@@ -146,9 +152,11 @@ export function SplitPane({
             <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
               {/* The label step, the one the navigator's section headers and every other panel
                   caption already use — 11px at 0.14em, not a third definition of "small caps". */}
-              <h2 className="min-w-0 truncate font-medium text-2xs text-muted-foreground uppercase tracking-[0.14em]">
-                {rightLabel}
-              </h2>
+              {rightHeading ?? (
+                <h2 className="min-w-0 truncate font-medium text-2xs text-muted-foreground uppercase tracking-[0.14em]">
+                  {rightLabel}
+                </h2>
+              )}
               <Button
                 aria-label={`Hide ${rightLabel}`}
                 onClick={() => onToggle(true)}
