@@ -501,6 +501,30 @@ export const SessionErrorCode = {
 } as const;
 export type SessionErrorCode = (typeof SessionErrorCode)[keyof typeof SessionErrorCode];
 
+/**
+ * One review round of a Session (F10 FR-7): the change as it stood when the reviewer saw it, and
+ * what they said.
+ *
+ * A Session spans every round — request-changes resumes the same one — so the rounds are read
+ * back out of its log: each `state` event leaving `review` closes a round, and the round's
+ * change is the latest capture per Repository up to that point. Reviews are paired to rounds in
+ * order. The open tail of a Session at its gate is a round with no review yet.
+ *
+ * Kept so a reviewer can see what changed *between* rounds. Without it, the moment a new round
+ * started the previous round's diff and decision were unreachable from the page.
+ */
+export const sessionRoundDto = z.object({
+  /** 1-based, in the order the rounds happened. */
+  index: z.number().int().positive(),
+  /** The `seq` of the event that closed the round, or null for the open one. */
+  closedAtSeq: z.number().int().nonnegative().nullable(),
+  /** The change as it stood at this round's gate, one entry per Repository (attachment order). */
+  diffs: z.array(taskDiffDto),
+  /** The decision on it, or null while it is still waiting for one. */
+  review: reviewDto.nullable(),
+});
+export type SessionRoundDto = z.infer<typeof sessionRoundDto>;
+
 export const sessionDetailDto = z.object({
   session: sessionDto,
   /**
@@ -529,5 +553,7 @@ export const sessionDetailDto = z.object({
   summaries: z.array(sessionSummaryDto),
   /** The fork point at the head of the log, or null while the log is still empty. */
   cursor: sessionCursorDto.nullable(),
+  /** Every review round so far, oldest first; the last is the one `diffs` and `review` describe. */
+  rounds: z.array(sessionRoundDto),
 });
 export type SessionDetailDto = z.infer<typeof sessionDetailDto>;

@@ -11,11 +11,9 @@ import {
   sessionEventRangeInput,
   sessionEventsFromInput,
   sessionForkCursorInput,
-  type TaskDiffDto,
-  taskDiffDto,
 } from "@solow/contracts";
 import { z } from "zod";
-import { getReviewForSession } from "../dal/review.js";
+import { getReviewForSession, listReviewsForSession } from "../dal/review.js";
 import {
   getSessionById,
   listSessionEvents,
@@ -29,6 +27,7 @@ import {
 } from "../dal/session.js";
 import { getTaskById } from "../dal/task.js";
 import { ownerProcedure, router, unwrap } from "../trpc.js";
+import { latestDiffPerRepository, sessionRounds } from "./session-rounds.js";
 
 type SessionRow = SessionDto & { workspaceId: string };
 
@@ -41,51 +40,6 @@ function toSessionDto(row: SessionRow): SessionDto {
     startedAt: row.startedAt,
     endedAt: row.endedAt,
   };
-}
-
-/**
- * The diff the orchestrator captured at the review gate, pulled back out of the event log.
- *
- * Stored as a `diff` session event rather than a column: it arrives on the same append-only log
- * as everything else the run produced, so it replays with the rest and survives the worktree
- * being torn down. Still parsed rather than trusted even though the payload is now typed — a
- * `diff` row written before the union existed reaches this function through the compatibility
- * mapping, and a shape that no longer matches degrades to "no diff" instead of breaking the
- * review page. `taskDiffDto` is non-strict, so the payload's own `kind` key is simply dropped.
- */
-function latestDiffPerRepository(
-  events: Array<{ kind: string; payload: unknown }>,
-  attachmentOrder: readonly string[],
-): TaskDiffDto[] {
-  // Keyed on the repository so a later review round replaces that repository's group rather
-  // than appending a second one; an event written before multi-repository Tasks existed carries
-  // no repository and shares the empty key, which is exactly the old "latest diff" behaviour.
-  const byRepository = new Map<string, TaskDiffDto>();
-  for (const event of events) {
-    if (event.kind !== "diff") continue;
-    const parsed = taskDiffDto.safeParse(event.payload);
-    if (!parsed.success) continue;
-    byRepository.set(parsed.data.repositoryId ?? "", parsed.data);
-  }
-
-  // A log can hold both shapes at once: a Task sitting at the review gate across an orchestrator
-  // upgrade keeps the memoized legacy capture from the round before it and gains a named one
-  // from the round after. The unlabelled entry is then a superseded copy of a capture that now
-  // has a name, so it is dropped rather than shown beside it as a second, stale group — a Task
-  // that only ever had one repository must not grow an "Unnamed repository" section. It survives
-  // only when nothing in the log is named at all, which is the pre-#7 Session this exists for.
-  if (byRepository.size > 1) byRepository.delete("");
-
-  // Ordered by attachment position, not by which repository the orchestrator happened to capture
-  // first: each capture is wrapped in its own try/catch, so a round where the primary's capture
-  // failed and a secondary's succeeded would otherwise put the secondary first — and `diff`,
-  // which every legacy consumer reads as "the primary Repository's change", is `diffs[0]`.
-  const rank = new Map(attachmentOrder.map((id, index) => [id, index]));
-  const unknown = attachmentOrder.length;
-  return [...byRepository.values()]
-    .map((diff, index) => ({ diff, index, rank: rank.get(diff.repositoryId ?? "") ?? unknown }))
-    .sort((a, b) => a.rank - b.rank || a.index - b.index)
-    .map((entry) => entry.diff);
 }
 
 export const sessionRouter = router({
@@ -146,13 +100,15 @@ export const sessionRouter = router({
         : events;
       const summaries = unwrap(await listSessionSummaries(ctx.rctx, input.sessionId));
       const review = unwrap(await getReviewForSession(ctx.rctx, input.sessionId));
+      const reviews = unwrap(await listReviewsForSession(ctx.rctx, input.sessionId));
       // The Task is read for its attachment order alone — position 0 is what "primary" means,
       // and the event log records capture order, which is not the same question.
       const task = unwrap(await getTaskById(ctx.rctx, session.taskId));
-      const diffs = latestDiffPerRepository(
-        events,
-        task.repositories.map((attachment) => attachment.repositoryId),
-      );
+      const attachmentOrder = task.repositories.map((attachment) => attachment.repositoryId);
+      const diffs = latestDiffPerRepository(events, attachmentOrder);
+      // Every round so far, read back out of the same log (F10 FR-7) — the whole log, for the
+      // reason `diffs` uses it: a round is a fact about the Session, not about one Step of it.
+      const rounds = sessionRounds(events, reviews, attachmentOrder);
       // The head fork point, so a caller reading a Session already holds something it can fork
       // from without a second round trip (issue #2, AC-4). Null while the log is still empty.
       // Minted from the rows already in hand: re-reading the log to hash it would make the one
@@ -173,6 +129,7 @@ export const sessionRouter = router({
         summaries: summaries.map(toSummaryDto),
         cursor,
         review,
+        rounds,
       };
     }),
 

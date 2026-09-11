@@ -2,6 +2,7 @@
 
 import type {
   SessionEventDto,
+  SessionRoundDto,
   TaskDiffDto,
   TaskDto,
   TaskEvent,
@@ -41,6 +42,7 @@ import { DeleteTaskAction } from "./delete-task-action";
 import { HarnessComposer } from "./harness-composer";
 import { LaunchTaskDialog, useWorkflowChoices } from "./launch-task-dialog";
 import { groupChanges, summariseConsequences } from "./review-groups";
+import { RoundSelector } from "./round-selector";
 import { SplitPane } from "./split-pane";
 import { TaskAdvance } from "./task-advance";
 import { TaskDependencies, useBlockedByEditor, useTaskDependencies } from "./task-dependencies";
@@ -72,6 +74,7 @@ const NO_EVENTS: SessionEventDto[] = [];
 /** Stable empties, for the same reason `NO_EVENTS` is one: a fresh literal misses every memo. */
 const NO_DIFFS: TaskDiffDto[] = [];
 const NO_ATTACHMENTS: TaskRepositoryDto[] = [];
+const NO_ROUNDS: SessionRoundDto[] = [];
 
 const STREAM_LABEL: Record<string, string> = {
   idle: "Not streaming",
@@ -219,14 +222,23 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   const scope = useStepScope(task.data ?? null);
   const sessions = trpc.session.listForTask.useQuery({ taskId });
   const latest = sessions.data?.[0];
+  /**
+   * Which Session the transcript and the Changes tab show (F10 FR-7).
+   *
+   * The newest, unless an earlier launch — a Session from a Retry — was picked from the round
+   * selector. Only the *reading* follows the pick: decisions, steering and the plan stay on
+   * `latest`, because that is the run a gate or a harness could still be waiting on.
+   */
+  const [sessionPick, setSessionPick] = useState<string | null>(null);
+  const viewing = sessions.data?.find((s) => s.id === sessionPick) ?? latest;
   const detail = trpc.session.get.useQuery(
     {
-      sessionId: latest?.id ?? "",
+      sessionId: viewing?.id ?? "",
       ...(scope.selected ? { workflowStepId: scope.selected } : {}),
     },
     // Held until the scope is settled: firing unscoped and refiring a moment later would fetch
     // the whole pipeline exactly once per page load, which is the cost being removed.
-    { enabled: Boolean(latest?.id) && scope.settled },
+    { enabled: Boolean(viewing?.id) && scope.settled },
   );
 
   /**
@@ -241,10 +253,10 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
    * `diff` event arrived, the Task refetched, and the Changes panel beside it kept showing the
    * previous round's files.
    *
-   * `session.get` is keyed by session id and the Session that matters can *change* — a
-   * `request_changes` opens a new one — so the invalidation is unkeyed on purpose. Naming
-   * `latest.id` would refresh the Session this render happens to know about, which is precisely
-   * the one that has just been superseded.
+   * `session.get` is keyed by session id and the Session that matters can *change* — a Retry
+   * opens a new one (a `request_changes` resumes the same one) — so the invalidation is unkeyed
+   * on purpose. Naming `latest.id` would refresh the Session this render happens to know about,
+   * which is precisely the one that has just been superseded.
    */
   const onLive = useCallback(
     (event: TaskEvent) => {
@@ -498,6 +510,21 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   );
   const capturedDiffs = detail.data?.diffs ?? NO_DIFFS;
   const attachments = task.data?.repositories ?? NO_ATTACHMENTS;
+  /**
+   * Which review round the Changes tab shows (F10 FR-7).
+   *
+   * The latest by default. A pick is remembered with the count it was made against, so it holds
+   * while the reviewer walks back through the history and lets go the moment a new round lands —
+   * a reviewer left staring at round 1 while round 3 waits for them is the failure this avoids.
+   */
+  const rounds = detail.data?.rounds ?? NO_ROUNDS;
+  const [roundPick, setRoundPick] = useState<{ index: number; of: number } | null>(null);
+  const latestRound = rounds[rounds.length - 1]?.index ?? 0;
+  const selectedRound =
+    roundPick && roundPick.of === rounds.length && rounds.some((r) => r.index === roundPick.index)
+      ? roundPick.index
+      : latestRound;
+  const shownRound = rounds.find((r) => r.index === selectedRound) ?? null;
   const reviewGroups = useMemo(
     () => groupChanges(capturedDiffs, attachments, nameFor),
     [capturedDiffs, attachments, nameFor],
@@ -550,7 +577,8 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   // branch and change is shown.
   const primary = t.repositories.length > 0 ? primaryTaskRepository(t.repositories) : null;
   const branch = primary?.resultBranch ?? latest?.diffRef ?? null;
-  const diffs = capturedDiffs;
+  // The gate's scope is always the latest capture; the tab may be showing an older round.
+  const diffs = shownRound && shownRound.index !== latestRound ? shownRound.diffs : capturedDiffs;
   const autoTab = todos.length > 0 && diffs.length === 0 && isRunning ? "plan" : "changes";
   const pickedTab = tabPick && tabPick.state === t.state ? tabPick.tab : autoTab;
   // A plan tab with no plan under it is disabled, so a pick that outlived its list falls back.
@@ -819,6 +847,23 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
             >
               <ScrollArea className="h-full">
                 <div className="p-3">
+                  <RoundSelector
+                    rounds={rounds}
+                    selected={selectedRound}
+                    onSelect={(index) => setRoundPick({ index, of: rounds.length })}
+                    {...(sessions.data && sessions.data.length > 1 && viewing
+                      ? {
+                          launches: {
+                            sessions: sessions.data,
+                            selectedId: viewing.id,
+                            onSelect: (id: string) => {
+                              setSessionPick(id);
+                              setRoundPick(null);
+                            },
+                          },
+                        }
+                      : {})}
+                  />
                   {/*
                     The source-control panel (spec F22), one per Repository (issue #7 AC-4). A Task
                     can span several, and a reviewer shown one flat file list could not tell which

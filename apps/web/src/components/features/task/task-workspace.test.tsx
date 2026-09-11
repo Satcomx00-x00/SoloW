@@ -101,6 +101,7 @@ function detail(payloads: SessionEventPayload[] = []) {
     summaries: [],
     cursor: null,
     review: null,
+    rounds: [],
   };
 }
 
@@ -709,6 +710,87 @@ describe("the Changes tab of a multi-Repository Task", () => {
     expect(screen.getByText(/Changes outside the primary repository: shared-lib/)).toBeDefined();
     // And the gate's one line now carries the weight as well as the count.
     expect(screen.getByText(/Approving covers .*4 files, \+342 −506/)).toBeDefined();
+  });
+
+  it("walks back through the review rounds, read-only, with what was decided on each", async () => {
+    const round = (index: number, path: string, review: unknown, closedAtSeq: number | null) => ({
+      index,
+      closedAtSeq,
+      diffs: [
+        { diffRef: "solow/task-1", repositoryId: "repo-1", repositoryName: "api", ...change(path) },
+      ],
+      review,
+    });
+    const decided = {
+      id: "rev-1",
+      sessionId: SESSION_ID,
+      decision: "request_changes",
+      feedback: "the other config file",
+      actorUserId: "u",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+    renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
+      ...baseHandlers,
+      "session.get": () => ({
+        ...detailWithDiffs([
+          {
+            diffRef: "solow/task-1",
+            repositoryId: "repo-1",
+            repositoryName: "api",
+            ...change("src/v2.ts"),
+          },
+        ]),
+        rounds: [round(1, "src/v1.ts", decided, 7), round(2, "src/v2.ts", null, null)],
+      }),
+    });
+
+    await openChangesTab();
+    // The latest round by default, which is the one the gate is about.
+    expect(await screen.findByText("Round 2 of 2")).toBeDefined();
+    const files = () => screen.getByRole("list", { name: "Changes" });
+    expect(within(files()).getByTitle("src/v2.ts")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Next round" }).hasAttribute("disabled")).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Previous round" }));
+    expect(screen.getByText("Round 1 of 2")).toBeDefined();
+    expect(within(files()).getByTitle("src/v1.ts")).toBeDefined();
+    expect(within(files()).queryByTitle("src/v2.ts")).toBeNull();
+    expect(screen.getByText(/Superseded — read-only/)).toBeDefined();
+    // What the reviewer said then — the part a new round used to lose.
+    expect(screen.getByText("Changes requested")).toBeDefined();
+    expect(screen.getByText("the other config file")).toBeDefined();
+    // The gate still speaks of the latest round, whatever the tab shows.
+    expect(screen.getByRole("button", { name: /Approve/ })).toBeDefined();
+  });
+
+  it("offers earlier launches when a Retry opened a second Session, and reads the one picked", async () => {
+    const older = {
+      ...session,
+      id: "sess-0",
+      state: "closed" as const,
+      startedAt: "2025-12-31T00:00:00.000Z",
+      endedAt: "2025-12-31T01:00:00.000Z",
+    };
+    const { log } = renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
+      ...baseHandlers,
+      "session.listForTask": () => [session, older],
+      "session.get": (input: unknown) =>
+        (input as { sessionId: string }).sessionId === older.id
+          ? {
+              ...detail([{ kind: "assistant_turn", text: "first attempt", thinking: false }]),
+              session: older,
+            }
+          : detail([{ kind: "assistant_turn", text: "second attempt", thinking: false }]),
+    });
+
+    expect(await screen.findByText(/second attempt/)).toBeDefined();
+    const picker = screen.getByRole("combobox", { name: "Launch" });
+    fireEvent.change(picker, { target: { value: older.id } });
+    expect(await screen.findByText(/first attempt/)).toBeDefined();
+    expect(log.calls.filter((c) => c.path === "session.get").at(-1)?.input).toMatchObject({
+      sessionId: older.id,
+    });
   });
 
   it("shows a single Repository's change with no group header at all", async () => {

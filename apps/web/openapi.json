@@ -23530,6 +23530,140 @@
                         "seq",
                         "hash"
                       ]
+                    },
+                    "rounds": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "index": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "exclusiveMinimum": true
+                          },
+                          "closedAtSeq": {
+                            "type": "integer",
+                            "nullable": true,
+                            "minimum": 0
+                          },
+                          "diffs": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "diffRef": {
+                                  "type": "string"
+                                },
+                                "files": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "path": {
+                                        "type": "string"
+                                      },
+                                      "status": {
+                                        "type": "string",
+                                        "enum": [
+                                          "added",
+                                          "modified",
+                                          "deleted",
+                                          "renamed"
+                                        ]
+                                      },
+                                      "additions": {
+                                        "type": "integer",
+                                        "minimum": 0
+                                      },
+                                      "deletions": {
+                                        "type": "integer",
+                                        "minimum": 0
+                                      }
+                                    },
+                                    "required": [
+                                      "path",
+                                      "status",
+                                      "additions",
+                                      "deletions"
+                                    ]
+                                  }
+                                },
+                                "patch": {
+                                  "type": "string"
+                                },
+                                "truncated": {
+                                  "type": "boolean"
+                                },
+                                "repositoryId": {
+                                  "type": "string"
+                                },
+                                "repositoryName": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "diffRef",
+                                "files",
+                                "patch",
+                                "truncated"
+                              ]
+                            }
+                          },
+                          "review": {
+                            "type": "object",
+                            "nullable": true,
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "sessionId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "decision": {
+                                "type": "string",
+                                "enum": [
+                                  "approve",
+                                  "reject",
+                                  "request_changes"
+                                ]
+                              },
+                              "feedback": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "actorUserId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "createdAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              },
+                              "updatedAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "sessionId",
+                              "decision",
+                              "feedback",
+                              "actorUserId",
+                              "createdAt",
+                              "updatedAt"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "index",
+                          "closedAtSeq",
+                          "diffs",
+                          "review"
+                        ]
+                      }
                     }
                   },
                   "required": [
@@ -23539,7 +23673,8 @@
                     "diff",
                     "diffs",
                     "summaries",
-                    "cursor"
+                    "cursor",
+                    "rounds"
                   ]
                 }
               }
