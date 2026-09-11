@@ -278,7 +278,9 @@ test.describe("control check — the main line of the product, end to end", () =
       await page.goto(`/task/${taskId}`);
       await page.getByRole("button", { name: `Delete ${taskTitle}` }).click();
       await page.getByRole("alertdialog").getByRole("button", { name: "Delete task" }).click();
-      await expect(page).not.toHaveURL(new RegExp(`/task/${taskId}$`));
+      // Leaving lands on the board, which the e2e `next dev` may be cold-compiling at this
+      // moment (10–20 s on this host); the default 30 s expect has timed out on that alone.
+      await expect(page).not.toHaveURL(new RegExp(`/task/${taskId}$`), { timeout: 90_000 });
 
       await page.goto(`/issues/${issueId}`);
       await page.getByRole("button", { name: "Delete issue" }).click();
