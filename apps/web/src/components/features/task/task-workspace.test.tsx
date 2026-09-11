@@ -190,8 +190,41 @@ describe("TaskWorkspace review gate", () => {
       }),
     });
 
-    expect(await screen.findByText(/Review actions become available/)).toBeDefined();
+    // The foot still says something — what the harness is doing — but offers no decision.
+    expect(await screen.findByText(/The harness is working/)).toBeDefined();
     expect(screen.queryByRole("button", { name: /Approve/ })).toBeNull();
+  });
+
+  it("offers Retry on a failed run, from the page that shows the failure", async () => {
+    const { log } = renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
+      "task.get": () => task({ state: "failed", failureReason: "interrupted" }),
+      "session.listForTask": () => [session],
+      "session.get": () => detail(),
+      "task.retry": () => task({ state: "running" }),
+    });
+
+    expect(await screen.findByText("Interrupted by restart")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => {
+      expect(log.calls.filter((c) => c.path === "task.retry")).toHaveLength(1);
+    });
+    expect(log.calls.find((c) => c.path === "task.retry")?.input).toEqual({ id: TASK_ID });
+  });
+
+  it("says why a refused retry was refused, in words, under the control", async () => {
+    renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
+      "task.get": () => task({ state: "failed", failureReason: "fail" }),
+      "session.listForTask": () => [session],
+      "session.get": () => detail(),
+      "task.retry": () => {
+        throw new Error(TaskErrorCode.ConcurrencyCapReached);
+      },
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).not.toContain(TaskErrorCode.ConcurrencyCapReached);
+    expect(alert.textContent?.length ?? 0).toBeGreaterThan(20);
   });
 
   it("renders recorded harness output in the terminal panel", async () => {

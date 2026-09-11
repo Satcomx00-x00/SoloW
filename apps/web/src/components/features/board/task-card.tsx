@@ -1,27 +1,10 @@
 import type { TaskDependencyDto, TaskDto } from "@solow/contracts";
 import { primaryTaskRepository, unsatisfiedDependencies } from "@solow/core";
-import {
-  CheckCircle2,
-  GitBranch,
-  KeyRound,
-  Library,
-  Lock,
-  RotateCcw,
-  TriangleAlert,
-  Workflow,
-} from "lucide-react";
+import { CheckCircle2, GitBranch, Library, Lock, Workflow } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import {
-  CREDENTIAL_EXPIRED_REASON,
-  failureReasonLabel,
-  INTERRUPTED_REASON,
-  needsAttention,
-  PARTIAL_INTEGRATION_REASON,
-  STATE_STYLE,
-  STRANDED_REVIEW_REASON,
-} from "@/lib/task-states";
+import { failureReasonLabel, needsAttention, STATE_STYLE } from "@/lib/task-states";
 import { cn } from "@/lib/utils";
 import { waitingOn } from "./blockers";
 import { useBoardReferences } from "./board-references";
@@ -29,22 +12,24 @@ import { IssueMenu } from "./issue-menu";
 import { TaskStateBadge } from "./task-state-badge";
 
 /**
- * Every `failureReason` that does not earn a badge of its own, in words rather than as its raw
- * class string — see `failureReasonLabel`, which owns the whole mapping so a reason added
- * upstream cannot leak a machine name onto a card the way it used to.
+ * Why a Task failed, in words rather than as its raw class string — see `failureReasonLabel`,
+ * which owns the whole mapping (the four reasons with a next step of their own included) so a
+ * reason added upstream cannot leak a machine name onto a card the way it used to, and so the
+ * Task page's footer says exactly what the card says.
  *
  * The glyph and colour come from the state the reason belongs to, so a Task parked past its
- * window reads violet like the badge beside it instead of contradicting it in red.
+ * window reads violet like the badge beside it instead of contradicting it in red. A reason
+ * with a glyph of its own — a key to renew, a restart to retry through — keeps it.
  */
 function FailureBadge({ reason }: { reason: string }) {
-  const { label, tone, code } = failureReasonLabel(reason);
-  const Icon = STATE_STYLE[tone].icon;
+  const { label, tone, icon: Icon, detail, code } = failureReasonLabel(reason);
   return (
     <span
       className={cn(
         "inline-flex items-center gap-1 rounded border px-1.5 py-px text-2xs",
         STATE_STYLE[tone].badgeClassName,
       )}
+      title={detail ?? undefined}
     >
       <Icon className="size-3 shrink-0" aria-hidden strokeWidth={2.25} />
       {label}
@@ -227,65 +212,7 @@ export function TaskCard({
                 </Tooltip>
               </TooltipProvider>
             ) : null}
-            {task.failureReason === CREDENTIAL_EXPIRED_REASON ? (
-              // Distinguished from a generic failure (spec AC-013, issue #63): the raw class
-              // string below is a machine name for a whole family of run failures, but this one
-              // has a one-click fix, so it earns its own icon and its own words rather than
-              // sharing the plain badge every other failure reason falls into.
-              <span
-                className={cn(
-                  "inline-flex items-center gap-1 rounded border px-1.5 py-px text-2xs",
-                  STATE_STYLE.failed.badgeClassName,
-                )}
-              >
-                <KeyRound className="size-3 shrink-0" aria-hidden />
-                Credential expired
-              </span>
-            ) : task.failureReason === INTERRUPTED_REASON ? (
-              // Same reasoning as credential-expired: a raw "interrupted" would read as just
-              // another failure class, but this one means something specific an Owner should not
-              // have to infer — the orchestrator restarted mid-run, the work itself is untouched,
-              // and Retry (below) picks it back up rather than starting over.
-              <span
-                className={cn(
-                  "inline-flex items-center gap-1 rounded border px-1.5 py-px text-2xs",
-                  STATE_STYLE.failed.badgeClassName,
-                )}
-              >
-                <RotateCcw className="size-3 shrink-0" aria-hidden />
-                Interrupted by restart
-              </span>
-            ) : task.failureReason === STRANDED_REVIEW_REASON ? (
-              // Not a failure of the work: the change is on its branch and the decision is in the
-              // review record. What broke is the delivery, and Retry is the fix — so the card says
-              // that rather than showing a raw reason string nobody can act on.
-              <span
-                className={cn(
-                  "inline-flex items-center gap-1 rounded border px-1.5 py-px text-2xs",
-                  STATE_STYLE.review.badgeClassName,
-                )}
-                title="The run holding this review gate was gone when the decision arrived. Retry re-runs it; nothing was lost."
-              >
-                <TriangleAlert className="size-3 shrink-0" aria-hidden />
-                Decision not applied
-              </span>
-            ) : task.failureReason === PARTIAL_INTEGRATION_REASON ? (
-              // The one failure where the work is *partly landed*. Retry would commit a second
-              // time to the branches that already took, so the card says what happened and sends
-              // the reader to the session log, which names which half is which (issue #70 AC-4).
-              <span
-                className={cn(
-                  "inline-flex items-center gap-1 rounded border px-1.5 py-px text-2xs",
-                  STATE_STYLE.failed.badgeClassName,
-                )}
-                title="Some of this task's repositories were committed and others were not. Open the task to see which — the branches that landed are real."
-              >
-                <TriangleAlert className="size-3 shrink-0" aria-hidden />
-                Partly integrated
-              </span>
-            ) : task.failureReason ? (
-              <FailureBadge reason={task.failureReason} />
-            ) : null}
+            {task.failureReason ? <FailureBadge reason={task.failureReason} /> : null}
             {extraRepositories > 0 ? (
               <span
                 // `img` with a label rather than a bare span: the count is meaningless read as

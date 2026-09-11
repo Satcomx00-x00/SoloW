@@ -13,29 +13,28 @@ import { DEFAULT_TASK_PANE_LAYOUT, type TaskPaneLayout } from "@solow/contracts"
 import { primaryTaskRepository } from "@solow/core";
 import {
   ArrowLeft,
-  Check,
   CheckCircle2,
   CircleSlash,
   GitBranch,
   ListChecks,
   OctagonAlert,
-  RotateCcw,
   Trash2,
   TriangleAlert,
-  X,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useMemo, useState } from "react";
 import { TaskStateBadge } from "@/components/features/board/task-state-badge";
-import { ConfirmAction, ConfirmDialog } from "@/components/features/confirm-action";
+import { ConfirmDialog } from "@/components/features/confirm-action";
 import { useBackToProject } from "@/components/features/shared/back-to-project";
 import { useTaskStream } from "@/components/hooks/use-task-stream";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { settingsHref } from "@/lib/navigation";
 import { WHOLE_PAGE } from "@/lib/paged";
 import { taskActionMessage } from "@/lib/task-errors";
+import { CREDENTIAL_EXPIRED_REASON } from "@/lib/task-states";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
 import { ChangesPanel } from "./changes-panel";
@@ -45,6 +44,7 @@ import { LaunchTaskDialog, useWorkflowChoices } from "./launch-task-dialog";
 import { groupChanges, summariseConsequences } from "./review-groups";
 import { SplitPane } from "./split-pane";
 import { TaskAdvance } from "./task-advance";
+import { TaskFooter } from "./task-footer";
 import { type TerminalScope, TerminalView } from "./terminal-view";
 import { latestTodos, TodoList } from "./todo-list";
 import { buildTranscript, inStepScope } from "./transcript";
@@ -346,6 +346,37 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
       utils.session.listForTask.invalidate({ taskId });
     },
   });
+  /**
+   * Starting again after a failure, from the page that shows the failure.
+   *
+   * The board's rule, not a new one: `task.retry` opens a fresh Session and re-enqueues the run
+   * (`startTaskRun`), so the Session list has to be re-read as well as the Task — the terminal
+   * would otherwise keep showing the failed run's log under a badge that says Running.
+   */
+  const retry = trpc.task.retry.useMutation({
+    onSuccess: () => {
+      utils.task.get.invalidate({ id: taskId });
+      utils.task.list.invalidate();
+      utils.session.listForTask.invalidate({ taskId });
+    },
+  });
+  /**
+   * Which Secret a credential-expired Task's "Renew" should open (spec AC-013, issue #63), the
+   * way the board finds it. Both lists are fetched only when there is a Renew to point somewhere:
+   * every other Task pays nothing for a control it will never show.
+   */
+  const credentialExpired = task.data?.failureReason === CREDENTIAL_EXPIRED_REASON;
+  const harnessProfiles = trpc.profile.agent.list.useQuery(
+    { ...WHOLE_PAGE },
+    { enabled: credentialExpired },
+  );
+  const secrets = trpc.secret.list.useQuery({}, { enabled: credentialExpired });
+  const renewHref = useMemo(() => {
+    if (!credentialExpired) return null;
+    const profile = harnessProfiles.data?.items.find((p) => p.id === task.data?.agentProfileId);
+    const secret = secrets.data?.find((s) => s.id === profile?.secretId);
+    return `${settingsHref("secrets")}&renewSecret=${encodeURIComponent(secret?.name ?? "")}`;
+  }, [credentialExpired, harnessProfiles.data, secrets.data, task.data?.agentProfileId]);
   const [pendingMove, setPendingMove] = useState<TaskState | null>(null);
   // The forward arrow on a Ready Task asks which Workflow first, when there is one (spec F03).
   const workflowChoices = useWorkflowChoices();
@@ -414,8 +445,6 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
           total: scope.stepped.length,
           current: scope.stepped[selectedStep]?.current ?? false,
         };
-  const inReview = t.state === "review";
-  const canDecide = inReview && !decide.isPending;
   // Steering only makes sense while a harness is actually working; once the Task is in review
   // the way to ask for more is "request changes", which is recorded (Principle I).
   const isRunning = t.state === "running";
@@ -430,6 +459,9 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
     if (!latest?.id) return;
     decide.mutate({ sessionId: latest.id, decision });
   };
+  // Refusals from the foot of the page, through the same mapping as the banner above: a wire
+  // code is never the sentence an operator reads.
+  const footerMessage = taskActionMessage(retry.error?.message ?? decide.error?.message);
 
   /**
    * One step along the lifecycle, from the arrows beside the state badge.
@@ -712,77 +744,18 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
         width={pane.changesWidth}
       />
 
-      {/* Review gate */}
-      <div
-        className={cn(
-          "border-t px-4 py-3 transition-colors",
-          // The gate lights up only when it is actually your turn.
-          inReview && "border-state-review/25 bg-state-review/[0.045]",
-        )}
-      >
-        {inReview ? (
-          <div className="space-y-2">
-            {/*
-              What this one click is about to do, before it is clicked (issue #70 AC-2/AC-3).
-
-              One decision covers the whole Task — splitting it per repository would look more
-              granular and is worse, because it produces partially-integrated Tasks that nothing
-              in the model describes. So the scope of the single decision has to be legible, and
-              a reviewer who approves without scrolling the Changes column still sees it.
-            */}
-            <p className="flex items-center gap-1.5 text-muted-foreground text-xs">
-              <GitBranch aria-hidden className="size-3.5 shrink-0" />
-              Approving covers {summariseConsequences(reviewGroups)}.
-            </p>
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                size="lg"
-                disabled={!canDecide}
-                loading={decide.isPending && decide.variables?.decision === "approve"}
-                onClick={() => runDecision("approve")}
-              >
-                <Check /> Approve
-              </Button>
-              <Button
-                size="lg"
-                variant="outline"
-                disabled={!canDecide}
-                loading={decide.isPending && decide.variables?.decision === "request_changes"}
-                onClick={() => runDecision("request_changes")}
-              >
-                <RotateCcw /> Request changes
-              </Button>
-              <ConfirmAction
-                disabled={!canDecide}
-                title="Reject these changes?"
-                description="The harness's work is discarded and the worktree is torn down. This cannot be undone. The task returns to Ready and would have to run again from scratch."
-                confirmLabel="Discard the changes"
-                onConfirm={() => runDecision("reject")}
-                trigger={
-                  <Button
-                    size="lg"
-                    variant="ghost"
-                    disabled={!canDecide}
-                    className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                  >
-                    <X /> Reject
-                  </Button>
-                }
-              />
-              {decide.error && (
-                <span className="text-destructive text-sm" role="alert">
-                  {decide.error.message}
-                </span>
-              )}
-            </div>
-          </div>
-        ) : (
-          <p className="text-muted-foreground text-sm">
-            Review actions become available when the harness submits changes and the task enters{" "}
-            <span className="font-medium text-foreground">Review</span>.
-          </p>
-        )}
-      </div>
+      <TaskFooter
+        task={t}
+        consequences={summariseConsequences(reviewGroups)}
+        decidePending={decide.isPending ? (decide.variables?.decision ?? null) : null}
+        onDecide={runDecision}
+        onLaunch={() => requestMove("running")}
+        onRetry={() => retry.mutate({ id: t.id })}
+        onMove={requestMove}
+        actionPending={move.isPending || launch.isPending || retry.isPending}
+        renewHref={renewHref}
+        error={footerMessage}
+      />
     </div>
   );
 }

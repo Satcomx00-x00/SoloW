@@ -1,12 +1,10 @@
 import type { TaskState } from "@solow/contracts";
-
-export {
+import {
   CREDENTIAL_EXPIRED_REASON,
   INTERRUPTED_REASON,
   PARTIAL_INTEGRATION_REASON,
   STRANDED_REVIEW_REASON,
 } from "@solow/core";
-
 import {
   Circle,
   CircleAlert,
@@ -14,9 +12,19 @@ import {
   CircleDot,
   CirclePause,
   Eye,
+  KeyRound,
   LoaderCircle,
   type LucideIcon,
+  RotateCcw,
+  TriangleAlert,
 } from "lucide-react";
+
+export {
+  CREDENTIAL_EXPIRED_REASON,
+  INTERRUPTED_REASON,
+  PARTIAL_INTEGRATION_REASON,
+  STRANDED_REVIEW_REASON,
+};
 
 /**
  * Board column order + display labels for the Task lifecycle (spec Domain Model / F02).
@@ -133,12 +141,15 @@ export const STATE_STYLE: Record<TaskState, StateStyle> = {
 };
 
 /**
- * The `failureReason` values that do not earn a badge of their own, as words.
+ * Every `failureReason` the product knows, as words an Owner can act on.
  *
- * Four reasons are drawn individually on the card (`task-card.tsx`) because each has its own
- * icon and its own next step. Everything else fell through to a badge that printed the raw class
- * string in monospace — a machine name shown to an Owner who cannot act on it, which is the same
- * mistake `taskActionMessage` was written to stop the banner making.
+ * One table for the card and the Task page both. The four reasons with a next step of their own
+ * — a credential to renew, a restart to retry through, a review decision that never landed, a
+ * half-committed Task — used to be drawn one by one on the card, and the page had nothing at
+ * all; a second copy of that chain is how the two would have started disagreeing. Everything
+ * else fell through to a badge that printed the raw class string in monospace — a machine name
+ * shown to an Owner who cannot act on it, which is the same mistake `taskActionMessage` was
+ * written to stop the banner making.
  *
  * `park_never_resumed` is not hypothetical: the orchestrator's sweep writes it onto a Task that
  * slept through its quota window, so the board really was rendering that string. Its literal is
@@ -148,18 +159,56 @@ export const STATE_STYLE: Record<TaskState, StateStyle> = {
  *
  * The tone matters as much as the wording. A parked Task's reason painted in the failed red
  * would contradict the violet badge sitting next to it, so each reason names the state whose
- * colour and glyph it borrows.
+ * colour and glyph it borrows — and the four with a glyph of their own say so, because the
+ * glyph is what distinguishes "renew this" from "retry this" at a glance.
  */
-const FAILURE_REASONS: Record<string, { label: string; tone: TaskState }> = {
+const FAILURE_REASONS: Record<
+  string,
+  { label: string; tone: TaskState; icon?: LucideIcon; detail?: string }
+> = {
   fail: { label: "Run failed", tone: "failed" },
   park: { label: "Paused on quota", tone: "parked" },
   park_never_resumed: { label: "Never resumed", tone: "parked" },
+  // Distinguished from a generic failure (spec AC-013, issue #63): this one has a one-click fix.
+  [CREDENTIAL_EXPIRED_REASON]: {
+    label: "Credential expired",
+    tone: "failed",
+    icon: KeyRound,
+    detail: "The harness's credential no longer works. Renew it, then retry.",
+  },
+  // The orchestrator restarted mid-run; the work is untouched and Retry picks it back up.
+  [INTERRUPTED_REASON]: {
+    label: "Interrupted by restart",
+    tone: "failed",
+    icon: RotateCcw,
+    detail: "The orchestrator restarted mid-run. Nothing was lost; retry picks the run back up.",
+  },
+  // Not a failure of the work: the change is on its branch and the decision is in the record.
+  [STRANDED_REVIEW_REASON]: {
+    label: "Decision not applied",
+    tone: "review",
+    icon: TriangleAlert,
+    detail:
+      "The run holding this review gate was gone when the decision arrived. Retry re-runs it; nothing was lost.",
+  },
+  // The one failure where the work is *partly landed* (issue #70 AC-4).
+  [PARTIAL_INTEGRATION_REASON]: {
+    label: "Partly integrated",
+    tone: "failed",
+    icon: TriangleAlert,
+    detail:
+      "Some of this task's repositories were committed and others were not. The session log names which — the branches that landed are real.",
+  },
 };
 
 export interface FailureReasonLabel {
   label: string;
-  /** The state this reason borrows its colour and glyph from. */
+  /** The state this reason borrows its colour from. */
   tone: TaskState;
+  /** The reason's own glyph when it has one, otherwise the borrowed state's. */
+  icon: LucideIcon;
+  /** A sentence more, for a tooltip or a footer — null when the label says it all. */
+  detail: string | null;
   /**
    * The raw class, and only when the label above is a generic stand-in for a reason this build
    * does not recognise. A class added upstream should still read as a failure to an Owner while
@@ -168,11 +217,25 @@ export interface FailureReasonLabel {
   code: string | null;
 }
 
-/** How a `failureReason` with no badge of its own should read. */
+/** How a `failureReason` should read. */
 export function failureReasonLabel(reason: string): FailureReasonLabel {
   const known = FAILURE_REASONS[reason];
-  if (known) return { label: known.label, tone: known.tone, code: null };
-  return { label: "Run failed", tone: "failed", code: reason };
+  if (known) {
+    return {
+      label: known.label,
+      tone: known.tone,
+      icon: known.icon ?? STATE_STYLE[known.tone].icon,
+      detail: known.detail ?? null,
+      code: null,
+    };
+  }
+  return {
+    label: "Run failed",
+    tone: "failed",
+    icon: STATE_STYLE.failed.icon,
+    detail: null,
+    code: reason,
+  };
 }
 
 /** The states that are actively moving, so the indicator spins only when work is happening. */
