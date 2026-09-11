@@ -44,6 +44,7 @@ import { LaunchTaskDialog, useWorkflowChoices } from "./launch-task-dialog";
 import { groupChanges, summariseConsequences } from "./review-groups";
 import { SplitPane } from "./split-pane";
 import { TaskAdvance } from "./task-advance";
+import { TaskDependencies, useBlockedByEditor, useTaskDependencies } from "./task-dependencies";
 import { TaskFooter } from "./task-footer";
 import { type TerminalScope, TerminalView } from "./terminal-view";
 import { latestTodos, TodoList } from "./todo-list";
@@ -194,6 +195,9 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
         utils.session.get.invalidate();
         // A Step advancing announces the state too, so this is what moves the step strip.
         utils.workflow.taskBinding.invalidate({ taskId });
+        // Readiness is derived from the blockers' states, so a predecessor finishing is what
+        // un-refuses Launch here — the board re-reads the edges on every status for the same reason.
+        utils.task.dependencies.invalidate();
         // The Issue above this Task derives its status from the Tasks under it, so a run that
         // finishes changes what the Issues list and the board card would say. Both are a
         // navigation away and would otherwise be stale on arrival.
@@ -377,6 +381,9 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
     const secret = secrets.data?.find((s) => s.id === profile?.secretId);
     return `${settingsHref("secrets")}&renewSecret=${encodeURIComponent(secret?.name ?? "")}`;
   }, [credentialExpired, harnessProfiles.data, secrets.data, task.data?.agentProfileId]);
+  // What holds this Task back, and what it holds back (issue #6). Above the guards: hooks.
+  const dependencies = useTaskDependencies(taskId);
+  const blockedBy = useBlockedByEditor(task.data ?? null, dependencies.blockedBy);
   const [pendingMove, setPendingMove] = useState<TaskState | null>(null);
   // The forward arrow on a Ready Task asks which Workflow first, when there is one (spec F03).
   const workflowChoices = useWorkflowChoices();
@@ -508,6 +515,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
         the approve step: `task.move` writes the state and nothing else, so the harness's branch is
         never committed and the run is left waiting at a gate no decision ever reaches.
       */}
+      {blockedBy.dialogs}
       <LaunchTaskDialog
         task={launching}
         onOpenChange={(open) => {
@@ -608,9 +616,11 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
             <GitBranch className="size-3 shrink-0" aria-hidden />
             {branch ?? `base ${primary?.baseRef ?? "HEAD"}`}
           </p>
+          <TaskDependencies blockedBy={dependencies.blockedBy} blocks={dependencies.blocks} />
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
           <StreamIndicator status={live.status} />
+          {blockedBy.button}
           {/*
             Deleting the Task the page is *about* leaves nowhere to stand, so it navigates back
             to the board rather than re-rendering against a Task that no longer exists.
@@ -746,6 +756,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
 
       <TaskFooter
         task={t}
+        outstanding={dependencies.outstanding}
         consequences={summariseConsequences(reviewGroups)}
         decidePending={decide.isPending ? (decide.variables?.decision ?? null) : null}
         onDecide={runDecision}

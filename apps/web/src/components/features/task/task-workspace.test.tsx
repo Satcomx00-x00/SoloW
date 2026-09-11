@@ -243,6 +243,57 @@ describe("TaskWorkspace review gate", () => {
   });
 });
 
+describe("TaskWorkspace dependencies (issue #6)", () => {
+  const edges = [
+    {
+      taskId: TASK_ID,
+      blockedByTaskId: "task-0",
+      blockedByTitle: "Pour the foundation",
+      blockedByState: "running" as const,
+      createdAt: "2026-01-01T00:00:00.000Z",
+    },
+    {
+      taskId: "task-9",
+      blockedByTaskId: TASK_ID,
+      blockedByTitle: "Fix the gate latch",
+      blockedByState: "ready" as const,
+      createdAt: "2026-01-01T00:00:00.000Z",
+    },
+  ];
+
+  it("names what this task waits on and what waits on it, each a link to the other task", async () => {
+    renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
+      "task.get": () => task({ state: "ready" }),
+      "session.listForTask": () => [],
+      "task.dependencies": () => edges,
+      "task.list": () => ({
+        items: [task({ id: "task-9", title: "Hang the gate", state: "backlog" })],
+        nextCursor: null,
+      }),
+    });
+
+    const blocker = await screen.findByRole("link", { name: /Pour the foundation/ });
+    expect(blocker.getAttribute("href")).toBe("/task/task-0");
+    const dependant = await screen.findByRole("link", { name: /Hang the gate/ });
+    expect(dependant.getAttribute("href")).toBe("/task/task-9");
+    // Launch is refused here, in words, rather than after a round trip as a wire code.
+    expect(screen.getByRole("button", { name: "Launch" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByText(/Waiting on Pour the foundation \(Running\)/)).toBeDefined();
+  });
+
+  it("shows no dependency row at all on a task with no edges", async () => {
+    renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
+      "task.get": () => task({ state: "ready" }),
+      "session.listForTask": () => [],
+      "task.dependencies": () => [],
+    });
+
+    expect(await screen.findByRole("button", { name: "Launch" })).toBeDefined();
+    expect(document.querySelector("[data-task-dependencies]")).toBeNull();
+    expect(screen.getByRole("button", { name: "Launch" }).hasAttribute("disabled")).toBe(false);
+  });
+});
+
 describe("TaskWorkspace destructive actions", () => {
   it("does not reject on a single click — the discard is confirmed first", async () => {
     const { log } = renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
