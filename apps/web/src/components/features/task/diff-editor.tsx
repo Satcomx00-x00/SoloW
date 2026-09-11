@@ -309,9 +309,11 @@ export function DiffEditor({
       ) : (
         <div className="min-h-0 flex-1 overflow-auto">
           {parsed.hunks.map((hunk, index) => (
-            // A hunk's start lines are its identity: two hunks of one file cannot begin at
-            // the same line, so no index is needed to tell them apart.
-            <div key={`${hunk.oldStart}:${hunk.newStart}`}>
+            // A hunk's start lines are its identity within one file — but the whole-patch view
+            // shows several files, and five new one-line files all begin `@@ -0,0 +1 @@`. The
+            // position disambiguates; the list is never reordered or spliced.
+            // biome-ignore lint/suspicious/noArrayIndexKey: see above
+            <div key={`${index}:${hunk.oldStart}:${hunk.newStart}`}>
               {index > 0 || hunk.heading ? <HunkSeparator heading={hunk.heading} /> : null}
               {mode === "split" ? (
                 <SplitRows

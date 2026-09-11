@@ -933,8 +933,11 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
                      * that the run got far enough to look.
                      */
                     captured={diffs.length > 0 || t.completedAt !== null}
-                    // Ticks only on the round the gate is about; an older round is read, not reviewed.
-                    {...(shownRound === null || shownRound.index === latestRound
+                    // Ticks and notes only while there is a review to draft — the Task at its gate,
+                    // on the round the gate is about. An older round, or a Task that is Done or
+                    // still Running, is read, not reviewed.
+                    {...(t.state === "review" &&
+                    (shownRound === null || shownRound.index === latestRound)
                       ? {
                           ticks: {
                             viewed: draft.viewed,
@@ -992,7 +995,9 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
         task={t}
         outstanding={dependencies.outstanding}
         consequences={summariseConsequences(reviewGroups)}
-        viewed={fileCount > 0 ? { viewed: viewedCount, of: fileCount } : null}
+        viewed={
+          t.state === "review" && fileCount > 0 ? { viewed: viewedCount, of: fileCount } : null
+        }
         notes={{
           count: draft.draft.notes.length,
           general: draft.draft.general,

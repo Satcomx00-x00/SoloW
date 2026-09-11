@@ -46,6 +46,7 @@ export function TranscriptFilterBar({
         icon={TriangleAlert}
         label="Failures only"
         pressed={failuresOnly}
+        mode
         title={
           failuresOnly
             ? "Show the whole transcript"
@@ -62,6 +63,7 @@ function Chip({
   label,
   pressed,
   muted = false,
+  mode = false,
   title,
   onClick,
 }: {
@@ -69,6 +71,8 @@ function Chip({
   label: string;
   pressed: boolean;
   muted?: boolean;
+  /** A mode reads "on" or "off", never struck through: off is the ordinary state, not a removal. */
+  mode?: boolean;
   title: string;
   onClick: () => void;
 }) {
@@ -80,7 +84,13 @@ function Chip({
       onClick={onClick}
       className={cn(
         "inline-flex h-6 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-1.5 text-2xs transition-colors duration-100 hover:bg-white/5",
-        pressed ? "text-foreground/80" : "text-muted-foreground line-through",
+        pressed
+          ? mode
+            ? "bg-feedback-caution/15 text-feedback-caution"
+            : "text-foreground/80"
+          : mode
+            ? "text-muted-foreground"
+            : "text-muted-foreground line-through",
         muted && "opacity-50",
       )}
     >
