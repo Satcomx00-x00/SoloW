@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReviewDecision, TaskDependencyDto, TaskDto, TaskState } from "@solow/contracts";
+import type { ReviewDecision, TaskDependencyDto, TaskDto } from "@solow/contracts";
 import { Check, CheckCircle2, GitBranch, KeyRound, Play, RotateCcw, X } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
@@ -39,7 +39,6 @@ export function TaskFooter({
   onDecide,
   onLaunch,
   onRetry,
-  onMove,
   actionPending = false,
   renewHref,
   error,
@@ -58,7 +57,6 @@ export function TaskFooter({
   onDecide: (decision: ReviewDecision) => void;
   onLaunch: () => void;
   onRetry: () => void;
-  onMove: (to: TaskState) => void;
   /** A launch, retry or move in flight. */
   actionPending?: boolean;
   /** Where "Renew" goes for a credential-expired Task; null when the credential is unknown. */
@@ -77,7 +75,6 @@ export function TaskFooter({
     onDecide,
     onLaunch,
     onRetry,
-    onMove,
     actionPending,
     renewHref,
   });
@@ -118,17 +115,13 @@ function footerBody(input: FooterInput) {
     case "ready":
       return <ReadyToLaunch {...input} />;
     case "backlog":
+      // No button: the header's forward arrow is already "Move to Ready", and a second control
+      // of the same name on one page is what the control checks — rightly — refuse to click.
       return (
-        <Row hint="This task is in the backlog. Move it to Ready when it can be worked on.">
-          <Button
-            size="lg"
-            variant="outline"
-            loading={input.actionPending}
-            onClick={() => input.onMove("ready")}
-          >
-            Move to Ready
-          </Button>
-        </Row>
+        <p className="text-muted-foreground text-sm">
+          This task is in the backlog. Move it to Ready, from the arrow beside its state, when it
+          can be worked on.
+        </p>
       );
     case "running":
       // The harness declared it was finished and the header carries the one "Open review"

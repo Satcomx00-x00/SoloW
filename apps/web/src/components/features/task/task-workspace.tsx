@@ -1007,7 +1007,6 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
         onDecide={runDecision}
         onLaunch={() => requestMove("running")}
         onRetry={() => retry.mutate({ id: t.id })}
-        onMove={requestMove}
         actionPending={move.isPending || launch.isPending || retry.isPending}
         renewHref={renewHref}
         error={footerMessage}

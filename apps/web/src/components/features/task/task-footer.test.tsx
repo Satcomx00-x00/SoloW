@@ -57,7 +57,6 @@ function renderFooter(
       onDecide={(d) => calls.push(`decide:${d}`)}
       onLaunch={() => calls.push("launch")}
       onRetry={() => calls.push("retry")}
-      onMove={(to) => calls.push(`move:${to}`)}
       renewHref="/settings?section=secrets&renewSecret=anthropic"
       error={null}
       {...extra}
@@ -114,10 +113,10 @@ describe("TaskFooter", () => {
     expect(calls).toEqual(["retry"]);
   });
 
-  it("moves a backlog task to Ready", () => {
-    const calls = renderFooter({ state: "backlog" });
-    fireEvent.click(screen.getByRole("button", { name: "Move to Ready" }));
-    expect(calls).toEqual(["move:ready"]);
+  it("offers no second 'Move to Ready' on a backlog task — the header arrow is the one", () => {
+    renderFooter({ state: "backlog" });
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.getByText(/in the backlog/)).toBeDefined();
   });
 
   it("keeps the review gate exactly as it was: three decisions, one scope line", () => {
