@@ -2,7 +2,7 @@ import { join } from "node:path";
 import type { RepositorySource } from "@solow/contracts";
 import { taskCheckoutBranch } from "@solow/core";
 import type { Executor } from "../executor/types.js";
-import { setupFileExclusions } from "./setup-files.js";
+import { worktreeExclusions } from "./setup-files.js";
 
 /**
  * Git worktree manager (spec F08 / task TASK-015). Each Task gets an isolated worktree so
@@ -416,6 +416,16 @@ export async function listWorktrees(
  * worktree of this repository, and returns its branch. A harness that reported a path outside
  * the repository — or none at all — has not given the Task an isolated workspace, and the
  * caller must fail rather than commit from wherever it happens to be pointing (Principle II).
+ *
+ * The repository's **own** working tree is refused too, and that case is not hypothetical.
+ * `git worktree list` names the main working tree first, so a harness that reported the
+ * repository root — a `--resume` round that started before any worktree was recorded runs
+ * there, with `--worktree` suppressed (see `packages/claude-code` `buildArgs`) — used to be
+ * adopted on `main` in the clone every other Task shares. Every capture then read that tree,
+ * which holds the other Tasks' `.claude/worktrees/*` checkouts as untracked gitlinks, so the
+ * Changes panel showed five "Subproject commit" files for a run that had changed nothing; and a
+ * reject would have discarded the shared checkout. Failing the round is the only safe answer,
+ * and a Retry opens a fresh Session that starts with `--worktree` again.
  */
 export async function adoptWorktree(
   executor: Executor,
@@ -430,6 +440,13 @@ export async function adoptWorktree(
   if (!match) {
     throw new Error(
       `harness reported ${reportedPath}, which is not a worktree of ${repoPath}; refusing to use it`,
+    );
+  }
+  // The main working tree is `git worktree list`'s first entry and is also, always, `repoPath`
+  // itself. Checked both ways: a symlinked repository root can print under either name.
+  if (samePath(match.path, repoPath) || known[0]?.path === match.path) {
+    throw new Error(
+      `harness reported ${reportedPath}, which is the repository's own working tree and not an isolated worktree; refusing to use it`,
     );
   }
   return { path: match.path, branch: match.branch ?? "", repoPath };
@@ -461,7 +478,7 @@ export async function hasChanges(
     "--porcelain",
     "--",
     ".",
-    ...setupFileExclusions(setupFilePatterns),
+    ...worktreeExclusions(setupFilePatterns),
   ]);
   return out.trim().length > 0;
 }
@@ -489,7 +506,7 @@ export async function commitWorktree(
     "-A",
     "--",
     ".",
-    ...setupFileExclusions(setupFilePatterns),
+    ...worktreeExclusions(setupFilePatterns),
   ]);
   await run(executor, ["git", "-C", path, "commit", "-m", message]);
 }
@@ -673,7 +690,7 @@ export async function diffWorktree(
   // Files copied in by the setup-file allowlist are subtracted from every one of these commands
   // (issue #52 AC-4). They were not authored by the harness, and a reviewer being shown the
   // contents of a `.env` would put a secret on screen — and into any snapshot taken of it.
-  const only = ["--", ".", ...setupFileExclusions(setupFilePatterns)];
+  const only = ["--", ".", ...worktreeExclusions(setupFilePatterns)];
   await executor.exec(["git", "-C", path, "add", "-N", ...only]);
 
   const numstat = await run(executor, ["git", "-C", path, "diff", "HEAD", "--numstat", ...only]);

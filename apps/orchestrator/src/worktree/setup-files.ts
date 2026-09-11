@@ -162,3 +162,20 @@ export async function seedSetupFiles(
 export function setupFileExclusions(patterns: string[]): string[] {
   return patterns.map((pattern) => `:(exclude,glob)${pattern}`);
 }
+
+/**
+ * Where Claude Code keeps the worktrees it makes: inside the repository it was started in.
+ *
+ * Every Task's worktree therefore sits under the shared clone's `.claude/worktrees/`, and git
+ * reads each one as an untracked nested repository — a gitlink, "Subproject commit …" — from any
+ * tree that contains that directory. No capture, status or commit is ever about those, so they
+ * are excluded from all of them, ahead of the setup-file allowlist. Adoption refuses the
+ * repository root outright (`adoptWorktree`); this is the guard for a tree that legitimately
+ * holds the directory anyway — the root, read for a live status.
+ */
+export const HARNESS_WORKTREES_EXCLUSION = ":(exclude).claude/worktrees";
+
+/** Everything a diff, status or commit must leave out: the harness's worktrees, then the allowlist. */
+export function worktreeExclusions(setupFilePatterns: string[]): string[] {
+  return [HARNESS_WORKTREES_EXCLUSION, ...setupFileExclusions(setupFilePatterns)];
+}

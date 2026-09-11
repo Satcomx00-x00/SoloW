@@ -267,6 +267,29 @@ describe("prepareRepository and adoptWorktree", () => {
     rmSync(stray, { recursive: true, force: true });
   });
 
+  it("never captures the harness's own worktree directory, even from a tree that holds it", async () => {
+    // A nested checkout under `.claude/worktrees/` is what Claude Code leaves in the repository
+    // root, and git reads it as an untracked gitlink from there. It is nobody's change.
+    const nested = join(repoDir, ".claude", "worktrees", "solow-task-other");
+    await $`git -C ${repoDir} worktree add -b solow-task-other ${nested}`.quiet();
+    try {
+      expect(await hasChanges(executor, repoDir)).toBe(false);
+      const diff = await diffWorktree(executor, repoDir);
+      expect(diff.files).toEqual([]);
+      expect(diff.patch).not.toContain("Subproject commit");
+    } finally {
+      await cleanupWorktree(executor, repoDir, nested);
+    }
+  });
+
+  it("refuses the repository's own working tree — the one every other Task shares", async () => {
+    // What a `--resume` round with no recorded worktree reports: it ran in the repository root
+    // with `--worktree` suppressed. Adopting that put a Task on `main` in the shared clone, where
+    // the other Tasks' `.claude/worktrees/*` checkouts read as five added gitlinks and a reject
+    // would have discarded the shared checkout (Principle II).
+    await expect(adoptWorktree(executor, repoDir, repoDir)).rejects.toThrow(/own working tree/);
+  });
+
   it("refuses when the harness reported no workspace at all", async () => {
     await expect(adoptWorktree(executor, repoDir, null)).rejects.toThrow(
       /did not report a workspace/,

@@ -1,6 +1,6 @@
 import type { ScmBranchDto, ScmChangeKind, ScmFileDto, ScmGroup } from "@solow/contracts";
 import type { Executor } from "../executor/types.js";
-import { setupFileExclusions } from "./setup-files.js";
+import { worktreeExclusions } from "./setup-files.js";
 
 /**
  * A worktree's source control, read from git (spec F22, Decision 0017).
@@ -206,7 +206,7 @@ export async function readScmStatus(
   setupFilePatterns: string[] = [],
   limit: number = SCM_FILE_LIMIT,
 ): Promise<ScmWorktreeStatus> {
-  const only = ["--", ".", ...setupFileExclusions(setupFilePatterns)];
+  const only = ["--", ".", ...worktreeExclusions(setupFilePatterns)];
   const [statusOut, unstagedOut, stagedOut] = await Promise.all([
     git(executor, path, ["status", "--porcelain=v2", "--branch", "-z", ...only]),
     git(executor, path, ["diff", "--numstat", "-z", ...only]),
