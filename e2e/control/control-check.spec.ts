@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { expect, type Page, test } from "@playwright/test";
 import { PATHS } from "../support/fixture.js";
-import { connectRepository, createTask, openReview, openTask } from "../support/flows.js";
+import { awaitWorkflowGate, connectRepository, createTask, openTask } from "../support/flows.js";
 
 /**
  * The control check (@control): one pass through the product's main line, on this host, as a
@@ -232,11 +232,9 @@ test.describe("control check — the main line of the product, end to end", () =
       for (const name of stepNames) await expect(tabs.getByRole("tab", { name })).toBeVisible();
 
       // Step 1's harness finishes → the advance moves the cursor → Step 2's harness runs in the
-      // same worktree. The last Step does not end the run: it offers the review gate.
+      // same worktree. The last Step does not end the run: it opens the review gate itself.
       await expect(progress).toContainText("Step 2 of 2");
-      await expect(
-        page.getByRole("main").getByRole("button", { name: "Open review" }),
-      ).toBeVisible();
+      await awaitWorkflowGate(page);
 
       // Every Step's transcript, read back one Step at a time — the terminal is scoped to the
       // selected tab. Both ran the fixture harness in the one worktree the Task owns.
@@ -254,7 +252,6 @@ test.describe("control check — the main line of the product, end to end", () =
     });
 
     await test.step("review the change and approve it onto a branch", async () => {
-      await openReview(page);
       const changed = page.getByRole("list", { name: "Changes" });
       await expect(changed.getByTitle(`marker-solow-task-${taskId}.txt`)).toBeVisible();
       await page.getByRole("main").getByRole("button", { name: "Approve" }).click();

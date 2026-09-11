@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { PATHS } from "../support/fixture.js";
-import { connectRepository, createTask, openReview, openTask } from "../support/flows.js";
+import { awaitWorkflowGate, connectRepository, createTask, openTask } from "../support/flows.js";
 
 /**
  * The branching control check (@control): the Workflow features that decide *where* a Task goes
@@ -291,10 +291,7 @@ test.describe("branching control check — conditions, a loop, and a gate in the
       // Implement → Review (yes) → Implement → Review (no) → Verify (blocked) → Escalate, whose
       // human gate holds the Task at the review the operator opens.
       await expect(progress).toContainText("Step 4 of 5", { timeout: 120_000 });
-      await expect(
-        page.getByRole("main").getByRole("button", { name: "Open review" }),
-      ).toBeVisible();
-      await openReview(page);
+      await awaitWorkflowGate(page);
       const tabs = page.getByRole("tablist", { name: "Workflow steps" });
       await expect(tabs.getByRole("tab", { name: "Escalate" })).toHaveAttribute(
         "aria-current",
@@ -308,10 +305,7 @@ test.describe("branching control check — conditions, a loop, and a gate in the
       await expect(progress).toContainText("Step 5 of 5", { timeout: 120_000 });
       // Not Done: the approval was spent on Escalate's gate, not on the integration.
       await expect(page.locator('[data-task-state="done"]')).toHaveCount(0);
-      await expect(
-        page.getByRole("main").getByRole("button", { name: "Open review" }),
-      ).toBeVisible();
-      await openReview(page);
+      await awaitWorkflowGate(page);
       await page.getByRole("main").getByRole("button", { name: "Approve" }).click();
       await expect(page.locator('[data-task-state="done"]').first()).toBeVisible();
       const branch = `solow-task-${taskId}`;

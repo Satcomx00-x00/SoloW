@@ -133,6 +133,20 @@ export async function openReview(page: Page): Promise<void> {
   await expect(page.locator('[data-task-state="review"]').first()).toBeVisible();
 }
 
+/**
+ * Wait for a Workflow gate the run opened itself.
+ *
+ * Under a Workflow the only way past a human-decided Step is a review decision, so the run puts
+ * the Task into review when the harness finishes (F03 FR-10: a Run that reaches a Gate *requests*
+ * the decision) — there is no "Open review" to click, and the Approve is on screen already.
+ */
+export async function awaitWorkflowGate(page: Page): Promise<void> {
+  await expect(page.locator('[data-task-state="review"]').first()).toBeVisible({
+    timeout: 120_000,
+  });
+  await expect(page.getByRole("main").getByRole("button", { name: "Approve" })).toBeVisible();
+}
+
 /** The whole run-up: launch, wait out the harness, open the gate. */
 export async function launchToReview(page: Page): Promise<void> {
   await launchTask(page);

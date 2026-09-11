@@ -2877,6 +2877,33 @@ export async function runTaskLifecycle(
          */
       }
 
+      /*
+       * Under a Workflow, the run opens the gate itself (F03 FR-10: "when a Run reaches a Gate, it
+       * pauses and requests the required human decision").
+       *
+       * The rule above — the transition into `review` is the operator's click — is about a Task
+       * on no Workflow, where "the harness stopped" and "someone should look" are different facts
+       * and only the person can tell which. Here they are the same fact: the only way past this
+       * point is a `review.decided`, so a Task left `running` with an "Open review" button is a
+       * gate the person has to open before they can answer it. A plan-first Step showed the cost
+       * in full — its harness declares `nothing_to_do` every time, and the operator was left
+       * looking at "Finished — nothing to do" with the Approve they needed one click further away.
+       *
+       * Not for a harness that gave up: `blocked` has not reached the gate, and a review over an
+       * abandoned run asks a person to sign off on nothing — the same line `canOpenReview` draws.
+       * Idempotent on a redrive: `setTaskState` writes the same value and `recordTransition`
+       * drops an identical adjacent transition.
+       */
+      if (wf && leg.stepId && run.outcome !== "blocked") {
+        const stepId = leg.stepId;
+        await step.run(`open-gate-${round}`, async () => {
+          await setTaskState(db, workspaceId, taskId, "review");
+          await recordTransition("running", "review", stepId);
+        });
+        logStateTransition(log, { workspaceId, taskId, from: "running", to: "review" });
+        announce("review");
+      }
+
       const decidedEvent = await step.waitForEvent(`await-review-${round}`, {
         event: "review.decided",
         timeout: REVIEW_WAIT_TIMEOUT,

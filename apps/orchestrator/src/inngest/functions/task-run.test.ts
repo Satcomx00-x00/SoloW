@@ -4512,6 +4512,75 @@ describe("a Task following a Workflow", () => {
     expect(sess?.state).toBe("active");
   });
 
+  it("opens the gate itself at a human-decided Step, so Approve is on screen without a click", async () => {
+    /*
+     * F03 FR-10: when a Run reaches a Gate it pauses and *requests* the decision. A plan-first
+     * Step is the case that showed the cost of not doing so — its harness is briefed not to
+     * change a file and declares `nothing_to_do` every time, and the operator was left looking
+     * at "Finished — nothing to do" with the Approve they needed one "Open review" click away.
+     *
+     * Red under `to-review` leaving the Task `running`: the state read at the wait is "running".
+     */
+    const ids = freshIds();
+    await seedRun(db, ids);
+    await seedWorkflow(ids, [
+      {
+        key: "plan",
+        command: "planner",
+        permissionMode: "plan",
+        promptTemplate: "Plan. Do not change any file.",
+        gate: "human",
+        advanceOn: "review",
+      },
+      {
+        key: "build",
+        command: "builder",
+        permissionMode: "acceptEdits",
+        promptTemplate: "Build.",
+        gate: "auto",
+        advanceOn: "agent-signal",
+      },
+    ]);
+    const planner = new ScriptedRunner(
+      [{ kind: "completed", stopReason: "end_turn" }],
+      [declares("the plan", "nothing_to_do")],
+    );
+    const builder = new ScriptedRunner(
+      [{ kind: "completed", stopReason: "end_turn" }],
+      [declares("built it")],
+    );
+    const { deps } = makeDeps(db, planner, nullStream());
+    deps.runner = runnersByMode({ plan: planner, acceptEdits: builder });
+
+    const deciding = decidingStep(ids, ["approve", "approve"]);
+    const statesAtWait: string[] = [];
+    const observing: StepLike = {
+      ...deciding,
+      waitForEvent: async (id, opts) => {
+        statesAtWait.push(await taskState(db, ids.taskId));
+        return deciding.waitForEvent(id, opts);
+      },
+    };
+
+    const result = await runTaskLifecycle(deps, { event: { data: ids }, step: observing });
+
+    // Both gates were reached with the Task already in review — no "Open review" needed.
+    expect(statesAtWait).toEqual(["review", "review"]);
+    expect(builder.starts).toBe(1);
+    expect(result.result).toBe("done");
+    const transitions = (
+      await db
+        .select()
+        .from(sessionEvent)
+        .where(eq(sessionEvent.sessionId, ids.sessionId))
+        .orderBy(asc(sessionEvent.seq))
+    )
+      .map((row) => row.payload as { kind: string; from?: string; to?: string })
+      .filter((payload) => payload.kind === "state")
+      .map((s) => `${s.from}→${s.to}`);
+    expect(transitions).toContain("running→review");
+  });
+
   /** The harness's declaration with any extra field — the `decision` the branch reads. */
   const declaresWith = (widget: Record<string, unknown>): HarnessStreamEvent => ({
     kind: "stdout",
