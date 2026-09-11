@@ -24,7 +24,8 @@ export function TranscriptFilterBar({
 }) {
   const { thinking, tools, failuresOnly } = filters;
   return (
-    <div className="flex items-center gap-0.5" aria-label="Transcript filters">
+    <fieldset className="m-0 flex items-center gap-0.5 border-0 p-0">
+      <legend className="sr-only">Transcript filters</legend>
       <Chip
         icon={Brain}
         label="Thinking"
@@ -52,7 +53,7 @@ export function TranscriptFilterBar({
         }
         onClick={() => onChange({ ...filters, failuresOnly: !failuresOnly })}
       />
-    </div>
+    </fieldset>
   );
 }
 
