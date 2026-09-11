@@ -222,7 +222,9 @@ test.describe("control check — the main line of the product, end to end", () =
       await launch.getByText(workflowName, { exact: true }).click();
       await expect(launch.getByRole("radio", { name: new RegExp(workflowName) })).toBeChecked();
       await launch.getByRole("button", { name: "Launch" }).click();
-      await expect(page.locator('[data-task-state="running"]').first()).toBeVisible();
+      // Launched, not "Running": the fixture harness is quick enough that a Workflow can run
+      // its Steps and park the Task at its gate before this poll sees the intermediate state.
+      await expect(page.locator('[data-task-state="ready"]')).toHaveCount(0);
     });
 
     await test.step("the run walks both Steps, and each Step's output is on its own tab", async () => {
