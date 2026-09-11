@@ -129,3 +129,50 @@ export function splitHighlights(text: string, query: string): HighlightSegment[]
   if (from < text.length) out.push({ text: text.slice(from), match: null });
   return out.length > 0 ? out : [{ text, match: null }];
 }
+
+/**
+ * What the transcript is narrowed to, from the toolbar's chips.
+ *
+ * Two toggles and one mode. Thinking is most of a long run by volume and least of it by
+ * consequence; tool calls are the opposite, and a reader after the harness's *reasoning* can
+ * fold those away instead. "Failures only" is a mode rather than a third toggle because it
+ * answers a different question — not "what do I want less of" but "where did it go wrong" — and
+ * a failed tool call is only legible next to the permission or notice that surrounded it, so the
+ * mode keeps those too and nothing else.
+ */
+export interface TranscriptFilters {
+  thinking: boolean;
+  tools: boolean;
+  failuresOnly: boolean;
+}
+
+export const DEFAULT_TRANSCRIPT_FILTERS: TranscriptFilters = {
+  thinking: true,
+  tools: true,
+  failuresOnly: false,
+};
+
+/** A tool row the harness did not get what it wanted from. */
+function failed(row: TranscriptRow): boolean {
+  return row.kind === "tool" && (row.status === "failed" || row.result?.ok === false);
+}
+
+/**
+ * The rows the filters let through. Applied before search sees them, so a match is never found in
+ * a block nobody can see. Returns the same array when nothing is filtered, so the memo downstream
+ * keeps its identity on the default settings.
+ */
+export function applyTranscriptFilters(
+  rows: readonly TranscriptRow[],
+  filters: TranscriptFilters,
+): readonly TranscriptRow[] {
+  if (filters.failuresOnly) {
+    return rows.filter((row) => failed(row) || row.kind === "notice" || row.kind === "permission");
+  }
+  if (filters.thinking && filters.tools) return rows;
+  return rows.filter((row) => {
+    if (row.kind === "text" && row.channel === "thinking") return filters.thinking;
+    if (row.kind === "tool") return filters.tools;
+    return true;
+  });
+}

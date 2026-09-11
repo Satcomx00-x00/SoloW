@@ -1,5 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import {
+  applyTranscriptFilters,
+  DEFAULT_TRANSCRIPT_FILTERS,
   findMatches,
   highlightsInline,
   rowText,
@@ -132,5 +134,51 @@ describe("splitHighlights", () => {
   it("returns the whole string untouched when there is nothing to find", () => {
     expect(splitHighlights("hello", "")).toEqual([{ text: "hello", match: null }]);
     expect(splitHighlights("hello", "zz")).toEqual([{ text: "hello", match: null }]);
+  });
+});
+
+describe("applyTranscriptFilters", () => {
+  const thinking: TranscriptRow = {
+    kind: "text",
+    id: "9",
+    sessionId: "s",
+    seq: 9,
+    channel: "thinking",
+    text: "Considering pip",
+    open: false,
+  };
+  const failedTool: TranscriptRow = {
+    ...(tool("10", "Bash", { command: "pytest" }) as Extract<TranscriptRow, { kind: "tool" }>),
+    status: "failed",
+    result: { ok: false, output: "3 failed", truncated: false },
+  };
+  const notice: TranscriptRow = { kind: "notice", id: "11", sessionId: "s", seq: 11, text: "…" };
+  const all = [
+    text("1", "hello"),
+    thinking,
+    tool("2", "Bash", { command: "ls" }),
+    failedTool,
+    notice,
+  ];
+
+  it("lets everything through on the defaults, as the same array", () => {
+    expect(applyTranscriptFilters(all, DEFAULT_TRANSCRIPT_FILTERS)).toBe(all);
+  });
+
+  it("folds thinking and tool calls away independently", () => {
+    const noThinking = applyTranscriptFilters(all, {
+      ...DEFAULT_TRANSCRIPT_FILTERS,
+      thinking: false,
+    });
+    expect(noThinking.map((r) => r.id)).toEqual(["1", "2", "10", "11"]);
+    const noTools = applyTranscriptFilters(all, { ...DEFAULT_TRANSCRIPT_FILTERS, tools: false });
+    expect(noTools.map((r) => r.id)).toEqual(["1", "9", "11"]);
+  });
+
+  it("keeps only what went wrong, and what surrounded it, in failures-only", () => {
+    // The two toggles say nothing while the mode is on: a failed tool call must not be hidden by
+    // "Tools off" on the way to being the one row the mode exists to show.
+    const only = applyTranscriptFilters(all, { thinking: false, tools: false, failuresOnly: true });
+    expect(only.map((r) => r.id)).toEqual(["10", "11"]);
   });
 });

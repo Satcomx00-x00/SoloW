@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, Brain, ChevronDown, ChevronUp, Layers, Search, X } from "lucide-react";
+import { ArrowDown, ChevronDown, ChevronUp, Layers, Search, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,8 +8,14 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { EmptyPanel } from "./empty-panel";
 import { HarnessActivityLine, LaunchingPanel } from "./harness-activity";
-import { findMatches, stepMatch } from "./terminal-search";
+import {
+  applyTranscriptFilters,
+  DEFAULT_TRANSCRIPT_FILTERS,
+  findMatches,
+  stepMatch,
+} from "./terminal-search";
 import { harnessActivity, type TranscriptRow } from "./transcript";
+import { TranscriptFilterBar } from "./transcript-filters";
 import { Transcript } from "./transcript-view";
 
 /** What the terminal has been narrowed to, in the words the strip above it already uses. */
@@ -85,15 +91,11 @@ export function TerminalView({
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const searchInput = useRef<HTMLInputElement | null>(null);
-  // The harness's reasoning is most of a long run by volume and least of it by consequence; a
-  // reader after what was *done* can fold it away. Off the rows before search sees them, so a
-  // match is never found in a block nobody can see.
-  const [showThinking, setShowThinking] = useState(true);
-  const visible = useMemo(
-    () =>
-      showThinking ? rows : rows.filter((r) => !(r.kind === "text" && r.channel === "thinking")),
-    [rows, showThinking],
-  );
+  // What the transcript is narrowed to (`applyTranscriptFilters`). Off the rows before search
+  // sees them, so a match is never found in a block nobody can see. Session-local on purpose:
+  // a filter that survived a reload would be a transcript quietly missing rows on every visit.
+  const [filters, setFilters] = useState(DEFAULT_TRANSCRIPT_FILTERS);
+  const visible = useMemo(() => applyTranscriptFilters(rows, filters), [rows, filters]);
 
   const matches = useMemo(() => findMatches(visible, query), [visible, query]);
   const activeMatch = matches[active] ?? null;
@@ -249,19 +251,7 @@ export function TerminalView({
         )}
 
         <div className="ml-auto flex min-w-0 items-center gap-1.5">
-          <button
-            type="button"
-            aria-pressed={showThinking}
-            title={showThinking ? "Hide the harness's thinking" : "Show the harness's thinking"}
-            onClick={() => setShowThinking((v) => !v)}
-            className={cn(
-              "inline-flex h-6 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-1.5 text-2xs transition-colors duration-100 hover:bg-white/5",
-              showThinking ? "text-foreground/80" : "text-muted-foreground line-through",
-            )}
-          >
-            <Brain aria-hidden className="size-3" />
-            <span className="sr-only @sm:not-sr-only">Thinking</span>
-          </button>
+          <TranscriptFilterBar filters={filters} onChange={setFilters} />
           {searchOpen ? (
             <>
               <div className="relative">

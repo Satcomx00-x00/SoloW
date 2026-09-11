@@ -220,6 +220,32 @@ describe("thinking toggle", () => {
     });
     expect(screen.getByText("no results")).toBeDefined();
   });
+
+  it("narrows to failures only — the failed call and the notice, nothing the run got right", () => {
+    const withFailure: TranscriptRow[] = [
+      ...withThinking,
+      {
+        kind: "tool",
+        id: "4",
+        sessionId: "s",
+        seq: 4,
+        name: "Bash",
+        callId: "c1",
+        input: { command: "pytest" },
+        status: "failed",
+        result: { ok: false, output: "3 failed", truncated: false },
+      },
+      { kind: "notice", id: "5", sessionId: "s", seq: 5, text: "The harness gave up." },
+    ];
+    renderTerminal({ rows: withFailure });
+    fireEvent.click(screen.getByRole("button", { name: "Failures only" }));
+    expect(screen.queryByText(/Running pip to check versions/)).toBeNull();
+    expect(screen.queryByText(/Considering whether pip/)).toBeNull();
+    expect(screen.getByText(/The harness gave up/)).toBeDefined();
+    expect(document.querySelector("[data-tool-status='failed']")).not.toBeNull();
+    // The two toggles are still there — dimmed, not gone — so the mode is reversible in place.
+    expect(screen.getByRole("button", { name: "Tools" }).getAttribute("aria-pressed")).toBe("true");
+  });
 });
 
 describe("thinking toggle", () => {
