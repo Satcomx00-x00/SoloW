@@ -161,6 +161,34 @@ export function isLaunchable(state: TaskState): boolean {
   return state === "ready";
 }
 
+/** The three facts "may the gate be opened on this Task" is decided from. */
+export interface ReviewableTask {
+  completedAt: string | null;
+  completedOutcome: "changes_ready" | "nothing_to_do" | "blocked" | null;
+  workflowStepId: string | null;
+}
+
+/**
+ * Whether a finished run may be put in front of a reviewer (Principle I).
+ *
+ * `changes_ready` always: there is a change to judge. `blocked` never: the harness gave up, and
+ * a gate over an abandoned run asks a person to sign off on nothing. `nothing_to_do` is the one
+ * that depends on *what* the gate is for. On a Task with no Workflow the answer is what the
+ * harness said — nothing changed, nothing to approve. On a Workflow Step it is not: a Step that
+ * advances on the reviewer's approval is reviewing the Step's *outcome* — a plan, an
+ * investigation, a verdict — and a Step briefed "do not change any file" reaches its gate with
+ * `nothing_to_do` every time. Refusing it there left every plan-first Workflow parked at its
+ * first Step with no control that could move it (seen on two real Tasks).
+ *
+ * One rule, here, because four places ask it: the server's `submitForReview` and three
+ * "Open review" controls — and the server must never refuse what a control offered.
+ */
+export function canOpenReview(task: ReviewableTask): boolean {
+  if (task.completedAt === null) return false;
+  if (task.completedOutcome === "changes_ready") return true;
+  return task.completedOutcome === "nothing_to_do" && task.workflowStepId !== null;
+}
+
 /**
  * Task dependencies (issue #6) — the whole graph story, and nothing else.
  *

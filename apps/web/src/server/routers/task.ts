@@ -23,6 +23,7 @@ import {
 } from "@solow/contracts";
 import {
   buildCreateTaskPayload,
+  canOpenReview,
   canTransitionTask,
   formatDependencyCycle,
   isLaunchable,
@@ -293,11 +294,12 @@ export const taskRouter = router({
     .output(taskDto)
     .mutation(async ({ ctx, input }) => {
       const task = unwrap(await getTaskById(ctx.rctx, input.id));
-      // The harness's own word, and only `changes_ready` counts: a run that finished having changed
-      // nothing (`nothing_to_do`) has nothing to approve, and one that gave up (`blocked`) has not
-      // finished at all. Checked here rather than only in the UI, because the button is not the
-      // only caller — MCP and the OpenAPI surface reach this too.
-      if (task.completedAt === null || task.completedOutcome !== "changes_ready") {
+      // The harness's own word decides, by the one rule the UI's controls also read
+      // (`canOpenReview`): `changes_ready` always, `blocked` never, and `nothing_to_do` only on a
+      // Workflow Step — where the gate reviews the Step's outcome, not a diff. Checked here rather
+      // than only in the UI, because the button is not the only caller — MCP and the OpenAPI
+      // surface reach this too.
+      if (!canOpenReview(task)) {
         throw new TRPCError({
           code: "PRECONDITION_FAILED",
           message: TaskErrorCode.NotComplete,

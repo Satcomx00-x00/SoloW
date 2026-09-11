@@ -1,6 +1,6 @@
 "use client";
 
-import type { SessionEventDto, TodoItem } from "@solow/contracts";
+import type { SessionEventDto, TodoItem, Widget } from "@solow/contracts";
 import { LoaderCircle, Square, SquareCheckBig } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -119,4 +119,22 @@ export function latestTodos(events: readonly SessionEventDto[]): TodoItem[] {
     if (payload?.kind === "todos") return payload.items;
   }
   return [];
+}
+
+/**
+ * The harness's most recent `step_card`, for the same tab.
+ *
+ * Not every harness keeps a `TodoWrite` list; a plan-first Step typically publishes its plan as
+ * a `step_card` widget and nothing else — and a Plan tab that only read `todos` sat disabled
+ * beside a transcript that plainly contained one. The latest card wins for the reason the
+ * latest list does: each emission is the whole plan as it now stands.
+ */
+export type StepCardWidget = Extract<Widget, { kind: "step_card" }>;
+
+export function latestStepCard(events: readonly SessionEventDto[]): StepCardWidget | null {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const payload = events[i]?.payload;
+    if (payload?.kind === "widget" && payload.widget.kind === "step_card") return payload.widget;
+  }
+  return null;
 }

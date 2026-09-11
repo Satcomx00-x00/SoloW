@@ -3,6 +3,7 @@ import { TaskDependencyErrorCode, TaskErrorCode, type TaskState } from "@solow/c
 import {
   buildCreateTaskPayload,
   buildDependencyGraph,
+  canOpenReview,
   canTransitionTask,
   checkDependencyEdge,
   formatDependencyCycle,
@@ -280,5 +281,31 @@ describe("formatDependencyCycle / parseDependencyCycleMessage", () => {
   it("returns null for an error that is not a cycle", () => {
     expect(parseDependencyCycleMessage(TaskErrorCode.NotReady)).toBeNull();
     expect(parseDependencyCycleMessage("TASK_DEPENDENCY_CYCLE: a")).toBeNull();
+  });
+});
+
+describe("canOpenReview", () => {
+  const at = "2026-01-01T00:00:00.000Z";
+  it("opens on changes_ready, never on blocked, and never before a declaration", () => {
+    expect(
+      canOpenReview({ completedAt: at, completedOutcome: "changes_ready", workflowStepId: null }),
+    ).toBe(true);
+    expect(
+      canOpenReview({ completedAt: at, completedOutcome: "blocked", workflowStepId: "st-1" }),
+    ).toBe(false);
+    expect(
+      canOpenReview({ completedAt: null, completedOutcome: null, workflowStepId: "st-1" }),
+    ).toBe(false);
+  });
+
+  it("opens on nothing_to_do only on a Workflow Step, where the gate reviews the Step's outcome", () => {
+    // A plan-first Step is briefed not to change a file and declares `nothing_to_do` every time;
+    // refusing it left the Workflow parked at its first Step with no control that could move it.
+    expect(
+      canOpenReview({ completedAt: at, completedOutcome: "nothing_to_do", workflowStepId: "st-1" }),
+    ).toBe(true);
+    expect(
+      canOpenReview({ completedAt: at, completedOutcome: "nothing_to_do", workflowStepId: null }),
+    ).toBe(false);
   });
 });

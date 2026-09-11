@@ -13,7 +13,7 @@ import type {
   TaskState,
 } from "@solow/contracts";
 import { DEFAULT_TASK_PANE_LAYOUT, type TaskPaneLayout } from "@solow/contracts";
-import { primaryTaskRepository } from "@solow/core";
+import { canOpenReview, primaryTaskRepository } from "@solow/core";
 import {
   ArrowLeft,
   CheckCircle2,
@@ -54,8 +54,9 @@ import { TaskDependencies, useBlockedByEditor, useTaskDependencies } from "./tas
 import { TaskFooter } from "./task-footer";
 import { TaskMeta } from "./task-meta";
 import { type TerminalScope, TerminalView } from "./terminal-view";
-import { latestTodos, TodoList } from "./todo-list";
+import { latestStepCard, latestTodos, type StepCardWidget, TodoList } from "./todo-list";
 import { buildTranscript, inStepScope } from "./transcript";
+import { StepCard } from "./widgets/step-card";
 import { selectedTabId, TERMINAL_PANEL_ID, useStepScope, WorkflowSteps } from "./workflow-steps";
 
 /**
@@ -391,6 +392,21 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
     }
     return latestTodos(events);
   }, [events, live.events, liveSessionId]);
+  // The other shape a plan takes — a `step_card` widget — read the same two-source way and for
+  // the same reasons; see `latestStepCard`. Both are shown when both exist.
+  const stepCard = useMemo<StepCardWidget | null>(() => {
+    for (let i = live.events.length - 1; i >= 0; i -= 1) {
+      const event = live.events[i];
+      if (
+        event?.kind === "widget" &&
+        event.sessionId === liveSessionId &&
+        event.widget.kind === "step_card"
+      )
+        return event.widget;
+    }
+    return latestStepCard(events);
+  }, [events, live.events, liveSessionId]);
+  const hasPlan = todos.length > 0 || stepCard !== null;
 
   /**
    * Which of the right column's two tabs is showing.
@@ -623,10 +639,10 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   const branch = primary?.resultBranch ?? latest?.diffRef ?? null;
   // The gate's scope is always the latest capture; the tab may be showing an older round.
   const diffs = shownRound && shownRound.index !== latestRound ? shownRound.diffs : capturedDiffs;
-  const autoTab = todos.length > 0 && diffs.length === 0 && isRunning ? "plan" : "changes";
+  const autoTab = hasPlan && diffs.length === 0 && isRunning ? "plan" : "changes";
   const pickedTab = tabPick && tabPick.state === t.state ? tabPick.tab : autoTab;
   // A plan tab with no plan under it is disabled, so a pick that outlived its list falls back.
-  const tab = pickedTab === "plan" && todos.length === 0 ? "changes" : pickedTab;
+  const tab = pickedTab === "plan" && !hasPlan ? "changes" : pickedTab;
   const runDecision = (decision: "approve" | "reject" | "request_changes") => {
     if (!latest?.id) return;
     // The draft goes with a request for changes and nowhere else (F10 FR-7): an approval has
@@ -755,11 +771,12 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
               The completion gate, where the operator already is.
               
               The card on the board carries the same control, and someone watching a run happen
-              should not have to leave the page it is happening on to act on it. Present only for
-              `changes_ready`: a run that finished having changed nothing has nothing to approve,
-              and one that gave up has not finished.
+              should not have to leave the page it is happening on to act on it. Present by
+              `canOpenReview`'s rule: `changes_ready`, or `nothing_to_do` on a Workflow Step —
+              where a plan-first Step reaches its gate with nothing changed and the gate is about
+              the plan. A run that gave up has not finished.
             */}
-            {t.completedOutcome === "changes_ready" && t.state === "running" ? (
+            {canOpenReview(t) && t.state === "running" ? (
               // The app's own Button, not a styled `<button>`: it brings the control ladder, the
               // one focus ring, the press, and — the reason it matters here — a loading state the
               // component owns, so the gate cannot be opened twice while the first call is in
@@ -969,9 +986,10 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
                     Nothing at all when the harness has published no list: `TodoList` renders `null`
                     on an empty one, and the tab is disabled so a heading over nothing is never shown.
                   */}
-                  {todos.length > 0 ? (
-                    <section aria-label="Harness plan">
-                      <TodoList items={todos} />
+                  {hasPlan ? (
+                    <section aria-label="Harness plan" className="space-y-3">
+                      {stepCard ? <StepCard widget={stepCard} /> : null}
+                      {todos.length > 0 ? <TodoList items={todos} /> : null}
                     </section>
                   ) : null}
                 </div>
@@ -984,7 +1002,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
             tab={tab}
             onPick={(next) => setTabPick({ tab: next, state: t.state })}
             files={diffs.reduce((n, d) => n + d.files.length, 0)}
-            planItems={todos.length}
+            planItems={todos.length > 0 ? todos.length : (stepCard?.steps.length ?? 0)}
           />
         }
         rightLabel="Review"

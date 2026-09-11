@@ -1,5 +1,5 @@
 import type { TaskDependencyDto, TaskDto } from "@solow/contracts";
-import { primaryTaskRepository, unsatisfiedDependencies } from "@solow/core";
+import { canOpenReview, primaryTaskRepository, unsatisfiedDependencies } from "@solow/core";
 import { CheckCircle2, GitBranch, Library, Lock, Workflow } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
@@ -135,7 +135,9 @@ export function TaskCard({
    * it rather than looking like a Task that stalled.
    */
   const declared = task.completedAt !== null;
-  const readyForReview = declared && task.completedOutcome === "changes_ready";
+  // `canOpenReview` owns the rule, and the server refuses by the same one — including the case a
+  // plan-first Workflow Step reaches its gate with nothing changed.
+  const readyForReview = canOpenReview(task);
 
   return (
     <article

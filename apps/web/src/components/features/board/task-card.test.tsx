@@ -248,13 +248,31 @@ describe("the completion gate", () => {
     expect(onSubmitForReview).toHaveBeenCalledWith(task.id);
   });
 
-  it("reports a run that finished with nothing to do, and offers no gate", () => {
+  it("reports a run that finished with nothing to do, and offers no gate on a Task with no Workflow", () => {
     // Finishing having changed nothing is an answer, and the card should say it rather than
     // looking like a Task that stalled. There is still nothing to approve.
     showGate({ ...FINISHED, completedOutcome: "nothing_to_do" }, () => {});
 
     expect(screen.getByText(/nothing to do/i)).toBeDefined();
     expect(screen.queryByRole("button", { name: /open review/i })).toBeNull();
+  });
+
+  it("offers the gate on a Workflow Step that finished with nothing to do — the plan is what is reviewed", () => {
+    // A Step briefed "do not change any file" reaches its gate with `nothing_to_do` every time;
+    // without this every plan-first Workflow parked at its first Step with no way on.
+    const onSubmitForReview = mock(() => {});
+    showGate(
+      {
+        ...FINISHED,
+        completedOutcome: "nothing_to_do",
+        workflowId: "wf-1",
+        workflowStepId: "st-1",
+      },
+      onSubmitForReview,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /open review/i }));
+    expect(onSubmitForReview).toHaveBeenCalledWith(task.id);
   });
 
   it("reports a run that gave up, and offers no gate", () => {

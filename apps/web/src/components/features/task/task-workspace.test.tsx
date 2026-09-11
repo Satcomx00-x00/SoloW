@@ -251,6 +251,28 @@ describe("TaskWorkspace review gate", () => {
     );
   });
 
+  it("offers Open review on a Workflow Step that finished with nothing to do — the plan is what is reviewed", async () => {
+    const { log } = renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
+      "task.get": () =>
+        task({
+          state: "running",
+          workflowId: "wf-1",
+          workflowStepId: "st-1",
+          completedAt: "2026-01-01T00:00:00.000Z",
+          completedOutcome: "nothing_to_do",
+          completedSummary: "Wrote the plan; changed no file, per the brief.",
+        }),
+      "session.listForTask": () => [session],
+      "session.get": () => detail(),
+      "task.submitForReview": () => task({ state: "review" }),
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Open review" }));
+    await waitFor(() =>
+      expect(log.calls.filter((c) => c.path === "task.submitForReview")).toHaveLength(1),
+    );
+  });
+
   it("offers no review action until the Task reaches Review", async () => {
     renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
       "task.get": () => task({ state: "running" }),
@@ -1156,6 +1178,33 @@ describe("TaskWorkspace todo checklist", () => {
     // The live item is shown in the present tense the harness wrote for exactly this moment.
     expect(within(plan).getByText("Writing the fix")).toBeDefined();
     expect(within(plan).getByText("1 of 3 done")).toBeDefined();
+  });
+
+  it("shows a step_card plan on the Plan tab when the harness published no todo list", async () => {
+    // A plan-first Step typically publishes its plan as a `step_card` widget and nothing else;
+    // a Plan tab that only read `todos` sat disabled beside a transcript containing the plan.
+    renderWithTrpc(
+      <TaskWorkspace taskId={TASK_ID} />,
+      handlers([
+        {
+          kind: "widget",
+          widgetId: "w-1",
+          widget: {
+            kind: "step_card",
+            title: "Plan: fix the latch",
+            steps: [
+              { id: "study", label: "Study the latch code", state: "done" },
+              { id: "write", label: "Write the fix", state: "active" },
+            ],
+          },
+        },
+      ]),
+    );
+
+    const plan = await screen.findByRole("region", { name: "Harness plan" });
+    expect(within(plan).getByText("Plan: fix the latch")).toBeDefined();
+    expect(within(plan).getByText("Write the fix")).toBeDefined();
+    expect(screen.getByRole("tab", { name: /Plan/ }).hasAttribute("disabled")).toBe(false);
   });
 
   it("shows no panel at all until the harness has published a plan", async () => {

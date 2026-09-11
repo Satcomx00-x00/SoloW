@@ -1,7 +1,7 @@
 "use client";
 
 import type { TaskDto } from "@solow/contracts";
-import { nextTaskState, primaryTaskRepository } from "@solow/core";
+import { canOpenReview, nextTaskState, primaryTaskRepository } from "@solow/core";
 import {
   Check,
   Columns3,
@@ -161,7 +161,7 @@ export function TaskNav({ taskId }: { taskId: string }) {
           {t.state === "ready" && (
             <Action icon={Play} label="Launch" onClick={requestLaunch} disabled={busy} />
           )}
-          {t.state === "running" && t.completedOutcome === "changes_ready" && (
+          {t.state === "running" && canOpenReview(t) && (
             <Action
               icon={ScanSearch}
               label="Open review"
