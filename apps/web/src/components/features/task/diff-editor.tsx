@@ -1,10 +1,19 @@
 "use client";
 
-import { Columns2, Rows3 } from "lucide-react";
-import { useMemo } from "react";
+import { Columns2, MessageSquarePlus, Rows3 } from "lucide-react";
+import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { type LineAnchor, type ReviewNotes, ReviewNoteThread } from "./review-notes";
 import { type DiffCell, type DiffLine, parseUnifiedDiff, toSideBySide } from "./unified-diff";
+
+function anchorOf(line: DiffLine): LineAnchor | null {
+  if (line.newLine !== null) return { side: "new", line: line.newLine };
+  if (line.oldLine !== null) return { side: "old", line: line.oldLine };
+  return null;
+}
+
+const anchorKey = (a: LineAnchor) => `${a.side}:${a.line}`;
 
 /**
  * The diff editor (spec F22 FR-5).
@@ -78,6 +87,59 @@ function Gutter({ line }: { line: number | null }) {
   );
 }
 
+/**
+ * The "+" that appears on a row under the pointer when notes are being taken — GitHub's gesture,
+ * because that is where every reviewer learned it. Absent entirely when the editor is read-only.
+ */
+function NoteButton({ anchor, onClick }: { anchor: LineAnchor; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-label={
+        anchor.side === "old"
+          ? `Add a note on old line ${anchor.line}`
+          : `Add a note on line ${anchor.line}`
+      }
+      onClick={onClick}
+      className="-ml-1 mr-1 inline-flex size-4 shrink-0 items-center justify-center self-center rounded bg-primary text-primary-foreground opacity-0 transition-opacity focus-visible:opacity-100 group-hover/line:opacity-100"
+    >
+      <MessageSquarePlus aria-hidden className="size-3" />
+    </button>
+  );
+}
+
+/**
+ * What hangs under a row: the notes already on it, and the form when one is being written.
+ * Rendered by both layouts so the two never disagree about where a note lives.
+ */
+function UnderRow({
+  anchor,
+  notes,
+  composing,
+  onCompose,
+}: {
+  anchor: LineAnchor | null;
+  notes: ReviewNotes | undefined;
+  composing: string | null;
+  onCompose: (key: string | null) => void;
+}) {
+  if (!anchor || !notes) return null;
+  const key = anchorKey(anchor);
+  const here = notes.notes.filter((n) => n.side === anchor.side && n.line === anchor.line);
+  if (here.length === 0 && composing !== key) return null;
+  return (
+    <ReviewNoteThread
+      anchor={anchor}
+      notes={here}
+      composing={composing === key}
+      onCompose={(open) => onCompose(open ? key : null)}
+      onSave={(text) => notes.onAdd(anchor, text)}
+      onEdit={(note, text) => notes.onEdit(note, text)}
+      onRemove={(note) => notes.onRemove(note)}
+    />
+  );
+}
+
 /** The `@@` header, shown as the separator it is rather than as its own syntax. */
 function HunkSeparator({ heading }: { heading: string }) {
   return (
@@ -91,7 +153,14 @@ function HunkSeparator({ heading }: { heading: string }) {
   );
 }
 
-function SplitRows({ lines }: { lines: DiffLine[] }) {
+interface RowsProps {
+  lines: DiffLine[];
+  notes: ReviewNotes | undefined;
+  composing: string | null;
+  onCompose: (key: string | null) => void;
+}
+
+function SplitRows({ lines, notes, composing, onCompose }: RowsProps) {
   const rows = useMemo(() => toSideBySide(lines), [lines]);
   return (
     <>
@@ -100,25 +169,35 @@ function SplitRows({ lines }: { lines: DiffLine[] }) {
           row.kind === "context" ? "context" : row.left.text === null ? "context" : "deleted";
         const rightTone =
           row.kind === "context" ? "context" : row.right.text === null ? "context" : "added";
+        // The new side when the row has one; a pure deletion anchors on the old.
+        const anchor: LineAnchor | null =
+          row.right.line !== null
+            ? { side: "new", line: row.right.line }
+            : row.left.line !== null
+              ? { side: "old", line: row.left.line }
+              : null;
         return (
-          <div
-            // biome-ignore lint/suspicious/noArrayIndexKey: a diff row is positional — it has no identity beyond where it sits, and the list is never reordered or spliced.
-            key={index}
-            className="flex font-mono text-xs leading-[1.55]"
-          >
-            <div className={cn("flex min-w-0 flex-1 basis-0", CELL_TONE[leftTone])}>
-              <Gutter line={row.left.line} />
-              <span className="min-w-0 flex-1 overflow-hidden pr-2">
-                <CellText cell={row.left} tone={leftTone} />
-              </span>
+          // biome-ignore lint/suspicious/noArrayIndexKey: a diff row is positional — it has no identity beyond where it sits, and the list is never reordered or spliced.
+          <div key={index}>
+            <div className="group/line flex font-mono text-xs leading-[1.55]">
+              <div className={cn("flex min-w-0 flex-1 basis-0", CELL_TONE[leftTone])}>
+                <Gutter line={row.left.line} />
+                <span className="min-w-0 flex-1 overflow-hidden pr-2">
+                  <CellText cell={row.left} tone={leftTone} />
+                </span>
+              </div>
+              <div aria-hidden className="w-px shrink-0 bg-border" />
+              <div className={cn("flex min-w-0 flex-1 basis-0", CELL_TONE[rightTone])}>
+                <Gutter line={row.right.line} />
+                {notes && anchor ? (
+                  <NoteButton anchor={anchor} onClick={() => onCompose(anchorKey(anchor))} />
+                ) : null}
+                <span className="min-w-0 flex-1 overflow-hidden pr-2">
+                  <CellText cell={row.right} tone={rightTone} />
+                </span>
+              </div>
             </div>
-            <div aria-hidden className="w-px shrink-0 bg-border" />
-            <div className={cn("flex min-w-0 flex-1 basis-0", CELL_TONE[rightTone])}>
-              <Gutter line={row.right.line} />
-              <span className="min-w-0 flex-1 overflow-hidden pr-2">
-                <CellText cell={row.right} tone={rightTone} />
-              </span>
-            </div>
+            <UnderRow anchor={anchor} notes={notes} composing={composing} onCompose={onCompose} />
           </div>
         );
       })}
@@ -126,35 +205,41 @@ function SplitRows({ lines }: { lines: DiffLine[] }) {
   );
 }
 
-function InlineRows({ lines }: { lines: DiffLine[] }) {
+function InlineRows({ lines, notes, composing, onCompose }: RowsProps) {
   return (
     <>
       {lines.map((line, index) => {
         const tone = line.kind === "context" ? "context" : line.kind;
+        const anchor = anchorOf(line);
         return (
-          <div
-            // biome-ignore lint/suspicious/noArrayIndexKey: a diff row is positional — it has no identity beyond where it sits, and the list is never reordered or spliced.
-            key={index}
-            className={cn("flex font-mono text-xs leading-[1.55]", CELL_TONE[tone])}
-          >
-            <Gutter line={line.oldLine} />
-            <Gutter line={line.newLine} />
-            <span
-              aria-hidden
-              className={cn(
-                "w-3 shrink-0 select-none text-center",
-                line.kind === "added" && "text-diff-added",
-                line.kind === "deleted" && "text-diff-removed",
-              )}
+          // biome-ignore lint/suspicious/noArrayIndexKey: a diff row is positional — it has no identity beyond where it sits, and the list is never reordered or spliced.
+          <div key={index}>
+            <div
+              className={cn("group/line flex font-mono text-xs leading-[1.55]", CELL_TONE[tone])}
             >
-              {line.kind === "added" ? "+" : line.kind === "deleted" ? "-" : ""}
-            </span>
-            <span className="min-w-0 flex-1 overflow-hidden whitespace-pre pr-2">
-              {line.text || " "}
-              {line.noNewline && (
-                <span className="ml-2 select-none text-2xs text-muted-foreground/50">↵</span>
-              )}
-            </span>
+              <Gutter line={line.oldLine} />
+              <Gutter line={line.newLine} />
+              {notes && anchor ? (
+                <NoteButton anchor={anchor} onClick={() => onCompose(anchorKey(anchor))} />
+              ) : null}
+              <span
+                aria-hidden
+                className={cn(
+                  "w-3 shrink-0 select-none text-center",
+                  line.kind === "added" && "text-diff-added",
+                  line.kind === "deleted" && "text-diff-removed",
+                )}
+              >
+                {line.kind === "added" ? "+" : line.kind === "deleted" ? "-" : ""}
+              </span>
+              <span className="min-w-0 flex-1 overflow-hidden whitespace-pre pr-2">
+                {line.text || " "}
+                {line.noNewline && (
+                  <span className="ml-2 select-none text-2xs text-muted-foreground/50">↵</span>
+                )}
+              </span>
+            </div>
+            <UnderRow anchor={anchor} notes={notes} composing={composing} onCompose={onCompose} />
           </div>
         );
       })}
@@ -168,15 +253,24 @@ export function DiffEditor({
   mode,
   onModeChange,
   truncated = false,
+  notes,
 }: {
   patch: string;
   path: string | null;
   mode: "split" | "inline";
   onModeChange: (mode: "split" | "inline") => void;
   truncated?: boolean;
+  /**
+   * The reviewer's notes on this file, and the means to take more (spec F10 FR-7). Only when the
+   * editor is showing one file of the round under review — a whole-patch view has no single
+   * path to anchor on, and an older round is read, not reviewed.
+   */
+  notes?: ReviewNotes | undefined;
 }) {
   const parsed = useMemo(() => parseUnifiedDiff(patch), [patch]);
   const title = path ?? parsed.path;
+  // Which row has its note form open — one at a time, keyed `side:line`.
+  const [composing, setComposing] = useState<string | null>(null);
 
   return (
     <section
@@ -220,9 +314,19 @@ export function DiffEditor({
             <div key={`${hunk.oldStart}:${hunk.newStart}`}>
               {index > 0 || hunk.heading ? <HunkSeparator heading={hunk.heading} /> : null}
               {mode === "split" ? (
-                <SplitRows lines={hunk.lines} />
+                <SplitRows
+                  lines={hunk.lines}
+                  notes={notes}
+                  composing={composing}
+                  onCompose={setComposing}
+                />
               ) : (
-                <InlineRows lines={hunk.lines} />
+                <InlineRows
+                  lines={hunk.lines}
+                  notes={notes}
+                  composing={composing}
+                  onCompose={setComposing}
+                />
               )}
             </div>
           ))}

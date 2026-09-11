@@ -1,6 +1,8 @@
 "use client";
 
 import type {
+  ReviewDraftFile,
+  ReviewNote,
   SessionEventDto,
   SessionRoundDto,
   TaskDiffDto,
@@ -42,7 +44,9 @@ import { ChangesPanel } from "./changes-panel";
 import { DeleteTaskAction } from "./delete-task-action";
 import { HarnessComposer } from "./harness-composer";
 import { LaunchTaskDialog, useWorkflowChoices } from "./launch-task-dialog";
+import { collateFeedback } from "./review-feedback";
 import { groupChanges, summariseConsequences } from "./review-groups";
+import type { LineAnchor } from "./review-notes";
 import { RoundSelector } from "./round-selector";
 import { SplitPane } from "./split-pane";
 import { TaskAdvance } from "./task-advance";
@@ -549,6 +553,22 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
     return n;
   }, [capturedDiffs, draft.viewed]);
   const fileCount = capturedDiffs.reduce((n, d) => n + d.files.length, 0);
+  /**
+   * The three edits the editor can make to the draft's notes, closed over the draft so the
+   * panel below never holds a note list of its own. Identity by value — a note is where it is
+   * and what it says — because the draft is a plain array that a reload re-reads from the server.
+   */
+  const noteEdits = useMemo(
+    () => ({
+      onAddNote: (file: ReviewDraftFile, anchor: LineAnchor, text: string) =>
+        draft.setNotes([...draft.draft.notes, { ...file, ...anchor, text }]),
+      onEditNote: (note: ReviewNote, text: string) =>
+        draft.setNotes(draft.draft.notes.map((n) => (n === note ? { ...n, text } : n))),
+      onRemoveNote: (note: ReviewNote) =>
+        draft.setNotes(draft.draft.notes.filter((n) => n !== note)),
+    }),
+    [draft.setNotes, draft.draft.notes],
+  );
   const reviewGroups = useMemo(
     () => groupChanges(capturedDiffs, attachments, nameFor),
     [capturedDiffs, attachments, nameFor],
@@ -609,7 +629,15 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   const tab = pickedTab === "plan" && todos.length === 0 ? "changes" : pickedTab;
   const runDecision = (decision: "approve" | "reject" | "request_changes") => {
     if (!latest?.id) return;
-    decide.mutate({ sessionId: latest.id, decision });
+    // The draft goes with a request for changes and nowhere else (F10 FR-7): an approval has
+    // nothing to say to a harness that is done, and a rejection discards the work the notes
+    // were about. Omitted, not empty, when there is nothing — the orchestrator has its own
+    // sentence for "the reviewer left no notes".
+    const feedback =
+      decision === "request_changes"
+        ? collateFeedback(draft.draft, (id) => (id ? nameFor(id) : null))
+        : undefined;
+    decide.mutate({ sessionId: latest.id, decision, ...(feedback ? { feedback } : {}) });
   };
   // Refusals from the foot of the page, through the same mapping as the banner above: a wire
   // code is never the sentence an operator reads.
@@ -907,7 +935,14 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
                     captured={diffs.length > 0 || t.completedAt !== null}
                     // Ticks only on the round the gate is about; an older round is read, not reviewed.
                     {...(shownRound === null || shownRound.index === latestRound
-                      ? { ticks: { viewed: draft.viewed, onToggle: draft.toggleViewed } }
+                      ? {
+                          ticks: {
+                            viewed: draft.viewed,
+                            onToggle: draft.toggleViewed,
+                            notes: draft.draft.notes,
+                            ...noteEdits,
+                          },
+                        }
                       : {})}
                   />
                 </div>
@@ -958,6 +993,11 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
         outstanding={dependencies.outstanding}
         consequences={summariseConsequences(reviewGroups)}
         viewed={fileCount > 0 ? { viewed: viewedCount, of: fileCount } : null}
+        notes={{
+          count: draft.draft.notes.length,
+          general: draft.draft.general,
+          onGeneral: draft.setGeneral,
+        }}
         decidePending={decide.isPending ? (decide.variables?.decision ?? null) : null}
         onDecide={runDecision}
         onLaunch={() => requestMove("running")}

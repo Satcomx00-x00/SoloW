@@ -1,6 +1,12 @@
 "use client";
 
-import type { ReviewDraftFile, ScmFileDto, TaskDiffDto, TaskRepositoryDto } from "@solow/contracts";
+import type {
+  ReviewDraftFile,
+  ReviewNote,
+  ScmFileDto,
+  TaskDiffDto,
+  TaskRepositoryDto,
+} from "@solow/contracts";
 import { primaryTaskRepository } from "@solow/core";
 import { FileMinus, Lock, Scissors, TriangleAlert } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -8,6 +14,7 @@ import { scmFromCapturedDiff, splitPatchByFile } from "./captured-scm";
 import { summariseDiff } from "./change-summary";
 import { DiffEditor } from "./diff-editor";
 import { describeTarget, groupChanges, type ReviewGroup } from "./review-groups";
+import type { LineAnchor, ReviewNotes } from "./review-notes";
 import { SourceControlPanel, type ViewedFiles } from "./source-control-panel";
 
 /**
@@ -31,6 +38,11 @@ const CAPTURED_REASON = "Captured from the harness's last turn — read-only.";
 export interface ReviewTicks {
   viewed: ReadonlySet<string>;
   onToggle: (file: ReviewDraftFile) => void;
+  /** Every note in the draft, across files; the editor is handed the ones for its file. */
+  notes: readonly ReviewNote[];
+  onAddNote: (file: ReviewDraftFile, anchor: LineAnchor, text: string) => void;
+  onEditNote: (note: ReviewNote, text: string) => void;
+  onRemoveNote: (note: ReviewNote) => void;
 }
 
 function RepositoryChanges({
@@ -58,10 +70,24 @@ function RepositoryChanges({
   // panel showed before it had a file list, so the first view of a Task is unchanged.
   const patch = (selected && sections.get(selected)) || diff.patch;
   const noop = () => {};
+  // The one file on screen, when there is one: a selected row, or a diff of a single file.
+  const shownPath = selected ?? (diff.files.length === 1 ? (diff.files[0]?.path ?? null) : null);
+  const repositoryId = diff.repositoryId ?? null;
+  const notes = useMemo<ReviewNotes | undefined>(() => {
+    if (!ticks || !shownPath) return undefined;
+    const file = { repositoryId, path: shownPath };
+    return {
+      notes: ticks.notes.filter(
+        (n) => n.path === shownPath && (n.repositoryId ?? null) === repositoryId,
+      ),
+      onAdd: (anchor, text) => ticks.onAddNote(file, anchor, text),
+      onEdit: ticks.onEditNote,
+      onRemove: ticks.onRemoveNote,
+    };
+  }, [ticks, shownPath, repositoryId]);
   const summary = useMemo(() => summariseDiff(diff), [diff]);
   // The panel speaks in paths; the draft keys files by repository as well, so a Task changing
   // `src/index.ts` in two repositories keeps two ticks. Translated at this seam, once.
-  const repositoryId = diff.repositoryId ?? null;
   const viewedFiles = useMemo<ViewedFiles | undefined>(
     () =>
       ticks
@@ -99,9 +125,10 @@ function RepositoryChanges({
       {patch && (
         <DiffEditor
           patch={patch}
-          path={selected ?? (diff.files.length === 1 ? (diff.files[0]?.path ?? null) : null)}
+          path={shownPath}
           mode={mode}
           onModeChange={setMode}
+          notes={notes}
           // The editor's own footer says it only over the whole patch; a selected file's section
           // may or may not be the cut one. The flag above the list says it regardless.
           truncated={diff.truncated && patch === diff.patch}

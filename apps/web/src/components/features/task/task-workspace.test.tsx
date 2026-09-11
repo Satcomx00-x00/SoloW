@@ -149,11 +149,11 @@ describe("TaskWorkspace review gate", () => {
     });
   });
 
-  it("requests changes with no feedback panel to fill in first", async () => {
+  it("requests changes without requiring feedback first", async () => {
     // The gate used to hold a Textarea and refuse to submit until it had something in it, which
     // made "request changes" the one review action that could not be taken by pressing it. The
-    // contract dropped the requirement (`reviewDecisionInput` no longer refines on it) and the
-    // panel went with it, so the button is now live on arrival like Approve and Reject.
+    // contract dropped the requirement (`reviewDecisionInput` no longer refines on it). The
+    // remark box is back — optional — and the button is live on arrival like Approve and Reject.
     const { log } = renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
       "task.get": () => task(),
       "session.listForTask": () => [session],
@@ -167,7 +167,6 @@ describe("TaskWorkspace review gate", () => {
 
     const request = await screen.findByRole("button", { name: /Request changes/ });
     expect(request.hasAttribute("disabled")).toBe(false);
-    expect(screen.queryByPlaceholderText(/Feedback/)).toBeNull();
 
     fireEvent.click(request);
     await waitFor(() => {
@@ -178,6 +177,78 @@ describe("TaskWorkspace review gate", () => {
       sessionId: SESSION_ID,
       decision: "request_changes",
     });
+  });
+
+  it("sends the reviewer's notes and remark as the decision's feedback, on request changes only", async () => {
+    const { log } = renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
+      "task.get": () => task(),
+      "session.listForTask": () => [session],
+      "session.get": () => ({
+        ...detail(),
+        diffs: [
+          {
+            diffRef: "solow/task-1",
+            repositoryId: "repo-1",
+            repositoryName: "api",
+            files: [{ path: "src/a.ts", status: "modified", additions: 1, deletions: 1 }],
+            patch: [
+              "diff --git a/src/a.ts b/src/a.ts",
+              "@@ -1,2 +1,2 @@",
+              " const a = 1;",
+              "-const b = 2;",
+              "+const b = 3;",
+              "",
+            ].join("\n"),
+            truncated: false,
+          },
+        ],
+        rounds: [{ index: 1, closedAtSeq: null, diffs: [], review: null }],
+      }),
+      "preference.getReviewDraft": () => ({
+        workspaceId: "ws",
+        userId: "u",
+        taskId: TASK_ID,
+        draft: null,
+      }),
+      "preference.setReviewDraft": (input: unknown) => ({
+        workspaceId: "ws",
+        userId: "u",
+        taskId: TASK_ID,
+        draft: (input as { draft: unknown }).draft,
+      }),
+      "preference.clearReviewDraft": () => ({
+        workspaceId: "ws",
+        userId: "u",
+        taskId: TASK_ID,
+        draft: null,
+      }),
+      "review.decide": () => ({ ok: true }),
+    });
+
+    // A note on a line of the diff, taken where the line is.
+    fireEvent.click(await screen.findByRole("button", { name: "Add a note on line 2" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Note" }), {
+      target: { value: "why 3?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save note" }));
+    expect(await screen.findByText(/1 note/)).toBeDefined();
+    // And a remark about the change as a whole, at the gate.
+    fireEvent.change(screen.getByRole("textbox", { name: "Feedback for the harness" }), {
+      target: { value: "Close, but check the config." },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Request changes/ }));
+    await waitFor(() =>
+      expect(log.calls.filter((c) => c.path === "review.decide")).toHaveLength(1),
+    );
+    const input = log.calls.find((c) => c.path === "review.decide")?.input as { feedback?: string };
+    expect(input.feedback).toBe(
+      "Close, but check the config.\n\nNotes on specific lines:\n- src/a.ts:2 — why 3?",
+    );
+    // The draft is spent with the decision.
+    await waitFor(() =>
+      expect(log.calls.filter((c) => c.path === "preference.clearReviewDraft")).toHaveLength(1),
+    );
   });
 
   it("offers no review action until the Task reaches Review", async () => {

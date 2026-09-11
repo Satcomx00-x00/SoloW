@@ -7,6 +7,7 @@ import type { ReactNode } from "react";
 import { waitingOn } from "@/components/features/board/blockers";
 import { ConfirmAction } from "@/components/features/confirm-action";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { CREDENTIAL_EXPIRED_REASON, failureReasonLabel, STATE_STYLE } from "@/lib/task-states";
 import { cn } from "@/lib/utils";
@@ -33,6 +34,7 @@ export function TaskFooter({
   outstanding = [],
   consequences,
   viewed = null,
+  notes = null,
   decidePending,
   onDecide,
   onLaunch,
@@ -49,6 +51,8 @@ export function TaskFooter({
   consequences: string;
   /** How much of the change the reviewer has ticked off — never a gate, only a reminder. */
   viewed?: { viewed: number; of: number } | null;
+  /** The notes drafted so far and the general remark, which "Request changes" sends. */
+  notes?: { count: number; general: string; onGeneral: (text: string) => void } | null;
   /** The decision in flight, so its button spins and the other two lock (no double-approve). */
   decidePending: ReviewDecision | null;
   onDecide: (decision: ReviewDecision) => void;
@@ -68,6 +72,7 @@ export function TaskFooter({
     outstanding,
     consequences,
     viewed,
+    notes,
     decidePending,
     onDecide,
     onLaunch,
@@ -168,8 +173,10 @@ function Row({ hint, children }: { hint: ReactNode; children: ReactNode }) {
  * So the scope of the single decision has to be legible, and a reviewer who approves without
  * scrolling the Changes column still sees it (issue #70 AC-2/AC-3).
  */
-function ReviewGate({ consequences, viewed, decidePending, onDecide }: FooterInput) {
+function ReviewGate({ consequences, viewed, notes, decidePending, onDecide }: FooterInput) {
   const canDecide = decidePending === null;
+  const noteCount = notes?.count ?? 0;
+  const hasFeedback = noteCount > 0 || Boolean(notes?.general.trim());
   // "7/12 viewed" on the button itself, where the eye is when it is about to press it. Never a
   // block: a reviewer who has read the diff whole has no ticks and nothing to answer for.
   const unread = viewed && viewed.viewed < viewed.of;
@@ -186,6 +193,20 @@ function ReviewGate({ consequences, viewed, decidePending, onDecide }: FooterInp
           ) : null}
         </span>
       </p>
+      {notes ? (
+        // The general remark, right above the button that sends it (F10 FR-7). Line notes are
+        // taken in the diff; this is for what is true of the change as a whole. Never required —
+        // the button was once refused without it, which made "request changes" the one decision
+        // that could not be taken by pressing it.
+        <Textarea
+          aria-label="Feedback for the harness"
+          rows={2}
+          value={notes.general}
+          onChange={(e) => notes.onGeneral(e.target.value)}
+          placeholder="Anything the harness should know before the next round… (optional)"
+          className="min-h-9 max-w-2xl text-xs"
+        />
+      ) : null}
       <div className="flex flex-wrap items-center gap-2">
         <Button
           size="lg"
@@ -216,6 +237,11 @@ function ReviewGate({ consequences, viewed, decidePending, onDecide }: FooterInp
           onClick={() => onDecide("request_changes")}
         >
           <RotateCcw /> Request changes
+          {noteCount > 0 ? (
+            <span aria-hidden className="ml-1 font-mono text-2xs tabular-nums opacity-80">
+              {noteCount} {noteCount === 1 ? "note" : "notes"}
+            </span>
+          ) : null}
         </Button>
         <ConfirmAction
           disabled={!canDecide}
@@ -234,6 +260,13 @@ function ReviewGate({ consequences, viewed, decidePending, onDecide }: FooterInp
             </Button>
           }
         />
+        {hasFeedback ? (
+          // Said here rather than as a confirm on Approve and Reject: the notes are the
+          // reviewer's own draft, and losing a draft is not the destructive act a dialog is for.
+          <span className="text-2xs text-muted-foreground">
+            Notes go with Request changes only.
+          </span>
+        ) : null}
       </div>
     </div>
   );
