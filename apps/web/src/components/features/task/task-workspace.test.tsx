@@ -294,6 +294,34 @@ describe("TaskWorkspace dependencies (issue #6)", () => {
   });
 });
 
+describe("TaskWorkspace meta popover", () => {
+  it("names the profiles behind the ids, the base ref and the session, on demand", async () => {
+    const { log } = renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
+      "task.get": () => task({ state: "review" }),
+      "session.listForTask": () => [session],
+      "session.get": () => detail(),
+      "profile.agent.list": () => ({
+        items: [{ id: "harness-1", secretId: "secret-1", name: "Claude", agentCatalogId: "cat-1" }],
+        nextCursor: null,
+      }),
+      "profile.executor.list": () => ({
+        items: [{ id: "exec-1", name: "This machine", kind: "local", config: {} }],
+        nextCursor: null,
+      }),
+    });
+
+    const about = await screen.findByRole("button", { name: "About this task" });
+    // Nothing is fetched for a popover nobody opened.
+    expect(log.calls.some((c) => c.path === "profile.agent.list")).toBe(false);
+    fireEvent.click(about);
+
+    expect(await screen.findByText("Claude")).toBeDefined();
+    expect(await screen.findByText("This machine")).toBeDefined();
+    expect(screen.getByText(/from main/)).toBeDefined();
+    expect(screen.getByRole("button", { name: `Copy ${SESSION_ID}` })).toBeDefined();
+  });
+});
+
 describe("TaskWorkspace destructive actions", () => {
   it("does not reject on a single click — the discard is confirmed first", async () => {
     const { log } = renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {

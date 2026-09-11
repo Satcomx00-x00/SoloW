@@ -46,6 +46,7 @@ import { SplitPane } from "./split-pane";
 import { TaskAdvance } from "./task-advance";
 import { TaskDependencies, useBlockedByEditor, useTaskDependencies } from "./task-dependencies";
 import { TaskFooter } from "./task-footer";
+import { TaskMeta } from "./task-meta";
 import { type TerminalScope, TerminalView } from "./terminal-view";
 import { latestTodos, TodoList } from "./todo-list";
 import { buildTranscript, inStepScope } from "./transcript";
@@ -620,6 +621,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
           <StreamIndicator status={live.status} />
+          <TaskMeta task={t} session={latest ?? null} />
           {blockedBy.button}
           {/*
             Deleting the Task the page is *about* leaves nowhere to stand, so it navigates back
