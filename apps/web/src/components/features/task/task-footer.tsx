@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReviewDecision, TaskDependencyDto, TaskDto } from "@solow/contracts";
+import { canOpenReview } from "@solow/core";
 import { Check, CheckCircle2, GitBranch, KeyRound, Play, RotateCcw, X } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
@@ -125,13 +126,29 @@ function footerBody(input: FooterInput) {
       );
     case "running":
       // The harness declared it was finished and the header carries the one "Open review"
-      // control (the control checks expect exactly one on the page). The foot only says so.
-      return task.completedOutcome === "changes_ready" ? (
-        <p className="flex items-center gap-1.5 text-muted-foreground text-sm">
-          <CheckCircle2 aria-hidden className="size-3.5 shrink-0 text-state-done" />
-          Finished — changes ready. Open review above to decide on them.
-        </p>
-      ) : (
+      // control (the control checks expect exactly one on the page). The foot only says so —
+      // and says what the gate is about, which on a Workflow Step is the Step's outcome (a plan)
+      // rather than a change. "Working" is only true while nothing has been declared.
+      if (canOpenReview(task)) {
+        return (
+          <p className="flex items-center gap-1.5 text-muted-foreground text-sm">
+            <CheckCircle2 aria-hidden className="size-3.5 shrink-0 text-state-done" />
+            {task.completedOutcome === "changes_ready"
+              ? "Finished — changes ready. Open review above to decide on them."
+              : "Finished — nothing changed. Open review above to approve this step and move the workflow on."}
+          </p>
+        );
+      }
+      if (task.completedAt !== null) {
+        return (
+          <p className="text-muted-foreground text-sm">
+            {task.completedOutcome === "blocked"
+              ? "The harness stopped — blocked. Steer it from the box under the terminal, or retry once it fails."
+              : "Finished — nothing to do. There is nothing to review."}
+          </p>
+        );
+      }
+      return (
         <p className="text-muted-foreground text-sm">
           The harness is working. Steer it, or stop it, from the box under the terminal.
         </p>
