@@ -1,8 +1,11 @@
 "use client";
 
 import type { ScmFileDto, TaskDiffDto, TaskRepositoryDto } from "@solow/contracts";
+import { primaryTaskRepository } from "@solow/core";
+import { FileMinus, Lock, Scissors, TriangleAlert } from "lucide-react";
 import { useMemo, useState } from "react";
 import { scmFromCapturedDiff, splitPatchByFile } from "./captured-scm";
+import { summariseDiff } from "./change-summary";
 import { DiffEditor } from "./diff-editor";
 import { describeTarget, groupChanges, type ReviewGroup } from "./review-groups";
 import { SourceControlPanel } from "./source-control-panel";
@@ -40,9 +43,11 @@ function RepositoryChanges({ diff }: { diff: TaskDiffDto }) {
   // panel showed before it had a file list, so the first view of a Task is unchanged.
   const patch = (selected && sections.get(selected)) || diff.patch;
   const noop = () => {};
+  const summary = useMemo(() => summariseDiff(diff), [diff]);
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
+      <ChangeStats summary={summary} />
       <div className="max-h-64 shrink-0">
         <SourceControlPanel
           worktree={worktree}
@@ -64,9 +69,79 @@ function RepositoryChanges({ diff }: { diff: TaskDiffDto }) {
           path={selected ?? (diff.files.length === 1 ? (diff.files[0]?.path ?? null) : null)}
           mode={mode}
           onModeChange={setMode}
+          // The editor's own footer says it only over the whole patch; a selected file's section
+          // may or may not be the cut one. The flag above the list says it regardless.
           truncated={diff.truncated && patch === diff.patch}
         />
       )}
+    </div>
+  );
+}
+
+/**
+ * How much, and what to look at first.
+ *
+ * "12 files · +340 −88" is the number a reviewer sizes the job by, and it was nowhere on the
+ * page — the file list has a count, the rows have their own deltas, and adding them up was left
+ * to the reader. Under it, the flags: each names a fact about the change that is easy to miss in
+ * a long list and expensive to miss in review. Caution tone, not the failed red — nothing here
+ * is wrong, it is *worth looking at*.
+ *
+ * The truncation flag lives here because the editor's own notice disappeared the moment a file
+ * was selected (its `truncated` is only true over the whole patch), which is exactly when a
+ * reviewer reading the cut-off file would need it.
+ */
+function ChangeStats({ summary }: { summary: ReturnType<typeof summariseDiff> }) {
+  const flags: Array<{ key: string; icon: typeof Lock; text: string }> = [];
+  if (summary.truncated) {
+    flags.push({
+      key: "truncated",
+      icon: Scissors,
+      text: "Patch cut short — the file list is complete, the diff is not. Check out the branch to read the rest.",
+    });
+  }
+  if (summary.deleted.length > 0) {
+    flags.push({
+      key: "deleted",
+      icon: FileMinus,
+      text:
+        summary.deleted.length === 1
+          ? `Deletes ${summary.deleted[0]}`
+          : `Deletes ${summary.deleted.length} files: ${summary.deleted.join(", ")}`,
+    });
+  }
+  if (summary.lockfiles.length > 0) {
+    flags.push({
+      key: "lockfiles",
+      icon: Lock,
+      text: `Lockfile changed: ${summary.lockfiles.join(", ")}`,
+    });
+  }
+  return (
+    <div className="space-y-1" data-change-stats>
+      <p className="flex items-center gap-2 text-xs">
+        <span className="font-medium">
+          {summary.files} {summary.files === 1 ? "file" : "files"}
+        </span>
+        <span className="font-mono text-2xs">
+          <span className="text-feedback-ok">+{summary.additions}</span>{" "}
+          <span className="text-feedback-error">−{summary.deletions}</span>
+        </span>
+      </p>
+      {flags.length > 0 ? (
+        <ul className="space-y-0.5">
+          {flags.map(({ key, icon: Icon, text }) => (
+            <li
+              key={key}
+              className="flex items-start gap-1.5 text-2xs text-feedback-caution"
+              data-change-flag={key}
+            >
+              <Icon aria-hidden className="mt-px size-3 shrink-0" />
+              <span className="min-w-0 break-words">{text}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </div>
   );
 }
@@ -140,8 +215,27 @@ export function ChangesPanel({
   if (groups.length === 1 && groups[0]?.diff) {
     return <RepositoryChanges diff={groups[0].diff} />;
   }
+  // A change outside the primary repository is the one thing a multi-repository approval most
+  // often lands by surprise: the header names the primary's branch, the transcript is mostly
+  // about it, and the second repository's diff is a scroll away. Said once, at the top.
+  const primary = repositories.length > 0 ? primaryTaskRepository(repositories) : null;
+  const secondaryChanged = groups.filter(
+    (group) => group.diff !== null && group.repositoryId !== (primary?.repositoryId ?? null),
+  );
   return (
     <div className="space-y-4">
+      {primary && secondaryChanged.length > 0 ? (
+        <p
+          className="flex items-start gap-1.5 text-2xs text-feedback-caution"
+          data-change-flag="secondary"
+        >
+          <TriangleAlert aria-hidden className="mt-px size-3 shrink-0" />
+          <span>
+            Changes outside the primary repository:{" "}
+            {secondaryChanged.map((g) => g.repositoryName ?? "an unnamed repository").join(", ")}.
+          </span>
+        </p>
+      ) : null}
       {groups.map((group) => (
         <section
           key={group.key}

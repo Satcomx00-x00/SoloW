@@ -650,6 +650,67 @@ describe("the Changes tab of a multi-Repository Task", () => {
     expect(within(apiFiles).queryByTitle("src/lib.ts")).toBeNull();
   });
 
+  it("states the size of the change and flags what is easy to miss in a long list", async () => {
+    renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
+      ...baseHandlers,
+      "task.get": () =>
+        task({
+          repositories: [
+            {
+              id: "attach-1",
+              repositoryId: "repo-1",
+              baseRef: "main",
+              checkoutBranch: "solow/task-1",
+              resultBranch: "solow/task-1",
+              position: 0,
+            },
+            {
+              id: "attach-2",
+              repositoryId: "repo-2",
+              baseRef: "main",
+              checkoutBranch: "solow/task-1",
+              resultBranch: "feature/lib",
+              position: 1,
+            },
+          ],
+        }),
+      "session.get": () =>
+        detailWithDiffs([
+          {
+            diffRef: "solow/task-1",
+            repositoryId: "repo-1",
+            repositoryName: "api",
+            files: [
+              { path: "src/api.ts", status: "modified", additions: 40, deletions: 5 },
+              { path: "src/legacy.ts", status: "deleted", additions: 0, deletions: 200 },
+              { path: "bun.lock", status: "modified", additions: 300, deletions: 300 },
+            ],
+            patch: "--- a/src/api.ts\n+++ b/src/api.ts\n",
+            truncated: true,
+          },
+          {
+            diffRef: "feature/lib",
+            repositoryId: "repo-2",
+            repositoryName: "shared-lib",
+            ...change("src/lib.ts"),
+          },
+        ]),
+    });
+
+    await openChangesTab();
+    const api = await screen.findByLabelText("Changes in api on solow/task-1");
+    expect(within(api).getByText("3 files")).toBeDefined();
+    expect(within(api).getByText("+340")).toBeDefined();
+    expect(within(api).getByText("−505")).toBeDefined();
+    expect(within(api).getByText(/Patch cut short/)).toBeDefined();
+    expect(within(api).getByText(/Deletes src\/legacy.ts/)).toBeDefined();
+    expect(within(api).getByText(/Lockfile changed: bun.lock/)).toBeDefined();
+    // The second repository changed too, and that is said once at the top, not discovered below.
+    expect(screen.getByText(/Changes outside the primary repository: shared-lib/)).toBeDefined();
+    // And the gate's one line now carries the weight as well as the count.
+    expect(screen.getByText(/Approving covers .*4 files, \+342 −506/)).toBeDefined();
+  });
+
   it("shows a single Repository's change with no group header at all", async () => {
     // A single-Repository Task's Changes tab is unchanged by this refactor.
     renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {

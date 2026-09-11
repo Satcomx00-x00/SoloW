@@ -140,7 +140,10 @@ describe("summariseConsequences", () => {
       ],
     );
 
-    expect(summariseConsequences(groups)).toBe("2 repositories, 2 branches, 3 files");
+    // The scope by count, then by weight: the second is what "3 files" cannot say.
+    expect(summariseConsequences(groups)).toMatch(
+      /^2 repositories, 2 branches, 3 files, \+\d+ −\d+$/,
+    );
   });
 
   it("names the repositories with nothing in them instead of folding them into a file count", () => {

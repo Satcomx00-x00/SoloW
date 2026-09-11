@@ -1,4 +1,5 @@
 import type { TaskDiffDto, TaskRepositoryDto } from "@solow/contracts";
+import { formatDelta, summariseDiff } from "./change-summary";
 
 /**
  * What one approval is about to do, group by group (spec F10, issue #70).
@@ -143,6 +144,20 @@ export function summariseConsequences(groups: readonly ReviewGroup[]): string {
   // Named rather than folded into the file count: "3 repositories, 12 files" reads as though all
   // three changed. The reviewer's question is which ones did.
   if (untouched > 0) parts.push(`${untouched} with no changes`);
+  // The size, after the scope: "14 files" sizes the job by count and "+340 −88" by weight, and
+  // a reviewer about to approve without scrolling deserves both. Only when there is a delta to
+  // state — a Task with nothing captured has no lines to count.
+  const delta = groups.reduce(
+    (total, group) => {
+      const summary = group.diff ? summariseDiff(group.diff) : null;
+      return {
+        additions: total.additions + (summary?.additions ?? 0),
+        deletions: total.deletions + (summary?.deletions ?? 0),
+      };
+    },
+    { additions: 0, deletions: 0 },
+  );
+  if (files > 0) parts.push(formatDelta(delta));
   return parts.join(", ");
 }
 
