@@ -252,6 +252,51 @@ describe("TaskWorkspace review gate", () => {
     );
   });
 
+  it("carries the harness's open items — declared, or left blocked on its checklist — to the gate", async () => {
+    renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
+      "task.get": () => task(),
+      "session.listForTask": () => [session],
+      "session.get": () =>
+        detail([
+          {
+            kind: "widget",
+            widgetId: "w-1",
+            widget: {
+              kind: "step_card",
+              title: "Sector source overrides",
+              steps: [
+                { id: "ac1", label: "AC-1 table", state: "done" },
+                {
+                  id: "migrate",
+                  label: "Migration applied",
+                  state: "blocked",
+                  note: "no Postgres here",
+                },
+                { id: "issue", label: "Record the decision on the issue", state: "todo" },
+              ],
+            },
+          },
+          {
+            kind: "widget",
+            widgetId: "w-2",
+            widget: {
+              kind: "task_complete",
+              outcome: "changes_ready",
+              summary: "Done.",
+              openItems: [{ label: "Integration test executed", why: "no database" }],
+            },
+          },
+        ]),
+    });
+
+    const banner = await screen.findByRole("status");
+    expect(banner.textContent).toContain("3 open items");
+    expect(banner.textContent).toContain("Integration test executed");
+    expect(banner.textContent).toContain("Migration applied");
+    expect(banner.textContent).toContain("Record the decision on the issue");
+    expect(screen.getByRole("button", { name: /Approve with 3 open items/ })).toBeDefined();
+  });
+
   it("offers Open review on a Workflow Step that finished with nothing to do — the plan is what is reviewed", async () => {
     const { log } = renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
       "task.get": () =>

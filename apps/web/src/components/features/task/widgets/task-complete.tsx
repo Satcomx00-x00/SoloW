@@ -1,7 +1,7 @@
 "use client";
 
 import type { Widget } from "@solow/contracts";
-import { CircleCheck, CircleSlash, OctagonMinus } from "lucide-react";
+import { CircleCheck, CircleDashed, CircleSlash, OctagonMinus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { WidgetRendererProps } from "./registry";
 
@@ -54,6 +54,21 @@ export function TaskComplete({
         <p className="whitespace-pre-wrap break-words text-foreground/80 text-xs leading-relaxed">
           {widget.summary}
         </p>
+      )}
+      {widget.openItems && widget.openItems.length > 0 && (
+        // Said as a list rather than folded into the summary: "not done" at the end of a
+        // paragraph is the sentence a reviewer skips, and it is the one the gate repeats.
+        <ul className="space-y-0.5 text-xs" aria-label="Open items">
+          {widget.openItems.map((item) => (
+            <li key={item.label} className="flex items-start gap-1.5">
+              <CircleDashed aria-hidden className="mt-0.5 size-3.5 shrink-0" />
+              <span>
+                <span className="font-medium">{item.label}</span>
+                {item.why ? <span className="text-foreground/70"> — {item.why}</span> : null}
+              </span>
+            </li>
+          ))}
+        </ul>
       )}
       {widget.decision && (
         // The answer to the Step's branch question, as a fact of the report — it is what the

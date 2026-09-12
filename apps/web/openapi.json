@@ -24145,6 +24145,27 @@
                                             "type": "string",
                                             "maxLength": 2000
                                           },
+                                          "openItems": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "label": {
+                                                  "type": "string",
+                                                  "minLength": 1,
+                                                  "maxLength": 500
+                                                },
+                                                "why": {
+                                                  "type": "string",
+                                                  "maxLength": 300
+                                                }
+                                              },
+                                              "required": [
+                                                "label"
+                                              ]
+                                            },
+                                            "maxItems": 20
+                                          },
                                           "decision": {
                                             "type": "string",
                                             "enum": [
@@ -25689,6 +25710,27 @@
                                         "type": "string",
                                         "maxLength": 2000
                                       },
+                                      "openItems": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "label": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 500
+                                            },
+                                            "why": {
+                                              "type": "string",
+                                              "maxLength": 300
+                                            }
+                                          },
+                                          "required": [
+                                            "label"
+                                          ]
+                                        },
+                                        "maxItems": 20
+                                      },
                                       "decision": {
                                         "type": "string",
                                         "enum": [
@@ -26962,6 +27004,27 @@
                                       "summary": {
                                         "type": "string",
                                         "maxLength": 2000
+                                      },
+                                      "openItems": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "label": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 500
+                                            },
+                                            "why": {
+                                              "type": "string",
+                                              "maxLength": 300
+                                            }
+                                          },
+                                          "required": [
+                                            "label"
+                                          ]
+                                        },
+                                        "maxItems": 20
                                       },
                                       "decision": {
                                         "type": "string",

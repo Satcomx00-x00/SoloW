@@ -130,6 +130,40 @@ export function latestTodos(events: readonly SessionEventDto[]): TodoItem[] {
  * latest list does: each emission is the whole plan as it now stands.
  */
 export type StepCardWidget = Extract<Widget, { kind: "step_card" }>;
+export type TaskCompleteWidget = Extract<Widget, { kind: "task_complete" }>;
+
+/** The harness's most recent `task_complete`, read the same way. */
+export function latestCompletion(events: readonly SessionEventDto[]): TaskCompleteWidget | null {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const payload = events[i]?.payload;
+    if (payload?.kind === "widget" && payload.widget.kind === "task_complete")
+      return payload.widget;
+  }
+  return null;
+}
+
+/**
+ * What is still open at the end of a run, from both places a harness says so.
+ *
+ * `task_complete.openItems` when the harness listed them; and every `step_card` item it left
+ * `blocked` or `todo`, which is how the harness that prompted this said "migration never
+ * applied" and "issue comment not posted" — inside a checklist of sixteen greens, under a
+ * report headed "changes ready". De-duplicated on the label.
+ */
+export function openItemsOf(
+  completion: TaskCompleteWidget | null,
+  stepCard: StepCardWidget | null,
+): Array<{ label: string; why: string | null }> {
+  const out = new Map<string, { label: string; why: string | null }>();
+  for (const item of completion?.openItems ?? [])
+    out.set(item.label, { label: item.label, why: item.why ?? null });
+  for (const step of stepCard?.steps ?? []) {
+    if (step.state === "blocked" || step.state === "todo") {
+      if (!out.has(step.label)) out.set(step.label, { label: step.label, why: step.note ?? null });
+    }
+  }
+  return [...out.values()];
+}
 
 export function latestStepCard(events: readonly SessionEventDto[]): StepCardWidget | null {
   for (let i = events.length - 1; i >= 0; i--) {

@@ -277,11 +277,24 @@ export const harnessDecisionSchema = z.enum(["yes", "no"]);
 export type HarnessDecision = z.infer<typeof harnessDecisionSchema>;
 
 /** The harness reporting how its run ended (`task_complete`). Presentational — nothing to answer. */
+/**
+ * Something the harness did not do, said as an item rather than as a sentence inside the
+ * summary. "Not done: the migration is unapplied" at the end of a paragraph is a fact the gate
+ * cannot see; a list is one it can put above the Approve button.
+ */
+export const openItemSchema = z.object({
+  label: z.string().min(1).max(fits("label")),
+  why: z.string().max(fits("note")).optional(),
+});
+export type OpenItem = z.infer<typeof openItemSchema>;
+
 export const taskCompleteWidget = z.object({
   kind: z.literal("task_complete"),
   outcome: taskCompletionOutcomeSchema,
   /** What the harness wants the reviewer to know before opening the diff. */
   summary: z.string().max(2000).optional(),
+  /** What is *not* done — blocked, skipped, left for a person — as the gate lists it. */
+  openItems: z.array(openItemSchema).max(20).optional(),
   /** Its answer to the Step's branch question, where the Step asked one. See `harnessDecisionSchema`. */
   decision: harnessDecisionSchema.optional(),
 });

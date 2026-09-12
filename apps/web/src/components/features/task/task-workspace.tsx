@@ -56,7 +56,15 @@ import { TaskDependencies, useBlockedByEditor, useTaskDependencies } from "./tas
 import { TaskFooter } from "./task-footer";
 import { TaskMeta } from "./task-meta";
 import { type TerminalScope, TerminalView } from "./terminal-view";
-import { latestStepCard, latestTodos, type StepCardWidget, TodoList } from "./todo-list";
+import {
+  latestCompletion,
+  latestStepCard,
+  latestTodos,
+  openItemsOf,
+  type StepCardWidget,
+  type TaskCompleteWidget,
+  TodoList,
+} from "./todo-list";
 import { buildTranscript, inStepScope } from "./transcript";
 import { StepCard } from "./widgets/step-card";
 import { selectedTabId, TERMINAL_PANEL_ID, useStepScope, WorkflowSteps } from "./workflow-steps";
@@ -421,6 +429,20 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
     return latestStepCard(events);
   }, [events, live.events, liveSessionId]);
   const hasPlan = todos.length > 0 || stepCard !== null;
+  // The harness's own report, for what it left open (point 5 of the review analysis).
+  const completion = useMemo<TaskCompleteWidget | null>(() => {
+    for (let i = live.events.length - 1; i >= 0; i -= 1) {
+      const event = live.events[i];
+      if (
+        event?.kind === "widget" &&
+        event.sessionId === liveSessionId &&
+        event.widget.kind === "task_complete"
+      )
+        return event.widget;
+    }
+    return latestCompletion(events);
+  }, [events, live.events, liveSessionId]);
+  const openItems = useMemo(() => openItemsOf(completion, stepCard), [completion, stepCard]);
 
   /**
    * Which of the right column's two tabs is showing.
@@ -1056,6 +1078,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
           viewed={
             t.state === "review" && fileCount > 0 ? { viewed: viewedCount, of: fileCount } : null
           }
+          openItems={openItems}
           notes={{
             count: draft.draft.notes.length,
             general: draft.draft.general,
