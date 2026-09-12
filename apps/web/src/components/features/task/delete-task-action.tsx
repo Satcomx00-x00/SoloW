@@ -1,6 +1,7 @@
 "use client";
 
 import type { TaskDeletionImpactDto } from "@solow/contracts";
+import { TASK_RETENTION_DAYS } from "@solow/core";
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { ConfirmDialog } from "@/components/features/confirm-action";
@@ -79,19 +80,22 @@ export function DeleteTaskAction({
 }
 
 function describe(impact: TaskDeletionImpactDto | undefined): string {
-  if (!impact) return "This cannot be undone. Counting what would be deleted…";
+  const window = `${TASK_RETENTION_DAYS} days`;
+  if (!impact)
+    return `It goes to History for ${window}, restorable. Counting what it takes with it…`;
 
-  let text = "This cannot be undone.";
+  let text = `It goes to History for ${window}, where it can be restored or resumed; after that it is gone for good.`;
   if (impact.sessionCount > 0) {
     const its = impact.sessionCount === 1 ? "its" : "their";
-    text += ` It deletes ${plural(impact.sessionCount, "session")} with ${its} logs and review history.`;
+    text += ` ${plural(impact.sessionCount, "session")} with ${its} logs and review history go with it.`;
   }
   if (impact.running) text += " The running harness will be stopped first.";
   if (impact.dependentCount > 0) {
-    text += ` ${plural(impact.dependentCount, "task")} waiting on this one will be unblocked.`;
+    text += ` ${plural(impact.dependentCount, "task")} waiting on this one will be unblocked, and stay unblocked if it is restored.`;
   }
   if (impact.worktreeCount > 0) {
-    text += ` ${plural(impact.worktreeCount, "git worktree")} will be left on disk — remove them yourself if you need the space.`;
+    const stay = impact.worktreeCount === 1 ? "stays" : "stay";
+    text += ` ${plural(impact.worktreeCount, "git worktree")} ${stay} on disk for the ${window}, then ${impact.worktreeCount === 1 ? "is" : "are"} removed.`;
   }
   return text;
 }

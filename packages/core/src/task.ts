@@ -156,6 +156,30 @@ export function primaryTaskRepository<T extends TaskRepositoryPosition>(
   return primary;
 }
 
+/**
+ * How long a closed or deleted Task stays in History — restorable, resumable, its worktree on
+ * disk — before the retention sweep purges what it left behind (spec F02 FR-10, F11).
+ *
+ * One number, read by the sweep, the History page's "expires in", and the delete dialog; a
+ * second copy anywhere would be a second answer to how long the Owner has.
+ */
+export const TASK_RETENTION_DAYS = 7;
+export const TASK_RETENTION_MS = TASK_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+
+/** When a Task closed or deleted at `since` leaves History. */
+export function retentionExpiresAt(since: string, retentionMs = TASK_RETENTION_MS): string {
+  return new Date(new Date(since).getTime() + retentionMs).toISOString();
+}
+
+/** Whether something that happened at `since` is still inside the retention window. */
+export function withinRetention(
+  since: string,
+  now = Date.now(),
+  retentionMs = TASK_RETENTION_MS,
+): boolean {
+  return new Date(since).getTime() + retentionMs > now;
+}
+
 /** A Task is launchable only from `ready`. */
 export function isLaunchable(state: TaskState): boolean {
   return state === "ready";

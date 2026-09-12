@@ -10708,6 +10708,10 @@
                       "nullable": true,
                       "minLength": 1
                     },
+                    "deletedAt": {
+                      "type": "string",
+                      "nullable": true
+                    },
                     "createdAt": {
                       "type": "string",
                       "format": "date-time"
@@ -10731,6 +10735,7 @@
                     "completedSummary",
                     "workflowId",
                     "workflowStepId",
+                    "deletedAt",
                     "createdAt",
                     "updatedAt"
                   ]
@@ -10950,6 +10955,10 @@
                       "nullable": true,
                       "minLength": 1
                     },
+                    "deletedAt": {
+                      "type": "string",
+                      "nullable": true
+                    },
                     "createdAt": {
                       "type": "string",
                       "format": "date-time"
@@ -10973,6 +10982,7 @@
                     "completedSummary",
                     "workflowId",
                     "workflowStepId",
+                    "deletedAt",
                     "createdAt",
                     "updatedAt"
                   ]
@@ -11215,6 +11225,10 @@
                             "nullable": true,
                             "minLength": 1
                           },
+                          "deletedAt": {
+                            "type": "string",
+                            "nullable": true
+                          },
                           "createdAt": {
                             "type": "string",
                             "format": "date-time"
@@ -11238,6 +11252,7 @@
                           "completedSummary",
                           "workflowId",
                           "workflowStepId",
+                          "deletedAt",
                           "createdAt",
                           "updatedAt"
                         ]
@@ -11330,6 +11345,13 @@
               "minLength": 1
             },
             "required": true
+          },
+          {
+            "in": "query",
+            "name": "includeDeleted",
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -11442,6 +11464,10 @@
                       "nullable": true,
                       "minLength": 1
                     },
+                    "deletedAt": {
+                      "type": "string",
+                      "nullable": true
+                    },
                     "createdAt": {
                       "type": "string",
                       "format": "date-time"
@@ -11465,6 +11491,7 @@
                     "completedSummary",
                     "workflowId",
                     "workflowStepId",
+                    "deletedAt",
                     "createdAt",
                     "updatedAt"
                   ]
@@ -11666,6 +11693,10 @@
                       "nullable": true,
                       "minLength": 1
                     },
+                    "deletedAt": {
+                      "type": "string",
+                      "nullable": true
+                    },
                     "createdAt": {
                       "type": "string",
                       "format": "date-time"
@@ -11689,6 +11720,7 @@
                     "completedSummary",
                     "workflowId",
                     "workflowStepId",
+                    "deletedAt",
                     "createdAt",
                     "updatedAt"
                   ]
@@ -11893,6 +11925,10 @@
                       "nullable": true,
                       "minLength": 1
                     },
+                    "deletedAt": {
+                      "type": "string",
+                      "nullable": true
+                    },
                     "createdAt": {
                       "type": "string",
                       "format": "date-time"
@@ -11916,6 +11952,7 @@
                     "completedSummary",
                     "workflowId",
                     "workflowStepId",
+                    "deletedAt",
                     "createdAt",
                     "updatedAt"
                   ]
@@ -12107,6 +12144,10 @@
                       "nullable": true,
                       "minLength": 1
                     },
+                    "deletedAt": {
+                      "type": "string",
+                      "nullable": true
+                    },
                     "createdAt": {
                       "type": "string",
                       "format": "date-time"
@@ -12130,6 +12171,226 @@
                     "completedSummary",
                     "workflowId",
                     "workflowStepId",
+                    "deletedAt",
+                    "createdAt",
+                    "updatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/task.restore": {
+      "post": {
+        "operationId": "task-restore",
+        "summary": "Bring a deleted Task back from History. Refused once the retention window has passed and the Task's rows are gone for good.",
+        "tags": [
+          "task"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "issueId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "backlog",
+                        "ready",
+                        "running",
+                        "review",
+                        "parked",
+                        "failed",
+                        "done"
+                      ]
+                    },
+                    "agentProfileId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "executorProfileId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "repositories": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "repositoryId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "baseRef": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "checkoutBranch": {
+                            "type": "string"
+                          },
+                          "resultBranch": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "position": {
+                            "type": "integer",
+                            "minimum": 0
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "repositoryId",
+                          "baseRef",
+                          "checkoutBranch",
+                          "resultBranch",
+                          "position"
+                        ]
+                      }
+                    },
+                    "failureReason": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "completedAt": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "completedOutcome": {
+                      "type": "string",
+                      "nullable": true,
+                      "enum": [
+                        "changes_ready",
+                        "nothing_to_do",
+                        "blocked",
+                        null
+                      ]
+                    },
+                    "completedSummary": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "workflowId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
+                    "workflowStepId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
+                    "deletedAt": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "issueId",
+                    "title",
+                    "state",
+                    "agentProfileId",
+                    "executorProfileId",
+                    "repositories",
+                    "failureReason",
+                    "completedAt",
+                    "completedOutcome",
+                    "completedSummary",
+                    "workflowId",
+                    "workflowStepId",
+                    "deletedAt",
                     "createdAt",
                     "updatedAt"
                   ]
@@ -12321,6 +12582,10 @@
                       "nullable": true,
                       "minLength": 1
                     },
+                    "deletedAt": {
+                      "type": "string",
+                      "nullable": true
+                    },
                     "createdAt": {
                       "type": "string",
                       "format": "date-time"
@@ -12344,6 +12609,7 @@
                     "completedSummary",
                     "workflowId",
                     "workflowStepId",
+                    "deletedAt",
                     "createdAt",
                     "updatedAt"
                   ]

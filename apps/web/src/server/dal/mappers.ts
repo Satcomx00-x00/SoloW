@@ -127,6 +127,7 @@ export function taskToDto(row: TaskRow, attachments: readonly TaskRepositoryRow[
     // rather than an ordinal on purpose — see the column comments in `schema.ts`.
     workflowId: row.workflowId,
     workflowStepId: row.workflowStepId,
+    deletedAt: row.deletedAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };

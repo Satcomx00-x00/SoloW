@@ -9,6 +9,7 @@ import {
   listTasksInput,
   moveTaskInput,
   removeTaskDependencyInput,
+  restoreTaskInput,
   retryTaskInput,
   setTaskRepositoriesInput,
   submitTaskForReviewInput,
@@ -47,6 +48,7 @@ import {
   listTaskDependencies,
   listTasks,
   removeTaskDependencyEdge,
+  restoreTask,
   setTaskRepositories,
   taskDeletionImpact,
   updateTaskState,
@@ -215,7 +217,13 @@ export const taskRouter = router({
     })
     .input(getTaskInput)
     .output(taskDto)
-    .query(async ({ ctx, input }) => unwrap(await getTaskById(ctx.rctx, input.id))),
+    .query(async ({ ctx, input }) =>
+      unwrap(
+        await getTaskById(ctx.rctx, input.id, {
+          ...(input.includeDeleted ? { includeDeleted: true } : {}),
+        }),
+      ),
+    ),
 
   launch: ownerProcedure
     .meta({
@@ -313,6 +321,29 @@ export const taskRouter = router({
         state: opened.state,
       });
       return opened;
+    }),
+
+  restore: ownerProcedure
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/task.restore",
+        tags: ["task"],
+        protect: true,
+        summary:
+          "Bring a deleted Task back from History. Refused once the retention window has passed and the Task's rows are gone for good.",
+      },
+    })
+    .input(restoreTaskInput)
+    .output(taskDto)
+    .mutation(async ({ ctx, input }) => {
+      const restored = unwrap(await restoreTask(ctx.rctx, input.id));
+      await orchestrator.announceTask({
+        workspaceId: ctx.rctx.workspaceId,
+        taskId: restored.id,
+        state: restored.state,
+      });
+      return restored;
     }),
 
   retry: ownerProcedure

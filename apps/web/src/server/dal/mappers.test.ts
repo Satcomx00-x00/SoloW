@@ -171,6 +171,7 @@ describe("mappers", () => {
       // A Task on no Workflow, which is every Task that exists today (issue #5).
       workflowId: null,
       workflowStepId: null,
+      deletedAt: null,
       workflowVersion: null,
       workflowHandoff: null,
       workflowPendingHandoff: null,

@@ -176,6 +176,10 @@ export type RetryTaskInput = z.infer<typeof retryTaskInput>;
 export const deleteTaskInput = z.object({ id: idSchema, force: z.boolean().default(false) });
 export type DeleteTaskInput = z.infer<typeof deleteTaskInput>;
 
+/** Bring a deleted Task back from History, within the retention window. */
+export const restoreTaskInput = z.object({ id: idSchema });
+export type RestoreTaskInput = z.infer<typeof restoreTaskInput>;
+
 export const taskDeletionImpactInput = z.object({ id: idSchema });
 export type TaskDeletionImpactInput = z.infer<typeof taskDeletionImpactInput>;
 
@@ -213,7 +217,11 @@ export const listTasksInput = z
   .merge(pageInputSchema);
 export type ListTasksInput = z.infer<typeof listTasksInput>;
 
-export const getTaskInput = z.object({ id: idSchema });
+export const getTaskInput = z.object({
+  id: idSchema,
+  /** Also answer for a Task in History. The Task page opened from there needs it; nothing else does. */
+  includeDeleted: z.boolean().optional(),
+});
 export type GetTaskInput = z.infer<typeof getTaskInput>;
 
 /**
@@ -275,6 +283,12 @@ export const taskDto = z
      */
     workflowId: idSchema.nullable(),
     workflowStepId: idSchema.nullable(),
+    /**
+     * When the Owner deleted this Task, or null while it is live. A deleted Task is in History
+     * for the retention window and is only ever returned by the readers that ask for it (the
+     * History page, the Task page opened from there); every list of live Tasks excludes it.
+     */
+    deletedAt: z.string().nullable(),
   })
   .merge(timestampsSchema);
 export type TaskDto = z.infer<typeof taskDto>;

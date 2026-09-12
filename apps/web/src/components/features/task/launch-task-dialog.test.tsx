@@ -26,6 +26,7 @@ function makeTask(over: Partial<TaskDto> & { id: string; state: TaskState }): Ta
     failureReason: null,
     workflowId: null,
     workflowStepId: null,
+    deletedAt: null,
     completedAt: null,
     completedOutcome: null,
     completedSummary: null,

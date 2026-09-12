@@ -36,6 +36,9 @@ const MESSAGES: Record<string, string> = {
     "A harness is still running on this task and could not be stopped, so nothing was deleted.",
   [TaskErrorCode.StopFailed]:
     "The harness could not be stopped, so nothing was deleted. Check the orchestrator is running, then try again.",
+  [TaskErrorCode.RetentionExpired]:
+    "This task left History — its retention window passed and its record is gone. It cannot be restored.",
+  [TaskErrorCode.NotDeleted]: "This task is not in History, so there is nothing to restore.",
   [TaskErrorCode.HasDependents]:
     "Other tasks are waiting on this one. Deleting it would unblock them.",
   [CommonErrorCode.RateLimited]: "Too many launches in a row. Wait a moment and try again.",

@@ -150,6 +150,7 @@ export async function reapOrphanedContainers(
         state: task.state,
         failureReason: task.failureReason,
         updatedAt: task.updatedAt,
+        deletedAt: task.deletedAt,
       })
       .from(task)
       .where(and(eq(task.workspaceId, container.workspaceId), eq(task.id, container.taskId)))
@@ -158,7 +159,8 @@ export async function reapOrphanedContainers(
     // What the Task table has to say about whether anything is still in here, asked once because
     // both filters below turn on it — and answered by `heldByRun` rather than by a state test
     // written out twice, which is how the two came to disagree.
-    const held = row !== undefined && heldByRun(row);
+    // A Task in History holds nothing: it was stopped on the way out, whatever its row still says.
+    const held = row !== undefined && row.deletedAt === null && heldByRun(row);
 
     // 3. Quiet. The registry is empty in every gap *between* durable steps, and a live run spends
     //    a good deal of its time in one: the moment after `agent-run` returns and before

@@ -41,6 +41,7 @@ function task(over: Partial<TaskDto> & { id: string }): TaskDto {
     completedSummary: null,
     workflowId: null,
     workflowStepId: null,
+    deletedAt: null,
     createdAt: AT,
     updatedAt: AT,
     ...over,

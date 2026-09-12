@@ -43,6 +43,14 @@ export const TaskErrorCode = {
    * being written.
    */
   NotComplete: "TASK_NOT_COMPLETE",
+  /**
+   * A restore reached a Task the retention sweep has already purged — or one deleted longer ago
+   * than the window, which the sweep is about to purge. History is seven days; after that the
+   * rows are gone and there is nothing to restore into.
+   */
+  RetentionExpired: "TASK_RETENTION_EXPIRED",
+  /** A restore on a Task that is not deleted: there is nothing to restore it from. */
+  NotDeleted: "TASK_NOT_DELETED",
 } as const;
 export type TaskErrorCode = (typeof TaskErrorCode)[keyof typeof TaskErrorCode];
 

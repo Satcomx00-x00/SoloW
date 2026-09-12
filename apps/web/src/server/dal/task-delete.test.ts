@@ -2,6 +2,7 @@
 
 import { beforeEach, describe, expect, it } from "bun:test";
 import { CommonErrorCode, TaskErrorCode } from "@solow/contracts";
+import { TASK_RETENTION_MS } from "@solow/core";
 import { session, taskDependency, task as taskTable, worktree } from "@solow/db";
 import { createTestDb, type TestDb } from "@solow/db/testing";
 import { eq } from "drizzle-orm";
@@ -11,6 +12,10 @@ import {
   addTaskDependencyEdge,
   createTaskRecord,
   deleteTask,
+  getTaskById,
+  listDeletedTasks,
+  listTasks,
+  restoreTask,
   taskDeletionImpact,
 } from "./task.js";
 import { ctxFor, seedIssue, seedWorkspaceGraph } from "./test-fixtures.js";
@@ -46,7 +51,9 @@ describe("deleteTask", () => {
     return { g, ctx, issue, make };
   }
 
-  it("deletes the Task with its sessions and worktree records, leaving the Issue in place", async () => {
+  it("moves the Task to History with its sessions and worktree records intact, leaving the Issue in place", async () => {
+    // A delete is a mark now (F02 FR-10): the record survives the retention window so the Task
+    // can be restored and its Sessions read; the orchestrator's retention sweep is what cascades.
     const { g, ctx, issue, make } = await seed("delete-task");
     const t = await make("Gave up on this", "failed");
     await db.insert(session).values({ workspaceId: g.workspaceId, taskId: t.id, state: "closed" });
@@ -63,11 +70,47 @@ describe("deleteTask", () => {
       ok: true,
       data: { id: t.id },
     });
-    expect(await db.select().from(taskTable).where(eq(taskTable.id, t.id))).toHaveLength(0);
-    expect(await db.select().from(session).where(eq(session.taskId, t.id))).toHaveLength(0);
-    expect(await db.select().from(worktree).where(eq(worktree.taskId, t.id))).toHaveLength(0);
+    const [row] = await db.select().from(taskTable).where(eq(taskTable.id, t.id));
+    expect(row?.deletedAt).toBeTruthy();
+    expect(await db.select().from(session).where(eq(session.taskId, t.id))).toHaveLength(1);
+    expect(await db.select().from(worktree).where(eq(worktree.taskId, t.id))).toHaveLength(1);
+    // Invisible to every reader of live Tasks, visible to the one that asks for History.
+    expect(await getTaskById(ctx, t.id)).toEqual({ ok: false, error: CommonErrorCode.NotFound });
+    expect(await listTasks(ctx, { limit: 50 })).toMatchObject({ ok: true, data: { items: [] } });
+    expect(await getTaskById(ctx, t.id, { includeDeleted: true })).toMatchObject({
+      ok: true,
+      data: { id: t.id, deletedAt: row?.deletedAt },
+    });
+    expect((await listDeletedTasks(ctx)).ok && (await listDeletedTasks(ctx))).toMatchObject({
+      ok: true,
+      data: [{ id: t.id }],
+    });
     // An Issue with no Tasks is an ordinary state — it is how every Issue starts.
     expect(await getIssueById(ctx, issue.id)).toMatchObject({ ok: true });
+  });
+
+  it("restores a deleted Task inside the retention window, and refuses past it", async () => {
+    const { ctx, make } = await seed("restore-task");
+    const t = await make("Deleted by mistake", "failed");
+    expect(await restoreTask(ctx, t.id)).toEqual({ ok: false, error: TaskErrorCode.NotDeleted });
+
+    await deleteTask(ctx, { id: t.id, force: false });
+    expect(await restoreTask(ctx, t.id)).toMatchObject({
+      ok: true,
+      data: { id: t.id, state: "failed", deletedAt: null },
+    });
+    expect(await getTaskById(ctx, t.id)).toMatchObject({ ok: true });
+
+    // Deleted eight days ago: the sweep may already have purged it, and a restore that raced it
+    // would resurrect a Task with no Sessions.
+    await deleteTask(ctx, { id: t.id, force: false });
+    const stale = new Date(Date.now() - (TASK_RETENTION_MS + 60_000)).toISOString();
+    await db.update(taskTable).set({ deletedAt: stale }).where(eq(taskTable.id, t.id));
+    expect(await restoreTask(ctx, t.id)).toEqual({
+      ok: false,
+      error: TaskErrorCode.RetentionExpired,
+    });
+    expect(await listDeletedTasks(ctx)).toEqual({ ok: true, data: [] });
   });
 
   it("refuses while an active Session is on the Task, whatever its own state says", async () => {
@@ -92,7 +135,7 @@ describe("deleteTask", () => {
     expect(await deleteTask(ctx, { id: t.id, force: true }, { stopIssued: true })).toMatchObject({
       ok: true,
     });
-    expect(await db.select().from(taskTable).where(eq(taskTable.id, t.id))).toHaveLength(0);
+    expect(await getTaskById(ctx, t.id)).toEqual({ ok: false, error: CommonErrorCode.NotFound });
   });
 
   it("deletes a Task stuck in `running` with no Session left to stop", async () => {
@@ -106,7 +149,7 @@ describe("deleteTask", () => {
       ok: true,
       data: { id: t.id },
     });
-    expect(await db.select().from(taskTable).where(eq(taskTable.id, t.id))).toHaveLength(0);
+    expect(await getTaskById(ctx, t.id)).toEqual({ ok: false, error: CommonErrorCode.NotFound });
   });
 
   it("refuses without force while another Task is blocked by this one", async () => {

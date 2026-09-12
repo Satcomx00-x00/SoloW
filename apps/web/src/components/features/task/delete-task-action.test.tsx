@@ -30,7 +30,7 @@ function trigger(open: () => void) {
 }
 
 describe("DeleteTaskAction", () => {
-  it("states sessions, the running harness, unblocked tasks and the worktree left on disk", async () => {
+  it("states the retention window, sessions, the running harness, unblocked tasks and the worktree kept on disk", async () => {
     renderWithTrpc(
       <DeleteTaskAction taskId="task-1" taskTitle="Fix the latch" trigger={trigger} />,
       { "task.deletionImpact": () => IMPACT },
@@ -39,9 +39,11 @@ describe("DeleteTaskAction", () => {
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
 
     const body = await screen.findByText(/2 sessions/);
+    // A delete is a move to History, and the dialog says for how long — the one number.
+    expect(body.textContent).toContain("History for 7 days");
     expect(body.textContent).toContain("The running harness will be stopped first");
     expect(body.textContent).toContain("3 tasks waiting on this one will be unblocked");
-    expect(body.textContent).toContain("1 git worktree will be left on disk");
+    expect(body.textContent).toContain("1 git worktree stays on disk for the 7 days");
   });
 
   it("does not ask for the impact until the dialog is opened", async () => {

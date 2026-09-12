@@ -104,7 +104,9 @@ export async function reclaimOrphanedRuns(
       workflowStepId: task.workflowStepId,
     })
     .from(task)
-    .where(eq(task.state, "running"));
+    // A Task in History is nobody's to reclaim: it was stopped on the way out, and relaunching it
+    // would put a harness back to work on something the Owner deleted.
+    .where(and(eq(task.state, "running"), isNull(task.deletedAt)));
 
   let reclaimed = 0;
   for (const row of running) {
@@ -311,7 +313,7 @@ export async function reportStrandedReviews(
   const inReview = await db
     .select({ id: task.id, workspaceId: task.workspaceId, updatedAt: task.updatedAt })
     .from(task)
-    .where(and(eq(task.state, "review"), isNull(task.failureReason)));
+    .where(and(eq(task.state, "review"), isNull(task.failureReason), isNull(task.deletedAt)));
 
   let reported = 0;
   for (const row of inReview) {
@@ -512,7 +514,7 @@ export async function reportStrandedParks(
   const parked = await db
     .select({ id: task.id, workspaceId: task.workspaceId, updatedAt: task.updatedAt })
     .from(task)
-    .where(and(eq(task.state, "parked"), isNull(task.failureReason)));
+    .where(and(eq(task.state, "parked"), isNull(task.failureReason), isNull(task.deletedAt)));
 
   let reported = 0;
   for (const row of parked) {

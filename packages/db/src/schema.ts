@@ -610,12 +610,26 @@ export const task = sqliteTable(
      * has to find an approval of its own.
      */
     workflowDecisionCall: text("workflow_decision_call"),
+    /**
+     * When the Owner deleted this Task, or null while it is live (spec F02 FR-10, the archive
+     * half; history retention).
+     *
+     * A delete used to cascade the Task and everything hanging off it out of the database in one
+     * transaction, which made "I deleted the wrong one" unrecoverable and threw away the one thing
+     * a Session is for — the record. It marks the row now, and every reader of live Tasks
+     * excludes marked rows; the retention sweep in the orchestrator does the cascade once the row
+     * is older than the retention window. Until then the Task is in History, restorable, and its
+     * Sessions, events, reviews and worktree are exactly as they were.
+     */
+    deletedAt: text("deleted_at"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => ({
     byState: index("task_ws_state").on(t.workspaceId, t.state),
     byIssue: index("task_issue").on(t.issueId),
+    /** Serves the retention sweep and the History page — both ask "deleted, and when". */
+    byDeleted: index("task_ws_deleted").on(t.workspaceId, t.deletedAt),
     /** Serves the "is this Workflow still in use" check that refuses a delete. */
     byWorkflow: index("task_workflow").on(t.workspaceId, t.workflowId),
     /**

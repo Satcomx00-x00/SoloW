@@ -23,6 +23,7 @@ import {
   CREDENTIAL_EXPIRED_REASON,
   checkDependencyEdge,
   taskCheckoutBranch,
+  withinRetention,
 } from "@solow/core";
 import {
   harnessProfile,
@@ -33,11 +34,10 @@ import {
   taskRepository,
   worktree,
 } from "@solow/db";
-import { and, asc, eq, inArray, like, notInArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, like, notInArray } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
 import { taskToDto } from "./mappers.js";
 import { pageAfter, pageLimit, pageOrder, pageProbe, toPage } from "./page.js";
-import { cascadeDeleteTasks } from "./task-cascade.js";
 
 /**
  * The Repository attachments of a set of Tasks, keyed by Task id (issue #7).
@@ -72,14 +72,31 @@ async function attachmentsForTasks(
   return byTask;
 }
 
+/**
+ * The Tasks that are still the Owner's to see: not deleted (spec F02 FR-10, history retention).
+ *
+ * A deleted Task keeps its row for the retention window so it can be restored and its record
+ * read, and every reader of *live* Tasks — the board, the palette, the Issue's task list, the
+ * counts a concurrency cap or an Issue's status are derived from — leaves it out through this
+ * one predicate. The readers that want History ask for it by name (`includeDeleted`).
+ */
+export const liveTask = () => isNull(task.deletedAt);
+
 export async function getTaskById(
   ctx: RequestContext,
   id: string,
+  opts: { includeDeleted?: boolean } = {},
 ): Promise<Result<TaskDto, typeof CommonErrorCode.NotFound>> {
   const [row] = await ctx.db
     .select()
     .from(task)
-    .where(and(eq(task.workspaceId, ctx.workspaceId), eq(task.id, id)))
+    .where(
+      and(
+        eq(task.workspaceId, ctx.workspaceId),
+        eq(task.id, id),
+        ...(opts.includeDeleted ? [] : [liveTask()]),
+      ),
+    )
     .limit(1);
   if (!row) return err(CommonErrorCode.NotFound);
   const attachments = await attachmentsForTasks(ctx, [row.id]);
@@ -90,7 +107,7 @@ export async function listTasks(
   ctx: RequestContext,
   input: ListTasksInput,
 ): Promise<Result<TaskListDto>> {
-  const conditions = [eq(task.workspaceId, ctx.workspaceId)];
+  const conditions = [eq(task.workspaceId, ctx.workspaceId), liveTask()];
   if (input.issueId) conditions.push(eq(task.issueId, input.issueId));
   if (input.state) conditions.push(eq(task.state, input.state));
   // `query` was accepted by the input schema and then dropped on the floor, so a filtered
@@ -313,6 +330,7 @@ export async function countRunningForHarnessProfile(
         eq(task.workspaceId, ctx.workspaceId),
         eq(task.agentProfileId, harnessProfileId),
         eq(task.state, "running"),
+        liveTask(),
       ),
     );
   return rows.length;
@@ -427,8 +445,9 @@ export async function removeTaskDependencyEdge(
 }
 
 /**
- * Delete one Task and everything hanging off it — the board's card menu and the Task page both
- * call this, so a Task no longer has to be deleted by way of its Issue.
+ * Delete one Task — into History, from where it can be restored for the retention window — the
+ * board's card menu and the Task page both call this, so a Task no longer has to be deleted by
+ * way of its Issue. The rows go for good when the orchestrator's retention sweep purges them.
  *
  * Two guards, and they are not the same kind of thing:
  *
@@ -505,9 +524,90 @@ export async function deleteTask(
       if (dependents.length > 0) return err(TaskErrorCode.HasDependents);
     }
 
-    cascadeDeleteTasks(tx, ctx.workspaceId, [input.id]);
+    /*
+     * A mark, not a cascade (spec F02 FR-10; history retention). The Task keeps its row, its
+     * Sessions, events, reviews and worktree rows for the retention window, restorable from
+     * History; the orchestrator's retention sweep runs `cascadeDeleteTasks` once the window has
+     * passed. The `blocked_by` edges go now, both ways: a Task in History must not hold another
+     * back, and a restored one gets no edges back — the Owner who forced past `HasDependents`
+     * decided that.
+     */
+    const now = new Date().toISOString();
+    tx.update(task)
+      .set({ deletedAt: now, updatedAt: now })
+      .where(and(eq(task.workspaceId, ctx.workspaceId), eq(task.id, input.id)))
+      .run();
+    tx.delete(taskDependency)
+      .where(
+        and(
+          eq(taskDependency.workspaceId, ctx.workspaceId),
+          inArray(taskDependency.taskId, [input.id]),
+        ),
+      )
+      .run();
+    tx.delete(taskDependency)
+      .where(
+        and(
+          eq(taskDependency.workspaceId, ctx.workspaceId),
+          inArray(taskDependency.blockedByTaskId, [input.id]),
+        ),
+      )
+      .run();
     return ok({ id: input.id });
   });
+}
+
+/**
+ * Bring a deleted Task back from History (spec F02 FR-10).
+ *
+ * Only inside the retention window: past it the sweep may already have purged the rows, and a
+ * restore that raced it would resurrect a Task with no Sessions. The state comes back exactly as
+ * it was — a Task deleted while Running was stopped on the way out, and reconcile's reclaim is
+ * what settles a `running` row with no run behind it, the same as after a restart.
+ */
+export async function restoreTask(
+  ctx: RequestContext,
+  id: string,
+): Promise<
+  Result<
+    TaskDto,
+    | typeof CommonErrorCode.NotFound
+    | typeof TaskErrorCode.NotDeleted
+    | typeof TaskErrorCode.RetentionExpired
+  >
+> {
+  const [existing] = await ctx.db
+    .select({ id: task.id, deletedAt: task.deletedAt })
+    .from(task)
+    .where(and(eq(task.workspaceId, ctx.workspaceId), eq(task.id, id)))
+    .limit(1);
+  if (!existing) return err(CommonErrorCode.NotFound);
+  if (existing.deletedAt === null) return err(TaskErrorCode.NotDeleted);
+  if (!withinRetention(existing.deletedAt)) return err(TaskErrorCode.RetentionExpired);
+
+  await ctx.db
+    .update(task)
+    .set({ deletedAt: null, updatedAt: new Date().toISOString() })
+    .where(and(eq(task.workspaceId, ctx.workspaceId), eq(task.id, id)));
+  return getTaskById(ctx, id);
+}
+
+/**
+ * The Tasks History lists: deleted inside the retention window, newest deletion first.
+ * (Done Tasks reach History through `listTasks({ state: "done" })`; this is the other half.)
+ */
+export async function listDeletedTasks(ctx: RequestContext): Promise<Result<TaskDto[]>> {
+  const rows = await ctx.db
+    .select()
+    .from(task)
+    .where(and(eq(task.workspaceId, ctx.workspaceId), isNotNull(task.deletedAt)))
+    .orderBy(desc(task.deletedAt));
+  const live = rows.filter((row) => row.deletedAt !== null && withinRetention(row.deletedAt));
+  const attachments = await attachmentsForTasks(
+    ctx,
+    live.map((row) => row.id),
+  );
+  return ok(live.map((row) => taskToDto(row, attachments.get(row.id) ?? [])));
 }
 
 /** What deleting this Task would destroy, for the confirmation to state. */
@@ -598,6 +698,7 @@ export async function taskIdsBlockedByCredential(
         eq(task.state, "failed"),
         eq(task.failureReason, CREDENTIAL_EXPIRED_REASON),
         eq(harnessProfile.secretId, secretId),
+        liveTask(),
       ),
     );
   return rows.map((row) => row.id);

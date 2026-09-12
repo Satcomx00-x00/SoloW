@@ -33,6 +33,7 @@ import { and, asc, eq, inArray, like, notInArray, or } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
 import { type IssueRollup, issueToDto, NO_TASKS } from "./mappers.js";
 import { encodeCursor, pageAfter, pageLimit, pageOrder, pageProbe, toPage } from "./page.js";
+import { liveTask } from "./task.js";
 import { cascadeDeleteTasks } from "./task-cascade.js";
 
 /**
@@ -51,7 +52,8 @@ async function taskStatesByIssue(
   const rows = await ctx.db
     .select({ issueId: task.issueId, state: task.state })
     .from(task)
-    .where(and(eq(task.workspaceId, ctx.workspaceId), inArray(task.issueId, issueIds)));
+    // A Task in History no longer says anything about its Issue's status.
+    .where(and(eq(task.workspaceId, ctx.workspaceId), inArray(task.issueId, issueIds), liveTask()));
 
   for (const row of rows) byIssue.get(row.issueId)?.push(row.state);
   return byIssue;
