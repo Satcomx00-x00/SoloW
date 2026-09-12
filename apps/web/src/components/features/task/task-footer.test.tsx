@@ -165,6 +165,19 @@ describe("TaskFooter", () => {
     expect(approve.hasAttribute("disabled")).toBe(false);
   });
 
+  it("locks Approve while a decision the harness made is unsettled, and says where to settle it", () => {
+    renderFooter({ state: "review" }, { decisionsPending: 2 });
+    const approve = screen.getByRole("button", { name: "Approve" });
+    expect(approve.hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("status").textContent).toContain("2 decisions");
+    expect(screen.getByRole("status").textContent).toContain("Plan tab");
+    // The other two decisions stay open: a request for changes or a rejection is how a reviewer
+    // says "not like this" without having to answer the harness's question first.
+    expect(screen.getByRole("button", { name: "Request changes" }).hasAttribute("disabled")).toBe(
+      false,
+    );
+  });
+
   it("re-runs a review gate whose decision was never applied, instead of offering a dead gate", () => {
     const calls = renderFooter({ state: "review", failureReason: "review_decision_not_applied" });
     expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();

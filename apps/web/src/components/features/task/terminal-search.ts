@@ -59,6 +59,8 @@ function widgetText(widget: WidgetLike): string {
       // Never the content: that is markup the harness wrote, and matching inside it would send a
       // search for "div" to every diagram in the run.
       return [widget.title ?? "", widget.module].join(" ");
+    case "decision":
+      return [widget.question, ...widget.options.map((o) => o.label)].join(" ");
     case "unsupported":
       return `${widget.requested} ${widget.reason}`;
   }

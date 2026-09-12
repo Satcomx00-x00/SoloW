@@ -1,6 +1,7 @@
 "use client";
 
 import type {
+  DecisionWidget,
   ReviewDraftFile,
   ReviewNote,
   SessionEventDto,
@@ -48,11 +49,12 @@ import { CREDENTIAL_EXPIRED_REASON } from "@/lib/task-states";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
 import { ChangesPanel } from "./changes-panel";
+import { DecisionForm } from "./decision-form";
 import { DeleteTaskAction } from "./delete-task-action";
 import { HarnessComposer } from "./harness-composer";
 import { LaunchTaskDialog, useWorkflowChoices } from "./launch-task-dialog";
 import { ReviewBriefPanel } from "./review-brief";
-import { collateFeedback } from "./review-feedback";
+import { collateDecisions, collateFeedback, joinFeedback } from "./review-feedback";
 import { groupChanges, summariseConsequences } from "./review-groups";
 import type { LineAnchor } from "./review-notes";
 import { RoundSelector } from "./round-selector";
@@ -440,7 +442,30 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
     }
     return latestStepCard(events);
   }, [events, live.events, liveSessionId]);
-  const hasPlan = todos.length > 0 || stepCard !== null;
+  /**
+   * The decisions the harness emitted, latest per id, from both sources (point 3). Part of the
+   * plan: they are drawn on the Plan tab as forms, and the gate waits for each to be settled.
+   */
+  const decisions = useMemo<DecisionWidget[]>(() => {
+    const byId = new Map<string, DecisionWidget>();
+    for (const event of events) {
+      const payload = event.payload;
+      if (payload.kind === "widget" && payload.widget.kind === "decision") {
+        byId.set(payload.widget.id, payload.widget);
+      }
+    }
+    for (const event of live.events) {
+      if (
+        event.kind === "widget" &&
+        event.sessionId === liveSessionId &&
+        event.widget.kind === "decision"
+      ) {
+        byId.set(event.widget.id, event.widget);
+      }
+    }
+    return [...byId.values()];
+  }, [events, live.events, liveSessionId]);
+  const hasPlan = todos.length > 0 || stepCard !== null || decisions.length > 0;
   // The harness's own report, for what it left open (point 5 of the review analysis).
   const completion = useMemo<TaskCompleteWidget | null>(() => {
     for (let i = live.events.length - 1; i >= 0; i -= 1) {
@@ -609,6 +634,9 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
    * round the gate would act on, and an older round or launch is read, not reviewed.
    */
   const draft = useReviewDraft(taskId, latest?.id ?? null, latestRound);
+  const decisionsPending = decisions.filter(
+    (w) => !draft.draft.decisions.some((d) => d.id === w.id),
+  ).length;
   const viewedCount = useMemo(() => {
     let n = 0;
     for (const diff of capturedDiffs) {
@@ -701,25 +729,36 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   // At the gate the brief is the view that answers "may I sign this", so it opens first there —
   // when there is one: an Issue with no criteria has no brief worth opening on, and the change
   // is what is left to read. During a run the plan is what you watch; otherwise the change.
+  // A decision the harness made and nobody settled comes first of all: it is what locks the gate.
   const autoTab: RightTab =
-    t.state === "review" && latest && (briefCriteria ?? 0) > 0
-      ? "review"
-      : hasPlan && diffs.length === 0 && isRunning
-        ? "plan"
-        : "changes";
+    t.state === "review" && decisionsPending > 0
+      ? "plan"
+      : t.state === "review" && latest && (briefCriteria ?? 0) > 0
+        ? "review"
+        : hasPlan && diffs.length === 0 && isRunning
+          ? "plan"
+          : "changes";
   const pickedTab = tabPick && tabPick.state === t.state ? tabPick.tab : autoTab;
   // A plan tab with no plan under it is disabled, so a pick that outlived its list falls back.
   const tab = pickedTab === "plan" && !hasPlan ? "changes" : pickedTab;
   const runDecision = (decision: "approve" | "reject" | "request_changes") => {
     if (!latest?.id) return;
-    // The draft goes with a request for changes and nowhere else (F10 FR-7): an approval has
-    // nothing to say to a harness that is done, and a rejection discards the work the notes
-    // were about. Omitted, not empty, when there is nothing — the orchestrator has its own
+    // The notes and remark go with a request for changes and nowhere else (F10 FR-7): an
+    // approval has nothing to say to a harness that is done, and a rejection discards the work
+    // the notes were about. Decisions the reviewer settled on the Plan tab are the exception —
+    // on an approval they become the next Step's handoff; on a request for changes they join
+    // the notes. Omitted, not empty, when there is nothing — the orchestrator has its own
     // sentence for "the reviewer left no notes".
+    const settled = collateDecisions(decisions, draft.draft.decisions);
     const feedback =
       decision === "request_changes"
-        ? collateFeedback(draft.draft, (id) => (id ? nameFor(id) : null))
-        : undefined;
+        ? joinFeedback(
+            collateFeedback(draft.draft, (id) => (id ? nameFor(id) : null)),
+            settled,
+          )
+        : decision === "approve"
+          ? settled
+          : undefined;
     decide.mutate({ sessionId: latest.id, decision, ...(feedback ? { feedback } : {}) });
   };
   // Refusals from the foot of the page, through the same mapping as the banner above: a wire
@@ -1080,6 +1119,25 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
                   */}
                   {hasPlan ? (
                     <section aria-label="Harness plan" className="space-y-3">
+                      {decisions.length > 0 ? (
+                        <div className="space-y-2" data-decisions={decisions.length}>
+                          <h3 className="font-medium text-sm">
+                            Decisions the harness made{" "}
+                            <span className="font-normal text-2xs text-muted-foreground">
+                              — yours to confirm or overturn before the next step
+                            </span>
+                          </h3>
+                          {decisions.map((widget) => (
+                            <DecisionForm
+                              key={widget.id}
+                              widget={widget}
+                              answer={draft.draft.decisions.find((d) => d.id === widget.id) ?? null}
+                              onAnswer={draft.setDecision}
+                              disabled={t.state !== "review" || deleted !== null}
+                            />
+                          ))}
+                        </div>
+                      ) : null}
                       {stepCard ? <StepCard widget={stepCard} /> : null}
                       {todos.length > 0 ? <TodoList items={todos} /> : null}
                     </section>
@@ -1115,7 +1173,9 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
             tab={tab}
             onPick={(next) => setTabPick({ tab: next, state: t.state })}
             files={diffs.reduce((n, d) => n + d.files.length, 0)}
-            planItems={todos.length > 0 ? todos.length : (stepCard?.steps.length ?? 0)}
+            planItems={
+              decisions.length + (todos.length > 0 ? todos.length : (stepCard?.steps.length ?? 0))
+            }
             review={latest ? Math.max(0, (briefCriteria ?? 0) - draft.draft.verified.length) : null}
           />
         }
@@ -1132,6 +1192,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
             t.state === "review" && fileCount > 0 ? { viewed: viewedCount, of: fileCount } : null
           }
           openItems={openItems}
+          decisionsPending={decisionsPending}
           notes={{
             count: draft.draft.notes.length,
             general: draft.draft.general,

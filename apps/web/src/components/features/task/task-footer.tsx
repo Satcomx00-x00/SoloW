@@ -10,6 +10,7 @@ import {
   KeyRound,
   Play,
   RotateCcw,
+  Scale,
   X,
 } from "lucide-react";
 import Link from "next/link";
@@ -50,6 +51,7 @@ export function TaskFooter({
   consequences,
   viewed = null,
   openItems = [],
+  decisionsPending = 0,
   notes = null,
   decidePending,
   onDecide,
@@ -71,6 +73,8 @@ export function TaskFooter({
   viewed?: { viewed: number; of: number } | null;
   /** What the harness said it did not do — listed above the decision, never a lock. */
   openItems?: ReadonlyArray<{ label: string; why: string | null }>;
+  /** Decisions the harness emitted that the reviewer has not settled on the Plan tab — a lock. */
+  decisionsPending?: number;
   /** The notes drafted so far and the general remark, which "Request changes" sends. */
   notes?: { count: number; general: string; onGeneral: (text: string) => void } | null;
   /** The decision in flight, so its button spins and the other two lock (no double-approve). */
@@ -97,6 +101,7 @@ export function TaskFooter({
     consequences,
     viewed,
     openItems,
+    decisionsPending,
     notes,
     decidePending,
     onDecide,
@@ -132,6 +137,7 @@ export function TaskFooter({
 type FooterInput = Omit<Parameters<typeof TaskFooter>[0], "error"> & {
   outstanding: readonly TaskDependencyDto[];
   openItems: ReadonlyArray<{ label: string; why: string | null }>;
+  decisionsPending: number;
   actionPending: boolean;
   openReviewPending: boolean;
 };
@@ -254,11 +260,16 @@ function ReviewGate({
   consequences,
   viewed,
   openItems,
+  decisionsPending,
   notes,
   decidePending,
   onDecide,
 }: FooterInput) {
+  // A decision the harness emitted and nobody settled is the one thing that locks Approve: the
+  // plan it belongs to is what the next Step is briefed with, and approving it unsettled is
+  // approving the harness's choice by default — the rubber stamp the Plan tab exists to replace.
   const canDecide = decidePending === null;
+  const canApprove = canDecide && decisionsPending === 0;
   const open = openItems.length;
   const noteCount = notes?.count ?? 0;
   const hasFeedback = noteCount > 0 || Boolean(notes?.general.trim());
@@ -293,6 +304,14 @@ function ReviewGate({
           </ul>
         </div>
       ) : null}
+      {decisionsPending > 0 ? (
+        <p className="flex items-center gap-1.5 text-state-review text-xs" role="status">
+          <Scale aria-hidden className="size-3.5 shrink-0" />
+          {decisionsPending === 1 ? "1 decision" : `${decisionsPending} decisions`} the harness made
+          {decisionsPending === 1 ? " is" : " are"} waiting for you on the Plan tab — settle{" "}
+          {decisionsPending === 1 ? "it" : "them"} to approve.
+        </p>
+      ) : null}
       <p className="flex items-center gap-1.5 text-muted-foreground text-xs">
         <GitBranch aria-hidden className="size-3.5 shrink-0" />
         <span>
@@ -321,7 +340,7 @@ function ReviewGate({
       <div className="flex flex-wrap items-center gap-2">
         <Button
           size="lg"
-          disabled={!canDecide}
+          disabled={!canApprove}
           loading={decidePending === "approve"}
           onClick={() => onDecide("approve")}
         >

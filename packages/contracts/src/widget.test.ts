@@ -75,6 +75,7 @@ describe("parseWidget", () => {
       .map(([k]) => k);
     expect(implemented).toEqual([
       "ask_user_input",
+      "decision",
       "show_widget",
       "options_card",
       "step_card",
@@ -110,6 +111,34 @@ describe("task_complete's decision field", () => {
     expect(
       parseWidget({ kind: "task_complete", outcome: "changes_ready", decision: "maybe" }).kind,
     ).toBe("unsupported");
+  });
+});
+
+describe("decision widget", () => {
+  const decision = {
+    kind: "decision",
+    id: "include-semantics",
+    question: "What does `include` on a nested resource select?",
+    options: [
+      { id: "all", label: "Every nested row", why: "matches the parent's behaviour" },
+      { id: "matching", label: "Only rows the filter matches" },
+    ],
+    chosen: "matching",
+    reason: "The filter is what the caller asked for.",
+  };
+
+  it("reads a choice the harness made, with the options it weighed", () => {
+    expect(parseWidget(decision)).toMatchObject({ kind: "decision", chosen: "matching" });
+  });
+
+  it("refuses a decision with fewer than two options — one option is not a choice", () => {
+    expect(parseWidget({ ...decision, options: decision.options.slice(0, 1) }).kind).toBe(
+      "unsupported",
+    );
+  });
+
+  it("is never something the operator answers in the transcript: the Plan tab settles it", () => {
+    expect(widgetExpectsResponse(parseWidget(decision))).toBe(false);
   });
 });
 

@@ -297,6 +297,88 @@ describe("TaskWorkspace review gate", () => {
     expect(screen.getByRole("button", { name: /Approve with 3 open items/ })).toBeDefined();
   });
 
+  it("puts a decision the harness made on the Plan tab, holds Approve until it is settled, and sends the answer with the approval", async () => {
+    const { log } = renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
+      "task.get": () => task(),
+      "session.listForTask": () => [session],
+      "session.get": () => ({
+        ...detail([
+          {
+            kind: "widget",
+            widgetId: "w-1",
+            widget: {
+              kind: "decision",
+              id: "include-semantics",
+              question: "What does include select?",
+              options: [
+                { id: "all", label: "Every nested row" },
+                { id: "matching", label: "Only matching rows" },
+              ],
+              chosen: "matching",
+            },
+          },
+        ]),
+        rounds: [{ index: 1, closedAtSeq: null, diffs: [], review: null }],
+      }),
+      "preference.getReviewDraft": () => ({
+        workspaceId: "ws",
+        userId: "u",
+        taskId: TASK_ID,
+        draft: null,
+      }),
+      "preference.setReviewDraft": (input: unknown) => ({
+        workspaceId: "ws",
+        userId: "u",
+        taskId: TASK_ID,
+        draft: (input as { draft: unknown }).draft,
+      }),
+      "preference.clearReviewDraft": () => ({
+        workspaceId: "ws",
+        userId: "u",
+        taskId: TASK_ID,
+        draft: null,
+      }),
+      "review.decide": () => ({ ok: true }),
+    });
+
+    // The decision is part of the plan, so the Plan tab is where it is offered — as a form.
+    const plan = await screen.findByRole("region", { name: "Harness plan" });
+    const form = within(plan).getByRole("group", { name: /What does include select/ });
+    expect(within(form).getAllByRole("radio")).toHaveLength(3);
+    expect(within(form).getByText("harness's pick")).toBeDefined();
+    // Nothing is preselected: the harness's pick is a recommendation, not an answer.
+    expect(within(form).queryByRole("radio", { checked: true })).toBeNull();
+
+    // The gate waits.
+    const approve = screen.getByRole("button", { name: "Approve" });
+    expect(approve.hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("status").textContent).toContain("1 decision");
+
+    // The reviewer overturns the harness. The pick is kept in the draft, per round.
+    fireEvent.click(within(form).getByRole("radio", { name: /Every nested row/ }));
+    await waitFor(() =>
+      expect(log.calls.find((c) => c.path === "preference.setReviewDraft")?.input).toMatchObject({
+        draft: { decisions: [{ id: "include-semantics", choice: "all" }] },
+      }),
+    );
+    await waitFor(() => expect(approve.hasAttribute("disabled")).toBe(false));
+
+    // And the approval carries the answer, in words the next Step cannot read as a nuance.
+    fireEvent.click(approve);
+    await waitFor(() =>
+      expect(log.calls.filter((c) => c.path === "review.decide")).toHaveLength(1),
+    );
+    const input = log.calls.find((c) => c.path === "review.decide")?.input as {
+      decision: string;
+      feedback?: string;
+    };
+    expect(input.decision).toBe("approve");
+    expect(input.feedback).toContain("Decisions settled by the reviewer:");
+    expect(input.feedback).toContain(
+      'What does include select? → Every nested row (overturned your choice of "Only matching rows")',
+    );
+  });
+
   it("offers Open review on a Workflow Step that finished with nothing to do — the plan is what is reviewed", async () => {
     const { log } = renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
       "task.get": () =>

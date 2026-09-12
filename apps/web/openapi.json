@@ -10234,6 +10234,34 @@
                           },
                           "maxItems": 200,
                           "default": []
+                        },
+                        "decisions": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 60
+                              },
+                              "choice": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 40
+                              },
+                              "note": {
+                                "type": "string",
+                                "maxLength": 2000
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "choice"
+                            ]
+                          },
+                          "maxItems": 50,
+                          "default": []
                         }
                       },
                       "required": [
@@ -10242,7 +10270,8 @@
                         "viewed",
                         "notes",
                         "general",
-                        "verified"
+                        "verified",
+                        "decisions"
                       ]
                     }
                   },
@@ -10420,6 +10449,34 @@
                         },
                         "maxItems": 200,
                         "default": []
+                      },
+                      "decisions": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 60
+                            },
+                            "choice": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 40
+                            },
+                            "note": {
+                              "type": "string",
+                              "maxLength": 2000
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "choice"
+                          ]
+                        },
+                        "maxItems": 50,
+                        "default": []
                       }
                     },
                     "required": [
@@ -10548,6 +10605,34 @@
                           },
                           "maxItems": 200,
                           "default": []
+                        },
+                        "decisions": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 60
+                              },
+                              "choice": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 40
+                              },
+                              "note": {
+                                "type": "string",
+                                "maxLength": 2000
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "choice"
+                            ]
+                          },
+                          "maxItems": 50,
+                          "default": []
                         }
                       },
                       "required": [
@@ -10556,7 +10641,8 @@
                         "viewed",
                         "notes",
                         "general",
-                        "verified"
+                        "verified",
+                        "decisions"
                       ]
                     }
                   },
@@ -10753,6 +10839,34 @@
                           },
                           "maxItems": 200,
                           "default": []
+                        },
+                        "decisions": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 60
+                              },
+                              "choice": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 40
+                              },
+                              "note": {
+                                "type": "string",
+                                "maxLength": 2000
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "choice"
+                            ]
+                          },
+                          "maxItems": 50,
+                          "default": []
                         }
                       },
                       "required": [
@@ -10761,7 +10875,8 @@
                         "viewed",
                         "notes",
                         "general",
-                        "verified"
+                        "verified",
+                        "decisions"
                       ]
                     }
                   },
@@ -24230,6 +24345,71 @@
                                           "kind": {
                                             "type": "string",
                                             "enum": [
+                                              "decision"
+                                            ]
+                                          },
+                                          "id": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 60
+                                          },
+                                          "question": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 200
+                                          },
+                                          "options": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "id": {
+                                                  "type": "string",
+                                                  "minLength": 1,
+                                                  "maxLength": 40
+                                                },
+                                                "label": {
+                                                  "type": "string",
+                                                  "minLength": 1,
+                                                  "maxLength": 500
+                                                },
+                                                "why": {
+                                                  "type": "string",
+                                                  "maxLength": 300
+                                                }
+                                              },
+                                              "required": [
+                                                "id",
+                                                "label"
+                                              ]
+                                            },
+                                            "minItems": 2,
+                                            "maxItems": 6
+                                          },
+                                          "chosen": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 40
+                                          },
+                                          "reason": {
+                                            "type": "string",
+                                            "maxLength": 300
+                                          }
+                                        },
+                                        "required": [
+                                          "kind",
+                                          "id",
+                                          "question",
+                                          "options",
+                                          "chosen"
+                                        ]
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": [
                                               "unsupported"
                                             ]
                                           },
@@ -26063,6 +26243,71 @@
                                       "kind": {
                                         "type": "string",
                                         "enum": [
+                                          "decision"
+                                        ]
+                                      },
+                                      "id": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 60
+                                      },
+                                      "question": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 200
+                                      },
+                                      "options": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "id": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 40
+                                            },
+                                            "label": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 500
+                                            },
+                                            "why": {
+                                              "type": "string",
+                                              "maxLength": 300
+                                            }
+                                          },
+                                          "required": [
+                                            "id",
+                                            "label"
+                                          ]
+                                        },
+                                        "minItems": 2,
+                                        "maxItems": 6
+                                      },
+                                      "chosen": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 40
+                                      },
+                                      "reason": {
+                                        "type": "string",
+                                        "maxLength": 300
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "id",
+                                      "question",
+                                      "options",
+                                      "chosen"
+                                    ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
                                           "unsupported"
                                         ]
                                       },
@@ -27356,6 +27601,71 @@
                                     "required": [
                                       "kind",
                                       "outcome"
+                                    ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "decision"
+                                        ]
+                                      },
+                                      "id": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 60
+                                      },
+                                      "question": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 200
+                                      },
+                                      "options": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "id": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 40
+                                            },
+                                            "label": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 500
+                                            },
+                                            "why": {
+                                              "type": "string",
+                                              "maxLength": 300
+                                            }
+                                          },
+                                          "required": [
+                                            "id",
+                                            "label"
+                                          ]
+                                        },
+                                        "minItems": 2,
+                                        "maxItems": 6
+                                      },
+                                      "chosen": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 40
+                                      },
+                                      "reason": {
+                                        "type": "string",
+                                        "maxLength": 300
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "id",
+                                      "question",
+                                      "options",
+                                      "chosen"
                                     ]
                                   },
                                   {

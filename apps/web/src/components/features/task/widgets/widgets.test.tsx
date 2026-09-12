@@ -6,6 +6,7 @@ import { WIDGET_ANSWER_PREFIX } from "@solow/contracts";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { buildTranscript } from "../transcript";
 import { AskUserInput } from "./ask-user-input";
+import { Decision } from "./decision";
 import { rendererFor } from "./registry";
 import { ShowWidget } from "./show-widget";
 
@@ -129,10 +130,43 @@ describe("registry", () => {
       "options_card",
       "step_card",
       "present_files",
+      "task_complete",
+      "decision",
       "unsupported",
     ] as const) {
       expect(rendererFor(kind)).toBeTruthy();
     }
+  });
+});
+
+describe("Decision", () => {
+  it("records the harness's pick as a fact, and offers nothing to click", () => {
+    render(
+      <Decision
+        widget={{
+          kind: "decision",
+          id: "include-semantics",
+          question: "What does include select?",
+          options: [
+            { id: "all", label: "Every nested row" },
+            { id: "matching", label: "Only matching rows", why: "the filter is the ask" },
+          ],
+          chosen: "matching",
+          reason: "The filter is what the caller asked for.",
+        }}
+        widgetId="w-1"
+        answer={null}
+        answered={false}
+        onAnswer={() => {}}
+      />,
+    );
+    const card = screen.getByRole("region", { name: /Decision: What does include select/ });
+    expect(card.textContent).toContain("Only matching rows");
+    expect(card.textContent).toContain("The filter is what the caller asked for.");
+    // The pick is marked on the option the harness took and nowhere else.
+    expect(screen.getAllByLabelText("the harness chose this")).toHaveLength(1);
+    expect(screen.queryByRole("radio")).toBeNull();
+    expect(screen.queryByRole("button")).toBeNull();
   });
 });
 

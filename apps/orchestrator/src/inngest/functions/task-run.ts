@@ -3044,6 +3044,7 @@ export async function runTaskLifecycle(
          * nothing is sent and the parked summary is promoted.
          */
         if (wf && leg.stepId && leg.advanceOn) {
+          const carried = handoffWith(run.summary, feedback);
           const reported = await reportStepFinished(
             `workflow-review-${round}`,
             `workflow-recheck-review-${round}`,
@@ -3051,7 +3052,10 @@ export async function runTaskLifecycle(
               fromStepId: leg.stepId,
               signal: leg.advanceOn,
               producedChanges: run.outcome === "changes_ready",
-              ...(run.summary ? { handoff: run.summary } : {}),
+              // The reviewer's words on an approval ride into the next Step with the harness's
+              // own summary (review analysis, point 3): a decision the harness emitted and the
+              // reviewer overturned on the Plan tab reaches the Build as text it cannot miss.
+              ...(carried ? { handoff: carried } : {}),
               ...(run.outcome ? { outcome: run.outcome } : {}),
             },
           );
@@ -3319,6 +3323,21 @@ export async function runTaskLifecycle(
       captureException(log, cause, { stage: "executor-dispose" });
     });
   }
+}
+
+/**
+ * The next Step's handoff: the harness's summary, and what the reviewer said when approving.
+ *
+ * Null when there is neither, so a Step with nothing to carry keeps carrying nothing. The
+ * reviewer's part is headed, because the Build's harness reads the handoff as prose and has to
+ * be able to tell "what the Plan said" from "what the person said about the Plan".
+ */
+function handoffWith(summary: string | null, feedback: string | null | undefined): string | null {
+  const said = feedback?.trim();
+  const parts = [summary?.trim() || null, said ? `Reviewer's decisions:\n${said}` : null].filter(
+    (part): part is string => part !== null,
+  );
+  return parts.length > 0 ? parts.join("\n\n") : null;
 }
 
 /**

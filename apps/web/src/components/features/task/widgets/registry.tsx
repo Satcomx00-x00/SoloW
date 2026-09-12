@@ -3,6 +3,7 @@
 import type { Widget, WidgetKind } from "@solow/contracts";
 import type { ComponentType } from "react";
 import { AskUserInput } from "./ask-user-input";
+import { Decision } from "./decision";
 import { OptionsCard } from "./options-card";
 import { PresentFiles } from "./present-files";
 import { ShowWidget } from "./show-widget";
@@ -48,6 +49,7 @@ const RENDERERS: Record<WidgetKind, AnyRenderer> = {
   step_card: StepCard as AnyRenderer,
   present_files: PresentFiles as AnyRenderer,
   task_complete: TaskComplete as AnyRenderer,
+  decision: Decision as AnyRenderer,
   unsupported: UnsupportedWidget as AnyRenderer,
 };
 

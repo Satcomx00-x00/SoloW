@@ -1,4 +1,4 @@
-import type { ReviewDraft, ReviewNote } from "@solow/contracts";
+import type { DecisionWidget, ReviewDraft, ReviewNote } from "@solow/contracts";
 
 /** The contract's ceiling on `reviewDecisionInput.feedback`. */
 export const FEEDBACK_MAX = 10_000;
@@ -58,4 +58,41 @@ export function collateFeedback(
   // because the reviewer wrote too much, and the harness is told the notes were cut.
   const marker = "\n\n[feedback truncated at the limit]";
   return `${text.slice(0, FEEDBACK_MAX - marker.length)}${marker}`;
+}
+
+/**
+ * The reviewer's decisions as the next Step's harness will read them (point 3): one line per
+ * decision, the question, the option taken — in the harness's own words when it was one of the
+ * offered ones, the reviewer's when it was "something else" — and whether it overturned the
+ * harness's pick, which is the fact the next Step most needs.
+ */
+export function collateDecisions(
+  widgets: readonly DecisionWidget[],
+  answers: ReadonlyArray<{ id: string; choice: string; note?: string | undefined }>,
+): string | undefined {
+  const lines: string[] = [];
+  for (const widget of widgets) {
+    const answer = answers.find((a) => a.id === widget.id);
+    if (!answer) continue;
+    const option = widget.options.find((o) => o.id === answer.choice);
+    const taken =
+      answer.choice === "other"
+        ? (answer.note ?? "").trim() || "(the reviewer chose neither option and left no words)"
+        : (option?.label ?? answer.choice);
+    const stance =
+      answer.choice === widget.chosen
+        ? "confirmed your choice"
+        : `overturned your choice of "${widget.options.find((o) => o.id === widget.chosen)?.label ?? widget.chosen}"`;
+    lines.push(`- ${widget.question} → ${taken} (${stance})`);
+  }
+  return lines.length > 0 ? `Decisions settled by the reviewer:\n${lines.join("\n")}` : undefined;
+}
+
+/** Everything the reviewer said, for one decision: notes and remark, then decisions. */
+export function joinFeedback(...parts: Array<string | undefined>): string | undefined {
+  const text = parts.filter((p): p is string => Boolean(p)).join("\n\n");
+  if (!text) return undefined;
+  return text.length <= FEEDBACK_MAX
+    ? text
+    : `${text.slice(0, FEEDBACK_MAX - 40)}\n\n[feedback truncated at the limit]`;
 }

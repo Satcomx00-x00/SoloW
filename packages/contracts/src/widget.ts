@@ -111,6 +111,7 @@ function clipDisplayText(value: unknown): unknown {
 export const WIDGET_CATALOG = {
   // Elicitation.
   ask_user_input: { family: "elicitation", status: "implemented" },
+  decision: { family: "elicitation", status: "implemented" },
   // Visualizer.
   show_widget: { family: "visualizer", status: "implemented" },
   // Cards.
@@ -276,6 +277,35 @@ export type TaskCompletionOutcome = z.infer<typeof taskCompletionOutcomeSchema>;
 export const harnessDecisionSchema = z.enum(["yes", "no"]);
 export type HarnessDecision = z.infer<typeof harnessDecisionSchema>;
 
+/**
+ * A choice the harness made that shapes the product (`decision`) — a semantics it had to pick,
+ * a scope it narrowed — emitted with the alternatives it rejected, so the reviewer can pick
+ * another before the next Step runs (review analysis, point 3).
+ *
+ * Not answered live: the harness that emitted it has finished by the time a person reads it.
+ * The reviewer's choice travels with the gate's approval, as the next Step's handoff.
+ */
+export const decisionWidget = z.object({
+  kind: z.literal("decision"),
+  /** Stable across re-emissions — `ac5-include-semantics` — so a reviewer's pick finds it. */
+  id: z.string().min(1).max(60),
+  question: z.string().min(1).max(fits("title")),
+  options: z
+    .array(
+      z.object({
+        id: z.string().min(1).max(40),
+        label: z.string().min(1).max(fits("label")),
+        why: z.string().max(fits("note")).optional(),
+      }),
+    )
+    .min(2)
+    .max(6),
+  /** The option the harness took, by id. */
+  chosen: z.string().min(1).max(40),
+  reason: z.string().max(fits("note")).optional(),
+});
+export type DecisionWidget = z.infer<typeof decisionWidget>;
+
 /** The harness reporting how its run ended (`task_complete`). Presentational — nothing to answer. */
 /**
  * Something the harness did not do, said as an item rather than as a sentence inside the
@@ -322,6 +352,7 @@ export const widgetSchema = z.discriminatedUnion("kind", [
   stepCardWidget,
   presentFilesWidget,
   taskCompleteWidget,
+  decisionWidget,
   unsupportedWidget,
 ]);
 export type Widget = z.infer<typeof widgetSchema>;

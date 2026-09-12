@@ -4148,6 +4148,73 @@ describe("a Task following a Workflow", () => {
     expect(step1).toBeTruthy();
   });
 
+  it("briefs the next Step with what the reviewer decided at the gate, after the harness's own handoff", async () => {
+    /*
+     * Review analysis, point 3: a decision the harness made on a Plan Step can be overturned by
+     * the reviewer on the Plan tab, and the web client sends that as the approval's `feedback`.
+     * Without this, the Build Step would be briefed with the plan as the harness wrote it — the
+     * reviewer's "no, the other way" would be a comment nobody reads.
+     */
+    const ids = freshIds();
+    await seedRun(db, ids);
+    await seedWorkflow(ids, [
+      {
+        key: "plan",
+        command: "planner",
+        permissionMode: "plan",
+        promptTemplate: "Write the plan.",
+        gate: "human",
+        advanceOn: "review",
+      },
+      {
+        key: "build",
+        command: "builder",
+        permissionMode: "acceptEdits",
+        promptTemplate: "Implement the plan.",
+        gate: "human",
+        advanceOn: "review",
+      },
+    ]);
+    const planner = new ScriptedRunner(
+      [{ kind: "completed", stopReason: "end_turn" }],
+      [declares("the plan: include selects matching rows")],
+    );
+    const builder = new ScriptedRunner(
+      [{ kind: "completed", stopReason: "end_turn" }],
+      [declares("built it")],
+    );
+    planner.harnessSessionId = null;
+    builder.harnessSessionId = null;
+    const { deps } = makeDeps(db, planner, nullStream());
+    deps.runner = runnersByMode({ plan: planner, acceptEdits: builder });
+
+    await runTaskLifecycle(deps, {
+      event: { data: ids },
+      step: decidingStep(ids, [
+        {
+          decision: "approve",
+          feedback:
+            'Decisions settled by the reviewer:\n- What does include select? → Every nested row (overturned your choice of "Only matching rows")',
+        },
+        "approve",
+      ]),
+    });
+
+    const prompt = builder.prompts[0] ?? "";
+    const heading = prompt.indexOf("## Handed over from the previous step");
+    const plan = prompt.indexOf("the plan: include selects matching rows");
+    const decided = prompt.indexOf("Reviewer's decisions:");
+    const overturned = prompt.indexOf("overturned your choice");
+    const template = prompt.indexOf("Implement the plan.");
+    expect(heading).toBeGreaterThanOrEqual(0);
+    expect(plan).toBeGreaterThan(heading);
+    expect(decided).toBeGreaterThan(plan);
+    expect(overturned).toBeGreaterThan(decided);
+    expect(template).toBeGreaterThan(overturned);
+    // The approval's words are a handoff, never review feedback: the Build Step was not rejected.
+    expect(prompt).not.toContain("# Review feedback");
+  });
+
   it("launches each Step at the posture the Step asked for, not its Profile's", async () => {
     /*
      * A Step *is* a harness launch (spec F05, on the Step). The case this exists for is one

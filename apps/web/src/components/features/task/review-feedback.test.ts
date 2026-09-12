@@ -1,6 +1,12 @@
 import { describe, expect, it } from "bun:test";
-import type { ReviewNote } from "@solow/contracts";
-import { collateFeedback, FEEDBACK_MAX, noteAnchor } from "./review-feedback";
+import type { DecisionWidget, ReviewNote } from "@solow/contracts";
+import {
+  collateDecisions,
+  collateFeedback,
+  FEEDBACK_MAX,
+  joinFeedback,
+  noteAnchor,
+} from "./review-feedback";
 
 /**
  * The draft as the one string the harness reads (F10 FR-7). The properties a harness depends on:
@@ -61,5 +67,60 @@ describe("collateFeedback", () => {
     const text = collateFeedback({ general: "x".repeat(FEEDBACK_MAX + 500), notes: [] });
     expect(text?.length).toBeLessThanOrEqual(FEEDBACK_MAX);
     expect(text?.endsWith("[feedback truncated at the limit]")).toBe(true);
+  });
+});
+
+/**
+ * The reviewer's decisions (review analysis, point 3), as the next Step's harness reads them:
+ * which way each went and — the fact that matters most — whether the harness was overturned.
+ */
+const DECISION: DecisionWidget = {
+  kind: "decision",
+  id: "include-semantics",
+  question: "What does include select?",
+  options: [
+    { id: "all", label: "Every nested row" },
+    { id: "matching", label: "Only matching rows" },
+  ],
+  chosen: "matching",
+};
+
+describe("collateDecisions", () => {
+  it("is undefined when nothing was settled", () => {
+    expect(collateDecisions([DECISION], [])).toBeUndefined();
+    expect(collateDecisions([], [{ id: "x", choice: "y" }])).toBeUndefined();
+  });
+
+  it("says when the reviewer confirmed the harness, in the harness's own words", () => {
+    expect(collateDecisions([DECISION], [{ id: DECISION.id, choice: "matching" }])).toBe(
+      "Decisions settled by the reviewer:\n- What does include select? → Only matching rows (confirmed your choice)",
+    );
+  });
+
+  it("names the choice that was overturned, so the next step cannot read it as a nuance", () => {
+    expect(collateDecisions([DECISION], [{ id: DECISION.id, choice: "all" }])).toBe(
+      'Decisions settled by the reviewer:\n- What does include select? → Every nested row (overturned your choice of "Only matching rows")',
+    );
+  });
+
+  it("carries the reviewer's own words when neither option was taken", () => {
+    const text = collateDecisions(
+      [DECISION],
+      [{ id: DECISION.id, choice: "other", note: "  Every row, but paginated.  " }],
+    );
+    expect(text).toContain("→ Every row, but paginated. (overturned");
+  });
+});
+
+describe("joinFeedback", () => {
+  it("joins what there is and is undefined when there is nothing", () => {
+    expect(joinFeedback(undefined, undefined)).toBeUndefined();
+    expect(joinFeedback("notes", undefined, "decisions")).toBe("notes\n\ndecisions");
+  });
+
+  it("keeps the whole to the contract's ceiling", () => {
+    const text = joinFeedback("x".repeat(FEEDBACK_MAX), "decisions") ?? "";
+    expect(text.length).toBeLessThanOrEqual(FEEDBACK_MAX);
+    expect(text.endsWith("[feedback truncated at the limit]")).toBe(true);
   });
 });

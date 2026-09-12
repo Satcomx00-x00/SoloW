@@ -110,6 +110,7 @@ describe("preference.getReviewDraft / setReviewDraft / clearReviewDraft", () => 
     ],
     general: "looks close",
     verified: ["AC-1"],
+    decisions: [{ id: "include-semantics", choice: "all" }],
   };
 
   it("is null until something is saved, then reads back what the same user saved, per Task", async () => {

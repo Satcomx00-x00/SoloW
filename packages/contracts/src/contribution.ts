@@ -260,6 +260,20 @@ export const reviewDraftSchema = z.object({
   general: z.string().max(10_000),
   /** Acceptance criteria the reviewer has checked for themselves (`AC-4`), on the brief. */
   verified: z.array(z.string().max(40)).max(200).default([]),
+  /**
+   * The reviewer's answer to each `decision` widget on the Plan tab: the option picked (one the
+   * harness offered, or `other` with the reviewer's own words), sent as the approval's feedback.
+   */
+  decisions: z
+    .array(
+      z.object({
+        id: z.string().min(1).max(60),
+        choice: z.string().min(1).max(40),
+        note: z.string().max(2000).optional(),
+      }),
+    )
+    .max(50)
+    .default([]),
 });
 export type ReviewDraft = z.infer<typeof reviewDraftSchema>;
 
