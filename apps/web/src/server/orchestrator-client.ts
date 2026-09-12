@@ -4,6 +4,7 @@ import {
   harnessProbeReport,
   REPOSITORY_SYNC_REQUESTED,
   type ReviewDecision,
+  TASK_PURGE_REQUESTED,
   type TaskState,
 } from "@solow/contracts";
 import { signStreamTicket } from "@solow/core/stream";
@@ -68,6 +69,17 @@ export interface OrchestratorClient {
    */
   requestMirrorSync(input: { workspaceId: string }): Promise<void>;
   /**
+   * Tell the orchestrator a Task's rows are gone and its files should follow (Decision 0025):
+   * the worktree paths, read before the delete, and the Task's stores. Fire and forget, never
+   * fatal — the delete already happened, and the retention sweep is not behind this one
+   * because nothing in the database points at the directories any more.
+   */
+  purgeTaskFiles(input: {
+    workspaceId: string;
+    taskId: string;
+    worktrees: string[];
+  }): Promise<void>;
+  /**
    * Ask the orchestrator whether a Harness Profile actually works, before a Task depends on it.
    *
    * Unlike the fire-and-forget calls above this one *answers*: the report is the whole point, so
@@ -130,6 +142,12 @@ export const orchestrator: OrchestratorClient = {
     if (orchestratorUrl()) return emit(REPOSITORY_SYNC_REQUESTED, input);
     // Silent in dev without an orchestrator, like `announceTask`: there is no poll to hurry, and
     // the button that calls this has already done the part that does not need one.
+    return;
+  },
+
+  async purgeTaskFiles(input) {
+    if (orchestratorUrl()) return emit(TASK_PURGE_REQUESTED, input);
+    // Silent where there is no orchestrator: no process could remove the directories anyway.
     return;
   },
 

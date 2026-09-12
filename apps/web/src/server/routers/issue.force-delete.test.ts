@@ -51,6 +51,42 @@ describe("issue.delete force", () => {
     else process.env.SOLOW_ORCHESTRATOR_URL = savedUrl;
   });
 
+  it("asks the orchestrator to remove the Tasks' files afterwards, and never fails the delete over it", async () => {
+    // The worktree paths are read before the cascade; an orchestrator that cannot be reached
+    // costs a directory, not the delete (Decision 0025).
+    process.env.SOLOW_DEV_OWNER = "off";
+    process.env.SOLOW_ORCHESTRATOR_URL = "http://127.0.0.1:9";
+    const g = await seedWorkspaceGraph(db, "router-purge");
+    const api = caller(db, g.workspaceId);
+    const created = await api.issue.create({
+      title: "Leaves a worktree",
+      repositoryId: g.repositoryId,
+      labels: [],
+    });
+    const made = await createTaskRecord(ctxFor(db, g.workspaceId), {
+      issueId: created.id,
+      title: "Worked",
+      agentProfileId: g.agentProfileId,
+      executorProfileId: g.executorProfileId,
+      repositories: [{ repositoryId: g.repositoryId }],
+      state: "backlog",
+    });
+    if (!made.ok) throw new Error("task seed failed");
+    await db.insert(worktree).values({
+      id: "wt-purge",
+      workspaceId: g.workspaceId,
+      taskId: made.data.id,
+      repositoryId: g.repositoryId,
+      path: "/wt/purge-me",
+      branch: "solow-task-purge",
+      status: "active",
+    });
+
+    const result = await api.issue.delete({ id: created.id, force: true });
+    expect(result).toEqual({ id: created.id, deletedTaskCount: 1 });
+    expect(await db.select().from(worktree).where(eq(worktree.taskId, made.data.id))).toEqual([]);
+  });
+
   it("deletes the Issue and its Tasks when nothing is running", async () => {
     process.env.SOLOW_DEV_OWNER = "off";
     const g = await seedWorkspaceGraph(db, "router-force");

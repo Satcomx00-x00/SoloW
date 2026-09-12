@@ -1,6 +1,7 @@
 import { InngestCommHandler } from "inngest";
 import { inngest } from "./client.js";
 import { repositorySync } from "./functions/repository-sync.js";
+import { taskPurge } from "./functions/task-purge.js";
 import { taskRun } from "./functions/task-run.js";
 
 /**
@@ -17,7 +18,7 @@ import { taskRun } from "./functions/task-run.js";
  * since the feature was introduced. `index.ts` now imports this constant rather than building its
  * own list, so there is exactly one place a function can be added and forgotten from the other.
  */
-export const INNGEST_FUNCTIONS = [taskRun, repositorySync];
+export const INNGEST_FUNCTIONS = [taskRun, repositorySync, taskPurge];
 
 /**
  * The `/api/inngest` handler (Decision 0004), **streaming**.

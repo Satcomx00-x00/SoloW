@@ -424,6 +424,40 @@ export async function updateIssue(
  * when it gets here, so a direct DAL caller cannot skip that step: dropping a `task` row while
  * its harness process is alive would orphan the process with nothing left referencing it.
  */
+/**
+ * The worktree directories the Issue's Tasks still hold, per Task — History rows included.
+ *
+ * Read by the router *before* `deleteIssue`, because the delete cascades the `worktree` rows
+ * and nothing afterwards remembers the paths; the orchestrator is then asked to remove them
+ * (`task.purge.requested`). The web app never touches the filesystem itself.
+ */
+export async function worktreesOfIssueTasks(
+  ctx: RequestContext,
+  issueId: string,
+): Promise<Array<{ taskId: string; paths: string[] }>> {
+  const tasks = await ctx.db
+    .select({ id: task.id })
+    .from(task)
+    .where(and(eq(task.workspaceId, ctx.workspaceId), eq(task.issueId, issueId)));
+  if (tasks.length === 0) return [];
+  const rows = await ctx.db
+    .select({ taskId: worktree.taskId, path: worktree.path })
+    .from(worktree)
+    .where(
+      and(
+        eq(worktree.workspaceId, ctx.workspaceId),
+        inArray(
+          worktree.taskId,
+          tasks.map((t) => t.id),
+        ),
+        eq(worktree.status, "active"),
+      ),
+    );
+  const byTask = new Map<string, string[]>(tasks.map((t) => [t.id, []]));
+  for (const row of rows) byTask.get(row.taskId)?.push(row.path);
+  return [...byTask].map(([taskId, paths]) => ({ taskId, paths }));
+}
+
 export async function deleteIssue(
   ctx: RequestContext,
   input: DeleteIssueInput,

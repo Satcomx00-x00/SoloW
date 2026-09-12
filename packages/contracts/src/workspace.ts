@@ -117,3 +117,17 @@ export type SyncRequestDto = z.infer<typeof syncRequestDto>;
  * should take.
  */
 export const REPOSITORY_SYNC_REQUESTED = "repository.sync.requested";
+
+/**
+ * The web app deleted a Task's rows outright — an Issue went with its Tasks — and the files
+ * those rows pointed at are the orchestrator's to remove (Decision 0025): the worktree
+ * directories, by path, plus the Task's transcript and checkpoint stores. Best effort, after
+ * the fact: the rows are already gone, which is why the paths travel in the event.
+ */
+export const TASK_PURGE_REQUESTED = "task.purge.requested";
+export const taskPurgeRequestedData = z.object({
+  workspaceId: z.string().min(1),
+  taskId: z.string().min(1),
+  worktrees: z.array(z.string().min(1)).max(64),
+});
+export type TaskPurgeRequestedData = z.infer<typeof taskPurgeRequestedData>;

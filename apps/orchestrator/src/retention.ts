@@ -91,38 +91,69 @@ async function removeWorktrees(
         eq(worktree.status, "active"),
       ),
     );
-  let allGone = true;
+  const gone = await removeTaskFiles(
+    deps.host,
+    deps.worktreeRoot ?? null,
+    taskId,
+    rows.map((row) => row.path),
+    log,
+  );
+  for (const row of rows) {
+    if (!gone.has(row.path)) continue;
+    await deps.db
+      .update(worktree)
+      .set({ status: "removed", updatedAt: new Date().toISOString() })
+      .where(eq(worktree.id, row.id));
+  }
+  return gone.size === rows.length;
+}
+
+/**
+ * Everything a Task left on disk: its worktree directories, by path, and its transcript and
+ * checkpoint stores. Returns the worktree paths that are now gone.
+ *
+ * Shared by the retention sweep and by `task.purge.requested` — the event the web app sends
+ * once it has deleted a Task's rows outright (an Issue deleted with its Tasks), at which point
+ * nothing in the database remembers the paths any more and the event is what carries them.
+ *
+ * Best effort per directory: one already gone by hand is agreed with and moved past, and one
+ * git refuses to remove is logged and left for the next pass rather than blocking the rest.
+ */
+export async function removeTaskFiles(
+  host: Executor,
+  worktreeRoot: string | null,
+  taskId: string,
+  paths: readonly string[],
+  log: (message: string, cause?: unknown) => void,
+): Promise<Set<string>> {
   // The transcripts a containerised run left on the host go with the worktrees: without the
   // directory they were keyed to they resume nothing, and they are the one thing here that
   // holds the conversation's text.
-  if (deps.worktreeRoot) {
+  if (worktreeRoot) {
     try {
-      await deps.host.exec([
+      await host.exec([
         "rm",
         "-rf",
         "--",
-        harnessTranscriptsPath(deps.worktreeRoot, taskId),
-        checkpointStorePath(deps.worktreeRoot, taskId),
+        harnessTranscriptsPath(worktreeRoot, taskId),
+        checkpointStorePath(worktreeRoot, taskId),
       ]);
     } catch (cause) {
       log(`retention: could not remove transcripts of task ${taskId}`, cause);
     }
   }
-  for (const row of rows) {
+  const gone = new Set<string>();
+  for (const path of paths) {
     try {
-      const repoPath = await repositoryOfWorktree(deps.host, row.path);
+      const repoPath = await repositoryOfWorktree(host, path);
       // A path git no longer recognises is one somebody removed already: nothing to do but agree.
-      if (repoPath !== null) await cleanupWorktree(deps.host, repoPath, row.path);
-      await deps.db
-        .update(worktree)
-        .set({ status: "removed", updatedAt: new Date().toISOString() })
-        .where(eq(worktree.id, row.id));
+      if (repoPath !== null) await cleanupWorktree(host, repoPath, path);
+      gone.add(path);
     } catch (cause) {
-      allGone = false;
-      log(`retention: could not remove worktree ${row.path}`, cause);
+      log(`retention: could not remove worktree ${path}`, cause);
     }
   }
-  return allGone;
+  return gone;
 }
 
 export async function retentionSweep(

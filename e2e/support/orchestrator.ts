@@ -2,6 +2,7 @@
 import { readdirSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { Writable } from "node:stream";
+import { taskPurgeRequestedData } from "@solow/contracts";
 import { createDb } from "@solow/db";
 import { createLogger } from "@solow/observability";
 import { $ } from "bun";
@@ -19,6 +20,7 @@ import {
   type StepLike,
   type TaskRunDeps,
 } from "../../apps/orchestrator/src/inngest/functions/task-run.js";
+import { removeTaskFiles } from "../../apps/orchestrator/src/retention.js";
 import {
   adoptWorktree,
   cleanupWorktree,
@@ -268,6 +270,18 @@ function handleEvent(name: string, data: Record<string, unknown>): void {
     const sessionId = String(data["sessionId"]);
     waiters.get(sessionId)?.(data);
     waiters.delete(sessionId);
+    return;
+  }
+  if (name === "task.purge.requested") {
+    // The rows are gone; the paths the event carries are what is left to remove — the same
+    // removal the real orchestrator's `task-purge` function runs.
+    const purge = taskPurgeRequestedData.parse(data);
+    const run = removeTaskFiles(executor, PATHS.worktrees, purge.taskId, purge.worktrees, (m, c) =>
+      console.error(`[e2e-orchestrator] ${m}`, c ?? ""),
+    )
+      .catch((cause) => console.error("[e2e-orchestrator] purge failed:", cause))
+      .finally(() => inFlight.delete(run));
+    inFlight.add(run);
   }
 }
 
