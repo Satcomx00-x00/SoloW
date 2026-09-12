@@ -31,7 +31,13 @@ Harness did, resume its work with full context, and revisit it later.
 - **FR-4** A Task may have multiple Sessions over its life; each is recorded and
   distinguishable.
 - **FR-5** A Session's state (active, awaiting review, resumable, closed) is shown to the
-  user (see [Domain Model](../product/04-domain-model.md)).
+  user (see [Domain Model](../product/04-domain-model.md)). *`resumable` is written since
+  [Decision 0025](../decisions/0025-history-retention.md):* a Session whose worktree is still on
+  disk after its decision is `resumable` for seven days — a relaunch of the Task continues that
+  conversation in that worktree — and `closed` once the retention sweep has removed it. A
+  containerised run keeps its transcripts on the host for the same span, so it resumes too. A
+  conversation the harness cannot find is said in a notice and the round starts again from the
+  brief, in the same worktree, without costing a review round.
 - **FR-6** A Session's Conversation is the source for the shareable Snapshot in
   [F13](./F13-collaboration-sharing.md).
 - **FR-7** Every event in a Conversation states what it is — a user turn, an assistant turn, a

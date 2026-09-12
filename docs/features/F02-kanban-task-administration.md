@@ -48,7 +48,12 @@ harness work.
 - **FR-9** A user can filter and search Tasks on a Board by Issue, Harness, Executor, state,
   and text.
 - **FR-10** A user can archive or delete a Task, with confirmation for the destructive
-  action.
+  action. *Shipped as History ([Decision 0025](../decisions/0025-history-retention.md)):* a
+  deleted Task leaves every board and list and stays in History for seven days, restorable, with
+  its worktree and transcripts kept so a restore can carry the harness's conversation on; a Done
+  Task can be reopened (`done → ready`) and relaunched the same way. After seven days the sweep
+  removes the worktrees and purges what was deleted. Deleting an Issue still removes its Tasks
+  outright.
 - **FR-11** Multiple Tasks can be Running at once, bounded by configured concurrency limits
   (see [F06](./F06-authentication-billing.md)).
 
