@@ -61,7 +61,6 @@ import {
   loadHarnessProbeContext,
   loadTaskRunContext,
   loadWorkflowStepHarnesses,
-  markWorktreesRemoved,
   nextSessionEventSeq,
   nextSessionUsageSeq,
   readTaskState,
@@ -3087,7 +3086,10 @@ export async function runTaskLifecycle(
 
           await setTaskState(db, workspaceId, taskId, "done");
           await recordTransition("review", "done", leg.stepId);
-          await setSessionState(db, workspaceId, sessionId, "closed", {
+          // `resumable`, not `closed` (F11 FR-3/FR-5): the worktrees stay on disk for the retention
+          // window and the harness conversation with them, so a reopened Task can carry on where
+          // this one stopped. The retention sweep closes the Session when it takes the worktree.
+          await setSessionState(db, workspaceId, sessionId, "resumable", {
             endedAt: new Date().toISOString(),
           });
           return { integrated, failed };
@@ -3177,34 +3179,17 @@ export async function runTaskLifecycle(
       announce("running");
     }
 
-    const adopted = wt;
-    // Every worktree the Task was given, not just the primary — a secondary left behind would keep
-    // its branch checked out and block the next launch from reusing it.
-    const remaining = adopted
-      ? worktreeBindings(adopted)
-      : ctx.repositories.flatMap((binding) => {
-          // Every attachment, not just the secondaries: when the primary's worktree is one
-          // SoloW provisioned, a run that ended before the harness reported anything still has
-          // that directory to remove.
-          const worktree = provisionedByAttachment.get(binding.attachment.id);
-          return worktree ? [{ binding, worktree }] : [];
-        });
-    if (remaining.length > 0) {
-      await step.run("cleanup", async () => {
-        for (const entry of remaining) {
-          await repoAdmin.cleanup(entry.worktree.repoPath, entry.worktree.path, ownClone);
-        }
-        // After the directories are gone, not before: a row marked removed while the removal is
-        // still in flight would be a table that disagrees with the disk in the one direction that
-        // matters — telling the delete path there is nothing left to tear down.
-        await markWorktreesRemoved(
-          db,
-          workspaceId,
-          taskId,
-          remaining.map((entry) => entry.worktree.path),
-        );
-      });
-    }
+    /*
+     * The worktrees are deliberately left where they are (History retention, Decision 0025).
+     *
+     * This is where the lifecycle used to remove every worktree the Task was given and mark the
+     * rows — the tidy ending. It was also the end of the conversation: Claude Code keys a
+     * transcript to the directory it ran in, so a Task reopened from History had nowhere to
+     * resume into and started again from the brief. The directories now stay for the retention
+     * window and the sweep in `retention.ts` removes them, whichever executor made them — the
+     * container is disposed below regardless; a Task's private clone on the host is what the
+     * next round resumes in.
+     */
     return { taskId, result: "done" };
   } finally {
     /*

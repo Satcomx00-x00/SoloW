@@ -594,7 +594,12 @@ describe("runTaskLifecycle (integration)", () => {
     expect(await taskState(db, ids.taskId)).toBe("done");
     expect(spies.commit).toBe(1);
     expect(spies.discard).toBe(0);
-    expect(spies.cleanup).toBe(1);
+    // The worktree stays (history retention, Decision 0025): the sweep removes it, days later,
+    // and until then the Session says it can be resumed into.
+    expect(spies.cleanup).toBe(0);
+    const [sess] = await db.select().from(session).where(eq(session.id, ids.sessionId)).limit(1);
+    expect(sess?.state).toBe("resumable");
+    expect(sess?.endedAt).toBeTruthy();
   });
 
   it("reject → discards worktree changes and returns the Task to Ready", async () => {
@@ -1477,7 +1482,9 @@ describe("the diff a reviewer is shown", () => {
 
     await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
-    expect(spies.cleanup).toBe(1);
+    // The worktree is no longer removed at approve (retention keeps it), but the diff is still
+    // read at the gate and persisted — which is what lets it outlive the retention sweep later.
+    expect(spies.cleanup).toBe(0);
     const stored = (
       await db.select().from(sessionEvent).where(eq(sessionEvent.sessionId, ids.sessionId))
     ).filter((e) => e.kind === "diff");
@@ -2145,7 +2152,7 @@ describe("the worktree a Task runs in", () => {
       expect(rows[0]?.status).toBe("active");
     });
 
-    it("is marked removed once the directory has actually been cleaned up", async () => {
+    it("stays active after approve — the directory is retention's to remove, not the run's", async () => {
       const ids = freshIds();
       await seedRun(db, ids);
       const { deps, spies } = makeDeps(
@@ -2156,12 +2163,12 @@ describe("the worktree a Task runs in", () => {
 
       await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
-      expect(spies.cleanup).toBe(1);
+      expect(spies.cleanup).toBe(0);
       const rows = await db.select().from(worktree).where(eq(worktree.taskId, ids.taskId));
-      // Kept rather than deleted: a Task whose worktree was cleaned up is a different fact from
-      // one that never had a worktree, and the path is the only record of where the work ran.
+      // The row and the directory agree: both still there, so a reopened Task can resume into
+      // it. `retention.ts` is what marks it removed, once the directory is actually gone.
       expect(rows).toHaveLength(1);
-      expect(rows[0]?.status).toBe("removed");
+      expect(rows[0]?.status).toBe("active");
     });
 
     it("does not double a row when the round that adopts it runs twice", async () => {
@@ -2246,7 +2253,7 @@ describe("the worktree a Task runs in", () => {
     expect(await taskState(db, ids.taskId)).toBe("failed");
   });
 
-  it("cleans up the worktree the harness made, not one SoloW guessed at", async () => {
+  it("commits in the worktree the harness made, not one SoloW guessed at, and leaves it there", async () => {
     const ids = freshIds();
     await seedRun(db, ids);
     const runner = new WorktreeRecordingRunner();
@@ -2266,7 +2273,11 @@ describe("the worktree a Task runs in", () => {
       { event: { data: ids }, step: scriptedStep(["approve"]) },
     );
 
-    expect(cleaned).toEqual([`/wt/solow-task-${ids.taskId}`]);
+    // Nothing removed at approve (retention keeps the worktree for a resume); the row names the
+    // directory the harness reported, which is where a reopened Task will run.
+    expect(cleaned).toEqual([]);
+    const rows = await db.select().from(worktree).where(eq(worktree.taskId, ids.taskId));
+    expect(rows.map((r) => r.path)).toEqual([`/wt/solow-task-${ids.taskId}`]);
     expect(spies.commit).toBe(1);
   });
 
@@ -2946,7 +2957,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
     ]);
   });
 
-  it("AC-4: reject discards every worktree, and cleanup removes every worktree", async () => {
+  it("AC-4: reject discards every worktree, and removes none", async () => {
     const ids = freshIds();
     await seedRun(db, ids, { agentProtocol: "acp", ...twoRepositories });
     const { deps, spies } = makeDeps(
@@ -2957,10 +2968,11 @@ describe("a Task spanning several Repositories (issue #7)", () => {
 
     await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["reject"]) });
 
-    // A secondary left with uncommitted work — or with its branch still checked out — would
-    // meet the next launch as a conflict nothing knows how to explain.
+    // A secondary left with uncommitted work would meet the next launch as a conflict nothing
+    // knows how to explain — so every worktree is discarded. None is removed: the next launch
+    // reuses them (retention, Decision 0025), which is how a rejected Task resumes its conversation.
     expect(new Set(spies.discarded).size).toBe(2);
-    expect(new Set(spies.cleaned).size).toBe(2);
+    expect(new Set(spies.cleaned).size).toBe(0);
   });
 
   it("copies each Repository's own setup files into its own worktree (issue #52)", async () => {
@@ -5351,7 +5363,6 @@ describe("a Task on no Workflow", () => {
       "to-review-0",
       "await-review-0",
       "approve-0",
-      "cleanup",
     ]);
   });
 
@@ -5373,7 +5384,6 @@ describe("a Task on no Workflow", () => {
       "to-review-1",
       "await-review-1",
       "approve-1",
-      "cleanup",
     ]);
   });
 
@@ -5388,7 +5398,6 @@ describe("a Task on no Workflow", () => {
       "to-review-0",
       "await-review-0",
       "reject-0",
-      "cleanup",
     ]);
   });
 });

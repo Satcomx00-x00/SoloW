@@ -23,6 +23,7 @@ import { handleEventPost } from "./inngest/events.js";
 import { INNGEST_FUNCTIONS, inngestServeHandler } from "./inngest/serve.js";
 import { reclaimOrphanedRuns, reportStrandedParks, reportStrandedReviews } from "./reconcile.js";
 import { defaultRelauncher, type RunRelauncher } from "./relaunch.js";
+import { RETENTION_INTERVAL_MS, retentionSweep } from "./retention.js";
 import { hub } from "./ws/hub.js";
 import { attachSubscriber } from "./ws/replay.js";
 
@@ -513,6 +514,20 @@ export function startWebSocketServer(
   setTimeout(() => {
     void reconcileSweep(deps);
     setInterval(() => void reconcileSweep(deps), RECONCILE_INTERVAL_MS);
+    // History retention (Decision 0025): hourly, and only after the first reconcile pass, so a
+    // Task the reclaim is about to settle is never purged from under it.
+    const retention = () =>
+      retentionSweep({ db: deps.db, host: deps.dockerHost })
+        .then((report) => {
+          if (report.purged > 0 || report.expired > 0) {
+            console.log(
+              `[solow/orchestrator] retention: purged ${report.purged} deleted task(s), expired ${report.expired} done task(s)`,
+            );
+          }
+        })
+        .catch(sweepFailed);
+    void retention();
+    setInterval(() => void retention(), RETENTION_INTERVAL_MS);
   }, RECONCILE_GRACE_MS);
 
   return Bun.serve<WsData>({

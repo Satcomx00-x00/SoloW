@@ -606,6 +606,37 @@ export async function cleanupWorktree(
   await run(executor, ["rm", "-rf", "--", repoPath]);
 }
 
+/**
+ * The repository a worktree belongs to, asked of git rather than of a row.
+ *
+ * The `worktree` table records a path and a branch and never the repository directory it was
+ * added onto — the run that made it always had that in hand. The retention sweep does not: it
+ * meets a worktree days later, with only the row. `--git-common-dir` is the `.git` of the main
+ * working tree, from any worktree of it, and its parent is what `cleanupWorktree` needs to be
+ * pointed at. Null when the path is no longer a worktree of anything (already removed by hand,
+ * or the whole clone gone), which the sweep treats as "nothing left to remove".
+ */
+export async function repositoryOfWorktree(
+  executor: Executor,
+  worktreePath: string,
+): Promise<string | null> {
+  try {
+    const out = await run(executor, [
+      "git",
+      "-C",
+      worktreePath,
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-common-dir",
+    ]);
+    const common = out.trim();
+    if (!common.endsWith("/.git")) return null;
+    return common.slice(0, -"/.git".length);
+  } catch {
+    return null;
+  }
+}
+
 export interface CleanupOpts {
   /**
    * Remove the repository itself, not just the worktree: true exactly when `repoPath` is the
