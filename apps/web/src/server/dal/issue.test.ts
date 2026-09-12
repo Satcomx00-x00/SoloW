@@ -25,7 +25,7 @@ import {
   setIssueStatus,
   updateIssue,
 } from "./issue.js";
-import { createTaskRecord } from "./task.js";
+import { createTaskRecord, deleteTask, getTaskById } from "./task.js";
 import { seedIssue, seedWorkspaceGraph } from "./test-fixtures.js";
 
 /** Insert a workspace row (Issues FK-reference it) and return its id. */
@@ -409,6 +409,36 @@ describe("deleteIssue (issue #15 reversal)", () => {
     expect(attempt).toEqual({ ok: false, error: IssueErrorCode.HasTasks });
     const reread = await getIssueById(ctx, created.data.id);
     expect(reread.ok).toBe(true);
+  });
+
+  it("is not blocked by a Task that is in History, and takes that Task with the Issue (Decision 0025)", async () => {
+    // Deleting a Task is a soft delete now; the person deleting its Issue afterwards is told
+    // "still has tasks" by nothing — as far as they can see there are none — and the History
+    // row goes with the Issue, because a restore would have no Issue to come back under.
+    const g = await seedWorkspaceGraph(db, "delete-history");
+    const ctx = ctxFor(db, g.workspaceId);
+    const created = await createIssue(ctx, {
+      title: "Its task was deleted",
+      repositoryId: g.repositoryId,
+      labels: [],
+    });
+    if (!created.ok) throw new Error("seed failed");
+    const made = await createTaskRecord(ctx, {
+      issueId: created.data.id,
+      title: "Gone to history",
+      agentProfileId: g.agentProfileId,
+      executorProfileId: g.executorProfileId,
+      repositories: [{ repositoryId: g.repositoryId }],
+      state: "backlog",
+    });
+    if (!made.ok) throw new Error("task seed failed");
+    const removed = await deleteTask(ctx, { id: made.data.id, force: false });
+    expect(removed.ok).toBe(true);
+
+    const attempt = await deleteIssue(ctx, { id: created.data.id, force: false });
+    expect(attempt).toEqual({ ok: true, data: { id: created.data.id, deletedTaskCount: 1 } });
+    const row = await getTaskById(ctx, made.data.id, { includeDeleted: true });
+    expect(row.ok).toBe(false);
   });
 
   it("cannot be used to delete an Issue in another Workspace (Principle V)", async () => {

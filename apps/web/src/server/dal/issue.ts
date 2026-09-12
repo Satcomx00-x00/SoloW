@@ -445,12 +445,17 @@ export async function deleteIssue(
     if (!existing) return err(CommonErrorCode.NotFound);
 
     const tasks = tx
-      .select({ id: task.id, state: task.state })
+      .select({ id: task.id, state: task.state, deletedAt: task.deletedAt })
       .from(task)
       .where(and(eq(task.workspaceId, ctx.workspaceId), eq(task.issueId, input.id)))
       .all();
 
-    if (tasks.length > 0 && !input.force) return err(IssueErrorCode.HasTasks);
+    // A Task in History (soft-deleted, Decision 0025) is gone as far as the person deleting the
+    // Issue is concerned: it must not make the Issue "still have tasks", and it must not
+    // survive the Issue either — it goes with the live ones below, since a restore would have no
+    // home to come back to.
+    const live = tasks.filter((t) => t.deletedAt === null);
+    if (live.length > 0 && !input.force) return err(IssueErrorCode.HasTasks);
 
     if (tasks.length > 0) {
       const taskIds = tasks.map((t) => t.id);
