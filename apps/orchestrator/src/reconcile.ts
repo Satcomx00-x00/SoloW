@@ -2,7 +2,7 @@ import type { HarnessStopReason, TaskCompletionOutcome } from "@solow/contracts"
 import { parseSessionEventPayload, stopReasonMeansTruncated } from "@solow/contracts";
 import { INTERRUPTED_REASON, STRANDED_REVIEW_REASON } from "@solow/core";
 import { type Db, review, session, sessionEvent, task } from "@solow/db";
-import { and, desc, eq, isNull, ne } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, ne, sql } from "drizzle-orm";
 import {
   appendSessionEvent,
   nextSessionEventSeq,
@@ -304,6 +304,29 @@ export async function reclaimOrphanedRuns(
  * paths with undefined precedence" this codebase refuses everywhere else. It names the condition
  * instead, so a person can retry, and the run that retries is the one that owns the work.
  */
+/** When the Task last entered review, from the session log — null when the log never says. */
+async function lastEnteredReview(
+  db: Db,
+  workspaceId: string,
+  taskId: string,
+): Promise<string | null> {
+  const [row] = await db
+    .select({ at: sessionEvent.at })
+    .from(sessionEvent)
+    .innerJoin(session, eq(session.id, sessionEvent.sessionId))
+    .where(
+      and(
+        eq(sessionEvent.workspaceId, workspaceId),
+        eq(session.taskId, taskId),
+        eq(sessionEvent.kind, "state"),
+        sql`json_extract(${sessionEvent.payload}, '$.to') = 'review'`,
+      ),
+    )
+    .orderBy(desc(sessionEvent.at))
+    .limit(1);
+  return row?.at ?? null;
+}
+
 export async function reportStrandedReviews(
   db: Db,
   registry: Pick<HarnessRegistry, "get">,
@@ -320,11 +343,27 @@ export async function reportStrandedReviews(
     if (registry.get(row.workspaceId, row.id)) continue;
     if (now().getTime() - Date.parse(row.updatedAt) < RECLAIM_STALE_MS) continue;
 
+    /*
+     * Only a decision on *this* gate counts. A Session accrues one review per gate it passes —
+     * a plan-first Workflow records the Plan's approval and later parks the Task at the Build's
+     * gate — and reading "any review for the Session" here stamped that second gate "decision
+     * not applied" the moment the orchestrator restarted, over a decision that had been applied
+     * an hour earlier and a gate nobody had decided on yet. Seen on a real Task. The gate is
+     * dated by the last transition into review the log holds; a Task that entered review by the
+     * operator's hand (no Workflow, no event) is dated by its row, which that write touched last.
+     */
+    const since = (await lastEnteredReview(db, row.workspaceId, row.id)) ?? row.updatedAt;
     const [decided] = await db
       .select({ id: review.id })
       .from(review)
       .innerJoin(session, eq(session.id, review.sessionId))
-      .where(and(eq(review.workspaceId, row.workspaceId), eq(session.taskId, row.id)))
+      .where(
+        and(
+          eq(review.workspaceId, row.workspaceId),
+          eq(session.taskId, row.id),
+          gte(review.createdAt, since),
+        ),
+      )
       .limit(1);
     // No decision means a person has simply not looked yet. That is the gate working.
     if (!decided) continue;

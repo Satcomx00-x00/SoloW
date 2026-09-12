@@ -37,7 +37,11 @@ import { type BoardColumn, lifecycleColumns, workflowColumns } from "@/lib/board
 import { settingsHref } from "@/lib/navigation";
 import { WHOLE_PAGE } from "@/lib/paged";
 import { taskActionMessage } from "@/lib/task-errors";
-import { BOARD_COLUMNS, CREDENTIAL_EXPIRED_REASON } from "@/lib/task-states";
+import {
+  BOARD_COLUMNS,
+  CREDENTIAL_EXPIRED_REASON,
+  STRANDED_REVIEW_REASON,
+} from "@/lib/task-states";
 import { useWorkspaceEvents } from "@/lib/workspace-events";
 import { trpc } from "@/trpc/react";
 import { LaunchTaskDialog, useWorkflowChoices } from "../task/launch-task-dialog";
@@ -491,7 +495,11 @@ export function Board({
    * retry here is a fresh harness process picking the same work back up, not a restart from zero.
    */
   const retryAction = (task: TaskDto): ReactNode => {
-    if (task.state !== "failed" || task.failureReason === CREDENTIAL_EXPIRED_REASON) return null;
+    // Also a review gate whose decision was recorded and never applied: the gate is dead, and
+    // Retry is the one thing that brings a run back to it.
+    const stranded = task.state === "review" && task.failureReason === STRANDED_REVIEW_REASON;
+    if (!stranded && (task.state !== "failed" || task.failureReason === CREDENTIAL_EXPIRED_REASON))
+      return null;
     return (
       <Button
         key={`retry-${task.id}`}

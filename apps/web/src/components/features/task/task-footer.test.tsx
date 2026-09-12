@@ -147,6 +147,32 @@ describe("TaskFooter", () => {
     expect(calls).toEqual(["reopen"]);
   });
 
+  it("lists what the harness left open above the decision, and names it on the button", () => {
+    renderFooter(
+      { state: "review" },
+      {
+        openItems: [
+          { label: "Migration applied", why: "no Postgres reachable from this sandbox" },
+          { label: "Record the decision on issue #115", why: null },
+        ],
+      },
+    );
+    const banner = screen.getByRole("status");
+    expect(banner.textContent).toContain("2 open items");
+    expect(banner.textContent).toContain("no Postgres reachable");
+    const approve = screen.getByRole("button", { name: /Approve with 2 open items/ });
+    // Impossible to miss; never a lock.
+    expect(approve.hasAttribute("disabled")).toBe(false);
+  });
+
+  it("re-runs a review gate whose decision was never applied, instead of offering a dead gate", () => {
+    const calls = renderFooter({ state: "review", failureReason: "review_decision_not_applied" });
+    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(screen.getByText("Decision not applied")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(calls).toEqual(["retry"]);
+  });
+
   it("locks every decision while one is in flight", () => {
     renderFooter({ state: "review" }, { decidePending: "approve" });
     for (const name of ["Approve", "Request changes", "Reject"]) {

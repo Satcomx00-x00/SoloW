@@ -2,7 +2,16 @@
 
 import type { ReviewDecision, TaskDependencyDto, TaskDto } from "@solow/contracts";
 import { canOpenReview } from "@solow/core";
-import { Check, CheckCircle2, GitBranch, KeyRound, Play, RotateCcw, X } from "lucide-react";
+import {
+  Check,
+  CheckCircle2,
+  CircleDashed,
+  GitBranch,
+  KeyRound,
+  Play,
+  RotateCcw,
+  X,
+} from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { waitingOn } from "@/components/features/board/blockers";
@@ -10,7 +19,12 @@ import { ConfirmAction } from "@/components/features/confirm-action";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { CREDENTIAL_EXPIRED_REASON, failureReasonLabel, STATE_STYLE } from "@/lib/task-states";
+import {
+  CREDENTIAL_EXPIRED_REASON,
+  failureReasonLabel,
+  STATE_STYLE,
+  STRANDED_REVIEW_REASON,
+} from "@/lib/task-states";
 import { cn } from "@/lib/utils";
 
 /**
@@ -35,6 +49,7 @@ export function TaskFooter({
   outstanding = [],
   consequences,
   viewed = null,
+  openItems = [],
   notes = null,
   decidePending,
   onDecide,
@@ -54,6 +69,8 @@ export function TaskFooter({
   consequences: string;
   /** How much of the change the reviewer has ticked off — never a gate, only a reminder. */
   viewed?: { viewed: number; of: number } | null;
+  /** What the harness said it did not do — listed above the decision, never a lock. */
+  openItems?: ReadonlyArray<{ label: string; why: string | null }>;
   /** The notes drafted so far and the general remark, which "Request changes" sends. */
   notes?: { count: number; general: string; onGeneral: (text: string) => void } | null;
   /** The decision in flight, so its button spins and the other two lock (no double-approve). */
@@ -79,6 +96,7 @@ export function TaskFooter({
     outstanding,
     consequences,
     viewed,
+    openItems,
     notes,
     decidePending,
     onDecide,
@@ -113,6 +131,7 @@ export function TaskFooter({
 
 type FooterInput = Omit<Parameters<typeof TaskFooter>[0], "error"> & {
   outstanding: readonly TaskDependencyDto[];
+  openItems: ReadonlyArray<{ label: string; why: string | null }>;
   actionPending: boolean;
   openReviewPending: boolean;
 };
@@ -121,6 +140,10 @@ function footerBody(input: FooterInput) {
   const { task } = input;
   switch (task.state) {
     case "review":
+      // A decision that was recorded and never applied (the run holding the gate was gone):
+      // another decision would go the same way, so the gate gives way to the one control that
+      // helps — Retry re-runs the Step, and the run that retries is the one that owns the work.
+      if (task.failureReason === STRANDED_REVIEW_REASON) return <FailedOrParked {...input} />;
       return <ReviewGate {...input} />;
     case "failed":
     case "parked":
@@ -227,8 +250,16 @@ function Row({ hint, children }: { hint: ReactNode; children: ReactNode }) {
  * So the scope of the single decision has to be legible, and a reviewer who approves without
  * scrolling the Changes column still sees it (issue #70 AC-2/AC-3).
  */
-function ReviewGate({ consequences, viewed, notes, decidePending, onDecide }: FooterInput) {
+function ReviewGate({
+  consequences,
+  viewed,
+  openItems,
+  notes,
+  decidePending,
+  onDecide,
+}: FooterInput) {
   const canDecide = decidePending === null;
+  const open = openItems.length;
   const noteCount = notes?.count ?? 0;
   const hasFeedback = noteCount > 0 || Boolean(notes?.general.trim());
   // "7/12 viewed" on the button itself, where the eye is when it is about to press it. Never a
@@ -236,6 +267,32 @@ function ReviewGate({ consequences, viewed, notes, decidePending, onDecide }: Fo
   const unread = viewed && viewed.viewed < viewed.of;
   return (
     <div className="space-y-2">
+      {open > 0 ? (
+        /*
+          What the harness said it did not do, where the decision is made (point 5 of the review
+          analysis). A "changes ready" report with a migration never applied and a test never
+          executed used to say so in the last sentence of a paragraph; the gate opened green all
+          the same. Never a lock — a person may still approve — but impossible to not see.
+        */
+        <div
+          className="rounded-lg border border-feedback-caution/40 bg-feedback-caution/10 px-3 py-2 text-xs"
+          role="status"
+          data-open-items={open}
+        >
+          <p className="flex items-center gap-1.5 font-medium text-feedback-caution">
+            <CircleDashed aria-hidden className="size-3.5 shrink-0" />
+            {open === 1 ? "1 open item" : `${open} open items`} — the harness left these undone
+          </p>
+          <ul className="mt-1 space-y-0.5 pl-5">
+            {openItems.map((item) => (
+              <li key={item.label} className="list-disc">
+                <span className="font-medium">{item.label}</span>
+                {item.why ? <span className="text-muted-foreground"> — {item.why}</span> : null}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       <p className="flex items-center gap-1.5 text-muted-foreground text-xs">
         <GitBranch aria-hidden className="size-3.5 shrink-0" />
         <span>
@@ -268,7 +325,8 @@ function ReviewGate({ consequences, viewed, notes, decidePending, onDecide }: Fo
           loading={decidePending === "approve"}
           onClick={() => onDecide("approve")}
         >
-          <Check /> Approve
+          <Check />{" "}
+          {open > 0 ? `Approve with ${open} open ${open === 1 ? "item" : "items"}` : "Approve"}
           {viewed ? (
             // Decoration on the button; the sentence above carries the same fact in words, so the
             // button's name stays "Approve" for anyone (or any check) that finds it by name.

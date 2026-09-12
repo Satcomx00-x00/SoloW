@@ -909,6 +909,50 @@ describe("reportStrandedReviews", () => {
     expect(row?.failureReason).toBe(STRANDED_REVIEW_REASON);
   });
 
+  it("ignores a decision on an earlier gate — the Plan's approval is not the Build's", async () => {
+    /*
+     * The false positive seen on a real Task: a plan-first Workflow records the Plan's approval,
+     * advances, and parks the Task at the Build's gate. An orchestrator restart later, "any
+     * review for the Session" stamped the Build gate "decision not applied" over a decision that
+     * had been applied an hour earlier, on a gate nobody had decided yet.
+     */
+    const db = createTestDb();
+    const { sessionId } = await seedTask(db, { taskId: "task-two-gates", taskState: "review" });
+    await db.insert(review).values({
+      id: "rev-plan",
+      workspaceId: WS,
+      sessionId,
+      decision: "approve",
+      actorUserId: "u1",
+      createdAt: "2026-01-01T10:00:00.000Z",
+    });
+    // The Build gate opened after that approval was spent.
+    await db.insert(sessionEvent).values({
+      id: "ev-gate",
+      workspaceId: WS,
+      sessionId,
+      seq: 0,
+      kind: "state",
+      payload: { kind: "state", from: "running", to: "review" },
+      at: "2026-01-01T11:00:00.000Z",
+    });
+
+    expect(await reportStrandedReviews(db, fakeRegistry(), fakeHub(), LONG_AFTER)).toBe(0);
+    const [row] = await db.select().from(task).where(eq(task.id, "task-two-gates"));
+    expect(row?.failureReason).toBeNull();
+
+    // A decision recorded on *this* gate, never applied, is the stranded case.
+    await db.insert(review).values({
+      id: "rev-build",
+      workspaceId: WS,
+      sessionId,
+      decision: "approve",
+      actorUserId: "u1",
+      createdAt: "2026-01-01T11:30:00.000Z",
+    });
+    expect(await reportStrandedReviews(db, fakeRegistry(), fakeHub(), LONG_AFTER)).toBe(1);
+  });
+
   it("leaves a Task whose run is still registered", async () => {
     const db = createTestDb();
     const { sessionId } = await seedTask(db, { taskId: "task-live", taskState: "review" });
