@@ -34,6 +34,7 @@ function step(id: string, name: string, position: number, rank: string): Workflo
     mcpServerIds: [],
     skillIds: [],
     permissionMode: null,
+    checkpoints: [],
     createdAt: AT,
     updatedAt: AT,
   };
@@ -260,6 +261,45 @@ describe("WorkflowsView", () => {
     await waitFor(() => {
       const call = log.calls.find((c) => c.path === "workflow.updateStep");
       expect(call?.input).toEqual({ stepId: "s1", permissionMode: "plan" });
+    });
+  });
+
+  it("declares a checkpoint on the step from the presets, and removes one from its list", async () => {
+    // A checkpoint is a launch parameter like the posture (review analysis, point 4): it sits on
+    // the node, one pick away, and the whole list is what the server is sent.
+    const withOne = {
+      ...PIPELINE,
+      steps: PIPELINE.steps.map((s) =>
+        s.id === "s2"
+          ? { ...s, checkpoints: [{ on: "command" as const, match: "git push", label: "Pushes" }] }
+          : s,
+      ),
+    };
+    const { log } = renderWithTrpc(
+      <WorkflowsView />,
+      handlersFor({ "workflow.get": () => withOne, "workflow.updateStep": () => withOne }),
+    );
+
+    const picker = await screen.findByLabelText("Add a checkpoint for Implement");
+    // The declared rule is on the card, with its own remove; the list goes back whole.
+    fireEvent.click(screen.getByLabelText("Remove checkpoint Pushes"));
+    await waitFor(() => {
+      const call = log.calls.find((c) => c.path === "workflow.updateStep");
+      expect(call?.input).toEqual({ stepId: "s2", checkpoints: [] });
+    });
+
+    // A preset is one pick away; the server's list still holds Pushes, so the new rule joins it.
+    fireEvent.keyDown(picker, { key: "Enter" });
+    fireEvent.click(await screen.findByRole("option", { name: "Runs a database migration" }));
+    await waitFor(() => {
+      const calls = log.calls.filter((c) => c.path === "workflow.updateStep");
+      expect(calls.at(-1)?.input).toEqual({
+        stepId: "s2",
+        checkpoints: [
+          { on: "command", match: "git push", label: "Pushes" },
+          expect.objectContaining({ on: "command", label: "Runs a database migration" }),
+        ],
+      });
     });
   });
 

@@ -1,7 +1,9 @@
+import { randomUUID } from "node:crypto";
 import { type ClaudeSession, type ClaudeUpdate, startClaudeSession } from "@solow/claude-code";
 import type { HarnessStopReason } from "@solow/contracts";
 import { detectFailureSignal, type FailureSignal } from "@solow/core";
 import type { Executor } from "../executor/types.js";
+import { CheckpointRelay } from "./checkpoints.js";
 import type {
   HarnessHandle,
   HarnessOutcome,
@@ -9,6 +11,7 @@ import type {
   HarnessStartOpts,
   HarnessStreamEvent,
 } from "./runner.js";
+import type { HarnessCheckpoints } from "./runners.js";
 
 /**
  * Claude Code as SoloW's harness (task TASK-014) — now one adapter among N (issue #58).
@@ -19,9 +22,11 @@ import type {
  * 0005) and Claude Code's ACP bridge ships as a separate binary. Nothing below changed when the
  * ACP client landed, which is what AC-3's "no behaviour change" means in practice.
  *
- * The handle it returns has no `respondPermission`: the CLI decides permissions inside itself
- * (see `DEFAULT_PERMISSION_MODE`) and offers no channel to ask an operator on, so the method is
- * simply absent rather than present and always answering `false`.
+ * The handle it returns has no `respondPermission` unless the Step declared checkpoints: the
+ * CLI decides permissions inside itself (see `DEFAULT_PERMISSION_MODE`) and offers no channel to
+ * ask an operator on, so the method is simply absent rather than present and always answering
+ * `false`. Checkpoints are the exception, and they go through the CLI's own hooks rather than a
+ * channel it does not have — see `checkpoints.ts`.
  *
  * Runs the CLI in its headless stream-JSON mode and **always with `--worktree`**. That flag is
  * the concurrency story: several Tasks run against one repository at a time, and two harnesses
@@ -63,6 +68,8 @@ export interface ClaudeCodeRunnerOptions {
   model?: string;
   /** Diagnostics sink for the CLI's stderr. Never receives protocol traffic. */
   onStderr?: (text: string) => void;
+  /** The Step's checkpoints, enforced through a `PreToolUse` hook this runner installs. */
+  checkpoints?: HarnessCheckpoints;
 }
 
 export class ClaudeCodeRunner implements HarnessRunner {
@@ -73,6 +80,18 @@ export class ClaudeCodeRunner implements HarnessRunner {
     let stopRequested = false;
     // Stateful: it drops the closing `result` when that text is the turn just streamed.
     const mapUpdate = createStreamMapper();
+    // Installed before the launch, because the launch's argv names the hook it writes; started
+    // only once the CLI is running, so nothing is armed for a process that never came up.
+    const checkpoints = this.options.checkpoints;
+    const relay =
+      checkpoints && checkpoints.rules.length > 0
+        ? new CheckpointRelay({
+            store: checkpoints.store,
+            rules: checkpoints.rules,
+            onEvent: opts.onEvent,
+            runTag: randomUUID().slice(0, 8),
+          })
+        : null;
 
     try {
       session = startClaudeSession(
@@ -92,6 +111,7 @@ export class ClaudeCodeRunner implements HarnessRunner {
           ...(opts.resumeSessionId ? { resumeSessionId: opts.resumeSessionId } : {}),
           permissionMode: this.options.permissionMode ?? DEFAULT_PERMISSION_MODE,
           ...(this.options.model ? { model: this.options.model } : {}),
+          ...(relay ? { settings: relay.settings } : {}),
           onUpdate: (update) => {
             const event = mapUpdate(update);
             if (event) opts.onEvent(event);
@@ -103,6 +123,7 @@ export class ClaudeCodeRunner implements HarnessRunner {
     } catch (cause) {
       // Spawning failed outright — a missing binary, usually. Fail the run rather than leave
       // the lifecycle waiting on a session that was never created.
+      relay?.close();
       const signal = detectFailureSignal(cause instanceof Error ? cause.message : String(cause));
       return {
         outcome: Promise.resolve<HarnessOutcome>({ kind: "failed", signal, stopReason: "error" }),
@@ -116,7 +137,10 @@ export class ClaudeCodeRunner implements HarnessRunner {
     }
 
     const live = session;
+    relay?.start();
     const outcome: Promise<HarnessOutcome> = live.outcome.then((result) => {
+      // Nothing is left waiting on an operator who is no longer watching a run that has ended.
+      relay?.close();
       // A stop is an operator decision, not a fault: the partial work stays in the worktree and
       // goes to review like any other completed run (Principle I).
       if (stopRequested) return { kind: "completed", stopReason: "cancelled" };
@@ -151,8 +175,17 @@ export class ClaudeCodeRunner implements HarnessRunner {
         if (accepted) opts.onEvent({ kind: "stdout", channel: "user", text });
         return accepted;
       },
+      // Present only when there is something to answer: the absence is the statement.
+      ...(relay
+        ? {
+            respondPermission: async (requestId: string, optionId: string) =>
+              relay.answer(requestId, optionId),
+          }
+        : {}),
       async stop() {
         stopRequested = true;
+        // Release a hook blocked on a question nobody will now answer, before the kill.
+        relay?.close();
         await live.stop();
       },
     };

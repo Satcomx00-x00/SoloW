@@ -8,13 +8,19 @@ import type {
   SkillDto,
   TaskCompletionOutcome,
   WorkflowAdvanceOn,
+  WorkflowCheckpoint,
   WorkflowStepBranch,
   WorkflowStepCondition,
   WorkflowStepDto,
   WorkflowStepGate,
   WorkflowWithStepsDto,
 } from "@solow/contracts";
-import { validateWorkflowGraph, type WorkflowGraphProblem } from "@solow/core";
+import {
+  CHECKPOINT_PRESETS,
+  checkpointPreset,
+  validateWorkflowGraph,
+  type WorkflowGraphProblem,
+} from "@solow/core";
 import {
   Background,
   BackgroundVariant,
@@ -723,6 +729,165 @@ function LoadsFields({
   );
 }
 
+/** The `Select` cannot hold "nothing chosen" as an item, so the custom entry gets a name. */
+const CUSTOM_CHECKPOINT = "custom";
+
+/**
+ * What this Step's harness stops for (review analysis of task 9f4bd3e9, point 4): the
+ * checkpoints, as a list with the presets one pick away and a custom rule behind a small form.
+ *
+ * Sits with the launch fields because it is one: a checkpoint is enforced by a hook the launch
+ * installs, on Claude Code (stream-json) Steps — a Step on another protocol keeps its list and
+ * the run says it was not enforced. The presets cover what a Build Step usually wants asked
+ * about before it happens rather than found in the diff afterwards: a migration run, a
+ * dependency change, a push, something destroyed.
+ */
+function CheckpointFields({
+  step,
+  save,
+}: {
+  step: WorkflowStepDto;
+  save: (checkpoints: WorkflowCheckpoint[]) => void;
+}) {
+  const [custom, setCustom] = useState<WorkflowCheckpoint | null>(null);
+  const declared = (rule: { on: string; match: string }) =>
+    step.checkpoints.some((c) => c.on === rule.on && c.match === rule.match);
+  const remaining = CHECKPOINT_PRESETS.filter((preset) => !declared(preset));
+  const add = (rule: WorkflowCheckpoint) => {
+    if (!declared(rule)) save([...step.checkpoints, rule]);
+    setCustom(null);
+  };
+  const customValid =
+    custom !== null &&
+    custom.match.trim().length > 0 &&
+    custom.label.trim().length > 0 &&
+    (custom.on !== "command" || compiles(custom.match));
+  return (
+    <div className="grid gap-1">
+      <span className="text-2xs text-muted-foreground uppercase tracking-wide">Checkpoints</span>
+      {step.checkpoints.length > 0 && (
+        <ul className="space-y-0.5" aria-label={`Checkpoints for ${step.name}`}>
+          {step.checkpoints.map((rule, index) => (
+            <li key={`${rule.on}:${rule.match}`} className="flex items-center gap-1 text-xs">
+              <Badge variant="outline" className="shrink-0 px-1 font-mono text-[10px]">
+                {rule.on}
+              </Badge>
+              <span className="min-w-0 truncate" title={`${rule.label} — ${rule.match}`}>
+                {rule.label}
+              </span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label={`Remove checkpoint ${rule.label}`}
+                className={`${FIELD} ml-auto size-5 shrink-0`}
+                onClick={() => save(step.checkpoints.filter((_, i) => i !== index))}
+              >
+                <X />
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <Select
+        value=""
+        onValueChange={(value) => {
+          if (value === CUSTOM_CHECKPOINT) {
+            setCustom({ on: "command", match: "", label: "" });
+            return;
+          }
+          const preset = checkpointPreset(value);
+          if (preset) add({ on: preset.on, match: preset.match, label: preset.label });
+        }}
+      >
+        <SelectTrigger
+          aria-label={`Add a checkpoint for ${step.name}`}
+          className={`${FIELD} h-7 w-full text-xs`}
+        >
+          <SelectValue placeholder="Add a checkpoint…" />
+        </SelectTrigger>
+        <SelectContent>
+          {remaining.map((preset) => (
+            <SelectItem key={preset.id} value={preset.id}>
+              {preset.label}
+            </SelectItem>
+          ))}
+          <SelectItem value={CUSTOM_CHECKPOINT}>Custom rule…</SelectItem>
+        </SelectContent>
+      </Select>
+      {custom && (
+        <div className="grid gap-1 rounded-md border bg-background/60 p-1.5">
+          <Select
+            value={custom.on}
+            onValueChange={(on) => setCustom({ ...custom, on: on as WorkflowCheckpoint["on"] })}
+          >
+            <SelectTrigger
+              aria-label="What the checkpoint watches"
+              className={`${FIELD} h-7 w-full text-xs`}
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="command">A command the harness runs</SelectItem>
+              <SelectItem value="write">A file the harness writes</SelectItem>
+            </SelectContent>
+          </Select>
+          <Input
+            aria-label={custom.on === "command" ? "Command pattern" : "Path glob"}
+            placeholder={
+              custom.on === "command"
+                ? "regular expression, e.g. git push"
+                : "glob, e.g. **/migrations/**"
+            }
+            value={custom.match}
+            onChange={(e) => setCustom({ ...custom, match: e.target.value })}
+            className={`${FIELD} h-7 font-mono text-xs`}
+          />
+          <Input
+            aria-label="Why the harness is stopped"
+            placeholder="What the operator is asked, e.g. Pushes the branch"
+            value={custom.label}
+            onChange={(e) => setCustom({ ...custom, label: e.target.value })}
+            className={`${FIELD} h-7 text-xs`}
+          />
+          <div className="flex justify-end gap-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className={`${FIELD} h-6 text-xs`}
+              onClick={() => setCustom(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              className={`${FIELD} h-6 text-xs`}
+              disabled={!customValid}
+              onClick={() =>
+                add({ on: custom.on, match: custom.match.trim(), label: custom.label.trim() })
+              }
+            >
+              <Plus /> Add checkpoint
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Whether a command pattern is a regular expression at all — the contract refuses one that is not. */
+function compiles(pattern: string): boolean {
+  try {
+    new RegExp(pattern);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * The Step's prompt: two clamped lines on the card, the whole thing in a dialog.
  *
@@ -1162,6 +1327,10 @@ function StepNodeView({ data }: NodeProps<StepNode>) {
               step={step}
               libraries={libraries}
               save={(patch) => update.mutate({ stepId: step.id, ...patch })}
+            />
+            <CheckpointFields
+              step={step}
+              save={(checkpoints) => update.mutate({ stepId: step.id, checkpoints })}
             />
             <BranchFields
               step={step}

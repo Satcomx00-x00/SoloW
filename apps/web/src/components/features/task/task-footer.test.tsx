@@ -216,6 +216,24 @@ describe("TaskFooter", () => {
     expect(calls).toEqual(["open-review"]);
   });
 
+  it("says what the harness is stopped on, and points at the card that answers it", () => {
+    // A checkpoint (review analysis, point 4): the run is going nowhere until a person answers
+    // in the transcript, which may be scrolled away from. One control, and it only navigates —
+    // the Allow and Deny of the card stay the only ones of their name on the page.
+    renderFooter(
+      { state: "running" },
+      {
+        waiting: {
+          requestId: "checkpoint:r1:1",
+          title: "Runs a database migration: bun run db:migrate",
+        },
+      },
+    );
+    expect(screen.getByRole("status").textContent).toContain("bun run db:migrate");
+    expect(screen.getByRole("button", { name: "Go to the question" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: /Allow/ })).toBeNull();
+  });
+
   it("offers nothing to open while the harness is still working", () => {
     renderFooter({ state: "running" });
     expect(screen.queryByRole("button")).toBeNull();

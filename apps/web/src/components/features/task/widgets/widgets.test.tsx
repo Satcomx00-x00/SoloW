@@ -154,10 +154,6 @@ describe("Decision", () => {
           chosen: "matching",
           reason: "The filter is what the caller asked for.",
         }}
-        widgetId="w-1"
-        answer={null}
-        answered={false}
-        onAnswer={() => {}}
       />,
     );
     const card = screen.getByRole("region", { name: /Decision: What does include select/ });

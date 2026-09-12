@@ -28585,6 +28585,37 @@
                               null
                             ]
                           },
+                          "checkpoints": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "on": {
+                                  "type": "string",
+                                  "enum": [
+                                    "command",
+                                    "write"
+                                  ]
+                                },
+                                "match": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                },
+                                "label": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 120
+                                }
+                              },
+                              "required": [
+                                "on",
+                                "match",
+                                "label"
+                              ]
+                            },
+                            "maxItems": 20
+                          },
                           "createdAt": {
                             "type": "string",
                             "format": "date-time"
@@ -28609,6 +28640,7 @@
                           "mcpServerIds",
                           "skillIds",
                           "permissionMode",
+                          "checkpoints",
                           "createdAt",
                           "updatedAt"
                         ]
@@ -29298,6 +29330,38 @@
                               null
                             ],
                             "default": null
+                          },
+                          "checkpoints": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "on": {
+                                  "type": "string",
+                                  "enum": [
+                                    "command",
+                                    "write"
+                                  ]
+                                },
+                                "match": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                },
+                                "label": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 120
+                                }
+                              },
+                              "required": [
+                                "on",
+                                "match",
+                                "label"
+                              ]
+                            },
+                            "maxItems": 20,
+                            "default": []
                           }
                         },
                         "required": [
@@ -29310,7 +29374,8 @@
                           "branch",
                           "mcpServers",
                           "skills",
-                          "permissionMode"
+                          "permissionMode",
+                          "checkpoints"
                         ]
                       },
                       "minItems": 1,
@@ -29596,6 +29661,38 @@
                                 null
                               ],
                               "default": null
+                            },
+                            "checkpoints": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "on": {
+                                    "type": "string",
+                                    "enum": [
+                                      "command",
+                                      "write"
+                                    ]
+                                  },
+                                  "match": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 200
+                                  },
+                                  "label": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 120
+                                  }
+                                },
+                                "required": [
+                                  "on",
+                                  "match",
+                                  "label"
+                                ]
+                              },
+                              "maxItems": 20,
+                              "default": []
                             }
                           },
                           "required": [
@@ -29841,6 +29938,37 @@
                                   null
                                 ]
                               },
+                              "checkpoints": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "on": {
+                                      "type": "string",
+                                      "enum": [
+                                        "command",
+                                        "write"
+                                      ]
+                                    },
+                                    "match": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 200
+                                    },
+                                    "label": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 120
+                                    }
+                                  },
+                                  "required": [
+                                    "on",
+                                    "match",
+                                    "label"
+                                  ]
+                                },
+                                "maxItems": 20
+                              },
                               "createdAt": {
                                 "type": "string",
                                 "format": "date-time"
@@ -29865,6 +29993,7 @@
                               "mcpServerIds",
                               "skillIds",
                               "permissionMode",
+                              "checkpoints",
                               "createdAt",
                               "updatedAt"
                             ]
@@ -30327,6 +30456,37 @@
                                   null
                                 ]
                               },
+                              "checkpoints": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "on": {
+                                      "type": "string",
+                                      "enum": [
+                                        "command",
+                                        "write"
+                                      ]
+                                    },
+                                    "match": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 200
+                                    },
+                                    "label": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 120
+                                    }
+                                  },
+                                  "required": [
+                                    "on",
+                                    "match",
+                                    "label"
+                                  ]
+                                },
+                                "maxItems": 20
+                              },
                               "createdAt": {
                                 "type": "string",
                                 "format": "date-time"
@@ -30351,6 +30511,7 @@
                               "mcpServerIds",
                               "skillIds",
                               "permissionMode",
+                              "checkpoints",
                               "createdAt",
                               "updatedAt"
                             ]
@@ -30611,6 +30772,37 @@
                       null
                     ]
                   },
+                  "checkpoints": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "on": {
+                          "type": "string",
+                          "enum": [
+                            "command",
+                            "write"
+                          ]
+                        },
+                        "match": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "label": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 120
+                        }
+                      },
+                      "required": [
+                        "on",
+                        "match",
+                        "label"
+                      ]
+                    },
+                    "maxItems": 20
+                  },
                   "afterStepId": {
                     "type": "string",
                     "nullable": true,
@@ -30833,6 +31025,37 @@
                               null
                             ]
                           },
+                          "checkpoints": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "on": {
+                                  "type": "string",
+                                  "enum": [
+                                    "command",
+                                    "write"
+                                  ]
+                                },
+                                "match": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                },
+                                "label": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 120
+                                }
+                              },
+                              "required": [
+                                "on",
+                                "match",
+                                "label"
+                              ]
+                            },
+                            "maxItems": 20
+                          },
                           "createdAt": {
                             "type": "string",
                             "format": "date-time"
@@ -30857,6 +31080,7 @@
                           "mcpServerIds",
                           "skillIds",
                           "permissionMode",
+                          "checkpoints",
                           "createdAt",
                           "updatedAt"
                         ]
@@ -31097,6 +31321,37 @@
                       "bypassPermissions",
                       null
                     ]
+                  },
+                  "checkpoints": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "on": {
+                          "type": "string",
+                          "enum": [
+                            "command",
+                            "write"
+                          ]
+                        },
+                        "match": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "label": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 120
+                        }
+                      },
+                      "required": [
+                        "on",
+                        "match",
+                        "label"
+                      ]
+                    },
+                    "maxItems": 20
                   }
                 },
                 "required": [
@@ -31313,6 +31568,37 @@
                               null
                             ]
                           },
+                          "checkpoints": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "on": {
+                                  "type": "string",
+                                  "enum": [
+                                    "command",
+                                    "write"
+                                  ]
+                                },
+                                "match": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                },
+                                "label": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 120
+                                }
+                              },
+                              "required": [
+                                "on",
+                                "match",
+                                "label"
+                              ]
+                            },
+                            "maxItems": 20
+                          },
                           "createdAt": {
                             "type": "string",
                             "format": "date-time"
@@ -31337,6 +31623,7 @@
                           "mcpServerIds",
                           "skillIds",
                           "permissionMode",
+                          "checkpoints",
                           "createdAt",
                           "updatedAt"
                         ]
@@ -31650,6 +31937,37 @@
                               null
                             ]
                           },
+                          "checkpoints": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "on": {
+                                  "type": "string",
+                                  "enum": [
+                                    "command",
+                                    "write"
+                                  ]
+                                },
+                                "match": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                },
+                                "label": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 120
+                                }
+                              },
+                              "required": [
+                                "on",
+                                "match",
+                                "label"
+                              ]
+                            },
+                            "maxItems": 20
+                          },
                           "createdAt": {
                             "type": "string",
                             "format": "date-time"
@@ -31674,6 +31992,7 @@
                           "mcpServerIds",
                           "skillIds",
                           "permissionMode",
+                          "checkpoints",
                           "createdAt",
                           "updatedAt"
                         ]
@@ -31975,6 +32294,37 @@
                               null
                             ]
                           },
+                          "checkpoints": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "on": {
+                                  "type": "string",
+                                  "enum": [
+                                    "command",
+                                    "write"
+                                  ]
+                                },
+                                "match": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                },
+                                "label": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 120
+                                }
+                              },
+                              "required": [
+                                "on",
+                                "match",
+                                "label"
+                              ]
+                            },
+                            "maxItems": 20
+                          },
                           "createdAt": {
                             "type": "string",
                             "format": "date-time"
@@ -31999,6 +32349,7 @@
                           "mcpServerIds",
                           "skillIds",
                           "permissionMode",
+                          "checkpoints",
                           "createdAt",
                           "updatedAt"
                         ]
@@ -32299,6 +32650,37 @@
                             null
                           ]
                         },
+                        "checkpoints": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "on": {
+                                "type": "string",
+                                "enum": [
+                                  "command",
+                                  "write"
+                                ]
+                              },
+                              "match": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "label": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 120
+                              }
+                            },
+                            "required": [
+                              "on",
+                              "match",
+                              "label"
+                            ]
+                          },
+                          "maxItems": 20
+                        },
                         "createdAt": {
                           "type": "string",
                           "format": "date-time"
@@ -32323,6 +32705,7 @@
                         "mcpServerIds",
                         "skillIds",
                         "permissionMode",
+                        "checkpoints",
                         "createdAt",
                         "updatedAt"
                       ]
@@ -32498,6 +32881,37 @@
                               null
                             ]
                           },
+                          "checkpoints": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "on": {
+                                  "type": "string",
+                                  "enum": [
+                                    "command",
+                                    "write"
+                                  ]
+                                },
+                                "match": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                },
+                                "label": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 120
+                                }
+                              },
+                              "required": [
+                                "on",
+                                "match",
+                                "label"
+                              ]
+                            },
+                            "maxItems": 20
+                          },
                           "createdAt": {
                             "type": "string",
                             "format": "date-time"
@@ -32522,6 +32936,7 @@
                           "mcpServerIds",
                           "skillIds",
                           "permissionMode",
+                          "checkpoints",
                           "createdAt",
                           "updatedAt"
                         ]
@@ -32912,6 +33327,37 @@
                             null
                           ]
                         },
+                        "checkpoints": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "on": {
+                                "type": "string",
+                                "enum": [
+                                  "command",
+                                  "write"
+                                ]
+                              },
+                              "match": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "label": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 120
+                              }
+                            },
+                            "required": [
+                              "on",
+                              "match",
+                              "label"
+                            ]
+                          },
+                          "maxItems": 20
+                        },
                         "createdAt": {
                           "type": "string",
                           "format": "date-time"
@@ -32936,6 +33382,7 @@
                         "mcpServerIds",
                         "skillIds",
                         "permissionMode",
+                        "checkpoints",
                         "createdAt",
                         "updatedAt"
                       ]
@@ -33111,6 +33558,37 @@
                               null
                             ]
                           },
+                          "checkpoints": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "on": {
+                                  "type": "string",
+                                  "enum": [
+                                    "command",
+                                    "write"
+                                  ]
+                                },
+                                "match": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                },
+                                "label": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 120
+                                }
+                              },
+                              "required": [
+                                "on",
+                                "match",
+                                "label"
+                              ]
+                            },
+                            "maxItems": 20
+                          },
                           "createdAt": {
                             "type": "string",
                             "format": "date-time"
@@ -33135,6 +33613,7 @@
                           "mcpServerIds",
                           "skillIds",
                           "permissionMode",
+                          "checkpoints",
                           "createdAt",
                           "updatedAt"
                         ]
@@ -33449,6 +33928,37 @@
                             null
                           ]
                         },
+                        "checkpoints": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "on": {
+                                "type": "string",
+                                "enum": [
+                                  "command",
+                                  "write"
+                                ]
+                              },
+                              "match": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "label": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 120
+                              }
+                            },
+                            "required": [
+                              "on",
+                              "match",
+                              "label"
+                            ]
+                          },
+                          "maxItems": 20
+                        },
                         "createdAt": {
                           "type": "string",
                           "format": "date-time"
@@ -33473,6 +33983,7 @@
                         "mcpServerIds",
                         "skillIds",
                         "permissionMode",
+                        "checkpoints",
                         "createdAt",
                         "updatedAt"
                       ]
@@ -33648,6 +34159,37 @@
                               null
                             ]
                           },
+                          "checkpoints": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "on": {
+                                  "type": "string",
+                                  "enum": [
+                                    "command",
+                                    "write"
+                                  ]
+                                },
+                                "match": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                },
+                                "label": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 120
+                                }
+                              },
+                              "required": [
+                                "on",
+                                "match",
+                                "label"
+                              ]
+                            },
+                            "maxItems": 20
+                          },
                           "createdAt": {
                             "type": "string",
                             "format": "date-time"
@@ -33672,6 +34214,7 @@
                           "mcpServerIds",
                           "skillIds",
                           "permissionMode",
+                          "checkpoints",
                           "createdAt",
                           "updatedAt"
                         ]

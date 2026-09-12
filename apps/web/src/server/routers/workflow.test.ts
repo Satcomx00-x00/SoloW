@@ -1034,6 +1034,65 @@ describe("workflows", () => {
     });
   });
 
+  describe("a step's checkpoints (review analysis, point 4)", () => {
+    const push = { on: "command" as const, match: "\\bgit push\\b", label: "Pushes" };
+    const schema = { on: "write" as const, match: "**/migrations/**", label: "Writes a migration" };
+
+    it("defaults to none, and takes a list on the step that is replaced whole", async () => {
+      const { c, planner, newPipeline } = await fixture(db, "acme");
+      const wf = await newPipeline("Ship");
+      expect(wf.steps.map((s) => s.checkpoints)).toEqual([[], [], []]);
+      const added = await c.workflow.addStep({
+        workflowId: wf.id,
+        name: "Build",
+        agentProfileId: planner.id,
+        checkpoints: [push],
+      });
+      const build = added.steps.find((s) => s.name === "Build");
+      expect(build?.checkpoints).toEqual([push]);
+      const replaced = await c.workflow.updateStep({
+        stepId: build?.id ?? "",
+        checkpoints: [schema, push],
+      });
+      expect(replaced.steps.find((s) => s.name === "Build")?.checkpoints).toEqual([schema, push]);
+      const cleared = await c.workflow.updateStep({ stepId: build?.id ?? "", checkpoints: [] });
+      expect(cleared.steps.find((s) => s.name === "Build")?.checkpoints).toEqual([]);
+    });
+
+    it("refuses a command rule whose pattern is not a regular expression", async () => {
+      const { c, newPipeline } = await fixture(db, "acme");
+      const wf = await newPipeline("Ship");
+      await expect(
+        c.workflow.updateStep({
+          stepId: steps(wf, 0),
+          checkpoints: [{ on: "command", match: "(", label: "Broken" }],
+        }),
+      ).rejects.toThrow();
+    });
+
+    it("does not bump the version for a list set to what it already was", async () => {
+      const { c, newPipeline } = await fixture(db, "acme");
+      const wf = await newPipeline("Ship");
+      await c.workflow.updateStep({ stepId: steps(wf, 0), checkpoints: [] });
+      expect((await c.workflow.get({ id: wf.id })).version).toBe(wf.version);
+      await c.workflow.updateStep({ stepId: steps(wf, 0), checkpoints: [push] });
+      const bumped = (await c.workflow.get({ id: wf.id })).version;
+      expect(bumped).toBeGreaterThan(wf.version);
+      await c.workflow.updateStep({ stepId: steps(wf, 0), checkpoints: [push] });
+      expect((await c.workflow.get({ id: wf.id })).version).toBe(bumped);
+    });
+
+    it("travels in an exported document and lands unchanged", async () => {
+      const { c, newPipeline } = await fixture(db, "acme");
+      const wf = await newPipeline("Ship");
+      await c.workflow.updateStep({ stepId: steps(wf, 0), checkpoints: [push, schema] });
+      const doc = await c.workflow.export({ id: wf.id });
+      expect(doc.steps[0]?.checkpoints).toEqual([push, schema]);
+      const imported = await c.workflow.import({ document: doc, name: "Ship again" });
+      expect(imported.workflow.steps[0]?.checkpoints).toEqual([push, schema]);
+    });
+  });
+
   describe("a step's permission posture (spec F05, on the Step)", () => {
     it("defaults to null, which means the step's harness profile decides", async () => {
       const { newPipeline } = await fixture(db, "acme");

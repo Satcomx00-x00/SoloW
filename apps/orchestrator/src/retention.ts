@@ -3,6 +3,7 @@ import { cascadeDeleteTasks, type Db, session, task, worktree } from "@solow/db"
 import { and, eq, isNotNull, isNull, lt } from "drizzle-orm";
 import type { Executor } from "./executor/types.js";
 import {
+  checkpointStorePath,
   cleanupWorktree,
   harnessTranscriptsPath,
   repositoryOfWorktree,
@@ -96,7 +97,13 @@ async function removeWorktrees(
   // holds the conversation's text.
   if (deps.worktreeRoot) {
     try {
-      await deps.host.exec(["rm", "-rf", "--", harnessTranscriptsPath(deps.worktreeRoot, taskId)]);
+      await deps.host.exec([
+        "rm",
+        "-rf",
+        "--",
+        harnessTranscriptsPath(deps.worktreeRoot, taskId),
+        checkpointStorePath(deps.worktreeRoot, taskId),
+      ]);
     } catch (cause) {
       log(`retention: could not remove transcripts of task ${taskId}`, cause);
     }

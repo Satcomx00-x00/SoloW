@@ -1,3 +1,4 @@
+import type { WorkflowCheckpoint } from "@solow/contracts";
 import {
   type HarnessPermissionMode,
   type HarnessProtocol,
@@ -60,6 +61,14 @@ export interface HarnessRunnerDeps {
    * is reachable only by a deployment naming it (`SOLOW_ACP_UNATTENDED_PERMISSION`).
    */
   unattendedPermissionPosture?: UnattendedPermissionPosture;
+  /** The Step's checkpoints and where their hook talks to the orchestrator (`harness/checkpoints.ts`). */
+  checkpoints?: HarnessCheckpoints;
+}
+
+/** A Step's checkpoint rules, with the per-Task store the hook relays through. */
+export interface HarnessCheckpoints {
+  rules: readonly WorkflowCheckpoint[];
+  store: string;
 }
 
 /**
@@ -73,6 +82,8 @@ export interface HarnessLaunchSettings {
   /** Absent means "whatever the harness chooses" — never a default written down here. */
   model?: string;
   modeId?: string;
+  /** Absent when the Step declared none — a Task on no Workflow never has any. */
+  checkpoints?: HarnessCheckpoints;
 }
 
 export function createHarnessRunner(
@@ -85,6 +96,7 @@ export function createHarnessRunner(
         executor: deps.executor,
         ...(deps.permissionMode === undefined ? {} : { permissionMode: deps.permissionMode }),
         ...(deps.model === undefined ? {} : { model: deps.model }),
+        ...(deps.checkpoints === undefined ? {} : { checkpoints: deps.checkpoints }),
       });
     case "acp": {
       // A Profile that never asks answers immediately: a deadline is how long a *person* gets,
@@ -152,6 +164,18 @@ const PROTOCOL_RESUMES_CONVERSATIONS: Record<HarnessProtocol, boolean> = {
 };
 
 /**
+ * Which protocols can hold a Step's checkpoints (`harness/checkpoints.ts`). Only the one with a
+ * hook the launch can install: ACP's permission channel is the agent's to open, not SoloW's,
+ * and a pass-through CLI has neither. A Step's list is kept on the other two and reported as
+ * not enforced, for the reason an unsupported pin is — a silent drop is the worse outcome.
+ */
+export const PROTOCOL_ENFORCES_CHECKPOINTS: Record<HarnessProtocol, boolean> = {
+  claude_code_stream_json: true,
+  acp: false,
+  cli_passthrough: false,
+};
+
+/**
  * The launch settings this protocol cannot carry, named.
  *
  * A Profile can pin a model and a mode; a protocol speaks one, the other, or neither. Dropping
@@ -167,7 +191,12 @@ const PROTOCOL_RESUMES_CONVERSATIONS: Record<HarnessProtocol, boolean> = {
  */
 export function unsupportedLaunchSettings(
   protocol: HarnessProtocol,
-  settings: { model?: string | null; modeId?: string | null; resumeSessionId?: string | null },
+  settings: {
+    model?: string | null;
+    modeId?: string | null;
+    resumeSessionId?: string | null;
+    checkpoints?: { rules: readonly unknown[] } | null;
+  },
 ): string[] {
   /*
    * Read from the contracts rather than restated here: the Harness Profile form has to make the
@@ -185,6 +214,10 @@ export function unsupportedLaunchSettings(
   // over the `agent_catalog.protocol` column.
   if (!PROTOCOL_RESUMES_CONVERSATIONS[protocol] && settings.resumeSessionId) {
     unsupported.push("the harness's previous conversation");
+  }
+  const rules = settings.checkpoints?.rules.length ?? 0;
+  if (!PROTOCOL_ENFORCES_CHECKPOINTS[protocol] && rules > 0) {
+    unsupported.push(`its ${rules === 1 ? "checkpoint" : `${rules} checkpoints`}`);
   }
   return unsupported;
 }

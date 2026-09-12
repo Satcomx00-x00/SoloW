@@ -97,6 +97,7 @@ export function workflowStoreDocument(
         gate: step.gate ?? "auto",
         advanceOn: step.advanceOn ?? "agent-signal",
         onEnter: null,
+        checkpoints: [],
         branch: step.branch
           ? {
               when: step.branch.when,

@@ -104,6 +104,19 @@ describe("buildArgs", () => {
     }
   });
 
+  it("passes launch settings inline, before the configured extras", () => {
+    // The checkpoint hook travels this way: inline JSON is the one place both a host and a
+    // container read without a file having to exist in both.
+    const settings = JSON.stringify({ hooks: { PreToolUse: [] } });
+    const args = buildArgs({ worktreeName: "w", permissionMode: "acceptEdits", settings });
+    const at = args.indexOf("--settings");
+    expect(at).toBeGreaterThanOrEqual(0);
+    expect(args[at + 1]).toBe(settings);
+    expect(buildArgs({ worktreeName: "w", permissionMode: "acceptEdits" })).not.toContain(
+      "--settings",
+    );
+  });
+
   it("puts configured extras after the arguments SoloW requires", () => {
     const args = buildArgs({
       worktreeName: "w",

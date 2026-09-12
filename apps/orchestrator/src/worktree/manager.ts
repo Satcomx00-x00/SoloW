@@ -71,6 +71,15 @@ export function harnessTranscriptsPath(root: string, taskId: string): string {
 }
 
 /**
+ * Where a Task's checkpoint hook and the orchestrator meet (`harness/checkpoints.ts`): a
+ * directory beside the transcripts, bind-mounted at its own path into a container so the hook
+ * the settings name is the hook the container runs. Removed with the transcripts at retention.
+ */
+export function checkpointStorePath(root: string, taskId: string): string {
+  return join(root, `${taskId}--checkpoints`);
+}
+
+/**
  * Where a Task's **own** copy of a Repository lives, when it is given one (`ownClone`).
  *
  * Under the cache root rather than the worktree root, because it is a repository and not a

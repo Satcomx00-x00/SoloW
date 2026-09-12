@@ -65,6 +65,7 @@ export function stepToDto(row: WorkflowStepRow, position: number): WorkflowStepD
     mcpServerIds: row.mcpServerIds ?? [],
     skillIds: row.skillIds ?? [],
     permissionMode: row.permissionMode ?? null,
+    checkpoints: row.checkpoints ?? [],
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };

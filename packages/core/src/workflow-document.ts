@@ -28,6 +28,7 @@ export interface ExportableStep {
   mcpServerIds: readonly string[];
   skillIds: readonly string[];
   permissionMode: WorkflowDocumentStep["permissionMode"];
+  checkpoints: WorkflowDocumentStep["checkpoints"];
 }
 
 /** Id → name, for each of the three catalogues a Step points into. */
@@ -89,6 +90,8 @@ export function workflowToDocument(
       skills: namesFor(step.skillIds, names.skill),
       // Not a name and not an id: one of three fixed postures, so it crosses unchanged.
       permissionMode: step.permissionMode,
+      // Patterns and labels: nothing here points into a Workspace, so nothing is resolved.
+      checkpoints: step.checkpoints.map((rule) => ({ ...rule })),
     })),
   };
 }
@@ -111,6 +114,7 @@ export interface PlannedStep {
   mcpServerIds: string[];
   skillIds: string[];
   permissionMode: WorkflowDocumentStep["permissionMode"];
+  checkpoints: WorkflowDocumentStep["checkpoints"];
   /**
    * The branch, still by index: the rows do not exist yet, so there are no ids to point at. The
    * DAL writes the Steps first and re-points the branches once every index has one.
@@ -222,6 +226,7 @@ export function planWorkflowImport(
       mcpServerIds: resolveTools(step.mcpServers, servers, unmatchedMcpServers),
       skillIds: resolveTools(step.skills, skills, unmatchedSkills),
       permissionMode: step.permissionMode,
+      checkpoints: step.checkpoints,
       branch: step.branch
         ? { when: step.branch.when, thenStep: step.branch.thenStep, elseStep: step.branch.elseStep }
         : null,

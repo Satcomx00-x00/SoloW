@@ -11,6 +11,7 @@ import {
   Play,
   RotateCcw,
   Scale,
+  ShieldQuestion,
   X,
 } from "lucide-react";
 import Link from "next/link";
@@ -52,6 +53,7 @@ export function TaskFooter({
   viewed = null,
   openItems = [],
   decisionsPending = 0,
+  waiting = null,
   notes = null,
   decidePending,
   onDecide,
@@ -75,6 +77,8 @@ export function TaskFooter({
   openItems?: ReadonlyArray<{ label: string; why: string | null }>;
   /** Decisions the harness emitted that the reviewer has not settled on the Plan tab — a lock. */
   decisionsPending?: number;
+  /** A checkpoint or permission the running harness is stopped on, until a person answers. */
+  waiting?: { requestId: string; title: string } | null;
   /** The notes drafted so far and the general remark, which "Request changes" sends. */
   notes?: { count: number; general: string; onGeneral: (text: string) => void } | null;
   /** The decision in flight, so its button spins and the other two lock (no double-approve). */
@@ -102,6 +106,7 @@ export function TaskFooter({
     viewed,
     openItems,
     decisionsPending,
+    waiting,
     notes,
     decidePending,
     onDecide,
@@ -166,6 +171,26 @@ function footerBody(input: FooterInput) {
         </p>
       );
     case "running":
+      // A checkpoint (review analysis, point 4) or a permission the harness is stopped on comes
+      // before anything else: the run is going nowhere until a person answers, and the card that
+      // answers is in the transcript — which may be scrolled away from. Said here, with the way
+      // there; never answered here, so there is one control of each name on the page.
+      if (input.waiting) {
+        return (
+          <Row
+            hint={
+              <span className="flex items-center gap-1.5 text-state-review" role="status">
+                <ShieldQuestion aria-hidden className="size-3.5 shrink-0" />
+                The harness is waiting for you: {input.waiting.title}
+              </span>
+            }
+          >
+            <Button size="lg" onClick={() => revealPermission(input.waiting?.requestId ?? "")}>
+              <ShieldQuestion /> Go to the question
+            </Button>
+          </Row>
+        );
+      }
       // The harness declared it was finished: the control that opens the gate sits here, with
       // the sentence that says what the gate is about — on a Workflow Step the Step's outcome (a
       // plan), otherwise the change. It used to be a small button in the header, and the person
@@ -239,6 +264,15 @@ function footerBody(input: FooterInput) {
 }
 
 /** A sentence of context on the left, the actions that answer it on the right. */
+/** Bring the transcript's card for a request into view and hand it the focus. */
+function revealPermission(requestId: string): void {
+  if (typeof document === "undefined") return;
+  const card = document.querySelector<HTMLElement>(`[data-permission="${CSS.escape(requestId)}"]`);
+  if (!card) return;
+  card.scrollIntoView({ block: "center" });
+  card.querySelector<HTMLElement>("button")?.focus();
+}
+
 function Row({ hint, children }: { hint: ReactNode; children: ReactNode }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-3">

@@ -12,6 +12,7 @@ import {
   type RepositorySource,
   TaskErrorCode,
   WIDGET_ANSWER_PREFIX,
+  type WorkflowCheckpoint,
   type WorkflowStepCondition,
 } from "@solow/contracts";
 import { CREDENTIAL_EXPIRED_REASON } from "@solow/core";
@@ -3862,6 +3863,8 @@ describe("a Task following a Workflow", () => {
     branch?: { when: WorkflowStepCondition; thenStep: string | null; elseStep: string | null };
     /** The binary this Step's harness launches — how AC-3 becomes observable in `HarnessStartOpts`. */
     command: string;
+    /** What this Step's harness stops for (review analysis, point 4). */
+    checkpoints?: WorkflowCheckpoint[];
     /**
      * Distinct per Step, and the reason is mechanical: `deps.runner` is handed the protocol and
      * the launch settings, not the catalog row, so the permission mode is the only thing in its
@@ -3936,6 +3939,7 @@ describe("a Task following a Workflow", () => {
         gate: seed.gate ?? "human",
         advanceOn: seed.advanceOn ?? "review",
         permissionMode: seed.stepPermissionMode ?? null,
+        checkpoints: seed.checkpoints ?? [],
       });
       stepIds.push(stepId);
     }
@@ -4213,6 +4217,59 @@ describe("a Task following a Workflow", () => {
     expect(template).toBeGreaterThan(overturned);
     // The approval's words are a handoff, never review feedback: the Build Step was not rejected.
     expect(prompt).not.toContain("# Review feedback");
+  });
+
+  it("hands a Step's checkpoints to the runner with the Task's store, and says so when the protocol cannot hold them", async () => {
+    /*
+     * Review analysis, point 4. A checkpoint is a Step property, like the posture: the runner
+     * factory is handed the rules with the one directory the hook relays through — the Task's,
+     * not the Step's, so a second Step answers in the same place — and the executor is handed
+     * that directory to mount. The seeded catalog speaks ACP, which has no hook to install, so
+     * the run also has to *say* the list went unenforced rather than drop it.
+     */
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const rules: WorkflowCheckpoint[] = [
+      { on: "command", match: "\\bgit push\\b", label: "Pushes" },
+      { on: "write", match: "**/migrations/**", label: "Writes a migration" },
+    ];
+    await seedWorkflow(ids, [
+      {
+        key: "build",
+        command: "builder",
+        permissionMode: "acceptEdits",
+        promptTemplate: "Build it.",
+        checkpoints: rules,
+      },
+    ]);
+    const builder = new ScriptedRunner(
+      [{ kind: "completed", stopReason: "end_turn" }],
+      [declares("built it")],
+    );
+    const { deps } = makeDeps(db, builder, nullStream());
+    const asked: HarnessLaunchSettings[] = [];
+    const built: ExecutorFactoryOpts[] = [];
+    const wrapped = {
+      ...deps,
+      runner: (protocol: HarnessProtocol, settings: HarnessLaunchSettings, executor: Executor) => {
+        asked.push(settings);
+        return deps.runner(protocol, settings, executor);
+      },
+      executorFor: (profile: { config: ExecutorConfig }, opts: ExecutorFactoryOpts) => {
+        built.push(opts);
+        return deps.executorFor(profile, opts);
+      },
+    };
+    await runTaskLifecycle(wrapped, { event: { data: ids }, step: decidingStep(ids, ["approve"]) });
+
+    expect(asked[0]?.checkpoints).toEqual({ rules, store: `/wt/${ids.taskId}--checkpoints` });
+    expect(built[0]?.checkpointStore).toBe(`/wt/${ids.taskId}--checkpoints`);
+    const notices = (await logOf(ids))
+      .filter((row) => row["kind"] === "notice")
+      .map((row) => String(row["text"]));
+    expect(notices.some((text) => text.includes("2 checkpoints") && text.includes("acp"))).toBe(
+      true,
+    );
   });
 
   it("launches each Step at the posture the Step asked for, not its Profile's", async () => {

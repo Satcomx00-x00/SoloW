@@ -48,6 +48,16 @@ describe("createHarnessRunner", () => {
     expect(carried.permissionMode).toBe("bypassPermissions");
   });
 
+  it("carries a Step's checkpoints to the stream-json runner, which is the one that can hold them", () => {
+    const checkpoints = {
+      rules: [{ on: "command" as const, match: "git push", label: "Pushes" }],
+      store: "/wt/task-1--checkpoints",
+    };
+    const runner = createHarnessRunner("claude_code_stream_json", { executor, checkpoints });
+    const carried = (runner as unknown as { options: { checkpoints?: unknown } }).options;
+    expect(carried.checkpoints).toEqual(checkpoints);
+  });
+
   it("turns a never-ask Profile into immediate ACP approval, not a slow one", () => {
     // ACP has a request channel, so "never ask" cannot mean "pass a flag" — it means answering
     // for the operator, at once. A deadline is how long a *person* gets; waiting it out for a
@@ -157,5 +167,18 @@ describe("unsupportedLaunchSettings", () => {
 
   it("says nothing about a round that asked to resume nothing", () => {
     expect(unsupportedLaunchSettings("cli_passthrough", { resumeSessionId: null })).toEqual([]);
+  });
+});
+
+describe("unsupportedLaunchSettings — checkpoints", () => {
+  it("names a Step's checkpoints on a protocol with no hook to enforce them, and stays silent where there is one", () => {
+    const one = { rules: [{ on: "command" as const, match: "x", label: "X" }] };
+    const two = { rules: [...one.rules, { on: "write" as const, match: "**", label: "Y" }] };
+    expect(unsupportedLaunchSettings("acp", { checkpoints: one })).toEqual(["its checkpoint"]);
+    expect(unsupportedLaunchSettings("cli_passthrough", { checkpoints: two })).toEqual([
+      "its 2 checkpoints",
+    ]);
+    expect(unsupportedLaunchSettings("claude_code_stream_json", { checkpoints: two })).toEqual([]);
+    expect(unsupportedLaunchSettings("acp", { checkpoints: { rules: [] } })).toEqual([]);
   });
 });

@@ -27,6 +27,7 @@ const step = (branch: WorkflowStepBranch): WorkflowStepDto => ({
   mcpServerIds: [],
   skillIds: [],
   permissionMode: null,
+  checkpoints: [],
   createdAt: AT,
   updatedAt: AT,
 });

@@ -349,6 +349,7 @@ export async function importWorkflow(
             mcpServerIds: step.mcpServerIds,
             skillIds: step.skillIds,
             permissionMode: step.permissionMode,
+            checkpoints: step.checkpoints,
           })
           .returning({ id: workflowStep.id })
           .all();
@@ -598,6 +599,7 @@ export async function addWorkflowStep(
           mcpServerIds: [...new Set(input.mcpServerIds ?? [])],
           skillIds: [...new Set(input.skillIds ?? [])],
           permissionMode: input.permissionMode ?? null,
+          checkpoints: input.checkpoints ?? [],
         })
         .returning()
         .all();
@@ -710,6 +712,13 @@ export async function updateWorkflowStep(
         input.permissionMode !== (step.permissionMode ?? null)
       ) {
         patch.permissionMode = input.permissionMode;
+      }
+      // The whole list, replaced — and compared whole, for the same reason as the libraries.
+      if (
+        input.checkpoints !== undefined &&
+        JSON.stringify(input.checkpoints) !== JSON.stringify(step.checkpoints)
+      ) {
+        patch.checkpoints = input.checkpoints;
       }
 
       if (Object.keys(patch).length === 0) return ok(step.workflowId);

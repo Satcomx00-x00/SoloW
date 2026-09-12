@@ -37,6 +37,7 @@ function step(id: string, name: string, over: Partial<ExportableStep> = {}): Exp
     mcpServerIds: [],
     skillIds: [],
     permissionMode: null,
+    checkpoints: [],
     ...over,
   };
 }
@@ -80,6 +81,22 @@ describe("workflowToDocument", () => {
     expect(doc.steps[1]?.mcpServers).toEqual(["Playwright"]);
     expect(doc.steps[1]?.skills).toEqual(["impeccable"]);
     expect(JSON.stringify(doc)).not.toContain("ap-opus");
+  });
+
+  it("carries a step's checkpoints as they are — patterns resolve against nothing", () => {
+    const rule = { on: "command" as const, match: "git push", label: "Pushes" };
+    const doc = workflowToDocument(
+      { name: "Ship", description: null },
+      [step("s1", "Build", { checkpoints: [rule] })],
+      NAMES,
+    );
+    expect(doc.steps[0]?.checkpoints).toEqual([rule]);
+    const plan = planWorkflowImport(workflowDocumentSchema.parse(doc), CATALOG);
+    expect(plan?.steps[0]?.checkpoints).toEqual([rule]);
+    // A document written before checkpoints existed still imports: the list defaults to none.
+    const { checkpoints: _dropped, ...older } = doc.steps[0] as Record<string, unknown>;
+    const parsed = workflowDocumentSchema.parse({ ...doc, steps: [older] });
+    expect(parsed.steps[0]?.checkpoints).toEqual([]);
   });
 
   it("carries a step's permission posture as itself — it is not a name to resolve", () => {
@@ -180,6 +197,7 @@ describe("workflowDocumentSchema", () => {
       mcpServers: [],
       skills: [],
       permissionMode: null,
+      checkpoints: [],
     });
   });
 });

@@ -41,6 +41,7 @@ function step(id: string, rank: string): WorkflowStepDto {
     mcpServerIds: [],
     skillIds: [],
     permissionMode: null,
+    checkpoints: [],
     createdAt: AT,
     updatedAt: AT,
   };

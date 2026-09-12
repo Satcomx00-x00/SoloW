@@ -35,6 +35,14 @@ Step on its own harness session, and the handoff (summary, diff, decision) trave
      stalls), or \`"bypassPermissions"\` (never asks). Omit it, or send null, to use the Step's
      Harness Profile's own setting. A Step is a harness launch, so this is a launch parameter like
      the two above: a planning Step and a building Step can share one Profile and differ here.
+   - \`checkpoints\` — actions a person waves through one by one while the Step runs, as a list
+     of \`{ on: "command" | "write", match, label }\`: \`command\` matches a regular expression
+     against a shell command the harness runs, \`write\` matches a glob against a path it
+     writes. The harness stops at each match until the operator answers in the transcript; no
+     answer is a refusal. Typical: \`{ on: "command", match: "drizzle-kit|db:migrate", label:
+     "Runs a database migration" }\`, \`{ on: "write", match: "**/migrations/**", label: "Writes a
+     migration" }\`. Enforced on Claude Code (stream-json) Steps; other protocols keep the list
+     and the run says it was not enforced.
 4. \`workflow_updateStep\` with \`branch\` — after every Step exists, add the conditions:
    \`{ when, thenStepId, elseStepId }\`, where \`when\` is one of
    \`{ kind: "agent-decides", question: "…?" }\` (the Step's harness answers yes or no — in its

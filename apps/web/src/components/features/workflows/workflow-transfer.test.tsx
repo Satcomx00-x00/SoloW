@@ -37,6 +37,7 @@ const STEP: WorkflowStepDto = {
   mcpServerIds: [],
   skillIds: [],
   permissionMode: null,
+  checkpoints: [],
   createdAt: AT,
   updatedAt: AT,
 };

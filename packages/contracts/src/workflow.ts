@@ -119,6 +119,42 @@ export type WorkflowStepBranch = z.infer<typeof workflowStepBranchSchema>;
 export const workflowStepPermissionModeSchema = harnessPermissionModeSchema.nullable();
 
 /**
+ * A checkpoint: one kind of action this Step's harness has to have waved through by a person
+ * before it happens (review analysis of task 9f4bd3e9, point 4).
+ *
+ * Between "the harness may do anything inside its worktree" and "a person judges the whole diff
+ * at the end" there was nothing. A Build Step applied the migration, regenerated the lockfile and
+ * would have pushed the branch, and the gate saw the three as one diff to take or leave. A
+ * checkpoint names the action — a shell command matching a regular expression, or a write to a
+ * path matching a glob — and the harness stops there until the operator answers, on the same
+ * transcript card an ACP permission is answered on. Nobody answering is a refusal, never a grant.
+ *
+ * On the Step and not on the Profile, for the reason `permissionMode` is: a Step is a harness
+ * launch, and a Plan Step needs none of the checkpoints its Build Step does. Enforced through the
+ * harness's own hook mechanism, which only the stream-json protocol offers today — a Step on
+ * another protocol keeps its list, and the run says the list was not enforced.
+ */
+export const workflowCheckpointSchema = z
+  .object({
+    /** What is watched: a command the harness runs, or a file it writes. */
+    on: z.enum(["command", "write"]),
+    /** A regular expression over the command line, or a glob over the path (`**`, `*`, `{a,b}`). */
+    match: z.string().min(1).max(200),
+    /** Why a person is asked — the words the request carries. */
+    label: z.string().min(1).max(120),
+  })
+  .superRefine((rule, ctx) => {
+    if (rule.on !== "command") return;
+    try {
+      new RegExp(rule.match);
+    } catch {
+      ctx.addIssue({ code: "custom", path: ["match"], message: "Not a regular expression." });
+    }
+  });
+export type WorkflowCheckpoint = z.infer<typeof workflowCheckpointSchema>;
+export const workflowCheckpointsSchema = z.array(workflowCheckpointSchema).max(20);
+
+/**
  * Workflow error codes.
  *
  * They live here rather than in `errors.ts` for the reason `TaskDependencyErrorCode` does:
@@ -237,6 +273,8 @@ export const addWorkflowStepInput = z.object({
   skillIds: z.array(idSchema).max(64).optional(),
   /** Null, or absent, leaves the posture to the Step's Harness Profile. */
   permissionMode: workflowStepPermissionModeSchema.optional(),
+  /** Actions a person waves through, one by one, while this Step runs. Absent means none. */
+  checkpoints: workflowCheckpointsSchema.optional(),
   afterStepId: idSchema.nullable().optional(),
 });
 export type AddWorkflowStepInput = z.infer<typeof addWorkflowStepInput>;
@@ -256,6 +294,8 @@ export const updateWorkflowStepInput = z.object({
   skillIds: z.array(idSchema).max(64).optional(),
   /** Null hands the posture back to the Harness Profile; a value overrides it for this Step. */
   permissionMode: workflowStepPermissionModeSchema.optional(),
+  /** The whole list, replaced — the same rule as the libraries. */
+  checkpoints: workflowCheckpointsSchema.optional(),
 });
 export type UpdateWorkflowStepInput = z.infer<typeof updateWorkflowStepInput>;
 
@@ -364,6 +404,7 @@ export const workflowStepDto = z
     mcpServerIds: z.array(idSchema),
     skillIds: z.array(idSchema),
     permissionMode: workflowStepPermissionModeSchema,
+    checkpoints: workflowCheckpointsSchema,
   })
   .merge(timestampsSchema);
 export type WorkflowStepDto = z.infer<typeof workflowStepDto>;
@@ -542,6 +583,8 @@ export const workflowDocumentStepSchema = z.object({
    * it means on the way out.
    */
   permissionMode: workflowStepPermissionModeSchema.default(null),
+  /** Patterns and labels, nothing to resolve: a checkpoint means the same thing everywhere. */
+  checkpoints: workflowCheckpointsSchema.default([]),
 });
 export type WorkflowDocumentStep = z.infer<typeof workflowDocumentStepSchema>;
 

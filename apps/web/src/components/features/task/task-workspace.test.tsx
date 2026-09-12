@@ -379,6 +379,43 @@ describe("TaskWorkspace review gate", () => {
     );
   });
 
+  it("says in the footer what the running harness is stopped on, until it is answered", async () => {
+    const ask = {
+      kind: "permission_request" as const,
+      requestId: "checkpoint:r1:1",
+      title: "Pushes: git push origin feature",
+      toolKind: "Bash",
+      options: [
+        { optionId: "allow", name: "Allow once", kind: "allow_once" },
+        { optionId: "deny", name: "Deny", kind: "reject_once" },
+      ],
+    };
+    const settled = {
+      kind: "permission_resolved" as const,
+      requestId: "checkpoint:r1:1",
+      optionId: "allow",
+      decidedBy: "operator" as const,
+    };
+    const { unmount } = renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
+      "task.get": () => task({ state: "running" }),
+      "session.listForTask": () => [session],
+      "session.get": () => detail([ask]),
+    });
+    expect(await screen.findByRole("button", { name: "Go to the question" })).toBeDefined();
+    expect(screen.getByRole("status").textContent).toContain("git push origin feature");
+    // The card in the transcript is still the one place it is answered.
+    expect(screen.getAllByRole("button", { name: "Allow once" })).toHaveLength(1);
+    unmount();
+
+    renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
+      "task.get": () => task({ state: "running" }),
+      "session.listForTask": () => [session],
+      "session.get": () => detail([ask, settled]),
+    });
+    await screen.findByText(/The harness is working/);
+    expect(screen.queryByRole("button", { name: "Go to the question" })).toBeNull();
+  });
+
   it("offers Open review on a Workflow Step that finished with nothing to do — the plan is what is reviewed", async () => {
     const { log } = renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
       "task.get": () =>

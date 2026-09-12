@@ -28,6 +28,7 @@ import type {
   TaskCompletionOutcome,
   TaskState,
   WorkflowAdvanceOn,
+  WorkflowCheckpoint,
   WorkflowStepAutomation,
   WorkflowStepBranch,
   WorkflowStepGate,
@@ -744,6 +745,16 @@ export const workflowStep = sqliteTable(
      * Profile when the Profile is re-postured.
      */
     permissionMode: text("permission_mode").$type<HarnessPermissionMode>(),
+    /**
+     * Actions of this Step's harness a person waves through one by one (review analysis of task
+     * 9f4bd3e9, point 4) — `{ on, match, label }` rules, applied by the orchestrator to what
+     * the harness's own hook reports. On the Step for the reason `permission_mode` is; a JSON
+     * list because a rule is read only by the launch of its own Step and replaced whole.
+     */
+    checkpoints: text("checkpoints", { mode: "json" })
+      .$type<WorkflowCheckpoint[]>()
+      .notNull()
+      .default(sql`'[]'`),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

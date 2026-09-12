@@ -108,6 +108,7 @@ import { clearStrandedPark } from "../../reconcile.js";
 import {
   adoptWorktree,
   type CloneCredential,
+  checkpointStorePath,
   cleanupWorktree,
   commitWorktree,
   diffWorktree,
@@ -186,6 +187,8 @@ interface RunLeg {
    * `launchSettingsFor` — and because a Step boundary has to be able to change it.
    */
   permissionMode: WorkflowStepDto["permissionMode"];
+  /** What this Step's harness stops for (`harness/checkpoints.ts`); none on a Task with no Step. */
+  checkpoints: WorkflowStepDto["checkpoints"];
   /**
    * The Step's prompt with the previous Step's handoff already prepended — `buildStepBrief`'s
    * output, carried from `loadTaskWorkflowRun` or from the advance DTO and never re-derived here.
@@ -212,7 +215,7 @@ type LegAdvance =
  * Workflow the Profile changes at a Step boundary and the launch settings have to change with it
  * — a Step pinned to a planning model must not be launched with the previous Step's pin.
  */
-function launchSettingsFor(leg: RunLeg): HarnessLaunchSettings {
+function launchSettingsFor(leg: RunLeg, checkpointStore: string): HarnessLaunchSettings {
   const profile = leg.harnessProfile;
   return {
     // The Step's posture wins where it has one, because a Step *is* a harness launch: the same
@@ -222,6 +225,11 @@ function launchSettingsFor(leg: RunLeg): HarnessLaunchSettings {
     permissionMode: leg.permissionMode ?? profile.permissionMode,
     ...(profile.model ? { model: profile.model } : {}),
     ...(profile.modeId ? { modeId: profile.modeId } : {}),
+    // The Step's checkpoints, with the per-Task store their hook relays through. Only a Step
+    // has any; the store is the Task's, so a second Step's rules answer in the same place.
+    ...(leg.checkpoints.length > 0
+      ? { checkpoints: { rules: leg.checkpoints, store: checkpointStore } }
+      : {}),
   };
 }
 
@@ -463,6 +471,7 @@ export function defaultDeps(): TaskRunDeps {
         permissionMode: settings.permissionMode,
         ...(settings.model ? { model: settings.model } : {}),
         ...(settings.modeId ? { modeId: settings.modeId } : {}),
+        ...(settings.checkpoints ? { checkpoints: settings.checkpoints } : {}),
         unattendedPermissionPosture: env.SOLOW_ACP_UNATTENDED_PERMISSION,
       }),
     worktreeRoot: env.SOLOW_WORKTREE_ROOT,
@@ -919,6 +928,7 @@ export async function runTaskLifecycle(
     harnessProfile: ctx.harnessProfile,
     harnessCatalog: ctx.harnessCatalog,
     permissionMode: null,
+    checkpoints: [],
     stepBrief: null,
   });
 
@@ -938,9 +948,13 @@ export async function runTaskLifecycle(
       harnessProfile: bound.harnessProfile,
       harnessCatalog: bound.harnessCatalog,
       permissionMode: workflowStep.permissionMode,
+      checkpoints: workflowStep.checkpoints,
       stepBrief: brief,
     };
   };
+  // Where a Step's checkpoint hook and this process meet — one directory per Task, beside its
+  // transcripts, so a container can be handed it the same way (`harness/checkpoints.ts`).
+  const checkpointStore = checkpointStorePath(deps.worktreeRoot, taskId);
 
   const entryLeg = wf ? legForStep(wf.currentStep, wf.brief) : legForTask();
   if (!entryLeg) {
@@ -972,7 +986,7 @@ export async function runTaskLifecycle(
    * through the one seam that already existed for the permission mode. Under a Workflow this is
    * the entry Step's Profile; a Step boundary rebuilds it, and re-emits the notice below.
    */
-  const launchSettings: HarnessLaunchSettings = launchSettingsFor(entryLeg);
+  const launchSettings: HarnessLaunchSettings = launchSettingsFor(entryLeg, checkpointStore);
 
   /*
    * A setting this protocol cannot carry is **said**, never dropped (issue #94 AC-3).
@@ -1071,6 +1085,9 @@ export async function runTaskLifecycle(
     // The harness's transcripts, kept on the host so a containerised Task can resume its
     // conversation (history retention); the local driver ignores it — its `$HOME` is the host's.
     transcriptStore: harnessTranscriptsPath(deps.worktreeRoot, taskId),
+    // Bound at its own path so the hook a Step's launch settings name is the file the container
+    // runs; the local driver shares the filesystem and ignores it.
+    checkpointStore,
     // What this run is going to spawn, probed once by the preflight so a missing harness binary
     // throws on the line the runners already guard rather than arriving as an exit 127.
     //
@@ -1654,7 +1671,7 @@ export async function runTaskLifecycle(
       }
       const rebuiltRunner = deps.runner(
         nextLeg.harnessCatalog.protocol,
-        launchSettingsFor(nextLeg),
+        launchSettingsFor(nextLeg, checkpointStore),
         executor,
       );
       if (!rebuiltRunner) {
@@ -1707,7 +1724,7 @@ export async function runTaskLifecycle(
       // id, so the bare one stays exactly what a Task with no Workflow emits.
       const legUnsupported = unsupportedLaunchSettings(
         nextLeg.harnessCatalog.protocol,
-        launchSettingsFor(nextLeg),
+        launchSettingsFor(nextLeg, checkpointStore),
       );
       if (legUnsupported.length > 0) {
         await step.run(`launch-settings-unsupported-${round}`, async () => {

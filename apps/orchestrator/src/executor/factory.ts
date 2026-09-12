@@ -47,6 +47,12 @@ export interface ExecutorFactoryOpts {
   bindPaths?: string[];
   /** The Task's harness transcript store on the host, mounted as the container's `.claude/projects`. */
   transcriptStore?: string;
+  /**
+   * The Task's checkpoint store (`checkpointStorePath`), mounted at its own path so the hook the
+   * launch settings name by absolute path is the file the container runs. Local runs share the
+   * filesystem and need nothing.
+   */
+  checkpointStore?: string;
   /** What this Task will `spawn`, so the preflight can prove it exists before the harness starts. */
   harnessCommands?: readonly string[];
   /**
@@ -157,6 +163,7 @@ export function dockerOpts(opts: ExecutorFactoryOpts): PreflightOpts {
     repoCacheRoot: opts.repoCacheRoot,
     bindPaths: opts.bindPaths ?? [],
     ...(opts.transcriptStore ? { transcriptStore: opts.transcriptStore } : {}),
+    ...(opts.checkpointStore ? { checkpointStore: opts.checkpointStore } : {}),
     dockerBin: env.SOLOW_DOCKER_BIN,
     user: env.SOLOW_DOCKER_USER ?? defaultContainerUser(),
     pullTimeoutMs: env.SOLOW_DOCKER_PULL_TIMEOUT_MS,

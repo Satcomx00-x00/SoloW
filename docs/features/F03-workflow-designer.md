@@ -342,6 +342,19 @@ The model, its seam and the designing canvas ship; the monitor does not. Concret
   produces one Session per Step so a completion report can be attributed to the Step it came from.
 - **Automations are a Step property.** `workflow_step.on_enter` is reserved for the automations of
   row 08, so an automation is a field on a Step rather than a second rules engine.
+- **A Step can declare checkpoints** ([Decision 0026](../decisions/0026-checkpoints-through-harness-hooks.md)):
+  actions of its harness a person waves through one by one while the Step runs, as
+  `{ on: "command" | "write", match, label }` rules — a regular expression over a shell command,
+  or a glob over a path written. Between "the harness may do anything in its worktree" and "a
+  person judges the whole diff at the end" there was nothing: a Build Step ran the migration,
+  regenerated the lockfile and would have pushed, and the gate saw one diff. A checkpoint stops
+  the harness at the action and asks, on the same transcript card an ACP permission is answered
+  on; the Task page's footer says what the harness is waiting on. No answer within the deadline
+  is a refusal, never a grant. The designer offers presets (migrations, dependencies, pushes,
+  destructive commands, migration files, environment files and keys) and a custom rule. The
+  list is on the Step, for the reason `permissionMode` is, and travels in an exported document
+  as itself. Enforced through Claude Code's own `PreToolUse` hook on stream-json Steps; a Step
+  on another protocol keeps its list and the run's log says it was not enforced.
 
 ## The run loop (issue #5, AC-2/AC-3/AC-5)
 

@@ -466,6 +466,30 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
     return [...byId.values()];
   }, [events, live.events, liveSessionId]);
   const hasPlan = todos.length > 0 || stepCard !== null || decisions.length > 0;
+  /**
+   * What the harness is stopped on, waiting for a person — a checkpoint (review analysis, point
+   * 4) or an ACP permission — from both sources, with the answered ones dropped. The footer
+   * shows the newest and points at its card; the card itself is where it is answered.
+   */
+  const waiting = useMemo<{ requestId: string; title: string } | null>(() => {
+    const open = new Map<string, { requestId: string; title: string }>();
+    for (const event of events) {
+      const payload = event.payload;
+      if (payload.kind === "permission_request") {
+        open.set(payload.requestId, { requestId: payload.requestId, title: payload.title });
+      } else if (payload.kind === "permission_resolved") {
+        open.delete(payload.requestId);
+      }
+    }
+    for (const event of live.events) {
+      if (event.kind === "permission_request" && event.sessionId === liveSessionId) {
+        open.set(event.requestId, { requestId: event.requestId, title: event.title });
+      } else if (event.kind === "permission_resolved" && event.sessionId === liveSessionId) {
+        open.delete(event.requestId);
+      }
+    }
+    return [...open.values()].at(-1) ?? null;
+  }, [events, live.events, liveSessionId]);
   // The harness's own report, for what it left open (point 5 of the review analysis).
   const completion = useMemo<TaskCompleteWidget | null>(() => {
     for (let i = live.events.length - 1; i >= 0; i -= 1) {
@@ -1193,6 +1217,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
           }
           openItems={openItems}
           decisionsPending={decisionsPending}
+          waiting={isRunning ? waiting : null}
           notes={{
             count: draft.draft.notes.length,
             general: draft.draft.general,

@@ -146,18 +146,16 @@ describe("getReviewBrief", () => {
         },
       },
     ];
-    await db
-      .insert(sessionEvent)
-      .values(
-        rows.map((row, seq) => ({
-          workspaceId: g.workspaceId,
-          sessionId: sess.id,
-          seq,
-          kind: row.kind,
-          payload: row.payload,
-          at,
-        })),
-      );
+    await db.insert(sessionEvent).values(
+      rows.map((row, seq) => ({
+        workspaceId: g.workspaceId,
+        sessionId: sess.id,
+        seq,
+        kind: row.kind,
+        payload: row.payload,
+        at,
+      })),
+    );
 
     const brief = await getReviewBrief(ctx, sess.id);
     if (!brief.ok) throw new Error("brief failed");

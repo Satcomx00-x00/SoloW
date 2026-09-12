@@ -100,6 +100,8 @@ export interface DockerExecutorOpts {
    * credential caches inside the container. Under `worktreeRoot`, so the mount guard admits it.
    */
   transcriptStore?: string;
+  /** The Task's checkpoint store, bound at its own path — the hook is named by absolute path. */
+  checkpointStore?: string;
   /** `SOLOW_DOCKER_BIN`. Named by the caller so a wrapper script is a deployment setting. */
   dockerBin?: string;
   /** `uid:gid` for everything inside the container. See `runArgs`. */
@@ -786,6 +788,12 @@ async function bindsFor(
   const byTarget = new Map<string, Bind>();
   for (const path of [opts.jailRoot, ...(opts.bindPaths ?? [])]) {
     const source = await guardMountSource(path, opts, resolveLinks);
+    byTarget.set(source, { source, target: source, readOnly: false });
+  }
+  if (opts.checkpointStore) {
+    // Identical-path, like the worktrees: the CLI's launch settings name the hook by the host's
+    // absolute path, and that string is what the container executes.
+    const source = await guardMountSource(opts.checkpointStore, opts, resolveLinks);
     byTarget.set(source, { source, target: source, readOnly: false });
   }
   if (opts.transcriptStore) {

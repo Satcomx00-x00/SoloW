@@ -76,6 +76,12 @@ export interface ClaudeSessionOptions {
    * `buildArgs` for why the two cannot both be honoured.
    */
   resumeSessionId?: string;
+  /**
+   * Settings for this launch, as the JSON the CLI's `--settings` takes — what the orchestrator
+   * uses to install the checkpoint hook. Inline rather than a file: the file would have to be
+   * somewhere both the host and a container see, and the argv already is.
+   */
+  settings?: string;
   onUpdate: (update: ClaudeUpdate) => void;
   onStderr?: (text: string) => void;
 }
@@ -94,6 +100,8 @@ export function buildArgs(options: {
   model?: string;
   /** A conversation to carry on. Wins over `worktreeName` outright — see below. */
   resumeSessionId?: string;
+  /** Inline settings JSON (`--settings`), or absent for the CLI's own. */
+  settings?: string;
   extraArgs?: string[];
 }): string[] {
   /*
@@ -139,6 +147,9 @@ export function buildArgs(options: {
      * cannot go stale.
      */
     ...(options.model ? ["--model", options.model] : []),
+    // Hooks and the like for this one launch, on top of whatever settings the host has. Before
+    // the extras so a configured extra can still override it — the operator's argv is last.
+    ...(options.settings ? ["--settings", options.settings] : []),
     ...(options.extraArgs ?? []),
   ];
 }
@@ -178,6 +189,7 @@ export function startClaudeSession(
         permissionMode: options.permissionMode,
         ...(options.model ? { model: options.model } : {}),
         ...(options.resumeSessionId ? { resumeSessionId: options.resumeSessionId } : {}),
+        ...(options.settings ? { settings: options.settings } : {}),
         ...(options.extraArgs ? { extraArgs: options.extraArgs } : {}),
       }),
     ],
