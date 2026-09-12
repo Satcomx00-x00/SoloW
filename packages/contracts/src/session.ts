@@ -100,6 +100,12 @@ export const taskDiffDto = z.object({
   /** True when `patch` was cut short. `files` is always complete. */
   truncated: z.boolean(),
   /**
+   * Generated files whose bodies the capture left out to stay within its bound, listed but not
+   * readable here. The file list is still complete, and what a person wrote was kept first: a
+   * snapshot of six thousand lines used to be what cut the migration beside it short.
+   */
+  omitted: z.array(z.string()).optional(),
+  /**
    * Which Repository this change belongs to (issue #7 AC-4) — a Task now spans several, and a
    * reviewer reading one flat file list could not tell which repository a path came from.
    *

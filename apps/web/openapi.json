@@ -23827,6 +23827,12 @@
                                   "truncated": {
                                     "type": "boolean"
                                   },
+                                  "omitted": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  },
                                   "repositoryId": {
                                     "type": "string"
                                   },
@@ -24607,6 +24613,12 @@
                         "truncated": {
                           "type": "boolean"
                         },
+                        "omitted": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
                         "repositoryId": {
                           "type": "string"
                         },
@@ -24668,6 +24680,12 @@
                           },
                           "truncated": {
                             "type": "boolean"
+                          },
+                          "omitted": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
                           },
                           "repositoryId": {
                             "type": "string"
@@ -24813,6 +24831,12 @@
                                 },
                                 "truncated": {
                                   "type": "boolean"
+                                },
+                                "omitted": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
                                 },
                                 "repositoryId": {
                                   "type": "string"
@@ -25391,6 +25415,12 @@
                               },
                               "truncated": {
                                 "type": "boolean"
+                              },
+                              "omitted": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
                               },
                               "repositoryId": {
                                 "type": "string"
@@ -26686,6 +26716,12 @@
                               },
                               "truncated": {
                                 "type": "boolean"
+                              },
+                              "omitted": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
                               },
                               "repositoryId": {
                                 "type": "string"

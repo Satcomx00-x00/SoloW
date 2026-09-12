@@ -1,4 +1,5 @@
 import type { ScmFileDto, ScmWorktreeDto, TaskDiffDto } from "@solow/contracts";
+import { isGeneratedPath, orderForReading } from "@solow/core";
 
 /**
  * The source-control panel over a *captured* diff (spec F22, "the worktree is gone").
@@ -20,11 +21,14 @@ const LETTER: Record<TaskDiffDto["files"][number]["status"], string> = {
 };
 
 export function scmFromCapturedDiff(diff: TaskDiffDto, reason: string): ScmWorktreeDto {
-  const files: ScmFileDto[] = diff.files.map((file) => ({
+  // Reading order, not git's: the migration first, the tests last, and a tool's output folded
+  // under its own group at the very end (`change-nature` in @solow/core, the rule the capture
+  // itself was bounded by).
+  const files: ScmFileDto[] = orderForReading(diff.files).map((file) => ({
     path: file.path,
     // Every captured file is an uncommitted working-tree change: the capture runs before the
     // gate commits anything, so nothing in it has been staged in the sense the panel means.
-    group: "changes",
+    group: isGeneratedPath(file.path) ? "generated" : "changes",
     kind: file.status,
     letter: LETTER[file.status] ?? "M",
     additions: file.additions,

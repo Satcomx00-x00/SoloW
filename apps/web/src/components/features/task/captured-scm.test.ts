@@ -44,6 +44,34 @@ describe("scmFromCapturedDiff", () => {
     expect(worktree.branch.name).toBe("worktree-solow-task-83b3a0d4");
   });
 
+  it("folds a tool's output under its own group and orders the rest for reading", () => {
+    const worktree = scmFromCapturedDiff(
+      diff({
+        files: [
+          {
+            path: "packages/db/drizzle/meta/0044_snapshot.json",
+            status: "added",
+            additions: 6194,
+            deletions: 0,
+          },
+          { path: "apps/api/test/x.test.ts", status: "added", additions: 10, deletions: 0 },
+          {
+            path: "packages/db/drizzle/0044_add.sql",
+            status: "added",
+            additions: 14,
+            deletions: 0,
+          },
+        ],
+      }),
+      "captured",
+    );
+    expect(worktree.files.map((f) => [f.path, f.group])).toEqual([
+      ["packages/db/drizzle/0044_add.sql", "changes"],
+      ["apps/api/test/x.test.ts", "changes"],
+      ["packages/db/drizzle/meta/0044_snapshot.json", "generated"],
+    ]);
+  });
+
   it("is never writable, because there is no working tree behind it", () => {
     const worktree = scmFromCapturedDiff(diff(), "the worktree was cleaned up");
 

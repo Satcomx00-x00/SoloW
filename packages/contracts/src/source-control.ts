@@ -35,7 +35,11 @@ export const scmPathSchema = z
  * status read returns it twice, once per group, exactly as git reports it and as an editor
  * draws it.
  */
-export const scmGroupSchema = z.enum(["merge", "staged", "changes", "untracked"]);
+/**
+ * `generated` is the panel's own group, never git's: a captured change folds the files no
+ * person wrote (`isGeneratedPath` in @solow/core) under it, read last and counted apart.
+ */
+export const scmGroupSchema = z.enum(["merge", "staged", "changes", "untracked", "generated"]);
 export type ScmGroup = z.infer<typeof scmGroupSchema>;
 
 /** What happened to the file, in the vocabulary the rest of the product already uses. */

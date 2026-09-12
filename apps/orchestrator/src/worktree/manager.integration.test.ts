@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { $ } from "bun";
@@ -173,6 +173,31 @@ describe("diffWorktree", () => {
     expect(diff.patch.length).toBe(DIFF_PATCH_LIMIT);
     expect(diff.files.some((f) => f.path === "huge.txt")).toBe(true);
     expect(diff.files.some((f) => f.path === "small.txt")).toBe(true);
+  });
+
+  it("folds a generated file's body before cutting anything a person wrote", async () => {
+    // The change that prompted this: a 6 194-line drizzle snapshot beside a 14-line migration,
+    // and a bound that cut the migration short while carrying the snapshot whole.
+    const wt = await freshWorktree();
+    mkdirSync(join(wt.path, "drizzle", "meta"), { recursive: true });
+    writeFileSync(
+      join(wt.path, "drizzle", "meta", "0044_snapshot.json"),
+      `${'{"x": 1}\n'.repeat(DIFF_PATCH_LIMIT / 8)}`,
+    );
+    writeFileSync(join(wt.path, "drizzle", "0044_add_table.sql"), "CREATE TABLE t (id int);\n");
+
+    const diff = await diffWorktree(executor, wt.path);
+    expect(diff.truncated).toBe(false);
+    expect(diff.omitted).toEqual(["drizzle/meta/0044_snapshot.json"]);
+    // The migration reads first and whole; the snapshot is listed, headed, and no more.
+    expect(diff.files.map((f) => f.path)).toEqual([
+      "drizzle/0044_add_table.sql",
+      "drizzle/meta/0044_snapshot.json",
+    ]);
+    // Whatever prefix this host's git prints (`a/`, or `c/` under `diff.mnemonicPrefix`).
+    expect(diff.patch).toMatch(/^diff --git \S+\/drizzle\/0044_add_table\.sql /);
+    expect(diff.patch).toContain("CREATE TABLE t");
+    expect(diff.patch).not.toContain('"x": 1');
   });
 
   it("leaves the worktree committable, so intent-to-add did not break the approve path", async () => {

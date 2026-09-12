@@ -32,13 +32,16 @@ import { buildScmTree, type ScmTreeNode, splitPath } from "./source-control-tree
  * harness is running and a browser can only know that one turn late (`writable` on the DTO).
  */
 
-const GROUP_ORDER: ScmGroup[] = ["merge", "staged", "changes", "untracked"];
+const GROUP_ORDER: ScmGroup[] = ["merge", "staged", "changes", "untracked", "generated"];
 
 const GROUP_LABEL: Record<ScmGroup, string> = {
   merge: "Merge Changes",
   staged: "Staged Changes",
   changes: "Changes",
   untracked: "Untracked",
+  // A captured change's tool output — snapshots, artefacts, lockfiles — folded by default: it is
+  // listed so nothing is hidden, and closed so nobody reads a 6 000-line snapshot for the diff.
+  generated: "Generated",
 };
 
 /** The letter's colour says the same thing the letter does, for anyone scanning rather than reading. */
@@ -316,7 +319,9 @@ export function SourceControlPanel({
   /** Present on a captured change under review; absent on a live worktree. */
   viewedFiles?: ViewedFiles | undefined;
 }) {
-  const [collapsed, setCollapsed] = useState<Partial<Record<ScmGroup, boolean>>>({});
+  const [collapsed, setCollapsed] = useState<Partial<Record<ScmGroup, boolean>>>({
+    generated: true,
+  });
   const [pendingDiscard, setPendingDiscard] = useState<ScmFileDto[] | null>(null);
 
   const groups = GROUP_ORDER.map((group) => ({

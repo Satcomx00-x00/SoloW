@@ -1,4 +1,7 @@
 import type { TaskDiffDto } from "@solow/contracts";
+import { isGeneratedPath, LOCKFILE_NAMES } from "@solow/core";
+
+export { LOCKFILE_NAMES };
 
 /**
  * What a captured change amounts to, before anyone reads a line of it.
@@ -16,47 +19,39 @@ export interface ChangeSummary {
   deleted: string[];
   /** Dependency lockfiles among the changed files — churn that is rarely reviewed line by line. */
   lockfiles: string[];
+  /** A tool's output among the changed files — folded under its own group, counted apart. */
+  generated: string[];
+  /** The lines in those, so the human share of the change can be stated ("+340 of +8 311"). */
+  generatedLines: number;
+  /** Generated files whose bodies the capture left out to stay within its bound. */
+  omitted: string[];
   /** True when the patch was cut short; the file list is always complete. */
   truncated: boolean;
 }
-
-/**
- * The lockfile names this build knows. Matched on the basename, so a lockfile anywhere in a
- * monorepo counts. A name added here is a name that starts being flagged — nothing else reads it.
- */
-export const LOCKFILE_NAMES: ReadonlySet<string> = new Set([
-  "bun.lock",
-  "bun.lockb",
-  "package-lock.json",
-  "npm-shrinkwrap.json",
-  "yarn.lock",
-  "pnpm-lock.yaml",
-  "Cargo.lock",
-  "poetry.lock",
-  "uv.lock",
-  "Pipfile.lock",
-  "go.sum",
-  "Gemfile.lock",
-  "composer.lock",
-  "mix.lock",
-  "flake.lock",
-]);
 
 function basename(path: string): string {
   const slash = path.lastIndexOf("/");
   return slash === -1 ? path : path.slice(slash + 1);
 }
 
-export function summariseDiff(diff: Pick<TaskDiffDto, "files" | "truncated">): ChangeSummary {
+export function summariseDiff(
+  diff: Pick<TaskDiffDto, "files" | "truncated"> & { omitted?: string[] | undefined },
+): ChangeSummary {
   let additions = 0;
   let deletions = 0;
+  let generatedLines = 0;
   const deleted: string[] = [];
   const lockfiles: string[] = [];
+  const generated: string[] = [];
   for (const file of diff.files) {
     additions += file.additions;
     deletions += file.deletions;
     if (file.status === "deleted") deleted.push(file.path);
     if (LOCKFILE_NAMES.has(basename(file.path))) lockfiles.push(file.path);
+    if (isGeneratedPath(file.path)) {
+      generated.push(file.path);
+      generatedLines += file.additions + file.deletions;
+    }
   }
   return {
     files: diff.files.length,
@@ -64,6 +59,9 @@ export function summariseDiff(diff: Pick<TaskDiffDto, "files" | "truncated">): C
     deletions,
     deleted,
     lockfiles,
+    generated,
+    generatedLines,
+    omitted: diff.omitted ?? [],
     truncated: diff.truncated,
   };
 }

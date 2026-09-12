@@ -32,6 +32,29 @@ describe("summariseDiff", () => {
     expect(summary.lockfiles).toEqual(["apps/web/bun.lock"]);
   });
 
+  it("counts a tool's output apart, and names what the capture left out", () => {
+    const summary = summariseDiff({
+      ...diff,
+      files: [
+        ...diff.files,
+        {
+          path: "packages/db/drizzle/meta/0044_snapshot.json",
+          status: "added" as const,
+          additions: 6194,
+          deletions: 0,
+        },
+      ],
+      omitted: ["packages/db/drizzle/meta/0044_snapshot.json"],
+    });
+    // The lockfile is generated too — it is folded, and it is still flagged as churn.
+    expect(summary.generated).toEqual([
+      "apps/web/bun.lock",
+      "packages/db/drizzle/meta/0044_snapshot.json",
+    ]);
+    expect(summary.generatedLines).toBe(300 + 6194);
+    expect(summary.omitted).toEqual(["packages/db/drizzle/meta/0044_snapshot.json"]);
+  });
+
   it("carries the capture's truncation through untouched", () => {
     expect(summariseDiff({ ...diff, truncated: true }).truncated).toBe(true);
     expect(summariseDiff({ files: [], truncated: false })).toEqual({
@@ -40,6 +63,9 @@ describe("summariseDiff", () => {
       deletions: 0,
       deleted: [],
       lockfiles: [],
+      generated: [],
+      generatedLines: 0,
+      omitted: [],
       truncated: false,
     });
   });

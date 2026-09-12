@@ -160,6 +160,13 @@ function ChangeStats({ summary }: { summary: ReturnType<typeof summariseDiff> })
       text: "Patch cut short — the file list is complete, the diff is not. Check out the branch to read the rest.",
     });
   }
+  if (summary.omitted.length > 0) {
+    flags.push({
+      key: "omitted",
+      icon: Scissors,
+      text: `${summary.omitted.length === 1 ? "1 generated file's body" : `${summary.omitted.length} generated files' bodies`} left out of the capture to keep it readable: ${summary.omitted.join(", ")}. Listed, not shown.`,
+    });
+  }
   if (summary.deleted.length > 0) {
     flags.push({
       key: "deleted",
@@ -179,7 +186,7 @@ function ChangeStats({ summary }: { summary: ReturnType<typeof summariseDiff> })
   }
   return (
     <div className="space-y-1" data-change-stats>
-      <p className="flex items-center gap-2 text-xs">
+      <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
         <span className="font-medium">
           {summary.files} {summary.files === 1 ? "file" : "files"}
         </span>
@@ -187,6 +194,14 @@ function ChangeStats({ summary }: { summary: ReturnType<typeof summariseDiff> })
           <span className="text-feedback-ok">+{summary.additions}</span>{" "}
           <span className="text-feedback-error">−{summary.deletions}</span>
         </span>
+        {summary.generated.length > 0 ? (
+          // The human share of the change, said next to the total: "+8 311" over a change whose
+          // hand-written half is +1 838 is a number that misleads by an order of magnitude.
+          <span className="text-2xs text-muted-foreground">
+            · {summary.generated.length} generated ({summary.generatedLines} lines), folded
+          </span>
+        ) : null}
+        <span className="text-2xs text-muted-foreground">· in reading order</span>
       </p>
       {flags.length > 0 ? (
         <ul className="space-y-0.5">

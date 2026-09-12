@@ -13,7 +13,12 @@ import type {
   TaskState,
 } from "@solow/contracts";
 import { DEFAULT_TASK_PANE_LAYOUT, type TaskPaneLayout } from "@solow/contracts";
-import { primaryTaskRepository, retentionExpiresAt, withinRetention } from "@solow/core";
+import {
+  isGeneratedPath,
+  primaryTaskRepository,
+  retentionExpiresAt,
+  withinRetention,
+} from "@solow/core";
 import {
   ArchiveRestore,
   ArrowLeft,
@@ -604,7 +609,11 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
     }
     return n;
   }, [capturedDiffs, draft.viewed]);
-  const fileCount = capturedDiffs.reduce((n, d) => n + d.files.length, 0);
+  // What is there to read: a tool's output is listed but is nobody's to tick off.
+  const fileCount = capturedDiffs.reduce(
+    (n, d) => n + d.files.filter((f) => !isGeneratedPath(f.path)).length,
+    0,
+  );
   /**
    * The three edits the editor can make to the draft's notes, closed over the draft so the
    * panel below never holds a note list of its own. Identity by value — a note is where it is

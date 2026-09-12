@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import type { RepositorySource } from "@solow/contracts";
-import { taskCheckoutBranch } from "@solow/core";
+import { isGeneratedPath, orderForReading, taskCheckoutBranch } from "@solow/core";
 import type { Executor } from "../executor/types.js";
 import { worktreeExclusions } from "./setup-files.js";
 
@@ -685,6 +685,76 @@ export interface WorktreeDiff {
   patch: string;
   /** True when the patch was cut short; the file list is always complete. */
   truncated: boolean;
+  /** Generated files whose bodies were left out of the patch to keep it within its bound. */
+  omitted?: string[];
+}
+
+/** One file's section of a unified diff, with the path its header names. */
+export interface PatchSection {
+  path: string;
+  text: string;
+}
+
+/**
+ * Split a unified diff at its `diff --git` headers, naming each section by the header's
+ * second path with its one-segment prefix (`b/`, `w/`, …) stripped. A section whose header
+ * cannot be read keeps `path: ""` and travels with the rest rather than being dropped.
+ */
+export function splitPatchSections(patch: string): PatchSection[] {
+  const sections: PatchSection[] = [];
+  const lines = patch.split("\n");
+  let current: PatchSection | null = null;
+  for (const line of lines) {
+    if (line.startsWith("diff --git ")) {
+      if (current) sections.push(current);
+      const rest = line.slice("diff --git ".length);
+      const at = rest.lastIndexOf(" ");
+      const dst = at === -1 ? rest : rest.slice(at + 1);
+      const path = dst.includes("/") ? dst.slice(dst.indexOf("/") + 1) : dst;
+      current = { path, text: `${line}\n` };
+    } else if (current) {
+      current.text += `${line}\n`;
+    } else if (line.length > 0) {
+      current = { path: "", text: `${line}\n` };
+    }
+  }
+  if (current) sections.push(current);
+  return sections;
+}
+
+/**
+ * The patch a reviewer is handed: what a person wrote first, in reading order, and a tool's
+ * output last — and, when the whole would not fit, the tool's output is what goes.
+ *
+ * The bound used to be a plain cut at `DIFF_PATCH_LIMIT`, in whatever order git printed the
+ * files. On a real change that put a 6 194-line drizzle snapshot ahead of the migration beside
+ * it, and cut the hand-written half short while the generated half was carried whole. Now the
+ * generated sections are dropped to a bare header — listed, not readable — largest first, until
+ * the rest fits; only if what remains is still over the bound is it cut, and only then is the
+ * patch `truncated`. `omitted` names what was folded, so the panel can say so.
+ */
+export function boundPatch(
+  patch: string,
+  limit: number,
+): { patch: string; truncated: boolean; omitted: string[] } {
+  if (patch.length <= limit) return { patch, truncated: false, omitted: [] };
+  const sections = orderForReading(splitPatchSections(patch));
+  const omitted: string[] = [];
+  let total = sections.reduce((n, section) => n + section.text.length, 0);
+  const generated = sections
+    .filter((section) => section.path !== "" && isGeneratedPath(section.path))
+    .sort((a, b) => b.text.length - a.text.length);
+  for (const section of generated) {
+    if (total <= limit) break;
+    const header = section.text.split("\n").slice(0, 1).join("\n");
+    const kept = `${header}\n`;
+    total -= section.text.length - kept.length;
+    section.text = kept;
+    omitted.push(section.path);
+  }
+  const joined = sections.map((section) => section.text).join("");
+  const truncated = joined.length > limit;
+  return { patch: truncated ? joined.slice(0, limit) : joined, truncated, omitted };
 }
 
 /**
@@ -769,6 +839,20 @@ export async function diffWorktree(
   }
 
   const full = await run(executor, ["git", "-C", path, "diff", "HEAD", ...only]);
-  const truncated = full.length > DIFF_PATCH_LIMIT;
-  return { files, patch: truncated ? full.slice(0, DIFF_PATCH_LIMIT) : full, truncated };
+  // Reading order and the bound, together: a patch small enough to fit is still handed over
+  // ordered, so the migration is the first section whether or not a snapshot sits beside it.
+  const bounded = boundPatch(
+    full.length <= DIFF_PATCH_LIMIT
+      ? orderForReading(splitPatchSections(full))
+          .map((s) => s.text)
+          .join("")
+      : full,
+    DIFF_PATCH_LIMIT,
+  );
+  return {
+    files: orderForReading(files),
+    patch: bounded.patch,
+    truncated: bounded.truncated,
+    ...(bounded.omitted.length > 0 ? { omitted: bounded.omitted } : {}),
+  };
 }
