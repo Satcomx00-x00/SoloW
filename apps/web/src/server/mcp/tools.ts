@@ -65,6 +65,9 @@ const WITHHELD_NAMESPACES = new Set([
   "mcpToken",
   "preference",
   "review",
+  // `history` — what the Owner closed or deleted, and for a harness a list of other Tasks'
+  // worktrees to wander into. First-party only.
+  "history",
   // `library` — the MCP servers and Skills every harness is started with, and the Secrets they
   // reference (spec F24). A token held by a harness must not be able to hand that harness a new
   // server, or point an existing one at a different credential. The two *lists* are let through

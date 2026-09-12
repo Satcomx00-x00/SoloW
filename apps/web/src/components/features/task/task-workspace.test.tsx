@@ -417,6 +417,36 @@ describe("TaskWorkspace meta popover", () => {
   });
 });
 
+describe("TaskWorkspace in History (Decision 0025)", () => {
+  it("reads a deleted task, says how long it has left, and offers Restore and nothing else", async () => {
+    const deletedAt = new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString();
+    const { log } = renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
+      "task.get": () => task({ state: "failed", deletedAt }),
+      "session.listForTask": () => [session],
+      "session.get": () =>
+        detail([{ kind: "assistant_turn", text: "the record survives", thinking: false }]),
+      "task.restore": () => task({ state: "failed" }),
+    });
+
+    const banner = await screen.findByRole("status");
+    expect(banner.textContent).toContain("Deleted 2d ago");
+    expect(banner.textContent).toContain("in History until in 5d");
+    // The page asked for the deleted row by name — the one reader that may.
+    expect(log.calls.find((c) => c.path === "task.get")?.input).toEqual({
+      id: TASK_ID,
+      includeDeleted: true,
+    });
+    // The record is readable; nothing that would act on the Task is offered.
+    expect(await screen.findByText(/the record survives/)).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+    expect(screen.queryByRole("button", { name: `Delete ${"Fix the gate latch"}` })).toBeNull();
+    expect(screen.getByLabelText(/Message the harness/).hasAttribute("disabled")).toBe(true);
+
+    fireEvent.click(within(banner).getByRole("button", { name: "Restore" }));
+    await waitFor(() => expect(log.calls.filter((c) => c.path === "task.restore")).toHaveLength(1));
+  });
+});
+
 describe("TaskWorkspace destructive actions", () => {
   it("does not reject on a single click — the discard is confirmed first", async () => {
     const { log } = renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {

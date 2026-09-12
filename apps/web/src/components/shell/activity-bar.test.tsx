@@ -48,7 +48,7 @@ describe("ActivityBar", () => {
       </TooltipProvider>,
     );
 
-    for (const name of [/^Projects$/, /^Unassigned$/, /^Workflows/, /^Settings$/]) {
+    for (const name of [/^Projects$/, /^Unassigned$/, /^Workflows/, /^History$/, /^Settings$/]) {
       expect(screen.getByRole("link", { name })).toBeTruthy();
     }
     // The sections that really did move inside a Project must not still be reachable from the

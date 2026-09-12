@@ -6,6 +6,7 @@ import {
   Columns3,
   FlaskConical,
   FolderGit2,
+  History,
   Inbox,
   KeyRound,
   type LucideIcon,
@@ -84,6 +85,12 @@ export const WORKSPACE_SECTIONS: readonly Section[] = [
     caption: "Repeatable multi-harness pipelines",
     icon: Workflow,
     wip: true,
+  },
+  {
+    href: "/history",
+    label: "History",
+    caption: "Closed and deleted tasks, 7 days",
+    icon: History,
   },
   {
     href: "/settings",

@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { describe, expect, it } from "bun:test";
-import { relativeAge } from "./relative-time";
+import { relativeAge, relativeUntil } from "./relative-time";
 
 /**
  * The boundaries, pinned — because every one of them is a place the label can quietly become
@@ -42,5 +42,15 @@ describe("relativeAge", () => {
 
   it("answers empty on a timestamp it cannot read rather than rendering NaN", () => {
     expect(relativeAge("not a date", NOW)).toBe("");
+  });
+});
+
+describe("relativeUntil", () => {
+  it("counts forward in the same units, and says now once the moment has passed", () => {
+    const now = Date.parse("2026-01-10T12:00:00.000Z");
+    expect(relativeUntil("2026-01-10T12:30:00.000Z", now)).toBe("in 30m");
+    expect(relativeUntil("2026-01-10T15:00:00.000Z", now)).toBe("in 3h");
+    expect(relativeUntil("2026-01-15T12:00:00.000Z", now)).toBe("in 5d");
+    expect(relativeUntil("2026-01-10T11:00:00.000Z", now)).toBe("now");
   });
 });

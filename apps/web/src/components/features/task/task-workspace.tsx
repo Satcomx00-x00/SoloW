@@ -13,8 +13,9 @@ import type {
   TaskState,
 } from "@solow/contracts";
 import { DEFAULT_TASK_PANE_LAYOUT, type TaskPaneLayout } from "@solow/contracts";
-import { primaryTaskRepository } from "@solow/core";
+import { primaryTaskRepository, retentionExpiresAt, withinRetention } from "@solow/core";
 import {
+  ArchiveRestore,
   ArrowLeft,
   CheckCircle2,
   CircleSlash,
@@ -36,6 +37,7 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { settingsHref } from "@/lib/navigation";
 import { WHOLE_PAGE } from "@/lib/paged";
+import { relativeAge, relativeUntil } from "@/lib/relative-time";
 import { taskActionMessage } from "@/lib/task-errors";
 import { CREDENTIAL_EXPIRED_REASON } from "@/lib/task-states";
 import { cn } from "@/lib/utils";
@@ -212,7 +214,17 @@ function StreamIndicator({ status }: { status: string }) {
 /** The IDE-like Task workspace: harness terminal + git changes + review gate. */
 export function TaskWorkspace({ taskId }: { taskId: string }) {
   const utils = trpc.useUtils();
-  const task = trpc.task.get.useQuery({ id: taskId });
+  // `includeDeleted`: this page is one of the two readers History points at, and a Task opened
+  // from there is in History — readable, restorable, and nothing else (Decision 0025).
+  const task = trpc.task.get.useQuery({ id: taskId, includeDeleted: true });
+  const deleted = task.data?.deletedAt ?? null;
+  const restore = trpc.task.restore.useMutation({
+    onSuccess: () => {
+      utils.task.get.invalidate({ id: taskId });
+      utils.task.list.invalidate();
+      utils.history.list.invalidate();
+    },
+  });
   // Back goes to the board of the Project holding this Task's Issue (see `useBackToProject`).
   const back = useBackToProject(task.data?.issueId, "/board");
   /**
@@ -299,7 +311,9 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
    * for it to reach and a message that arrives at the *next* run would be steering blind.
    */
   const [queued, setQueued] = useState<string | null>(null);
-  const isRunning = task.data?.state === "running";
+  // A Task in History is never steered: its run was stopped on the way out, whatever its row
+  // still says, and a message to it would reach the next run or nothing.
+  const isRunning = task.data?.state === "running" && deleted === null;
   useEffect(() => {
     if (queued === null) return;
     if (!isRunning) {
@@ -762,11 +776,13 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
               exactly the thing the badge shows, and a control placed away from its own readout
               leaves the operator checking two corners of the header to see what they just did.
             */}
-            <TaskAdvance
-              state={t.state}
-              onMove={requestMove}
-              pending={move.isPending || launch.isPending}
-            />
+            {deleted === null ? (
+              <TaskAdvance
+                state={t.state}
+                onMove={requestMove}
+                pending={move.isPending || launch.isPending}
+              />
+            ) : null}
             {/*
               The completion gate, where the operator already is.
               
@@ -803,29 +819,66 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
           <StreamIndicator status={live.status} />
           <TaskMeta task={t} session={latest ?? null} />
-          {blockedBy.button}
+          {deleted === null ? blockedBy.button : null}
           {/*
             Deleting the Task the page is *about* leaves nowhere to stand, so it navigates back
             to the board rather than re-rendering against a Task that no longer exists.
           */}
-          <DeleteTaskAction
-            onDeleted={() => router.push(back.href)}
-            taskId={t.id}
-            taskTitle={t.title}
-            trigger={(openDialog) => (
-              <Button
-                aria-label={`Delete ${t.title}`}
-                className="text-muted-foreground hover:text-destructive"
-                onClick={openDialog}
-                size="icon"
-                variant="ghost"
-              >
-                <Trash2 />
-              </Button>
-            )}
-          />
+          {deleted !== null ? null : (
+            <DeleteTaskAction
+              onDeleted={() => router.push(back.href)}
+              taskId={t.id}
+              taskTitle={t.title}
+              trigger={(openDialog) => (
+                <Button
+                  aria-label={`Delete ${t.title}`}
+                  className="text-muted-foreground hover:text-destructive"
+                  onClick={openDialog}
+                  size="icon"
+                  variant="ghost"
+                >
+                  <Trash2 />
+                </Button>
+              )}
+            />
+          )}
         </div>
       </div>
+
+      {deleted !== null ? (
+        /*
+          In History (Decision 0025). Said at the top, in the caution tone rather than the failed
+          one — nothing went wrong, the Owner did this — with the one control that changes it.
+          Everything below stays readable: the transcript, the change, the rounds are the record
+          this window exists to keep.
+        */
+        <div
+          className="mx-4 mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-feedback-caution/40 bg-feedback-caution/10 px-3 py-2 text-sm"
+          role="status"
+          data-task-deleted
+        >
+          <ArchiveRestore aria-hidden className="size-4 shrink-0 text-feedback-caution" />
+          <span className="min-w-0 flex-1">
+            Deleted {relativeAge(deleted)} — in History until{" "}
+            {relativeUntil(retentionExpiresAt(deleted))}
+            {withinRetention(deleted) ? ", then purged with its sessions and worktree." : "."}
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            loading={restore.isPending}
+            disabled={!withinRetention(deleted)}
+            onClick={() => restore.mutate({ id: t.id })}
+          >
+            <ArchiveRestore /> Restore
+          </Button>
+          {restore.error ? (
+            <span className="text-destructive text-xs" role="alert">
+              {taskActionMessage(restore.error.message)}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
 
       {/*
         Which Step of its Workflow the run is on, when it is on one (spec F03) — and, since the
@@ -995,29 +1048,31 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
         width={pane.changesWidth}
       />
 
-      <TaskFooter
-        task={t}
-        outstanding={dependencies.outstanding}
-        consequences={summariseConsequences(reviewGroups)}
-        viewed={
-          t.state === "review" && fileCount > 0 ? { viewed: viewedCount, of: fileCount } : null
-        }
-        notes={{
-          count: draft.draft.notes.length,
-          general: draft.draft.general,
-          onGeneral: draft.setGeneral,
-        }}
-        decidePending={decide.isPending ? (decide.variables?.decision ?? null) : null}
-        onDecide={runDecision}
-        onLaunch={() => requestMove("running")}
-        onRetry={() => retry.mutate({ id: t.id })}
-        onOpenReview={() => submitForReview.mutate({ id: t.id })}
-        onReopen={() => requestMove("ready")}
-        openReviewPending={submitForReview.isPending}
-        actionPending={move.isPending || launch.isPending || retry.isPending}
-        renewHref={renewHref}
-        error={footerMessage}
-      />
+      {deleted !== null ? null : (
+        <TaskFooter
+          task={t}
+          outstanding={dependencies.outstanding}
+          consequences={summariseConsequences(reviewGroups)}
+          viewed={
+            t.state === "review" && fileCount > 0 ? { viewed: viewedCount, of: fileCount } : null
+          }
+          notes={{
+            count: draft.draft.notes.length,
+            general: draft.draft.general,
+            onGeneral: draft.setGeneral,
+          }}
+          decidePending={decide.isPending ? (decide.variables?.decision ?? null) : null}
+          onDecide={runDecision}
+          onLaunch={() => requestMove("running")}
+          onRetry={() => retry.mutate({ id: t.id })}
+          onOpenReview={() => submitForReview.mutate({ id: t.id })}
+          onReopen={() => requestMove("ready")}
+          openReviewPending={submitForReview.isPending}
+          actionPending={move.isPending || launch.isPending || retry.isPending}
+          renewHref={renewHref}
+          error={footerMessage}
+        />
+      )}
     </div>
   );
 }

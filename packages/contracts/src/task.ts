@@ -358,3 +358,33 @@ export type TaskDependencyDto = z.infer<typeof taskDependencyDto>;
 
 export const taskDependencyListDto = z.array(taskDependencyDto);
 export type TaskDependencyListDto = z.infer<typeof taskDependencyListDto>;
+
+/**
+ * One row of History (spec F02 FR-10, F11; Decision 0025): a Task closed or deleted inside the
+ * retention window, and what can still be done with it.
+ */
+export const historyResumabilitySchema = z.enum(["conversation", "brief", "none"]);
+export type HistoryResumability = z.infer<typeof historyResumabilitySchema>;
+
+export const historyEntryDto = z.object({
+  task: taskDto,
+  /** Why it is here: the Owner deleted it, or it reached Done. */
+  kind: z.enum(["deleted", "done"]),
+  /** When that happened — the moment the retention window is measured from. */
+  since: z.string(),
+  /** When it leaves History: a deleted Task is purged, a Done one loses its worktree. */
+  expiresAt: z.string(),
+  /**
+   * What a resume would do. `conversation`: the worktree is still on disk and the harness
+   * conversation with it, so a relaunch carries straight on. `brief`: a relaunch starts again
+   * from the Task brief (no worktree kept, or no conversation recorded). `none`: nothing to
+   * relaunch into — a Task that never ran.
+   */
+  resumable: historyResumabilitySchema,
+  issueTitle: z.string().nullable(),
+  repositoryName: z.string().nullable(),
+});
+export type HistoryEntryDto = z.infer<typeof historyEntryDto>;
+
+export const historyListDto = z.array(historyEntryDto);
+export type HistoryListDto = z.infer<typeof historyListDto>;

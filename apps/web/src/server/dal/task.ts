@@ -47,7 +47,7 @@ import { pageAfter, pageLimit, pageOrder, pageProbe, toPage } from "./page.js";
  * Tasks. Ordered by position so every DTO's `repositories[0]` is the primary attachment, which
  * is what `primaryTaskRepository` decides from.
  */
-async function attachmentsForTasks(
+export async function attachmentsForTasks(
   ctx: RequestContext,
   taskIds: readonly string[],
 ): Promise<Map<string, (typeof taskRepository.$inferSelect)[]>> {
