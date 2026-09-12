@@ -53,6 +53,24 @@ export function worktreePath(root: string, taskId: string, attachmentId?: string
 }
 
 /**
+ * Where a containerised Task's harness transcripts live on the host (history retention,
+ * Decision 0025).
+ *
+ * Claude Code keeps a conversation under `$HOME/.claude/projects/`, and a container's `HOME` is
+ * a tmpfs that dies with it (`executor/docker.ts` `CONTAINER_HOME`) — rightly, because the rest
+ * of `$HOME` is where a tool caches credentials. This one subdirectory is bound from here
+ * instead, so a Task run in a container can be resumed after the container is gone. Transcripts,
+ * never tokens: the bind target is `.claude/projects`, not `.claude`.
+ *
+ * Beside the worktree under the same root, keyed by the Task id with a suffix no attachment id
+ * can produce, so the retention sweep removes it with the worktrees and nothing else can be
+ * named into it.
+ */
+export function harnessTranscriptsPath(root: string, taskId: string): string {
+  return join(root, `${taskId}--transcripts`);
+}
+
+/**
  * Where a Task's **own** copy of a Repository lives, when it is given one (`ownClone`).
  *
  * Under the cache root rather than the worktree root, because it is a repository and not a

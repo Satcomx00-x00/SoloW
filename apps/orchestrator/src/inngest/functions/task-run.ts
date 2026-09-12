@@ -112,6 +112,7 @@ import {
   commitWorktree,
   diffWorktree,
   discardWorktreeChanges,
+  harnessTranscriptsPath,
   hasChanges,
   isRepositoryUnusable,
   type ProvisionParams,
@@ -1067,6 +1068,9 @@ export async function runTaskLifecycle(
     worktreeRoot: deps.worktreeRoot,
     repoCacheRoot: deps.repoCacheRoot,
     bindPaths: executorBindPaths(deps, taskId, ctx.repositories, ownClone),
+    // The harness's transcripts, kept on the host so a containerised Task can resume its
+    // conversation (history retention); the local driver ignores it — its `$HOME` is the host's.
+    transcriptStore: harnessTranscriptsPath(deps.worktreeRoot, taskId),
     // What this run is going to spawn, probed once by the preflight so a missing harness binary
     // throws on the line the runners already guard rather than arriving as an exit 127.
     //

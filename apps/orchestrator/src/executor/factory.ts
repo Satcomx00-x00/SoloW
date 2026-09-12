@@ -45,6 +45,8 @@ export interface ExecutorFactoryOpts {
   repoCacheRoot: string;
   /** Host directories bind-mounted at their own path: the Task's worktrees and repositories. */
   bindPaths?: string[];
+  /** The Task's harness transcript store on the host, mounted as the container's `.claude/projects`. */
+  transcriptStore?: string;
   /** What this Task will `spawn`, so the preflight can prove it exists before the harness starts. */
   harnessCommands?: readonly string[];
   /**
@@ -154,6 +156,7 @@ export function dockerOpts(opts: ExecutorFactoryOpts): PreflightOpts {
     worktreeRoot: opts.worktreeRoot,
     repoCacheRoot: opts.repoCacheRoot,
     bindPaths: opts.bindPaths ?? [],
+    ...(opts.transcriptStore ? { transcriptStore: opts.transcriptStore } : {}),
     dockerBin: env.SOLOW_DOCKER_BIN,
     user: env.SOLOW_DOCKER_USER ?? defaultContainerUser(),
     pullTimeoutMs: env.SOLOW_DOCKER_PULL_TIMEOUT_MS,

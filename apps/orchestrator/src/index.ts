@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { announceRequest, harnessProbeRequest, taskInputSchema } from "@solow/contracts";
 import { type StreamTicketClaims, streamChannel, verifyStreamTicket } from "@solow/core/stream";
 import { createDb, type Db } from "@solow/db";
@@ -517,7 +517,11 @@ export function startWebSocketServer(
     // History retention (Decision 0025): hourly, and only after the first reconcile pass, so a
     // Task the reclaim is about to settle is never purged from under it.
     const retention = () =>
-      retentionSweep({ db: deps.db, host: deps.dockerHost })
+      retentionSweep({
+        db: deps.db,
+        host: deps.dockerHost,
+        worktreeRoot: resolve(orchestratorEnv().SOLOW_WORKTREE_ROOT),
+      })
         .then((report) => {
           if (report.purged > 0 || report.expired > 0) {
             console.log(

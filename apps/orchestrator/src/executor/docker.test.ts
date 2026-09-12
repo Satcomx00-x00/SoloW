@@ -260,6 +260,27 @@ describe("creation — the docker run line", () => {
     for (const mkdir of mkdirs) expect(host.calls.indexOf(mkdir)).toBeLessThan(run);
   });
 
+  it("mounts the Task's transcript store as the container's .claude/projects, and nothing more of HOME", async () => {
+    // History retention (Decision 0025): the one subdirectory of `$HOME` that crosses the
+    // boundary is the harness's transcript store, translated to the container's own `HOME`. The
+    // rest of `$HOME` stays the tmpfs: a token cache must still die with the container.
+    const host = fakeHost();
+    const store = `${WORKTREE_ROOT}/task-1--transcripts`;
+    await ensureContainer(host.executor, CONFIG, IDS, opts({ transcriptStore: store }));
+
+    const run = host.calls.find((cmd) => cmd[1] === "run") ?? [];
+    const mounts = run.filter((_, i) => run[i - 1] === "--mount");
+    expect(mounts).toContain(`type=bind,source=${store},target=/home/solow/.claude/projects`);
+    expect(
+      mounts.some(
+        (m) => m.endsWith("target=/home/solow") || m.includes("target=/home/solow/.claude,"),
+      ),
+    ).toBe(false);
+    expect(run.some((arg) => arg.startsWith("/home/solow:rw,exec"))).toBe(true);
+    // Created on the host before the run, like every other bind source.
+    expect(host.calls.some((cmd) => cmd[0] === "mkdir" && cmd[2] === store)).toBe(true);
+  });
+
   it("puts no profile environment value anywhere in the run argv", async () => {
     const host = fakeHost();
     await ensureContainer(host.executor, CONFIG, IDS, opts());

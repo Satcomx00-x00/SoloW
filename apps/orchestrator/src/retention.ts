@@ -2,7 +2,11 @@ import { TASK_RETENTION_MS } from "@solow/core";
 import { cascadeDeleteTasks, type Db, session, task, worktree } from "@solow/db";
 import { and, eq, isNotNull, isNull, lt } from "drizzle-orm";
 import type { Executor } from "./executor/types.js";
-import { cleanupWorktree, repositoryOfWorktree } from "./worktree/manager.js";
+import {
+  cleanupWorktree,
+  harnessTranscriptsPath,
+  repositoryOfWorktree,
+} from "./worktree/manager.js";
 
 /**
  * How long a closed or deleted Task stays in History before this sweep takes back what it left
@@ -34,6 +38,11 @@ export interface RetentionDeps {
   db: Db;
   /** The host, where every worktree directory lives whichever executor made it. */
   host: Executor;
+  /**
+   * `SOLOW_WORKTREE_ROOT`, absolute — where a containerised Task's transcript store sits
+   * (`harnessTranscriptsPath`). Omitted in a test that has no such store to remove.
+   */
+  worktreeRoot?: string;
   /** Test seam: the window, defaulting to the product's one number for it. */
   retentionMs?: number;
 }
@@ -82,6 +91,16 @@ async function removeWorktrees(
       ),
     );
   let allGone = true;
+  // The transcripts a containerised run left on the host go with the worktrees: without the
+  // directory they were keyed to they resume nothing, and they are the one thing here that
+  // holds the conversation's text.
+  if (deps.worktreeRoot) {
+    try {
+      await deps.host.exec(["rm", "-rf", "--", harnessTranscriptsPath(deps.worktreeRoot, taskId)]);
+    } catch (cause) {
+      log(`retention: could not remove transcripts of task ${taskId}`, cause);
+    }
+  }
   for (const row of rows) {
     try {
       const repoPath = await repositoryOfWorktree(deps.host, row.path);

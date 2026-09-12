@@ -93,6 +93,13 @@ export interface DockerExecutorOpts {
    * on both sides rather than translated.
    */
   bindPaths?: string[];
+  /**
+   * A host directory mounted at `$HOME/.claude/projects` inside the container — the harness's
+   * transcript store, kept across containers so a Task can resume its conversation (history
+   * retention, Decision 0025). Only that subdirectory: `$HOME` itself stays the tmpfs that keeps
+   * credential caches inside the container. Under `worktreeRoot`, so the mount guard admits it.
+   */
+  transcriptStore?: string;
   /** `SOLOW_DOCKER_BIN`. Named by the caller so a wrapper script is a deployment setting. */
   dockerBin?: string;
   /** `uid:gid` for everything inside the container. See `runArgs`. */
@@ -780,6 +787,14 @@ async function bindsFor(
   for (const path of [opts.jailRoot, ...(opts.bindPaths ?? [])]) {
     const source = await guardMountSource(path, opts, resolveLinks);
     byTarget.set(source, { source, target: source, readOnly: false });
+  }
+  if (opts.transcriptStore) {
+    // Translated, unlike every bind above: the CLI keys a transcript to the cwd it ran in and
+    // looks under `$HOME/.claude/projects`, so what has to be stable across containers is the
+    // *target*, and `CONTAINER_HOME` is.
+    const source = await guardMountSource(opts.transcriptStore, opts, resolveLinks);
+    const target = `${CONTAINER_HOME}/.claude/projects`;
+    byTarget.set(target, { source, target, readOnly: false });
   }
   /*
    * The profile's own mounts last: an operator who named a target explicitly meant that target.
