@@ -308,6 +308,11 @@ export async function updateTaskState(
         : state === "failed"
           ? {}
           : { failureReason: null }),
+      // Reopening (done → ready) starts a new stretch of work: the last run's declaration would
+      // otherwise sit on the card — and on the footer's gate — describing a run that is over.
+      ...(state === "ready"
+        ? { completedAt: null, completedOutcome: null, completedSummary: null }
+        : {}),
       updatedAt: new Date().toISOString(),
     })
     .where(and(eq(task.workspaceId, ctx.workspaceId), eq(task.id, id)))

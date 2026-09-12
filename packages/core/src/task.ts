@@ -23,7 +23,10 @@ const TRANSITIONS: Record<TaskState, readonly TaskState[]> = {
   review: ["done", "running", "ready"], // approve → done; request_changes → running; reject → ready
   parked: ["running", "failed"],
   failed: ["running"], // retry
-  done: [],
+  // Reopen (history): a Done Task goes back to Ready, from where a launch resumes its
+  // conversation in the worktree retention kept. Never straight to `running` — a reopen is a
+  // decision to work on it again, and starting the harness is a second one.
+  done: ["ready"],
 };
 
 export function canTransitionTask(

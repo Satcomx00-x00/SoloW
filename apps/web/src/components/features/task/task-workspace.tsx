@@ -1012,6 +1012,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
         onLaunch={() => requestMove("running")}
         onRetry={() => retry.mutate({ id: t.id })}
         onOpenReview={() => submitForReview.mutate({ id: t.id })}
+        onReopen={() => requestMove("ready")}
         openReviewPending={submitForReview.isPending}
         actionPending={move.isPending || launch.isPending || retry.isPending}
         renewHref={renewHref}

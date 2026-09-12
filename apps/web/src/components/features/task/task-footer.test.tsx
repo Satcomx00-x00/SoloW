@@ -59,6 +59,7 @@ function renderFooter(
       onLaunch={() => calls.push("launch")}
       onRetry={() => calls.push("retry")}
       onOpenReview={() => calls.push("open-review")}
+      onReopen={() => calls.push("reopen")}
       renewHref="/settings?section=secrets&renewSecret=anthropic"
       error={null}
       {...extra}
@@ -137,6 +138,13 @@ describe("TaskFooter", () => {
     expect(screen.getByText(/7 of 12 files viewed/)).toBeDefined();
     const approve = screen.getByRole("button", { name: "Approve" });
     expect(approve.hasAttribute("disabled")).toBe(false);
+  });
+
+  it("reopens a Done task — back to Ready, never straight into a run", () => {
+    const calls = renderFooter({ state: "done", completedSummary: "Shipped the latch." });
+    expect(screen.getByText("Shipped the latch.")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Reopen" }));
+    expect(calls).toEqual(["reopen"]);
   });
 
   it("locks every decision while one is in flight", () => {

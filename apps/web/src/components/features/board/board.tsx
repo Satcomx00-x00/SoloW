@@ -465,6 +465,22 @@ export function Board({
   };
 
   /**
+   * Reopen a Done Task (history): back to Ready, through the same `move` the drag uses — the
+   * transition table allows exactly this one exit from Done. Launching is a second click.
+   */
+  const reopenAction = (task: TaskDto): ReactNode => (
+    <Button
+      key={`reopen-${task.id}`}
+      size="xs"
+      variant="outline"
+      loading={pendingOn(task.id)}
+      onClick={() => move.mutate({ id: task.id, to: "ready" })}
+    >
+      <RotateCcw /> Reopen
+    </Button>
+  );
+
+  /**
    * The one-click path back to `running` for a Task that failed for a reason a fresh attempt can
    * actually fix — everything except a credential, which `renewAction` covers instead: retrying
    * before the credential itself changes would only fail the same way again immediately.
@@ -544,7 +560,7 @@ export function Board({
     // Nothing to declare on a finished Task: an edge into it would only ever be satisfied.
     return (
       <>
-        {task.state === "done" ? null : blockedByAction(task)}
+        {task.state === "done" ? reopenAction(task) : blockedByAction(task)}
         {renewAction(task)}
         {retryAction(task)}
         {deleteAction(task)}

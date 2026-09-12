@@ -36,6 +36,7 @@ describe("canTransitionTask", () => {
       ["backlog", "running"],
       ["ready", "done"],
       ["done", "running"],
+      ["done", "review"],
       ["running", "done"],
       ["parked", "review"],
     ];
@@ -56,7 +57,7 @@ describe("canTransitionTask", () => {
  * lifecycle grows is for there to be one statement of it. So these cases assert the seven states
  * in both directions against the transition table's own answer, and pin the four that carry
  * real product meaning — a Task under review moves on to `done`, back to `running`; a `running`
- * Task has nowhere to retreat to; `done` is terminal in both directions.
+ * Task has nowhere to retreat to; `done` goes nowhere forward and only back to `ready` (reopen).
  */
 describe("nextTaskState / previousTaskState", () => {
   const states: TaskState[] = ["backlog", "ready", "running", "review", "parked", "failed", "done"];
@@ -88,7 +89,8 @@ describe("nextTaskState / previousTaskState", () => {
       review: "running",
       parked: "running",
       failed: "running",
-      done: null,
+      // Reopen: the one way out of Done, and it is backwards — to Ready, never to a run.
+      done: "ready",
     };
     for (const state of states) expect(previousTaskState(state)).toBe(back[state]);
   });
@@ -104,9 +106,10 @@ describe("nextTaskState / previousTaskState", () => {
     }
   });
 
-  it("leaves the terminal state with nowhere to go", () => {
+  it("leaves Done with nowhere to go forward, and Reopen as its only way back", () => {
     expect(nextTaskState("done")).toBeNull();
-    expect(previousTaskState("done")).toBeNull();
+    expect(previousTaskState("done")).toBe("ready");
+    expect(canTransitionTask("done", "ready").ok).toBe(true);
   });
 });
 

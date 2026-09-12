@@ -41,6 +41,7 @@ export function TaskFooter({
   onLaunch,
   onRetry,
   onOpenReview,
+  onReopen,
   openReviewPending = false,
   actionPending = false,
   renewHref,
@@ -62,6 +63,8 @@ export function TaskFooter({
   onRetry: () => void;
   /** Open the gate on a run that has declared itself finished (`canOpenReview`). */
   onOpenReview: () => void;
+  /** Take a Done Task back to Ready (history: resume it from there). */
+  onReopen: () => void;
   openReviewPending?: boolean;
   /** A launch, retry or move in flight. */
   actionPending?: boolean;
@@ -82,6 +85,7 @@ export function TaskFooter({
     onLaunch,
     onRetry,
     onOpenReview,
+    onReopen,
     openReviewPending,
     actionPending,
     renewHref,
@@ -176,12 +180,30 @@ function footerBody(input: FooterInput) {
         </p>
       );
     case "done":
-      return task.completedSummary ? (
-        <p className="flex items-center gap-1.5 text-muted-foreground text-sm">
-          <CheckCircle2 aria-hidden className="size-3.5 shrink-0 text-state-done" />
-          <span className="truncate">{task.completedSummary}</span>
-        </p>
-      ) : null;
+      // Reopen (history): back to Ready, from where a launch resumes the conversation in the
+      // worktree retention kept. Two decisions — reopen, then launch — because starting a harness
+      // is never a side effect of reading a finished Task.
+      return (
+        <Row
+          hint={
+            <span className="flex min-w-0 items-center gap-1.5">
+              <CheckCircle2 aria-hidden className="size-3.5 shrink-0 text-state-done" />
+              <span className="truncate">
+                {task.completedSummary ?? "Done. Reopen it to work on it again."}
+              </span>
+            </span>
+          }
+        >
+          <Button
+            size="lg"
+            variant="outline"
+            loading={input.actionPending}
+            onClick={input.onReopen}
+          >
+            <RotateCcw /> Reopen
+          </Button>
+        </Row>
+      );
     default:
       return null;
   }
