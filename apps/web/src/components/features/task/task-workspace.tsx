@@ -51,6 +51,7 @@ import { ChangesPanel } from "./changes-panel";
 import { DeleteTaskAction } from "./delete-task-action";
 import { HarnessComposer } from "./harness-composer";
 import { LaunchTaskDialog, useWorkflowChoices } from "./launch-task-dialog";
+import { ReviewBriefPanel } from "./review-brief";
 import { collateFeedback } from "./review-feedback";
 import { groupChanges, summariseConsequences } from "./review-groups";
 import type { LineAnchor } from "./review-notes";
@@ -135,12 +136,14 @@ function CompletionBadge({ outcome }: { outcome: string | null }) {
   );
 }
 
-type RightTab = "changes" | "plan";
+type RightTab = "changes" | "plan" | "review";
 const RIGHT_TAB_ID: Record<RightTab, string> = {
+  review: "task-right-tab-review",
   changes: "task-right-tab-changes",
   plan: "task-right-tab-plan",
 };
 const RIGHT_PANEL_ID: Record<RightTab, string> = {
+  review: "task-right-panel-review",
   changes: "task-right-panel-changes",
   plan: "task-right-panel-plan",
 };
@@ -158,15 +161,19 @@ function RightColumnTabs({
   onPick,
   files,
   planItems,
+  review,
 }: {
   tab: RightTab;
   onPick: (tab: RightTab) => void;
   files: number;
   planItems: number;
+  /** Criteria still to verify, or null when there is no Session to brief on. */
+  review: number | null;
 }) {
   const tabs: Array<{ id: RightTab; label: string; count: number; disabled: boolean }> = [
     { id: "changes", label: "Changes", count: files, disabled: false },
     { id: "plan", label: "Plan", count: planItems, disabled: planItems === 0 },
+    { id: "review", label: "Review", count: review ?? 0, disabled: review === null },
   ];
   return (
     <div role="tablist" aria-label="Review column" className="flex min-w-0 items-center gap-1">
@@ -448,6 +455,13 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
     return latestCompletion(events);
   }, [events, live.events, liveSessionId]);
   const openItems = useMemo(() => openItemsOf(completion, stepCard), [completion, stepCard]);
+  // The count on the Review tab: how many criteria the reviewer has not ticked. The same query
+  // the panel makes — React Query hands both the one response.
+  const briefQuery = trpc.session.reviewBrief.useQuery(
+    { sessionId: latest?.id ?? "" },
+    { enabled: Boolean(latest?.id) },
+  );
+  const briefCriteria = briefQuery.data?.criteria.length ?? null;
 
   /**
    * Which of the right column's two tabs is showing.
@@ -684,7 +698,15 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   const branch = primary?.resultBranch ?? latest?.diffRef ?? null;
   // The gate's scope is always the latest capture; the tab may be showing an older round.
   const diffs = shownRound && shownRound.index !== latestRound ? shownRound.diffs : capturedDiffs;
-  const autoTab = hasPlan && diffs.length === 0 && isRunning ? "plan" : "changes";
+  // At the gate the brief is the view that answers "may I sign this", so it opens first there —
+  // when there is one: an Issue with no criteria has no brief worth opening on, and the change
+  // is what is left to read. During a run the plan is what you watch; otherwise the change.
+  const autoTab: RightTab =
+    t.state === "review" && latest && (briefCriteria ?? 0) > 0
+      ? "review"
+      : hasPlan && diffs.length === 0 && isRunning
+        ? "plan"
+        : "changes";
   const pickedTab = tabPick && tabPick.state === t.state ? tabPick.tab : autoTab;
   // A plan tab with no plan under it is disabled, so a pick that outlived its list falls back.
   const tab = pickedTab === "plan" && !hasPlan ? "changes" : pickedTab;
@@ -1065,6 +1087,27 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
                 </div>
               </ScrollArea>
             </div>
+            <div
+              role="tabpanel"
+              id={RIGHT_PANEL_ID.review}
+              aria-labelledby={RIGHT_TAB_ID.review}
+              hidden={tab !== "review"}
+              className="h-full"
+            >
+              <ScrollArea className="h-full">
+                <div className="p-3">
+                  {latest ? (
+                    <ReviewBriefPanel
+                      sessionId={latest.id}
+                      openItems={openItems}
+                      verified={draft.draft.verified}
+                      onToggleVerified={draft.toggleVerified}
+                      canVerify={t.state === "review" && deleted === null}
+                    />
+                  ) : null}
+                </div>
+              </ScrollArea>
+            </div>
           </>
         }
         rightHeading={
@@ -1073,6 +1116,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
             onPick={(next) => setTabPick({ tab: next, state: t.state })}
             files={diffs.reduce((n, d) => n + d.files.length, 0)}
             planItems={todos.length > 0 ? todos.length : (stepCard?.steps.length ?? 0)}
+            review={latest ? Math.max(0, (briefCriteria ?? 0) - draft.draft.verified.length) : null}
           />
         }
         rightLabel="Review"

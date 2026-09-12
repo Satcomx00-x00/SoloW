@@ -1,7 +1,9 @@
 import "server-only";
 import {
+  getReviewBriefInput,
   getSessionInput,
   getTaskSessionsInput,
+  reviewBriefDto,
   type SessionDto,
   type SessionSummaryDto,
   sessionCursorDto,
@@ -14,6 +16,7 @@ import {
 } from "@solow/contracts";
 import { z } from "zod";
 import { getReviewForSession, listReviewsForSession } from "../dal/review.js";
+import { getReviewBrief } from "../dal/review-brief.js";
 import {
   getSessionById,
   listSessionEvents,
@@ -132,6 +135,25 @@ export const sessionRouter = router({
         rounds,
       };
     }),
+
+  /**
+   * The review brief (review analysis, point 1): the Issue's acceptance criteria against what
+   * the harness claimed for each and what it actually ran.
+   */
+  reviewBrief: ownerProcedure
+    .meta({
+      openapi: {
+        method: "GET",
+        path: "/session.reviewBrief",
+        tags: ["session"],
+        protect: true,
+        summary:
+          "The Issue's acceptance criteria lined up with the harness's claim for each, the files that claim names, and every test, lint and typecheck the run executed with its verdict and where it ran.",
+      },
+    })
+    .input(getReviewBriefInput)
+    .output(reviewBriefDto)
+    .query(async ({ ctx, input }) => unwrap(await getReviewBrief(ctx.rctx, input.sessionId))),
 
   /**
    * The events one summarised range stands in for (issue #2, AC-3).

@@ -109,6 +109,7 @@ describe("preference.getReviewDraft / setReviewDraft / clearReviewDraft", () => 
       { repositoryId: "repo-1", path: "src/a.ts", side: "new" as const, line: 12, text: "?" },
     ],
     general: "looks close",
+    verified: ["AC-1"],
   };
 
   it("is null until something is saved, then reads back what the same user saved, per Task", async () => {

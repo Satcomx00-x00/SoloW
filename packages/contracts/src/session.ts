@@ -563,3 +563,46 @@ export const sessionDetailDto = z.object({
   rounds: z.array(sessionRoundDto),
 });
 export type SessionDetailDto = z.infer<typeof sessionDetailDto>;
+
+/**
+ * The review brief (review analysis, point 1): the Issue's acceptance criteria lined up with
+ * what the harness claimed for each, the files its claim names, and the verifications it ran —
+ * the one view that answers "may I sign this" without reading the log.
+ */
+export const reviewClaimDto = z.object({
+  label: z.string(),
+  state: z.enum(["todo", "active", "done", "blocked"]),
+  note: z.string().nullable(),
+});
+export const reviewCriterionDto = z.object({
+  id: z.string(),
+  text: z.string(),
+  ticked: z.boolean(),
+  claim: reviewClaimDto.nullable(),
+  files: z.array(z.string()),
+  tests: z.array(z.string()),
+});
+export const reviewCheckDto = z.object({
+  kind: z.enum(["test", "typecheck", "lint", "build", "audit"]),
+  command: z.string(),
+  cwd: z.string().nullable(),
+  verdict: z.string(),
+  passed: z.boolean().nullable(),
+  at: z.string(),
+  /** True when the command ran somewhere other than the Task's worktree — a copy in /tmp, say. */
+  elsewhere: z.boolean(),
+});
+export const reviewBriefDto = z.object({
+  sessionId: idSchema,
+  /** The worktree the run was given, which the checks are measured against. */
+  worktreePath: z.string().nullable(),
+  criteria: z.array(reviewCriterionDto),
+  unmatched: z.array(reviewClaimDto),
+  checks: z.array(reviewCheckDto),
+});
+export type ReviewBriefDto = z.infer<typeof reviewBriefDto>;
+export type ReviewCheckDto = z.infer<typeof reviewCheckDto>;
+export type ReviewCriterionDto = z.infer<typeof reviewCriterionDto>;
+
+export const getReviewBriefInput = z.object({ sessionId: idSchema });
+export type GetReviewBriefInput = z.infer<typeof getReviewBriefInput>;

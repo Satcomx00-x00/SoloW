@@ -1023,6 +1023,87 @@ describe("the Changes tab of a multi-Repository Task", () => {
     expect(screen.getByRole("button", { name: "Approve" }).hasAttribute("disabled")).toBe(false);
   });
 
+  it("opens on the Review brief at the gate, lines criteria up with claims, and keeps the reviewer's ticks", async () => {
+    const { log } = renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
+      ...baseHandlers,
+      // A round to draft against: the draft's ticks are per round, and a Task at its gate has one.
+      "session.get": () => ({
+        ...detail(),
+        rounds: [{ index: 1, closedAtSeq: null, diffs: [], review: null }],
+      }),
+      "session.reviewBrief": () => ({
+        sessionId: SESSION_ID,
+        worktreePath: "/wt/solow-task-1",
+        criteria: [
+          {
+            id: "AC-1",
+            text: "A table exists",
+            ticked: false,
+            claim: { label: "AC-1 table", state: "done", note: "0044.sql" },
+            files: ["packages/db/drizzle/0044.sql"],
+            tests: [],
+          },
+          {
+            id: "AC-14",
+            text: "An integration test runs in CI",
+            ticked: false,
+            claim: { label: "AC-14 test", state: "done", note: "NOT executed here" },
+            files: ["apps/api/test/x.test.ts"],
+            tests: ["apps/api/test/x.test.ts"],
+          },
+          { id: "AC-15", text: "Docs updated", ticked: false, claim: null, files: [], tests: [] },
+        ],
+        unmatched: [],
+        checks: [
+          {
+            kind: "test",
+            command: "cd /tmp/copy && bun test",
+            cwd: "/tmp/copy",
+            verdict: "811 pass / 6 fail",
+            passed: false,
+            at: "2026-01-01T00:00:00.000Z",
+            elsewhere: true,
+          },
+        ],
+      }),
+      "preference.getReviewDraft": () => ({
+        workspaceId: "ws",
+        userId: "u",
+        taskId: TASK_ID,
+        draft: null,
+      }),
+      "preference.setReviewDraft": (input: unknown) => ({
+        workspaceId: "ws",
+        userId: "u",
+        taskId: TASK_ID,
+        draft: (input as { draft: unknown }).draft,
+      }),
+    });
+
+    const tab = await screen.findByRole("tab", { name: /Review/ });
+    await waitFor(() => expect(tab.getAttribute("aria-selected")).toBe("true"));
+    const brief = await screen.findByRole("region", { name: "Acceptance criteria" });
+    expect(within(brief).getByText(/0 of 3 verified by you/)).toBeDefined();
+    // A criterion the harness said nothing about is the loudest row.
+    expect(within(brief).getByText(/made no claim about this criterion/)).toBeDefined();
+    // A named test that never ran is said so, next to the criterion it was supposed to prove.
+    expect(within(brief).getByText(/not executed/)).toBeDefined();
+    // And a check that ran in a copy is flagged where the checks are listed.
+    const checks = screen.getByRole("region", { name: "Verifications" });
+    expect(checks.textContent).toContain("811 pass / 6 fail");
+    expect(checks.textContent).toContain("not this worktree");
+
+    fireEvent.click(within(brief).getByRole("checkbox", { name: "Verified AC-1 myself" }));
+    expect(await within(brief).findByText(/1 of 3 verified by you/)).toBeDefined();
+    await waitFor(() =>
+      expect(log.calls.find((c) => c.path === "preference.setReviewDraft")?.input).toMatchObject({
+        draft: { verified: ["AC-1"] },
+      }),
+    );
+    // The tab counts what is left to verify.
+    expect(tab.textContent).toContain("2");
+  });
+
   it("shows a single Repository's change with no group header at all", async () => {
     // A single-Repository Task's Changes tab is unchanged by this refactor.
     renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
@@ -1605,7 +1686,11 @@ describe("TaskWorkspace step-scoped terminal", () => {
     const implement = screen.getByRole("tab", { name: /Implement/ });
     expect(implement.getAttribute("aria-selected")).toBe("true");
     expect(implement.getAttribute("aria-current")).toBeNull();
-    expect(screen.getByRole("tab", { name: /Review/ }).getAttribute("aria-current")).toBe("step");
+    expect(
+      within(screen.getByRole("region", { name: "Workflow progress" }))
+        .getByRole("tab", { name: /Review/ })
+        .getAttribute("aria-current"),
+    ).toBe("step");
   });
 
   it("asks for the whole run again, in the words it always used, when told to", async () => {

@@ -258,6 +258,8 @@ export const reviewDraftSchema = z.object({
   notes: z.array(reviewNoteSchema).max(REVIEW_DRAFT_MAX_NOTES),
   /** What the reviewer wants to say about the change as a whole. */
   general: z.string().max(10_000),
+  /** Acceptance criteria the reviewer has checked for themselves (`AC-4`), on the brief. */
+  verified: z.array(z.string().max(40)).max(200).default([]),
 });
 export type ReviewDraft = z.infer<typeof reviewDraftSchema>;
 
