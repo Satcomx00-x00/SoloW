@@ -5579,6 +5579,89 @@ describe("resuming the harness conversation", () => {
     );
   });
 
+  it("runs a new Session inside the worktree the last one left, and resumes its conversation", async () => {
+    /*
+     * History (Decision 0025): a reopened or retried Task is a new Session, and the earlier
+     * Session's worktree is still on disk with the harness conversation keyed to it. The round
+     * therefore runs *in* that directory with `--resume` — the request-changes shape — rather
+     * than in the repository root asking the harness for a fresh worktree.
+     */
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const earlier = `sess-earlier-${ids.taskId}`;
+    await db.insert(session).values({
+      id: earlier,
+      workspaceId: ids.workspaceId,
+      taskId: ids.taskId,
+      state: "resumable",
+      harnessSessionId: "conversation-from-before",
+      startedAt: "2026-01-01T00:00:00.000Z",
+    });
+    await db.insert(worktree).values({
+      workspaceId: ids.workspaceId,
+      taskId: ids.taskId,
+      repositoryId: `repo-${ids.taskId}`,
+      path: `/wt/solow-task-${ids.taskId}`,
+      branch: `worktree-solow-task-${ids.taskId}`,
+      status: "active",
+    });
+    const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    expect(runner.cwds).toEqual([`/wt/solow-task-${ids.taskId}`]);
+    expect(runner.worktreeNames).toEqual([null]);
+    expect(runner.resumeSessionIds).toEqual(["conversation-from-before"]);
+    expect(runner.prompts[0]).toContain("# Continue");
+  });
+
+  it("starts from the brief, once, when the conversation it was told to resume is gone", async () => {
+    // The harness's own words for a `--resume` it cannot honour end the process before it
+    // reports a workspace. Filed as a failure that read as "no worktree"; it is neither — the ids
+    // are forgotten, the operator told, and the same round runs again from the brief.
+    const ids = freshIds();
+    await seedRun(db, ids);
+    await db.insert(session).values({
+      id: `sess-earlier-${ids.taskId}`,
+      workspaceId: ids.workspaceId,
+      taskId: ids.taskId,
+      state: "resumable",
+      harnessSessionId: "purged-conversation",
+      startedAt: "2026-01-01T00:00:00.000Z",
+    });
+    await db.insert(worktree).values({
+      workspaceId: ids.workspaceId,
+      taskId: ids.taskId,
+      repositoryId: `repo-${ids.taskId}`,
+      path: `/wt/solow-task-${ids.taskId}`,
+      branch: `worktree-solow-task-${ids.taskId}`,
+      status: "active",
+    });
+    const runner = new ScriptedRunner([
+      { kind: "failed", stopReason: "error", signal: { resumeLost: true } },
+      { kind: "completed", stopReason: "end_turn" },
+    ]);
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    const result = await runTaskLifecycle(deps, {
+      event: { data: ids },
+      step: scriptedStep(["approve"]),
+    });
+
+    expect(result.result).toBe("done");
+    expect(runner.starts).toBe(2);
+    expect(runner.resumeSessionIds).toEqual(["purged-conversation", null]);
+    // Same worktree both times: the directory is fine, only the conversation was lost.
+    expect(runner.cwds).toEqual([`/wt/solow-task-${ids.taskId}`, `/wt/solow-task-${ids.taskId}`]);
+    expect(runner.prompts[1]).toContain("# Task");
+    expect(await notices(ids.sessionId)).toContain(
+      "The previous conversation could not be found, so this run is starting again from the brief in the same worktree.",
+    );
+    const rows = await db.select().from(session).where(eq(session.taskId, ids.taskId));
+    expect(rows.every((row) => row.harnessSessionId !== "purged-conversation")).toBe(true);
+  });
+
   it("asks a first round to resume nothing, and briefs it in full", async () => {
     const ids = freshIds();
     await seedRun(db, ids);

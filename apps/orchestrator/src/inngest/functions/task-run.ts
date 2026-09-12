@@ -56,11 +56,13 @@ import {
   appendSessionEvent,
   clearTaskCompletion,
   compactSession,
+  forgetHarnessConversations,
   isMissingParentRow,
   latestStateTransition,
   loadHarnessProbeContext,
   loadTaskRunContext,
   loadWorkflowStepHarnesses,
+  markWorktreesRemoved,
   nextSessionEventSeq,
   nextSessionUsageSeq,
   readTaskState,
@@ -69,6 +71,7 @@ import {
   recordTaskCompletion,
   recordWorktree,
   resolveResumeHarnessSessionId,
+  retainedWorktree,
   setSessionState,
   setTaskRepositoryResultBranch,
   setTaskState,
@@ -1512,6 +1515,14 @@ export async function runTaskLifecycle(
      * and what to tell the harness about why it is being started again.
      */
     let continuingTruncated = false;
+    /**
+     * The round about to start follows one whose `--resume` named a conversation the harness no
+     * longer has (history: a transcript purged, or its worktree gone). Set once per run — the
+     * second such failure is a real one — and what keeps the retry from asking to resume again.
+     */
+    let resumeLost = false;
+    /** The very next round is that retry, and does not spend a reviewer's round. */
+    let resumeLostRetry = false;
 
     /**
      * Report the current Step finished, and read what the shared transaction decided (AC-2).
@@ -1753,10 +1764,13 @@ export async function runTaskLifecycle(
        * resets at every advance, so a Step that exhausts it stops the run rather than the pipeline
        * running on into the next Step with the reviewer's patience already spent.
        */
-      if (!continuingTruncated) {
+      // Nor is the retry of a round whose `--resume` found nothing (`resumeLostRetry`): the
+      // reviewer has not seen that round either.
+      if (!continuingTruncated && !resumeLostRetry) {
         if (roundsOnStep >= MAX_REVIEW_ROUNDS) break;
         roundsOnStep += 1;
       }
+      resumeLostRetry = false;
       /*
        * Read once and cleared here, so nothing below can mistake "the round that just started was
        * a continuation" for "the round that just ended asked for one". Run-local rather than
@@ -2206,6 +2220,32 @@ export async function runTaskLifecycle(
         // with `wt` already set to the worktree SoloW provisioned, so it takes the same
         // path from its very first round — as does a Claude Code Task whose primary attachment
         // named a base ref or a branch of its own.
+        /*
+         * A worktree an earlier round — or an earlier Session — left on disk (history retention,
+         * Decision 0025).
+         *
+         * A relaunch is a new Session, and on a `--worktree` harness it used to start in the
+         * repository root and let the harness make a fresh worktree: the earlier one had been
+         * removed at approve, and there was nothing to resume into. Now it is still there, and the
+         * conversation the harness keyed to it with it, so this round runs *inside* it, exactly as
+         * a request-changes round does — `cwd` is the worktree, no `--worktree`, and `--resume`
+         * picks the conversation up. Read here, inside the step body, for the reason the resume id
+         * below is: a redrive of this round re-executes the body and has to see the row the dying
+         * attempt wrote when the harness announced its path. Confirmed with git first, as any path
+         * the harness reports would be; a row whose directory is gone is marked so and the round
+         * proceeds as a first one.
+         */
+        if (wt === null && harnessMakesPrimaryWorktree) {
+          const row = await retainedWorktree(db, workspaceId, taskId, primaryBinding.repository.id);
+          if (row) {
+            try {
+              wt = await repoAdmin.adopt(repoPath, row.path);
+            } catch (cause) {
+              captureException(log, cause, { stage: "resume-worktree", path: row.path });
+              await markWorktreesRemoved(db, workspaceId, taskId, [row.path]);
+            }
+          }
+        }
         const resuming = wt;
 
         /*
@@ -2249,12 +2289,16 @@ export async function runTaskLifecycle(
          * it and sees the id the dying attempt recorded mid-run. Same reasoning as the credential
          * above, arrived at from the other direction.
          */
-        const resumeSessionId = await resolveResumeHarnessSessionId(
-          db,
-          workspaceId,
-          taskId,
-          sessionId,
-        );
+        /*
+         * ...and only when there is a worktree to resume *in*. The conversation is keyed to that
+         * directory: asked for from the repository root it is not found, and the round that asked
+         * ends as a failed one. A relaunch with no retained worktree (the window passed, or the
+         * directory removed by hand) therefore starts from the brief instead, and says so below.
+         */
+        const resumeSessionId =
+          resuming && !resumeLost
+            ? await resolveResumeHarnessSessionId(db, workspaceId, taskId, sessionId)
+            : null;
 
         /*
          * Two briefs, because the round has to commit to one before it can know which is right.
@@ -2483,6 +2527,28 @@ export async function runTaskLifecycle(
           // looked at it. A later round skips it: the files are already there, and re-copying
           // would overwrite anything the harness changed.
           if (round === 0 && reported) await seed(reported);
+          /*
+           * Write the worktree down the moment the harness names it, not only after the round
+           * (`record-worktree-${round}`). A round that dies mid-run — a restart, an exhausted
+           * execution budget — is redriven, and the redrive can only carry the conversation on by
+           * running in this directory; without the row it would not know it exists. Best effort:
+           * a write that fails costs the resume, not the round.
+           */
+          if (reported && !wt) {
+            try {
+              const live = await livePrimary();
+              if (live) {
+                await recordWorktree(db, workspaceId, {
+                  taskId,
+                  repositoryId: primaryBinding.repository.id,
+                  path: live.path,
+                  branch: live.branch,
+                });
+              }
+            } catch (cause) {
+              captureException(log, cause, { stage: "worktree-record-live" });
+            }
+          }
           outcome = await handle.outcome;
         } finally {
           disarmCompletionStop();
@@ -2500,6 +2566,13 @@ export async function runTaskLifecycle(
         // to rows that no longer exist (compaction, the state transition, the captured diff), so
         // continuing would turn one deleted Task into a failing step and a retried run.
         if (abandoned) return { kind: "abandoned" as const };
+
+        // A `--resume` the harness could not honour ends the process before it reports a
+        // workspace, so this has to be read before adoption — which would otherwise turn "the
+        // conversation is gone" into "the harness reported no worktree" and file it as a failure.
+        if (outcome.kind === "failed" && outcome.signal.resumeLost) {
+          return { kind: "resume-lost" as const };
+        }
 
         // Confirm with git that the reported path really is a worktree of this repository. An
         // harness working somewhere else has not been isolated, and committing from wherever it
@@ -2614,6 +2687,35 @@ export async function runTaskLifecycle(
         return { taskId, result: "abandoned" };
       }
 
+      if (run.kind === "resume-lost") {
+        /*
+         * The conversation this round tried to carry on is gone. Once: the ids are forgotten, the
+         * operator is told, and the same round is run again from the brief in the same worktree.
+         * A second such failure means something else is wrong, and is filed as one.
+         */
+        if (resumeLost) {
+          return await failRun(`resume-lost-twice-${round}`, "fail", leg.stepId, "running");
+        }
+        resumeLost = true;
+        resumeLostRetry = true;
+        await step.run(`resume-lost-${round}`, async () => {
+          await forgetHarnessConversations(db, workspaceId, taskId);
+          const payload: SessionEventPayload = {
+            kind: "notice",
+            text: "The previous conversation could not be found, so this run is starting again from the brief in the same worktree.",
+          };
+          const seq = await nextSessionEventSeq(db, workspaceId, sessionId);
+          await appendSessionEvent(db, workspaceId, {
+            sessionId,
+            seq,
+            workflowStepId: leg.stepId,
+            payload,
+          });
+          const frame = toTaskEvent(payload, taskId, sessionId, seq, leg.stepId);
+          if (frame) deps.hub.publish(channel, frame);
+        });
+        continue;
+      }
       if (run.kind === "failed") {
         if (run.cls === "park") {
           await step.run(`park-${round}`, async () => {

@@ -136,6 +136,12 @@ export const PARTIAL_INTEGRATION_REASON = "partial_integration";
 export interface FailureSignal {
   quotaExhausted?: boolean;
   credentialInvalid?: boolean;
+  /**
+   * The harness was asked to resume a conversation it no longer has (history: a transcript
+   * purged, or a worktree the CLI keys it to gone). Not a failure of the work — the run is
+   * started again from the brief, once, in the same worktree.
+   */
+  resumeLost?: boolean;
 }
 
 /**
@@ -177,9 +183,13 @@ const CREDENTIAL_PATTERNS = [
   /credential.{0,20}(invalid|expired)/i,
 ];
 
+/** Claude Code's own words for a `--resume` id it cannot find. */
+const RESUME_LOST_PATTERNS = [/no conversation found with session id/i];
+
 export function detectFailureSignal(text: string | null | undefined): FailureSignal {
   if (!text) return {};
   const signal: FailureSignal = {};
+  if (RESUME_LOST_PATTERNS.some((p) => p.test(text))) signal.resumeLost = true;
   if (QUOTA_PATTERNS.some((p) => p.test(text))) signal.quotaExhausted = true;
   // Quota wins: a provider that returns 429 alongside a quota message has not rejected the
   // credential, and parking is the recoverable outcome.

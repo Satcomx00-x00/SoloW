@@ -387,6 +387,54 @@ export async function recordWorktree(
 }
 
 /**
+ * The worktree a relaunched Task should run in, if one is still on disk (history retention).
+ *
+ * The newest `active` row for the primary Repository — the one the last round ran in, kept by
+ * retention so the harness conversation keyed to it can be continued. Null when none: a Task
+ * never run, or one whose window has passed. The caller confirms the path with git before
+ * trusting it (`adoptWorktree`), exactly as it would a path the harness reported.
+ */
+export async function retainedWorktree(
+  db: Db,
+  workspaceId: string,
+  taskId: string,
+  repositoryId: string,
+): Promise<{ path: string; branch: string } | null> {
+  const [row] = await db
+    .select({ path: worktree.path, branch: worktree.branch })
+    .from(worktree)
+    .where(
+      and(
+        eq(worktree.workspaceId, workspaceId),
+        eq(worktree.taskId, taskId),
+        eq(worktree.repositoryId, repositoryId),
+        eq(worktree.status, "active"),
+      ),
+    )
+    .orderBy(desc(worktree.updatedAt))
+    .limit(1);
+  return row ?? null;
+}
+
+/**
+ * Forget every harness conversation this Task ever had, so the next round starts from the brief.
+ *
+ * Every Session's, not the current one's: `resolveResumeHarnessSessionId` reaches back through
+ * earlier Sessions for an id, and clearing only the newest would offer the one before it — the
+ * same lost conversation under an older name.
+ */
+export async function forgetHarnessConversations(
+  db: Db,
+  workspaceId: string,
+  taskId: string,
+): Promise<void> {
+  await db
+    .update(session)
+    .set({ harnessSessionId: null })
+    .where(and(eq(session.workspaceId, workspaceId), eq(session.taskId, taskId)));
+}
+
+/**
  * Mark a Task's working copies gone, after the directories really have been removed.
  *
  * The row is kept rather than deleted: `status` is what the two readers filter on, and a Task
