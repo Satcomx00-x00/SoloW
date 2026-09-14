@@ -173,11 +173,15 @@ export function useStepScope(task: TaskDto | null): StepScope {
  */
 export function WorkflowSteps({
   scope,
-  orientation = "horizontal",
+  layout = "line",
 }: {
   scope: StepScope;
-  /** Vertical in the Task page's rail — one Step per line under the Workflow's name. */
-  orientation?: "horizontal" | "vertical";
+  /**
+   * `line`: a row of its own under a header. `inline`: inside the header bar itself — one
+   * 44px line shared with the title, so the strip never wraps and scrolls instead. `vertical`:
+   * one Step per line, for a column.
+   */
+  layout?: "line" | "inline" | "vertical";
 }) {
   const { binding, stepped, selected, select } = scope;
 
@@ -187,6 +191,8 @@ export function WorkflowSteps({
   if (!binding) return null;
 
   const at = stepped.findIndex((s) => s.current);
+  const vertical = layout === "vertical";
+  const inline = layout === "inline";
 
   return (
     // The header's second line, not a card of its own: where the run is belongs with what the
@@ -195,27 +201,39 @@ export function WorkflowSteps({
     <section
       aria-label="Workflow progress"
       className={cn(
-        orientation === "vertical"
-          ? "flex min-w-0 flex-col gap-2"
-          : "flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 border-b px-4 py-1.5",
+        vertical && "flex min-w-0 flex-col gap-2",
+        inline && "flex min-w-0 items-center gap-2",
+        layout === "line" &&
+          "flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 border-b px-4 py-1.5",
       )}
     >
-      <p className="flex min-w-0 shrink-0 items-center gap-1.5 text-muted-foreground text-xs">
+      <p
+        className={cn(
+          "flex min-w-0 shrink-0 items-center gap-1.5 text-muted-foreground text-xs",
+          // In the bar the name may give way; the position never does.
+          inline && "max-w-56",
+        )}
+      >
         <Workflow aria-hidden className="size-3 shrink-0" />
         <span className="truncate font-medium text-foreground/80">{binding.workflowName}</span>
         <span className="shrink-0">
           · Step {at + 1} of {stepped.length}
         </span>
       </p>
-      {orientation === "vertical" ? null : (
+      {vertical ? null : (
         <span aria-hidden className="hidden h-4 w-px shrink-0 bg-border sm:inline-block" />
       )}
       <Steps
         aria-label="Workflow steps"
         onKeyDown={onStripKey}
-        orientation={orientation}
+        orientation={vertical ? "vertical" : "horizontal"}
         role="tablist"
-        className={orientation === "vertical" ? undefined : "w-auto min-w-0 flex-1"}
+        className={cn(
+          !vertical && "w-auto min-w-0 flex-1",
+          // One line in the bar: past its width it scrolls (the strip's own scroll style),
+          // never wraps into a second row of a 44px header.
+          inline && "tabs-scroll flex-nowrap overflow-x-auto",
+        )}
       >
         {/*
           The way back to everything, first and set apart — where an "All" filter sits in every
@@ -224,10 +242,7 @@ export function WorkflowSteps({
           genuine alternative to the Steps, not a control that undoes them.
         */}
         <li
-          className={cn(
-            "flex min-w-0 items-center",
-            orientation === "vertical" && "mb-1 border-b pb-1",
-          )}
+          className={cn("flex min-w-0 items-center", vertical && "mb-1 border-b pb-1")}
           role="presentation"
         >
           <button
@@ -248,9 +263,7 @@ export function WorkflowSteps({
           >
             Whole run
           </button>
-          {orientation === "vertical" ? null : (
-            <span aria-hidden className="mx-2 h-4 w-px shrink-0 bg-border" />
-          )}
+          {vertical ? null : <span aria-hidden className="mx-2 h-4 w-px shrink-0 bg-border" />}
         </li>
         {stepped.map(({ step, status }, i) => (
           <Step

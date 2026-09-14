@@ -1012,6 +1012,19 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
             pending={move.isPending || launch.isPending}
           />
         ) : null}
+        {/*
+          Where the run is in its Workflow, in the bar itself — past a hairline from the title
+          group, taking the middle of the line. It is the terminal's tablist as well: picking a
+          Step opens Run and scopes it. Nothing at all for a Task on no Workflow.
+        */}
+        {scope.binding ? (
+          <>
+            <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border" />
+            <div className="min-w-0 flex-1">
+              <WorkflowSteps scope={stepScope} layout="inline" />
+            </div>
+          </>
+        ) : null}
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
           <StreamIndicator status={live.status} />
           {/* Deleting the Task the page is *about* leaves nowhere to stand, so it navigates
@@ -1343,12 +1356,6 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
                   </p>
                 ) : null}
               </RailSection>
-
-              {scope.binding ? (
-                <RailSection title="Workflow">
-                  <WorkflowSteps scope={stepScope} orientation="vertical" />
-                </RailSection>
-              ) : null}
 
               <RailSection title="Repository">
                 <p className="flex items-center gap-1.5 font-mono text-xs">
