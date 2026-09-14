@@ -2,14 +2,15 @@
 
 import { afterEach, describe, expect, it } from "bun:test";
 import { TaskErrorCode } from "@solow/contracts";
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { renderWithTrpc } from "@/test/trpc-harness";
 import { DeleteTaskAction } from "./delete-task-action";
 
 /**
  * The board card and the Task page mount the same component, so these cover both surfaces at
- * once. What matters is that the dialog states the real consequences before the click, and that
- * a server refusal comes back as a sentence rather than a wire code.
+ * once. What matters is that an ordinary delete goes on the click with an Undo on offer, that
+ * the dialog — kept for what Restore cannot undo — states the real consequences before the
+ * click, and that a server refusal comes back as a sentence rather than a wire code.
  */
 
 afterEach(cleanup);
@@ -46,7 +47,7 @@ describe("DeleteTaskAction", () => {
     expect(body.textContent).toContain("1 git worktree stays on disk for the 7 days");
   });
 
-  it("does not ask for the impact until the dialog is opened", async () => {
+  it("does not ask for the impact until Delete is pressed", async () => {
     let asked = 0;
     renderWithTrpc(<DeleteTaskAction taskId="task-2" taskTitle="Quiet" trigger={trigger} />, {
       "task.deletionImpact": () => {
@@ -63,7 +64,7 @@ describe("DeleteTaskAction", () => {
     await waitFor(() => expect(asked).toBe(1));
   });
 
-  it("confirming sends force and reports success upstream", async () => {
+  it("deletes on the press when Restore could undo it, with an Undo on the toast", async () => {
     let sent: unknown = null;
     let deleted = false;
     renderWithTrpc(
@@ -85,10 +86,29 @@ describe("DeleteTaskAction", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Delete task" }));
 
     await waitFor(() => expect(deleted).toBe(true));
     expect(sent).toEqual({ id: "task-3", force: true });
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    const toast = await screen.findByRole("status");
+    expect(toast.textContent).toContain('Deleted "Abandoned"');
+    expect(within(toast).getByRole("button", { name: "Undo" })).toBeDefined();
+  });
+
+  it("asks first when a harness is running or another task waits on this one", async () => {
+    let sent = 0;
+    renderWithTrpc(<DeleteTaskAction taskId="task-5" taskTitle="Busy" trigger={trigger} />, {
+      "task.deletionImpact": () => ({ ...IMPACT, running: false, dependentCount: 2 }),
+      "task.delete": () => {
+        sent += 1;
+        return { id: "task-5" };
+      },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(await screen.findByRole("alertdialog")).toBeDefined();
+    expect(sent).toBe(0);
+    fireEvent.click(screen.getByRole("button", { name: "Delete task" }));
+    await waitFor(() => expect(sent).toBe(1));
   });
 
   it("says nothing was deleted when the harness could not be stopped", async () => {

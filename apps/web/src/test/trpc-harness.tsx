@@ -3,6 +3,7 @@ import { type RenderResult, render } from "@testing-library/react";
 import { TRPCClientError, type TRPCLink } from "@trpc/client";
 import { observable } from "@trpc/server/observable";
 import type { ReactElement } from "react";
+import { ToastProvider } from "@/components/ui/toast";
 import type { AppRouter } from "@/server/routers";
 import { trpc } from "@/trpc/react";
 
@@ -59,7 +60,10 @@ export function renderWithTrpc(ui: ReactElement, handlers: Handlers = {}): Harne
 
   const result = render(
     <trpc.Provider client={client} queryClient={queryClient}>
-      <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>
+      <QueryClientProvider client={queryClient}>
+        {/* The app mounts one toast stack; components that toast need it here too. */}
+        <ToastProvider>{ui}</ToastProvider>
+      </QueryClientProvider>
     </trpc.Provider>,
   );
   return { ...result, log };

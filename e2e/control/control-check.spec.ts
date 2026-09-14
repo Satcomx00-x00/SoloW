@@ -276,8 +276,9 @@ test.describe("control check — the main line of the product, end to end", () =
     await test.step("remove everything the check created", async () => {
       // The Task first: an Issue with Tasks refuses to go, and a Workflow a Task follows too.
       await page.goto(`/task/${taskId}`);
+      // No dialog: a finished Task with nothing waiting on it goes to History on the press,
+      // with Undo on a toast — the dialog is only for a running harness or a dependant.
       await page.getByRole("button", { name: `Delete ${taskTitle}` }).click();
-      await page.getByRole("alertdialog").getByRole("button", { name: "Delete task" }).click();
       // Leaving lands on the board, which the e2e `next dev` may be cold-compiling at this
       // moment (10–20 s on this host); the default 30 s expect has timed out on that alone.
       await expect(page).not.toHaveURL(new RegExp(`/task/${taskId}$`), { timeout: 90_000 });

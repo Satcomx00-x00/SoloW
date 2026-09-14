@@ -180,7 +180,7 @@ function FileRow({
             title={file.path}
           >
             {label}
-            {parent && <span className="ml-1.5 text-muted-foreground/60">{parent}</span>}
+            {parent && <span className="ml-1.5 text-muted-foreground-subtle">{parent}</span>}
           </span>
           {/* The letter is meaning; screen readers get it in words rather than as a glyph. */}
           <span className="sr-only">{` ${file.kind}`}</span>
@@ -193,7 +193,9 @@ function FileRow({
             ) : null}
           </span>
         )}
-        {file.binary && <span className="shrink-0 text-2xs text-muted-foreground/60">binary</span>}
+        {file.binary && (
+          <span className="shrink-0 text-2xs text-muted-foreground-subtle">binary</span>
+        )}
         {viewedFiles ? (
           <Checkbox
             aria-label={`Mark ${file.path} viewed`}

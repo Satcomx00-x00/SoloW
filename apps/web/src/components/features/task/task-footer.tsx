@@ -15,12 +15,12 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect, useId, useRef } from "react";
 import { waitingOn } from "@/components/features/board/blockers";
 import { ConfirmAction } from "@/components/features/confirm-action";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { useToast } from "@/components/ui/toast";
 import {
   CREDENTIAL_EXPIRED_REASON,
   failureReasonLabel,
@@ -57,6 +57,7 @@ export function TaskFooter({
   notes = null,
   decidePending,
   onDecide,
+  onSettleDecisions,
   onLaunch,
   onRetry,
   onOpenReview,
@@ -65,6 +66,7 @@ export function TaskFooter({
   actionPending = false,
   renewHref,
   error,
+  onDismissError,
 }: {
   task: TaskDto;
   /** Predecessors not yet Done — Launch is refused with these named, as the board refuses it. */
@@ -84,6 +86,8 @@ export function TaskFooter({
   /** The decision in flight, so its button spins and the other two lock (no double-approve). */
   decidePending: ReviewDecision | null;
   onDecide: (decision: ReviewDecision) => void;
+  /** Approve pressed with decisions unsettled: take the reviewer to the first one. */
+  onSettleDecisions?: (() => void) | undefined;
   onLaunch: () => void;
   onRetry: () => void;
   /** Open the gate on a run that has declared itself finished (`canOpenReview`). */
@@ -97,6 +101,8 @@ export function TaskFooter({
   renewHref: string | null;
   /** A refusal, already mapped to words — never a wire code. */
   error: string | null;
+  /** Clears the refusal; without it the line would sit until the next attempt. */
+  onDismissError?: (() => void) | undefined;
 }) {
   const inReview = task.state === "review";
   const body = footerBody({
@@ -110,6 +116,7 @@ export function TaskFooter({
     notes,
     decidePending,
     onDecide,
+    onSettleDecisions,
     onLaunch,
     onRetry,
     onOpenReview,
@@ -131,8 +138,26 @@ export function TaskFooter({
     >
       {body}
       {error ? (
-        <p className="mt-2 text-destructive text-sm" role="alert">
-          {error}
+        // The feedback family's red, not the destructive one — Reject spends that, and an error
+        // in the same red made every refusal look like a discard. Closable, so it does not sit
+        // under the next attempt.
+        <p
+          className="mt-2 flex items-center gap-2 text-feedback-error text-sm"
+          role="alert"
+          data-footer-error
+        >
+          <span className="min-w-0 flex-1">{error}</span>
+          {onDismissError ? (
+            <Button
+              aria-label="Dismiss"
+              size="icon-xs"
+              variant="ghost"
+              className="text-feedback-error hover:text-feedback-error"
+              onClick={onDismissError}
+            >
+              <X />
+            </Button>
+          ) : null}
         </p>
       ) : null}
     </div>
@@ -200,20 +225,24 @@ function footerBody(input: FooterInput) {
         return (
           <Row
             hint={
-              <span className="flex items-center gap-1.5">
-                <CheckCircle2 aria-hidden className="size-3.5 shrink-0 text-state-done" />
-                {task.completedOutcome === "changes_ready"
-                  ? "Finished — changes ready. Open the review to decide on them."
-                  : "Finished — the plan is ready and nothing changed. Open the review to approve this step and move the workflow on."}
+              // The harness's own summary is the most useful sentence on the page; it used to
+              // be in the button's `title`, which is a tooltip nobody hovers a primary button for.
+              <span className="flex min-w-0 flex-col gap-0.5">
+                <span className="flex items-center gap-1.5">
+                  <CheckCircle2 aria-hidden className="size-3.5 shrink-0 text-state-done" />
+                  {task.completedOutcome === "changes_ready"
+                    ? "Finished — changes ready. Open the review to decide on them."
+                    : "Finished — the plan is ready and nothing changed. Open the review to approve this step and move the workflow on."}
+                </span>
+                {task.completedSummary ? (
+                  <span className="truncate pl-5 text-xs" title={task.completedSummary}>
+                    {task.completedSummary}
+                  </span>
+                ) : null}
               </span>
             }
           >
-            <Button
-              size="lg"
-              loading={input.openReviewPending}
-              onClick={input.onOpenReview}
-              title={task.completedSummary ?? undefined}
-            >
+            <Button size="lg" loading={input.openReviewPending} onClick={input.onOpenReview}>
               <CheckCircle2 /> Open review
             </Button>
           </Row>
@@ -237,27 +266,7 @@ function footerBody(input: FooterInput) {
       // Reopen (history): back to Ready, from where a launch resumes the conversation in the
       // worktree retention kept. Two decisions — reopen, then launch — because starting a harness
       // is never a side effect of reading a finished Task.
-      return (
-        <Row
-          hint={
-            <span className="flex min-w-0 items-center gap-1.5">
-              <CheckCircle2 aria-hidden className="size-3.5 shrink-0 text-state-done" />
-              <span className="truncate">
-                {task.completedSummary ?? "Done. Reopen it to work on it again."}
-              </span>
-            </span>
-          }
-        >
-          <Button
-            size="lg"
-            variant="outline"
-            loading={input.actionPending}
-            onClick={input.onReopen}
-          >
-            <RotateCcw /> Reopen
-          </Button>
-        </Row>
-      );
+      return <Finished {...input} />;
     default:
       return null;
   }
@@ -298,12 +307,17 @@ function ReviewGate({
   notes,
   decidePending,
   onDecide,
+  onSettleDecisions,
 }: FooterInput) {
-  // A decision the harness emitted and nobody settled is the one thing that locks Approve: the
-  // plan it belongs to is what the next Step is briefed with, and approving it unsettled is
-  // approving the harness's choice by default — the rubber stamp the Plan tab exists to replace.
+  // A decision the harness emitted and nobody settled is the one thing that stands between the
+  // reviewer and Approve: the plan it belongs to is what the next Step is briefed with, and
+  // approving it unsettled is approving the harness's choice by default — the rubber stamp the
+  // Plan tab exists to replace. The button stays live, though: pressing it goes to the first
+  // unsettled decision, which is what a greyed button with a sentence about a tab made the
+  // reviewer do by hand.
   const canDecide = decidePending === null;
-  const canApprove = canDecide && decisionsPending === 0;
+  const blockedByDecisions = decisionsPending > 0;
+  const noteId = useId();
   const open = openItems.length;
   const noteCount = notes?.count ?? 0;
   const hasFeedback = noteCount > 0 || Boolean(notes?.general.trim());
@@ -339,11 +353,15 @@ function ReviewGate({
         </div>
       ) : null}
       {decisionsPending > 0 ? (
-        <p className="flex items-center gap-1.5 text-state-review text-xs" role="status">
+        <p
+          className="flex items-center gap-1.5 text-state-review text-xs"
+          role="status"
+          id="task-footer-decisions"
+        >
           <Scale aria-hidden className="size-3.5 shrink-0" />
           {decisionsPending === 1 ? "1 decision" : `${decisionsPending} decisions`} the harness made
-          {decisionsPending === 1 ? " is" : " are"} waiting for you on the Plan tab — settle{" "}
-          {decisionsPending === 1 ? "it" : "them"} to approve.
+          {decisionsPending === 1 ? " is" : " are"} waiting for you on the Plan tab — Approve takes
+          you there.
         </p>
       ) : null}
       <p className="flex items-center gap-1.5 text-muted-foreground text-xs">
@@ -361,22 +379,31 @@ function ReviewGate({
         // The general remark, right above the button that sends it (F10 FR-7). Line notes are
         // taken in the diff; this is for what is true of the change as a whole. Never required —
         // the button was once refused without it, which made "request changes" the one decision
-        // that could not be taken by pressing it.
-        <Textarea
-          aria-label="Feedback for the harness"
-          rows={2}
-          value={notes.general}
-          onChange={(e) => notes.onGeneral(e.target.value)}
-          placeholder="Anything the harness should know before the next round… (optional)"
-          className="min-h-9 max-w-2xl text-xs"
-        />
+        // that could not be taken by pressing it. The label stays put above the field: a
+        // placeholder is gone the moment the first word is typed.
+        <div className="max-w-2xl space-y-1">
+          <label htmlFor={noteId} className="block text-2xs text-muted-foreground">
+            Note to the harness — optional, goes with Request changes
+          </label>
+          <Textarea
+            id={noteId}
+            rows={2}
+            value={notes.general}
+            onChange={(e) => notes.onGeneral(e.target.value)}
+            placeholder="e.g. The lockfile change was not asked for — revert it."
+            className="min-h-9 text-xs"
+          />
+        </div>
       ) : null}
       <div className="flex flex-wrap items-center gap-2">
         <Button
           size="lg"
-          disabled={!canApprove}
+          disabled={!canDecide}
+          aria-describedby={blockedByDecisions ? "task-footer-decisions" : undefined}
           loading={decidePending === "approve"}
-          onClick={() => onDecide("approve")}
+          onClick={() =>
+            blockedByDecisions && onSettleDecisions ? onSettleDecisions() : onDecide("approve")
+          }
         >
           <Check />{" "}
           {open > 0 ? `Approve with ${open} open ${open === 1 ? "item" : "items"}` : "Approve"}
@@ -498,11 +525,10 @@ function FailedOrParked({ task, actionPending, onRetry, renewHref }: FooterInput
  */
 function ReadyToLaunch({ outstanding, actionPending, onLaunch }: FooterInput) {
   const blocked = outstanding.length > 0;
-  const button = (
-    <Button size="lg" loading={actionPending} disabled={blocked} onClick={onLaunch}>
-      <Play /> Launch
-    </Button>
-  );
+  const { toast } = useToast();
+  // The button stays live and refuses out loud. Disabled, it left the tab order and its tooltip
+  // hung off a wrapper because the control itself fired no events; a press that answers with
+  // the blocker's name reaches everyone, and the sentence beside it says the same thing at rest.
   return (
     <Row
       hint={
@@ -511,19 +537,61 @@ function ReadyToLaunch({ outstanding, actionPending, onLaunch }: FooterInput) {
           : "Ready to run. Launching starts a harness in a fresh worktree."
       }
     >
-      {blocked ? (
-        <TooltipProvider delayDuration={200}>
-          <Tooltip>
-            {/* A disabled button fires no pointer events, so the tooltip hangs off a wrapper. */}
-            <TooltipTrigger asChild>
-              <span className="inline-flex">{button}</span>
-            </TooltipTrigger>
-            <TooltipContent>{waitingOn(outstanding)}</TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-      ) : (
-        button
-      )}
+      <Button
+        size="lg"
+        loading={actionPending}
+        aria-disabled={blocked || undefined}
+        className={cn(blocked && "opacity-60")}
+        onClick={
+          blocked
+            ? () =>
+                toast({ tone: "caution", title: "Not yet", description: waitingOn(outstanding) })
+            : onLaunch
+        }
+      >
+        <Play /> Launch
+      </Button>
+    </Row>
+  );
+}
+
+/**
+ * The end of the flow, which is the part people remember.
+ *
+ * "Done. Reopen it to work on it again." in grey was a flat last screen for a review that
+ * approved and committed a change; it now says what happened — the harness's own summary, or
+ * what the approval covered — in the done colour. And the line takes the focus when the Task
+ * arrives here: the buttons the reviewer just pressed are gone, and focus that fell to the body
+ * left a keyboard or screen-reader user with no word that anything had happened.
+ */
+function Finished({ task, consequences, actionPending, onReopen }: FooterInput) {
+  const status = useRef<HTMLParagraphElement | null>(null);
+  useEffect(() => {
+    status.current?.focus({ preventScroll: true });
+  }, []);
+  return (
+    <Row
+      hint={
+        <p
+          ref={status}
+          tabIndex={-1}
+          className="flex min-w-0 items-center gap-1.5 outline-none"
+          data-task-finished
+        >
+          <CheckCircle2 aria-hidden className="size-3.5 shrink-0 text-state-done" />
+          <span className="min-w-0 truncate">
+            <span className="font-medium text-foreground">Done</span>
+            {" — "}
+            {/* The harness's report; failing that, the scope of what was reviewed here. Not
+                "committed" — Done can also be reached by moving past the gate. */}
+            {task.completedSummary ?? `The review covered ${consequences}`}
+          </span>
+        </p>
+      }
+    >
+      <Button size="lg" variant="outline" loading={actionPending} onClick={onReopen}>
+        <RotateCcw /> Reopen
+      </Button>
     </Row>
   );
 }

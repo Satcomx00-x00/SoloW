@@ -29,6 +29,7 @@ import {
   OctagonAlert,
   Trash2,
   TriangleAlert,
+  X,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -37,10 +38,12 @@ import { TaskStateBadge } from "@/components/features/board/task-state-badge";
 import { ConfirmDialog } from "@/components/features/confirm-action";
 import { useBackToProject } from "@/components/features/shared/back-to-project";
 import { draftFileKey, useReviewDraft } from "@/components/hooks/use-review-draft";
+import { useTablistKeys } from "@/components/hooks/use-tablist-keys";
 import { useTaskStream } from "@/components/hooks/use-task-stream";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Skeleton } from "@/components/ui/skeleton";
 import { settingsHref } from "@/lib/navigation";
 import { WHOLE_PAGE } from "@/lib/paged";
 import { relativeAge, relativeUntil } from "@/lib/relative-time";
@@ -51,6 +54,7 @@ import { trpc } from "@/trpc/react";
 import { ChangesPanel } from "./changes-panel";
 import { DecisionForm } from "./decision-form";
 import { DeleteTaskAction } from "./delete-task-action";
+import { EmptyPanel } from "./empty-panel";
 import { HarnessComposer } from "./harness-composer";
 import { LaunchTaskDialog, useWorkflowChoices } from "./launch-task-dialog";
 import { ReviewBriefPanel } from "./review-brief";
@@ -118,7 +122,7 @@ const STREAM_LABEL: Record<string, string> = {
  * Rule exists to prevent.
  */
 const STREAM_TONE: Record<string, string> = {
-  idle: "text-muted-foreground/60",
+  idle: "text-muted-foreground-subtle",
   connecting: "text-muted-foreground",
   open: "text-feedback-ok",
   reconnecting: "text-feedback-caution",
@@ -151,12 +155,21 @@ const RIGHT_PANEL_ID: Record<RightTab, string> = {
 };
 
 /**
- * The right column's tab strip: Changes, Plan.
+ * The right column's tab strip: Changes, Plan, Review.
  *
  * Hand-rolled like the Workflow strip rather than Radix Tabs, because the strip sits in the
  * column's header row and the panels in its body — two slots of `SplitPane`, and a Radix
  * `TabsList` cannot live outside its root. The pattern is the one `workflow-steps.tsx` already
- * uses: `aria-controls` from tab to panel, manual activation, and a count where one helps.
+ * uses: `aria-controls` from tab to panel, manual activation, roving focus from the shared
+ * hook, and a count where one helps.
+ *
+ * No tab is ever disabled. Plan and Review used to grey out until there was something to show,
+ * with the reason in a `title` — which a disabled button never displays, and which a keyboard
+ * never reaches. A tab that opens onto a panel saying "no plan yet" tells the same truth to
+ * everyone, and keeps the strip's shape constant so the third tab is always where it was.
+ *
+ * The selected tab is underlined rather than ringed: the focus ring is a ring, and two rings in
+ * two greys made "where am I" and "what is showing" the same mark.
  */
 function RightColumnTabs({
   tab,
@@ -172,14 +185,20 @@ function RightColumnTabs({
   /** Criteria still to verify, or null when there is no Session to brief on. */
   review: number | null;
 }) {
-  const tabs: Array<{ id: RightTab; label: string; count: number; disabled: boolean }> = [
-    { id: "changes", label: "Changes", count: files, disabled: false },
-    { id: "plan", label: "Plan", count: planItems, disabled: planItems === 0 },
-    { id: "review", label: "Review", count: review ?? 0, disabled: review === null },
+  const onKeyDown = useTablistKeys<HTMLDivElement>();
+  const tabs: Array<{ id: RightTab; label: string; count: number }> = [
+    { id: "changes", label: "Changes", count: files },
+    { id: "plan", label: "Plan", count: planItems },
+    { id: "review", label: "Review", count: review ?? 0 },
   ];
   return (
-    <div role="tablist" aria-label="Review column" className="flex min-w-0 items-center gap-1">
-      {tabs.map(({ id, label, count, disabled }) => {
+    <div
+      role="tablist"
+      aria-label="Review column"
+      className="flex min-w-0 items-center gap-1"
+      onKeyDown={onKeyDown}
+    >
+      {tabs.map(({ id, label, count }) => {
         const selected = tab === id;
         return (
           <button
@@ -190,15 +209,12 @@ function RightColumnTabs({
             aria-controls={RIGHT_PANEL_ID[id]}
             aria-selected={selected}
             tabIndex={selected ? 0 : -1}
-            disabled={disabled}
-            title={disabled ? "The harness has published no plan yet" : undefined}
             onClick={() => onPick(id)}
             className={cn(
-              "inline-flex h-6 items-center gap-1.5 rounded-md px-1.5 font-medium text-2xs uppercase tracking-[0.14em] transition-colors",
+              "inline-flex h-6 items-center gap-1.5 rounded-md px-1.5 font-medium text-2xs uppercase tracking-[0.14em] transition-colors duration-100",
               selected
-                ? "bg-muted text-foreground ring-1 ring-border"
+                ? "bg-muted text-foreground shadow-[inset_0_-2px_0_0_var(--foreground)]"
                 : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
-              disabled && "opacity-50",
             )}
           >
             {label}
@@ -210,6 +226,48 @@ function RightColumnTabs({
           </button>
         );
       })}
+    </div>
+  );
+}
+
+/**
+ * The page's own shape, drawn empty while the Task loads — a header line, the run beside the
+ * review column, the foot — so what arrives lands in place instead of jumping into it. Held
+ * back 300ms: a warm cache answers well inside that, and a skeleton that flashes for two frames
+ * reads as a glitch, not as loading. `aria-busy` and a hidden line, because a screen reader
+ * gets nothing from a pulse — not a live region, which announces nothing when it is born with
+ * its content already in it.
+ */
+function WorkspaceSkeleton({ changesWidth }: { changesWidth: number }) {
+  return (
+    <div aria-busy className="delayed-reveal flex h-full flex-col" data-workspace-skeleton>
+      <span className="sr-only">Loading task</span>
+      <div className="flex items-center gap-3 border-b px-4 py-3">
+        <Skeleton className="size-8 rounded-md" />
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <Skeleton className="h-5 w-60" />
+            <Skeleton className="h-5 w-16 rounded-full" />
+          </div>
+          <Skeleton className="h-3 w-40" />
+        </div>
+      </div>
+      <div className="flex min-h-0 flex-1">
+        <div className="flex-1 p-3">
+          <Skeleton className="h-full rounded-xl" />
+        </div>
+        <div
+          className="flex shrink-0 flex-col gap-3 border-l p-3"
+          style={{ width: `min(${changesWidth}px, 60%)` }}
+        >
+          <Skeleton className="h-6 w-40" />
+          <Skeleton className="h-24" />
+          <Skeleton className="h-24" />
+        </div>
+      </div>
+      <div className="border-t px-4 py-3">
+        <Skeleton className="h-9 w-72" />
+      </div>
     </div>
   );
 }
@@ -333,6 +391,9 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
    * for it to reach and a message that arrives at the *next* run would be steering blind.
    */
   const [queued, setQueued] = useState<string | null>(null);
+  // A stop pressed while the stream was away, held by the same rule as a steer: it goes the
+  // moment the stream is back, and is dropped if the Task leaves Running first.
+  const [stopQueued, setStopQueued] = useState(false);
   // A Task in History is never steered: its run was stopped on the way out, whatever its row
   // still says, and a message to it would reach the next run or nothing.
   const isRunning = task.data?.state === "running" && deleted === null;
@@ -344,6 +405,17 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
     }
     if (live.status === "open" && live.sendInput(queued)) setQueued(null);
   }, [queued, isRunning, live.status, live.sendInput]);
+  useEffect(() => {
+    if (!stopQueued) return;
+    if (!isRunning) {
+      setStopQueued(false);
+      return;
+    }
+    if (live.status === "open") {
+      live.stopHarness();
+      setStopQueued(false);
+    }
+  }, [stopQueued, isRunning, live.status, live.stopHarness]);
 
   /**
    * The split between the run and the change under review — a per-user preference, so the
@@ -702,18 +774,26 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   );
 
   if (task.isLoading) {
-    return (
-      <div className="space-y-3 p-6" aria-hidden>
-        <div className="h-4 w-64 animate-pulse rounded-full bg-muted" />
-        <div className="h-[60vh] animate-pulse rounded-xl border bg-card" />
-      </div>
-    );
+    return <WorkspaceSkeleton changesWidth={pane.changesWidth} />;
   }
   if (task.error || !task.data) {
+    // A page that could not load still has somewhere to go: the way back is the one action
+    // every failure here has to offer, or the operator is left with a sentence and no exit.
     return (
-      <p className="p-6 text-destructive text-sm" role="alert">
-        {task.error?.message ?? "Task not found"}
-      </p>
+      <div className="flex flex-col items-start gap-3 p-6" role="alert">
+        <p className="flex items-center gap-2 text-feedback-error text-sm">
+          <TriangleAlert className="size-4 shrink-0" aria-hidden />
+          {task.error ? taskActionMessage(task.error.message) : "This task could not be found."}
+        </p>
+        <p className="text-muted-foreground text-sm">
+          It may have been deleted, or the link may be stale.
+        </p>
+        <Button asChild variant="outline" size="sm">
+          <Link href="/board">
+            <ArrowLeft /> Back to the board
+          </Link>
+        </Button>
+      </div>
     );
   }
 
@@ -762,9 +842,19 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
         : hasPlan && diffs.length === 0 && isRunning
           ? "plan"
           : "changes";
-  const pickedTab = tabPick && tabPick.state === t.state ? tabPick.tab : autoTab;
-  // A plan tab with no plan under it is disabled, so a pick that outlived its list falls back.
-  const tab = pickedTab === "plan" && !hasPlan ? "changes" : pickedTab;
+  const tab = tabPick && tabPick.state === t.state ? tabPick.tab : autoTab;
+  /**
+   * Approve pressed with decisions still unsettled: rather than a greyed button and a sentence
+   * about a tab elsewhere, the page goes to the tab and puts the focus on the first decision
+   * still open — the blocker itself, where it is answered. After paint, because the panel is
+   * `hidden` until the pick lands.
+   */
+  const goToDecisions = () => {
+    setTabPick({ tab: "plan", state: t.state });
+    requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>('[data-decision][data-settled="false"] input')?.focus();
+    });
+  };
   const runDecision = (decision: "approve" | "reject" | "request_changes") => {
     if (!latest?.id) return;
     // The notes and remark go with a request for changes and nowhere else (F10 FR-7): an
@@ -939,21 +1029,26 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
           {/*
             Deleting the Task the page is *about* leaves nowhere to stand, so it navigates back
             to the board rather than re-rendering against a Task that no longer exists.
+
+            Set apart from the reading controls beside it by a hairline and a wider gap: one
+            evenly spaced row put the destructive control a graze away from "About this task".
           */}
+          {deleted !== null ? null : <span aria-hidden className="mx-1 h-4 w-px bg-border" />}
           {deleted !== null ? null : (
             <DeleteTaskAction
               onDeleted={() => router.push(back.href)}
               taskId={t.id}
               taskTitle={t.title}
-              trigger={(openDialog) => (
+              trigger={(press, busy) => (
                 <Button
                   aria-label={`Delete ${t.title}`}
                   className="text-muted-foreground hover:text-destructive"
-                  onClick={openDialog}
+                  onClick={press}
+                  loading={busy}
                   size="icon"
                   variant="ghost"
                 >
-                  <Trash2 />
+                  {busy ? null : <Trash2 />}
                 </Button>
               )}
             />
@@ -1003,13 +1098,31 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
       <WorkflowSteps scope={scope} />
 
       {moveMessage ? (
-        <p
-          className="mx-4 mt-3 flex items-center gap-2 rounded-lg border border-state-failed/30 bg-state-failed/10 px-3 py-2 text-state-failed text-sm"
+        /*
+          A refusal, in the feedback family (not the lifecycle one — Failed red is the Task's
+          colour, and this is the server's). It can be closed: it used to sit until the *next*
+          mutation happened to clear it, and an alert nobody can dismiss is one that gets read
+          around.
+        */
+        <div
+          className="mx-4 mt-3 flex items-center gap-2 rounded-lg border border-feedback-error/30 bg-feedback-error/10 px-3 py-2 text-feedback-error text-sm"
           role="alert"
         >
           <TriangleAlert className="size-3.5 shrink-0" aria-hidden />
-          {moveMessage}
-        </p>
+          <span className="min-w-0 flex-1">{moveMessage}</span>
+          <Button
+            aria-label="Dismiss"
+            size="icon-xs"
+            variant="ghost"
+            className="text-feedback-error hover:text-feedback-error"
+            onClick={() => {
+              move.reset();
+              launch.reset();
+            }}
+          >
+            <X />
+          </Button>
+        </div>
       ) : null}
 
       {/* Panels: the run on the left, the change under review in a column beside it. */}
@@ -1049,6 +1162,9 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
               isRunning={isRunning}
               queued={queued}
               onDiscardQueued={() => setQueued(null)}
+              stopQueued={stopQueued}
+              onQueueStop={() => setStopQueued(true)}
+              onDiscardStop={() => setStopQueued(false)}
               ackError={ack && !ack.ok ? (ack.error ?? "unknown") : null}
             />
           </div>
@@ -1067,7 +1183,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
               id={RIGHT_PANEL_ID.changes}
               aria-labelledby={RIGHT_TAB_ID.changes}
               hidden={tab !== "changes"}
-              className="h-full"
+              className="h-full transition-opacity duration-100 starting:opacity-0"
             >
               <ScrollArea className="h-full">
                 <div className="p-3">
@@ -1128,7 +1244,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
               id={RIGHT_PANEL_ID.plan}
               aria-labelledby={RIGHT_TAB_ID.plan}
               hidden={tab !== "plan"}
-              className="h-full"
+              className="h-full transition-opacity duration-100 starting:opacity-0"
             >
               <ScrollArea className="h-full">
                 <div className="p-3">
@@ -1138,10 +1254,20 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
                     opposite ends and are read at different moments: the plan while the run is
                     going, the diff once it has stopped.
 
-                    Nothing at all when the harness has published no list: `TodoList` renders `null`
-                    on an empty one, and the tab is disabled so a heading over nothing is never shown.
+                    Before the harness has published anything the tab still opens — onto a panel
+                    that says so, and when a plan tends to appear, so an empty column is never
+                    mistaken for a broken one.
                   */}
-                  {hasPlan ? (
+                  {!hasPlan ? (
+                    <EmptyPanel
+                      label="No plan yet."
+                      hint={
+                        isRunning
+                          ? "The harness publishes one when it writes its todo list — usually in its first minute."
+                          : "The harness publishes one when it runs and writes its todo list."
+                      }
+                    />
+                  ) : (
                     <section aria-label="Harness plan" className="space-y-3">
                       {decisions.length > 0 ? (
                         <div className="space-y-2" data-decisions={decisions.length}>
@@ -1165,7 +1291,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
                       {stepCard ? <StepCard widget={stepCard} /> : null}
                       {todos.length > 0 ? <TodoList items={todos} /> : null}
                     </section>
-                  ) : null}
+                  )}
                 </div>
               </ScrollArea>
             </div>
@@ -1174,7 +1300,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
               id={RIGHT_PANEL_ID.review}
               aria-labelledby={RIGHT_TAB_ID.review}
               hidden={tab !== "review"}
-              className="h-full"
+              className="h-full transition-opacity duration-100 starting:opacity-0"
             >
               <ScrollArea className="h-full">
                 <div className="p-3">
@@ -1186,7 +1312,12 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
                       onToggleVerified={draft.toggleVerified}
                       canVerify={t.state === "review" && deleted === null}
                     />
-                  ) : null}
+                  ) : (
+                    <EmptyPanel
+                      label="Nothing to review yet."
+                      hint="The brief — the criteria to verify — is drawn up from the first run."
+                    />
+                  )}
                 </div>
               </ScrollArea>
             </div>
@@ -1225,6 +1356,11 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
           }}
           decidePending={decide.isPending ? (decide.variables?.decision ?? null) : null}
           onDecide={runDecision}
+          onSettleDecisions={goToDecisions}
+          onDismissError={() => {
+            retry.reset();
+            decide.reset();
+          }}
           onLaunch={() => requestMove("running")}
           onRetry={() => retry.mutate({ id: t.id })}
           onOpenReview={() => submitForReview.mutate({ id: t.id })}

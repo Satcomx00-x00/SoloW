@@ -44,7 +44,7 @@ export function TaskAdvance({
   const busy = pending ?? false;
 
   return (
-    <TooltipProvider delayDuration={200}>
+    <TooltipProvider>
       <div className="flex shrink-0 items-center gap-0.5">
         <Step direction="back" to={back} onMove={onMove} pending={busy} />
         <Step direction="forward" to={forward} onMove={onMove} pending={busy} />
@@ -88,7 +88,7 @@ function Step({
         <span className="inline-flex">
           <Button
             aria-label={label}
-            className="text-muted-foreground"
+            className="pointer-coarse:size-11 text-muted-foreground"
             disabled={to === null || pending}
             onClick={() => to && onMove(to)}
             size="icon-sm"

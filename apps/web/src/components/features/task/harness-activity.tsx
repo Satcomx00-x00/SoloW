@@ -38,7 +38,7 @@ export function HarnessActivityLine({ activity }: { activity: HarnessActivity })
       // harness's own output.
       aria-live="polite"
       data-harness-activity={activity.kind}
-      className="flex items-center gap-2 font-mono text-2xs text-muted-foreground/80"
+      className="flex items-center gap-2 font-mono text-2xs text-muted-foreground-subtle"
     >
       {activity.kind === "launching" ? (
         // A spinner, not the dots: this is a machine starting, not a model composing, and it is
@@ -89,7 +89,7 @@ export function LaunchingPanel() {
     >
       <LoaderCircle aria-hidden className="spinner size-5 text-state-running" />
       <p className="font-medium text-sm">Launching the harness…</p>
-      <p className="max-w-xs text-muted-foreground/70 text-xs leading-relaxed">
+      <p className="max-w-xs text-muted-foreground-subtle text-xs leading-relaxed">
         Starting the session and checking out the worktree. The harness's first output appears here
         within a few seconds.
       </p>

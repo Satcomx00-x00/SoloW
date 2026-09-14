@@ -5,6 +5,7 @@ import { httpBatchStreamLink } from "@trpc/client";
 import type { ReactNode } from "react";
 import { useState } from "react";
 import superjson from "superjson";
+import { ToastProvider } from "@/components/ui/toast";
 import { trpc } from "@/trpc/react";
 import { createQueryClient } from "./query-client";
 
@@ -33,7 +34,10 @@ export function Providers({ children }: { children: ReactNode }) {
 
   return (
     <trpc.Provider client={trpcClient} queryClient={queryClient}>
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      <QueryClientProvider client={queryClient}>
+        {/* Toasts sit above the query providers so an Undo on one can still reach a mutation. */}
+        <ToastProvider>{children}</ToastProvider>
+      </QueryClientProvider>
     </trpc.Provider>
   );
 }

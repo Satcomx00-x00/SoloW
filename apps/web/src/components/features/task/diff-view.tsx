@@ -37,7 +37,7 @@ function FileRow({ file }: { file: DiffFileDto }) {
         {file.additions > 0 && file.deletions > 0 && " "}
         {file.deletions > 0 && <span className="text-diff-removed">-{file.deletions}</span>}
         {file.additions === 0 && file.deletions === 0 && (
-          <span className="text-muted-foreground/60">0</span>
+          <span className="text-muted-foreground-subtle">0</span>
         )}
       </span>
     </li>
@@ -62,7 +62,7 @@ export function DiffView({ diff, branch }: { diff: TaskDiffDto | null; branch: s
             </p>
           </div>
         ) : (
-          <div className="flex h-full min-h-40 items-center justify-center text-sm text-muted-foreground/60">
+          <div className="flex h-full min-h-40 items-center justify-center text-sm text-muted-foreground-subtle">
             No proposed changes yet.
           </div>
         )}

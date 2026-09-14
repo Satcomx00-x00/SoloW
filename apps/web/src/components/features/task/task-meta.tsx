@@ -12,6 +12,7 @@ import {
   PopoverTitle,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { WHOLE_PAGE } from "@/lib/paged";
 import { relativeAge } from "@/lib/relative-time";
 import { cn } from "@/lib/utils";
@@ -41,17 +42,25 @@ export function TaskMeta({ task, session }: { task: TaskDto; session: SessionDto
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button
-          aria-label="About this task"
-          className="text-muted-foreground"
-          size="icon"
-          title="About this task"
-          variant="ghost"
-        >
-          <Info />
-        </Button>
-      </PopoverTrigger>
+      {/* A real tooltip, not a `title`: the native one waits a second, has no arrow, and never
+          shows on touch. */}
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <PopoverTrigger asChild>
+              <Button
+                aria-label="About this task"
+                className="text-muted-foreground"
+                size="icon"
+                variant="ghost"
+              >
+                <Info />
+              </Button>
+            </PopoverTrigger>
+          </TooltipTrigger>
+          <TooltipContent>About this task</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
       <PopoverContent align="end" className="w-80 p-0">
         <PopoverHeader className="border-b px-3 py-2">
           <PopoverTitle className="text-sm">About this task</PopoverTitle>
@@ -127,8 +136,9 @@ function Id({ value }: { value: string }) {
       <button
         type="button"
         aria-label={`Copy ${value}`}
+        // 24px to hit, 12px to see: the glyph stays small, the target does not.
         className={cn(
-          "inline-flex size-4 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground",
+          "-my-1 inline-flex size-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
           copied && "text-feedback-ok",
         )}
         onClick={() => {

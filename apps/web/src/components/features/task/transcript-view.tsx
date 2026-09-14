@@ -138,7 +138,7 @@ function RowBody({
 
   if (row.kind === "notice") {
     return (
-      <p className="font-mono text-2xs text-muted-foreground/70">
+      <p className="font-mono text-2xs text-muted-foreground-subtle">
         <Highlighted text={row.text} query={query} activeIndex={activeIndex} />
       </p>
     );
@@ -215,7 +215,7 @@ const TextBlock = memo(function TextBlock({
 
   if (channel === "system") {
     return (
-      <p className="whitespace-pre-wrap font-mono text-2xs text-muted-foreground/70 leading-[1.75]">
+      <p className="whitespace-pre-wrap font-mono text-2xs text-muted-foreground-subtle leading-[1.75]">
         <Highlighted text={text} query={query} activeIndex={activeIndex} />
       </p>
     );

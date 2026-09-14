@@ -234,7 +234,7 @@ describe("TaskWorkspace review gate", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save note" }));
     expect(await screen.findByText(/1 note/)).toBeDefined();
     // And a remark about the change as a whole, at the gate.
-    fireEvent.change(screen.getByRole("textbox", { name: "Feedback for the harness" }), {
+    fireEvent.change(screen.getByRole("textbox", { name: /Note to the harness/ }), {
       target: { value: "Close, but check the config." },
     });
 
@@ -349,9 +349,10 @@ describe("TaskWorkspace review gate", () => {
     // Nothing is preselected: the harness's pick is a recommendation, not an answer.
     expect(within(form).queryByRole("radio", { checked: true })).toBeNull();
 
-    // The gate waits.
+    // The gate waits — and Approve, still live, goes to the decision rather than approving.
     const approve = screen.getByRole("button", { name: "Approve" });
-    expect(approve.hasAttribute("disabled")).toBe(true);
+    expect(approve.hasAttribute("disabled")).toBe(false);
+    expect(approve.getAttribute("aria-describedby")).toBe("task-footer-decisions");
     expect(screen.getByRole("status").textContent).toContain("1 decision");
 
     // The reviewer overturns the harness. The pick is kept in the draft, per round.
@@ -535,8 +536,11 @@ describe("TaskWorkspace dependencies (issue #6)", () => {
     expect(blocker.getAttribute("href")).toBe("/task/task-0");
     const dependant = await screen.findByRole("link", { name: /Hang the gate/ });
     expect(dependant.getAttribute("href")).toBe("/task/task-9");
-    // Launch is refused here, in words, rather than after a round trip as a wire code.
-    expect(screen.getByRole("button", { name: "Launch" }).hasAttribute("disabled")).toBe(true);
+    // Launch is refused here, in words, rather than after a round trip as a wire code — and
+    // stays live, so the refusal reaches a keyboard too.
+    expect(screen.getByRole("button", { name: "Launch" }).getAttribute("aria-disabled")).toBe(
+      "true",
+    );
     expect(screen.getByText(/Waiting on Pour the foundation \(Running\)/)).toBeDefined();
   });
 
@@ -716,17 +720,19 @@ describe("TaskWorkspace harness steering (TASK-022)", () => {
     expect(screen.getByRole("button", { name: /Stop/ }).hasAttribute("disabled")).toBe(true);
   });
 
-  it("confirms before stopping the harness, then sends the stop", async () => {
+  it("stops the harness on a held Stop, never on a click", async () => {
     renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, handlers("running"));
     const stop = await screen.findByRole("button", { name: /Stop/ });
     await waitFor(() => expect(stop.hasAttribute("disabled")).toBe(false));
 
+    // A click is exactly the gesture the hold exists to refuse.
     fireEvent.click(stop);
     expect(sockets[0]?.sent).toEqual([]);
-    expect(await screen.findByRole("alertdialog")).toBeDefined();
 
-    fireEvent.click(screen.getByRole("button", { name: /Stop the harness/ }));
+    // Held for the fill to cross it, the stop goes — with no dialog in between.
+    fireEvent.pointerDown(stop, { button: 0 });
     await waitFor(() => expect(sockets[0]?.sent).toEqual([{ kind: "stop", taskId: TASK_ID }]));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
   });
 
   it("holds a message typed while the stream is away, and sends it once the stream is back", async () => {
@@ -1488,8 +1494,12 @@ describe("TaskWorkspace todo checklist", () => {
 
     await screen.findByRole("complementary", { name: "Review" });
     expect(screen.queryByRole("region", { name: "Harness plan" })).toBeNull();
-    // And the tab that would show it is there but disabled — never a heading over nothing.
-    expect(screen.getByRole("tab", { name: "Plan" }).hasAttribute("disabled")).toBe(true);
+    // The tab is still there and still opens — onto a panel that says so, never a heading over
+    // nothing and never a greyed tab with a reason nobody can read.
+    const plan = screen.getByRole("tab", { name: "Plan" });
+    expect(plan.hasAttribute("disabled")).toBe(false);
+    fireEvent.click(plan);
+    expect(screen.getByText("No plan yet.")).toBeDefined();
   });
 
   it("opens on the plan while the run is going, and on the change once one is captured", async () => {

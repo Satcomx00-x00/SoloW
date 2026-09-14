@@ -3,6 +3,7 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import type { TaskDependencyDto, TaskDto } from "@solow/contracts";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { ToastProvider } from "@/components/ui/toast";
 import { TaskFooter } from "./task-footer";
 
 /**
@@ -51,19 +52,21 @@ function renderFooter(
 ) {
   const calls: string[] = [];
   render(
-    <TaskFooter
-      task={task(over)}
-      consequences="1 repository, 1 branch, 3 files"
-      decidePending={null}
-      onDecide={(d) => calls.push(`decide:${d}`)}
-      onLaunch={() => calls.push("launch")}
-      onRetry={() => calls.push("retry")}
-      onOpenReview={() => calls.push("open-review")}
-      onReopen={() => calls.push("reopen")}
-      renewHref="/settings?section=secrets&renewSecret=anthropic"
-      error={null}
-      {...extra}
-    />,
+    <ToastProvider>
+      <TaskFooter
+        task={task(over)}
+        consequences="1 repository, 1 branch, 3 files"
+        decidePending={null}
+        onDecide={(d) => calls.push(`decide:${d}`)}
+        onLaunch={() => calls.push("launch")}
+        onRetry={() => calls.push("retry")}
+        onOpenReview={() => calls.push("open-review")}
+        onReopen={() => calls.push("reopen")}
+        renewHref="/settings?section=secrets&renewSecret=anthropic"
+        error={null}
+        {...extra}
+      />
+    </ToastProvider>,
   );
   return calls;
 }
@@ -88,10 +91,15 @@ describe("TaskFooter", () => {
     ];
     const calls = renderFooter({ state: "ready" }, { outstanding });
     const launch = screen.getByRole("button", { name: "Launch" });
-    expect(launch.hasAttribute("disabled")).toBe(true);
+    // Live, so the refusal reaches a keyboard and a screen reader; the press answers with the
+    // blocker's name instead of launching.
+    expect(launch.hasAttribute("disabled")).toBe(false);
+    expect(launch.getAttribute("aria-disabled")).toBe("true");
     fireEvent.click(launch);
     expect(calls).toEqual([]);
-    expect(screen.getByText(/Waiting on Pour the foundation \(Running\)/)).toBeDefined();
+    expect(
+      screen.getAllByText(/Waiting on Pour the foundation \(Running\)/).length,
+    ).toBeGreaterThan(0);
   });
 
   it("offers Retry on a failed run, with the reason in words rather than as its class", () => {
@@ -142,7 +150,9 @@ describe("TaskFooter", () => {
 
   it("reopens a Done task — back to Ready, never straight into a run", () => {
     const calls = renderFooter({ state: "done", completedSummary: "Shipped the latch." });
-    expect(screen.getByText("Shipped the latch.")).toBeDefined();
+    expect(screen.getByText(/Shipped the latch\./)).toBeDefined();
+    // The finish takes the focus: the buttons just pressed are gone, and nothing else says so.
+    expect(document.activeElement?.hasAttribute("data-task-finished")).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Reopen" }));
     expect(calls).toEqual(["reopen"]);
   });
@@ -165,12 +175,19 @@ describe("TaskFooter", () => {
     expect(approve.hasAttribute("disabled")).toBe(false);
   });
 
-  it("locks Approve while a decision the harness made is unsettled, and says where to settle it", () => {
-    renderFooter({ state: "review" }, { decisionsPending: 2 });
+  it("sends Approve to the unsettled decision while one waits, rather than approving", () => {
+    let sent = 0;
+    const calls = renderFooter(
+      { state: "review" },
+      { decisionsPending: 2, onSettleDecisions: () => sent++ },
+    );
     const approve = screen.getByRole("button", { name: "Approve" });
-    expect(approve.hasAttribute("disabled")).toBe(true);
+    expect(approve.hasAttribute("disabled")).toBe(false);
     expect(screen.getByRole("status").textContent).toContain("2 decisions");
     expect(screen.getByRole("status").textContent).toContain("Plan tab");
+    fireEvent.click(approve);
+    expect(sent).toBe(1);
+    expect(calls).toEqual([]);
     // The other two decisions stay open: a request for changes or a rejection is how a reviewer
     // says "not like this" without having to answer the harness's question first.
     expect(screen.getByRole("button", { name: "Request changes" }).hasAttribute("disabled")).toBe(

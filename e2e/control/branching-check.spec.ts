@@ -369,8 +369,9 @@ test.describe("branching control check — conditions, a loop, and a gate in the
 
     await test.step("cleanup", async () => {
       await page.goto(`/task/${taskId}`);
+      // Straight to History on the press (Undo on a toast); the dialog is for a running
+      // harness or a dependant, and this Task has neither.
       await page.getByRole("button", { name: `Delete ${taskTitle}` }).click();
-      await page.getByRole("alertdialog").getByRole("button", { name: "Delete task" }).click();
       await expect(page).not.toHaveURL(new RegExp(`/task/${taskId}$`));
       await page.goto(`/issues/${issueId}`);
       await page.getByRole("button", { name: "Delete issue" }).click();

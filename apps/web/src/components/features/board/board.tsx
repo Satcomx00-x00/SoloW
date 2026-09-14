@@ -434,16 +434,17 @@ export function Board({
       key={`delete-${task.id}`}
       taskId={task.id}
       taskTitle={task.title}
-      trigger={(open) => (
+      trigger={(press, busy) => (
         <Button
           aria-label={`Delete ${task.title}`}
           className="ml-auto text-muted-foreground hover:text-destructive"
           disabled={pendingOn(task.id)}
-          onClick={open}
+          loading={busy}
+          onClick={press}
           size="xs"
           variant="ghost"
         >
-          <Trash2 />
+          {busy ? null : <Trash2 />}
         </Button>
       )}
     />

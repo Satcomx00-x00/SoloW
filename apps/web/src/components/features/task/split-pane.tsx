@@ -117,14 +117,22 @@ export function SplitPane({
             aria-valuemin={TASK_PANE_MIN_WIDTH}
             aria-valuenow={shown}
             className={cn(
-              "m-0 h-auto w-1 shrink-0 cursor-col-resize border-0 border-l transition-colors",
-              "hover:bg-ring/40 focus-visible:bg-ring/60 focus-visible:outline-none",
-              dragWidth !== null && "bg-ring/60",
+              // The line is a pixel; the thing you grab is twelve. A 4px hairline was a moving
+              // target the cursor kept missing, so the hit area is drawn by `before:` around a
+              // divider that stays as thin as it looks. Negative margins keep the columns where
+              // they were — the extra width is borrowed from both sides, not added between them.
+              "relative z-10 -mx-1.5 my-0 h-auto w-3 shrink-0 cursor-col-resize border-0 bg-transparent",
+              "before:absolute before:inset-y-0 before:left-1/2 before:w-px before:-translate-x-1/2 before:bg-border before:transition-colors",
+              "hover:before:w-0.5 hover:before:bg-ring/60 focus-visible:before:w-0.5 focus-visible:before:bg-ring focus-visible:outline-none",
+              dragWidth !== null && "before:w-0.5 before:bg-ring",
             )}
             onKeyDown={(event) => {
-              // A separator that only responds to a pointer is unusable without one.
+              // A separator that only responds to a pointer is unusable without one. Home and
+              // End go to the extremes, as every slider does.
               if (event.key === "ArrowLeft") nudge(24);
               else if (event.key === "ArrowRight") nudge(-24);
+              else if (event.key === "Home") onResize(TASK_PANE_MAX_WIDTH);
+              else if (event.key === "End") onResize(TASK_PANE_MIN_WIDTH);
               else return;
               event.preventDefault();
             }}

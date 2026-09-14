@@ -1,9 +1,9 @@
 "use client";
 
 import { Clock, CornerDownLeft, Square, X } from "lucide-react";
-import { useEffect, useId, useState } from "react";
-import { ConfirmDialog } from "@/components/features/confirm-action";
+import { useEffect, useId, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { HoldButton } from "@/components/ui/hold-button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { type ComposerSteer, matchSteers } from "./composer-steers";
@@ -46,11 +46,21 @@ export function ackMessage(error: string | undefined): string {
  * stream is back (the workspace owns that flush, because it owns the socket). Only a Task that
  * is no longer Running has nothing to steer, and then the box says that, as before.
  *
+ * **Stop is held, not confirmed.** Stopping discards nothing — the harness's changes stay in the
+ * worktree and go to review — so it is not the irreversible act an `alertdialog` is for, and a
+ * modal over it was one more "are you sure?" to click through. The button has to be held for
+ * the fill to cross it instead; a stray click does nothing. And it stays live while the stream
+ * is away: the moment an operator most wants a harness stopped is the moment it used to go grey
+ * with no word why. A stop pressed then is queued exactly as a steer is, said so in the frame,
+ * and dropped if the Task stops Running first — which is the rule that keeps it from reaching
+ * the wrong run.
+ *
  * **The hub's answer, in the frame.** A refused send used to be reported by an orphan line
  * under the form; it belongs inside the thing that was refused.
  *
  * **`/` for the usual asks.** Four canned steers (`composer-steers.ts`) behind a leading slash,
  * so "run the tests" is three keystrokes rather than a sentence typed for the tenth time.
+ * `/stop` cannot hold a button for you, so it puts the focus on Stop and says what to do.
  *
  * Extracted from the workspace so it can be rendered — and looked at — on its own.
  */
@@ -63,6 +73,9 @@ export function HarnessComposer({
   isRunning,
   queued = null,
   onDiscardQueued,
+  stopQueued = false,
+  onQueueStop,
+  onDiscardStop,
   ackError = null,
 }: {
   value: string;
@@ -76,13 +89,21 @@ export function HarnessComposer({
   /** A message waiting for the stream to come back, shown until it goes. */
   queued?: string | null;
   onDiscardQueued?: (() => void) | undefined;
+  /** A stop waiting for the stream to come back. */
+  stopQueued?: boolean;
+  /** Stop pressed while the stream is away: hold it until the stream is back. */
+  onQueueStop?: (() => void) | undefined;
+  onDiscardStop?: (() => void) | undefined;
   /** The hub's refusal of the last send, as its wire code; rendered in words. */
   ackError?: string | null;
 }) {
   const [isMac, setIsMac] = useState(false);
   useEffect(() => setIsMac(navigator.platform.toLowerCase().includes("mac")), []);
-  const [stopOpen, setStopOpen] = useState(false);
   const [highlighted, setHighlighted] = useState(0);
+  // `/stop` was picked: the focus goes to Stop and the frame says to hold it, until the next
+  // keystroke or the stop itself.
+  const [stopHint, setStopHint] = useState(false);
+  const stopButton = useRef<HTMLButtonElement | null>(null);
   const listId = useId();
 
   const steers = isRunning ? matchSteers(value) : [];
@@ -94,10 +115,18 @@ export function HarnessComposer({
   const pick = (steer: ComposerSteer) => {
     if (steer.action === "stop") {
       onChange("");
-      setStopOpen(true);
+      setStopHint(true);
+      stopButton.current?.focus();
       return;
     }
     onChange(steer.text ?? "");
+  };
+
+  // The stop, wherever it lands: on the socket now, or in the queue until there is one.
+  const stop = () => {
+    setStopHint(false);
+    if (canSteer) onStop();
+    else onQueueStop?.();
   };
 
   const submit = () => {
@@ -118,14 +147,6 @@ export function HarnessComposer({
         submit();
       }}
     >
-      <ConfirmDialog
-        open={stopOpen}
-        onOpenChange={setStopOpen}
-        title="Stop the harness?"
-        description="The harness stops where it is. Whatever it has already changed stays in the worktree and goes to review. Nothing is discarded."
-        confirmLabel="Stop the harness"
-        onConfirm={onStop}
-      />
       {menuOpen ? (
         <div
           id={listId}
@@ -165,7 +186,10 @@ export function HarnessComposer({
         <Textarea
           id="harness-input"
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => {
+            setStopHint(false);
+            onChange(e.target.value);
+          }}
           disabled={!isRunning}
           rows={1}
           role={menuOpen ? "combobox" : undefined}
@@ -224,7 +248,7 @@ export function HarnessComposer({
             {onDiscardQueued ? (
               <button
                 type="button"
-                className="ml-auto inline-flex shrink-0 items-center gap-0.5 rounded px-1 text-muted-foreground hover:text-foreground"
+                className="ml-auto inline-flex h-6 shrink-0 items-center gap-0.5 rounded px-1 text-muted-foreground hover:text-foreground"
                 onClick={onDiscardQueued}
               >
                 <X aria-hidden className="size-3" /> Discard
@@ -232,26 +256,57 @@ export function HarnessComposer({
             ) : null}
           </p>
         ) : null}
+        {stopQueued ? (
+          <p
+            className="flex items-center gap-1.5 px-1 text-2xs text-feedback-caution"
+            data-composer-stop-queued
+          >
+            <Clock aria-hidden className="size-3 shrink-0" />
+            <span className="min-w-0 truncate">Stop queued — goes when the stream is back.</span>
+            {onDiscardStop ? (
+              <button
+                type="button"
+                className="ml-auto inline-flex h-6 shrink-0 items-center gap-0.5 rounded px-1 text-muted-foreground hover:text-foreground"
+                onClick={onDiscardStop}
+              >
+                <X aria-hidden className="size-3" /> Discard
+              </button>
+            ) : null}
+          </p>
+        ) : null}
+        {stopHint ? (
+          <p className="px-1 text-2xs text-muted-foreground" role="status">
+            Hold Stop — the button, or Space on it — to stop the harness. Nothing is discarded.
+          </p>
+        ) : null}
         {ackError ? (
-          <p className="px-1 text-2xs text-destructive" role="alert">
+          <p className="px-1 text-2xs text-feedback-error" role="alert">
             {ackMessage(ackError)}
           </p>
         ) : null}
       </div>
-      <Button type="submit" disabled={!isRunning || !value.trim()}>
+      {/* `pointer-coarse`: a thumb gets a 44px row; a mouse keeps the console's 32px. */}
+      <Button
+        type="submit"
+        disabled={!isRunning || !value.trim()}
+        className="pointer-coarse:h-11 pointer-coarse:px-4"
+      >
         <CornerDownLeft /> Send
-        <kbd className="ml-0.5 font-mono text-2xs opacity-60 tracking-widest">
+        <kbd className="ml-0.5 font-mono text-2xs opacity-80 tracking-widest">
           {isMac ? "⌘" : "Ctrl"}↩
         </kbd>
       </Button>
-      <Button
+      <HoldButton
+        ref={stopButton}
         type="button"
         variant="outline"
-        disabled={!canSteer}
-        onClick={() => setStopOpen(true)}
+        disabled={!isRunning || stopQueued}
+        onConfirm={stop}
+        hint={canSteer ? "Hold to stop" : "Hold to queue the stop"}
+        className="pointer-coarse:h-11 pointer-coarse:px-4"
       >
         <Square /> Stop
-      </Button>
+      </HoldButton>
     </form>
   );
 }

@@ -182,7 +182,7 @@ export function ToolCall({ row }: { row: ToolRow }) {
           <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1">
             {args.map(([key, value]) => (
               <Fragment key={key}>
-                <dt className="font-mono text-2xs text-muted-foreground/70">{key}</dt>
+                <dt className="font-mono text-2xs text-muted-foreground-subtle">{key}</dt>
                 <dd className="min-w-0 whitespace-pre-wrap break-words font-mono text-xs">
                   {value}
                 </dd>
@@ -192,7 +192,7 @@ export function ToolCall({ row }: { row: ToolRow }) {
         )}
 
         {row.result === null ? (
-          <p className="text-muted-foreground/70 text-xs">No result recorded yet.</p>
+          <p className="text-muted-foreground-subtle text-xs">No result recorded yet.</p>
         ) : (
           <div>
             <p

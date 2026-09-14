@@ -146,7 +146,7 @@ function HunkSeparator({ heading }: { heading: string }) {
     <div className="flex items-center gap-2 border-y bg-background/50 px-2 py-1">
       <span aria-hidden className="h-px flex-1 bg-border" />
       {heading && (
-        <span className="truncate font-mono text-2xs text-muted-foreground/70">{heading}</span>
+        <span className="truncate font-mono text-2xs text-muted-foreground-subtle">{heading}</span>
       )}
       <span aria-hidden className="h-px flex-1 bg-border" />
     </div>

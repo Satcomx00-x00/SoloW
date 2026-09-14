@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { afterEach, describe, expect, it } from "bun:test";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { matchSteers } from "./composer-steers";
 import { HarnessComposer } from "./harness-composer";
@@ -21,6 +21,8 @@ function Harness({
   ackError = null,
   onSubmit,
   onStop = () => {},
+  onQueueStop = () => {},
+  stopQueued = false,
 }: {
   canSteer?: boolean;
   isRunning?: boolean;
@@ -28,6 +30,8 @@ function Harness({
   ackError?: string | null;
   onSubmit: (value: string) => void;
   onStop?: () => void;
+  onQueueStop?: () => void;
+  stopQueued?: boolean;
 }) {
   const [value, setValue] = useState("");
   return (
@@ -40,6 +44,9 @@ function Harness({
       isRunning={isRunning}
       queued={queued}
       onDiscardQueued={() => {}}
+      stopQueued={stopQueued}
+      onQueueStop={onQueueStop}
+      onDiscardStop={() => {}}
       ackError={ackError}
     />
   );
@@ -101,17 +108,31 @@ describe("HarnessComposer slash steers", () => {
     expect(box.value).toMatch(/Wrap up/);
   });
 
-  it("/stop asks before stopping, exactly as the Stop button does", async () => {
+  it("/stop hands over to the Stop button, which has to be held — a menu cannot hold for you", async () => {
     let stopped = 0;
     render(<Harness onSubmit={() => {}} onStop={() => stopped++} />);
     const box = screen.getByLabelText("Message the harness") as HTMLTextAreaElement;
     fireEvent.change(box, { target: { value: "/stop" } });
     fireEvent.keyDown(box, { key: "Enter" });
     expect(box.value).toBe("");
-    expect(await screen.findByRole("alertdialog")).toBeDefined();
+    const stop = screen.getByRole("button", { name: /Stop/ });
+    expect(document.activeElement).toBe(stop);
+    expect(screen.getByRole("status").textContent).toMatch(/Hold Stop/);
     expect(stopped).toBe(0);
-    fireEvent.click(screen.getByRole("button", { name: "Stop the harness" }));
-    expect(stopped).toBe(1);
+    // Space held for the length of the fill is the keyboard's hold.
+    fireEvent.keyDown(stop, { key: " " });
+    await waitFor(() => expect(stopped).toBe(1));
+  });
+
+  it("a click on Stop does nothing, and letting go early cancels the hold", async () => {
+    let stopped = 0;
+    render(<Harness onSubmit={() => {}} onStop={() => stopped++} />);
+    const stop = screen.getByRole("button", { name: /Stop/ });
+    fireEvent.click(stop);
+    fireEvent.pointerDown(stop, { button: 0 });
+    fireEvent.pointerUp(stop);
+    await new Promise((r) => setTimeout(r, 500));
+    expect(stopped).toBe(0);
   });
 
   it("offers no menu when there is no harness to steer", () => {
@@ -130,8 +151,27 @@ describe("HarnessComposer frame", () => {
     expect(screen.getByText(/Queued — sends when the stream is back/).textContent).toContain(
       "also bump the version",
     );
-    // Stop needs a live socket; a queued stop would stop the wrong run.
-    expect(screen.getByRole("button", { name: /Stop/ }).hasAttribute("disabled")).toBe(true);
+    // Stop stays live too: held now, it is queued for the stream rather than refused.
+    const stop = screen.getByRole("button", { name: /Stop/ });
+    expect(stop.hasAttribute("disabled")).toBe(false);
+  });
+
+  it("queues a stop held while the stream is away, and names it in the frame", async () => {
+    let queued = 0;
+    let stopped = 0;
+    const { rerender } = render(
+      <Harness
+        onSubmit={() => {}}
+        canSteer={false}
+        onStop={() => stopped++}
+        onQueueStop={() => queued++}
+      />,
+    );
+    fireEvent.pointerDown(screen.getByRole("button", { name: /Stop/ }), { button: 0 });
+    await waitFor(() => expect(queued).toBe(1));
+    expect(stopped).toBe(0);
+    rerender(<Harness onSubmit={() => {}} canSteer={false} stopQueued />);
+    expect(screen.getByText(/Stop queued/)).toBeDefined();
   });
 
   it("says the hub's refusal inside the frame, in words", () => {

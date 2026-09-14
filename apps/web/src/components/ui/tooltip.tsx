@@ -5,8 +5,13 @@ import { Tooltip as TooltipPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
 
+/**
+ * 300ms before a hover tooltip shows: enough that a cursor crossing a row of icons does not fire
+ * every one of them, short enough that a deliberate pause is answered. Callers used to override
+ * a 0ms default one by one; the default is the rule now.
+ */
 function TooltipProvider({
-  delayDuration = 0,
+  delayDuration = 300,
   ...props
 }: React.ComponentProps<typeof TooltipPrimitive.Provider>) {
   return (

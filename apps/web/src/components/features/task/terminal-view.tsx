@@ -330,7 +330,7 @@ export function TerminalView({
               {/* The shortcut, stated rather than discovered — the same idiom the command
                   palette and the create menu already use. It is the first thing to go when the
                   panel is narrow: a hint nobody can read is not a hint. */}
-              <kbd className="ml-0.5 hidden font-mono text-2xs text-muted-foreground/60 tracking-widest @sm:inline">
+              <kbd className="ml-0.5 hidden font-mono text-2xs text-muted-foreground-subtle tracking-widest @sm:inline">
                 ⌘F
               </kbd>
             </button>
@@ -360,7 +360,7 @@ export function TerminalView({
         {rows.length > 0 ? (
           <>
             {elided > 0 && (
-              <p className="border-b px-4 py-2 font-mono text-2xs text-muted-foreground/70">
+              <p className="border-b px-4 py-2 font-mono text-2xs text-muted-foreground-subtle">
                 … {elided} earlier events summarised
               </p>
             )}

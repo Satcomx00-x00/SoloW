@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
 
 /** A line's role in the patch, from its first character. */
 export function lineTone(line: string): string {
-  if (line.startsWith("+++") || line.startsWith("---")) return "text-muted-foreground/60";
+  if (line.startsWith("+++") || line.startsWith("---")) return "text-muted-foreground-subtle";
   if (line.startsWith("@@")) return "text-diff-moved";
   if (line.startsWith("+")) return "text-diff-added";
   if (line.startsWith("-")) return "text-diff-removed";

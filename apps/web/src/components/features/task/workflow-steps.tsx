@@ -2,8 +2,8 @@
 
 import type { TaskDto, TaskState, TaskWorkflowBindingDto, WorkflowStepDto } from "@solow/contracts";
 import { Workflow } from "lucide-react";
-import type { KeyboardEvent } from "react";
 import { useCallback, useState } from "react";
+import { useTablistKeys } from "@/components/hooks/use-tablist-keys";
 import { Step, type StepStatus, Steps } from "@/components/ui/steps";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
@@ -174,29 +174,8 @@ export function useStepScope(task: TaskDto | null): StepScope {
 export function WorkflowSteps({ scope }: { scope: StepScope }) {
   const { binding, stepped, selected, select } = scope;
 
-  /**
-   * Roving focus along the strip. Queried from the DOM rather than held in a ref array: the tabs
-   * are rendered by a shared primitive that knows nothing about this strip, and what has to move
-   * is focus, which is a DOM fact anyway.
-   */
-  const onStripKey = useCallback((event: KeyboardEvent<HTMLOListElement>) => {
-    const { key } = event;
-    if (key !== "ArrowLeft" && key !== "ArrowRight" && key !== "Home" && key !== "End") return;
-    const tabs = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('[role="tab"]'));
-    const at = tabs.indexOf(document.activeElement as HTMLElement);
-    if (at === -1) return;
-    event.preventDefault();
-    const last = tabs.length - 1;
-    const next =
-      key === "Home"
-        ? 0
-        : key === "End"
-          ? last
-          : key === "ArrowLeft"
-            ? (at - 1 + tabs.length) % tabs.length
-            : (at + 1) % tabs.length;
-    tabs[next]?.focus();
-  }, []);
+  // Roving focus along the strip — the hook the right column's tabs share.
+  const onStripKey = useTablistKeys<HTMLOListElement>();
 
   if (!binding) return null;
 

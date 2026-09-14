@@ -283,7 +283,7 @@ export function ChangesPanel({
 
   if (groups.length === 0) {
     return (
-      <div className="surface-edge flex h-full min-h-40 items-center justify-center rounded-xl border bg-card text-muted-foreground/60 text-sm">
+      <div className="surface-edge flex h-full min-h-40 items-center justify-center rounded-xl border bg-card text-muted-foreground-subtle text-sm">
         No proposed changes yet.
       </div>
     );
@@ -328,7 +328,7 @@ export function ChangesPanel({
             // Said, not hidden. "Nothing changed here" is a consequence of the approval, and the
             // reviewer has to be able to see it without counting the groups — but only once it is
             // something anyone has checked. See `describeTarget`.
-            <p className="surface-edge rounded-lg border bg-card px-3 py-2 text-2xs text-muted-foreground/70">
+            <p className="surface-edge rounded-lg border bg-card px-3 py-2 text-2xs text-muted-foreground-subtle">
               {captured
                 ? "The harness made no changes in this repository."
                 : "No change has been read from this repository yet."}

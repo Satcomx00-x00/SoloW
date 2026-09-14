@@ -32,6 +32,14 @@
   --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
   --muted-foreground: oklch(0.556 0 0);
+  /*
+   * The quietest ink that still reads. `--muted-foreground` clears 4.5:1 only at full opacity;
+   * every `text-muted-foreground/60` the UI used to reach for landed near 2.3:1 on white. This
+   * is that "even quieter" step done as a colour instead of an alpha, tuned to clear 4.5:1 on
+   * the background, the card and the terminal in both themes — so a caption can be secondary
+   * without being unreadable.
+   */
+  --muted-foreground-subtle: oklch(0.5 0 0);
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
@@ -139,6 +147,7 @@
   --secondary-foreground: oklch(0.985 0 0);
   --muted: oklch(0.269 0 0);
   --muted-foreground: oklch(0.708 0 0);
+  --muted-foreground-subtle: oklch(0.66 0 0);
   --accent: oklch(0.371 0 0);
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.704 0.191 22.216);
@@ -256,6 +265,7 @@
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
+  --color-muted-foreground-subtle: var(--muted-foreground-subtle);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
@@ -613,6 +623,78 @@
     animation-duration: var(--duration-thinking) !important;
     animation-iteration-count: infinite !important;
   }
+}
+
+/*
+ * Toasts (`components/ui/toast.tsx`). A 200ms ease-out entrance and a 150ms exit — exits faster
+ * than entrances, so a dismissal feels snappy rather than dragged — and a ring that drains over
+ * the toast's lifetime so an Undo says how long it is still on offer. The drain pauses with the
+ * hover, the way the dismissal timer does, so someone reading it is not racing it.
+ */
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+@keyframes toast-out {
+  to {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+@keyframes toast-drain {
+  to {
+    stroke-dashoffset: var(--toast-ring);
+  }
+}
+.toast-enter {
+  animation: toast-in 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.toast-leave {
+  animation: toast-out 150ms ease-in both;
+}
+.toast-ring {
+  stroke-dasharray: var(--toast-ring);
+  stroke-dashoffset: 0;
+  animation: toast-drain var(--toast-duration) linear forwards;
+}
+.toast-paused .toast-ring {
+  animation-play-state: paused;
+}
+
+/*
+ * A loading state that waits to be seen. `both` keeps the element invisible through the 300ms
+ * delay, so a fetch that answers first never shows a skeleton at all — a flash of placeholder
+ * over a page that was about to paint reads as a glitch, not as progress.
+ */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+.delayed-reveal {
+  animation: fade-in 200ms ease-out 300ms both;
+}
+
+/*
+ * Hold-to-confirm (`components/ui/hold-button.tsx`). The fill is the safeguard: it crosses the
+ * button over the hold, and letting go early cancels. Under reduced motion the transition is
+ * cut to nothing by the block below, which is fine — the timer still holds, and the label says
+ * what to do.
+ */
+.hold-fill::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 0;
+  background: color-mix(in oklch, currentColor 18%, transparent);
+  pointer-events: none;
+  border-radius: inherit;
+}
+.hold-fill[data-holding="true"]::before {
+  width: 100%;
+  transition: width var(--hold-duration) linear;
 }
 
 /*

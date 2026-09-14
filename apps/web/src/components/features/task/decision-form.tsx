@@ -41,6 +41,9 @@ export function DecisionForm({
         choice === null ? "border-state-review/40" : "border-feedback-ok/40",
       )}
       data-decision={widget.id}
+      // Read by the gate's Approve when it sends the reviewer here: the first unsettled one is
+      // where the focus lands.
+      data-settled={choice !== null}
       disabled={disabled}
     >
       <legend className="flex items-center gap-2 px-1 font-medium text-sm">
@@ -92,14 +95,20 @@ export function DecisionForm({
           <span className="font-medium">Something else</span>
         </label>
         {choice === "other" ? (
-          <Textarea
-            aria-label={`Your decision on: ${widget.question}`}
-            rows={2}
-            value={answer?.note ?? ""}
-            placeholder="Say what you want instead — this goes to the next step's harness verbatim."
-            onChange={(e) => onAnswer({ id: widget.id, choice: "other", note: e.target.value })}
-            className="min-h-12 text-xs"
-          />
+          // A label that stays: the placeholder is an example and goes the moment they type.
+          <div className="space-y-1 pt-1">
+            <label htmlFor={`${name}-note`} className="block text-2xs text-muted-foreground">
+              Your decision — sent to the next step's harness verbatim
+            </label>
+            <Textarea
+              id={`${name}-note`}
+              rows={2}
+              value={answer?.note ?? ""}
+              placeholder="e.g. Keep both, but put the migration behind a flag."
+              onChange={(e) => onAnswer({ id: widget.id, choice: "other", note: e.target.value })}
+              className="min-h-12 text-xs"
+            />
+          </div>
         ) : null}
       </div>
       {widget.reason ? (
