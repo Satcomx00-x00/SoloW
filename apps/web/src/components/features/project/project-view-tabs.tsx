@@ -11,7 +11,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { cn } from "@/lib/utils";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 /**
  * The tab strip (spec F23 FR-9, issue #129).
@@ -23,6 +23,10 @@ import { cn } from "@/lib/utils";
  * Reordering is two menu items rather than a drag: the strip is small, and left/right work from
  * a keyboard, which a drag does not. The whole order is sent on every move (`onReorder`), which
  * is what stops two people rearranging tabs from interleaving into an order neither chose.
+ *
+ * On the app's Tabs primitive rather than a row of buttons wearing `role="tab"`: the arrows,
+ * the sliding underline and the scroll-with-fades come with it, and the rows below are not a
+ * panel of the strip — a view is a saved question, and the table answers whichever is asked.
  */
 /**
  * The strip with one tab moved a single place.
@@ -72,94 +76,94 @@ export function ProjectViewTabs({
     );
 
   return (
-    <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b px-4" role="tablist">
-      {views.map((view, index) => {
-        const active = view.id === activeViewId;
-        if (renaming === view.id) {
-          return (
-            <form
-              key={view.id}
-              className="py-1.5"
-              onSubmit={(event) => {
-                event.preventDefault();
-                const name = new FormData(event.currentTarget).get("name");
-                setRenaming(null);
-                if (typeof name === "string" && name.trim() !== "") onRename(view.id, name.trim());
-              }}
-            >
-              <input
-                name="name"
-                aria-label={`Rename ${view.name}`}
-                defaultValue={view.name}
-                // Focused and selected on mount, so renaming is type-over rather than
-                // click-into. A ref rather than `autoFocus`, which steals focus on any render
-                // the browser decides to give it.
-                ref={(node) => node?.select()}
-                maxLength={60}
-                // Blur commits nothing: leaving the field is how people abandon a rename, and a
-                // half-typed tab name saved on the way past is a tab nobody meant to create.
-                onBlur={() => setRenaming(null)}
-                onKeyDown={(event) => {
-                  if (event.key === "Escape") setRenaming(null);
+    <Tabs value={activeViewId ?? ""} onValueChange={onSelect} className="shrink-0 gap-0">
+      <TabsList variant="line" aria-label="Views" className="w-full border-b px-4">
+        {views.map((view, index) => {
+          const active = view.id === activeViewId;
+          if (renaming === view.id) {
+            return (
+              <form
+                key={view.id}
+                className="py-1.5"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  const name = new FormData(event.currentTarget).get("name");
+                  setRenaming(null);
+                  if (typeof name === "string" && name.trim() !== "")
+                    onRename(view.id, name.trim());
                 }}
-                className="h-6 w-32 rounded border bg-transparent px-1.5 text-xs"
-              />
-            </form>
-          );
-        }
+              >
+                <input
+                  name="name"
+                  aria-label={`Rename ${view.name}`}
+                  defaultValue={view.name}
+                  // Focused and selected on mount, so renaming is type-over rather than
+                  // click-into. A ref rather than `autoFocus`, which steals focus on any render
+                  // the browser decides to give it.
+                  ref={(node) => node?.select()}
+                  maxLength={60}
+                  // Blur commits nothing: leaving the field is how people abandon a rename, and a
+                  // half-typed tab name saved on the way past is a tab nobody meant to create.
+                  onBlur={() => setRenaming(null)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") setRenaming(null);
+                  }}
+                  className="h-6 w-32 rounded border bg-transparent px-1.5 text-xs"
+                />
+              </form>
+            );
+          }
 
-        return (
-          <span key={view.id} className="flex shrink-0 items-center">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={active}
-              disabled={disabled}
-              onClick={() => onSelect(view.id)}
-              className={cn(
-                "-mb-px border-b-2 px-2 py-2 text-xs",
-                active
-                  ? "border-primary font-medium text-foreground"
-                  : "border-transparent text-muted-foreground hover:text-foreground",
+          return (
+            <span key={view.id} className="flex shrink-0 items-center">
+              <TabsTrigger value={view.id} disabled={disabled} className="text-xs">
+                {view.name}
+              </TabsTrigger>
+              {active && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button size="icon-xs" variant="ghost" aria-label={`${view.name} view options`}>
+                      <MoreHorizontal aria-hidden />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start">
+                    <DropdownMenuItem onSelect={() => setRenaming(view.id)}>
+                      <Pencil aria-hidden /> Rename
+                    </DropdownMenuItem>
+                    <DropdownMenuItem disabled={index === 0} onSelect={() => move(view.id, -1)}>
+                      <ChevronLeft aria-hidden /> Move left
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      disabled={index === views.length - 1}
+                      onSelect={() => move(view.id, 1)}
+                    >
+                      <ChevronRight aria-hidden /> Move right
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      className="text-destructive"
+                      onSelect={() => onDelete(view.id)}
+                    >
+                      {/* Deleting a view deletes a question, never the rows it selected. */}
+                      <Trash2 aria-hidden /> Delete view
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               )}
-            >
-              {view.name}
-            </button>
-            {active && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button size="icon-xs" variant="ghost" aria-label={`${view.name} view options`}>
-                    <MoreHorizontal aria-hidden />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start">
-                  <DropdownMenuItem onSelect={() => setRenaming(view.id)}>
-                    <Pencil aria-hidden /> Rename
-                  </DropdownMenuItem>
-                  <DropdownMenuItem disabled={index === 0} onSelect={() => move(view.id, -1)}>
-                    <ChevronLeft aria-hidden /> Move left
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    disabled={index === views.length - 1}
-                    onSelect={() => move(view.id, 1)}
-                  >
-                    <ChevronRight aria-hidden /> Move right
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem className="text-destructive" onSelect={() => onDelete(view.id)}>
-                    {/* Deleting a view deletes a question, never the rows it selected. */}
-                    <Trash2 aria-hidden /> Delete view
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
-          </span>
-        );
-      })}
+            </span>
+          );
+        })}
 
-      <Button size="xs" variant="ghost" disabled={disabled} onClick={onCreate} className="shrink-0">
-        <Plus aria-hidden /> New view
-      </Button>
-    </div>
+        <Button
+          size="xs"
+          variant="ghost"
+          disabled={disabled}
+          onClick={onCreate}
+          className="shrink-0"
+        >
+          <Plus aria-hidden /> New view
+        </Button>
+      </TabsList>
+    </Tabs>
   );
 }

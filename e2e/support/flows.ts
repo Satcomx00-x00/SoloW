@@ -147,6 +147,19 @@ export async function awaitWorkflowGate(page: Page): Promise<void> {
   await expect(page.getByRole("main").getByRole("button", { name: "Approve" })).toBeVisible();
 }
 
+/**
+ * The page's own tabs (Run · Brief · Plan · Changes). At the gate the page opens on the review,
+ * so a spec that wants the terminal or the change has to say so — exactly as a person would.
+ */
+export async function openWorkspaceTab(
+  page: Page,
+  name: "Run" | "Brief" | "Plan" | "Changes",
+): Promise<void> {
+  const tab = page.getByRole("tablist", { name: "Task" }).getByRole("tab", { name, exact: true });
+  await tab.click();
+  await expect(tab).toHaveAttribute("aria-selected", "true");
+}
+
 /** The whole run-up: launch, wait out the harness, open the gate. */
 export async function launchToReview(page: Page): Promise<void> {
   await launchTask(page);

@@ -10,6 +10,7 @@ import {
   launchToReview,
   openReview,
   openTask,
+  openWorkspaceTab,
 } from "../support/flows.js";
 import { seedIssue } from "../support/seed.js";
 
@@ -91,13 +92,13 @@ test.describe("core program happy path", () => {
     const taskId = await openTask(page, issue.id, taskTitle);
     await launchToReview(page);
 
-    // The harness's output is on screen — streamed live and replayed from the session log.
+    // The harness's output is on the Run tab — streamed live and replayed from the session log.
+    await openWorkspaceTab(page, "Run");
     await expect(page.getByText(/harness edited/)).toBeVisible();
 
     // And the change itself is reviewable in the app: the files the harness actually wrote, in
-    // the captured source-control panel, with the written line in the diff beside them. No tab
-    // to click any more — the Changes column sits beside the terminal in the split pane, on
-    // screen the whole time the review is.
+    // the captured source-control panel, with the written line in the diff beside them.
+    await openWorkspaceTab(page, "Changes");
     const changed = page.getByRole("list", { name: "Changes" });
     await expect(changed.getByTitle(`marker-solow-task-${taskId}.txt`)).toBeVisible();
     await expect(changed.getByTitle("visible.txt")).toBeVisible();

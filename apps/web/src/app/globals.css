@@ -678,6 +678,28 @@
 }
 
 /*
+ * Tab strips (`components/ui/tabs.tsx`). A strip never wraps: past its width it scrolls, with
+ * the scrollbar off and a fade on whichever edge has more — the hint that there is more, where
+ * a bar would be a second control. `data-overflow` is kept by the component from scroll and
+ * resize; the masks are the only thing here.
+ */
+.tabs-scroll {
+  scrollbar-width: none;
+}
+.tabs-scroll::-webkit-scrollbar {
+  display: none;
+}
+.tabs-scroll[data-overflow="end"] {
+  mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent);
+}
+.tabs-scroll[data-overflow="start"] {
+  mask-image: linear-gradient(to right, transparent, #000 32px);
+}
+.tabs-scroll[data-overflow="both"] {
+  mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent);
+}
+
+/*
  * Hold-to-confirm (`components/ui/hold-button.tsx`). The fill is the safeguard: it crosses the
  * button over the hold, and letting go early cancels. Under reduced motion the transition is
  * cut to nothing by the block below, which is fine — the timer still holds, and the label says

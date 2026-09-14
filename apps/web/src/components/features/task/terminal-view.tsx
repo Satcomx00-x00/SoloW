@@ -65,6 +65,7 @@ export function TerminalView({
   rows,
   elided,
   isRunning = false,
+  shown = true,
   onRespondPermission,
   onRespondWidget,
   panelId,
@@ -76,6 +77,8 @@ export function TerminalView({
   elided: number;
   /** Whether a harness is on the other end. Nothing below the transcript moves when it is not. */
   isRunning?: boolean;
+  /** False while the panel is hidden behind another tab: a hidden viewport cannot be scrolled. */
+  shown?: boolean;
   onRespondPermission: (requestId: string, optionId: string) => void;
   onRespondWidget?: ((widgetId: string, values: string[], text?: string) => void) | undefined;
   /** Set only when a Workflow strip is driving this panel, which makes it that strip's tabpanel. */
@@ -119,8 +122,8 @@ export function TerminalView({
   // arrives. Dropping them — which is what the rule asks for — stops the terminal following.
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-run on growth, by design
   useEffect(() => {
-    if (following) scrollToBottom();
-  }, [following, scrollToBottom, rows.length, tailSize, tailLength, activityKey]);
+    if (following && shown) scrollToBottom();
+  }, [following, shown, scrollToBottom, rows.length, tailSize, tailLength, activityKey]);
 
   /**
    * Leaving the bottom turns following off; coming back turns it on. The threshold is generous

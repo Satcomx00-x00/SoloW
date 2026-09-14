@@ -714,6 +714,8 @@ describe("TaskWorkspace harness steering (TASK-022)", () => {
     // In Review the way to ask for more work is "request changes", which is recorded
     // (Principle I) — a back channel into the harness would bypass that.
     renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, handlers("review"));
+    // In Review the page opens on the review; the composer is on the Run tab.
+    fireEvent.mouseDown(await screen.findByRole("tab", { name: "Run" }), { button: 0 });
     const box = await screen.findByLabelText(/Message the harness/);
     expect(box.hasAttribute("disabled")).toBe(true);
     expect(screen.getByRole("button", { name: /Send/ }).hasAttribute("disabled")).toBe(true);
@@ -890,12 +892,11 @@ describe("the Changes tab of a multi-Repository Task", () => {
 
   /** Radix activates a tab on mousedown/focus, not on click. */
   /**
-   * Changes is a column beside the terminal now, not a tab, so there is nothing to open — it is
-   * mounted from the first paint. The helper stays as a no-op rather than being deleted from
-   * each test, so the cases below still read as "given the changes are on screen".
+   * Changes is one of the page's tabs. Every panel is mounted from the first paint (the
+   * Changes panel keeps which file is open), so this opens the tab and is otherwise a wait.
    */
   async function openChangesTab(): Promise<void> {
-    await screen.findByRole("complementary", { name: "Review" });
+    fireEvent.mouseDown(await screen.findByRole("tab", { name: /Changes/ }), { button: 0 });
   }
 
   const baseHandlers = {
@@ -1205,7 +1206,7 @@ describe("the Changes tab of a multi-Repository Task", () => {
       }),
     });
 
-    const tab = await screen.findByRole("tab", { name: /Review/ });
+    const tab = await screen.findByRole("tab", { name: /Brief/ });
     await waitFor(() => expect(tab.getAttribute("aria-selected")).toBe("true"));
     const brief = await screen.findByRole("region", { name: "Acceptance criteria" });
     expect(within(brief).getByText(/0 of 3 verified by you/)).toBeDefined();
@@ -1455,6 +1456,7 @@ describe("TaskWorkspace todo checklist", () => {
   it("draws the list a finished run left behind", async () => {
     renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, handlers([{ kind: "todos", items }]));
 
+    fireEvent.mouseDown(await screen.findByRole("tab", { name: /Plan/ }), { button: 0 });
     const plan = await screen.findByRole("region", { name: "Harness plan" });
     expect(within(plan).getByText("Read the latch code")).toBeDefined();
     // The live item is shown in the present tense the harness wrote for exactly this moment.
@@ -1483,6 +1485,7 @@ describe("TaskWorkspace todo checklist", () => {
       ]),
     );
 
+    fireEvent.mouseDown(await screen.findByRole("tab", { name: /Plan/ }), { button: 0 });
     const plan = await screen.findByRole("region", { name: "Harness plan" });
     expect(within(plan).getByText("Plan: fix the latch")).toBeDefined();
     expect(within(plan).getByText("Write the fix")).toBeDefined();
@@ -1492,17 +1495,17 @@ describe("TaskWorkspace todo checklist", () => {
   it("shows no panel at all until the harness has published a plan", async () => {
     renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, handlers());
 
-    await screen.findByRole("complementary", { name: "Review" });
+    await screen.findByRole("tablist", { name: "Task" });
     expect(screen.queryByRole("region", { name: "Harness plan" })).toBeNull();
     // The tab is still there and still opens — onto a panel that says so, never a heading over
     // nothing and never a greyed tab with a reason nobody can read.
     const plan = screen.getByRole("tab", { name: "Plan" });
     expect(plan.hasAttribute("disabled")).toBe(false);
-    fireEvent.click(plan);
+    fireEvent.mouseDown(plan, { button: 0 });
     expect(screen.getByText("No plan yet.")).toBeDefined();
   });
 
-  it("opens on the plan while the run is going, and on the change once one is captured", async () => {
+  it("opens on the run while the run is going, and on the change once one is captured", async () => {
     let state: TaskDto["state"] = "running";
     const diff: SessionEventPayload = {
       kind: "diff",
@@ -1522,17 +1525,20 @@ describe("TaskWorkspace todo checklist", () => {
       }),
     });
 
-    const plan = await screen.findByRole("tab", { name: /Plan/ });
-    await waitFor(() => expect(plan.getAttribute("aria-selected")).toBe("true"));
+    // The run is the thing to watch while it is going; the plan is a tab away.
+    const run = await screen.findByRole("tab", { name: "Run" });
+    await waitFor(() => expect(run.getAttribute("aria-selected")).toBe("true"));
+    const plan = screen.getByRole("tab", { name: /Plan/ });
+    fireEvent.mouseDown(plan, { button: 0 });
     expect(screen.getByRole("region", { name: "Harness plan" })).toBeDefined();
 
     // The reviewer's pick wins over the default, until the Task moves on.
-    fireEvent.click(screen.getByRole("tab", { name: /Changes/ }));
+    fireEvent.mouseDown(screen.getByRole("tab", { name: /Changes/ }), { button: 0 });
     expect(screen.getByRole("tab", { name: /Changes/ }).getAttribute("aria-selected")).toBe("true");
-    fireEvent.click(plan);
+    fireEvent.mouseDown(plan, { button: 0 });
     expect(plan.getAttribute("aria-selected")).toBe("true");
 
-    // The run reaches its gate: the diff lands and the column turns to it.
+    // The run reaches its gate: the diff lands and the page turns to it.
     state = "review";
     payloads = [...payloads, diff];
     await waitFor(() => expect(sockets[0]).toBeDefined());

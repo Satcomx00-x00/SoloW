@@ -1,7 +1,13 @@
 import { execFileSync } from "node:child_process";
 import { expect, type Page, test } from "@playwright/test";
 import { PATHS } from "../support/fixture.js";
-import { awaitWorkflowGate, connectRepository, createTask, openTask } from "../support/flows.js";
+import {
+  awaitWorkflowGate,
+  connectRepository,
+  createTask,
+  openTask,
+  openWorkspaceTab,
+} from "../support/flows.js";
 
 /**
  * The control check (@control): one pass through the product's main line, on this host, as a
@@ -239,7 +245,8 @@ test.describe("control check — the main line of the product, end to end", () =
       await awaitWorkflowGate(page);
 
       // Every Step's transcript, read back one Step at a time — the terminal is scoped to the
-      // selected tab. Both ran the fixture harness in the one worktree the Task owns.
+      // selected tab, and picking a Step opens the Run tab the terminal is on (at the gate the
+      // page has turned to the review).
       for (const name of stepNames) {
         const tab = tabs.getByRole("tab", { name });
         await tab.click();
@@ -254,6 +261,7 @@ test.describe("control check — the main line of the product, end to end", () =
     });
 
     await test.step("review the change and approve it onto a branch", async () => {
+      await openWorkspaceTab(page, "Changes");
       const changed = page.getByRole("list", { name: "Changes" });
       await expect(changed.getByTitle(`marker-solow-task-${taskId}.txt`)).toBeVisible();
       await page.getByRole("main").getByRole("button", { name: "Approve" }).click();

@@ -13,7 +13,6 @@ import type {
   TaskRepositoryDto,
   TaskState,
 } from "@solow/contracts";
-import { DEFAULT_TASK_PANE_LAYOUT, type TaskPaneLayout } from "@solow/contracts";
 import {
   isGeneratedPath,
   primaryTaskRepository,
@@ -33,17 +32,18 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { TaskStateBadge } from "@/components/features/board/task-state-badge";
 import { ConfirmDialog } from "@/components/features/confirm-action";
 import { useBackToProject } from "@/components/features/shared/back-to-project";
 import { draftFileKey, useReviewDraft } from "@/components/hooks/use-review-draft";
-import { useTablistKeys } from "@/components/hooks/use-tablist-keys";
 import { useTaskStream } from "@/components/hooks/use-task-stream";
+import { useUrlTab } from "@/components/hooks/use-url-tab";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { settingsHref } from "@/lib/navigation";
 import { WHOLE_PAGE } from "@/lib/paged";
 import { relativeAge, relativeUntil } from "@/lib/relative-time";
@@ -62,7 +62,6 @@ import { collateDecisions, collateFeedback, joinFeedback } from "./review-feedba
 import { groupChanges, summariseConsequences } from "./review-groups";
 import type { LineAnchor } from "./review-notes";
 import { RoundSelector } from "./round-selector";
-import { SplitPane } from "./split-pane";
 import { TaskAdvance } from "./task-advance";
 import { TaskDependencies, useBlockedByEditor, useTaskDependencies } from "./task-dependencies";
 import { TaskFooter } from "./task-footer";
@@ -142,103 +141,34 @@ function CompletionBadge({ outcome }: { outcome: string | null }) {
   );
 }
 
-type RightTab = "changes" | "plan" | "review";
-const RIGHT_TAB_ID: Record<RightTab, string> = {
-  review: "task-right-tab-review",
-  changes: "task-right-tab-changes",
-  plan: "task-right-tab-plan",
-};
-const RIGHT_PANEL_ID: Record<RightTab, string> = {
-  review: "task-right-panel-review",
-  changes: "task-right-panel-changes",
-  plan: "task-right-panel-plan",
-};
-
 /**
- * The right column's tab strip: Changes, Plan, Review.
- *
- * Hand-rolled like the Workflow strip rather than Radix Tabs, because the strip sits in the
- * column's header row and the panels in its body — two slots of `SplitPane`, and a Radix
- * `TabsList` cannot live outside its root. The pattern is the one `workflow-steps.tsx` already
- * uses: `aria-controls` from tab to panel, manual activation, roving focus from the shared
- * hook, and a count where one helps.
- *
- * No tab is ever disabled. Plan and Review used to grey out until there was something to show,
- * with the reason in a `title` — which a disabled button never displays, and which a keyboard
- * never reaches. A tab that opens onto a panel saying "no plan yet" tells the same truth to
- * everyone, and keeps the strip's shape constant so the third tab is always where it was.
- *
- * The selected tab is underlined rather than ringed: the focus ring is a ring, and two rings in
- * two greys made "where am I" and "what is showing" the same mark.
+ * The page's tabs, in reading order: what the run did, what was asked, what was planned, what
+ * changed. One thing on screen at a time, the whole width — the page used to show all of it at
+ * once, every panel half a screen wide and a third of a screen tall, and the one an operator
+ * wanted was always the one being squeezed. The decision bar under them stays put on every
+ * one, so the gate is never a tab away.
  */
-function RightColumnTabs({
-  tab,
-  onPick,
-  files,
-  planItems,
-  review,
-}: {
-  tab: RightTab;
-  onPick: (tab: RightTab) => void;
-  files: number;
-  planItems: number;
-  /** Criteria still to verify, or null when there is no Session to brief on. */
-  review: number | null;
-}) {
-  const onKeyDown = useTablistKeys<HTMLDivElement>();
-  const tabs: Array<{ id: RightTab; label: string; count: number }> = [
-    { id: "changes", label: "Changes", count: files },
-    { id: "plan", label: "Plan", count: planItems },
-    { id: "review", label: "Review", count: review ?? 0 },
-  ];
+type WorkspaceTab = "run" | "brief" | "plan" | "changes";
+const TABS: readonly WorkspaceTab[] = ["run", "brief", "plan", "changes"];
+
+/** A reading panel: scrolls on its own, one comfortable column wide. The Run panel is not one. */
+function ReadingPanel({ children }: { children: ReactNode }) {
   return (
-    <div
-      role="tablist"
-      aria-label="Review column"
-      className="flex min-w-0 items-center gap-1"
-      onKeyDown={onKeyDown}
-    >
-      {tabs.map(({ id, label, count }) => {
-        const selected = tab === id;
-        return (
-          <button
-            key={id}
-            type="button"
-            role="tab"
-            id={RIGHT_TAB_ID[id]}
-            aria-controls={RIGHT_PANEL_ID[id]}
-            aria-selected={selected}
-            tabIndex={selected ? 0 : -1}
-            onClick={() => onPick(id)}
-            className={cn(
-              "inline-flex h-6 items-center gap-1.5 rounded-md px-1.5 font-medium text-2xs uppercase tracking-[0.14em] transition-colors duration-100",
-              selected
-                ? "bg-muted text-foreground shadow-[inset_0_-2px_0_0_var(--foreground)]"
-                : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
-            )}
-          >
-            {label}
-            {count > 0 ? (
-              <span className="rounded-full bg-background/60 px-1 font-mono text-[10px] normal-case tracking-normal">
-                {count}
-              </span>
-            ) : null}
-          </button>
-        );
-      })}
-    </div>
+    <ScrollArea className="min-h-0 flex-1">
+      <div className="mx-auto max-w-5xl p-4">{children}</div>
+    </ScrollArea>
   );
 }
 
 /**
- * The page's own shape, drawn empty while the Task loads — a header line, the run beside the
- * review column, the foot — so what arrives lands in place instead of jumping into it. Held
- * back 300ms: a warm cache answers well inside that, and a skeleton that flashes for two frames
- * reads as a glitch, not as loading. `aria-busy` and a hidden line, because a screen reader
- * gets nothing from a pulse — not a live region, which announces nothing when it is born with
- * its content already in it.
+ * The page's own shape, drawn empty while the Task loads — a header line, the tab strip, one
+ * panel, the foot — so what arrives lands in place instead of jumping into it. Held back 300ms:
+ * a warm cache answers well inside that, and a skeleton that flashes for two frames reads as a
+ * glitch, not as loading. `aria-busy` and a hidden line, because a screen reader gets nothing
+ * from a pulse — not a live region, which announces nothing when it is born with its content
+ * already in it.
  */
-function WorkspaceSkeleton({ changesWidth }: { changesWidth: number }) {
+function WorkspaceSkeleton() {
   return (
     <div aria-busy className="delayed-reveal flex h-full flex-col" data-workspace-skeleton>
       <span className="sr-only">Loading task</span>
@@ -252,18 +182,14 @@ function WorkspaceSkeleton({ changesWidth }: { changesWidth: number }) {
           <Skeleton className="h-3 w-40" />
         </div>
       </div>
-      <div className="flex min-h-0 flex-1">
-        <div className="flex-1 p-3">
-          <Skeleton className="h-full rounded-xl" />
-        </div>
-        <div
-          className="flex shrink-0 flex-col gap-3 border-l p-3"
-          style={{ width: `min(${changesWidth}px, 60%)` }}
-        >
-          <Skeleton className="h-6 w-40" />
-          <Skeleton className="h-24" />
-          <Skeleton className="h-24" />
-        </div>
+      <div className="flex items-center gap-4 border-b px-6 py-3">
+        <Skeleton className="h-4 w-10" />
+        <Skeleton className="h-4 w-12" />
+        <Skeleton className="h-4 w-10" />
+        <Skeleton className="h-4 w-16" />
+      </div>
+      <div className="min-h-0 flex-1 p-3">
+        <Skeleton className="h-full rounded-xl" />
       </div>
       <div className="border-t px-4 py-3">
         <Skeleton className="h-9 w-72" />
@@ -418,23 +344,19 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   }, [stopQueued, isRunning, live.status, live.stopHarness]);
 
   /**
-   * The split between the run and the change under review — a per-user preference, so the
-   * arrangement follows the person rather than the browser (issue #3, AC-3).
+   * Which tab is showing, when the operator has said.
    *
-   * Optimistic: the divider must track the pointer, and a column that snapped back while a
-   * round trip completed would be unusable. The mutation is fired on release, not per move, so
-   * one drag is one write.
+   * The page follows the Task by default (see `autoTab` below) — the run while it is running,
+   * the brief at the gate — because that is the tab an operator would pick every time. A manual
+   * pick sticks until the Task changes state, which is when the default would have changed
+   * anyway; pinning it for longer would leave a reviewer who clicked Plan during the run staring
+   * at the plan when the diff lands. The pick is also in the URL (`?tab=`), so a refresh stays
+   * put and a link to the Changes tab is a link to the Changes tab; it is read once, on arrival,
+   * and written on every pick.
    */
-  const paneQuery = trpc.preference.getTaskPaneLayout.useQuery({});
-  const [paneOverride, setPaneOverride] = useState<TaskPaneLayout | null>(null);
-  const savePaneMutation = trpc.preference.setTaskPaneLayout.useMutation();
-  const pane = paneOverride ?? paneQuery.data?.layout ?? DEFAULT_TASK_PANE_LAYOUT;
-  const savePane = useCallback(
-    (next: TaskPaneLayout) => {
-      setPaneOverride(next);
-      savePaneMutation.mutate(next);
-    },
-    [savePaneMutation],
+  const [urlTab, setUrlTab] = useUrlTab("tab", TABS);
+  const [tabPick, setTabPick] = useState<{ tab: WorkspaceTab; state: TaskState | null } | null>(
+    () => (urlTab ? { tab: urlTab, state: null } : null),
   );
 
   /**
@@ -583,17 +505,6 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
     { enabled: Boolean(latest?.id) },
   );
   const briefCriteria = briefQuery.data?.criteria.length ?? null;
-
-  /**
-   * Which of the right column's two tabs is showing.
-   *
-   * The column follows the Task by default — the plan while a run is in progress and nothing has
-   * been captured yet, the change once there is one to review — because that is the tab an
-   * operator would pick every time. A manual pick sticks until the Task changes state, which is
-   * when the default would have changed anyway; pinning it for longer would leave a reviewer who
-   * clicked Plan during the run staring at the plan when the diff lands.
-   */
-  const [tabPick, setTabPick] = useState<{ tab: RightTab; state: TaskState } | null>(null);
 
   const [input, setInput] = useState("");
   const decide = trpc.review.decide.useMutation({
@@ -774,7 +685,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   );
 
   if (task.isLoading) {
-    return <WorkspaceSkeleton changesWidth={pane.changesWidth} />;
+    return <WorkspaceSkeleton />;
   }
   if (task.error || !task.data) {
     // A page that could not load still has somewhere to go: the way back is the one action
@@ -832,25 +743,39 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   const diffs = shownRound && shownRound.index !== latestRound ? shownRound.diffs : capturedDiffs;
   // At the gate the brief is the view that answers "may I sign this", so it opens first there —
   // when there is one: an Issue with no criteria has no brief worth opening on, and the change
-  // is what is left to read. During a run the plan is what you watch; otherwise the change.
-  // A decision the harness made and nobody settled comes first of all: it is what locks the gate.
-  const autoTab: RightTab =
+  // is what is left to read. A decision the harness made and nobody settled comes first of all:
+  // it is what locks the gate. Done opens on what was shipped. Everything else — a run in
+  // progress, a Task not yet launched, a failure — opens on the run, which is where the evidence is.
+  const autoTab: WorkspaceTab =
     t.state === "review" && decisionsPending > 0
       ? "plan"
       : t.state === "review" && latest && (briefCriteria ?? 0) > 0
-        ? "review"
-        : hasPlan && diffs.length === 0 && isRunning
-          ? "plan"
-          : "changes";
-  const tab = tabPick && tabPick.state === t.state ? tabPick.tab : autoTab;
+        ? "brief"
+        : t.state === "review" || (t.state === "done" && diffs.length > 0)
+          ? "changes"
+          : "run";
+  // A pick from the URL has no state yet: it holds until the first state change after arrival.
+  const tab =
+    tabPick && (tabPick.state === null || tabPick.state === t.state) ? tabPick.tab : autoTab;
+  const pickTab = (next: WorkspaceTab) => {
+    setTabPick({ tab: next, state: t.state });
+    setUrlTab(next);
+  };
   /**
    * Approve pressed with decisions still unsettled: rather than a greyed button and a sentence
    * about a tab elsewhere, the page goes to the tab and puts the focus on the first decision
    * still open — the blocker itself, where it is answered. After paint, because the panel is
    * `hidden` until the pick lands.
    */
+  const stepScope = {
+    ...scope,
+    select: (stepId: string | null) => {
+      scope.select(stepId);
+      if (tab !== "run") pickTab("run");
+    },
+  };
   const goToDecisions = () => {
-    setTabPick({ tab: "plan", state: t.state });
+    pickTab("plan");
     requestAnimationFrame(() => {
       document.querySelector<HTMLElement>('[data-decision][data-settled="false"] input')?.focus();
     });
@@ -1091,12 +1016,6 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
         </div>
       ) : null}
 
-      {/*
-        Which Step of its Workflow the run is on, when it is on one (spec F03) — and, since the
-        strip became the terminal's tablist, which Step's output is on screen.
-      */}
-      <WorkflowSteps scope={scope} />
-
       {moveMessage ? (
         /*
           A refusal, in the feedback family (not the lifecycle one — Failed red is the Task's
@@ -1125,218 +1044,200 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
         </div>
       ) : null}
 
-      {/* Panels: the run on the left, the change under review in a column beside it. */}
-      <SplitPane
-        collapsed={pane.changesCollapsed}
-        left={
-          // Panel padding, the same 12px the Changes column beside it uses. Two halves of one
-          // split with two different gutters is a seam you can see along the divider.
-          <div className="flex min-h-0 flex-1 flex-col gap-2 p-3">
-            <TerminalView
-              rows={rows}
-              elided={elided}
-              // What lets the panel say "launching" over an empty terminal and name what the
-              // harness is doing under a quiet one — both are only true while a run is alive.
-              isRunning={isRunning}
-              onRespondPermission={live.respondPermission}
-              // Answering means reaching a live harness, so the control is offered only while
-              // there is one: a finished run keeps its widgets as a record.
-              {...(isRunning ? { onRespondWidget: live.respondWidget } : {})}
-              // The other half of the strip's tablist. Only when there is a strip: a Task on no
-              // Workflow has no tabs, so the terminal is a plain panel exactly as before.
-              {...(scope.binding
-                ? { panelId: TERMINAL_PANEL_ID, labelledBy: selectedTabId(scope.selected) }
-                : {})}
-              {...(terminalScope ? { scope: terminalScope } : {})}
-            />
+      {/*
+        Which Step of its Workflow the run is on, when it is on one (spec F03) — above the tabs,
+        because where the run is matters whichever panel is open. The strip is also the
+        terminal's tablist: picking a Step means "show me that Step's output", so it opens the
+        Run tab as well as scoping it.
+      */}
+      <WorkflowSteps scope={stepScope} />
 
-            <HarnessComposer
-              value={input}
-              onChange={setInput}
-              onSubmit={submitInput}
-              onStop={() => {
-                setAck(null);
-                live.stopHarness();
-              }}
-              canSteer={canSteer}
-              isRunning={isRunning}
-              queued={queued}
-              onDiscardQueued={() => setQueued(null)}
-              stopQueued={stopQueued}
-              onQueueStop={() => setStopQueued(true)}
-              onDiscardStop={() => setStopQueued(false)}
-              ackError={ack && !ack.ok ? (ack.error ?? "unknown") : null}
-            />
-          </div>
-        }
-        onResize={(changesWidth) => savePane({ ...pane, changesWidth })}
-        onToggle={(changesCollapsed) => savePane({ ...pane, changesCollapsed })}
-        right={
-          <>
-            {/*
-              Both panels stay mounted and one is hidden, rather than unmounting the inactive one:
-              the Changes panel holds which file is open and how, and a reviewer who glanced at
-              the plan should come back to the diff exactly where they left it.
-            */}
-            <div
-              role="tabpanel"
-              id={RIGHT_PANEL_ID.changes}
-              aria-labelledby={RIGHT_TAB_ID.changes}
-              hidden={tab !== "changes"}
-              className="h-full transition-opacity duration-100 starting:opacity-0"
-            >
-              <ScrollArea className="h-full">
-                <div className="p-3">
-                  <RoundSelector
-                    rounds={rounds}
-                    selected={selectedRound}
-                    onSelect={(index) => setRoundPick({ index, of: rounds.length })}
-                    {...(sessions.data && sessions.data.length > 1 && viewing
-                      ? {
-                          launches: {
-                            sessions: sessions.data,
-                            selectedId: viewing.id,
-                            onSelect: (id: string) => {
-                              setSessionPick(id);
-                              setRoundPick(null);
-                            },
-                          },
-                        }
-                      : {})}
-                  />
-                  {/*
-                    The source-control panel (spec F22), one per Repository (issue #7 AC-4). A Task
-                    can span several, and a reviewer shown one flat file list could not tell which
-                    repository a path came from.
-                  */}
-                  <ChangesPanel
-                    diffs={diffs}
-                    repositories={attachments}
-                    repositoryName={nameFor}
-                    /*
-                     * The change is read once, when the run reaches its review gate — so before a
-                     * Task has ever got there, "no changes" is a claim nobody has checked. A capture
-                     * having happened is what `diffs` being non-empty means; a Task past the gate
-                     * with genuinely nothing to show is the other case, and `completedAt` is the tell
-                     * that the run got far enough to look.
-                     */
-                    captured={diffs.length > 0 || t.completedAt !== null}
-                    // Ticks and notes only while there is a review to draft — the Task at its gate,
-                    // on the round the gate is about. An older round, or a Task that is Done or
-                    // still Running, is read, not reviewed.
-                    {...(t.state === "review" &&
-                    (shownRound === null || shownRound.index === latestRound)
-                      ? {
-                          ticks: {
-                            viewed: draft.viewed,
-                            onToggle: draft.toggleViewed,
-                            notes: draft.draft.notes,
-                            ...noteEdits,
-                          },
-                        }
-                      : {})}
-                  />
-                </div>
-              </ScrollArea>
-            </div>
-            <div
-              role="tabpanel"
-              id={RIGHT_PANEL_ID.plan}
-              aria-labelledby={RIGHT_TAB_ID.plan}
-              hidden={tab !== "plan"}
-              className="h-full transition-opacity duration-100 starting:opacity-0"
-            >
-              <ScrollArea className="h-full">
-                <div className="p-3">
-                  {/*
-                    The harness's own plan — what it still believes is outstanding — on a tab of its
-                    own beside the change, because the two answer the reviewer's question from
-                    opposite ends and are read at different moments: the plan while the run is
-                    going, the diff once it has stopped.
-
-                    Before the harness has published anything the tab still opens — onto a panel
-                    that says so, and when a plan tends to appear, so an empty column is never
-                    mistaken for a broken one.
-                  */}
-                  {!hasPlan ? (
-                    <EmptyPanel
-                      label="No plan yet."
-                      hint={
-                        isRunning
-                          ? "The harness publishes one when it writes its todo list — usually in its first minute."
-                          : "The harness publishes one when it runs and writes its todo list."
-                      }
-                    />
-                  ) : (
-                    <section aria-label="Harness plan" className="space-y-3">
-                      {decisions.length > 0 ? (
-                        <div className="space-y-2" data-decisions={decisions.length}>
-                          <h3 className="font-medium text-sm">
-                            Decisions the harness made{" "}
-                            <span className="font-normal text-2xs text-muted-foreground">
-                              — yours to confirm or overturn before the next step
-                            </span>
-                          </h3>
-                          {decisions.map((widget) => (
-                            <DecisionForm
-                              key={widget.id}
-                              widget={widget}
-                              answer={draft.draft.decisions.find((d) => d.id === widget.id) ?? null}
-                              onAnswer={draft.setDecision}
-                              disabled={t.state !== "review" || deleted !== null}
-                            />
-                          ))}
-                        </div>
-                      ) : null}
-                      {stepCard ? <StepCard widget={stepCard} /> : null}
-                      {todos.length > 0 ? <TodoList items={todos} /> : null}
-                    </section>
-                  )}
-                </div>
-              </ScrollArea>
-            </div>
-            <div
-              role="tabpanel"
-              id={RIGHT_PANEL_ID.review}
-              aria-labelledby={RIGHT_TAB_ID.review}
-              hidden={tab !== "review"}
-              className="h-full transition-opacity duration-100 starting:opacity-0"
-            >
-              <ScrollArea className="h-full">
-                <div className="p-3">
-                  {latest ? (
-                    <ReviewBriefPanel
-                      sessionId={latest.id}
-                      openItems={openItems}
-                      verified={draft.draft.verified}
-                      onToggleVerified={draft.toggleVerified}
-                      canVerify={t.state === "review" && deleted === null}
-                    />
-                  ) : (
-                    <EmptyPanel
-                      label="Nothing to review yet."
-                      hint="The brief — the criteria to verify — is drawn up from the first run."
-                    />
-                  )}
-                </div>
-              </ScrollArea>
-            </div>
-          </>
-        }
-        rightHeading={
-          <RightColumnTabs
-            tab={tab}
-            onPick={(next) => setTabPick({ tab: next, state: t.state })}
-            files={diffs.reduce((n, d) => n + d.files.length, 0)}
-            planItems={
+      {/* One panel at a time, the whole width; the decision bar below stays on every tab. */}
+      <Tabs
+        value={tab}
+        onValueChange={(next) => pickTab(next as WorkspaceTab)}
+        className="min-h-0 flex-1 gap-0"
+      >
+        <TabsList variant="line" size="lg" aria-label="Task" className="w-full border-b px-4">
+          <TabsTrigger value="run">Run</TabsTrigger>
+          <TabsTrigger
+            value="brief"
+            count={latest ? Math.max(0, (briefCriteria ?? 0) - draft.draft.verified.length) : 0}
+            countLabel="criteria still to verify"
+          >
+            Brief
+          </TabsTrigger>
+          <TabsTrigger
+            value="plan"
+            count={
               decisions.length + (todos.length > 0 ? todos.length : (stepCard?.steps.length ?? 0))
             }
-            review={latest ? Math.max(0, (briefCriteria ?? 0) - draft.draft.verified.length) : null}
-          />
-        }
-        rightLabel="Review"
-        width={pane.changesWidth}
-      />
+            countLabel="plan items"
+          >
+            Plan
+          </TabsTrigger>
+          <TabsTrigger
+            value="changes"
+            count={diffs.reduce((n, d) => n + d.files.length, 0)}
+            countLabel="files changed"
+          >
+            Changes
+          </TabsTrigger>
+        </TabsList>
+
+        {/* All four stay mounted: the Changes panel holds which file is open and how. */}
+        <TabsContent value="run" keepMounted className="flex min-h-0 flex-col">
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="flex min-h-0 flex-1 flex-col gap-2 p-3">
+              <TerminalView
+                rows={rows}
+                elided={elided}
+                // Hidden with its tab, the viewport has no height to follow; this re-pins the tail
+                // the moment the tab is back.
+                shown={tab === "run"}
+                // What lets the panel say "launching" over an empty terminal and name what the
+                // harness is doing under a quiet one — both are only true while a run is alive.
+                isRunning={isRunning}
+                onRespondPermission={live.respondPermission}
+                // Answering means reaching a live harness, so the control is offered only while
+                // there is one: a finished run keeps its widgets as a record.
+                {...(isRunning ? { onRespondWidget: live.respondWidget } : {})}
+                // The other half of the strip's tablist. Only when there is a strip: a Task on no
+                // Workflow has no tabs, so the terminal is a plain panel exactly as before.
+                {...(scope.binding
+                  ? { panelId: TERMINAL_PANEL_ID, labelledBy: selectedTabId(scope.selected) }
+                  : {})}
+                {...(terminalScope ? { scope: terminalScope } : {})}
+              />
+
+              <HarnessComposer
+                value={input}
+                onChange={setInput}
+                onSubmit={submitInput}
+                onStop={() => {
+                  setAck(null);
+                  live.stopHarness();
+                }}
+                canSteer={canSteer}
+                isRunning={isRunning}
+                queued={queued}
+                onDiscardQueued={() => setQueued(null)}
+                stopQueued={stopQueued}
+                onQueueStop={() => setStopQueued(true)}
+                onDiscardStop={() => setStopQueued(false)}
+                ackError={ack && !ack.ok ? (ack.error ?? "unknown") : null}
+              />
+            </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="brief" keepMounted className="flex min-h-0 flex-col">
+          <ReadingPanel>
+            {latest ? (
+              <ReviewBriefPanel
+                sessionId={latest.id}
+                openItems={openItems}
+                verified={draft.draft.verified}
+                onToggleVerified={draft.toggleVerified}
+                canVerify={t.state === "review" && deleted === null}
+              />
+            ) : (
+              <EmptyPanel
+                label="Nothing to review yet."
+                hint="The brief — the criteria to verify — is drawn up from the first run."
+              />
+            )}
+          </ReadingPanel>
+        </TabsContent>
+
+        <TabsContent value="plan" keepMounted className="flex min-h-0 flex-col">
+          <ReadingPanel>
+            {!hasPlan ? (
+              <EmptyPanel
+                label="No plan yet."
+                hint={
+                  isRunning
+                    ? "The harness publishes one when it writes its todo list — usually in its first minute."
+                    : "The harness publishes one when it runs and writes its todo list."
+                }
+              />
+            ) : (
+              <section aria-label="Harness plan" className="space-y-3">
+                {decisions.length > 0 ? (
+                  <div className="space-y-2" data-decisions={decisions.length}>
+                    <h3 className="font-medium text-sm">
+                      Decisions the harness made{" "}
+                      <span className="font-normal text-2xs text-muted-foreground">
+                        — yours to confirm or overturn before the next step
+                      </span>
+                    </h3>
+                    {decisions.map((widget) => (
+                      <DecisionForm
+                        key={widget.id}
+                        widget={widget}
+                        answer={draft.draft.decisions.find((d) => d.id === widget.id) ?? null}
+                        onAnswer={draft.setDecision}
+                        disabled={t.state !== "review" || deleted !== null}
+                      />
+                    ))}
+                  </div>
+                ) : null}
+                {stepCard ? <StepCard widget={stepCard} /> : null}
+                {todos.length > 0 ? <TodoList items={todos} /> : null}
+              </section>
+            )}
+          </ReadingPanel>
+        </TabsContent>
+
+        <TabsContent value="changes" keepMounted className="flex min-h-0 flex-col">
+          <ReadingPanel>
+            <RoundSelector
+              rounds={rounds}
+              selected={selectedRound}
+              onSelect={(index) => setRoundPick({ index, of: rounds.length })}
+              {...(sessions.data && sessions.data.length > 1 && viewing
+                ? {
+                    launches: {
+                      sessions: sessions.data,
+                      selectedId: viewing.id,
+                      onSelect: (id: string) => {
+                        setSessionPick(id);
+                        setRoundPick(null);
+                      },
+                    },
+                  }
+                : {})}
+            />
+
+            <ChangesPanel
+              diffs={diffs}
+              repositories={attachments}
+              repositoryName={nameFor}
+              /*
+               * The change is read once, when the run reaches its review gate — so before a
+               * Task has ever got there, "no changes" is a claim nobody has checked. A capture
+               * having happened is what `diffs` being non-empty means; a Task past the gate
+               * with genuinely nothing to show is the other case, and `completedAt` is the tell
+               * that the run got far enough to look.
+               */
+              captured={diffs.length > 0 || t.completedAt !== null}
+              // Ticks and notes only while there is a review to draft — the Task at its gate,
+              // on the round the gate is about. An older round, or a Task that is Done or
+              // still Running, is read, not reviewed.
+              {...(t.state === "review" && (shownRound === null || shownRound.index === latestRound)
+                ? {
+                    ticks: {
+                      viewed: draft.viewed,
+                      onToggle: draft.toggleViewed,
+                      notes: draft.draft.notes,
+                      ...noteEdits,
+                    },
+                  }
+                : {})}
+            />
+          </ReadingPanel>
+        </TabsContent>
+      </Tabs>
 
       {deleted !== null ? null : (
         <TaskFooter

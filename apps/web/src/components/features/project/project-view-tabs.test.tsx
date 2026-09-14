@@ -79,7 +79,7 @@ describe("ProjectViewTabs", () => {
     const chosen: string[] = [];
     render(strip({ onSelect: (id) => chosen.push(id) }));
 
-    fireEvent.click(screen.getByRole("tab", { name: "Bugs" }));
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Bugs" }), { button: 0 });
 
     expect(chosen).toEqual(["v3"]);
   });
