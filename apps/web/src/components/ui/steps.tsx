@@ -6,13 +6,32 @@ import { Hourglass, X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 
-function Steps({ className, ...props }: React.ComponentProps<"ol">) {
+/**
+ * Horizontal by default — a strip. Vertical in a column, where each step sits on its own line
+ * and the connector runs down from the marker; the markup and the roles are identical, only the
+ * axis the connector is drawn on changes.
+ */
+const StepsOrientation = React.createContext<"horizontal" | "vertical">("horizontal")
+
+function Steps({
+  className,
+  orientation = "horizontal",
+  ...props
+}: React.ComponentProps<"ol"> & { orientation?: "horizontal" | "vertical" }) {
   return (
-    <ol
-      data-slot="steps"
-      className={cn("flex w-full flex-wrap items-center gap-y-1.5", className)}
-      {...props}
-    />
+    <StepsOrientation.Provider value={orientation}>
+      <ol
+        data-slot="steps"
+        data-orientation={orientation}
+        className={cn(
+          orientation === "vertical"
+            ? "flex w-full flex-col items-stretch"
+            : "flex w-full flex-wrap items-center gap-y-1.5",
+          className
+        )}
+        {...props}
+      />
+    </StepsOrientation.Provider>
   )
 }
 
@@ -130,6 +149,7 @@ function Step({
 }) {
   const word = STATUS_WORD[status]
   const here = status === "running" || status === "waiting"
+  const vertical = React.useContext(StepsOrientation) === "vertical"
   const body = (
     <>
       <StepMarker status={status} index={index} />
@@ -144,7 +164,10 @@ function Step({
       data-selected={onSelect ? selected : undefined}
       role={onSelect ? "presentation" : undefined}
       aria-current={!onSelect && here ? "step" : undefined}
-      className={cn("flex min-w-0 items-center gap-1.5", className)}
+      className={cn(
+        vertical ? "flex min-w-0 flex-col items-start" : "flex min-w-0 items-center gap-1.5",
+        className
+      )}
       {...props}
     >
       {onSelect ? (
@@ -177,7 +200,9 @@ function Step({
         <span
           aria-hidden
           className={cn(
-            "h-px w-8 shrink-0",
+            // Down from the marker's centre in a column (the marker is 20px, inset 4px by the
+            // button's padding); along the row in a strip.
+            vertical ? "ml-[13px] h-3 w-px shrink-0" : "h-px w-8 shrink-0",
             status === "done" ? "bg-state-done/60" : "bg-border"
           )}
         />

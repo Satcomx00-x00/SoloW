@@ -560,9 +560,9 @@ describe("TaskWorkspace dependencies (issue #6)", () => {
   });
 });
 
-describe("TaskWorkspace meta popover", () => {
-  it("names the profiles behind the ids, the base ref and the session, on demand", async () => {
-    const { log } = renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
+describe("TaskWorkspace meta in the rail", () => {
+  it("names the profiles behind the ids, the base ref and the session", async () => {
+    renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
       "task.get": () => task({ state: "review" }),
       "session.listForTask": () => [session],
       "session.get": () => detail(),
@@ -576,11 +576,9 @@ describe("TaskWorkspace meta popover", () => {
       }),
     });
 
-    const about = await screen.findByRole("button", { name: "About this task" });
-    // Nothing is fetched for a popover nobody opened.
-    expect(log.calls.some((c) => c.path === "profile.agent.list")).toBe(false);
-    fireEvent.click(about);
-
+    // In the rail, not behind a popover: the facts are on the page the moment it is.
+    const about = await screen.findByRole("complementary", { name: "About this task" });
+    expect(within(about).getByRole("region", { name: "Run" })).toBeDefined();
     expect(await screen.findByText("Claude")).toBeDefined();
     expect(await screen.findByText("This machine")).toBeDefined();
     expect(screen.getByText(/from main/)).toBeDefined();

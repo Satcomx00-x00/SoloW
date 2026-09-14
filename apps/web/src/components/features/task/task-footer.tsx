@@ -15,7 +15,7 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { type ReactNode, useEffect, useId, useRef } from "react";
+import { createContext, type ReactNode, useContext, useEffect, useId, useRef } from "react";
 import { waitingOn } from "@/components/features/board/blockers";
 import { ConfirmAction } from "@/components/features/confirm-action";
 import { Button } from "@/components/ui/button";
@@ -46,8 +46,17 @@ import { cn } from "@/lib/utils";
  * workspace owns every mutation — its invalidations, its pending flags, its error mapping — and
  * a second call site for `task.retry` is a second place for those to be got wrong.
  */
+/**
+ * `bar` is the strip along the foot of a page: sentence left, actions right. `stack` is the
+ * same content as a card in a column — sentence, then actions — for the Task page's rail,
+ * where the decision sits beside the evidence rather than under it.
+ */
+type FooterLayout = "bar" | "stack";
+const FooterLayoutContext = createContext<FooterLayout>("bar");
+
 export function TaskFooter({
   task,
+  layout = "bar",
   outstanding = [],
   consequences,
   viewed = null,
@@ -69,6 +78,7 @@ export function TaskFooter({
   onDismissError,
 }: {
   task: TaskDto;
+  layout?: FooterLayout;
   /** Predecessors not yet Done — Launch is refused with these named, as the board refuses it. */
   outstanding?: readonly TaskDependencyDto[];
   /** What one Approve covers, already in words: "2 repositories, 2 branches, 14 files". */
@@ -128,39 +138,42 @@ export function TaskFooter({
   if (body === null && !error) return null;
 
   return (
-    <div
-      data-task-footer={task.state}
-      className={cn(
-        "border-t px-4 py-3 transition-colors",
-        // The gate lights up only when it is actually your turn.
-        inReview && "border-state-review/25 bg-state-review/[0.045]",
-      )}
-    >
-      {body}
-      {error ? (
-        // The feedback family's red, not the destructive one — Reject spends that, and an error
-        // in the same red made every refusal look like a discard. Closable, so it does not sit
-        // under the next attempt.
-        <p
-          className="mt-2 flex items-center gap-2 text-feedback-error text-sm"
-          role="alert"
-          data-footer-error
-        >
-          <span className="min-w-0 flex-1">{error}</span>
-          {onDismissError ? (
-            <Button
-              aria-label="Dismiss"
-              size="icon-xs"
-              variant="ghost"
-              className="text-feedback-error hover:text-feedback-error"
-              onClick={onDismissError}
-            >
-              <X />
-            </Button>
-          ) : null}
-        </p>
-      ) : null}
-    </div>
+    <FooterLayoutContext.Provider value={layout}>
+      <div
+        data-task-footer={task.state}
+        data-layout={layout}
+        className={cn(
+          "border-t px-4 py-3 transition-colors",
+          // The gate lights up only when it is actually your turn.
+          inReview && "border-state-review/25 bg-state-review/[0.045]",
+        )}
+      >
+        {body}
+        {error ? (
+          // The feedback family's red, not the destructive one — Reject spends that, and an error
+          // in the same red made every refusal look like a discard. Closable, so it does not sit
+          // under the next attempt.
+          <p
+            className="mt-2 flex items-center gap-2 text-feedback-error text-sm"
+            role="alert"
+            data-footer-error
+          >
+            <span className="min-w-0 flex-1">{error}</span>
+            {onDismissError ? (
+              <Button
+                aria-label="Dismiss"
+                size="icon-xs"
+                variant="ghost"
+                className="text-feedback-error hover:text-feedback-error"
+                onClick={onDismissError}
+              >
+                <X />
+              </Button>
+            ) : null}
+          </p>
+        ) : null}
+      </div>
+    </FooterLayoutContext.Provider>
   );
 }
 
@@ -283,10 +296,21 @@ function revealPermission(requestId: string): void {
 }
 
 function Row({ hint, children }: { hint: ReactNode; children: ReactNode }) {
+  const stacked = useContext(FooterLayoutContext) === "stack";
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3">
+    <div
+      className={cn(
+        stacked
+          ? "flex flex-col items-stretch gap-3"
+          : "flex flex-wrap items-center justify-between gap-3",
+      )}
+    >
       <div className="min-w-0 text-muted-foreground text-sm">{hint}</div>
-      <div className="flex shrink-0 flex-wrap items-center gap-2">{children}</div>
+      <div
+        className={cn("flex flex-wrap items-center gap-2", stacked ? "justify-end" : "shrink-0")}
+      >
+        {children}
+      </div>
     </div>
   );
 }
@@ -381,7 +405,7 @@ function ReviewGate({
         // the button was once refused without it, which made "request changes" the one decision
         // that could not be taken by pressing it. The label stays put above the field: a
         // placeholder is gone the moment the first word is typed.
-        <div className="max-w-2xl space-y-1">
+        <div className="space-y-1">
           <label htmlFor={noteId} className="block text-2xs text-muted-foreground">
             Note to the harness — optional, goes with Request changes
           </label>

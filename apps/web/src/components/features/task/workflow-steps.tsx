@@ -171,7 +171,14 @@ export function useStepScope(task: TaskDto | null): StepScope {
  * Nothing at all for a Task on no Workflow: a single-harness run has no steps to be on, and its
  * terminal is never scoped.
  */
-export function WorkflowSteps({ scope }: { scope: StepScope }) {
+export function WorkflowSteps({
+  scope,
+  orientation = "horizontal",
+}: {
+  scope: StepScope;
+  /** Vertical in the Task page's rail — one Step per line under the Workflow's name. */
+  orientation?: "horizontal" | "vertical";
+}) {
   const { binding, stepped, selected, select } = scope;
 
   // Roving focus along the strip — the hook the right column's tabs share.
@@ -187,7 +194,11 @@ export function WorkflowSteps({ scope }: { scope: StepScope }) {
     // One row — name, position, then the Steps — at the caption step, on the header's hairline.
     <section
       aria-label="Workflow progress"
-      className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 border-b px-4 py-1.5"
+      className={cn(
+        orientation === "vertical"
+          ? "flex min-w-0 flex-col gap-2"
+          : "flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 border-b px-4 py-1.5",
+      )}
     >
       <p className="flex min-w-0 shrink-0 items-center gap-1.5 text-muted-foreground text-xs">
         <Workflow aria-hidden className="size-3 shrink-0" />
@@ -196,12 +207,15 @@ export function WorkflowSteps({ scope }: { scope: StepScope }) {
           · Step {at + 1} of {stepped.length}
         </span>
       </p>
-      <span aria-hidden className="hidden h-4 w-px shrink-0 bg-border sm:inline-block" />
+      {orientation === "vertical" ? null : (
+        <span aria-hidden className="hidden h-4 w-px shrink-0 bg-border sm:inline-block" />
+      )}
       <Steps
         aria-label="Workflow steps"
         onKeyDown={onStripKey}
+        orientation={orientation}
         role="tablist"
-        className="w-auto min-w-0 flex-1"
+        className={orientation === "vertical" ? undefined : "w-auto min-w-0 flex-1"}
       >
         {/*
           The way back to everything, first and set apart — where an "All" filter sits in every
@@ -209,7 +223,13 @@ export function WorkflowSteps({ scope }: { scope: StepScope }) {
           tablist with none of its tabs selected is a broken tablist, and "the whole run" is a
           genuine alternative to the Steps, not a control that undoes them.
         */}
-        <li className="flex min-w-0 items-center" role="presentation">
+        <li
+          className={cn(
+            "flex min-w-0 items-center",
+            orientation === "vertical" && "mb-1 border-b pb-1",
+          )}
+          role="presentation"
+        >
           <button
             aria-controls={TERMINAL_PANEL_ID}
             aria-selected={selected === null}
@@ -228,7 +248,9 @@ export function WorkflowSteps({ scope }: { scope: StepScope }) {
           >
             Whole run
           </button>
-          <span aria-hidden className="mx-2 h-4 w-px shrink-0 bg-border" />
+          {orientation === "vertical" ? null : (
+            <span aria-hidden className="mx-2 h-4 w-px shrink-0 bg-border" />
+          )}
         </li>
         {stepped.map(({ step, status }, i) => (
           <Step
