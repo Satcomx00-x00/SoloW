@@ -189,7 +189,9 @@ export function TerminalView({
     // this panel is sized by a draggable divider, so a viewport breakpoint knows nothing about
     // how much room the strip actually has.
     <div
-      className="@container surface-edge flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-terminal"
+      // No frame: inside the Run tab the region is the frame, and `--terminal` is one value step
+      // from the page ground — depth from value, not from a border and a radius.
+      className="@container flex min-h-0 flex-1 flex-col overflow-hidden bg-terminal"
       // A tabpanel only when a Workflow strip is actually driving it, and all three attributes
       // arrive together or not at all: a Task on no Workflow has no tabs, and a panel announcing
       // itself as one half of a relationship that does not exist is worse than a plain container.
@@ -254,7 +256,12 @@ export function TerminalView({
         )}
 
         <div className="ml-auto flex min-w-0 items-center gap-1.5">
-          <TranscriptFilterBar filters={filters} onChange={setFilters} />
+          <TranscriptFilterBar
+            filters={filters}
+            onChange={setFilters}
+            shown={visible.length}
+            total={rows.length}
+          />
           {searchOpen ? (
             <>
               <div className="relative">

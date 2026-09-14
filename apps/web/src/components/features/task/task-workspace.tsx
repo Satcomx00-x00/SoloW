@@ -22,8 +22,10 @@ import {
 import {
   ArchiveRestore,
   ArrowLeft,
+  Check,
   CheckCircle2,
   CircleSlash,
+  Copy,
   GitBranch,
   OctagonAlert,
   Trash2,
@@ -48,7 +50,7 @@ import { settingsHref } from "@/lib/navigation";
 import { WHOLE_PAGE } from "@/lib/paged";
 import { relativeAge, relativeUntil } from "@/lib/relative-time";
 import { taskActionMessage } from "@/lib/task-errors";
-import { CREDENTIAL_EXPIRED_REASON } from "@/lib/task-states";
+import { CREDENTIAL_EXPIRED_REASON, failureReasonLabel, STATE_STYLE } from "@/lib/task-states";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
 import { ChangesPanel } from "./changes-panel";
@@ -195,6 +197,59 @@ function WorkspaceSkeleton() {
         <Skeleton className="h-9 w-72" />
       </div>
     </div>
+  );
+}
+
+/**
+ * Why the Task is where it is, beside the state that says where — a stranded Review, an
+ * expired credential, a quota park. The footer explains and offers the way out; this is the
+ * header saying the same thing in one chip, so "Review" next to "Decision not applied" is never
+ * read as two facts that disagree. Drawn in the footer's own style for the reason, so the two
+ * are visibly one claim.
+ */
+function FailureChip({ reason, state }: { reason: string; state: TaskState }) {
+  const label = failureReasonLabel(reason);
+  if (!label) return null;
+  const tone = label.tone ?? state;
+  const Icon = label.icon ?? STATE_STYLE[tone].icon;
+  return (
+    <span
+      className={cn(
+        "inline-flex shrink-0 items-center gap-1 rounded border px-1.5 py-px font-medium text-2xs",
+        STATE_STYLE[tone].badgeClassName,
+      )}
+      data-failure-chip={reason}
+    >
+      <Icon aria-hidden className="size-3 shrink-0" strokeWidth={2.25} />
+      {label.label}
+    </span>
+  );
+}
+
+/** The one thing anyone does with a branch name, next to the branch name. */
+function CopyBranch({ branch }: { branch: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      aria-label={copied ? "Branch name copied" : "Copy branch name"}
+      className={cn(
+        "-my-1 inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors duration-100 hover:bg-accent hover:text-foreground",
+        copied && "text-feedback-ok",
+      )}
+      onClick={() => {
+        // A clipboard write can be refused (an insecure origin); the name is on screen either way.
+        void navigator.clipboard
+          ?.writeText(branch)
+          .then(() => {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+          })
+          .catch(() => {});
+      }}
+    >
+      {copied ? <Check aria-hidden className="size-3" /> : <Copy aria-hidden className="size-3" />}
+    </button>
   );
 }
 
@@ -902,6 +957,10 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
             */}
             <h1 className="truncate font-semibold text-lg">{t.title}</h1>
             <TaskStateBadge state={t.state} size="sm" />
+            {t.failureReason &&
+            (t.state === "review" || t.state === "failed" || t.state === "parked") ? (
+              <FailureChip reason={t.failureReason} state={t.state} />
+            ) : null}
             {/*
               Beside the badge rather than in the action cluster on the right: the arrows change
               exactly the thing the badge shows, and a control placed away from its own readout
@@ -941,9 +1000,10 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
           </div>
           {/* The code step (12px mono), not the label step: this is a branch name, read glyph by
               glyph, and it was set at the size reserved for uppercase section captions. */}
-          <p className="mt-0.5 flex items-center gap-1.5 truncate font-mono text-muted-foreground text-xs">
+          <p className="mt-0.5 flex items-center gap-1.5 font-mono text-muted-foreground text-xs">
             <GitBranch className="size-3 shrink-0" aria-hidden />
-            {branch ?? `base ${primary?.baseRef ?? "HEAD"}`}
+            <span className="truncate">{branch ?? `base ${primary?.baseRef ?? "HEAD"}`}</span>
+            {branch ? <CopyBranch branch={branch} /> : null}
           </p>
           <TaskDependencies blockedBy={dependencies.blockedBy} blocks={dependencies.blocks} />
         </div>
@@ -980,6 +1040,14 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
           )}
         </div>
       </div>
+
+      {/*
+        Which Step of its Workflow the run is on, when it is on one (spec F03) — the header's
+        second line, because where the run is matters whichever panel is open. The strip is also
+        the terminal's tablist: picking a Step means "show me that Step's output", so it opens
+        the Run tab as well as scoping it.
+      */}
+      <WorkflowSteps scope={stepScope} />
 
       {deleted !== null ? (
         /*
@@ -1044,42 +1112,45 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
         </div>
       ) : null}
 
-      {/*
-        Which Step of its Workflow the run is on, when it is on one (spec F03) — above the tabs,
-        because where the run is matters whichever panel is open. The strip is also the
-        terminal's tablist: picking a Step means "show me that Step's output", so it opens the
-        Run tab as well as scoping it.
-      */}
-      <WorkflowSteps scope={stepScope} />
-
       {/* One panel at a time, the whole width; the decision bar below stays on every tab. */}
       <Tabs
         value={tab}
         onValueChange={(next) => pickTab(next as WorkspaceTab)}
+        // Manual, like the Step strip beside it: two strips, one rule — and arrowing across
+        // four tabs should not switch the panel four times.
+        activationMode="manual"
         className="min-h-0 flex-1 gap-0"
       >
         <TabsList variant="line" size="lg" aria-label="Task" className="w-full border-b px-4">
           <TabsTrigger value="run">Run</TabsTrigger>
+          {/*
+            Every count is what is left for *you*, on the round the gate is about: criteria not
+            verified, decisions not settled, files not viewed. One meaning under one pill, and
+            each drains to nothing as the review is done — which is what a count on a tab is for.
+            Nothing at all outside Review, where none of them is anyone's to do.
+          */}
           <TabsTrigger
             value="brief"
-            count={latest ? Math.max(0, (briefCriteria ?? 0) - draft.draft.verified.length) : 0}
+            count={
+              t.state === "review" && latest
+                ? Math.max(0, (briefCriteria ?? 0) - draft.draft.verified.length)
+                : 0
+            }
             countLabel="criteria still to verify"
           >
             Brief
           </TabsTrigger>
           <TabsTrigger
             value="plan"
-            count={
-              decisions.length + (todos.length > 0 ? todos.length : (stepCard?.steps.length ?? 0))
-            }
-            countLabel="plan items"
+            count={t.state === "review" ? decisionsPending : 0}
+            countLabel="decisions still to settle"
           >
             Plan
           </TabsTrigger>
           <TabsTrigger
             value="changes"
-            count={diffs.reduce((n, d) => n + d.files.length, 0)}
-            countLabel="files changed"
+            count={t.state === "review" ? Math.max(0, fileCount - viewedCount) : 0}
+            countLabel="files not yet viewed"
           >
             Changes
           </TabsTrigger>
@@ -1087,8 +1158,10 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
 
         {/* All four stay mounted: the Changes panel holds which file is open and how. */}
         <TabsContent value="run" keepMounted className="flex min-h-0 flex-col">
+          {/* Edge to edge: inside a tab panel the region is the frame, and the terminal's own
+              value step from the page ground is all the edge it needs. */}
           <div className="flex min-h-0 flex-1 flex-col">
-            <div className="flex min-h-0 flex-1 flex-col gap-2 p-3">
+            <div className="flex min-h-0 flex-1 flex-col">
               <TerminalView
                 rows={rows}
                 elided={elided}

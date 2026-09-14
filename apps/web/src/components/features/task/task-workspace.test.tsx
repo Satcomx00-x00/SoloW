@@ -463,7 +463,10 @@ describe("TaskWorkspace review gate", () => {
       "task.retry": () => task({ state: "running" }),
     });
 
-    expect(await screen.findByText("Interrupted by restart")).toBeDefined();
+    // Said twice on purpose — the header's chip beside the state, and the footer's badge beside
+    // Retry — so "Failed" and the reason are never read as two facts that disagree.
+    expect(await screen.findAllByText("Interrupted by restart")).toHaveLength(2);
+    expect(document.querySelector("[data-failure-chip]")).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     await waitFor(() => {
       expect(log.calls.filter((c) => c.path === "task.retry")).toHaveLength(1);
@@ -608,7 +611,10 @@ describe("TaskWorkspace in History (Decision 0025)", () => {
     expect(await screen.findByText(/the record survives/)).toBeDefined();
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
     expect(screen.queryByRole("button", { name: `Delete ${"Fix the gate latch"}` })).toBeNull();
-    expect(screen.getByLabelText(/Message the harness/).hasAttribute("disabled")).toBe(true);
+    // A deleted Task is never running, so there is no steering field — a sentence, not a form.
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Run" }), { button: 0 });
+    expect(screen.queryByLabelText(/Message the harness/)).toBeNull();
+    expect(screen.getByText(/Not running/)).toBeDefined();
 
     fireEvent.click(within(banner).getByRole("button", { name: "Restore" }));
     await waitFor(() => expect(log.calls.filter((c) => c.path === "task.restore")).toHaveLength(1));
@@ -716,10 +722,10 @@ describe("TaskWorkspace harness steering (TASK-022)", () => {
     renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, handlers("review"));
     // In Review the page opens on the review; the composer is on the Run tab.
     fireEvent.mouseDown(await screen.findByRole("tab", { name: "Run" }), { button: 0 });
-    const box = await screen.findByLabelText(/Message the harness/);
-    expect(box.hasAttribute("disabled")).toBe(true);
-    expect(screen.getByRole("button", { name: /Send/ }).hasAttribute("disabled")).toBe(true);
-    expect(screen.getByRole("button", { name: /Stop/ }).hasAttribute("disabled")).toBe(true);
+    expect(await screen.findByText(/Not running/)).toBeDefined();
+    expect(screen.queryByLabelText(/Message the harness/)).toBeNull();
+    expect(screen.queryByRole("button", { name: /Send/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Stop/ })).toBeNull();
   });
 
   it("stops the harness on a held Stop, never on a click", async () => {

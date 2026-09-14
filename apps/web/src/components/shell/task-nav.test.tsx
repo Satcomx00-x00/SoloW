@@ -2,14 +2,14 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import type { TaskDto } from "@solow/contracts";
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import { installFakeWebSocket, renderWithTrpc } from "@/test/trpc-harness";
 import { TaskNav } from "./task-nav";
 
 /**
- * The Task page's sidebar gathers the page's own controls into one column. These assert that
- * each control appears only in the state it applies to, issues the page's mutation, and that
- * the Step list reads the same colours the header strip does.
+ * The Task page's sidebar is navigation: where to go from this Task. It no longer carries a
+ * copy of the page's controls — the decision bar under every tab is the one place a verdict is
+ * given — so these assert the links, and that nothing that looks like the gate is offered here.
  */
 
 const AT = "2026-08-20T00:00:00.000Z";
@@ -104,14 +104,13 @@ describe("TaskNav", () => {
   });
   afterEach(cleanup);
 
-  it("launches a Ready Task from the sidebar, and goes where the page's back link goes", async () => {
-    const { log } = renderWithTrpc(<TaskNav taskId="task-1" />, handlers(task()));
+  it("goes where the page's back link goes, and offers no copy of the page's controls", async () => {
+    renderWithTrpc(<TaskNav taskId="task-1" />, handlers(task()));
 
-    fireEvent.click(await screen.findByRole("button", { name: "Launch" }));
-    await waitFor(() => {
-      expect(log.calls.find((c) => c.path === "task.launch")?.input).toEqual({ id: "task-1" });
-    });
-    const goTo = screen.getByRole("navigation", { name: "Go to" });
+    const goTo = await screen.findByRole("navigation", { name: "Go to" });
+    // One copy of each verb, on the page: the sidebar is not a second Launch.
+    expect(screen.queryByRole("button", { name: "Launch" })).toBeNull();
+    expect(screen.queryByRole("navigation", { name: "Task actions" })).toBeNull();
     expect(within(goTo).getByRole("link", { name: "Board" }).getAttribute("href")).toBe(
       "/projects/proj-1/board",
     );
@@ -121,23 +120,13 @@ describe("TaskNav", () => {
     expect(within(goTo).queryByRole("link", { name: "Workflow" })).toBeNull();
   });
 
-  it("offers the review verdicts only in Review, and records one against the latest session", async () => {
-    const { log } = renderWithTrpc(
-      <TaskNav taskId="task-1" />,
-      handlers(task({ state: "review" })),
-    );
+  it("offers no verdict in Review — the gate lives in the page's decision bar, once", async () => {
+    renderWithTrpc(<TaskNav taskId="task-1" />, handlers(task({ state: "review" })));
 
-    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
-    await waitFor(() => {
-      expect(log.calls.find((c) => c.path === "review.decide")?.input).toEqual({
-        sessionId: "sess-1",
-        decision: "approve",
-      });
-    });
-    expect(screen.queryByRole("button", { name: "Launch" })).toBeNull();
-    // Rejecting is destructive, so it is confirmed rather than done on one click.
-    fireEvent.click(screen.getByRole("button", { name: "Reject" }));
-    expect(await screen.findByRole("alertdialog")).toBeDefined();
+    await screen.findByRole("navigation", { name: "Go to" });
+    for (const name of ["Approve", "Request changes", "Reject", "Move to Done"]) {
+      expect(screen.queryByRole("button", { name })).toBeNull();
+    }
   });
 
   it("links to the Workflow a bound Task runs on, without repeating the header's Step strip", async () => {

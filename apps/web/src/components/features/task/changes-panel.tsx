@@ -13,6 +13,7 @@ import { useMemo, useState } from "react";
 import { scmFromCapturedDiff, splitPatchByFile } from "./captured-scm";
 import { summariseDiff } from "./change-summary";
 import { DiffEditor } from "./diff-editor";
+import { EmptyPanel } from "./empty-panel";
 import { describeTarget, groupChanges, type ReviewGroup } from "./review-groups";
 import type { LineAnchor, ReviewNotes } from "./review-notes";
 import { SourceControlPanel, type ViewedFiles } from "./source-control-panel";
@@ -281,11 +282,21 @@ export function ChangesPanel({
     [diffs, repositories, repositoryName],
   );
 
-  if (groups.length === 0) {
-    return (
-      <div className="surface-edge flex h-full min-h-40 items-center justify-center rounded-xl border bg-card text-muted-foreground-subtle text-sm">
-        No proposed changes yet.
-      </div>
+  // Empty is said once, and says which empty: a change not read yet is not "no change", and a
+  // run that changed nothing is not a panel waiting for something. Before this the summary row
+  // ("0 files +0 −0"), each repository's shell and its "nothing changed" line all said it.
+  const files = groups.reduce((n, g) => n + g.fileCount, 0);
+  if (groups.length === 0 || files === 0) {
+    return captured ? (
+      <EmptyPanel
+        label="The run changed no files."
+        hint="There is nothing to read here — the plan and the brief are what the decision is about."
+      />
+    ) : (
+      <EmptyPanel
+        label="No change captured yet."
+        hint="The harness's change is read once it reaches its review gate."
+      />
     );
   }
   // One group is the ordinary case and gets no heading: naming the repository you are already

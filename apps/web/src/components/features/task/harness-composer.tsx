@@ -134,13 +134,29 @@ export function HarnessComposer({
     onSubmit();
   };
 
+  // Not running is not "disabled": there is no field to fill and nothing to press, so a form
+  // of greyed controls was three dead targets and a placeholder nobody could read. One line,
+  // the height the form has, so the terminal above does not move when a run starts.
+  if (!isRunning) {
+    return (
+      <p
+        className="flex h-11 shrink-0 items-center gap-2 border-t px-3 text-muted-foreground text-xs"
+        data-composer-state="idle"
+      >
+        <Square aria-hidden className="size-3 shrink-0" />
+        Not running — steering opens when a run starts.
+      </p>
+    );
+  }
+
   return (
     <form
       // Wraps rather than crushes. Send and Stop have a fixed appetite, so on a narrow run column
       // a single row spent the remainder on the field and left a box two characters wide; below
       // the field's floor the actions drop to their own line instead, which is the arrangement
       // that still lets someone type.
-      className="surface-edge relative flex flex-wrap items-end justify-end gap-2 rounded-xl border bg-card/60 p-2 transition-colors focus-within:border-ring/40"
+      // A hairline row under the terminal, not a second frame: the region is the frame now.
+      className="relative flex shrink-0 flex-wrap items-end justify-end gap-2 border-t bg-card/60 p-2 transition-colors focus-within:bg-card"
       data-composer-state={canSteer ? "live" : isRunning ? "away" : "idle"}
       onSubmit={(e) => {
         e.preventDefault();

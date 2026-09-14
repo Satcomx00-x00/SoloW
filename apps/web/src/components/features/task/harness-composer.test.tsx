@@ -135,11 +135,11 @@ describe("HarnessComposer slash steers", () => {
     expect(stopped).toBe(0);
   });
 
-  it("offers no menu when there is no harness to steer", () => {
+  it("offers no field at all when there is no harness to steer — a sentence, not dead controls", () => {
     render(<Harness onSubmit={() => {}} isRunning={false} />);
-    const box = screen.getByLabelText("Message the harness");
-    expect(box.hasAttribute("disabled")).toBe(true);
-    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(screen.queryByLabelText("Message the harness")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Send|Stop/ })).toBeNull();
+    expect(screen.getByText(/Not running/)).toBeDefined();
   });
 });
 

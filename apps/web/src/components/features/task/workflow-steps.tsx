@@ -182,18 +182,27 @@ export function WorkflowSteps({ scope }: { scope: StepScope }) {
   const at = stepped.findIndex((s) => s.current);
 
   return (
+    // The header's second line, not a card of its own: where the run is belongs with what the
+    // run is, and a bordered box under a bordered header was two frames saying "separate".
+    // One row — name, position, then the Steps — at the caption step, on the header's hairline.
     <section
       aria-label="Workflow progress"
-      className="surface-edge mx-4 mt-3 rounded-lg border bg-card px-3 py-2"
+      className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 border-b px-4 py-1.5"
     >
-      <p className="mb-2 flex items-center gap-1.5 text-2xs text-muted-foreground">
+      <p className="flex min-w-0 shrink-0 items-center gap-1.5 text-muted-foreground text-xs">
         <Workflow aria-hidden className="size-3 shrink-0" />
         <span className="truncate font-medium text-foreground/80">{binding.workflowName}</span>
         <span className="shrink-0">
           · Step {at + 1} of {stepped.length}
         </span>
       </p>
-      <Steps aria-label="Workflow steps" onKeyDown={onStripKey} role="tablist">
+      <span aria-hidden className="hidden h-4 w-px shrink-0 bg-border sm:inline-block" />
+      <Steps
+        aria-label="Workflow steps"
+        onKeyDown={onStripKey}
+        role="tablist"
+        className="w-auto min-w-0 flex-1"
+      >
         {/*
           The way back to everything, first and set apart — where an "All" filter sits in every
           other strip of this shape. It belongs *in* the tablist rather than beside it because a

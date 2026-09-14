@@ -395,7 +395,50 @@ function ReviewGate({
           />
         </div>
       ) : null}
-      <div className="flex flex-wrap items-center gap-2">
+      {/*
+        Reject · Request changes · Approve, right-aligned: the primary at the end and the
+        destructive one furthest from it, which is where every dialog on the page puts them —
+        so the hand that learned "confirm is on the right" never lands on Reject here.
+      */}
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        {hasFeedback ? (
+          // Said here rather than as a confirm on Approve and Reject: the notes are the
+          // reviewer's own draft, and losing a draft is not the destructive act a dialog is for.
+          <span className="mr-auto text-2xs text-muted-foreground">
+            Notes go with Request changes only.
+          </span>
+        ) : null}
+        <ConfirmAction
+          disabled={!canDecide}
+          title="Reject these changes?"
+          description="The harness's work is discarded and the worktree is torn down. This cannot be undone. The task returns to Ready and would have to run again from scratch."
+          confirmLabel="Discard the changes"
+          onConfirm={() => onDecide("reject")}
+          trigger={
+            <Button
+              size="lg"
+              variant="ghost"
+              disabled={!canDecide}
+              className="mr-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
+            >
+              <X /> Reject
+            </Button>
+          }
+        />
+        <Button
+          size="lg"
+          variant="outline"
+          disabled={!canDecide}
+          loading={decidePending === "request_changes"}
+          onClick={() => onDecide("request_changes")}
+        >
+          <RotateCcw /> Request changes
+          {noteCount > 0 ? (
+            <span aria-hidden className="ml-1 font-mono text-2xs tabular-nums opacity-80">
+              {noteCount} {noteCount === 1 ? "note" : "notes"}
+            </span>
+          ) : null}
+        </Button>
         <Button
           size="lg"
           disabled={!canDecide}
@@ -421,44 +464,6 @@ function ReviewGate({
             </span>
           ) : null}
         </Button>
-        <Button
-          size="lg"
-          variant="outline"
-          disabled={!canDecide}
-          loading={decidePending === "request_changes"}
-          onClick={() => onDecide("request_changes")}
-        >
-          <RotateCcw /> Request changes
-          {noteCount > 0 ? (
-            <span aria-hidden className="ml-1 font-mono text-2xs tabular-nums opacity-80">
-              {noteCount} {noteCount === 1 ? "note" : "notes"}
-            </span>
-          ) : null}
-        </Button>
-        <ConfirmAction
-          disabled={!canDecide}
-          title="Reject these changes?"
-          description="The harness's work is discarded and the worktree is torn down. This cannot be undone. The task returns to Ready and would have to run again from scratch."
-          confirmLabel="Discard the changes"
-          onConfirm={() => onDecide("reject")}
-          trigger={
-            <Button
-              size="lg"
-              variant="ghost"
-              disabled={!canDecide}
-              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-            >
-              <X /> Reject
-            </Button>
-          }
-        />
-        {hasFeedback ? (
-          // Said here rather than as a confirm on Approve and Reject: the notes are the
-          // reviewer's own draft, and losing a draft is not the destructive act a dialog is for.
-          <span className="text-2xs text-muted-foreground">
-            Notes go with Request changes only.
-          </span>
-        ) : null}
       </div>
     </div>
   );
