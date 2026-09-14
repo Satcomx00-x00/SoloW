@@ -1,5 +1,7 @@
 import "server-only";
 import {
+  criterionExplanationDto,
+  explainCriterionInput,
   getReviewBriefInput,
   getSessionInput,
   getTaskSessionsInput,
@@ -15,6 +17,7 @@ import {
   sessionForkCursorInput,
 } from "@solow/contracts";
 import { z } from "zod";
+import { explainCriterion } from "../dal/explain-criterion.js";
 import { getReviewForSession, listReviewsForSession } from "../dal/review.js";
 import { getReviewBrief } from "../dal/review-brief.js";
 import {
@@ -154,6 +157,28 @@ export const sessionRouter = router({
     .input(getReviewBriefInput)
     .output(reviewBriefDto)
     .query(async ({ ctx, input }) => unwrap(await getReviewBrief(ctx.rctx, input.sessionId))),
+
+  /**
+   * One acceptance criterion, explained for someone who does not read code (Brief tab).
+   *
+   * A mutation, not a query: it asks a model and is billed, so it runs on a press and never
+   * on a render. The server keeps the answer for a day per criterion and language, so a second
+   * press — or a reload — costs nothing.
+   */
+  explainCriterion: ownerProcedure
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/session.explainCriterion",
+        tags: ["session"],
+        protect: true,
+        summary:
+          "Explain one of the Issue's acceptance criteria in plain business language, anchored in the harness's own account of the run — its claim, its summary and what it said about the criterion.",
+      },
+    })
+    .input(explainCriterionInput)
+    .output(criterionExplanationDto)
+    .mutation(async ({ ctx, input }) => unwrap(await explainCriterion(ctx.rctx, input))),
 
   /**
    * The events one summarised range stands in for (issue #2, AC-3).

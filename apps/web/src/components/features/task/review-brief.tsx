@@ -1,21 +1,26 @@
 "use client";
 
 import type { ReviewCheckDto, ReviewCriterionDto } from "@solow/contracts";
+import { CommonErrorCode, ExplainErrorCode } from "@solow/contracts";
 import {
   Check,
   CircleDashed,
   CircleHelp,
   FlaskConical,
   MapPinOff,
+  MessageCircleQuestion,
   OctagonMinus,
   ShieldCheck,
   TriangleAlert,
   X,
 } from "lucide-react";
+import { useId, useState } from "react";
+import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { relativeAge } from "@/lib/relative-time";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
+import { HarnessMarkdown } from "./markdown";
 
 /**
  * The Review tab (review analysis, point 1): the one view that answers "may I sign this".
@@ -105,6 +110,7 @@ export function ReviewBriefPanel({
             {criteria.map((criterion) => (
               <CriterionRow
                 key={criterion.id}
+                sessionId={sessionId}
                 criterion={criterion}
                 lastTest={lastTest}
                 verified={verified.includes(criterion.id)}
@@ -178,12 +184,14 @@ function ClaimIcon({ state }: { state: keyof typeof CLAIM_STYLE }) {
 }
 
 function CriterionRow({
+  sessionId,
   criterion,
   lastTest,
   verified,
   onToggle,
   canVerify,
 }: {
+  sessionId: string;
   criterion: ReviewCriterionDto;
   lastTest: ReviewCheckDto | null;
   verified: boolean;
@@ -191,6 +199,7 @@ function CriterionRow({
   canVerify: boolean;
 }) {
   const claim = criterion.claim;
+  const ex = useExplainCriterion(sessionId, criterion);
   // The evidence line: the test the claim names, and whether a test check ran at all — and if
   // it did, where. "NOT executed here" inside a note is what this row exists to make visible.
   const notExecuted = /not (executed|run)|unexecuted/i.test(claim?.note ?? "");
@@ -211,10 +220,13 @@ function CriterionRow({
         />
       </div>
       <div className="min-w-0 space-y-1">
-        <p>
-          <span className="mr-1.5 rounded bg-muted px-1 font-mono text-2xs">{criterion.id}</span>
-          <span className={cn(verified && "text-muted-foreground")}>{criterion.text}</span>
-        </p>
+        <div className="flex items-start gap-2">
+          <p className="min-w-0 flex-1">
+            <span className="mr-1.5 rounded bg-muted px-1 font-mono text-2xs">{criterion.id}</span>
+            <span className={cn(verified && "text-muted-foreground")}>{criterion.text}</span>
+          </p>
+          <ExplainButton ex={ex} criterion={criterion} />
+        </div>
         <p className="flex items-start gap-1.5 text-2xs">
           {claim ? (
             <>
@@ -265,6 +277,7 @@ function CriterionRow({
             )}
           </p>
         ) : null}
+        <ExplanationBlock ex={ex} criterion={criterion} />
       </div>
     </li>
   );
@@ -317,5 +330,102 @@ function CheckRow({ check }: { check: ReviewCheckDto }) {
         </span>
       ) : null}
     </li>
+  );
+}
+
+/** What the ask can say when it fails, in words — the code is never shown. */
+const EXPLAIN_MESSAGE: Record<string, string> = {
+  [ExplainErrorCode.NoCredential]:
+    "No API key to ask with. Attach an api_key Secret to this task's harness profile, or set ANTHROPIC_API_KEY on the server.",
+  [ExplainErrorCode.BadCredential]: "The API refused the harness profile's key.",
+  [ExplainErrorCode.Refused]: "The model declined to explain this one.",
+  [ExplainErrorCode.Upstream]: "The model could not be reached. Try again in a moment.",
+  [CommonErrorCode.RateLimited]: "Rate limited — try again in a moment.",
+};
+
+/**
+ * "Explain" on a criterion: a plain-language reading of it, for someone who does not read
+ * code, anchored in the harness's own account of the run (see dal/explain-criterion.ts).
+ *
+ * Asked on the press, never on render — it is billed — and asked once: the answer is held here
+ * for the life of the panel and on the server for a day, so the button then only folds the
+ * text away and back. Written in the reader's language (`navigator.language`); the criterion's
+ * identifiers stay as they are. The button sits on the criterion's line; the text lands under
+ * it, where the eye goes next — so the state lives in this hook and the row draws both.
+ */
+function useExplainCriterion(sessionId: string, criterion: ReviewCriterionDto) {
+  const [open, setOpen] = useState(false);
+  const panelId = useId();
+  const explain = trpc.session.explainCriterion.useMutation();
+  const language = typeof navigator === "undefined" ? "en" : navigator.language;
+  const ask = () => {
+    setOpen(true);
+    if (explain.data || explain.isPending) return;
+    explain.mutate({ sessionId, criterionId: criterion.id, language });
+  };
+  const shown = open && Boolean(explain.data);
+  const message = explain.error
+    ? (EXPLAIN_MESSAGE[explain.error.message] ?? EXPLAIN_MESSAGE[ExplainErrorCode.Upstream])
+    : null;
+  return {
+    panelId,
+    shown,
+    pending: explain.isPending,
+    data: explain.data ?? null,
+    message,
+    toggle: shown ? () => setOpen(false) : ask,
+    retry: () => explain.mutate({ sessionId, criterionId: criterion.id, language }),
+  };
+}
+
+type Explanation = ReturnType<typeof useExplainCriterion>;
+
+function ExplainButton({ ex, criterion }: { ex: Explanation; criterion: ReviewCriterionDto }) {
+  return (
+    <Button
+      size="xs"
+      variant="ghost"
+      className="-my-0.5 shrink-0 text-muted-foreground hover:text-foreground"
+      aria-label={ex.shown ? `Hide the explanation of ${criterion.id}` : `Explain ${criterion.id}`}
+      aria-expanded={ex.shown}
+      aria-controls={ex.data ? ex.panelId : undefined}
+      loading={ex.pending}
+      onClick={ex.toggle}
+    >
+      <MessageCircleQuestion aria-hidden />
+      {ex.shown ? "Hide" : "Explain"}
+    </Button>
+  );
+}
+
+/** Said under the text: which model wrote it, and that it is a reading of the record, not part of it. */
+function ExplanationBlock({ ex, criterion }: { ex: Explanation; criterion: ReviewCriterionDto }) {
+  if (ex.message) {
+    return (
+      <p className="flex items-center gap-2 text-2xs text-feedback-error" role="alert">
+        <span className="min-w-0 flex-1">{ex.message}</span>
+        <button
+          type="button"
+          className="shrink-0 underline underline-offset-2 hover:text-foreground"
+          onClick={ex.retry}
+        >
+          Try again
+        </button>
+      </p>
+    );
+  }
+  if (!ex.shown || !ex.data) return null;
+  return (
+    <div
+      id={ex.panelId}
+      className="space-y-2 rounded-md bg-muted/40 px-3 py-2 text-xs leading-relaxed transition-opacity duration-150 starting:opacity-0"
+      data-criterion-explanation={criterion.id}
+    >
+      <HarnessMarkdown text={ex.data.text} />
+      <p className="text-2xs text-muted-foreground-subtle">
+        A reading of the harness's own account by {ex.data.model}
+        {ex.data.cached ? ", kept from an earlier ask" : ""} — not part of the record.
+      </p>
+    </div>
   );
 }

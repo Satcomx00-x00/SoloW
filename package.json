@@ -43,10 +43,10 @@
     "flag": "bun run scripts/flag.ts"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.12",
-    "@playwright/test": "^1.62.1",
+    "@biomejs/biome": "^2.5.13",
+    "@playwright/test": "^1.63.0",
     "inngest-cli": "^1.44.0",
-    "turbo": "^2",
+    "turbo": "^2.10.12",
     "typescript": "^7.0.2"
   },
   "trustedDependencies": [

@@ -196,3 +196,16 @@ export const HarnessCatalogErrorCode = {
 } as const;
 export type HarnessCatalogErrorCode =
   (typeof HarnessCatalogErrorCode)[keyof typeof HarnessCatalogErrorCode];
+
+/** Explaining a criterion (Brief tab) asks a model; these are the ways that ask can fail. */
+export const ExplainErrorCode = {
+  /** Neither the harness profile's Secret (an `api_key`) nor `ANTHROPIC_API_KEY` is available. */
+  NoCredential: "EXPLAIN_NO_CREDENTIAL",
+  /** The credential was refused by the API. */
+  BadCredential: "EXPLAIN_BAD_CREDENTIAL",
+  /** The model declined to answer. */
+  Refused: "EXPLAIN_REFUSED",
+  /** The API could not be reached or answered with an error. */
+  Upstream: "EXPLAIN_UPSTREAM",
+} as const;
+export type ExplainErrorCode = (typeof ExplainErrorCode)[keyof typeof ExplainErrorCode];

@@ -606,3 +606,27 @@ export type ReviewCriterionDto = z.infer<typeof reviewCriterionDto>;
 
 export const getReviewBriefInput = z.object({ sessionId: idSchema });
 export type GetReviewBriefInput = z.infer<typeof getReviewBriefInput>;
+
+/**
+ * "Explain this criterion to me" (Brief tab). The reader is someone who does not read code —
+ * a product owner at the gate — and the explanation is anchored in the harness's own account
+ * of the run so it never drifts from what was actually done. `language` is the reader's
+ * (`navigator.language`); the criterion's identifiers stay verbatim whatever it is.
+ */
+export const explainCriterionInput = z.object({
+  sessionId: idSchema,
+  criterionId: z.string().min(1).max(40),
+  language: z.string().min(2).max(35).default("en"),
+});
+export type ExplainCriterionInput = z.infer<typeof explainCriterionInput>;
+
+export const criterionExplanationDto = z.object({
+  criterionId: z.string(),
+  /** Markdown, a few short paragraphs. */
+  text: z.string(),
+  /** Which model wrote it — said under the text, because this is not part of the record. */
+  model: z.string(),
+  /** True when the same explanation was served from the server's cache rather than asked again. */
+  cached: z.boolean(),
+});
+export type CriterionExplanationDto = z.infer<typeof criterionExplanationDto>;
