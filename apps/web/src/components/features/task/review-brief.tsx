@@ -336,10 +336,8 @@ function CheckRow({ check }: { check: ReviewCheckDto }) {
 /** What the ask can say when it fails, in words — the code is never shown. */
 const EXPLAIN_MESSAGE: Record<string, string> = {
   [ExplainErrorCode.NoCredential]:
-    "No API key to ask with. Attach an api_key Secret to this task's harness profile, or set ANTHROPIC_API_KEY on the server.",
-  [ExplainErrorCode.BadCredential]: "The API refused the harness profile's key.",
-  [ExplainErrorCode.Refused]: "The model declined to explain this one.",
-  [ExplainErrorCode.Upstream]: "The model could not be reached. Try again in a moment.",
+    "This task's harness profile has no usable credential — check the Secret it points at.",
+  [ExplainErrorCode.Upstream]: "The task's harness could not answer. Try again in a moment.",
   [CommonErrorCode.RateLimited]: "Rate limited — try again in a moment.",
 };
 
@@ -423,7 +421,8 @@ function ExplanationBlock({ ex, criterion }: { ex: Explanation; criterion: Revie
     >
       <HarnessMarkdown text={ex.data.text} />
       <p className="text-2xs text-muted-foreground-subtle">
-        A reading of the harness's own account by {ex.data.model}
+        A reading of its own account by the task's harness
+        {ex.data.model ? ` (${ex.data.model})` : ""}
         {ex.data.cached ? ", kept from an earlier ask" : ""} — not part of the record.
       </p>
     </div>

@@ -25498,7 +25498,8 @@
                       "type": "string"
                     },
                     "model": {
-                      "type": "string"
+                      "type": "string",
+                      "nullable": true
                     },
                     "cached": {
                       "type": "boolean"

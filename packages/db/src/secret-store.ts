@@ -6,12 +6,10 @@ import { dbEnv } from "./env.js";
  *
  * AES-256-GCM. The key comes from the validated env module only. Ciphertext is stored
  * as `iv.tag.data` (base64 parts). The plaintext is NEVER returned to a DTO, log, span,
- * or WebSocket event — only three named entry points yield plaintext, each solely for its own
+ * or WebSocket event — only two named entry points yield plaintext, each solely for its own
  * caller: `decryptForHarnessRun` (orchestrator-only, to inject a single credential into a harness
- * process's environment), `decryptForScmSync` (web layer, to call a GitHub/GitLab API
- * directly from the server process — issue #15) and `decryptForCriterionExplanation` (web
- * layer, to ask a model to explain an acceptance criterion with the credential the harness
- * ran under). None of their results is ever mapped into a DTO.
+ * process's environment) and `decryptForScmSync` (web layer, to call a GitHub/GitLab API
+ * directly from the server process — issue #15). Neither's result is ever mapped into a DTO.
  */
 
 const ALGO = "aes-256-gcm";
@@ -60,15 +58,5 @@ export function decryptForHarnessRun(ciphertext: string): string {
  * DTO, never logged.
  */
 export function decryptForScmSync(ciphertext: string): string {
-  return decrypt(ciphertext);
-}
-
-/**
- * Web layer only, for the Brief tab's "Explain" (dal/explain-criterion.ts). Decrypts the
- * `api_key` Secret of the Harness Profile a Task ran under, so the explanation is billed to the
- * same credential as the run it explains. The result is handed to the SDK client and discarded
- * — never returned from a DAL function, never mapped into a DTO, never logged.
- */
-export function decryptForCriterionExplanation(ciphertext: string): string {
   return decrypt(ciphertext);
 }

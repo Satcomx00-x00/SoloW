@@ -1,6 +1,8 @@
 import "server-only";
 import {
+  type HarnessExplainReport,
   type HarnessProbeReport,
+  harnessExplainReport,
   harnessProbeReport,
   REPOSITORY_SYNC_REQUESTED,
   type ReviewDecision,
@@ -90,6 +92,13 @@ export interface OrchestratorClient {
     workspaceId: string;
     agentProfileId: string;
   }): Promise<HarnessProbeReport>;
+  /** Ask the Task's own harness for one answer — the Brief tab's Explain (see dal/explain-criterion.ts). */
+  explainWithHarness(input: {
+    workspaceId: string;
+    taskId: string;
+    system: string;
+    prompt: string;
+  }): Promise<HarnessExplainReport>;
 }
 
 const UNWIRED = "orchestrator not configured (SOLOW_ORCHESTRATOR_URL unset)";
@@ -173,6 +182,30 @@ export const orchestrator: OrchestratorClient = {
     }
   },
 
+  async explainWithHarness(input) {
+    const base = orchestratorUrl();
+    if (!base) throw new Error(`${UNWIRED}: harness explanation unavailable`);
+    // Scoped to the Task: the orchestrator refuses a body naming another one.
+    const ticket = signStreamTicket(
+      { workspaceId: input.workspaceId, taskId: input.taskId },
+      webEnv().SOLOW_STREAM_SECRET,
+      Date.now(),
+    );
+    const res = await fetch(new URL("/explain", base), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        ticket,
+        taskId: input.taskId,
+        system: input.system,
+        prompt: input.prompt,
+      }),
+    });
+    if (!res.ok) {
+      throw new Error(`orchestrator rejected explain: ${res.status} ${await res.text()}`);
+    }
+    return harnessExplainReport.parse(await res.json());
+  },
   async probeHarnessProfile(input) {
     const base = orchestratorUrl();
     if (!base) throw new Error(`${UNWIRED}: harness probe unavailable`);

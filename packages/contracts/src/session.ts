@@ -624,8 +624,8 @@ export const criterionExplanationDto = z.object({
   criterionId: z.string(),
   /** Markdown, a few short paragraphs. */
   text: z.string(),
-  /** Which model wrote it — said under the text, because this is not part of the record. */
-  model: z.string(),
+  /** Which model the harness reported using, when it said — under the text, because this is not part of the record. */
+  model: z.string().nullable(),
   /** True when the same explanation was served from the server's cache rather than asked again. */
   cached: z.boolean(),
 });

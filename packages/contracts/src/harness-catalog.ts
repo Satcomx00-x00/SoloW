@@ -242,3 +242,33 @@ export const harnessProbeReport = z.object({
   capabilities: z.object({ models: z.array(z.string()), modes: z.array(z.string()) }),
 });
 export type HarnessProbeReport = z.infer<typeof harnessProbeReport>;
+
+/**
+ * `POST /explain` on the orchestrator — "ask this Task's own harness to explain something".
+ *
+ * The web layer never holds a harness credential; the orchestrator does, for exactly one
+ * purpose (`decryptForHarnessRun`). So an explanation that must come from the Task's harness —
+ * the one the operator pays for, under the subscription or key its Profile points at — is a
+ * request to the orchestrator, signed with the same stream ticket the probe uses, scoped to the
+ * Task. `system` is the instruction, `prompt` the material; one turn, no tools, no worktree.
+ */
+export const harnessExplainRequest = z.object({
+  ticket: z.string().min(1),
+  taskId: z.string().min(1),
+  system: z.string().min(1).max(8_000),
+  prompt: z.string().min(1).max(60_000),
+});
+export type HarnessExplainRequest = z.infer<typeof harnessExplainRequest>;
+
+export const harnessExplainReport = z.object({
+  ok: z.boolean(),
+  /** The harness's answer, Markdown. Null when it failed. */
+  text: z.string().nullable(),
+  /** The model the harness reported using, when it said. */
+  model: z.string().nullable(),
+  /** Why it failed, in terms an Owner can act on. Null when it worked. */
+  reason: z.string().nullable(),
+  /** What failed: the Profile's credential, or the harness itself. Null when it worked. */
+  failure: z.enum(["credential", "harness"]).nullable(),
+});
+export type HarnessExplainReport = z.infer<typeof harnessExplainReport>;

@@ -2,15 +2,25 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { announceRequest, harnessProbeRequest, taskInputSchema } from "@solow/contracts";
+import {
+  announceRequest,
+  harnessExplainRequest,
+  harnessProbeRequest,
+  taskInputSchema,
+} from "@solow/contracts";
 import { type StreamTicketClaims, streamChannel, verifyStreamTicket } from "@solow/core/stream";
 import { createDb, type Db } from "@solow/db";
 import { prepareHarnessEnv } from "./billing/guard.js";
-import { loadHarnessProbeContext, updateHarnessCatalogCapabilities } from "./data.js";
+import {
+  loadHarnessProbeContext,
+  loadTaskRunContext,
+  updateHarnessCatalogCapabilities,
+} from "./data.js";
 import { orchestratorEnv } from "./env.js";
 import { createLocalExecutor } from "./executor/local.js";
 import { reapOrphanedContainers } from "./executor/reap.js";
 import type { Executor } from "./executor/types.js";
+import { explainWithHarness } from "./harness/explain.js";
 import { probeHarness } from "./harness/probe.js";
 import {
   type HarnessRegistry,
@@ -154,6 +164,73 @@ export async function handleAnnouncePost(
  * `taskId`) is exactly right and is what the API mints: a probe belongs to Settings, before any
  * Task exists to scope it to.
  */
+/**
+ * `POST /explain` — "ask this Task's own harness to explain something" (the Brief tab's
+ * Explain). In idiom with `handleProbePost` below: the same ticket, the same env shaping from
+ * the Profile's Secret, the same throwaway working directory — and the Task's harness, model
+ * and executor environment, because the answer has to come from the harness the operator is
+ * already paying for, under the credential its Profile points at. One print turn, no tools, no
+ * worktree; the text comes back and nothing is recorded.
+ */
+export async function handleExplainPost(
+  req: Request,
+  deps: Pick<WsServerDeps, "db" | "now" | "streamSecret">,
+): Promise<Response> {
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return new Response("invalid_json", { status: 400 });
+  }
+  const parsed = harnessExplainRequest.safeParse(body);
+  if (!parsed.success) return new Response("invalid_request", { status: 400 });
+  const verified = verifyStreamTicket(parsed.data.ticket, deps.streamSecret, deps.now());
+  if (!verified.ok) return new Response(verified.error, { status: 401 });
+  const { workspaceId, taskId } = verified.claims;
+  // The ticket names the Task it was signed for; a body naming another is not this ticket's.
+  if (taskId !== parsed.data.taskId) return new Response("ticket_task_mismatch", { status: 403 });
+  let ctx: Awaited<ReturnType<typeof loadTaskRunContext>>;
+  try {
+    ctx = await loadTaskRunContext(deps.db, workspaceId, taskId);
+  } catch {
+    return new Response("task_not_found", { status: 404 });
+  }
+  const shaped = prepareHarnessEnv({
+    authMode: ctx.harnessProfile.authMode,
+    secretCiphertext: ctx.secretCiphertext,
+    baseEnv: process.env,
+    subscriptionEnvVar: ctx.harnessCatalog.subscriptionEnvVar,
+    meteredEnvVar: ctx.harnessCatalog.meteredEnvVar,
+    profileEnv: ctx.executorProfile.config.env ?? {},
+  });
+  if (!shaped.ok) {
+    return Response.json({
+      ok: false,
+      text: null,
+      model: null,
+      reason:
+        "this task's harness profile has no usable credential — check the Secret it points at",
+      failure: "credential",
+    });
+  }
+  const cwd = await mkdtemp(join(tmpdir(), "solow-explain-"));
+  try {
+    const report = await explainWithHarness(createLocalExecutor(cwd), {
+      command: ctx.harnessCatalog.command,
+      args: ctx.harnessCatalog.argsTemplate ?? [],
+      env: shaped.data,
+      cwd,
+      protocol: ctx.harnessCatalog.protocol,
+      ...(ctx.harnessProfile.model ? { model: ctx.harnessProfile.model } : {}),
+      system: parsed.data.system,
+      prompt: parsed.data.prompt,
+    });
+    return Response.json(report);
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+}
+
 export async function handleProbePost(
   req: Request,
   deps: Pick<WsServerDeps, "db" | "now" | "streamSecret">,
@@ -546,6 +623,7 @@ export function startWebSocketServer(
       if (pathname === "/api/inngest") return inngestServeHandler(req);
       if (pathname === "/announce" && req.method === "POST") return handleAnnouncePost(req, deps);
       if (pathname === "/probe-agent" && req.method === "POST") return handleProbePost(req, deps);
+      if (pathname === "/explain" && req.method === "POST") return handleExplainPost(req, deps);
 
       const auth = authorizeUpgrade(req.url, deps);
       if (!auth.ok) return new Response(auth.error, { status: auth.status });

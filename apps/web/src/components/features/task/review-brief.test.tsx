@@ -73,7 +73,9 @@ describe("Explain a criterion", () => {
     // The reader's language travels with the ask; the criterion's identifier is the key.
     expect(sent).toMatchObject({ sessionId: "sess-1", criterionId: "AC-1" });
     // Said under the text: who wrote it, and that it is not part of the record.
-    expect(screen.getByText(/by claude-opus-5/).textContent).toContain("not part of the record");
+    expect(screen.getByText(/by the task's harness/).textContent).toContain(
+      "not part of the record",
+    );
 
     // Fold away, bring back: one ask in all.
     fireEvent.click(screen.getByRole("button", { name: "Hide the explanation of AC-1" }));
@@ -100,7 +102,7 @@ describe("Explain a criterion", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Explain AC-1" }));
     const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toContain("No API key");
+    expect(alert.textContent).toContain("no usable credential");
     expect(alert.textContent).not.toContain(ExplainErrorCode.NoCredential);
 
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
