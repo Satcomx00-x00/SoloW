@@ -180,9 +180,11 @@ test.describe("@critical isolation", () => {
     await page.goto(`/task/${OTHER_WORKSPACE_TASK}`);
 
     // The refusal is NOT_FOUND rather than FORBIDDEN by design: telling the caller the Task
-    // exists would itself leak across the tenant boundary. (Filtered because Next.js keeps its
-    // own empty `role="alert"` route announcer in the page.)
-    await expect(page.getByRole("alert").filter({ hasText: "NOT_FOUND" })).toBeVisible();
+    // exists would itself leak across the tenant boundary — and it is said as the sentence the
+    // app has for a Task that is not there, never as the wire code. (Filtered because Next.js
+    // keeps its own empty `role="alert"` route announcer in the page.)
+    await expect(page.getByRole("alert").filter({ hasText: /no longer exists/ })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Back to the board" })).toBeVisible();
     await expect(page.getByText(OTHER_WORKSPACE_TASK_TITLE)).toHaveCount(0);
   });
 

@@ -2,7 +2,8 @@
 import { readdirSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { Writable } from "node:stream";
-import { taskPurgeRequestedData } from "@solow/contracts";
+import { harnessExplainRequest, taskPurgeRequestedData } from "@solow/contracts";
+import { verifyStreamTicket } from "@solow/core/stream";
 import { createDb } from "@solow/db";
 import { createLogger } from "@solow/observability";
 import { $ } from "bun";
@@ -297,8 +298,39 @@ Bun.serve({
       handleEvent(body.name, body.data);
       return new Response(null, { status: 202 });
     }
+    if (pathname === "/explain" && req.method === "POST") return handleExplain(req);
     return new Response("not found", { status: 404 });
   },
 });
 
 console.log(`[e2e-orchestrator] events :${PORTS.orchestrator} · ws :${PORTS.ws}`);
+
+/**
+ * `POST /explain` — the Brief tab's Explain, answered by the fixture harness (the real
+ * orchestrator drives one print turn of the Task's harness; see `harness/explain.ts` there).
+ * The contract is the real one — the same ticket, verified the same way, scoped to the Task —
+ * and the answer is scripted from the prompt, so a spec can assert the text landed where the
+ * criterion is without a model in the loop.
+ */
+async function handleExplain(req: Request): Promise<Response> {
+  const parsed = harnessExplainRequest.safeParse(await req.json().catch(() => null));
+  if (!parsed.success) return new Response("invalid_request", { status: 400 });
+  const verified = verifyStreamTicket(
+    parsed.data.ticket,
+    process.env.SOLOW_STREAM_SECRET ?? "",
+    Date.now(),
+  );
+  if (!verified.ok) return new Response(verified.error, { status: 401 });
+  if (verified.claims.taskId !== parsed.data.taskId) {
+    return new Response("ticket_task_mismatch", { status: 403 });
+  }
+  const criterion = /# Criterion (\S+)/.exec(parsed.data.prompt)?.[1] ?? "the criterion";
+  const language = /Reader's language: (\S+)/.exec(parsed.data.prompt)?.[1] ?? "en";
+  return Response.json({
+    ok: true,
+    text: `**What it means** — the fixture harness explains ${criterion} in plain words, in ${language}.`,
+    model: "fixture-harness",
+    reason: null,
+    failure: null,
+  });
+}

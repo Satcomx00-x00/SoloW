@@ -226,7 +226,9 @@ function TabsTrigger({
           >
             {count}
           </span>
-          <span id={countId} className="sr-only">
+          {/* Hidden from the name's computation — a tab is "Changes", not "Changes 3 files" —
+              and still what `aria-describedby` reads: a description may reference hidden text. */}
+          <span id={countId} className="sr-only" aria-hidden>
             {count} {countLabel}
           </span>
         </>

@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { expect, type Page, test } from "@playwright/test";
-import { PATHS } from "../support/fixture.js";
+import { HARNESS_PROFILE_NAME, PATHS } from "../support/fixture.js";
 import {
   awaitWorkflowGate,
   connectRepository,
@@ -130,7 +130,18 @@ test.describe("control check — the main line of the product, end to end", () =
       const issue = await trpc<{ id: string; title: string }>(
         page,
         "issue.create",
-        { title: issueTitle, description: "Created by the control check.", repositoryId: repo?.id },
+        {
+          title: issueTitle,
+          // Two criteria, so the Brief tab has something to line the harness's claims up with
+          // and Explain has something to explain.
+          description: [
+            "Created by the control check.",
+            "",
+            "- [ ] **AC-1** The harness leaves a marker file in its worktree.",
+            "- [ ] **AC-2** Nothing outside the worktree is touched.",
+          ].join("\n"),
+          repositoryId: repo?.id,
+        },
         "mutation",
       );
       issueId = issue.id;
@@ -260,6 +271,37 @@ test.describe("control check — the main line of the product, end to end", () =
       );
     });
 
+    await test.step("the page is tabs; the pick is in the URL and survives a reload", async () => {
+      await openWorkspaceTab(page, "Changes");
+      await expect(page).toHaveURL(/[?&]tab=changes/);
+      await page.reload();
+      await expect(
+        page.getByRole("tablist", { name: "Task" }).getByRole("tab", { name: "Changes" }),
+      ).toHaveAttribute("aria-selected", "true");
+    });
+
+    await test.step("the rail says what is true about the task, with the decision at its foot", async () => {
+      const rail = page.getByRole("complementary", { name: "About this task" });
+      for (const name of ["Status", "Repository", "Dependencies", "Run"]) {
+        await expect(rail.getByRole("region", { name })).toBeVisible();
+      }
+      // The run's harness, named — out of a popover and onto the page.
+      await expect(rail.getByRole("region", { name: "Run" })).toContainText(HARNESS_PROFILE_NAME);
+      await expect(rail.getByRole("button", { name: "Approve" })).toBeVisible();
+    });
+
+    await test.step("Explain on a criterion answers from the task's harness", async () => {
+      await openWorkspaceTab(page, "Brief");
+      const brief = page.getByRole("region", { name: "Acceptance criteria" });
+      await expect(brief.getByText("AC-1", { exact: true })).toBeVisible();
+      await brief.getByRole("button", { name: "Explain AC-1" }).click();
+      const explanation = page.locator('[data-criterion-explanation="AC-1"]');
+      await expect(explanation).toContainText("explains AC-1");
+      await expect(explanation).toContainText("not part of the record");
+      await brief.getByRole("button", { name: "Hide the explanation of AC-1" }).click();
+      await expect(explanation).toHaveCount(0);
+    });
+
     await test.step("review the change and approve it onto a branch", async () => {
       await openWorkspaceTab(page, "Changes");
       const changed = page.getByRole("list", { name: "Changes" });
@@ -285,7 +327,18 @@ test.describe("control check — the main line of the product, end to end", () =
       // The Task first: an Issue with Tasks refuses to go, and a Workflow a Task follows too.
       await page.goto(`/task/${taskId}`);
       // No dialog: a finished Task with nothing waiting on it goes to History on the press,
-      // with Undo on a toast — the dialog is only for a running harness or a dependant.
+      // with Undo on a toast — the dialog is only for a running harness or a dependant. Undo
+      // once, to prove the toast means it; then delete for real. The board the delete lands on
+      // is visited first, so its first compile under `next dev` does not eat the toast's ten
+      // seconds.
+      await page.goto(`/projects/${projectId}/board`);
+      await page.goto(`/task/${taskId}`);
+      await expect(page.getByRole("heading", { name: taskTitle })).toBeVisible();
+      await page.getByRole("button", { name: `Delete ${taskTitle}` }).click();
+      const toast = page.getByRole("status").filter({ hasText: `Deleted "${taskTitle}"` });
+      await toast.getByRole("button", { name: "Undo" }).click();
+      await page.goto(`/task/${taskId}`);
+      await expect(page.locator("[data-task-deleted]")).toHaveCount(0);
       await page.getByRole("button", { name: `Delete ${taskTitle}` }).click();
       // Leaving lands on the board, which the e2e `next dev` may be cold-compiling at this
       // moment (10–20 s on this host); the default 30 s expect has timed out on that alone.

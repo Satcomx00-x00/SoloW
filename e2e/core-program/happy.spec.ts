@@ -111,7 +111,11 @@ test.describe("core program happy path", () => {
     // badge's own attribute — the lifecycle labels also appear as plain words elsewhere.
     await expect(page.locator('[data-task-state="done"]').first()).toBeVisible();
     const branch = `solow-task-${taskId}`;
-    await expect(page.getByText(branch).first()).toBeVisible();
+    // The branch is named in the rail's Repository block (the terminal names it too, on the
+    // Run tab, which is not the tab a finished Task opens on).
+    await expect(
+      page.getByRole("complementary", { name: "About this task" }).getByText(branch),
+    ).toBeVisible();
 
     // …and the branch really exists in the repository, with the harness's file on it. Polled:
     // the API answers as soon as the state is written, a moment before the step returns.
@@ -150,10 +154,17 @@ test.describe("core program happy path", () => {
       .getByRole("button", { name: "Discard the changes" })
       .click();
 
-    // The Task returns to Ready and the worktree is torn down — nothing was committed.
+    // The Task returns to Ready and the harness's changes are discarded — nothing was committed.
+    // The worktree itself stays where it is: since worktrees live for the retention window
+    // (a reopened Task resumes its conversation there), it is the sweep that takes it back,
+    // not the rejection. What the rejection guarantees is that the change is gone from it.
     await expect(page.locator('[data-task-state="ready"]').first()).toBeVisible();
     const branch = `solow-task-${taskId}`;
-    await expect.poll(() => existsSync(join(PATHS.worktrees, `solow-task-${taskId}`))).toBe(false);
+    const worktree = join(PATHS.worktrees, `solow-task-${taskId}`);
+    await expect
+      .poll(() => existsSync(join(worktree, `marker-solow-task-${taskId}.txt`)))
+      .toBe(false);
+    expect(existsSync(worktree)).toBe(true);
     expect(git(["log", "--oneline", branch, "--"])).not.toContain("SoloW");
   });
 });

@@ -25,6 +25,16 @@ export function seedIssue(workspaceId: string, title: string, repoName?: string)
   return runSeedCli(["issue", workspaceId, repoName ?? "-", title]);
 }
 
+/** An Issue with acceptance criteria in its description — what the Brief tab reads. */
+export function seedIssueWithBrief(
+  workspaceId: string,
+  title: string,
+  repoName: string,
+  criteria: readonly string[],
+): { id: string } {
+  return runSeedCli(["issue-brief", workspaceId, repoName, JSON.stringify(criteria), title]);
+}
+
 /** Insert a complete, self-contained Task graph into an existing Workspace. */
 export function seedTask(workspaceId: string, title: string): { id: string } {
   return runSeedCli(["task", workspaceId, title]);

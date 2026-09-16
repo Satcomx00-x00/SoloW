@@ -40,7 +40,22 @@ import {
 } from "@solow/db";
 import { EXECUTOR_PROFILE_NAME, HARNESS_PROFILE_NAME } from "./fixture.js";
 
-async function seedIssue(workspaceId: string, repoName: string, title: string): Promise<void> {
+/** The Brief tab lines the Issue's `- [ ] **AC-n**` lines up with the harness's claims. */
+function criteriaDescription(criteria: readonly string[]): string {
+  return [
+    "Seeded by the E2E suite.",
+    "",
+    "## Acceptance criteria",
+    ...criteria.map((text, i) => `- [ ] **AC-${i + 1}** ${text}`),
+  ].join("\n");
+}
+
+async function seedIssue(
+  workspaceId: string,
+  repoName: string,
+  title: string,
+  criteria: readonly string[] = [],
+): Promise<void> {
   const db = createDb();
   /*
    * The Issue is attached to a Repository, because the product's own Issues always are:
@@ -63,7 +78,15 @@ async function seedIssue(workspaceId: string, repoName: string, title: string): 
     if (!repo) throw new Error(`seed-cli: no repository named "${repoName}" in ${workspaceId}`);
     repositoryId = repo.id;
   }
-  const [row] = await db.insert(issue).values({ workspaceId, title, repositoryId }).returning();
+  const [row] = await db
+    .insert(issue)
+    .values({
+      workspaceId,
+      title,
+      repositoryId,
+      ...(criteria.length > 0 ? { description: criteriaDescription(criteria) } : {}),
+    })
+    .returning();
   if (!row) throw new Error("failed to seed issue");
   console.log(JSON.stringify({ id: row.id, title: row.title }));
 }
@@ -235,6 +258,15 @@ if (kind === "tenants") {
 } else if (kind === "issue") {
   const [repoName, ...titleParts] = rest;
   await seedIssue(workspaceId, repoName ?? "-", titleParts.join(" "));
+} else if (kind === "issue-brief") {
+  // `issue-brief <ws> <repo> <criteria as JSON> <title…>`
+  const [repoName, criteriaJson, ...titleParts] = rest;
+  await seedIssue(
+    workspaceId,
+    repoName ?? "-",
+    titleParts.join(" "),
+    JSON.parse(criteriaJson ?? "[]") as string[],
+  );
 } else if (kind === "task") {
   await seedTask(workspaceId, rest.join(" "));
 } else {
