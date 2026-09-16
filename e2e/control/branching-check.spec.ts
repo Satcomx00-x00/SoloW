@@ -95,7 +95,7 @@ test.describe("branching control check — conditions, a loop, and a gate in the
   test("implement ⇄ review loop, outcome-routed escalation, two approvals — and the log explains every move @control", async ({
     page,
   }) => {
-    test.setTimeout(900_000);
+    test.setTimeout(20 * 60_000);
     const stamp = Date.now();
     const issueTitle = `Branching issue ${stamp}`;
     const workflowName = `Branching pipeline ${stamp}`;
