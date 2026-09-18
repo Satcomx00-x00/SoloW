@@ -1,10 +1,10 @@
 {
-  "generatedAt": "2026-09-17T04:31:48.218Z",
+  "generatedAt": "2026-09-18T04:30:39.912Z",
   "sources": {
     "openspec": {
       "repository": "https://github.com/Fission-AI/OpenSpec",
       "ref": "main",
-      "commit": "634c557bd0470eec37861b46172c3f503d283c1b",
+      "commit": "bae58cf61479986431bb798acbe5a688a591c18c",
       "license": "MIT"
     },
     "solow": {
@@ -16,7 +16,7 @@
     "speckit": {
       "repository": "https://github.com/github/spec-kit",
       "ref": "main",
-      "commit": "d743a695e46d6decfeb48fb2a641913ff5ab9ac5",
+      "commit": "5e952140659287106580d32f242ba71365a3862b",
       "license": "MIT"
     },
     "superpowers": {
