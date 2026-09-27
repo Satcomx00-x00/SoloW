@@ -11,6 +11,7 @@ import {
   workflowStoreEntry,
   workflowStoreSkills,
 } from "./index.js";
+import type { WorkflowStoreEntry } from "./types.js";
 
 describe("the Workflow store", () => {
   it("has the everyday pipelines and the three methods, each in a real category", () => {
@@ -120,5 +121,84 @@ describe("the Workflow store", () => {
     expect(() => workflowStoreSkills({ ...entry, skills: ["not-vendored"] })).toThrow(
       /not vendored/,
     );
+  });
+
+  it("binds every Skill it bundles to a Step, and every Skill a prompt tells the harness to use", () => {
+    // A bundled Skill no Step binds is a library row the install writes and no harness ever
+    // loads; a prompt that says "using the X skill" on a Step that does not bind X asks for a
+    // judgement the run cannot read.
+    const vendored = Object.keys(VENDORED_STORE.skills);
+    for (const entry of WORKFLOW_STORE) {
+      const bound = new Set(entry.steps.flatMap((s) => s.skills ?? []));
+      for (const name of entry.skills) {
+        if (!bound.has(name)) throw new Error(`${entry.id}: bundles ${name}, which no Step binds`);
+      }
+      for (const step of entry.steps) {
+        for (const name of vendored) {
+          if (step.prompt.includes(name) && !(step.skills ?? []).includes(name)) {
+            throw new Error(
+              `${entry.id}/${step.name}: the prompt names ${name}, the Step does not`,
+            );
+          }
+        }
+      }
+    }
+  });
+
+  it("fills what a recipe leaves out with what a Step added on the canvas would have", () => {
+    const skills = ["brainstorming"];
+    const entry: WorkflowStoreEntry = {
+      id: "fixture",
+      title: "Fixture",
+      description: "Two Steps, the second looping back or ending.",
+      category: "delivery",
+      vendor: "SoloW",
+      homepage: "https://example.com",
+      skills,
+      steps: [
+        { name: "Build", prompt: "Build it.", skills },
+        {
+          name: "Check",
+          prompt: "Check it.",
+          gate: "human",
+          advanceOn: "review",
+          permissionMode: "plan",
+          branch: { when: { kind: "produced-changes" }, yes: "Build", no: null },
+        },
+      ],
+    };
+    const document = workflowStoreDocument(entry, "Default");
+    expect(document.name).toBe("Fixture");
+    expect(document.steps[0]).toEqual({
+      name: "Build",
+      harnessProfile: "Default",
+      promptTemplate: "Build it.",
+      gate: "auto",
+      advanceOn: "agent-signal",
+      onEnter: null,
+      checkpoints: [],
+      branch: null,
+      mcpServers: [],
+      skills: ["brainstorming"],
+      permissionMode: null,
+    });
+    expect(document.steps[1]).toMatchObject({
+      gate: "human",
+      advanceOn: "review",
+      permissionMode: "plan",
+      branch: { when: { kind: "produced-changes" }, thenStep: 0, elseStep: null },
+    });
+    // A copy, not the catalog's own array: an importer that edits the document edits nothing shared.
+    document.steps[0]?.skills.push("mutated");
+    expect(skills).toEqual(["brainstorming"]);
+  });
+
+  it("shows the seeds first and the methods last, and knows no entry it does not list", () => {
+    const firstOther = WORKFLOW_STORE.findIndex((e) => e.seed !== true);
+    expect(WORKFLOW_STORE.slice(0, firstOther)).toEqual([...WORKFLOW_STORE_SEEDS]);
+    const firstMethod = WORKFLOW_STORE.findIndex((e) => e.category === "methodology");
+    expect(WORKFLOW_STORE.slice(firstMethod).every((e) => e.category === "methodology")).toBe(true);
+    expect(workflowStoreEntry("no-such-entry")).toBeUndefined();
+    expect(workflowStoreEntry("")).toBeUndefined();
   });
 });

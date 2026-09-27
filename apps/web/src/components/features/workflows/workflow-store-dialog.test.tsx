@@ -137,6 +137,80 @@ describe("WorkflowStoreDialog", () => {
     expect(pushed).not.toContain("/workflows/wf-1");
   });
 
+  it("installs on the profile picked in Runs on, not the one it pre-selected", async () => {
+    const { log } = renderWithTrpc(
+      <WorkflowStoreDialog
+        trigger={<button type="button">Browse the store</button>}
+        installed={[]}
+      />,
+      {
+        "profile.agent.list": () => ({
+          items: [
+            { id: "ap-2", name: "Opus" },
+            { id: "ap-1", name: "Codex" },
+          ],
+          nextCursor: null,
+        }),
+        "workflow.installFromStore": () => ({
+          workflow: { ...installedWorkflow("Hotfix"), steps: [] },
+          createdSkills: [],
+          reusedSkills: [],
+        }),
+        "workflow.list": () => [],
+      },
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Browse the store" }));
+    fireEvent.click(await screen.findByRole("combobox", { name: "Runs on" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Codex" }));
+    fireEvent.click(screen.getByRole("button", { name: "Bug fix" }));
+    fireEvent.click(screen.getByRole("button", { name: "Install Hotfix" }));
+
+    await waitFor(() => {
+      const call = log.calls.find((c) => c.path === "workflow.installFromStore");
+      expect(call?.input).toEqual({ entryId: "hotfix", harnessProfileId: "ap-1" });
+    });
+  });
+
+  it("says what a card's pipeline costs — steps, human gates, the Skills it writes", async () => {
+    renderWithTrpc(
+      <WorkflowStoreDialog
+        trigger={<button type="button">Browse the store</button>}
+        installed={[]}
+      />,
+      { "profile.agent.list": () => ({ items: [], nextCursor: null }) },
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Browse the store" }));
+    fireEvent.change(await screen.findByLabelText("Search the store"), {
+      target: { value: "Security review" },
+    });
+    const card = screen.getByText("Security review").closest("li");
+    expect(card?.textContent).toContain("3 steps");
+    expect(card?.textContent).toContain("brings security-review-checklist");
+    expect(card?.querySelector("a")?.getAttribute("href")).toMatch(/^https:\/\//);
+  });
+
+  it("says nothing matches rather than showing an empty grid", async () => {
+    renderWithTrpc(
+      <WorkflowStoreDialog
+        trigger={<button type="button">Browse the store</button>}
+        installed={[]}
+      />,
+      { "profile.agent.list": () => ({ items: [], nextCursor: null }) },
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Browse the store" }));
+    fireEvent.change(await screen.findByLabelText("Search the store"), {
+      target: { value: "zzz-no-pipeline-is-called-this" },
+    });
+    expect(screen.getByText("Nothing in the store matches.")).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "Store entries" })).toBeNull();
+    // Clearing the search brings the catalog back.
+    fireEvent.change(screen.getByLabelText("Search the store"), { target: { value: "" } });
+    expect(screen.getByRole("list", { name: "Store entries" })).toBeTruthy();
+  });
+
   it("cannot install with no harness profile to run on", async () => {
     renderWithTrpc(
       <WorkflowStoreDialog

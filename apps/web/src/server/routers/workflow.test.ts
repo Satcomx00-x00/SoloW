@@ -1619,5 +1619,59 @@ describe("workflows", () => {
         "security-review-checklist",
       );
     });
+
+    it("lists every entry in catalog order, each Skill once, exactly what an install would bring", async () => {
+      const { c } = await fixture(db, "acme");
+      const store = await c.workflow.store({});
+      expect(store.map((e) => e.id)).toEqual(WORKFLOW_STORE.map((e) => e.id));
+      for (const listed of store) {
+        const entry = WORKFLOW_STORE.find((e) => e.id === listed.id);
+        expect(listed.steps).toEqual(entry?.steps.map((s) => s.name) ?? []);
+        expect(listed.skills).toEqual([...new Set(entry?.skills ?? [])]);
+      }
+    });
+
+    it("does not count a Skill another Workspace holds as one this library already has", async () => {
+      const { c, reviewer } = await fixture(db, "acme");
+      const other = await fixture(db, "beta");
+      await other.c.library.skill.create({
+        name: "security-review-checklist",
+        description: "Beta's own checklist.",
+        source: { kind: "inline", body: "# Beta\n".padEnd(300, "x") },
+      });
+      const installed = await c.workflow.installFromStore({
+        entryId: "security-review",
+        harnessProfileId: reviewer.id,
+      });
+      expect(installed.createdSkills).toEqual(["security-review-checklist"]);
+      expect(installed.reusedSkills).toEqual([]);
+      const ours = (await c.library.skill.list({})).find(
+        (s) => s.name === "security-review-checklist",
+      );
+      expect(ours?.description).toBe(
+        VENDORED_STORE.skills["security-review-checklist"]?.description,
+      );
+      // Beta's row is untouched by acme's install.
+      const theirs = (await other.c.library.skill.list({})).filter(
+        (s) => s.name === "security-review-checklist",
+      );
+      expect(theirs.map((s) => s.description)).toEqual(["Beta's own checklist."]);
+    });
+
+    it("suffixes a chosen name the Workspace already uses rather than refusing it", async () => {
+      const { c, planner } = await fixture(db, "acme");
+      const first = await c.workflow.installFromStore({
+        entryId: "hotfix",
+        harnessProfileId: planner.id,
+        name: "Ship it",
+      });
+      const second = await c.workflow.installFromStore({
+        entryId: "quick-change",
+        harnessProfileId: planner.id,
+        name: "Ship it",
+      });
+      expect(first.workflow.name).toBe("Ship it");
+      expect(second.workflow.name).toBe("Ship it (2)");
+    });
   });
 });

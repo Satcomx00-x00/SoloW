@@ -59,7 +59,7 @@ export const SUPERPOWERS_WORKFLOWS: readonly WorkflowStoreEntry[] = [
       },
       {
         name: "Execute",
-        skills: ["executing-plans", "test-driven-development"],
+        skills: ["executing-plans", "test-driven-development", "receiving-code-review"],
         prompt:
           "Using the executing-plans and test-driven-development skills, carry out the plan task by task — failing test, least code, refactor, checkpoint. If this is a later pass, start with what the verification or the review in the handoff above asked for, using the receiving-code-review skill's judgement. Report every deviation.",
       },

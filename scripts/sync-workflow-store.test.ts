@@ -2,7 +2,12 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { readSkillFrontmatter, type VendoredStore, WORKFLOW_STORE_SOURCES } from "@solow/core";
+import {
+  readSkillFrontmatter,
+  type VendoredSkillSpec,
+  type VendoredStore,
+  WORKFLOW_STORE_SOURCES,
+} from "@solow/core";
 import {
   check,
   readGenerated,
@@ -61,6 +66,10 @@ describe("validateSkill", () => {
     expect(() => validateSkill("x", { ...ok, body: "# stub\n" })).toThrow(/stub/);
     expect(() => validateSkill("x", { ...ok, body: `<!DOCTYPE html>${ok.body}` })).toThrow(/HTML/);
   });
+  it("refuses a description the library could not store", () => {
+    expect(() => validateSkill("x", { ...ok, description: "d".repeat(501) })).toThrow(/over 500/);
+    expect(() => validateSkill("x", { ...ok, description: "d".repeat(500) })).not.toThrow();
+  });
 });
 
 describe("check", () => {
@@ -89,6 +98,51 @@ describe("check", () => {
     const uncommitted: VendoredStore = structuredClone(store);
     uncommitted.sources["superpowers"] = { ...uncommitted.sources["superpowers"]!, commit: null };
     expect(check(uncommitted)).toEqual(["source superpowers records no commit"]);
+  });
+
+  it("names a source the file lost and a Skill read from somewhere the manifest does not say", () => {
+    const store = readGenerated();
+
+    const lost: VendoredStore = structuredClone(store);
+    delete lost.sources["openspec"];
+    expect(check(lost)).toEqual(["source openspec is not in the generated file"]);
+
+    const moved: VendoredStore = structuredClone(store);
+    const spec = moved.skills["brainstorming"]!;
+    moved.skills["brainstorming"] = { ...spec, path: "skills/elsewhere/SKILL.md" };
+    expect(check(moved)).toEqual([
+      `brainstorming: generated from ${spec.source}/skills/elsewhere/SKILL.md, manifest says ${spec.source}/${spec.path}`,
+    ]);
+  });
+});
+
+describe("the command line", () => {
+  const script = join(import.meta.dir, "sync-workflow-store.ts");
+  const run = (...args: string[]) => {
+    const proc = Bun.spawnSync(["bun", script, ...args], { stdout: "pipe", stderr: "pipe" });
+    return { code: proc.exitCode, out: proc.stdout.toString(), err: proc.stderr.toString() };
+  };
+
+  it("exits 0 and counts the Skills when the committed file checks out", () => {
+    const { code, out } = run("check");
+    expect(code).toBe(0);
+    expect(out).toMatch(/^store:check: ok — \d+ skills/);
+  });
+
+  it("exits 2 with its usage on a mode it does not know, and touches nothing", () => {
+    const before = readFileSync(
+      join(import.meta.dir, "../packages/core/src/workflow-store/vendored.generated.json"),
+      "utf8",
+    );
+    const { code, err } = run("refresh");
+    expect(code).toBe(2);
+    expect(err).toContain("usage: sync-workflow-store.ts [sync|check]");
+    expect(
+      readFileSync(
+        join(import.meta.dir, "../packages/core/src/workflow-store/vendored.generated.json"),
+        "utf8",
+      ),
+    ).toBe(before);
   });
 });
 
@@ -220,6 +274,44 @@ describe("sync", () => {
       "/templates/commands/tasks.md": () => new Response("---\ndescription: d\n---\nshort"),
     });
     await expect(sync()).rejects.toThrow(/speckit-tasks: body is \d+ chars/);
+  });
+
+  /** Swaps one manifest spec for the length of `body`, and always puts it back. */
+  async function withSpec(
+    sourceId: string,
+    index: number,
+    patch: Partial<VendoredSkillSpec>,
+    body: () => Promise<void>,
+  ) {
+    const source = WORKFLOW_STORE_SOURCES.find((s) => s.id === sourceId);
+    const skills = source?.skills as VendoredSkillSpec[] | undefined;
+    const original = skills?.[index];
+    if (!skills || !original) throw new Error("fixture");
+    skills[index] = { ...original, ...patch };
+    try {
+      await body();
+    } finally {
+      skills[index] = original;
+    }
+  }
+
+  it("refuses a manifest path that climbs out of its source, before fetching it", async () => {
+    const asked = fakeGithub();
+    await withSpec("superpowers", 0, { path: "../../etc/SKILL.md" }, async () => {
+      await expect(sync()).rejects.toThrow(/escapes its source/);
+    });
+    expect(asked.some((u) => u.includes("etc/SKILL.md"))).toBe(false);
+    await withSpec("solow", 0, { path: "/etc/passwd" }, async () => {
+      await expect(sync()).rejects.toThrow(/escapes its source/);
+    });
+  });
+
+  it("refuses two sources that publish a Skill under the same name", async () => {
+    fakeGithub();
+    const first = WORKFLOW_STORE_SOURCES.find((s) => s.kind === "repository")?.skills[0]?.name;
+    await withSpec("solow", 0, { name: first ?? "" }, async () => {
+      await expect(sync()).rejects.toThrow(`${first}: named by two sources`);
+    });
   });
 
   it("serializes with sorted keys and a trailing newline, so an unchanged upstream rewrites nothing", async () => {
