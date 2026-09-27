@@ -1,11 +1,17 @@
 import { describe, expect, it } from "bun:test";
-import { TaskDependencyErrorCode, TaskErrorCode, type TaskState } from "@solow/contracts";
+import {
+  TaskDependencyErrorCode,
+  TaskErrorCode,
+  TaskParentErrorCode,
+  type TaskState,
+} from "@solow/contracts";
 import {
   buildCreateTaskPayload,
   buildDependencyGraph,
   canOpenReview,
   canTransitionTask,
   checkDependencyEdge,
+  checkParentEdge,
   formatDependencyCycle,
   isBlocked,
   isLaunchable,
@@ -15,6 +21,7 @@ import {
   primaryTaskRepository,
   type TaskDependencyEdge,
   taskCheckoutBranch,
+  taskSubtree,
   unsatisfiedDependencies,
 } from "./task.js";
 
@@ -310,5 +317,72 @@ describe("canOpenReview", () => {
     expect(
       canOpenReview({ completedAt: at, completedOutcome: "nothing_to_do", workflowStepId: null }),
     ).toBe(false);
+  });
+});
+
+describe("checkParentEdge (issue #56, AC-6)", () => {
+  /** `child → parent`, the shape one scan of `(id, parent_task_id)` produces. */
+  const chain = (...pairs: [string, string | null][]) => new Map(pairs);
+
+  it("allows a link between two unrelated Tasks", () => {
+    expect(checkParentEdge(chain(["a", null], ["b", null]), "a", "b").ok).toBe(true);
+  });
+
+  it("allows a deeper nesting under a Task that is already a child", () => {
+    const graph = chain(["a", null], ["b", "a"], ["c", null]);
+    expect(checkParentEdge(graph, "c", "b").ok).toBe(true);
+  });
+
+  it("refuses a Task as its own parent", () => {
+    const refused = checkParentEdge(chain(["a", null]), "a", "a");
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect(refused.error.code).toBe(TaskParentErrorCode.Cycle);
+    expect(refused.error.path).toEqual(["a", "a"]);
+  });
+
+  it("refuses a link to a Task's own child, and names the chain", () => {
+    const refused = checkParentEdge(chain(["a", null], ["b", "a"]), "a", "b");
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect(refused.error.path).toEqual(["a", "b", "a"]);
+  });
+
+  it("refuses a link to a distant descendant", () => {
+    const graph = chain(["a", null], ["b", "a"], ["c", "b"], ["d", "c"]);
+    const refused = checkParentEdge(graph, "a", "d");
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect(refused.error.path).toEqual(["a", "d", "c", "b", "a"]);
+  });
+
+  it("terminates on a chain that is already cyclic rather than walking it forever", () => {
+    // Not reachable through the checked path — a restored backup or a pre-check row. The answer
+    // that matters is that it returns at all.
+    const graph = chain(["x", "y"], ["y", "x"], ["a", null]);
+    expect(checkParentEdge(graph, "a", "x").ok).toBe(true);
+  });
+});
+
+describe("taskSubtree (issue #56)", () => {
+  const chain = (...pairs: [string, string | null][]) => new Map(pairs);
+
+  it("returns the root alone when nothing descends from it", () => {
+    expect(taskSubtree(chain(["a", null], ["b", null]), ["a"])).toEqual(["a"]);
+  });
+
+  it("collects children, grandchildren and every branch below the root", () => {
+    const graph = chain(["a", null], ["b", "a"], ["c", "a"], ["d", "b"], ["e", null], ["f", "e"]);
+    expect(taskSubtree(graph, ["a"]).sort()).toEqual(["a", "b", "c", "d"]);
+  });
+
+  it("takes several roots at once without repeating a shared descendant", () => {
+    const graph = chain(["a", null], ["b", "a"], ["c", null]);
+    expect(taskSubtree(graph, ["a", "b", "c"]).sort()).toEqual(["a", "b", "c"]);
+  });
+
+  it("terminates on a cyclic chain", () => {
+    const graph = chain(["a", null], ["b", "a"], ["x", "y"], ["y", "x"]);
+    expect(taskSubtree(graph, ["a"]).sort()).toEqual(["a", "b"]);
   });
 });

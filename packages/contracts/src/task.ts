@@ -2,6 +2,7 @@ import { z } from "zod";
 import { idSchema, taskStateSchema, timestampsSchema } from "./common.js";
 import { pageInputSchema, pageOf } from "./page.js";
 import { gitRefNameSchema } from "./repository.js";
+import { sessionCursorDto } from "./session.js";
 import { taskCompletionOutcomeSchema } from "./widget.js";
 
 /**
@@ -109,6 +110,77 @@ export const createTaskInput = z.object({
 export type CreateTaskInput = z.infer<typeof createTaskInput>;
 
 /**
+ * Split a Task into a sub-task (issue #56, AC-1/AC-2).
+ *
+ * A separate procedure from `task.create` rather than a `parentTaskId` on it, because the two
+ * ask the Owner for opposite amounts. `create` demands an Issue, a Harness Profile, an Executor
+ * Profile and an attachment list; this demands a title. Everything else is the parent's until
+ * the Owner says otherwise — and that is not a convenience, it is what decides whether the
+ * affordance gets used at all: a "split this task" button that reopens the whole create form is
+ * a button nobody presses when they are already deep in a run that is going badly.
+ *
+ * The `issueId` is deliberately *not* overridable. A sub-task that hangs off a different Issue
+ * from its parent is not a split, it is a new Task with a misleading breadcrumb.
+ */
+export const createSubtaskInput = z.object({
+  parentTaskId: idSchema,
+  title: z.string().min(1).max(200),
+  /** Each falls back to the parent's value (AC-2). */
+  agentProfileId: idSchema.optional(),
+  executorProfileId: idSchema.optional(),
+  /**
+   * Overrides the inherited attachment set. Omitted, the parent's Repositories and base refs are
+   * copied — but never its checkout branches: each sub-task gets its own derived branch, because
+   * two Tasks sharing one worktree is the isolation failure Principle II exists to prevent
+   * (AC-5).
+   */
+  repositories: taskRepositoriesSchema.optional(),
+  /**
+   * Where in the parent's transcript to fork (AC-3). The head of the parent's latest Session
+   * when omitted, which is what "split off what you are doing right now" means.
+   */
+  forkSeq: z.number().int().nonnegative().optional(),
+  /**
+   * Set false for a sub-task that should start cold — a genuinely separate piece of work that
+   * merely belongs under this parent. The default carries the context, because re-explaining
+   * everything is the failure this feature exists to remove.
+   */
+  fork: z.boolean().default(true),
+});
+export type CreateSubtaskInput = z.infer<typeof createSubtaskInput>;
+
+/**
+ * Re-parent a Task, or detach it (`parentTaskId: null`) back to the top level.
+ *
+ * This is where AC-6 bites. A sub-task created under a parent cannot close a cycle — it did not
+ * exist a moment ago, so nothing can descend from it — but moving an existing Task under one of
+ * its own descendants can, and the result is a chain the breadcrumb walks forever.
+ *
+ * The fork point is left alone: where a Task started reading from is a fact about its history,
+ * and re-parenting is a statement about how the work is organised now.
+ */
+export const setTaskParentInput = z.object({
+  id: idSchema,
+  parentTaskId: idSchema.nullable(),
+});
+export type SetTaskParentInput = z.infer<typeof setTaskParentInput>;
+
+export const TaskParentErrorCode = {
+  /** The parent link would close a cycle — the proposed parent descends from this Task (AC-6). */
+  Cycle: "TASK_PARENT_CYCLE",
+} as const;
+export type TaskParentErrorCode = (typeof TaskParentErrorCode)[keyof typeof TaskParentErrorCode];
+
+export interface TaskParentCycleError {
+  code: typeof TaskParentErrorCode.Cycle;
+  /**
+   * The chain the link would have closed, from the Task being re-parented up to itself:
+   * `[A, B, A]` reads "A would be a child of B, which is already a child of A".
+   */
+  path: readonly string[];
+}
+
+/**
  * Replace a Task's whole attachment set (issue #7 AC-1).
  *
  * The whole list is sent, not a delta, for the reason `updateRepositorySetupInput` gives: a
@@ -193,6 +265,13 @@ export const taskDeletionImpactDto = z.object({
   worktreeCount: z.number().int().nonnegative(),
   /** Tasks blocked *by* this one — they are unblocked by the delete. */
   dependentCount: z.number().int().nonnegative(),
+  /**
+   * Live descendants that go to History with it (issue #56) — the whole subtree, not just the
+   * immediate children, because that is what the delete actually takes. A sub-task left on the
+   * board under a parent in History has lost the Task that explains why it exists; the
+   * confirmation says how many go.
+   */
+  subtaskCount: z.number().int().nonnegative(),
   /** Whether a harness has to be stopped before the delete can proceed. */
   running: z.boolean(),
 });
@@ -213,6 +292,11 @@ export const listTasksInput = z
     projectId: idSchema.optional(),
     /** Only the Tasks whose Issue belongs to no Project — the counterpart escape hatch. */
     unassigned: z.boolean().optional(),
+    /**
+     * Only the sub-tasks of this Task (issue #56). `null` asks the opposite question — only the
+     * top-level Tasks — which an unfiltered list cannot express.
+     */
+    parentTaskId: idSchema.nullable().optional(),
   })
   .merge(pageInputSchema);
 export type ListTasksInput = z.infer<typeof listTasksInput>;
@@ -247,6 +331,20 @@ export const taskDto = z
   .object({
     id: idSchema,
     issueId: idSchema,
+    /**
+     * The Task this one was split out of, or null for a top-level Task (issue #56, AC-1).
+     *
+     * Only the immediate parent: the breadcrumb follows this field up, rather than the DTO
+     * carrying an ancestor list that every board tile would pay for to render a relationship
+     * most Tasks do not have.
+     */
+    parentTaskId: idSchema.nullable(),
+    /**
+     * The point in the parent's transcript this Task was forked from (AC-3), or null for one
+     * that starts cold. Carries the hash, so a client can tell a fork point that still resolves
+     * from one whose history has since been rewritten.
+     */
+    forkedFrom: sessionCursorDto.nullable(),
     title: z.string(),
     state: taskStateSchema,
     agentProfileId: idSchema,

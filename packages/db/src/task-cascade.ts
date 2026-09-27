@@ -92,6 +92,21 @@ export function cascadeDeleteTasks(
       and(eq(taskRepository.workspaceId, workspaceId), inArray(taskRepository.taskId, taskIds)),
     )
     .run();
+  /*
+   * Every parent link pointing *at* a Task in the set goes first (issue #56) — inside the set and
+   * outside it, because `task.parent_task_id` is a real foreign key and the two cases fail it the
+   * same way.
+   *
+   * Inside, it is ordering: nothing promises that one `DELETE ... IN (...)` reaches a child before
+   * its parent. Outside, it is the retention sweep, which purges one Task per transaction: a
+   * sub-task restored from History while its parent stayed there outlives the parent's purge, and
+   * becomes a top-level Task rather than the reason the purge fails every night. Its fork point
+   * stays on its row — where it started is still true after the parent is gone.
+   */
+  tx.update(task)
+    .set({ parentTaskId: null })
+    .where(and(eq(task.workspaceId, workspaceId), inArray(task.parentTaskId, taskIds)))
+    .run();
   tx.delete(task)
     .where(and(eq(task.workspaceId, workspaceId), inArray(task.id, taskIds)))
     .run();

@@ -6,6 +6,8 @@ import {
   type TaskDependencyCycleError,
   TaskDependencyErrorCode,
   TaskErrorCode,
+  type TaskParentCycleError,
+  TaskParentErrorCode,
   type TaskState,
   taskStateSchema,
 } from "@solow/contracts";
@@ -296,6 +298,79 @@ export function checkDependencyEdge(
   const path = findDependencyPath(graph, edge.blockedByTaskId, edge.taskId);
   if (!path) return ok(undefined);
   return err({ code: TaskDependencyErrorCode.Cycle, path: [edge.taskId, ...path] });
+}
+
+/**
+ * Would making `parentTaskId` the parent of `taskId` close a chain (issue #56, AC-6)?
+ *
+ * A parent link is a single pointer, not an edge set, so this is a walk up rather than a DFS:
+ * follow the proposed parent's own parents and see whether the Task being re-parented is among
+ * them. The map is `child → parent` for exactly that reason — it is the direction the walk goes,
+ * and the direction the breadcrumb reads.
+ *
+ * The `seen` set is not defensive dressing. Two Tasks already pointing at each other would be a
+ * cycle this function exists to have prevented, but a database restored from a partial backup,
+ * or a row written before this check existed, can still present one — and a walk with no memory
+ * loops forever on it rather than reporting it.
+ *
+ * The reported path starts and ends on the Task being re-parented, so it reads as the sentence
+ * the Owner has to act on — `A → B → A`.
+ */
+export function checkParentEdge(
+  parentOf: ReadonlyMap<string, string | null>,
+  taskId: string,
+  parentTaskId: string,
+): Result<void, TaskParentCycleError> {
+  if (taskId === parentTaskId) {
+    return err({ code: TaskParentErrorCode.Cycle, path: [taskId, taskId] });
+  }
+  const path = [taskId];
+  const seen = new Set<string>([taskId]);
+  for (let at: string | null | undefined = parentTaskId; at != null; at = parentOf.get(at)) {
+    path.push(at);
+    if (at === taskId) return err({ code: TaskParentErrorCode.Cycle, path });
+    if (seen.has(at)) break;
+    seen.add(at);
+  }
+  return ok(undefined);
+}
+
+/**
+ * A set of Tasks and everything descended from them, following the parent link down (issue #56).
+ *
+ * The input is the same `child → parent` map `checkParentEdge` takes, because it is the same map
+ * every caller already has: one scan of `(id, parent_task_id)`. Inverting it here rather than
+ * asking callers for a `parent → children` map keeps that single read serving both questions —
+ * "would this link close a chain" and "what goes with this Task when it is deleted".
+ *
+ * The roots are included in the result: every caller wants the Task *and* its descendants. `seen`
+ * bounds the walk, so a cycle that predates `checkParentEdge` is enumerated once rather than
+ * looped on forever.
+ */
+export function taskSubtree(
+  parentOf: ReadonlyMap<string, string | null>,
+  roots: readonly string[],
+): string[] {
+  const children = new Map<string, string[]>();
+  for (const [child, parent] of parentOf) {
+    if (parent === null) continue;
+    const siblings = children.get(parent);
+    if (siblings) siblings.push(child);
+    else children.set(parent, [child]);
+  }
+
+  const seen = new Set<string>(roots);
+  const queue = [...roots];
+  while (queue.length > 0) {
+    const next = queue.pop();
+    if (next === undefined) break;
+    for (const child of children.get(next) ?? []) {
+      if (seen.has(child)) continue;
+      seen.add(child);
+      queue.push(child);
+    }
+  }
+  return [...seen];
 }
 
 /** The shape readiness is decided from — a blocker and the state it is currently in. */

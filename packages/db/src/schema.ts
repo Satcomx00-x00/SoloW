@@ -34,6 +34,7 @@ import type {
   WorkflowStepGate,
 } from "@solow/contracts";
 import { sql } from "drizzle-orm";
+import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core";
 import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 /**
@@ -526,6 +527,44 @@ export const task = sqliteTable(
     issueId: text("issue_id")
       .notNull()
       .references(() => issue.id),
+    /**
+     * The Task this one was split out of (issue #56, AC-1). Null for every Task created directly
+     * under an Issue.
+     *
+     * A self-referencing foreign key, and a real one: a sub-task whose parent is gone has lost
+     * the transcript it forked from and the breadcrumb that explains why it exists. The delete
+     * cascade expands a Task to its descendants for exactly that reason (`task-cascade.ts`), so
+     * the constraint is enforceable rather than a rule the cascade would have to dodge.
+     *
+     * A parent link is *not* a dependency edge. `task_dependency` says "do not start B until A
+     * is done"; this says "B was split out of A, and inherits its setup". A sub-task may well
+     * run beside its parent — that is the point of splitting one — so nothing here gates a
+     * launch, and the acyclicity this needs is its own walk (`checkParentEdge`) rather than the
+     * dependency graph's.
+     */
+    parentTaskId: text("parent_task_id").references((): AnySQLiteColumn => task.id),
+    /**
+     * The point in the parent's transcript this Task starts from (issue #56, AC-3) — the three
+     * fields of the `session_cursor` DTO that issue #2 minted, flattened onto the row.
+     *
+     * Three columns rather than a JSON blob because `fork_hash` is the load-bearing one: it
+     * proves the history behind the fork point is the history that was there when the Owner
+     * chose it, and a run that resumes from a rewritten transcript is worse than one that
+     * refuses to start. Storing it flat keeps it checkable by the same `verifySessionCursor` the
+     * read path uses, with no parsing in between.
+     *
+     * **Deliberately not a foreign key on `fork_session_id`**, for the reason
+     * `session_event.workflow_step_id` gives: this is a record of a decision that was taken, and
+     * it must keep its meaning after the Session it names is deleted. A child holding an
+     * unresolvable fork point tells the truth — it really did start there — where a nulled
+     * column would claim it started cold.
+     *
+     * All three are null together: a sub-task created from a parent that never ran has no
+     * transcript to fork, and starts from the brief like any other Task.
+     */
+    forkSessionId: text("fork_session_id"),
+    forkSeq: integer("fork_seq"),
+    forkHash: text("fork_hash"),
     title: text("title").notNull(),
     state: text("state").$type<TaskState>().notNull().default("backlog"),
     agentProfileId: text("agent_profile_id")
@@ -629,6 +668,11 @@ export const task = sqliteTable(
   (t) => ({
     byState: index("task_ws_state").on(t.workspaceId, t.state),
     byIssue: index("task_issue").on(t.issueId),
+    /**
+     * Serves both questions the parent link is asked: "what are this Task's children" on every
+     * Task page render, and "does this Task have any" before a delete (issue #56).
+     */
+    byParent: index("task_parent").on(t.workspaceId, t.parentTaskId),
     /** Serves the retention sweep and the History page — both ask "deleted, and when". */
     byDeleted: index("task_ws_deleted").on(t.workspaceId, t.deletedAt),
     /** Serves the "is this Workflow still in use" check that refuses a delete. */

@@ -2,8 +2,11 @@ import { describe, expect, it } from "bun:test";
 import type { SessionEventPayload } from "@solow/contracts";
 import {
   canonicalJson,
+  FORK_DIGEST_MAX_EVENTS,
+  FORK_DIGEST_MAX_TURN_CHARS,
   hashSessionLog,
   planCompaction,
+  renderForkDigest,
   type SessionLogEvent,
   sessionCursorAt,
   summarizeRange,
@@ -198,5 +201,69 @@ describe("summarizeRange", () => {
   it("says the same thing twice for the same range, so a replayed step writes the same row", () => {
     const events = log(3);
     expect(summarizeRange(events)).toBe(summarizeRange([...events].reverse()));
+  });
+});
+
+describe("renderForkDigest (issue #56, AC-3)", () => {
+  const at = (seq: number, payload: SessionEventPayload): SessionLogEvent => ({ seq, payload });
+
+  it("reads the work, in order, and leaves out the machinery and the private reasoning", () => {
+    const digest = renderForkDigest([
+      at(3, {
+        kind: "tool_call",
+        name: "Edit",
+        input: {},
+        status: "completed",
+      } as SessionEventPayload),
+      at(0, { kind: "user_turn", text: "Fix the latch" }),
+      at(1, { kind: "assistant_turn", text: "weighing options", thinking: true }),
+      at(2, { kind: "assistant_turn", text: "Rewiring it", thinking: false }),
+      at(4, { kind: "notice", text: "Started a harness" }),
+      at(5, {
+        kind: "todos",
+        items: [
+          { content: "Order a servo", status: "completed" },
+          { content: "Fit it", status: "pending" },
+        ],
+      }),
+    ]);
+
+    expect(digest.split("\n")).toEqual([
+      "Operator: Fix the latch",
+      "Agent: Rewiring it",
+      "Tool: Edit",
+      "Plan: [x] Order a servo; [ ] Fit it",
+    ]);
+  });
+
+  it("keeps the tail nearest the fork point, and says how much it dropped", () => {
+    const events = Array.from({ length: FORK_DIGEST_MAX_EVENTS + 5 }, (_, seq) =>
+      at(seq, { kind: "assistant_turn", text: `line ${seq}`, thinking: false }),
+    );
+    const lines = renderForkDigest(events).split("\n");
+
+    expect(lines[0]).toBe("[5 earlier events not shown]");
+    expect(lines[1]).toBe("Agent: line 5");
+    expect(lines.at(-1)).toBe(`Agent: line ${FORK_DIGEST_MAX_EVENTS + 4}`);
+  });
+
+  it("clips one enormous turn rather than letting it crowd out the rest", () => {
+    const digest = renderForkDigest([
+      at(0, { kind: "user_turn", text: "x".repeat(FORK_DIGEST_MAX_TURN_CHARS + 50) }),
+    ]);
+    expect(digest).toBe(`Operator: ${"x".repeat(FORK_DIGEST_MAX_TURN_CHARS)}… [truncated]`);
+  });
+
+  it("says how a run ended even when the harness left no words", () => {
+    const digest = renderForkDigest([
+      at(0, { kind: "agent_done", changed: true, branch: "solow/task-1" } as SessionEventPayload),
+    ]);
+    expect(digest).toBe("Agent finished: with changes");
+  });
+
+  it("is the same text for the same log, whatever order the rows arrived in", () => {
+    const a = at(0, { kind: "user_turn", text: "one" });
+    const b = at(1, { kind: "assistant_turn", text: "two", thinking: false });
+    expect(renderForkDigest([b, a])).toBe(renderForkDigest([a, b]));
   });
 });
