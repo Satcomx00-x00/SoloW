@@ -76,8 +76,6 @@ test.describe("control check — the main line of the product, end to end", () =
     // default was cutting it at the last `goto` whenever it ran second. Host-only, never a CI
     // gate, so the budget follows the walk (the branching check sets its own the same way).
     test.setTimeout(20 * 60_000);
-    // The whole line, on a cold dev server that compiles each route on first visit.
-    test.setTimeout(600_000);
     const stamp = Date.now();
     const projectTitle = `Control check ${stamp}`;
     const issueTitle = `Control issue ${stamp}`;
