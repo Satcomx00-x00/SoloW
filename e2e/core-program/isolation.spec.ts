@@ -139,7 +139,10 @@ test.describe("@critical isolation", () => {
     // Task has always used. The secondary is a sibling SoloW provisioned, named for the
     // attachment — no Owner-authored text ever reaches the path.
     const primary = join(PATHS.worktrees, `solow-task-${id}`);
-    const siblings = readdirSync(PATHS.worktrees).filter((entry) => entry.startsWith(`${id}--`));
+    // The Task's harness home (Decision 0027) shares the `<id>--` prefix but is not a checkout.
+    const siblings = readdirSync(PATHS.worktrees).filter(
+      (entry) => entry.startsWith(`${id}--`) && entry !== `${id}--harness-home`,
+    );
     expect(siblings).toHaveLength(1);
     const secondary = join(PATHS.worktrees, siblings[0] as string);
 
