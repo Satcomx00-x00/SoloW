@@ -2,6 +2,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import {
+  type RunLinkDto,
   type SessionEventPayload,
   TaskDependencyErrorCode,
   type TaskDto,
@@ -88,7 +89,7 @@ const session = {
 };
 
 /** Session detail, with the log's payloads typed the way the router now returns them (#2). */
-function detail(payloads: SessionEventPayload[] = []) {
+function detail(payloads: SessionEventPayload[] = [], links: RunLinkDto[] = []) {
   return {
     session,
     events: payloads.map((payload, i) => ({
@@ -103,6 +104,7 @@ function detail(payloads: SessionEventPayload[] = []) {
     cursor: null,
     review: null,
     rounds: [],
+    links,
   };
 }
 
@@ -583,6 +585,110 @@ describe("TaskWorkspace meta in the rail", () => {
     expect(await screen.findByText("This machine")).toBeDefined();
     expect(screen.getByText(/from main/)).toBeDefined();
     expect(screen.getByRole("button", { name: `Copy ${SESSION_ID}` })).toBeDefined();
+  });
+});
+
+describe("TaskWorkspace links in the rail", () => {
+  const MR: RunLinkDto = {
+    kind: "merge_request",
+    url: "https://gitlab.com/acme/gate/-/merge_requests/42",
+    label: "Merge request !42",
+    host: "gitlab.com",
+    repository: "acme/gate",
+  };
+  const PIPELINE: RunLinkDto = {
+    kind: "pipeline",
+    url: "https://gitlab.com/acme/gate/-/pipelines/1204",
+    label: "Pipeline #1204",
+    host: "gitlab.com",
+    repository: "acme/gate",
+  };
+
+  it("opens each thing the run did where it lives, in a new tab", async () => {
+    renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
+      "task.get": () => task({ state: "review" }),
+      "session.listForTask": () => [session],
+      "session.get": () => detail([], [MR, PIPELINE]),
+    });
+
+    const about = await screen.findByRole("complementary", { name: "About this task" });
+    const links = within(about).getByRole("region", { name: "Links" });
+    const mr = within(links).getByRole("link", { name: /Merge request !42/ });
+    expect(mr.getAttribute("href")).toBe(MR.url);
+    expect(mr.getAttribute("target")).toBe("_blank");
+    expect(
+      within(links)
+        .getByRole("link", { name: /Pipeline #1204/ })
+        .getAttribute("href"),
+    ).toBe(PIPELINE.url);
+  });
+
+  it("says a run opened nothing rather than showing an empty box", async () => {
+    renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
+      "task.get": () => task({ state: "review" }),
+      "session.listForTask": () => [session],
+      "session.get": () => detail(),
+    });
+
+    const about = await screen.findByRole("complementary", { name: "About this task" });
+    const links = within(about).getByRole("region", { name: "Links" });
+    expect(within(links).getByText(/opened nothing outside this app/)).toBeDefined();
+    expect(within(links).queryAllByRole("link")).toEqual([]);
+  });
+
+  it("names the repository once a Task's links span more than one", async () => {
+    const other: RunLinkDto = {
+      kind: "merge_request",
+      url: "https://gitlab.com/acme/latch/-/merge_requests/7",
+      label: "Merge request !7",
+      host: "gitlab.com",
+      repository: "acme/latch",
+    };
+    renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
+      "task.get": () => task({ state: "review" }),
+      "session.listForTask": () => [session],
+      "session.get": () => detail([], [MR, other]),
+    });
+
+    const about = await screen.findByRole("complementary", { name: "About this task" });
+    const links = within(about).getByRole("region", { name: "Links" });
+    // Two rows both reading "Merge request !n" say nothing about which repository either is in.
+    expect(within(links).getByText("acme/gate")).toBeDefined();
+    expect(within(links).getByText("acme/latch")).toBeDefined();
+  });
+
+  it("puts the merge request on the page while the run is still going", async () => {
+    // A `glab mr create` produces no status and no diff, so nothing else would refetch the
+    // Session that holds the link. The frame going past is what does it.
+    let links: RunLinkDto[] = [];
+    renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
+      "task.get": () => task({ state: "running" }),
+      "session.listForTask": () => [session],
+      "session.get": () => detail([], links),
+      "stream.ticket": () => ({
+        url: "ws://hub.test/?ticket=t",
+        expiresAt: "2026-01-01T00:01:00.000Z",
+      }),
+    });
+    const about = await screen.findByRole("complementary", { name: "About this task" });
+    expect(within(about).queryByRole("link", { name: /Merge request/ })).toBeNull();
+
+    await waitFor(() => expect(sockets[0]).toBeDefined());
+    links = [MR];
+    act(() =>
+      sockets[0]?.emit({
+        kind: "tool_result",
+        taskId: TASK_ID,
+        sessionId: SESSION_ID,
+        seq: 9,
+        callId: "c1",
+        ok: true,
+        output: `Created merge request !42: ${MR.url}`,
+        truncated: false,
+      }),
+    );
+
+    expect(await within(about).findByRole("link", { name: /Merge request !42/ })).toBeDefined();
   });
 });
 

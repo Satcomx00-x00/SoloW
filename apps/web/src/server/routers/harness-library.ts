@@ -6,6 +6,8 @@ import {
   deleteSkillInput,
   importSkillsInput,
   importSkillsOutput,
+  installSkillsInput,
+  installSkillsOutput,
   listMcpServersInput,
   listSkillsInput,
   mcpServerDto,
@@ -24,6 +26,7 @@ import {
   deleteMcpServer,
   deleteSkill,
   importSkills,
+  installSkills,
   listMcpServers,
   listSkills,
   scanSkills,
@@ -158,7 +161,7 @@ export const libraryRouter = router({
           tags: ["library"],
           protect: true,
           summary:
-            "Find every Skill — each directory holding a SKILL.md — under a directory on the host or in a repository, whose archive (default branch, or #ref) SoloW fetches over HTTPS into its skills directory on every scan. Returns them named and described, marking the ones the library already holds. Nothing is imported.",
+            "Find every Skill — each directory holding a SKILL.md — under a directory on the host, in a repository whose archive (default branch, or #ref) SoloW fetches over HTTPS into its skills directory on every scan, or at a locator: anything `npx skills add` takes (owner/repo, owner/repo@skill, a /tree/ URL, a skills.sh page, a .zip, a SKILL.md, a site's /.well-known/agent-skills/) or the install command itself. Returns them named and described, marking the ones the library already holds. Nothing is imported.",
         },
       })
       .input(scanSkillsInput)
@@ -179,6 +182,21 @@ export const libraryRouter = router({
       .input(unpackSkillsInput)
       .output(scanSkillsOutput)
       .mutation(async ({ ctx, input }) => unwrap(await unpackSkills(ctx.rctx, input))),
+
+    install: libraryProcedure
+      .meta({
+        openapi: {
+          method: "POST",
+          path: "/library.skill.install",
+          tags: ["library"],
+          protect: true,
+          summary:
+            "Install Skills in one step, the way `npx skills add <locator> --skill … -y` would: the locator — anything the skills installers take (owner/repo, owner/repo@skill, github:/gitlab: shorthands, a repository, /tree/ or /blob/…/SKILL.md URL, git@host:…, a skills.sh page, a .zip/.tar.gz or SKILL.md over HTTPS, a site publishing /.well-known/agent-skills/, a directory on the host) or the install command a README prints — is fetched into SoloW's skills directory and scanned, and every Skill it names (or every one found) is imported as a directory source. A name the library already holds is skipped; a name asked for that the source lacks is reported as missing.",
+        },
+      })
+      .input(installSkillsInput)
+      .output(installSkillsOutput)
+      .mutation(async ({ ctx, input }) => unwrap(await installSkills(ctx.rctx, input))),
 
     import: libraryProcedure
       .meta({

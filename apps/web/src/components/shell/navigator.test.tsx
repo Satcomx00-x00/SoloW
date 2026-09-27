@@ -210,3 +210,44 @@ describe("Navigator — Recent tasks (current task excluded)", () => {
     });
   });
 });
+
+/**
+ * The sidebar's title is the Project switcher (spec F16).
+ *
+ * Two claims worth pinning. It is reachable from *every* screen, not only from inside a Project —
+ * the switcher it replaced only appeared once you were already in one, so it could never be the
+ * way in. And switching keeps the section you were on, which is the one behaviour from the old
+ * `Select` worth carrying over.
+ */
+describe("Navigator — the project picker in the title", () => {
+  it("opens from a screen that is in no project at all", async () => {
+    pathname = "/settings";
+    renderWithTrpc(<Navigator workspaceName="acme" />, baseHandlers());
+
+    fireEvent.click(await screen.findByRole("button", { name: /switch project/ }));
+
+    expect(await screen.findByRole("option", { name: /Features ToDeb/ })).toBeDefined();
+  });
+
+  it("asks for the list only once it is opened", async () => {
+    pathname = "/settings";
+    const { log } = renderWithTrpc(<Navigator workspaceName="acme" />, baseHandlers());
+
+    // Every screen in the app renders this title; a list nobody has asked to see must not cost a
+    // request on each of them.
+    await screen.findByRole("button", { name: /switch project/ });
+    expect(log.calls.some((c) => c.path === "project.list")).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: /switch project/ }));
+    await waitFor(() => expect(log.calls.some((c) => c.path === "project.list")).toBe(true));
+  });
+
+  it("names the Project it is in, and says which section", async () => {
+    pathname = "/projects/proj-1/board";
+    renderWithTrpc(<Navigator workspaceName="acme" />, baseHandlers());
+
+    const trigger = await screen.findByRole("button", { name: /switch project/ });
+    await waitFor(() => expect(trigger.textContent).toContain("Features ToDeb"));
+    expect(trigger.textContent).toContain("Harness runs, by state");
+  });
+});

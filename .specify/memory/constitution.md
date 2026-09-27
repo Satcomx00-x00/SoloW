@@ -1,6 +1,26 @@
 <!--
 SYNC IMPACT REPORT
 ==================
+Version change: 1.4.0 → 1.5.0 (MINOR)
+Rationale: feature flags now ship **default ON**. The prior default-OFF rule was written for a
+dark-launch posture this product does not have: SoloW is installed deliberately by the person who
+will use it, and shipping every capability disabled meant a fresh install could not run a Task,
+hid most of Settings, and could only be recovered with `bun run flag enable …` on the host — the
+one screen that could explain the problem was itself behind the flag. The flag keeps the half
+that was always load-bearing, the per-Workspace kill switch, and gains two explicit constraints
+so that half still works: "off" stays an explicit stored value rather than the absence of one,
+and a flag may never stand in for authorization. MINOR: a committed constraint is redefined in
+its default, no principle is removed, and the flag mechanism itself is unchanged.
+
+Consequences propagated with this amendment:
+  - packages/db/src/flag-registry.ts — all seven flags flipped to `default: true`.
+  - apps/web/src/server/dal/workspace.ts — `getWorkspaceFlags` now resolves an unreadable
+    `enabled_flags` column to "defaults stand" (i.e. on); the trade is recorded there.
+  - .specify/templates/{spec,plan,tasks}-template.md — the preset "default: OFF" rows.
+  - In-product copy that told operators "feature flags ship off" and pointed at a terminal.
+  - docs/features/F12, docs/features/F16 (FR-9).
+
+--- superseded report (1.3.0 → 1.4.0) ---
 Version change: 1.3.0 → 1.4.0 (MINOR)
 Rationale: three decision records accepted after v1.3.0 (0014, 0015, 0016) changed
 committed architecture without being reflected here, and one of them made a standing
@@ -257,7 +277,15 @@ an accepted decision record.
   no remote images, and no `dangerouslySetInnerHTML` (Decision 0015). These guarantees are
   load-bearing for the review gate and MUST be covered by tests, never assumed.
 - **Feature flags**: Every user-facing feature ships behind a flag named `ff-[feature-name]`,
-  default OFF, with a kill switch.
+  **default ON**, with a kill switch. The flag's purpose here is the kill switch — an operator
+  turning a misbehaving capability off for a Workspace — not a dark launch. Default-OFF is the
+  right posture for a service that ships to users who did not ask for the feature; SoloW is
+  installed deliberately by the person who will use it, and a fresh install arriving with every
+  capability disabled made the product inert until a terminal command on the host turned it on.
+  A flag MUST remain readable and settable per Workspace, and "off" MUST stay an explicit stored
+  value rather than the absence of one, so the kill switch survives the default being on. A flag
+  MUST NOT be used in place of authorization: access to another tenant's data is decided by
+  authentication and `workspaceId` scoping (Principle V), never by a flag.
 - **Secrets**: Accessed only through a validated environment module; never via bare
   environment access; secret scanning runs in CI.
 - **Documentation**: Docs-as-Code. Architecture follows arc42 + C4; significant choices are
@@ -308,4 +336,4 @@ conflicts with it, the constitution governs and the conflicting artifact MUST be
   (see `docs/README.md`); architecture guidance follows the arc42 sections in
   `docs/architecture/`.
 
-**Version**: 1.4.0 | **Ratified**: 2026-08-17 | **Last Amended**: 2026-08-24
+**Version**: 1.5.0 | **Ratified**: 2026-08-17 | **Last Amended**: 2026-09-24

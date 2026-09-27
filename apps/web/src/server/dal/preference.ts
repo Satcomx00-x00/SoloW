@@ -1,7 +1,14 @@
 import "server-only";
 import {
+  APPEARANCE_PREFERENCE_KEY,
+  type AppearanceDto,
+  appearanceSchema,
+  CommonErrorCode,
+  DEFAULT_APPEARANCE,
   DEFAULT_SURFACE_LAYOUT,
+  DEFAULT_TASK_DEFAULTS,
   DEFAULT_TASK_PANE_LAYOUT,
+  err,
   ok,
   RECENT_TASKS_MAX,
   RECENT_TASKS_PREFERENCE_KEY,
@@ -12,18 +19,23 @@ import {
   recentTaskIdsSchema,
   reviewDraftPreferenceKey,
   reviewDraftSchema,
+  type SetAppearanceInput,
   type SetSurfaceLayoutInput,
+  type SetTaskDefaultsInput,
   type SurfaceKey,
   type SurfaceLayout,
   type SurfaceLayoutDto,
   surfaceLayoutPreferenceKey,
   surfaceLayoutSchema,
+  TASK_DEFAULTS_PREFERENCE_KEY,
   TASK_PANE_PREFERENCE_KEY,
+  type TaskDefaultsDto,
   type TaskPaneLayout,
   type TaskPaneLayoutDto,
+  taskDefaultsSchema,
   taskPaneLayoutSchema,
 } from "@solow/contracts";
-import { uiPreference } from "@solow/db";
+import { executorProfile, harnessProfile, uiPreference } from "@solow/db";
 import { and, eq } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
 
@@ -272,4 +284,144 @@ export async function clearReviewDraft(
       ),
     );
   return ok({ workspaceId: ctx.workspaceId, userId: ctx.userId, taskId, draft: null });
+}
+
+/**
+ * How the app looks, per user — the same read-parse-or-default and upsert shape as the three
+ * preferences above, for the same reasons.
+ */
+export async function getAppearance(ctx: RequestContext): Promise<Result<AppearanceDto>> {
+  const [row] = await ctx.db
+    .select({ value: uiPreference.value })
+    .from(uiPreference)
+    .where(
+      and(
+        eq(uiPreference.workspaceId, ctx.workspaceId),
+        eq(uiPreference.userId, ctx.userId),
+        eq(uiPreference.key, APPEARANCE_PREFERENCE_KEY),
+      ),
+    )
+    .limit(1);
+
+  const parsed = appearanceSchema.safeParse(row?.value);
+  return ok({
+    workspaceId: ctx.workspaceId,
+    userId: ctx.userId,
+    appearance: parsed.success ? parsed.data : DEFAULT_APPEARANCE,
+  });
+}
+
+export async function setAppearance(
+  ctx: RequestContext,
+  input: SetAppearanceInput,
+): Promise<Result<AppearanceDto>> {
+  const now = new Date().toISOString();
+  await ctx.db
+    .insert(uiPreference)
+    .values({
+      workspaceId: ctx.workspaceId,
+      userId: ctx.userId,
+      key: APPEARANCE_PREFERENCE_KEY,
+      value: input,
+    })
+    .onConflictDoUpdate({
+      target: [uiPreference.workspaceId, uiPreference.userId, uiPreference.key],
+      set: { value: input, updatedAt: now },
+    });
+
+  return ok({ workspaceId: ctx.workspaceId, userId: ctx.userId, appearance: input });
+}
+
+/**
+ * What a new Task starts as.
+ *
+ * The one preference in this file that points at *other rows*, and therefore the only one whose
+ * stored value can be invalidated by something else being deleted. So it is read back through
+ * the Profile tables rather than trusted: a default naming a Harness Profile that has since been
+ * deleted answers null, the picker opens empty, and the Owner is asked the question again —
+ * instead of the form preselecting a Profile that `task.create` will reject with a message about
+ * an id the Owner never typed.
+ *
+ * Both lookups are by primary key and scoped to the Workspace, so this costs two indexed reads
+ * on a preference nothing renders in a loop.
+ */
+export async function getTaskDefaults(ctx: RequestContext): Promise<Result<TaskDefaultsDto>> {
+  const [row] = await ctx.db
+    .select({ value: uiPreference.value })
+    .from(uiPreference)
+    .where(
+      and(
+        eq(uiPreference.workspaceId, ctx.workspaceId),
+        eq(uiPreference.userId, ctx.userId),
+        eq(uiPreference.key, TASK_DEFAULTS_PREFERENCE_KEY),
+      ),
+    )
+    .limit(1);
+
+  const parsed = taskDefaultsSchema.safeParse(row?.value);
+  const stored = parsed.success ? parsed.data : DEFAULT_TASK_DEFAULTS;
+
+  const stillThere = async (
+    table: typeof harnessProfile | typeof executorProfile,
+    id: string | null,
+  ): Promise<string | null> => {
+    if (!id) return null;
+    const [found] = await ctx.db
+      .select({ id: table.id })
+      .from(table)
+      .where(and(eq(table.workspaceId, ctx.workspaceId), eq(table.id, id)))
+      .limit(1);
+    return found ? id : null;
+  };
+
+  return ok({
+    workspaceId: ctx.workspaceId,
+    userId: ctx.userId,
+    defaults: {
+      harnessProfileId: await stillThere(harnessProfile, stored.harnessProfileId),
+      executorProfileId: await stillThere(executorProfile, stored.executorProfileId),
+    },
+  });
+}
+
+/**
+ * Writes are checked the same way reads are, and refuse rather than store: a default that named
+ * a Profile in another Workspace would be a tenancy hole (Principle V), and one naming a Profile
+ * that does not exist would be a row this Workspace can never satisfy.
+ */
+export async function setTaskDefaults(
+  ctx: RequestContext,
+  input: SetTaskDefaultsInput,
+): Promise<Result<TaskDefaultsDto>> {
+  const owns = async (
+    table: typeof harnessProfile | typeof executorProfile,
+    id: string | null,
+  ): Promise<boolean> => {
+    if (!id) return true;
+    const [found] = await ctx.db
+      .select({ id: table.id })
+      .from(table)
+      .where(and(eq(table.workspaceId, ctx.workspaceId), eq(table.id, id)))
+      .limit(1);
+    return Boolean(found);
+  };
+
+  if (!(await owns(harnessProfile, input.harnessProfileId))) return err(CommonErrorCode.NotFound);
+  if (!(await owns(executorProfile, input.executorProfileId))) return err(CommonErrorCode.NotFound);
+
+  const now = new Date().toISOString();
+  await ctx.db
+    .insert(uiPreference)
+    .values({
+      workspaceId: ctx.workspaceId,
+      userId: ctx.userId,
+      key: TASK_DEFAULTS_PREFERENCE_KEY,
+      value: input,
+    })
+    .onConflictDoUpdate({
+      target: [uiPreference.workspaceId, uiPreference.userId, uiPreference.key],
+      set: { value: input, updatedAt: now },
+    });
+
+  return ok({ workspaceId: ctx.workspaceId, userId: ctx.userId, defaults: input });
 }

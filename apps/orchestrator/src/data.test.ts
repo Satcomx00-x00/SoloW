@@ -2,9 +2,11 @@ import { beforeAll, describe, expect, it } from "bun:test";
 import {
   encryptSecret,
   executorProfile,
+  type FlagKey,
   harnessCatalog,
   harnessProfile,
   integration,
+  isEnabled,
   issue,
   repository,
   secret,
@@ -795,16 +797,91 @@ describe("session log (issue #2)", () => {
 });
 
 describe("the Workflow flag on a run context", () => {
-  it("is off for a Workspace that has said nothing about it", async () => {
+  it("is on for a Workspace that has said nothing about it", async () => {
     const db = createTestDb();
     await seed(db);
 
     const ctx = await loadTaskRunContext(db, WS, "task-1");
 
-    // Default OFF is the Definition of Done, and "no flags row at all" is the shape every
-    // existing Workspace is in.
+    /*
+     * "No flags row at all" is the shape every existing Workspace is in, and since flags default
+     * ON (constitution v1.5.0) that shape means *enabled*.
+     *
+     * This assertion was `false` until 2026-09-25, and it was the one that hid the bug the flip
+     * introduced: this file read `flags?.["ff-workflows"] === true` straight off the column
+     * rather than through the registry, so the web app began offering Workflows to a Workspace
+     * this process would then refuse to advance. The test passed throughout, because it encoded
+     * the same wrong assumption as the code.
+     */
+    expect(ctx.workflowsEnabled).toBe(true);
+  });
+
+  it("is off once a Workspace turns it off — the kill switch, which is what the flag is for", async () => {
+    const db = createTestDb();
+    await seed(db);
+    await db
+      .update(workspace)
+      .set({ enabledFlags: { "ff-workflows": false } })
+      .where(eq(workspace.id, WS));
+
+    const ctx = await loadTaskRunContext(db, WS, "task-1");
+
     expect(ctx.workflowsEnabled).toBe(false);
   });
+
+  /**
+   * The guard for the bug the flip exposed.
+   *
+   * Every one of these three used to be decided here with `flags?.[key] === true`, an expression
+   * that agreed with the registry only while every default was OFF. When the default changed,
+   * this process and the web app started giving opposite answers for a Workspace that had stored
+   * nothing — the UI offered Workflows, widgets and libraries, and the run loop ignored all
+   * three. No error, no failing test, because the tests restated the same expression.
+   *
+   * So this asserts the *relationship* rather than any particular value: whatever
+   * `enabled_flags` holds, the run context must say what `isEnabled` says. Reading the column
+   * directly again — here or in a fourth place — fails this, and a future change to a default
+   * needs no edit to it at all.
+   */
+  const COLUMN_SHAPES: readonly { name: string; stored: Record<string, unknown> | null }[] = [
+    { name: "no flags column at all", stored: null },
+    { name: "an empty object", stored: {} },
+    {
+      name: "every flag turned off",
+      stored: { "ff-workflows": false, "ff-agent-widgets": false, "ff-agent-libraries": false },
+    },
+    {
+      name: "every flag turned on",
+      stored: { "ff-workflows": true, "ff-agent-widgets": true, "ff-agent-libraries": true },
+    },
+    { name: "one off, the rest unsaid", stored: { "ff-workflows": false } },
+    // A row somebody edited by hand. Not a boolean, so not an override.
+    { name: "a non-boolean value", stored: { "ff-workflows": "false" } },
+    { name: "a key the build does not know", stored: { "ff-from-the-future": true } },
+  ];
+
+  for (const shape of COLUMN_SHAPES) {
+    it(`agrees with the flag registry given ${shape.name}`, async () => {
+      const db = createTestDb();
+      await seed(db);
+      await db
+        .update(workspace)
+        .set({ enabledFlags: shape.stored as Record<string, boolean> | null })
+        .where(eq(workspace.id, WS));
+
+      const ctx = await loadTaskRunContext(db, WS, "task-1");
+
+      const overrides: Partial<Record<FlagKey, boolean>> = {};
+      for (const [key, value] of Object.entries(shape.stored ?? {})) {
+        if (typeof value === "boolean") overrides[key as FlagKey] = value;
+      }
+      const expected = (key: FlagKey) => isEnabled(key, { workspaceId: WS, overrides });
+
+      expect(ctx.workflowsEnabled).toBe(expected("ff-workflows"));
+      expect(ctx.widgetsEnabled).toBe(expected("ff-agent-widgets"));
+      expect(ctx.librariesEnabled).toBe(expected("ff-agent-libraries"));
+    });
+  }
 
   it("is read from the same Workspace row the widget flag comes from", async () => {
     const db = createTestDb();

@@ -4,6 +4,8 @@ import {
   executorConfigSchema,
   executorKindSchema,
   GUARDED_ENV_VARS,
+  HARNESS_CONFIG_ENV_VARS,
+  isHarnessConfigEnvVar,
 } from "./executor-config.js";
 import { createExecutorProfileInput } from "./profile.js";
 
@@ -105,6 +107,31 @@ describe("AC-6 — a profile cannot reach the credential environment", () => {
   it("rejects a name that is not a legal environment variable", () => {
     expect(parse({ kind: "local", env: { "not a name": "x" } }).success).toBe(false);
     expect(parse({ kind: "local", env: { "1LEADING_DIGIT": "x" } }).success).toBe(false);
+  });
+});
+
+describe("HARNESS_CONFIG_ENV_VARS — the names that point a harness at its configuration", () => {
+  it("names HOME, the XDG base directories and Claude Code's own config directory", () => {
+    expect([...HARNESS_CONFIG_ENV_VARS].sort()).toEqual([
+      "CLAUDE_CONFIG_DIR",
+      "HOME",
+      "XDG_CACHE_HOME",
+      "XDG_CONFIG_HOME",
+      "XDG_DATA_HOME",
+      "XDG_STATE_HOME",
+    ]);
+    expect(isHarnessConfigEnvVar("HOME")).toBe(true);
+    expect(isHarnessConfigEnvVar("PATH")).toBe(false);
+  });
+
+  it("is NOT part of GUARDED_ENV_VARS, so a profile that sets HOME is still accepted", () => {
+    // Deliberate, and the whole reason the two lists are separate: `GUARDED_ENV_VARS` feeds a
+    // `.refine` that *rejects* the profile, and starting to reject a profile that sets `HOME`
+    // would break an API that has always accepted it. The run-time guard drops the value instead.
+    for (const name of HARNESS_CONFIG_ENV_VARS) {
+      expect(GUARDED_ENV_VARS as readonly string[]).not.toContain(name);
+      expect(parse({ kind: "local", env: { [name]: "/tmp/somewhere" } }).success).toBe(true);
+    }
   });
 });
 

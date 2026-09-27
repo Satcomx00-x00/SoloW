@@ -79,6 +79,15 @@ export interface AcpScript {
    * self-defeating test.
    */
   writeEnvNames?: string;
+  /**
+   * Write the child's `$HOME` to this path under the session cwd.
+   *
+   * The value, unlike `writeEnvNames`, because a home directory is a path and not a secret — and
+   * the thing worth proving about it is *which* one it is (Decision 0027): a harness given the
+   * operator's `$HOME` reads their `~/.claude`, and no list of variable names can tell those two
+   * cases apart.
+   */
+  writeEnvHome?: string;
 }
 
 /** Where a scripted agent's bytes go. Implemented over a pipe, or over `process.stdout`. */
@@ -163,6 +172,9 @@ class ScriptedAgent {
             `${this.cwd}/${this.script.writeEnvNames}`,
             JSON.stringify(Object.keys(process.env).sort()),
           );
+        }
+        if (this.script.writeEnvHome) {
+          await Bun.write(`${this.cwd}/${this.script.writeEnvHome}`, process.env["HOME"] ?? "");
         }
         return {
           ...(method === AcpMethod.SessionNew ? { sessionId: "acp-session-1" } : {}),

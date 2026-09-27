@@ -22,14 +22,14 @@ which supersedes [Decision 0009](../decisions/0009-cli-based-source-integrations
 pair). GitLab's merge requests and GitHub's pull requests both surface as a **change
 request** — the domain never encodes one provider's noun. Integrations are optional; the
 product functions fully without any of them, and behind the `ff-integrations` flag,
-default OFF.
+default ON — the flag is the kill switch an operator reaches for, not a dark launch.
 
 This feature also covers integration in the **opposite direction**: the external **MCP
 server** (issue #16), which lets outside agents and scripts drive SoloW rather than
 SoloW reaching out to them. It is the same product surface seen from the other side —
 the MCP tools are *derived* from the same tRPC procedures the SPA calls and `openapi.json`
 documents, so there is no second definition of any operation to drift. It sits behind its own
-`ff-mcp` flag, default OFF.
+`ff-mcp` flag, default ON — the same kill-switch posture as every other flag.
 
 ## Jobs served
 

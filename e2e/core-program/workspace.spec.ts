@@ -1,5 +1,10 @@
 import { expect, test } from "@playwright/test";
-import { HARNESS_PROFILE_NAME, PATHS, SEED_WORKSPACE_A } from "../support/fixture.js";
+import {
+  HARNESS_PROFILE_NAME,
+  PATHS,
+  SCRIPTED_LINKS,
+  SEED_WORKSPACE_A,
+} from "../support/fixture.js";
 import {
   connectRepository,
   createTask,
@@ -90,7 +95,7 @@ test.describe("the Task page", () => {
     await launchToReview(page);
 
     const rail = page.getByRole("complementary", { name: "About this task" });
-    for (const name of ["Status", "Repository", "Dependencies", "Run"]) {
+    for (const name of ["Status", "Repository", "Links", "Dependencies", "Run"]) {
       await expect(rail.getByRole("region", { name })).toBeVisible();
     }
     // The branch, with its copy button on it; the harness, named on the page.
@@ -103,6 +108,82 @@ test.describe("the Task page", () => {
     await openWorkspaceTab(page, "Plan");
     await expect(rail.getByRole("button", { name: "Approve" })).toBeVisible();
     await expect(rail.getByRole("button", { name: "Reject" })).toBeVisible();
+  });
+
+  test("lists what the run opened outside SoloW — the merge request and the pipeline, as links", async ({
+    page,
+  }) => {
+    // F10 FR-12a. The harness opens the merge request; SoloW opens none. What is under test is
+    // that the URLs its shell printed are read back out of the Session log and offered as doors,
+    // so a reviewer never has to scroll a transcript for one and copy it out of a `<pre>`.
+    const stamp = Date.now();
+    const issueTitle = `Latch sticks ${stamp}`;
+    const taskTitle = `Ship the latch fix ${stamp} [opens-mr]`;
+    await ensureRepository(page);
+    const issue = seedIssue(SEED_WORKSPACE_A, issueTitle, REPO_NAME);
+    await createTask(page, {
+      title: taskTitle,
+      issueId: issue.id,
+      issue: issueTitle,
+      repository: REPO_NAME,
+    });
+    await openTask(page, issue.id, taskTitle);
+    await launchToReview(page);
+
+    const rail = page.getByRole("complementary", { name: "About this task" });
+    const links = rail.getByRole("region", { name: "Links" });
+
+    // Named the way the forge names them, and pointing at the resource itself.
+    const mr = links.getByRole("link", { name: /Merge request !42/ });
+    await expect(mr).toBeVisible();
+    await expect(mr).toHaveAttribute("href", SCRIPTED_LINKS.mergeRequest);
+    await expect(mr).toHaveAttribute("target", "_blank");
+    const pipeline = links.getByRole("link", { name: /Pipeline #1204/ });
+    await expect(pipeline).toBeVisible();
+    await expect(pipeline).toHaveAttribute("href", SCRIPTED_LINKS.pipeline);
+
+    // The proposal before the pipeline, whatever order the shell printed them in.
+    await expect(links.getByRole("link").first()).toHaveAttribute(
+      "href",
+      SCRIPTED_LINKS.mergeRequest,
+    );
+
+    // And the negative: `git push` offers to open a merge request on every push to a new
+    // branch. Nothing opened that one, so it is not among the things this run did.
+    await expect(links.locator(`a[href="${SCRIPTED_LINKS.offer}"]`)).toHaveCount(0);
+    await expect(links.getByRole("link")).toHaveCount(2);
+
+    // The evidence is still where it was — the links are a reading of the log, not a
+    // replacement for it. By the tool row rather than by its text: the command is on screen
+    // twice, once on the row's summary line and once in the body, and both are right.
+    await openWorkspaceTab(page, "Run");
+    await expect(
+      page.locator('[data-tool-call="Bash"]', { hasText: "glab mr create --fill --yes" }),
+    ).toHaveCount(1);
+  });
+
+  test("says a run that opened nothing opened nothing, rather than showing an empty box", async ({
+    page,
+  }) => {
+    const stamp = Date.now();
+    const issueTitle = `Hinge drips ${stamp}`;
+    const taskTitle = `Wipe the hinge ${stamp}`;
+    await ensureRepository(page);
+    const issue = seedIssue(SEED_WORKSPACE_A, issueTitle, REPO_NAME);
+    await createTask(page, {
+      title: taskTitle,
+      issueId: issue.id,
+      issue: issueTitle,
+      repository: REPO_NAME,
+    });
+    await openTask(page, issue.id, taskTitle);
+    await launchToReview(page);
+
+    const links = page
+      .getByRole("complementary", { name: "About this task" })
+      .getByRole("region", { name: "Links" });
+    await expect(links).toContainText("opened nothing outside this app");
+    await expect(links.getByRole("link")).toHaveCount(0);
   });
 
   test("explains a criterion on the Brief tab, from the task's own harness, and folds it away", async ({

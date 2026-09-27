@@ -296,9 +296,12 @@ describe("harnessActivity", () => {
     expect(running(buildTranscript([], [liveText(0, "the answer is")]))).toEqual({
       kind: "writing",
     });
-    expect(running(buildTranscript([], [liveText(0, "hmm", "thinking" as never)]))).toEqual({
-      kind: "thinking",
-    });
+  });
+
+  it("goes quiet under a thinking block that is still arriving", () => {
+    // The block's own header says "Thinking", dots and all, one line above where this would go.
+    // Two of them stacked on one run is what this was found as.
+    expect(running(buildTranscript([], [liveText(0, "hmm", "thinking" as never)]))).toBeNull();
   });
 
   it("goes quiet while the harness is blocked on a question", () => {

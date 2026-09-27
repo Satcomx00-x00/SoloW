@@ -14,6 +14,7 @@ import type {
   HarnessOutcome,
   HarnessRunner,
   HarnessStartOpts,
+  HarnessStreamEvent,
 } from "../../apps/orchestrator/src/harness/runner.js";
 import { startWebSocketServer } from "../../apps/orchestrator/src/index.js";
 import {
@@ -35,7 +36,7 @@ import {
 } from "../../apps/orchestrator/src/worktree/manager.js";
 import { seedSetupFiles } from "../../apps/orchestrator/src/worktree/setup-files.js";
 import { hub } from "../../apps/orchestrator/src/ws/hub.js";
-import { PATHS, PORTS } from "./fixture.js";
+import { PATHS, PORTS, SCRIPTED_LINKS } from "./fixture.js";
 
 /**
  * Orchestrator harness for the E2E suite (tasks TASK-025 / TASK-026).
@@ -49,6 +50,57 @@ import { PATHS, PORTS } from "./fixture.js";
 
 /** A Task whose brief carries this marker keeps its harness alive so a test can steer it. */
 const STEERABLE = "[steerable]";
+
+/**
+ * A Task whose brief carries this marker has its harness *ship* the work: push the branch, open
+ * a merge request, and read the pipeline back — through the shell, as a real one does.
+ *
+ * Scripted here rather than faked at the API, because the thing under test is that SoloW reads
+ * those actions back out of its own log (F10 FR-12a). The run loop persists these as ordinary
+ * tool rows, through the same argument allowlist and the same truncation a real harness's calls
+ * go through, so the link list the Task page draws is derived from the log a real run leaves —
+ * not from a shape invented for the test.
+ */
+const OPENS_MR = "[opens-mr]";
+
+/**
+ * The shell the marker scripts, command by command, with the output each one really prints.
+ *
+ * The push comes first and matters most: GitLab answers every push to a branch with no merge
+ * request behind it by *offering* to open one, and that offer is a URL under `/merge_requests/`
+ * like any other. A reader that took it would report a merge request nobody opened, on every
+ * run. It is here so a test can assert the button is absent.
+ */
+function shipTheWork(onEvent: (e: HarnessStreamEvent) => void, branch: string): void {
+  const ran = (callId: string, command: string, output: string) => {
+    onEvent({ kind: "tool_use", name: "Bash", callId, input: { command }, status: "completed" });
+    onEvent({ kind: "tool_result", callId, ok: true, output });
+  };
+  ran(
+    "ship-push",
+    `git push -u origin ${branch}`,
+    [
+      "remote:",
+      "remote: To create a merge request for this branch, visit:",
+      `remote:   ${SCRIPTED_LINKS.offer}`,
+      "remote:",
+      `To gitlab.example.test:acme/gate.git`,
+      ` * [new branch]      ${branch} -> ${branch}`,
+    ].join("\n"),
+  );
+  ran(
+    "ship-mr",
+    "glab mr create --fill --yes",
+    [`Creating merge request for ${branch} into main`, "!42", SCRIPTED_LINKS.mergeRequest].join(
+      "\n",
+    ),
+  );
+  ran(
+    "ship-ci",
+    "glab ci status --live=false",
+    ["Pipeline state: running", `${SCRIPTED_LINKS.pipeline}`].join("\n"),
+  );
+}
 
 /**
  * Markers a Step's prompt can carry to script what the fixture harness *reports* — the two
@@ -146,6 +198,10 @@ class FixtureHarnessRunner implements HarnessRunner {
         .join(",");
       writeFileSync(join(worktree, "visible.txt"), `${visible}\n`);
       opts.onEvent({ kind: "stdout", channel: "assistant", text: `harness edited ${label}\n` });
+
+      // A harness that ships what it wrote: the shell calls a real one makes once the edit is
+      // done, and the URLs their output carries.
+      if (opts.prompt.includes(OPENS_MR)) shipTheWork(opts.onEvent, label);
 
       // A scripted Step reports through the same fenced widget Claude Code emits, so the run
       // loop's own scanner, the completion record and the branch evaluation all run for real.

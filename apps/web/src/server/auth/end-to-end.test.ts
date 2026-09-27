@@ -52,10 +52,17 @@ async function signUpOwner(): Promise<{ cookie: string; userId: string }> {
   };
 }
 
-const enableCoreLoop = (workspaceId: string) =>
+/**
+ * Kill the core loop for one Workspace.
+ *
+ * The inverse of the helper this replaces. `ff-core-program` defaults ON (constitution v1.5.0),
+ * so a freshly signed-up Owner can already reach the API and the interesting case is the one
+ * where somebody has switched the loop off underneath them.
+ */
+const killCoreLoop = (workspaceId: string) =>
   db
     .update(workspace)
-    .set({ enabledFlags: { "ff-core-program": true } })
+    .set({ enabledFlags: { "ff-core-program": false } })
     .where(eq(workspace.id, workspaceId));
 
 /** Run a call and return the TRPCError code, or "OK" if it resolved. */
@@ -69,18 +76,19 @@ async function errCode(fn: () => Promise<unknown>): Promise<string> {
 }
 
 describe("signed-in Owner reaching the API", () => {
-  it("is refused until the flag is switched on for their Workspace", async () => {
-    const { cookie } = await signUpOwner();
-
-    // The Owner is authenticated — this is the flag, not the session.
-    const before = appRouter.createCaller(await contextFor(cookie));
-    expect(await errCode(() => before.issue.list({}))).toBe("FORBIDDEN");
-  });
-
-  it("reads its own Workspace's seeded Issue once the flag is on", async () => {
+  it("is refused once the flag is switched off for their Workspace", async () => {
     const { cookie, userId } = await signUpOwner();
     const workspaceId = (await workspaceForUser(db, userId)) as string;
-    await enableCoreLoop(workspaceId);
+    await killCoreLoop(workspaceId);
+
+    // The Owner is authenticated — this is the flag, not the session.
+    const after = appRouter.createCaller(await contextFor(cookie));
+    expect(await errCode(() => after.issue.list({}))).toBe("FORBIDDEN");
+  });
+
+  it("reads its own Workspace's seeded Issue with the flag at its default", async () => {
+    const { cookie, userId } = await signUpOwner();
+    const workspaceId = (await workspaceForUser(db, userId)) as string;
     // Issue #15 removed issue.create; every real Issue is imported. Seeded directly here since
     // this test is about read-side Workspace scoping through the session, not the import flow.
     const [seeded] = await db
@@ -96,10 +104,11 @@ describe("signed-in Owner reaching the API", () => {
   });
 
   it("writes land in the Workspace the session names, not one the client picked", async () => {
-    const { cookie, userId } = await signUpOwner();
-    const ownWorkspace = (await workspaceForUser(db, userId)) as string;
-    await enableCoreLoop(ownWorkspace);
-    // Another tenant that the signed-in Owner has nothing to do with.
+    const { cookie } = await signUpOwner();
+    // No flag write anywhere in this case: flags default ON, and this is about Workspace
+    // scoping rather than the switch. (`ownWorkspace` went with the write that needed it — the
+    // Owner's own Workspace is never named here, which is the property under test.)
+    // Another tenant the signed-in Owner has nothing to do with:
     const [other] = await db
       .insert(workspace)
       .values({ name: "Someone else", ownerUserId: "another-user" })
@@ -130,8 +139,7 @@ describe("signed-in Owner reaching the API", () => {
   });
 
   it("is unauthorized again after signing out", async () => {
-    const { cookie, userId } = await signUpOwner();
-    await enableCoreLoop((await workspaceForUser(db, userId)) as string);
+    const { cookie } = await signUpOwner();
     const signedIn = appRouter.createCaller(await contextFor(cookie));
     expect(await errCode(() => signedIn.issue.list({}))).toBe("OK");
 
@@ -144,15 +152,11 @@ describe("signed-in Owner reaching the API", () => {
   it("clearing the flag is a kill switch on a live session", async () => {
     const { cookie, userId } = await signUpOwner();
     const workspaceId = (await workspaceForUser(db, userId)) as string;
-    await enableCoreLoop(workspaceId);
     expect(
       await errCode(async () => appRouter.createCaller(await contextFor(cookie)).issue.list({})),
     ).toBe("OK");
 
-    await db
-      .update(workspace)
-      .set({ enabledFlags: { "ff-core-program": false } })
-      .where(eq(workspace.id, workspaceId));
+    await killCoreLoop(workspaceId);
 
     // The same still-valid session is refused on its next request — no sign-out needed.
     expect(

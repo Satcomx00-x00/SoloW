@@ -603,8 +603,11 @@ export function harnessActivity(
   if (last?.kind === "text" && last.open && last.channel === "assistant") {
     return { kind: "writing" };
   }
-  // Everything else — a thinking block still arriving, a finished tool call, a settled turn the
-  // harness has not followed up yet — is the model working with nothing to show for it.
+  // A thinking block still arriving already carries its own "Thinking" header, dots included,
+  // directly above where this line would sit. Saying it a second time reads as a mistake.
+  if (last?.kind === "text" && last.open && last.channel === "thinking") return null;
+  // Everything else — a finished tool call, a settled turn the harness has not followed up yet —
+  // is the model working with nothing to show for it.
   return { kind: "thinking" };
 }
 

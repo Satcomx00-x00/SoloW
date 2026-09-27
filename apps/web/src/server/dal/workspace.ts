@@ -4,11 +4,13 @@ import {
   err,
   ok,
   type RenameWorkspaceInput,
+  type ResetWorkspaceInput,
   type Result,
   type SetupStepDto,
   type SyncRequestDto,
   type SyncStatusDto,
   type WorkspaceDto,
+  type WorkspaceResetDto,
   type WorkspaceSetupDto,
 } from "@solow/contracts";
 import {
@@ -19,6 +21,7 @@ import {
   harnessCatalog,
   harnessProfile,
   repository,
+  resetWorkspace,
   secret,
   workspace,
 } from "@solow/db";
@@ -33,8 +36,16 @@ import type { RequestContext } from "./context.js";
 
 /**
  * Feature-flag overrides stored on the Workspace (task TASK-001). Absent or malformed JSON
- * yields no overrides, so the registry default (OFF) stands — a corrupt column must never be
- * read as "the feature is on".
+ * yields no overrides, so the registry default stands.
+ *
+ * That sentence used to end "— a corrupt column must never be read as 'the feature is on'", and
+ * the flip to default-ON (2026-09-24) inverts what it buys: an unreadable column now resolves to
+ * every feature enabled rather than every feature disabled. Accepted deliberately, because a
+ * flag here gates a *capability*, never access to data — authentication and the `workspaceId`
+ * scoping on every query are what stand between a caller and another tenant's rows (Principle V),
+ * and neither is a flag. The failure this trades away (a corrupt column quietly offering a
+ * feature) is recoverable in one click; the one it avoids (a corrupt column bricking the install
+ * with no in-app way back) was not.
  */
 export async function getWorkspaceFlags(
   db: Db,
@@ -279,4 +290,53 @@ export async function getWorkspaceSetup(ctx: RequestContext): Promise<Result<Wor
   ];
 
   return ok({ workspace: found.data, steps, ready: steps.every((step) => step.done) });
+}
+
+/**
+ * Empty the Workspace (spec F16).
+ *
+ * Three things happen here and the order is the whole design:
+ *
+ * 1. The typed name is compared against the name the *server* holds, not the one the client
+ *    showed. A tab left open across a rename would otherwise pass its own stale copy back and be
+ *    honoured — the one case where an "are you sure" gate is worse than useless, because the
+ *    person answering it was looking at a Workspace that no longer exists under that name.
+ * 2. The walk runs inside one transaction. A reset that tripped a foreign key halfway would
+ *    leave a Workspace neither full nor empty, and the receipt it printed would describe rows
+ *    that had been rolled back.
+ * 3. The orchestrator is told afterwards, per Task, and never inside the transaction. The rows
+ *    are already gone by then, so the paths travel out with the result (Decision 0025) — and a
+ *    filesystem it cannot reach must not be able to roll back a delete the database committed.
+ *
+ * Not `Result<…, never>`: a wrong name is a business error and comes back as one, rather than as
+ * a thrown exception the client has to guess the meaning of.
+ */
+export async function resetWorkspaceData(
+  ctx: RequestContext,
+  input: ResetWorkspaceInput,
+): Promise<Result<WorkspaceResetDto>> {
+  const found = await getWorkspace(ctx);
+  if (!found.ok) return found;
+  if (input.confirmName.trim() !== found.data.name.trim()) {
+    return err(CommonErrorCode.ValidationFailed);
+  }
+
+  const result = ctx.db.transaction((tx) => resetWorkspace(tx, ctx.workspaceId, input.scope));
+
+  for (const entry of result.purge) {
+    // Best effort, never fatal, exactly as `deleteIssue`'s purge is: the rows are gone, and an
+    // orchestrator that is not running is not a reason to report the reset as having failed.
+    await orchestrator.purgeTaskFiles({
+      workspaceId: ctx.workspaceId,
+      taskId: entry.taskId,
+      worktrees: entry.worktrees,
+    });
+  }
+
+  return ok({
+    scope: input.scope,
+    removed: result.removed.map((entry) => ({ table: entry.table, rows: entry.rows })),
+    rows: result.rows,
+    worktrees: result.purge.flatMap((entry) => entry.worktrees),
+  });
 }

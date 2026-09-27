@@ -170,6 +170,10 @@ function IssuePreview({ issue }: { issue: IssueDto }) {
  *
  * `shouldDirty` on purpose: these are values the operator chose by right-clicking a row, so Reset
  * returns to an empty form rather than to their click.
+ *
+ * The *title* is deliberately not written here. A preset names an Issue by id, and the Issue's
+ * title is not in hand until `issue.list` has answered — so naming the Task after it belongs
+ * with the other asynchronous defaults, below.
  */
 function applyPreset(form: UseFormReturn<TaskFormValues>, preset: TaskPreset | undefined): void {
   if (!preset) return;
@@ -207,6 +211,12 @@ export function CreateTaskDialog({
   const harnesses = trpc.profile.agent.list.useQuery({ ...WHOLE_PAGE });
   const executors = trpc.profile.executor.list.useQuery({ ...WHOLE_PAGE });
   const repos = trpc.repository.list.useQuery({ ...WHOLE_PAGE });
+  /*
+   * The Harness Profile and Executor a new Task starts with (spec F16). `retry: false` because
+   * this is a convenience behind its own feature flag: a Workspace that has not turned it on
+   * must get a form that opens empty, not one that retries a forbidden read before giving up.
+   */
+  const taskDefaults = trpc.preference.getTaskDefaults.useQuery({}, { retry: false });
 
   const form = useForm<TaskFormValues>({
     resolver: zodResolver(taskFormSchema),
@@ -263,6 +273,66 @@ export function CreateTaskDialog({
     (harnesses.data?.items.length ?? 0) === 0 ||
     (executors.data?.items.length ?? 0) === 0 ||
     (repos.data?.items.length ?? 0) === 0;
+
+  /**
+   * What the form starts as, once the server has said: the Task named after its Issue, and the
+   * two profile pickers on the Owner's stored defaults (spec F16).
+   *
+   * Naming the Task after its Issue used to hang off the Issue picker's `onChange`, which fired
+   * for an Issue chosen by hand and never for one arriving in a `preset` — so every Task cut
+   * from an Issue's own page, the common path, opened with an empty Title while the picker path
+   * filled it in. Keyed on the *resolved Issue* instead, both paths are one path.
+   *
+   * **The three values are watched, and the effect is deliberately un-keyed.** Both are load
+   * bearing, and together they are the whole reason this works. `useController` subscribes each
+   * *field* to the form, so writing a value re-renders that field and nothing else: without a
+   * watch this component would not re-render, and an un-keyed effect would still only run once.
+   * That matters because the dialog's content is portalled — its pickers register with React
+   * Hook Form some time after the effect that seeds them, and a value written before a field
+   * exists is discarded when that field registers with its own default. Watching makes this
+   * component a subscriber, so when a picker finally registers the effect runs again and
+   * re-asserts; the un-keyed effect is what gives it that second chance. With a one-shot write
+   * the seed silently loses that race — which is exactly how the two pickers came to be sent
+   * empty while visibly showing a profile.
+   *
+   * Two guards make this a *default* rather than a lock, and they are the feature: a field the
+   * operator has touched is never written, and neither is one that already holds a value. So
+   * picking a different Issue after typing your own title leaves your words alone. `setValue`
+   * without `shouldDirty` keeps the field pristine, so `isDirty` goes on meaning "a person
+   * edited this" and nothing else.
+   *
+   * A stored Profile is only offered if it is in the list on screen. `getTaskDefaults` already
+   * drops an id whose Profile has been deleted; this is the belt to those braces, because a
+   * picker holding a value it has no option to draw is what a form ignoring you looks like.
+   */
+  const issueForTitle =
+    selectedIssue ?? (allIssues.data?.items ?? []).find((i) => i.id === issueId) ?? null;
+  const storedDefaults = taskDefaults.data?.defaults;
+  const currentTitle = form.watch("title");
+  const currentHarness = form.watch("agentProfileId");
+  const currentExecutor = form.watch("executorProfileId");
+  useEffect(() => {
+    if (!open || missingConfig) return;
+    const seed = (name: keyof TaskFormValues, current: string, value: string | undefined) => {
+      if (!value || current) return;
+      if (form.getFieldState(name).isDirty) return;
+      form.setValue(name, value);
+    };
+    const inList = (id: string | null | undefined, options: readonly { id: string }[]) =>
+      id && options.some((option) => option.id === id) ? id : undefined;
+
+    seed("title", currentTitle, issueForTitle?.title);
+    seed(
+      "agentProfileId",
+      currentHarness,
+      inList(storedDefaults?.harnessProfileId, harnesses.data?.items ?? []),
+    );
+    seed(
+      "executorProfileId",
+      currentExecutor,
+      inList(storedDefaults?.executorProfileId, executors.data?.items ?? []),
+    );
+  });
 
   const selectField = (
     name: "issueId" | "agentProfileId" | "executorProfileId" | "repositoryId",
@@ -401,16 +471,10 @@ export function CreateTaskDialog({
                     "Issue",
                     repositoryId ? "Select an issue" : "Select a repository first",
                     (issues.data?.items ?? []).map((i) => ({ id: i.id, label: i.title })),
-                    // The Task is the Issue's work, so it starts out named after it. Typing your
-                    // own title stops that — `setValue` here leaves the field pristine, so
-                    // `isDirty` means "a person edited this" and nothing else, and a deliberate
-                    // title is not silently replaced by picking a different Issue afterwards.
-                    (value) => {
-                      const picked = (issues.data?.items ?? []).find((i) => i.id === value);
-                      if (picked && !form.getFieldState("title").isDirty) {
-                        form.setValue("title", picked.title);
-                      }
-                    },
+                    // No title side-effect here any more: the Task is named after its Issue by
+                    // the seeding effect above, which sees a preset Issue as well as a picked
+                    // one. The Task is the Issue's work, so it starts out named after it, and a
+                    // title the operator typed is never replaced.
                   )}
                 </div>
 

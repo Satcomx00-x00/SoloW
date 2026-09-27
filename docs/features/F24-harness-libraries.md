@@ -63,6 +63,21 @@ each harness runtime is handed it, because Claude Code and an ACP agent take it 
   of prose when there is none — ticked for import unless the library already holds that name.
   Each import is a directory source, so the scripts, references and assets beside the `SKILL.md`
   travel with it.
+- **Installing from a locator** (`library.skill.install`, and the `locator` source of
+  `library.skill.scan`; the Import dialog's default mode, *Install* beside *Scan*): what the
+  skills installers take — `npx skills add`, `npx skills-installer`, `npx add-skill` — pasted as
+  it is, the whole install command included. `parseSkillLocator` (`@solow/core`) reads
+  `owner/repo`, `owner/repo/path`, `owner/repo@skill`, `github:`/`gitlab:` shorthands, a
+  repository, `/tree/` or `/blob/…/SKILL.md` URL on GitHub, GitLab, Azure Repos or a self-hosted
+  forge, `git@host:…`, a skills.sh page, a `.zip`/`.tar.gz` or raw `SKILL.md` over HTTPS, a site
+  publishing `/.well-known/agent-skills/index.json` (v0.1.0 file lists and v0.2.0 artifacts, a
+  digest checked when given), a directory on the host, and `#ref`, `#ref@skill`, `--skill a,b`
+  and `--branch` within any of them. The CLI is emulated, never run — this app spawns nothing
+  (`audit-executor-boundary`) — so the fetch is the same HTTPS archive as a scan, unpacked into
+  `SOLOW_SKILLS_ROOT`, the named directory stepped into, and every Skill the locator names (or
+  every one found) imported in one step; a name the library holds is skipped, a name asked for
+  that the source lacks is reported as missing. The harness side is unchanged: a Skill installed
+  this way is a directory source like any other, loaded by every runtime the loaders know.
 - **The MCP store** (Settings → MCP servers → *Store*): a curated catalog in `@solow/core`
   (`MCP_STORE`, 30 well-known servers — GitHub and GitLab among them, plus local tools, browsers,
   documentation, search, data, cloud and productivity servers, and a gateway entry) installed with

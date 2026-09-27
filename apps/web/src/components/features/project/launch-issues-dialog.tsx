@@ -78,17 +78,29 @@ export function LaunchIssuesDialog({
   const [outcomes, setOutcomes] = useState<Record<string, RowOutcome>>({});
   const [running, setRunning] = useState(false);
 
-  // Each opening starts blank, the same reason `LaunchTaskDialog` resets on a fresh `task`: a
-  // second selection must not launch on the profiles the last batch happened to leave chosen.
+  /*
+   * Each opening starts from the Owner's stored defaults, and from nothing else.
+   *
+   * The reset itself is unchanged and still matters, for the reason `LaunchTaskDialog` resets on
+   * a fresh `task`: a second selection must not launch on whatever profiles the last batch
+   * happened to leave chosen. A *stored default* is a different thing from that leftover state —
+   * it is an answer the Owner wrote down in Settings, not one this dialog is remembering on
+   * their behalf — so the two coexist: every open is blank, then seeded (spec F16).
+   *
+   * The Workflow is deliberately not defaulted. It is the choice that decides what this batch
+   * *does*, and there is no per-Workspace answer to it that would be right twice running.
+   */
+  const storedDefaults = trpc.preference.getTaskDefaults.useQuery({}, { retry: false }).data
+    ?.defaults;
   useEffect(() => {
     if (rows) {
-      setAgentProfileId("");
-      setExecutorProfileId("");
+      setAgentProfileId(storedDefaults?.harnessProfileId ?? "");
+      setExecutorProfileId(storedDefaults?.executorProfileId ?? "");
       setWorkflowChoice(NONE);
       setOutcomes({});
       setRunning(false);
     }
-  }, [rows]);
+  }, [rows, storedDefaults]);
 
   const all = rows ?? [];
   const eligible = all.filter((r) => ineligibleReason(r) === null);

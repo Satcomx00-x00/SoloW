@@ -33,7 +33,7 @@ describe("listFlags", () => {
     expect(core?.default).toBe(FLAGS["ff-core-program"].default);
   });
 
-  it("reports an untouched flag as its registry default (OFF)", async () => {
+  it("reports an untouched flag as its registry default (now ON)", async () => {
     const result = await listFlags(ctxFor(db, workspaceIdA));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -65,16 +65,23 @@ describe("setFlag", () => {
 
   it("leaves the other flags on the same Workspace untouched", async () => {
     const ctx = ctxFor(db, workspaceIdA);
+    // Written against a *turned-off* neighbour rather than an untouched one: flags default ON
+    // (constitution v1.5.0), so "the others are still false" would now pass without the write
+    // having been scoped to anything at all.
+    await setFlag(ctx, { key: "ff-core-program", enabled: false });
     await setFlag(ctx, { key: "ff-workflows", enabled: true });
 
     const after = await listFlags(ctx);
     expect(after.ok).toBe(true);
     if (!after.ok) return;
     expect(after.data.find((f) => f.key === "ff-core-program")?.enabled).toBe(false);
-    expect(after.data.find((f) => f.key === "ff-integrations")?.enabled).toBe(false);
+    expect(after.data.find((f) => f.key === "ff-integrations")?.enabled).toBe(true);
   });
 
   it("does not affect another Workspace's flags (Principle V)", async () => {
+    // A leaks into B only if B's value *changes*, so B is pinned off first — otherwise both
+    // Workspaces read `true` from the registry default and the isolation is untested.
+    await setFlag(ctxFor(db, workspaceIdB), { key: "ff-workflows", enabled: false });
     await setFlag(ctxFor(db, workspaceIdA), { key: "ff-workflows", enabled: true });
 
     const bResult = await listFlags(ctxFor(db, workspaceIdB));

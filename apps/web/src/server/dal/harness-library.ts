@@ -7,6 +7,8 @@ import {
   HarnessLibraryErrorCode,
   type ImportSkillsInput,
   type ImportSkillsOutput,
+  type InstallSkillsInput,
+  type InstallSkillsOutput,
   type McpServerDto,
   type McpServerListDto,
   type McpServerTransport,
@@ -20,13 +22,15 @@ import {
   type UpdateMcpServerInput,
   type UpdateSkillInput,
 } from "@solow/contracts";
+import { parseSkillLocator, skillMatchesRequest } from "@solow/core";
 import { mcpServer, secret, skill, workflowStep } from "@solow/db";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { skillsRoot } from "../env.js";
 import {
   holdsSkill,
   type ImportError,
-  resolveImportRoot,
+  resolveImportSource,
+  resolveSkillLocator,
   scanSkillDirectories,
   unpackSkillArchive,
 } from "../skill-import.js";
@@ -320,9 +324,48 @@ export async function scanSkills(
   ctx: RequestContext,
   input: ScanSkillsInput,
 ): Promise<Result<ScanSkillsOutput, ImportError>> {
-  const root = await resolveImportRoot(input.source, skillsRoot());
-  if (!root.ok) return root;
-  return ok(await scanned(ctx, root.data));
+  const resolved = await resolveImportSource(input.source, skillsRoot());
+  if (!resolved.ok) return resolved;
+  return ok(await scanned(ctx, resolved.data.root, resolved.data.skills));
+}
+
+/**
+ * The one-step import (spec F24): what `npx skills add <locator> --skill … -y` does, against
+ * the library instead of a `.claude/skills` directory. The locator is fetched and scanned like
+ * `scanSkills`, then everything it names — or everything found, when it names nothing — is
+ * imported the way `importSkills` would import a fully ticked picker. A name the library holds
+ * is skipped, as there; a name asked for that the source lacks is reported as missing rather
+ * than failing the rest, since `--skill a,b` with one typo should still install the other.
+ */
+export async function installSkills(
+  ctx: RequestContext,
+  input: InstallSkillsInput,
+): Promise<Result<InstallSkillsOutput, ImportError | string>> {
+  const locator = parseSkillLocator(input.locator);
+  if (!locator) return err(HarnessLibraryErrorCode.ImportLocatorInvalid);
+  const requested = [...new Set([...locator.skills, ...input.skills.map((s) => s.toLowerCase())])];
+  const resolved = await resolveSkillLocator({ ...locator, skills: requested }, skillsRoot());
+  if (!resolved.ok) return resolved;
+  const { root, skills: found } = await scanned(ctx, resolved.data.root, resolved.data.skills);
+  const missing = resolved.data.skills.filter(
+    (name) => !found.some((s) => skillMatchesRequest([name], s)),
+  );
+  const pick = found.filter((s) => !s.existing);
+  if (pick.length === 0) {
+    return ok({ root, found, missing, imported: [], skipped: found.map((s) => s.name) });
+  }
+  const imported = await importSkills(ctx, {
+    skills: pick.map(({ name, description, path }) => ({ name, description, path })),
+    enabled: input.enabled,
+  });
+  if (!imported.ok) return imported;
+  return ok({
+    root,
+    found,
+    missing,
+    imported: imported.data.imported,
+    skipped: [...found.filter((s) => s.existing).map((s) => s.name), ...imported.data.skipped],
+  });
 }
 
 /**
@@ -339,8 +382,13 @@ export async function unpackSkills(
   return ok(await scanned(ctx, root.data));
 }
 
-async function scanned(ctx: RequestContext, root: string): Promise<ScanSkillsOutput> {
-  const found = await scanSkillDirectories(root);
+/** The tree scanned, thinned to the Skills asked for by name when the source named any. */
+async function scanned(
+  ctx: RequestContext,
+  root: string,
+  requested: string[] = [],
+): Promise<ScanSkillsOutput> {
+  const found = (await scanSkillDirectories(root)).filter((s) => skillMatchesRequest(requested, s));
   const existing = new Set(
     ctx.db
       .select({ name: skill.name })

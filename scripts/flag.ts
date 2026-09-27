@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   createDb,
+  describeWorkspaceFlags,
   FLAGS,
   flagKeys,
   isFlagKey,
@@ -82,11 +83,10 @@ const db = createDb();
 if (command === "list") {
   const rows = await listWorkspaceFlags(db);
   if (rows.length === 0) console.log("no workspaces yet");
+  // The effective state, not the stored keys — see `describeWorkspaceFlags` for why those are
+  // no longer the same list, and for where it is tested.
   for (const row of rows) {
-    const on = Object.entries(row.flags)
-      .filter(([, enabled]) => enabled)
-      .map(([key]) => key);
-    console.log(`${row.id}  ${row.name}  [${on.join(", ") || "none enabled"}]`);
+    console.log(`${row.id}  ${row.name}  [${describeWorkspaceFlags(row.flags)}]`);
   }
 } else {
   const changed = await setWorkspaceFlag(db, flag as string, command === "enable", workspaceId);

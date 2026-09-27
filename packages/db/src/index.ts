@@ -78,7 +78,12 @@ export {
   isEnabled,
   isFlagKey,
 } from "./flag-registry.js";
-export { listWorkspaceFlags, setWorkspaceFlag, type WorkspaceFlags } from "./flags.js";
+export {
+  describeWorkspaceFlags,
+  listWorkspaceFlags,
+  setWorkspaceFlag,
+  type WorkspaceFlags,
+} from "./flags.js";
 export { ensureDefaultHarnessCatalog } from "./harness-catalog-defaults.js";
 export { loadHarnessLibrariesForRun } from "./harness-library-run.js";
 export { DEFAULT_MCP_SERVER, DEFAULT_SKILL, ensureDefaultLibraries } from "./library-defaults.js";
@@ -106,3 +111,8 @@ export {
   stepsToDto,
   stepToDto,
 } from "./workflow-run.js";
+export {
+  resetWorkspace,
+  type WorkspaceResetResult,
+  type WorkspaceResetScope,
+} from "./workspace-reset.js";

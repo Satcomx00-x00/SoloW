@@ -59,6 +59,8 @@ describe("ImportSkillsDialog", () => {
     });
 
     fireEvent.click((await screen.findAllByRole("button", { name: /Import/ }))[0]!);
+    fireEvent.click(screen.getByRole("combobox", { name: "From" }));
+    fireEvent.click(await screen.findByRole("option", { name: "A directory on this machine" }));
     fireEvent.change(await screen.findByLabelText("Directory"), {
       target: { value: "/srv/skills" },
     });
@@ -157,12 +159,81 @@ describe("ImportSkillsDialog", () => {
       },
     });
     fireEvent.click((await screen.findAllByRole("button", { name: /Import/ }))[0]!);
-    fireEvent.click(screen.getByRole("combobox", { name: "From" }));
-    fireEvent.click(await screen.findByRole("option", { name: "A git repository" }));
-    fireEvent.change(await screen.findByLabelText("Repository URL"), {
+    fireEvent.change(await screen.findByLabelText("Skill or repository"), {
       target: { value: "https://github.com/acme/skills.git" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Scan" }));
     expect((await screen.findByRole("alert")).textContent).toContain("could not be fetched");
+  });
+
+  it("installs in one step what a pasted install command names, and reports what was not there", async () => {
+    const { log } = renderWithTrpc(<SkillsSection />, {
+      "library.skill.list": () => [],
+      "library.skill.install": () => ({
+        root: "/srv/.solow/skills/vercel-labs-agent-skills/agent-skills-main",
+        found: [
+          {
+            name: "react-best-practices",
+            description: "React",
+            path: "/srv/.solow/skills/vercel-labs-agent-skills/agent-skills-main/skills/react-best-practices",
+            relativePath: "skills/react-best-practices",
+            files: 12,
+            existing: false,
+          },
+        ],
+        imported: [
+          {
+            id: "k1",
+            name: "react-best-practices",
+            description: "React",
+            source: { kind: "path", path: "/srv/.solow/skills/x" },
+            enabled: true,
+            createdAt: AT,
+            updatedAt: AT,
+          },
+        ],
+        skipped: [],
+        missing: ["nope"],
+      }),
+    });
+    fireEvent.click((await screen.findAllByRole("button", { name: /Import/ }))[0]!);
+    fireEvent.change(await screen.findByLabelText("Skill or repository"), {
+      target: {
+        value: "npx skills add vercel-labs/agent-skills --skill react-best-practices,nope",
+      },
+    });
+    fireEvent.click(screen.getByLabelText("Load in every harness"));
+    fireEvent.click(screen.getByRole("button", { name: "Install" }));
+
+    await waitFor(() => {
+      expect(log.calls.find((c) => c.path === "library.skill.install")?.input).toEqual({
+        locator: "npx skills add vercel-labs/agent-skills --skill react-best-practices,nope",
+        enabled: true,
+      });
+    });
+    const status = await screen.findByRole("status");
+    expect(status.textContent).toContain("Imported 1 skill");
+    expect(status.textContent).toContain("not found there: nope");
+  });
+
+  it("stays open on an install that found nothing, and says what a bad locator is", async () => {
+    renderWithTrpc(<SkillsSection />, {
+      "library.skill.list": () => [],
+      "library.skill.install": (input: unknown) => {
+        if ((input as { locator: string }).locator === "just-a-word") {
+          throw new Error("AGENT_LIBRARY_IMPORT_LOCATOR_INVALID");
+        }
+        return { root: "/x", found: [], imported: [], skipped: [], missing: [] };
+      },
+    });
+    fireEvent.click((await screen.findAllByRole("button", { name: /Import/ }))[0]!);
+    const field = await screen.findByLabelText("Skill or repository");
+    fireEvent.change(field, { target: { value: "acme/empty" } });
+    fireEvent.click(screen.getByRole("button", { name: "Install" }));
+    expect(await screen.findByText("No SKILL.md found under there.")).toBeTruthy();
+
+    fireEvent.change(field, { target: { value: "just-a-word" } });
+    fireEvent.click(screen.getByRole("button", { name: "Install" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("skills installer");
   });
 });

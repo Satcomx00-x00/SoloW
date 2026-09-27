@@ -5,6 +5,7 @@ import type { Executor } from "./executor/types.js";
 import {
   checkpointStorePath,
   cleanupWorktree,
+  harnessHomePath,
   harnessTranscriptsPath,
   repositoryOfWorktree,
 } from "./worktree/manager.js";
@@ -128,7 +129,9 @@ export async function removeTaskFiles(
 ): Promise<Set<string>> {
   // The transcripts a containerised run left on the host go with the worktrees: without the
   // directory they were keyed to they resume nothing, and they are the one thing here that
-  // holds the conversation's text.
+  // holds the conversation's text. The Task's harness home (Decision 0027) goes with them for
+  // the same reason and one more: it is where the harness cached whatever it cached, and a
+  // deleted Task must not leave that on the machine.
   if (worktreeRoot) {
     try {
       await host.exec([
@@ -137,6 +140,7 @@ export async function removeTaskFiles(
         "--",
         harnessTranscriptsPath(worktreeRoot, taskId),
         checkpointStorePath(worktreeRoot, taskId),
+        harnessHomePath(worktreeRoot, taskId),
       ]);
     } catch (cause) {
       log(`retention: could not remove transcripts of task ${taskId}`, cause);

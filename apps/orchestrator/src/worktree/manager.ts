@@ -80,6 +80,24 @@ export function checkpointStorePath(root: string, taskId: string): string {
 }
 
 /**
+ * The `$HOME` a Task's harness is given, in place of the operator's own (Decision 0027).
+ *
+ * A harness started with the orchestrator's environment reads `~/.claude/`, `~/.claude.json`,
+ * `$HOME/CLAUDE.md`, the operator's `settings.json` and their user-level MCP servers and Skills —
+ * so editing a file on the machine silently changed what every SoloW run did. This directory is
+ * the app's answer instead: made empty at launch, and everything the app really wants the harness
+ * to load still arrives on the command line (`--mcp-config`, `--plugin-dir`, `--settings`).
+ *
+ * Under the worktree root rather than a temp directory, and beside the transcripts for the same
+ * two reasons they are: the Docker mount guard already admits this root, and the retention sweep
+ * already removes anything keyed to the Task here. Kept for the life of the Task, not per round —
+ * a harness that cached something in its home on round one is resumed on round two.
+ */
+export function harnessHomePath(root: string, taskId: string): string {
+  return join(root, `${taskId}--harness-home`);
+}
+
+/**
  * Where a Task's **own** copy of a Repository lives, when it is given one (`ownClone`).
  *
  * Under the cache root rather than the worktree root, because it is a repository and not a

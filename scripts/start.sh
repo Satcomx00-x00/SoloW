@@ -32,10 +32,11 @@ SOLOW_SQLITE_PATH="$GC_DIR/solow.db"
 SOLOW_SECRET_KEY="$(cat "$KEY_FILE")"
 export SOLOW_SQLITE_PATH SOLOW_SECRET_KEY
 export SOLOW_DB_DRIVER="${SOLOW_DB_DRIVER:-sqlite}"
-# Dev-owner mode skips sign-in and binds to the seeded Workspace with the core flag on.
+# Dev-owner mode skips sign-in and binds to the seeded Workspace.
 # Set SOLOW_DEV_OWNER=off to exercise the real BetterAuth flow: the first visit to
-# /sign-in creates the single Owner account, then enable the feature for their Workspace with
-#   bun run flag enable ff-core-program
+# /sign-in creates the single Owner account. Feature flags default ON, so nothing has to be
+# switched on after that; `bun run flag list` shows them and `bun run flag disable <key>` is the
+# kill switch.
 export SOLOW_DEV_OWNER="${SOLOW_DEV_OWNER:-on}"
 # Signs the session cookie; the env module refuses anything under 32 characters.
 export SOLOW_AUTH_SECRET="${SOLOW_AUTH_SECRET:-dev-insecure-session-secret-32ch}"

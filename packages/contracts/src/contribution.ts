@@ -300,3 +300,87 @@ export type ReviewDraftDto = z.infer<typeof reviewDraftDto>;
 export function reviewDraftPreferenceKey(taskId: string): string {
   return `review-draft:${taskId}`;
 }
+
+/**
+ * How the app looks, per user (issue: workspace controls).
+ *
+ * A fourth row of `ui_preference`, its own schema for the reason the three above are their own:
+ * a theme is neither an arrangement nor a width, and widening one of those shapes to hold it
+ * would make that shape stop describing anything.
+ *
+ * `system` is a real third value, not the absence of a choice. The alternative — storing only
+ * `light`/`dark` and treating "no row" as "follow the OS" — cannot express *returning* to the
+ * OS after having chosen, because the way back would be deleting the row, and a delete is not
+ * something a preference upsert can say. Three values, one of which defers, keeps every
+ * transition expressible.
+ */
+export const themeSchema = z.enum(["system", "light", "dark"]);
+export type Theme = z.infer<typeof themeSchema>;
+
+export const appearanceSchema = z.object({ theme: themeSchema });
+export type Appearance = z.infer<typeof appearanceSchema>;
+
+/**
+ * Dark, not `system`, and deliberately so: this is a console that sits open beside an editor all
+ * day, which is the same reason `app/layout.tsx` hard-coded `dark` before a preference existed.
+ * Changing the default to `system` would have every existing installation change appearance on
+ * upgrade because of a setting nobody touched.
+ */
+export const DEFAULT_APPEARANCE: Appearance = { theme: "dark" };
+
+export const setAppearanceInput = appearanceSchema;
+export type SetAppearanceInput = z.infer<typeof setAppearanceInput>;
+
+/** Echoes the identity back for the same reason `taskPaneLayoutDto` does (Principle V). */
+export const appearanceDto = z.object({
+  workspaceId: idSchema,
+  userId: idSchema,
+  appearance: appearanceSchema,
+});
+export type AppearanceDto = z.infer<typeof appearanceDto>;
+
+/** The single `ui_preference.key` the theme is stored under. */
+export const APPEARANCE_PREFERENCE_KEY = "appearance";
+
+/**
+ * What a new Task starts as, per user (issue: workspace controls).
+ *
+ * Every Task needs a Harness Profile and an Executor Profile, and until now every Task form
+ * opened with both empty — so creating work meant answering the same two questions the same way
+ * every time. This is that answer, written down once.
+ *
+ * Nullable on both, and null is not "unset by accident": a Workspace with several Harness
+ * Profiles may genuinely want the choice made per Task, and a null default says so rather than
+ * picking the first row and pretending it was chosen.
+ *
+ * **These ids are read back through the live Profile lists, never trusted as stored.** A default
+ * is the only preference in this file that points at another row, so it is the only one that can
+ * go stale by something *else* being deleted — and a form preselecting a Profile that no longer
+ * exists would fail on submit with a message about the wrong thing. `getTaskDefaults` resolves
+ * each id and answers null for one that is gone; see its doc comment.
+ */
+export const taskDefaultsSchema = z.object({
+  harnessProfileId: idSchema.nullable(),
+  executorProfileId: idSchema.nullable(),
+});
+export type TaskDefaults = z.infer<typeof taskDefaultsSchema>;
+
+/** No default is a default: a fresh Workspace has no Profiles to point at yet. */
+export const DEFAULT_TASK_DEFAULTS: TaskDefaults = {
+  harnessProfileId: null,
+  executorProfileId: null,
+};
+
+export const setTaskDefaultsInput = taskDefaultsSchema;
+export type SetTaskDefaultsInput = z.infer<typeof setTaskDefaultsInput>;
+
+/** Echoes the identity back for the same reason `taskPaneLayoutDto` does (Principle V). */
+export const taskDefaultsDto = z.object({
+  workspaceId: idSchema,
+  userId: idSchema,
+  defaults: taskDefaultsSchema,
+});
+export type TaskDefaultsDto = z.infer<typeof taskDefaultsDto>;
+
+/** The single `ui_preference.key` the defaults are stored under. */
+export const TASK_DEFAULTS_PREFERENCE_KEY = "task-defaults";

@@ -33,6 +33,7 @@ import {
 } from "../dal/session.js";
 import { getTaskById } from "../dal/task.js";
 import { ownerProcedure, router, unwrap } from "../trpc.js";
+import { sessionRunLinks } from "./session-links.js";
 import { latestDiffPerRepository, sessionRounds } from "./session-rounds.js";
 
 type SessionRow = SessionDto & { workspaceId: string };
@@ -78,7 +79,7 @@ export const sessionRouter = router({
         tags: ["session"],
         protect: true,
         summary:
-          "Fetch one Session with its event log — minus any range a compaction summary stands in for, which session.eventRange reads back — the diff captured at the review gate for each Repository the Task works in, and any recorded decision. Pass workflowStepId to narrow the events to one Workflow Step.",
+          "Fetch one Session with its event log — minus any range a compaction summary stands in for, which session.eventRange reads back — the diff captured at the review gate for each Repository the Task works in, the merge requests, pipelines and commits the run linked to, and any recorded decision. Pass workflowStepId to narrow the events to one Workflow Step.",
       },
     })
     .input(getSessionInput)
@@ -120,6 +121,10 @@ export const sessionRouter = router({
       // Minted from the rows already in hand: re-reading the log to hash it would make the one
       // endpoint a long run has to survive scan the whole table twice per request.
       const cursor = sessionCursorOf(input.sessionId, events);
+      // Where the run went outside this app, from the whole log for the same reason `diffs` and
+      // `rounds` use it: a merge request opened in Step 2 does not stop existing because the
+      // terminal is showing Step 1. Free — the rows are already in hand.
+      const links = sessionRunLinks(events);
       // What compaction bought. A summarised range is answered by its summary and nothing else;
       // the events it stands for are still there and still readable through `eventRange` (AC-2),
       // but a response that carried them anyway would leave the log growing without bound on the
@@ -136,6 +141,7 @@ export const sessionRouter = router({
         cursor,
         review,
         rounds,
+        links,
       };
     }),
 

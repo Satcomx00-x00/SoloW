@@ -90,6 +90,7 @@ import {
 import type { PreflightResult } from "../../executor/preflight.js";
 import type { Executor } from "../../executor/types.js";
 import { worktreeNameForTask } from "../../harness/claude-code-runner.js";
+import { resolveHarnessConfigEnv } from "../../harness/hermetic-home.js";
 import { materializeLibraries } from "../../harness/libraries.js";
 import {
   harnessCreatesOwnWorktree,
@@ -113,6 +114,7 @@ import {
   commitWorktree,
   diffWorktree,
   discardWorktreeChanges,
+  harnessHomePath,
   harnessTranscriptsPath,
   hasChanges,
   isRepositoryUnusable,
@@ -1815,23 +1817,41 @@ export async function runTaskLifecycle(
           ? ((await loadHarnessProbeContext(db, workspaceId, leg.harnessProfile.id))
               ?.secretCiphertext ?? null)
           : ctx.secretCiphertext;
+        /*
+         * What a command run by *this* executor would inherit, not what the orchestrator
+         * inherited (issue #96, §1). `SpawnOpts.env` replaces the child's environment wholesale,
+         * so the base has to describe the machine the harness is actually on: handing a
+         * containerised harness the host's `PATH` and `HOME` describes a machine it is not running
+         * on, and it then fails for reasons that have nothing to do with the Task. Identical to
+         * `process.env` for the local driver, which is what it always was.
+         */
+        const hostEnv = await executor.baseEnv();
+        /*
+         * A blank, app-owned configuration for this Task (Decision 0027).
+         *
+         * Resolved here rather than once at provisioning time because the answer depends on the
+         * driver: a container already has a `HOME` nobody has ever configured and is only told to
+         * stay in it, while a local run is pointed at a directory beside its worktree so the
+         * operator's `~/.claude` is somewhere it never looks. Idempotent, which is the point —
+         * every round of the Task passes through here and round two resumes round one's home.
+         */
+        const configEnv = await resolveHarnessConfigEnv({
+          kind: ctx.executorProfile.config.kind,
+          home: harnessHomePath(deps.worktreeRoot, taskId),
+          baseEnv: hostEnv,
+        });
         const shaped = prepareHarnessEnv({
           authMode: leg.harnessProfile.authMode,
           secretCiphertext: legCiphertext,
-          /*
-           * What a command run by *this* executor would inherit, not what the orchestrator
-           * inherited (issue #96, §1). `SpawnOpts.env` replaces the child's environment wholesale,
-           * so the base has to describe the machine the harness is actually on: handing a
-           * containerised harness the host's `PATH` and `HOME` describes a machine it is not running
-           * on, and it then fails for reasons that have nothing to do with the Task. Identical to
-           * `process.env` for the local driver, which is what it always was.
-           */
-          baseEnv: await executor.baseEnv(),
+          baseEnv: hostEnv,
           subscriptionEnvVar: leg.harnessCatalog.subscriptionEnvVar,
           meteredEnvVar: leg.harnessCatalog.meteredEnvVar,
           // The Executor Profile's environment (issue #73). It is applied under the credential
           // shaping, never over it, so a profile cannot become a route to metered billing.
           profileEnv: ctx.executorProfile.config.env ?? {},
+          // …and under the configuration isolation, for the same reason stated the same way: the
+          // configuration a Task runs against is the app's decision, not a profile's.
+          configEnv,
         });
         if (!shaped.ok) return { kind: "failed" as const, cls: CREDENTIAL_EXPIRED_REASON };
 

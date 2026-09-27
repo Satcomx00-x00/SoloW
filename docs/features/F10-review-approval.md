@@ -55,6 +55,14 @@ use.
 - **FR-12** No pull request is promised by that summary, because this build opens none. Opening
   one is [F12](./F12-integrations.md)'s integration strategies; stating it here would be the
   same failure the summary exists to prevent, pointed the other way.
+- **FR-12a** A Harness may nonetheless open one *itself* — it has a shell and the forge's CLI —
+  and where it does, the Task page lists every such action as a link: the merge request or pull
+  request, the pipeline, the commits, the release. The links are **read back out of the Session
+  log**, from what the run printed, and nothing is stored: the transcript is already the record,
+  and a table of "links this run made" would be a second source of truth for it. They are links
+  and not status — this build asks no provider whether a pipeline passed, and a control implying
+  a state it had not checked would be the same failure FR-12 names. Read from the whole log, so
+  a merge request opened under one Workflow Step is still listed while another is on screen.
 - **FR-13** IF integration fails for any group after approval, THEN the Task fails with
   `partial_integration` and its Session log names the branches that were committed and the ones
   that were not, with the reason each failed. It is not retried automatically: a second attempt

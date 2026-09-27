@@ -5,7 +5,7 @@ import {
   type ScannedSkillDto,
   type SkillImportSource,
 } from "@solow/contracts";
-import { Download, FileArchive, FolderOpen, Search } from "lucide-react";
+import { Download, FileArchive, FolderOpen, Search, Zap } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -32,13 +32,18 @@ import {
 import { trpc } from "@/trpc/react";
 
 /**
- * Bulk import of Skills from a directory on this machine or a git repository (spec F24).
+ * Bulk import of Skills from a locator, a directory on this machine or a `.zip` (spec F24).
  *
- * Two steps on purpose: a scan first, which finds every directory holding a `SKILL.md` and
- * says what it would call each one, then the import of the ones left ticked. A directory of
- * fifty Skills usually has a few the team does not want every harness reading, and the only
- * moment to leave those out is before they are in the library. A Skill whose name is already
- * there is shown unticked and locked, with the reason, rather than silently dropped.
+ * The locator is the front door: whatever a README or skills.sh says to run — `npx skills add
+ * owner/repo --skill x`, `owner/repo@skill`, a `/tree/` URL, a raw `SKILL.md`, a site with a
+ * `/.well-known/agent-skills/` index — pasted as it is. It offers two buttons. *Install* does
+ * what the CLI would: fetch, find, import everything the locator names, in one step, because
+ * "add this skill" is the whole of most requests. *Scan* is the two-step route: find every
+ * directory holding a `SKILL.md`, say what each would be called, and import the ones left
+ * ticked — a repository of fifty Skills usually has a few the team does not want every harness
+ * reading, and the only moment to leave those out is before they are in the library. A Skill
+ * whose name is already there is shown unticked and locked, with the reason, rather than
+ * silently dropped.
  *
  * Each import is a directory source: the scripts, references and assets beside the SKILL.md go
  * with it, and the directory is read again on every run — so a repository's archive is fetched
@@ -48,7 +53,10 @@ import { trpc } from "@/trpc/react";
  * it over as `droppedFile`. The archive is unpacked server-side into that same directory and
  * scanned like a folder, so the picker that follows is the one the other two sources get.
  */
-type Source = SkillImportSource["kind"] | "zip";
+type Source = Exclude<SkillImportSource["kind"], "git"> | "zip";
+
+/** What the import reported: how many arrived, how many it passed over, what it could not find. */
+export type ImportReport = { count: number; skipped: number; missing: string[] };
 
 /** A file's bytes as base64, in chunks: `String.fromCharCode(...bytes)` overflows the stack past ~100 KB. */
 async function fileToBase64(file: File): Promise<string> {
@@ -67,14 +75,14 @@ export function ImportSkillsDialog({
   onDroppedFileTaken,
 }: {
   trigger: ReactNode;
-  onImported: (count: number, skipped: number) => void;
+  onImported: (report: ImportReport) => void;
   /** A `.zip` dropped on the surface around this dialog: opens it in zip mode and unpacks at once. */
   droppedFile?: File | null;
   onDroppedFileTaken?: () => void;
 }) {
   const utils = trpc.useUtils();
   const [open, setOpen] = useState(false);
-  const [kind, setKind] = useState<Source>("path");
+  const [kind, setKind] = useState<Source>("locator");
   const [location, setLocation] = useState("");
   const [archive, setArchive] = useState<File | null>(null);
   const [enabled, setEnabled] = useState(false);
@@ -117,7 +125,21 @@ export function ImportSkillsDialog({
   const doImport = trpc.library.skill.import.useMutation({
     onSuccess: ({ imported, skipped }) => {
       utils.library.skill.list.invalidate();
-      onImported(imported.length, skipped.length);
+      onImported({ count: imported.length, skipped: skipped.length, missing: [] });
+      setOpen(false);
+      reset();
+    },
+  });
+  // The one-step route. A source with nothing in it stays open on the same empty-state the scan
+  // shows, since closing on "nothing happened" would look like something did.
+  const install = trpc.library.skill.install.useMutation({
+    onSuccess: ({ found, imported, skipped, missing }) => {
+      if (found.length === 0) {
+        setFound([]);
+        return;
+      }
+      utils.library.skill.list.invalidate();
+      onImported({ count: imported.length, skipped: skipped.length, missing });
       setOpen(false);
       reset();
     },
@@ -126,11 +148,11 @@ export function ImportSkillsDialog({
   const source: SkillImportSource | null =
     kind === "path"
       ? { kind, path: location.trim() }
-      : kind === "git"
-        ? { kind, url: location.trim() }
+      : kind === "locator"
+        ? { kind, locator: location.trim() }
         : null;
-  const pending = scan.isPending || unpack.isPending;
-  const error = scan.error ?? unpack.error;
+  const pending = scan.isPending || unpack.isPending || install.isPending;
+  const error = scan.error ?? unpack.error ?? install.error;
   const toggle = (name: string, on: boolean) =>
     setPicked((prev) => {
       const next = new Set(prev);
@@ -153,8 +175,9 @@ export function ImportSkillsDialog({
         <DialogHeader>
           <DialogTitle>Import skills</DialogTitle>
           <DialogDescription>
-            Every directory holding a SKILL.md becomes one Skill, with the scripts and references
-            beside it.
+            Paste what a README or skills.sh says to run, or point at a repository, a directory or
+            an archive. Every directory holding a SKILL.md becomes one Skill, with the scripts and
+            references beside it.
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="space-y-4">
@@ -162,7 +185,10 @@ export function ImportSkillsDialog({
             className={`grid gap-3 ${kind === "zip" ? "sm:grid-cols-[13rem_1fr]" : "sm:grid-cols-[13rem_1fr_auto]"}`}
             onSubmit={(e) => {
               e.preventDefault();
-              if (source) scan.mutate({ source });
+              // Enter in the locator field installs — the CLI it stands in for asks nothing more.
+              if (kind === "locator" && source?.kind === "locator") {
+                install.mutate({ locator: source.locator, enabled });
+              } else if (source) scan.mutate({ source });
             }}
           >
             <div className="grid gap-2">
@@ -178,8 +204,8 @@ export function ImportSkillsDialog({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="locator">A skill, repository or install command</SelectItem>
                   <SelectItem value="path">A directory on this machine</SelectItem>
-                  <SelectItem value="git">A git repository</SelectItem>
                   <SelectItem value="zip">A .zip file</SelectItem>
                 </SelectContent>
               </Select>
@@ -234,13 +260,13 @@ export function ImportSkillsDialog({
               <>
                 <div className="grid gap-2">
                   <Label htmlFor="skills-import-location">
-                    {kind === "path" ? "Directory" : "Repository URL"}
+                    {kind === "path" ? "Directory" : "Skill or repository"}
                   </Label>
                   <Input
                     id="skills-import-location"
                     className="font-mono"
                     placeholder={
-                      kind === "path" ? "/srv/skills" : "https://github.com/acme/skills#main"
+                      kind === "path" ? "/srv/skills" : "npx skills add vercel-labs/agent-skills"
                     }
                     value={location}
                     onChange={(e) => setLocation(e.target.value)}
@@ -251,14 +277,46 @@ export function ImportSkillsDialog({
                   <span className="text-sm opacity-0" aria-hidden>
                     Scan
                   </span>
-                  <Button type="submit" variant="secondary" loading={pending}>
-                    <Search aria-hidden />
-                    Scan
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button
+                      type={kind === "locator" ? "button" : "submit"}
+                      variant="secondary"
+                      loading={scan.isPending}
+                      disabled={pending && !scan.isPending}
+                      onClick={
+                        kind === "locator" ? () => source && scan.mutate({ source }) : undefined
+                      }
+                    >
+                      <Search aria-hidden />
+                      Scan
+                    </Button>
+                    {kind === "locator" && (
+                      <Button
+                        type="submit"
+                        loading={install.isPending}
+                        disabled={pending && !install.isPending}
+                      >
+                        <Zap aria-hidden />
+                        Install
+                      </Button>
+                    )}
+                  </div>
                 </div>
               </>
             )}
           </form>
+          {kind === "locator" && !found && (
+            <p className="text-muted-foreground text-xs leading-relaxed">
+              Anything <code className="font-mono">npx skills add</code> takes:{" "}
+              <code className="font-mono">owner/repo</code>,{" "}
+              <code className="font-mono">owner/repo@skill</code>, a GitHub or GitLab URL (a{" "}
+              <code className="font-mono">/tree/</code> path included), a skills.sh page, a raw{" "}
+              <code className="font-mono">SKILL.md</code>, a .zip or .tar.gz, a site publishing{" "}
+              <code className="font-mono">/.well-known/agent-skills/</code>, or the whole install
+              command with its <code className="font-mono">--skill</code> flags. Install takes
+              everything it names; Scan lets you pick.
+            </p>
+          )}
           {kind === "zip" && unpack.isPending && (
             <p className="text-muted-foreground text-sm" role="status">
               Unpacking {archive?.name ?? "the archive"}…
@@ -351,15 +409,20 @@ export function ImportSkillsDialog({
 /** The scan's failure, said the way the operator can act on it. */
 function describeScanError(code: string, kind: Source): string {
   if (code === HarnessLibraryErrorCode.ImportSourceNotFound) {
-    return "That is not a directory on the machine SoloW runs on.";
+    return kind === "locator"
+      ? "Nothing at that path — on this machine, or inside the repository."
+      : "That is not a directory on the machine SoloW runs on.";
   }
   if (code === HarnessLibraryErrorCode.ImportArchiveInvalid) {
-    return "That is not a .zip SoloW can unpack — or it names a path outside itself, which is refused whole.";
+    return kind === "locator"
+      ? "What that served is not a SKILL.md or an archive SoloW can unpack — or its digest did not match what the site's index promised."
+      : "That is not a .zip SoloW can unpack — or it names a path outside itself, which is refused whole.";
   }
   if (code === HarnessLibraryErrorCode.ImportCloneFailed) {
-    return kind === "git"
-      ? "That repository's archive could not be fetched — check the URL (add #branch for a branch other than the default), and that it is public or reachable from this machine."
-      : code;
+    return "That could not be fetched — check the locator (add #branch for a branch other than the default), and that it is public or reachable from this machine.";
+  }
+  if (code === HarnessLibraryErrorCode.ImportLocatorInvalid) {
+    return "That is not something a skills installer would take: try owner/repo, a repository URL, a directory, or the npx skills add … line as the README prints it.";
   }
   return code;
 }

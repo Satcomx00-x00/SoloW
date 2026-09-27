@@ -1,9 +1,11 @@
 import "server-only";
 import {
   renameWorkspaceInput,
+  resetWorkspaceInput,
   syncRequestDto,
   syncStatusDto,
   workspaceDto,
+  workspaceResetDto,
   workspaceSetupDto,
 } from "@solow/contracts";
 import {
@@ -12,16 +14,23 @@ import {
   getWorkspaceSetup,
   renameWorkspace,
   requestWorkspaceSync,
+  resetWorkspaceData,
 } from "../dal/workspace.js";
-import { router, sessionProcedure, unwrap } from "../trpc.js";
+import {
+  rateLimit,
+  router,
+  sessionProcedure,
+  unwrap,
+  workspaceControlsProcedure,
+} from "../trpc.js";
 
 /**
  * The Workspace as a thing an Owner can see and act on (2026-08-28).
  *
  * On `sessionProcedure`, not `ownerProcedure`, for the same reason `flag.ts` is: every
- * flag-gated procedure needs `ff-core-program` ON, and it ships OFF. The setup checklist is what
- * tells an Owner the core loop is off and offers to turn it on, so gating it behind that flag
- * would hide the one screen that can fix it. Tenancy is untouched — the Workspace is always the
+ * flag-gated procedure needs `ff-core-program` ON, and an operator can turn it off. The setup
+ * checklist is what tells an Owner the core loop is off and offers to turn it back on, so gating
+ * it behind that flag would hide the one screen that can fix it. Tenancy is untouched — the Workspace is always the
  * session's own, never named by the caller (Principle V).
  */
 export const workspaceRouter = router({
@@ -112,4 +121,32 @@ export const workspaceRouter = router({
     .input(workspaceDto.pick({}).optional())
     .output(syncRequestDto)
     .mutation(async ({ ctx }) => unwrap(await requestWorkspaceSync(ctx.rctx))),
+
+  /**
+   * Empty this Workspace (spec F16).
+   *
+   * Behind its own flag rather than `ff-core-program`, because this is the surface an Owner
+   * reaches for when the core loop has left the Workspace in a state they want gone — see
+   * `workspaceControlsProcedure`. Rate limited for the reason `secret.set` is, and then some:
+   * it is the only write in the product with no undo, so a client stuck in a retry loop must
+   * run out of attempts rather than keep succeeding.
+   *
+   * The name is checked against the server's copy inside the DAL, not here, so the check and
+   * the delete read the same row.
+   */
+  reset: workspaceControlsProcedure
+    .use(rateLimit("workspace.reset"))
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/workspace.reset",
+        tags: ["workspace"],
+        protect: true,
+        summary:
+          "Delete this Workspace's data. `work-data` removes Projects, Issues, Tasks and Sessions and keeps the setup; `everything` additionally removes Repositories, Profiles, Secrets, Integrations, libraries and preferences. The Workspace row, the account and the harness catalog always survive. `confirmName` must equal the Workspace's current name. There is no undo.",
+      },
+    })
+    .input(resetWorkspaceInput)
+    .output(workspaceResetDto)
+    .mutation(async ({ ctx, input }) => unwrap(await resetWorkspaceData(ctx.rctx, input))),
 });

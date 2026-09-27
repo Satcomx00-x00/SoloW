@@ -6419,7 +6419,7 @@
     "/library.skill.scan": {
       "post": {
         "operationId": "library-skill-scan",
-        "summary": "Find every Skill — each directory holding a SKILL.md — under a directory on the host or in a repository, whose archive (default branch, or #ref) SoloW fetches over HTTPS into its skills directory on every scan. Returns them named and described, marking the ones the library already holds. Nothing is imported.",
+        "summary": "Find every Skill — each directory holding a SKILL.md — under a directory on the host, in a repository whose archive (default branch, or #ref) SoloW fetches over HTTPS into its skills directory on every scan, or at a locator: anything `npx skills add` takes (owner/repo, owner/repo@skill, a /tree/ URL, a skills.sh page, a .zip, a SKILL.md, a site's /.well-known/agent-skills/) or the install command itself. Returns them named and described, marking the ones the library already holds. Nothing is imported.",
         "tags": [
           "library"
         ],
@@ -6475,6 +6475,26 @@
                         "required": [
                           "kind",
                           "url"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "locator"
+                            ]
+                          },
+                          "locator": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4000
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "locator"
                         ]
                       }
                     ]
@@ -6675,6 +6695,250 @@
                   "required": [
                     "root",
                     "skills"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/library.skill.install": {
+      "post": {
+        "operationId": "library-skill-install",
+        "summary": "Install Skills in one step, the way `npx skills add <locator> --skill … -y` would: the locator — anything the skills installers take (owner/repo, owner/repo@skill, github:/gitlab: shorthands, a repository, /tree/ or /blob/…/SKILL.md URL, git@host:…, a skills.sh page, a .zip/.tar.gz or SKILL.md over HTTPS, a site publishing /.well-known/agent-skills/, a directory on the host) or the install command a README prints — is fetched into SoloW's skills directory and scanned, and every Skill it names (or every one found) is imported as a directory source. A name the library already holds is skipped; a name asked for that the source lacks is reported as missing.",
+        "tags": [
+          "library"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "locator": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4000
+                  },
+                  "skills": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "maxItems": 200,
+                    "default": []
+                  },
+                  "enabled": {
+                    "type": "boolean",
+                    "default": false
+                  }
+                },
+                "required": [
+                  "locator"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "imported": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "name": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "source": {
+                            "oneOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "inline"
+                                    ]
+                                  },
+                                  "body": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 200000
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "body"
+                                ]
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": [
+                                      "path"
+                                    ]
+                                  },
+                                  "path": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 4000
+                                  }
+                                },
+                                "required": [
+                                  "kind",
+                                  "path"
+                                ]
+                              }
+                            ]
+                          },
+                          "enabled": {
+                            "type": "boolean"
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "updatedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name",
+                          "description",
+                          "source",
+                          "enabled",
+                          "createdAt",
+                          "updatedAt"
+                        ]
+                      }
+                    },
+                    "skipped": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+                      }
+                    },
+                    "root": {
+                      "type": "string"
+                    },
+                    "found": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string",
+                            "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "path": {
+                            "type": "string"
+                          },
+                          "relativePath": {
+                            "type": "string"
+                          },
+                          "files": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "existing": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "description",
+                          "path",
+                          "relativePath",
+                          "files",
+                          "existing"
+                        ]
+                      }
+                    },
+                    "missing": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "imported",
+                    "skipped",
+                    "root",
+                    "found",
+                    "missing"
                   ]
                 }
               }
@@ -10885,6 +11149,469 @@
                     "userId",
                     "taskId",
                     "draft"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/preference.getAppearance": {
+      "get": {
+        "operationId": "preference-getAppearance",
+        "summary": "The signed-in user's theme: `system`, `light` or `dark`. Answers the default (`dark`) when nothing is saved.",
+        "tags": [
+          "preference"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "workspaceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "userId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "appearance": {
+                      "type": "object",
+                      "properties": {
+                        "theme": {
+                          "type": "string",
+                          "enum": [
+                            "system",
+                            "light",
+                            "dark"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "theme"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "workspaceId",
+                    "userId",
+                    "appearance"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.NOT_FOUND"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/preference.setAppearance": {
+      "post": {
+        "operationId": "preference-setAppearance",
+        "summary": "Set the signed-in user's theme.",
+        "tags": [
+          "preference"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "theme": {
+                    "type": "string",
+                    "enum": [
+                      "system",
+                      "light",
+                      "dark"
+                    ]
+                  }
+                },
+                "required": [
+                  "theme"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "workspaceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "userId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "appearance": {
+                      "type": "object",
+                      "properties": {
+                        "theme": {
+                          "type": "string",
+                          "enum": [
+                            "system",
+                            "light",
+                            "dark"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "theme"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "workspaceId",
+                    "userId",
+                    "appearance"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/preference.getTaskDefaults": {
+      "get": {
+        "operationId": "preference-getTaskDefaults",
+        "summary": "The Harness Profile and Executor Profile a new Task starts with. Either is null when none is chosen, or when the one that was chosen has since been deleted.",
+        "tags": [
+          "preference"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "workspaceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "userId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "defaults": {
+                      "type": "object",
+                      "properties": {
+                        "harnessProfileId": {
+                          "type": "string",
+                          "nullable": true,
+                          "minLength": 1
+                        },
+                        "executorProfileId": {
+                          "type": "string",
+                          "nullable": true,
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "harnessProfileId",
+                        "executorProfileId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "workspaceId",
+                    "userId",
+                    "defaults"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.NOT_FOUND"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/preference.setTaskDefaults": {
+      "post": {
+        "operationId": "preference-setTaskDefaults",
+        "summary": "Choose the Harness Profile and Executor Profile a new Task starts with. Null on either clears it. Refuses a Profile this Workspace does not own.",
+        "tags": [
+          "preference"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "harnessProfileId": {
+                    "type": "string",
+                    "nullable": true,
+                    "minLength": 1
+                  },
+                  "executorProfileId": {
+                    "type": "string",
+                    "nullable": true,
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "harnessProfileId",
+                  "executorProfileId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "workspaceId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "userId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "defaults": {
+                      "type": "object",
+                      "properties": {
+                        "harnessProfileId": {
+                          "type": "string",
+                          "nullable": true,
+                          "minLength": 1
+                        },
+                        "executorProfileId": {
+                          "type": "string",
+                          "nullable": true,
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "harnessProfileId",
+                        "executorProfileId"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "workspaceId",
+                    "userId",
+                    "defaults"
                   ]
                 }
               }
@@ -23509,7 +24236,7 @@
     "/session.get": {
       "get": {
         "operationId": "session-get",
-        "summary": "Fetch one Session with its event log — minus any range a compaction summary stands in for, which session.eventRange reads back — the diff captured at the review gate for each Repository the Task works in, and any recorded decision. Pass workflowStepId to narrow the events to one Workflow Step.",
+        "summary": "Fetch one Session with its event log — minus any range a compaction summary stands in for, which session.eventRange reads back — the diff captured at the review gate for each Repository the Task works in, the merge requests, pipelines and commits the run linked to, and any recorded decision. Pass workflowStepId to narrow the events to one Workflow Step.",
         "tags": [
           "session"
         ],
@@ -25127,6 +25854,47 @@
                           "review"
                         ]
                       }
+                    },
+                    "links": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "merge_request",
+                              "pipeline",
+                              "commit",
+                              "release",
+                              "issue"
+                            ]
+                          },
+                          "url": {
+                            "type": "string",
+                            "format": "uri"
+                          },
+                          "label": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "host": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "repository": {
+                            "type": "string",
+                            "nullable": true
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "url",
+                          "label",
+                          "host",
+                          "repository"
+                        ]
+                      }
                     }
                   },
                   "required": [
@@ -25137,7 +25905,8 @@
                     "diffs",
                     "summaries",
                     "cursor",
-                    "rounds"
+                    "rounds",
+                    "links"
                   ]
                 }
               }
@@ -35140,6 +35909,144 @@
                   "required": [
                     "accepted",
                     "repositories"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workspace.reset": {
+      "post": {
+        "operationId": "workspace-reset",
+        "summary": "Delete this Workspace's data. `work-data` removes Projects, Issues, Tasks and Sessions and keeps the setup; `everything` additionally removes Repositories, Profiles, Secrets, Integrations, libraries and preferences. The Workspace row, the account and the harness catalog always survive. `confirmName` must equal the Workspace's current name. There is no undo.",
+        "tags": [
+          "workspace"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "work-data",
+                      "everything"
+                    ]
+                  },
+                  "confirmName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80
+                  }
+                },
+                "required": [
+                  "scope",
+                  "confirmName"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "scope": {
+                      "type": "string",
+                      "enum": [
+                        "work-data",
+                        "everything"
+                      ]
+                    },
+                    "removed": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "table": {
+                            "type": "string"
+                          },
+                          "rows": {
+                            "type": "integer",
+                            "minimum": 0
+                          }
+                        },
+                        "required": [
+                          "table",
+                          "rows"
+                        ]
+                      }
+                    },
+                    "rows": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "worktrees": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "scope",
+                    "removed",
+                    "rows",
+                    "worktrees"
                   ]
                 }
               }

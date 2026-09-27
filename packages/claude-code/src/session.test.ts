@@ -117,6 +117,23 @@ describe("buildArgs", () => {
     );
   });
 
+  it("loads only the project's and the checkout's settings, never the operator's own", () => {
+    // The second belt of Decision 0027. The environment already points `$HOME` and
+    // `CLAUDE_CONFIG_DIR` at a directory SoloW made, so there are no user settings to find; this
+    // says so in argv as well, which is the half an operator's own `--settings` cannot undo.
+    const args = buildArgs({ worktreeName: "w", permissionMode: "acceptEdits" });
+    const at = args.indexOf("--setting-sources");
+    expect(at).toBeGreaterThanOrEqual(0);
+    expect(args[at + 1]).toBe("project,local");
+    // …and it is one of SoloW's own arguments, so the configured extras still come after it.
+    const withExtras = buildArgs({
+      worktreeName: "w",
+      permissionMode: "acceptEdits",
+      extraArgs: ["--model", "opus"],
+    });
+    expect(withExtras.indexOf("--setting-sources")).toBeLessThan(withExtras.indexOf("--model"));
+  });
+
   it("puts configured extras after the arguments SoloW requires", () => {
     const args = buildArgs({
       worktreeName: "w",

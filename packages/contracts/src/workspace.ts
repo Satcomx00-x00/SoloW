@@ -131,3 +131,67 @@ export const taskPurgeRequestedData = z.object({
   worktrees: z.array(z.string().min(1)).max(64),
 });
 export type TaskPurgeRequestedData = z.infer<typeof taskPurgeRequestedData>;
+
+/**
+ * How much of a Workspace "clean up the database" removes.
+ *
+ * Two scopes rather than one, because the two things people mean by it are genuinely different
+ * and only one of them is recoverable in practice:
+ *
+ * - `work-data` empties what the Workspace has *done* — Projects, Issues, Tasks, Sessions and
+ *   everything hanging off them — and keeps what it *is*: Repositories, Harness and Executor
+ *   Profiles, Secrets, Integrations, libraries, flags and preferences. After it you can start
+ *   work again immediately, which is what someone clearing out a pile of experiments wants.
+ * - `everything` additionally removes the setup. What survives is the account and the Workspace
+ *   row itself, reseeded with the harness catalog a fresh install gets — a factory reset.
+ *
+ * Neither touches the account or the Workspace row: a surface that could delete the tenant it
+ * is addressed through would have nowhere to answer from (Principle V).
+ */
+export const workspaceResetScopeSchema = z.enum(["work-data", "everything"]);
+export type WorkspaceResetScope = z.infer<typeof workspaceResetScopeSchema>;
+
+/**
+ * Typing the Workspace's own name back is the gate, rather than a second "are you sure".
+ *
+ * A confirm dialog is the right weight for deleting one row you are looking at; it is the wrong
+ * weight for something with no undo and no record of what it removed. Re-typing a name cannot
+ * be done by a mis-aimed click or a keyboard repeat, and it fails closed — the server compares
+ * it against the name it holds, so a stale tab whose Workspace was renamed underneath it is
+ * refused rather than honoured.
+ *
+ * No `id`: the Workspace is the caller's own, from the session (Principle V).
+ */
+export const resetWorkspaceInput = z.object({
+  scope: workspaceResetScopeSchema,
+  confirmName: z.string().min(1).max(80),
+});
+export type ResetWorkspaceInput = z.infer<typeof resetWorkspaceInput>;
+
+/**
+ * What one table lost. An array of named counts rather than a map, so the shape survives the
+ * OpenAPI export intact and a table added later cannot silently widen a record type.
+ */
+export const workspaceResetCountDto = z.object({
+  table: z.string(),
+  rows: z.number().int().nonnegative(),
+});
+export type WorkspaceResetCountDto = z.infer<typeof workspaceResetCountDto>;
+
+/**
+ * The receipt.
+ *
+ * It exists because the action has no undo: the only thing that can tell an Owner what actually
+ * happened is a truthful account of it, immediately, and "Removed 412 rows across 14 tables"
+ * is that. `worktrees` carries the directories the orchestrator is asked to remove afterwards —
+ * the rows are already gone by then, which is why the paths travel out of the transaction
+ * (Decision 0025, the same handoff `TASK_PURGE_REQUESTED` uses).
+ */
+export const workspaceResetDto = z.object({
+  scope: workspaceResetScopeSchema,
+  removed: z.array(workspaceResetCountDto),
+  /** Total across every table — what the confirmation line says. */
+  rows: z.number().int().nonnegative(),
+  worktrees: z.array(z.string()),
+});
+export type WorkspaceResetDto = z.infer<typeof workspaceResetDto>;

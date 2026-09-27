@@ -1,7 +1,7 @@
 # Feature Specification: [FEATURE NAME]
 
 **Feature slug**: `[feature-name]`
-**Feature flag**: `ff-[feature-name]` (default: OFF)
+**Feature flag**: `ff-[feature-name]` (default: ON — the flag is a kill switch, not a dark launch)
 **Feature branch**: `feat/[feature-name]`
 **Created**: [DATE]
 **Status**: Draft

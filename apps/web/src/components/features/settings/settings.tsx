@@ -19,6 +19,8 @@ import {
   settingsSectionFor,
   settingsSectionsIn,
 } from "@/lib/navigation";
+import { AppearanceSection } from "./appearance-section";
+import { DangerZoneSection } from "./danger-zone-section";
 import { ExecutorProfilesSection } from "./executor-profiles-section";
 import { FlagsSection } from "./flags-section";
 import { HarnessProfilesSection } from "./harness-profiles-section";
@@ -30,6 +32,7 @@ import { RepositoriesSection } from "./repositories-section";
 import { SecretsSection } from "./secrets-section";
 import { SkillsSection } from "./skills-section";
 import { StatusBarSection } from "./status-bar-section";
+import { TaskDefaultsSection } from "./task-defaults-section";
 import { WorkspaceSection } from "./workspace-section";
 
 /**
@@ -208,15 +211,18 @@ function captionFor(group: SettingsGroup): string {
  */
 const SECTION_COMPONENTS: Record<string, () => React.ReactNode> = {
   workspace: () => <WorkspaceSection />,
+  "danger-zone": () => <DangerZoneSection />,
   integrations: () => <IntegrationsSection />,
   repositories: () => <RepositoriesSection />,
   "provider-identity": () => <ProviderIdentitySection />,
   secrets: () => <SecretsSection />,
   "agent-profiles": () => <HarnessProfilesSection />,
   "executor-profiles": () => <ExecutorProfilesSection />,
+  "task-defaults": () => <TaskDefaultsSection />,
   "mcp-servers": () => <McpServersSection />,
   skills: () => <SkillsSection />,
   mcp: () => <McpSection />,
+  appearance: () => <AppearanceSection />,
   "status-bar": () => <StatusBarSection />,
   flags: () => <FlagsSection />,
 };

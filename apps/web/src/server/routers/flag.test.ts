@@ -62,8 +62,10 @@ describe("flag router", () => {
 
     const core = flags.find((f) => f.key === "ff-core-program");
     expect(core).toBeDefined();
-    expect(core?.enabled).toBe(false);
-    expect(core?.default).toBe(false);
+    // Default ON since constitution v1.5.0 — the flag's job here is the kill switch, so an
+    // untouched Workspace reads every capability as available.
+    expect(core?.enabled).toBe(true);
+    expect(core?.default).toBe(true);
     expect(core?.description.length).toBeGreaterThan(0);
   });
 
@@ -95,10 +97,15 @@ describe("flag router", () => {
     const wsA = await seedWs(db, "workspace-a");
     const wsB = await seedWs(db, "workspace-b");
 
-    await caller(db, wsB).flag.set({ key: "ff-workflows", enabled: true });
+    // B turns it *off*, because the write has to move B away from the shared default for the
+    // isolation to be visible at all — with both Workspaces reading `true` from the registry,
+    // a leak and no leak look identical.
+    await caller(db, wsB).flag.set({ key: "ff-workflows", enabled: false });
 
     const aFlags = await caller(db, wsA).flag.list({});
-    expect(aFlags.find((f) => f.key === "ff-workflows")?.enabled).toBe(false);
+    expect(aFlags.find((f) => f.key === "ff-workflows")?.enabled).toBe(true);
+    const bFlags = await caller(db, wsB).flag.list({});
+    expect(bFlags.find((f) => f.key === "ff-workflows")?.enabled).toBe(false);
   });
 
   it("rejects a key that is not a registered flag with BAD_REQUEST", async () => {

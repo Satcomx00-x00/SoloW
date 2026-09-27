@@ -126,6 +126,83 @@ describe("resolveHarnessRunEnv — billing integrity (Principle IV)", () => {
     }
   });
 
+  it("applies the app-owned configuration environment, over the base (Decision 0027)", () => {
+    const r = resolveHarnessRunEnv({
+      authMode: "subscription",
+      credentialValue: "sk-ant-oat01-abc",
+      baseEnv: { HOME: "/home/operator", PATH: "/usr/bin", LANG: "en_GB.UTF-8" },
+      configEnv: { HOME: "/srv/worktrees/task_1--harness-home" },
+      ...CLAUDE_CODE_VARS,
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.data["HOME"]).toBe("/srv/worktrees/task_1--harness-home");
+      // Only configuration discovery is isolated: the rest of the environment is what makes the
+      // harness able to run at all.
+      expect(r.data["PATH"]).toBe("/usr/bin");
+      expect(r.data["LANG"]).toBe("en_GB.UTF-8");
+    }
+  });
+
+  it("lets an Executor Profile's environment through untouched when there is no config env", () => {
+    // The Docker driver's own `baseEnv()` is already hermetic, so nothing is imposed there and a
+    // profile that names `HOME` for its own image still means it.
+    const r = resolveHarnessRunEnv({
+      authMode: "subscription",
+      credentialValue: "sk-ant-oat01-abc",
+      baseEnv: { HOME: "/home/solow" },
+      profileEnv: { HOME: "/workspace" },
+      ...CLAUDE_CODE_VARS,
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.data["HOME"]).toBe("/workspace");
+  });
+
+  it("a profile env cannot override the configuration isolation the app imposed", () => {
+    const r = resolveHarnessRunEnv({
+      authMode: "subscription",
+      credentialValue: "sk-ant-oat01-abc",
+      baseEnv: { PATH: "/usr/bin", NODE_ENV: "development" },
+      profileEnv: {
+        HOME: "/home/operator",
+        CLAUDE_CONFIG_DIR: "/home/operator/.claude",
+        NODE_ENV: "production",
+        GOPATH: "/go",
+      },
+      configEnv: {
+        HOME: "/srv/worktrees/task_1--harness-home",
+        CLAUDE_CONFIG_DIR: "/srv/worktrees/task_1--harness-home/.claude",
+      },
+      ...CLAUDE_CODE_VARS,
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.data["HOME"]).toBe("/srv/worktrees/task_1--harness-home");
+      expect(r.data["CLAUDE_CONFIG_DIR"]).toBe("/srv/worktrees/task_1--harness-home/.claude");
+      // …and everything else a profile sets is still its business.
+      expect(r.data["NODE_ENV"]).toBe("production");
+      expect(r.data["GOPATH"]).toBe("/go");
+      expect(r.data["PATH"]).toBe("/usr/bin");
+    }
+  });
+
+  it("the config env still cannot reach the credential the guard owns", () => {
+    // Ordering, again: the credential is shaped last, so even this parameter — which outranks the
+    // profile — cannot divert billing.
+    const r = resolveHarnessRunEnv({
+      authMode: "subscription",
+      credentialValue: "sk-ant-oat01-real",
+      baseEnv: {},
+      configEnv: { HOME: "/srv/h", ANTHROPIC_API_KEY: "sk-metered" },
+      ...CLAUDE_CODE_VARS,
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.data).not.toHaveProperty("ANTHROPIC_API_KEY");
+      expect(r.data["CLAUDE_CODE_OAUTH_TOKEN"]).toBe("sk-ant-oat01-real");
+    }
+  });
+
   it("errors when the credential is missing", () => {
     const r = resolveHarnessRunEnv({
       authMode: "subscription",

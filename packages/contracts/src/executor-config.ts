@@ -40,6 +40,37 @@ export function isGuardedEnvVar(name: string): boolean {
   return (GUARDED_ENV_VARS as readonly string[]).includes(name);
 }
 
+/**
+ * The variables that tell a harness *where its configuration lives* (Decision 0027).
+ *
+ * A Task's harness runs against a blank, app-owned configuration: `$HOME` is a directory SoloW
+ * made for that Task, so `~/.claude/`, `~/.claude.json`, `$HOME/CLAUDE.md`, the operator's
+ * `settings.json`, their user-level MCP servers and their user-level Skills are all somewhere the
+ * harness never looks. Repository-level configuration — a `CLAUDE.md` or `.claude/` committed in
+ * the checkout — is the *project's* and is untouched. `CLAUDE_CONFIG_DIR` is named explicitly
+ * because Claude Code honours it over `$HOME` (verified against 2.1.280: with it set, `.claude.json`
+ * is written inside it and not in `$HOME`), so pointing `HOME` alone would leave that door open.
+ *
+ * **Deliberately NOT in `GUARDED_ENV_VARS`, and this is the point of keeping two lists.** That
+ * constant feeds the `.refine` below, which *rejects* the whole profile; adding these names there
+ * would turn every Executor Profile that has ever set `HOME` into a validation error — a breaking
+ * API change, to stop something that is merely futile rather than dangerous. A profile may say
+ * `HOME`; `resolveHarnessRunEnv` silently drops it, because the app's answer is applied after the
+ * profile's and must win.
+ */
+export const HARNESS_CONFIG_ENV_VARS = [
+  "HOME",
+  "XDG_CONFIG_HOME",
+  "XDG_DATA_HOME",
+  "XDG_CACHE_HOME",
+  "XDG_STATE_HOME",
+  "CLAUDE_CONFIG_DIR",
+] as const;
+
+export function isHarnessConfigEnvVar(name: string): boolean {
+  return (HARNESS_CONFIG_ENV_VARS as readonly string[]).includes(name);
+}
+
 const envMap = z
   .record(envVarName, z.string())
   .refine((env) => !Object.keys(env).some(isGuardedEnvVar), {

@@ -8,6 +8,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { IssueLabel } from "@/components/features/project/issue-label";
+import { FlagDisabled } from "@/components/features/shared/flag-disabled";
 import { useMirrorRefresh } from "@/components/hooks/use-mirror-refresh";
 import { useProviderNames } from "@/components/hooks/use-provider-names";
 import { Button } from "@/components/ui/button";
@@ -421,14 +422,8 @@ export function IssuesView({
 
       {issues.error &&
         (issues.error.message === CommonErrorCode.FlagDisabled ? (
-          <div className="space-y-3 py-10" role="alert">
-            <h2 className="font-medium text-sm">The core program is not enabled here</h2>
-            <p className="max-w-md text-muted-foreground text-sm leading-relaxed">
-              Feature flags ship off. Enable it from the machine running this instance:
-            </p>
-            <pre className="w-fit rounded-lg border bg-card px-3 py-2 font-mono text-xs">
-              bun run flag enable ff-core-program
-            </pre>
+          <div className="py-10">
+            <FlagDisabled flag="ff-core-program" title="The core program is not enabled here" />
           </div>
         ) : (
           <div className="flex items-start gap-2.5 py-10 text-sm" role="alert">

@@ -5,15 +5,17 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HarnessLibraryErrorCode } from "@solow/contracts";
-import { zipSync } from "fflate";
+import { gzipSync, zipSync } from "fflate";
 import {
   archiveDirFor,
   archiveUrlsFor,
   cloneDirFor,
   parseRepositoryUrl,
-  resolveImportRoot,
+  resolveImportSource,
+  resolveSkillLocator,
   scanSkillDirectories,
   unpackSkillArchive,
+  untar,
 } from "./skill-import.js";
 
 /**
@@ -70,18 +72,18 @@ describe("scanSkillDirectories", () => {
   });
 });
 
-describe("resolveImportRoot", () => {
+describe("resolveImportSource", () => {
   it("takes a directory as it is, and refuses a file or a path that is not there", async () => {
     await file("f.txt");
-    expect(await resolveImportRoot({ kind: "path", path: root }, join(root, "clones"))).toEqual({
+    expect(await resolveImportSource({ kind: "path", path: root }, join(root, "clones"))).toEqual({
       ok: true,
-      data: root,
+      data: { root, skills: [] },
     });
-    expect(await resolveImportRoot({ kind: "path", path: join(root, "f.txt") }, root)).toEqual({
+    expect(await resolveImportSource({ kind: "path", path: join(root, "f.txt") }, root)).toEqual({
       ok: false,
       error: HarnessLibraryErrorCode.ImportSourceNotFound,
     });
-    expect(await resolveImportRoot({ kind: "path", path: join(root, "nope") }, root)).toEqual({
+    expect(await resolveImportSource({ kind: "path", path: join(root, "nope") }, root)).toEqual({
       ok: false,
       error: HarnessLibraryErrorCode.ImportSourceNotFound,
     });
@@ -104,8 +106,12 @@ describe("resolveImportRoot", () => {
 
     const clones = join(root, "clones");
     const url = "https://github.com/Acme/Skills.git";
-    const first = await resolveImportRoot({ kind: "git", url }, clones, fetchImpl);
-    expect(first).toEqual({ ok: true, data: join(clones, "acme-skills") });
+    const first = await resolveImportSource({ kind: "git", url }, clones, fetchImpl);
+    // The forge's `repo-ref/` wrapper is stepped into: the root is the tree itself.
+    expect(first).toEqual({
+      ok: true,
+      data: { root: join(clones, "acme-skills", "skills-main"), skills: [] },
+    });
     expect(served).toEqual(["https://codeload.github.com/Acme/Skills/zip/HEAD"]);
     expect((await scanSkillDirectories(join(clones, "acme-skills"))).map((s) => s.name)).toEqual([
       "deploy",
@@ -115,7 +121,11 @@ describe("resolveImportRoot", () => {
       "skills-main/skills/deploy/SKILL.md": text("# Deploy\n"),
       "skills-main/skills/review/SKILL.md": text("# Review\n"),
     });
-    const second = await resolveImportRoot({ kind: "git", url: `${url}#main` }, clones, fetchImpl);
+    const second = await resolveImportSource(
+      { kind: "git", url: `${url}#main` },
+      clones,
+      fetchImpl,
+    );
     expect(second).toEqual(first);
     expect(served[1]).toBe("https://codeload.github.com/Acme/Skills/zip/main");
     expect((await scanSkillDirectories(join(clones, "acme-skills"))).map((s) => s.name)).toEqual([
@@ -132,12 +142,12 @@ describe("resolveImportRoot", () => {
         ? new Response("not here", { status: 404 })
         : zipResponse(zipSync({ "SKILL.md": new TextEncoder().encode("# One") }));
     });
-    const out = await resolveImportRoot(
+    const out = await resolveImportSource(
       { kind: "git", url: "git@git.example.com:team/skills.git" },
       root,
       fetchImpl,
     );
-    expect(out).toEqual({ ok: true, data: join(root, "team-skills") });
+    expect(out).toEqual({ ok: true, data: { root: join(root, "team-skills"), skills: [] } });
     expect(served).toEqual([
       "https://git.example.com/team/skills/-/archive/HEAD/skills-HEAD.zip",
       "https://git.example.com/team/skills/archive/HEAD.zip",
@@ -145,18 +155,285 @@ describe("resolveImportRoot", () => {
   });
 
   it("refuses what is not a repository URL, and a repository it cannot fetch", async () => {
-    expect(await resolveImportRoot({ kind: "git", url: "not a url" }, root)).toEqual({
+    expect(await resolveImportSource({ kind: "git", url: "not a url" }, root)).toEqual({
+      ok: false,
+      error: HarnessLibraryErrorCode.ImportCloneFailed,
+    });
+    expect(await resolveImportSource({ kind: "git", url: "/srv/skills" }, root)).toEqual({
       ok: false,
       error: HarnessLibraryErrorCode.ImportCloneFailed,
     });
     const gone = fetchOf(async () => new Response("", { status: 404 }));
     expect(
-      await resolveImportRoot({ kind: "git", url: "https://github.com/acme/missing" }, root, gone),
+      await resolveImportSource(
+        { kind: "git", url: "https://github.com/acme/missing" },
+        root,
+        gone,
+      ),
     ).toEqual({ ok: false, error: HarnessLibraryErrorCode.ImportCloneFailed });
     const garbage = fetchOf(async () => new Response("<html>", { status: 200 }));
     expect(
-      await resolveImportRoot({ kind: "git", url: "https://github.com/acme/html" }, root, garbage),
+      await resolveImportSource(
+        { kind: "git", url: "https://github.com/acme/html" },
+        root,
+        garbage,
+      ),
     ).toEqual({ ok: false, error: HarnessLibraryErrorCode.ImportCloneFailed });
+    expect(await resolveImportSource({ kind: "locator", locator: "anthropics" }, root)).toEqual({
+      ok: false,
+      error: HarnessLibraryErrorCode.ImportLocatorInvalid,
+    });
+  });
+
+  const text = (t: string) => new TextEncoder().encode(t);
+  const checkout = () =>
+    zipSync({
+      "skills-main/README.md": text("# Skills"),
+      "skills-main/skills/deploy/SKILL.md": text("---\nname: deploy\ndescription: Ship\n---\n"),
+      "skills-main/skills/review/SKILL.md": text("# Review\n\nHow we review.\n"),
+      "skills-main/skills/review/scripts/check.sh": text("#!/bin/sh"),
+    });
+
+  it("steps into the directory a /tree/ URL or owner/repo/path names, and keeps the Skills a locator asks for", async () => {
+    const served: string[] = [];
+    const fetchImpl = fetchOf(async (input) => {
+      served.push(String(input));
+      return zipResponse(checkout());
+    });
+    const tree = await resolveImportSource(
+      { kind: "locator", locator: "https://github.com/acme/skills/tree/v2/skills/review" },
+      root,
+      fetchImpl,
+    );
+    expect(tree).toEqual({
+      ok: true,
+      data: { root: join(root, "acme-skills", "skills-main", "skills", "review"), skills: [] },
+    });
+    expect(served).toEqual(["https://codeload.github.com/acme/skills/zip/v2"]);
+
+    // The whole command, as a README prints it: the repository, and `--skill` narrowing it.
+    const command = await resolveImportSource(
+      { kind: "locator", locator: "npx skills add acme/skills --skill deploy -y" },
+      root,
+      fetchImpl,
+    );
+    expect(command).toEqual({
+      ok: true,
+      data: { root: join(root, "acme-skills", "skills-main"), skills: ["deploy"] },
+    });
+
+    // skills-installer's `owner/repo/skill`: not a directory at the root, so its parent is
+    // scanned and the name kept — the same answer as `--skill deploy`.
+    const short = await resolveImportSource(
+      { kind: "locator", locator: "acme/skills/deploy" },
+      root,
+      fetchImpl,
+    );
+    expect(short).toEqual(command);
+
+    // A directory that is nowhere in the checkout is said so, not scanned from the top.
+    expect(
+      await resolveImportSource(
+        { kind: "locator", locator: "acme/skills/nowhere/at-all" },
+        root,
+        fetchImpl,
+      ),
+    ).toEqual({ ok: false, error: HarnessLibraryErrorCode.ImportSourceNotFound });
+  });
+
+  it("fetches a lone SKILL.md into a directory named after the one it sat in, and an archive under its own name", async () => {
+    const fetchImpl = fetchOf(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/deploy/SKILL.md")) return new Response("# Deploy\n\nShip it.\n");
+      if (url.endsWith(".tar.gz")) {
+        return zipResponse(gzipSync(tarOf({ "bundle/triage/SKILL.md": "# Triage\n" })));
+      }
+      if (url.endsWith("/bad.png")) return zipResponse(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0]));
+      return new Response("", { status: 404 });
+    });
+    const md = await resolveSkillLocator(
+      { kind: "download", url: "https://example.com/skills/deploy/SKILL.md", skills: [] },
+      root,
+      fetchImpl,
+    );
+    expect(md).toEqual({ ok: true, data: { root: join(root, "deploy"), skills: [] } });
+    expect(await readFile(join(root, "deploy", "SKILL.md"), "utf8")).toBe("# Deploy\n\nShip it.\n");
+
+    const tgz = await resolveSkillLocator(
+      { kind: "download", url: "https://example.com/dl/bundle.tar.gz", skills: [] },
+      root,
+      fetchImpl,
+    );
+    expect(tgz).toEqual({ ok: true, data: { root: join(root, "bundle"), skills: [] } });
+    expect((await scanSkillDirectories(join(root, "bundle"))).map((s) => s.name)).toEqual([
+      "triage",
+    ]);
+
+    expect(
+      await resolveSkillLocator(
+        { kind: "download", url: "https://example.com/bad.png", skills: [] },
+        root,
+        fetchImpl,
+      ),
+    ).toEqual({ ok: false, error: HarnessLibraryErrorCode.ImportArchiveInvalid });
+  });
+
+  it("reads a site's /.well-known/agent-skills/ index, in both its shapes, checking a digest when one is given", async () => {
+    const skillMd = text("---\nname: deploy\ndescription: Ship\n---\n");
+    const digest = `sha256:${Buffer.from(await crypto.subtle.digest("SHA-256", skillMd)).toString("hex")}`;
+    const served: string[] = [];
+    const fetchImpl = fetchOf(async (input) => {
+      const url = String(input);
+      served.push(url);
+      const routes: Record<string, Response> = {
+        "https://docs.example/.well-known/agent-skills/index.json": Response.json({
+          $schema: "https://schemas.agentskills.io/discovery/0.2.0/schema.json",
+          skills: [
+            {
+              name: "deploy",
+              description: "Ship",
+              type: "skill-md",
+              url: "deploy/SKILL.md",
+              digest,
+            },
+            { name: "Review Kit", description: "Review", type: "archive", url: "/dl/review.zip" },
+            { name: "../evil", description: "", type: "skill-md", url: "evil/SKILL.md" },
+          ],
+        }),
+        "https://docs.example/.well-known/agent-skills/deploy/SKILL.md": zipResponse(skillMd),
+        "https://docs.example/dl/review.zip": zipResponse(
+          zipSync({ "SKILL.md": text("# Review\n"), "references/style.md": text("# Style") }),
+        ),
+        "https://docs.example/.well-known/agent-skills/evil/SKILL.md": new Response("# Evil"),
+        "https://legacy.example/.well-known/skills/index.json": Response.json({
+          skills: [
+            {
+              name: "triage",
+              description: "Triage",
+              files: ["SKILL.md", "refs/labels.md", "../../etc/passwd"],
+            },
+          ],
+        }),
+        "https://legacy.example/.well-known/skills/triage/SKILL.md": new Response("# Triage\n"),
+        "https://legacy.example/.well-known/skills/triage/refs/labels.md": new Response("# Labels"),
+      };
+      return routes[url] ?? new Response("", { status: 404 });
+    });
+
+    const v2 = await resolveSkillLocator(
+      { kind: "url", url: "https://docs.example", skills: [] },
+      root,
+      fetchImpl,
+    );
+    expect(v2).toEqual({ ok: true, data: { root: join(root, "docs.example"), skills: [] } });
+    const found = await scanSkillDirectories(join(root, "docs.example"));
+    expect(found.map((s) => [s.name, s.relativePath, s.files])).toEqual([
+      ["deploy", "deploy", 1],
+      ["evil", "evil", 1],
+      ["review-kit", "review-kit", 2],
+    ]);
+
+    // A path on the site is probed first, then the origin; the legacy path after the current one.
+    served.length = 0;
+    const v1 = await resolveSkillLocator(
+      { kind: "url", url: "https://legacy.example/docs", skills: ["triage"] },
+      root,
+      fetchImpl,
+    );
+    expect(v1).toEqual({
+      ok: true,
+      data: { root: join(root, "legacy.example"), skills: ["triage"] },
+    });
+    expect(served.slice(0, 4)).toEqual([
+      "https://legacy.example/docs/.well-known/agent-skills/index.json",
+      "https://legacy.example/.well-known/agent-skills/index.json",
+      "https://legacy.example/docs/.well-known/skills/index.json",
+      "https://legacy.example/.well-known/skills/index.json",
+    ]);
+    expect(served).not.toContain(
+      "https://legacy.example/.well-known/skills/triage/../../etc/passwd",
+    );
+    expect(
+      (await scanSkillDirectories(join(root, "legacy.example"))).map((s) => [s.name, s.files]),
+    ).toEqual([["triage", 2]]);
+
+    // A wrong digest refuses the whole import: an index that lies is not one to trust in part.
+    const lying = fetchOf(async (input) => {
+      const url = String(input);
+      if (url.endsWith("index.json")) {
+        return Response.json({
+          skills: [
+            {
+              name: "deploy",
+              description: "",
+              type: "skill-md",
+              url: "deploy/SKILL.md",
+              digest: `sha256:${"0".repeat(64)}`,
+            },
+          ],
+        });
+      }
+      return url.endsWith("SKILL.md")
+        ? new Response("# Deploy")
+        : new Response("", { status: 404 });
+    });
+    expect(
+      await resolveSkillLocator(
+        { kind: "url", url: "https://liar.example", skills: [] },
+        root,
+        lying,
+      ),
+    ).toEqual({ ok: false, error: HarnessLibraryErrorCode.ImportArchiveInvalid });
+
+    // No index anywhere and nothing to download: the URL could not be fetched.
+    expect(
+      await resolveSkillLocator(
+        { kind: "url", url: "https://nothing.example/x", skills: [] },
+        root,
+        fetchImpl,
+      ),
+    ).toEqual({ ok: false, error: HarnessLibraryErrorCode.ImportCloneFailed });
+  });
+});
+
+/** A ustar archive of the given files, the plain way, for the reader to undo. */
+function tarOf(files: Record<string, string>): Uint8Array {
+  const blocks: Uint8Array[] = [];
+  for (const [name, body] of Object.entries(files)) {
+    const data = new TextEncoder().encode(body);
+    const header = new Uint8Array(512);
+    const put = (at: number, s: string) => header.set(new TextEncoder().encode(s), at);
+    put(0, name);
+    put(100, "0000644\0");
+    put(124, `${data.byteLength.toString(8).padStart(11, "0")}\0`);
+    put(156, "0");
+    put(257, "ustar\0");
+    put(263, "00");
+    let sum = 0;
+    header.fill(0x20, 148, 156);
+    for (const b of header) sum += b;
+    put(148, `${sum.toString(8).padStart(6, "0")}\0 `);
+    blocks.push(
+      header,
+      data,
+      new Uint8Array(Math.ceil(data.byteLength / 512) * 512 - data.byteLength),
+    );
+  }
+  blocks.push(new Uint8Array(1024));
+  const out = new Uint8Array(blocks.reduce((n, b) => n + b.byteLength, 0));
+  let at = 0;
+  for (const b of blocks) {
+    out.set(b, at);
+    at += b.byteLength;
+  }
+  return out;
+}
+
+describe("untar", () => {
+  it("reads regular files, a ustar prefix and a GNU long name, and stops at the end blocks", () => {
+    const files = untar(tarOf({ "a/SKILL.md": "# A", "a/scripts/run.sh": "#!/bin/sh\n" }));
+    expect(Object.keys(files)).toEqual(["a/SKILL.md", "a/scripts/run.sh"]);
+    expect(new TextDecoder().decode(files["a/SKILL.md"])).toBe("# A");
   });
 });
 

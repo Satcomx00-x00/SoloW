@@ -110,6 +110,8 @@ export const HarnessLibraryErrorCode = {
   ImportCloneFailed: "AGENT_LIBRARY_IMPORT_CLONE_FAILED",
   /** The uploaded file is not a zip archive SoloW can unpack, or holds a path it will not write. */
   ImportArchiveInvalid: "AGENT_LIBRARY_IMPORT_ARCHIVE_INVALID",
+  /** The text is nothing a skills installer would take: not a directory, `owner/repo`, a repository URL, a download, or an install command. */
+  ImportLocatorInvalid: "AGENT_LIBRARY_IMPORT_LOCATOR_INVALID",
 } as const;
 export type HarnessLibraryErrorCode =
   (typeof HarnessLibraryErrorCode)[keyof typeof HarnessLibraryErrorCode];
@@ -189,14 +191,27 @@ export type SkillListDto = z.infer<typeof skillListDto>;
 // ---- Importing Skills in bulk ----
 
 /**
- * Where a bulk import reads from: a directory on the host, or a repository whose archive SoloW
+ * What a locator is: anything the skills installers (`npx skills add`, `npx skills-installer`,
+ * `npx add-skill`) take, or the install command itself as a README prints it. `owner/repo`,
+ * `owner/repo/path`, `owner/repo@skill`, `github:`/`gitlab:` shorthands, a repository, `/tree/`
+ * or `/blob/…/SKILL.md` URL on GitHub, GitLab, Azure Repos or a self-hosted forge, `git@host:…`,
+ * a skills.sh page, a `.zip`/`.tar.gz` or `SKILL.md` served over HTTPS, a site publishing
+ * `/.well-known/agent-skills/`, or a directory on the host; `#ref`, `#ref@skill` and `--skill`
+ * select within it. Read by `parseSkillLocator` in `@solow/core`.
+ */
+export const skillLocatorSchema = z.string().min(1).max(4000);
+
+/**
+ * Where a bulk import reads from: a directory on the host, a repository whose archive SoloW
  * fetches over HTTPS (its default branch, or `#ref`) into its own skills directory, again on
- * every scan. Either way, every directory holding a `SKILL.md` becomes one Skill of the `path`
- * kind, so the scripts, references and assets beside that file travel with it.
+ * every scan, or a locator (see `skillLocatorSchema`), which is the superset of the other two.
+ * Either way, every directory holding a `SKILL.md` becomes one Skill of the `path` kind, so
+ * the scripts, references and assets beside that file travel with it.
  */
 export const skillImportSourceSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("path"), path: z.string().min(1).max(4000) }),
   z.object({ kind: z.literal("git"), url: z.string().min(1).max(2000) }),
+  z.object({ kind: z.literal("locator"), locator: skillLocatorSchema }),
 ]);
 export type SkillImportSource = z.infer<typeof skillImportSourceSchema>;
 
@@ -258,6 +273,28 @@ export const importSkillsOutput = z.object({
   skipped: z.array(libraryNameSchema),
 });
 export type ImportSkillsOutput = z.infer<typeof importSkillsOutput>;
+
+/**
+ * The one-step import: scan the locator and import everything it names, the way
+ * `npx skills add owner/repo --skill x -y` would, with no picker in between. `skills` narrows
+ * to those names on top of whatever the locator itself selects.
+ */
+export const installSkillsInput = z.object({
+  locator: skillLocatorSchema,
+  skills: z.array(z.string().min(1).max(200)).max(200).default([]),
+  enabled: z.boolean().default(false),
+});
+export type InstallSkillsInput = z.infer<typeof installSkillsInput>;
+
+export const installSkillsOutput = importSkillsOutput.extend({
+  /** The directory that was scanned — the checkout, for a repository. */
+  root: z.string(),
+  /** Everything the scan found, before the selection and the library's own names thinned it. */
+  found: z.array(scannedSkillDto),
+  /** Names that were asked for and are not in the source. */
+  missing: z.array(z.string()),
+});
+export type InstallSkillsOutput = z.infer<typeof installSkillsOutput>;
 
 // ---- What a run is handed ----
 

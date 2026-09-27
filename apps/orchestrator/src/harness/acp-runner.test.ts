@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { type AcpScript, writeFakeAcpBin } from "@solow/acp/testing";
 import { createLocalExecutor } from "../executor/local.js";
 import { AcpRunner, toStreamEvent } from "./acp-runner.js";
+import { harnessConfigEnv } from "./hermetic-home.js";
 import type { HarnessHandle, HarnessStartOpts, HarnessStreamEvent } from "./runner.js";
 
 /**
@@ -320,6 +321,33 @@ describe("AcpRunner credential isolation (AC-5 / Principle IV)", () => {
     // …and neither must anything of the orchestrator's own environment, which proves the child
     // environment was *replaced* rather than merged.
     expect(names).not.toContain("SOLOW_ACP_TEST_MARKER");
+  });
+});
+
+describe("AcpRunner configuration isolation (Decision 0027)", () => {
+  it("hands the harness the home the app shaped, not the operator's", async () => {
+    // `$HOME` is a path, not a credential, so this one can assert the value: what it proves is
+    // that the harness looks for `~/.claude`, `~/.claude.json` and `$HOME/CLAUDE.md` inside a
+    // directory SoloW owns. Same mechanism as the credential test above — the environment the
+    // runner spawns with is the only thing between the agent and the operator's own config.
+    const appHome = await mkdtemp(join(tmpdir(), "solow-acp-home-"));
+    try {
+      const { handle: h, workdir: dir } = await run(
+        { writeEnvHome: "env-home.txt" },
+        {
+          PATH: process.env["PATH"] ?? "",
+          CLAUDE_CODE_OAUTH_TOKEN: "the-credential",
+          ...harnessConfigEnv(appHome),
+        },
+      );
+      await h.outcome;
+
+      const home = await readFile(join(dir as string, "env-home.txt"), "utf8");
+      expect(home).toBe(appHome);
+      expect(home).not.toBe(process.env["HOME"]);
+    } finally {
+      await rm(appHome, { recursive: true, force: true });
+    }
   });
 });
 

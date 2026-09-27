@@ -4,6 +4,7 @@ import {
   Bot,
   Building2,
   Columns3,
+  Eraser,
   FlaskConical,
   FolderGit2,
   History,
@@ -15,6 +16,8 @@ import {
   PlugZap,
   Server,
   Settings,
+  Sparkles,
+  SunMoon,
   Table2,
   UserRound,
   Workflow,
@@ -62,15 +65,19 @@ export interface Section {
   wip?: boolean;
 }
 
-/** Destinations that exist with no Project selected. */
+/**
+ * Destinations that exist with no Project selected.
+ *
+ * No `/projects` entry, by decision (spec F16): which Project you are in is chosen by clicking
+ * the navigator's own title, not by visiting a hub and clicking through to one. A rail entry for
+ * it was the first half of the double-sidebar problem — two columns to traverse before reaching
+ * the work, and a "Projects" destination whose content was mostly links back out of itself.
+ *
+ * The `/projects` *routes* deliberately stay: they are where a deep link, a bookmark and the
+ * redirect after deleting a Project land, and the hub is still where a Project is created. What
+ * changed is that nothing in the chrome sends you there in order to pick one.
+ */
 export const WORKSPACE_SECTIONS: readonly Section[] = [
-  {
-    href: "/projects",
-    label: "Projects",
-    // The hub, not a view: this is where a session starts and where a Project is adopted.
-    caption: "Everything starts here",
-    icon: FolderGit2,
-  },
   {
     href: "/unassigned",
     label: "Unassigned",
@@ -171,10 +178,15 @@ export function projectSectionFor(pathname: string): ProjectSection | null {
 
 /** The workspace section a path belongs to, or null on a path outside them (e.g. sign-in). */
 export function sectionFor(pathname: string): Section | null {
-  // A Task is work inside a Project, but its route is flat (`/task/:id`) because a Task outlives
-  // the Project view it was opened from. It lights the Projects rail entry, which is the nearest
-  // true statement about where it belongs.
-  if (pathname.startsWith("/task/")) return WORKSPACE_SECTIONS[0] ?? null;
+  /*
+   * A Task is work inside a Project, but its route is flat (`/task/:id`) because a Task outlives
+   * the Project view it was opened from. It used to light `WORKSPACE_SECTIONS[0]`, which *was*
+   * the Projects rail entry — an index that would silently come to mean "Unassigned" the moment
+   * that entry was removed, lighting the wrong destination for every Task in a Project. No rail
+   * entry is true about a Task any more, so it lights none: the navigator names the Task itself
+   * in its title, which is the honest statement of where you are.
+   */
+  if (pathname.startsWith("/task/")) return null;
   return (
     WORKSPACE_SECTIONS.find((s) => pathname === s.href || pathname.startsWith(`${s.href}/`)) ?? null
   );
@@ -244,6 +256,13 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
     icon: Building2,
   },
   {
+    id: "danger-zone",
+    label: "Reset",
+    caption: "Empty this Workspace — its work, or everything but the account",
+    group: "Workspace",
+    icon: Eraser,
+  },
+  {
     id: "integrations",
     label: "Integrations",
     caption: "The GitHub, GitLab and Gitea accounts this Workspace reads work from",
@@ -286,6 +305,13 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
     icon: Server,
   },
   {
+    id: "task-defaults",
+    label: "New task defaults",
+    caption: "The harness and executor a new Task starts with",
+    group: "Harnesses",
+    icon: Sparkles,
+  },
+  {
     id: "mcp-servers",
     label: "MCP servers",
     caption: "Tools every harness can call — or only the Steps that name them",
@@ -307,6 +333,13 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
     caption: "Tokens that let an outside harness drive this Workspace",
     group: "Extensions",
     icon: Blocks,
+  },
+  {
+    id: "appearance",
+    label: "Appearance",
+    caption: "Light, dark, or whatever this machine is set to",
+    group: "Interface",
+    icon: SunMoon,
   },
   {
     id: "status-bar",

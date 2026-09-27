@@ -93,9 +93,13 @@ describe("the command palette's entries", () => {
     // The workspace destinations — the ones that exist with no Project selected. A board and an
     // issue list are reached through a Project now, and the palette cannot offer them statically
     // because it would have to name a Project to do it.
-    expect(offered).toContain("Projects");
     expect(offered).toContain("Unassigned");
     expect(offered).toContain("Settings");
+    // And *not* Projects: picking a Project is the navigator title's job now (spec F16), so the
+    // rail entry this registration mirrored no longer exists. Asserted rather than merely
+    // achieved — a stray re-registration would draw a row leading back to the hub the change
+    // removed from the chrome.
+    expect(offered).not.toContain("Projects");
   });
 
   it("offers no create command, because there is no create action left to run one", () => {
@@ -137,7 +141,7 @@ describe("the command palette's entries", () => {
       screen
         .getAllByRole("option")
         .map((option) => option.textContent)
-        .filter((title) => title === "Probe a contributed command" || title === "Projects");
+        .filter((title) => title === "Probe a contributed command" || title === "Unassigned");
 
     renderPalette(null, { order: [], hidden: [], shown: [], widths: {} });
     const before = inGoToGroup();
@@ -146,10 +150,10 @@ describe("the command palette's entries", () => {
     renderPalette(null, { order: [PROBE_ID], hidden: [], shown: [], widths: {} });
     const after = inGoToGroup();
 
-    // Unarranged, priority decides: `Projects` is 10 and the probe is 900. Naming the probe in
-    // `order` puts it first regardless, which is the whole claim.
-    expect(before).toEqual(["Projects", "Probe a contributed command"]);
-    expect(after).toEqual(["Probe a contributed command", "Projects"]);
+    // Unarranged, priority decides: `Unassigned` is the first rail entry, at 10, and the probe is
+    // 900. Naming the probe in `order` puts it first regardless, which is the whole claim.
+    expect(before).toEqual(["Unassigned", "Probe a contributed command"]);
+    expect(after).toEqual(["Probe a contributed command", "Unassigned"]);
   });
 
   it("offers a command a feature module contributed, without importing that module", () => {
@@ -170,13 +174,13 @@ describe("the command palette's entries", () => {
   it("runs a chosen command through the actions the surface supplied", () => {
     renderPalette();
 
-    fireEvent.click(screen.getByText("Projects"));
+    fireEvent.click(screen.getByText("Unassigned"));
     fireEvent.click(screen.getByText("Probe a contributed command"));
 
     // Both a registration the app ships and one a test contributed reach the same supplied
     // action — which is the point of handing the actions in rather than letting a command import
     // the router.
-    expect(calls.navigated).toEqual(["/projects", "/probe"]);
+    expect(calls.navigated).toEqual(["/unassigned", "/probe"]);
   });
 
   it("groups the entries under the headings the command vocabulary defines", () => {

@@ -13,13 +13,6 @@ import { CreateDisclosure } from "@/components/ui/create-disclosure";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { ISSUE_STATUS_LABELS, ISSUE_STATUS_STYLE, ISSUE_STATUSES } from "@/lib/issue-status";
 import {
   PROJECT_SECTIONS,
@@ -39,6 +32,7 @@ import { taskActionMessage } from "@/lib/task-errors";
 import { BOARD_COLUMNS, STATE_LABELS, STATE_STYLE } from "@/lib/task-states";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
+import { ProjectPicker } from "./project-picker";
 import { TaskNav } from "./task-nav";
 
 function SectionLabel({ children }: { children: ReactNode }) {
@@ -490,40 +484,26 @@ function SettingsNav() {
 }
 
 /**
- * The Project switcher, and the sections inside the Project it names.
+ * The sections inside the Project the sidebar's title names.
  *
- * At the very top of the sidebar, because that is where the top of the hierarchy belongs. It used
- * to sit in a toolbar above the project *table*, which said a Project was a property of that one
- * screen — when the board, the issue list and the workflows are equally inside it. Switching here
- * keeps you on the same section of the new Project rather than dumping you on its overview, which
- * is what someone comparing two projects' boards actually wants.
+ * The switcher that used to head this list moved into that title (`ProjectPicker`); what stays
+ * here is the Project's own contents. Switching still keeps you on the same section of the new
+ * Project rather than dumping you on its overview — that behaviour moved with the control, and
+ * it is what someone comparing two projects' boards actually wants.
  */
 function ProjectNav({ projectId }: { projectId: string }) {
   const pathname = usePathname();
-  const router = useRouter();
-  const projects = trpc.project.list.useQuery({});
   const active = projectSectionFor(pathname);
 
   return (
     <>
-      <div className="px-2 pt-2.5">
-        <Select
-          value={projectId}
-          onValueChange={(id) => router.push(projectSectionHref(id, active?.path ?? ""))}
-        >
-          <SelectTrigger className="h-8 w-full text-xs" aria-label="Project">
-            <SelectValue placeholder="Project" />
-          </SelectTrigger>
-          <SelectContent>
-            {(projects.data ?? []).map((p) => (
-              <SelectItem key={p.id} value={p.id}>
-                {p.title}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
+      {/*
+       * No switcher here any more. It was a `Select` directly beneath the sidebar's title, saying
+       * in a smaller font exactly what the title above it already said — and it only existed once
+       * you were *already* inside a Project, so it could never be the way in to one. The title
+       * itself is the switcher now (`ProjectPicker`), reachable from every screen. What is left
+       * here is what is genuinely inside the Project.
+       */}
       <nav aria-label="Project sections">
         <SectionLabel>In this project</SectionLabel>
         <ul className="space-y-px px-2">
@@ -682,10 +662,17 @@ export function Navigator({ workspaceName }: { workspaceName: string }) {
 
   return (
     <aside className="hidden w-60 shrink-0 flex-col border-r bg-sidebar md:flex">
-      <div className="flex h-11 shrink-0 flex-col justify-center border-b px-3">
-        <span className="truncate font-semibold text-sm leading-tight">{title}</span>
-        <span className="truncate text-muted-foreground text-xs leading-tight">{caption}</span>
-      </div>
+      {/*
+        The title is the Project switcher (spec F16). It used to be two lines of static text with
+        a second, smaller switcher repeating the same name just below it — see `ProjectPicker`
+        for why one control, in the place you are already looking, replaced both.
+      */}
+      <ProjectPicker
+        caption={caption}
+        projectId={projectId}
+        section={projectSection?.path ?? ""}
+        title={title}
+      />
       <ScrollArea className="flex-1">
         <RecentTasksNav excludeTaskId={taskId} />
         {taskId ? (

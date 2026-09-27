@@ -174,6 +174,41 @@ describe("session.get scoped to a Workflow Step", () => {
     expect(scoped.session).toEqual(whole.session);
   });
 
+  it("keeps the links the run made, whichever Step the caller is looking at", async () => {
+    /*
+     * A merge request opened under Step 2 does not stop existing because the terminal is showing
+     * Step 1 (F10 FR-12a). Same reasoning as the cursor above, and the same failure if it were
+     * scoped: the rail would empty out as the operator moved along the strip, and a reviewer on
+     * Step 1 would conclude the run had shipped nothing.
+     */
+    const fx = await fixture(db);
+    await turn(db, fx, 0, "planning", "step-plan");
+    await db.insert(sessionEvent).values({
+      workspaceId: fx.workspaceId,
+      sessionId: fx.sessionId,
+      seq: 1,
+      kind: "tool_result",
+      payload: {
+        kind: "tool_result",
+        callId: "c1",
+        ok: true,
+        output: "Created https://gitlab.example.test/acme/gate/-/merge_requests/42",
+      },
+      workflowStepId: "step-build",
+    });
+
+    const onPlan = await caller(db, fx.workspaceId).session.get({
+      sessionId: fx.sessionId,
+      workflowStepId: "step-plan",
+    });
+    // Step 1's slice holds one turn and no tool call at all — and still names the merge request.
+    expect(onPlan.events.map((e) => e.seq)).toEqual([0]);
+    expect(onPlan.links.map((l) => l.label)).toEqual(["Merge request !42"]);
+
+    const whole = await caller(db, fx.workspaceId).session.get({ sessionId: fx.sessionId });
+    expect(onPlan.links).toEqual(whole.links);
+  });
+
   it("still elides a summarised range inside a Step's own slice", async () => {
     // Compaction and Step scoping are answers to the same problem and must compose: a range a
     // summary already stands in for stays elided, whichever Step the caller asked for.

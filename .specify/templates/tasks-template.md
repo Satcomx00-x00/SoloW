@@ -63,10 +63,11 @@ The `@critical` tenant-isolation E2E tests MUST pass before the PR is opened.
 
 ### TASK-001 — [P] Declare feature flag `ff-[feature-name]`
 *File*: the project's flag registry
-- [ ] Flag registered in the project's flag registry with `default: false` — the exact
+- [ ] Flag registered in the project's flag registry with `default: true` — the exact
       key from the spec header, verifiable by grep
 - [ ] Granularity per plan §6 (must be supported by the flag system)
-- [ ] Flag evaluates to `false` on a clean environment
+- [ ] Flag evaluates to `true` on a clean environment, and to `false` once an operator
+      turns it off for a Workspace — the kill switch is the half worth testing
 
 ### TASK-002 — [P] Implement validation contracts in [shared package]/schemas/[feature-name].ts
 - [ ] Input schemas: `Create[Feature]Input`, `Update[Feature]Input`, `Get[Feature]Input`, `List[Feature]Input`

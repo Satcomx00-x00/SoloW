@@ -68,7 +68,8 @@ const STEPS: Record<
   },
   "core-loop": {
     title: "Main loop",
-    blurb: "Running Tasks is behind a feature flag, and it ships off.",
+    blurb:
+      "Running Tasks is behind a feature flag. It ships on — this step is here for the case where someone turned it off.",
   },
 };
 

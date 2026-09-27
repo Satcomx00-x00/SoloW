@@ -1,30 +1,38 @@
 import "server-only";
 import {
+  appearanceDto,
   clearReviewDraftInput,
   getReviewDraftInput,
   getSurfaceLayoutInput,
   recentTasksDto,
   recordRecentTaskInput,
   reviewDraftDto,
+  setAppearanceInput,
   setReviewDraftInput,
   setSurfaceLayoutInput,
+  setTaskDefaultsInput,
   setTaskPaneLayoutInput,
   surfaceLayoutDto,
+  taskDefaultsDto,
   taskPaneLayoutDto,
 } from "@solow/contracts";
 import { z } from "zod";
 import {
   clearReviewDraft,
+  getAppearance,
   getRecentTasks,
   getReviewDraft,
   getSurfaceLayout,
+  getTaskDefaults,
   getTaskPaneLayout,
   recordRecentTask,
+  setAppearance,
   setReviewDraft,
   setSurfaceLayout,
+  setTaskDefaults,
   setTaskPaneLayout,
 } from "../dal/preference.js";
-import { ownerProcedure, router, unwrap } from "../trpc.js";
+import { ownerProcedure, router, unwrap, workspaceControlsProcedure } from "../trpc.js";
 
 /**
  * Interface preferences that belong to a user rather than to a browser (issue #3, AC-3).
@@ -167,4 +175,71 @@ export const preferenceRouter = router({
     .input(clearReviewDraftInput)
     .output(reviewDraftDto)
     .mutation(async ({ ctx, input }) => unwrap(await clearReviewDraft(ctx.rctx, input.taskId))),
+
+  /*
+   * The last two sit on `workspaceControlsProcedure`, not `ownerProcedure`, and the difference
+   * is deliberate. Everything above is state *about the core loop* — a review draft means
+   * nothing with the loop off. A theme is not: the app still has to render when
+   * `ff-core-program` is off, and a theme query that failed in that state would leave the shell
+   * unable to find out how it is meant to look. The new-Task defaults keep it company because
+   * they are written on the same Settings page and share its switch (spec F16).
+   */
+  getAppearance: workspaceControlsProcedure
+    .meta({
+      openapi: {
+        method: "GET",
+        path: "/preference.getAppearance",
+        tags: ["preference"],
+        protect: true,
+        summary:
+          "The signed-in user's theme: `system`, `light` or `dark`. Answers the default (`dark`) when nothing is saved.",
+      },
+    })
+    .input(z.object({}))
+    .output(appearanceDto)
+    .query(async ({ ctx }) => unwrap(await getAppearance(ctx.rctx))),
+
+  setAppearance: workspaceControlsProcedure
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/preference.setAppearance",
+        tags: ["preference"],
+        protect: true,
+        summary: "Set the signed-in user's theme.",
+      },
+    })
+    .input(setAppearanceInput)
+    .output(appearanceDto)
+    .mutation(async ({ ctx, input }) => unwrap(await setAppearance(ctx.rctx, input))),
+
+  getTaskDefaults: workspaceControlsProcedure
+    .meta({
+      openapi: {
+        method: "GET",
+        path: "/preference.getTaskDefaults",
+        tags: ["preference"],
+        protect: true,
+        summary:
+          "The Harness Profile and Executor Profile a new Task starts with. Either is null when none is chosen, or when the one that was chosen has since been deleted.",
+      },
+    })
+    .input(z.object({}))
+    .output(taskDefaultsDto)
+    .query(async ({ ctx }) => unwrap(await getTaskDefaults(ctx.rctx))),
+
+  setTaskDefaults: workspaceControlsProcedure
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/preference.setTaskDefaults",
+        tags: ["preference"],
+        protect: true,
+        summary:
+          "Choose the Harness Profile and Executor Profile a new Task starts with. Null on either clears it. Refuses a Profile this Workspace does not own.",
+      },
+    })
+    .input(setTaskDefaultsInput)
+    .output(taskDefaultsDto)
+    .mutation(async ({ ctx, input }) => unwrap(await setTaskDefaults(ctx.rctx, input))),
 });

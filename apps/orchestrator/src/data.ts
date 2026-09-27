@@ -14,9 +14,12 @@ import {
 import {
   type Db,
   executorProfile,
+  type FlagKey,
   harnessCatalog,
   harnessProfile,
   integration,
+  isEnabled,
+  isFlagKey,
   issue,
   repository,
   secret,
@@ -192,6 +195,14 @@ export async function loadTaskRunContext(
     .where(and(eq(secret.workspaceId, workspaceId), eq(secret.id, ap.secretId)))
     .limit(1);
 
+  // Only booleans survive: a column hand-edited to hold a string for a known key is not an
+  // override, and must fall through to the registry default rather than be coerced.
+  const overrides: Partial<Record<FlagKey, boolean>> = {};
+  for (const [key, value] of Object.entries(ws?.flags ?? {})) {
+    if (isFlagKey(key) && typeof value === "boolean") overrides[key] = value;
+  }
+  const flagFor = (key: FlagKey) => isEnabled(key, { workspaceId, overrides });
+
   return {
     task: t,
     issue: iss,
@@ -199,9 +210,23 @@ export async function loadTaskRunContext(
     harnessCatalog: cat,
     executorProfile: ep,
     repositories,
-    widgetsEnabled: ws?.flags?.["ff-agent-widgets"] === true,
-    librariesEnabled: ws?.flags?.["ff-agent-libraries"] === true,
-    workflowsEnabled: ws?.flags?.["ff-workflows"] === true,
+    /*
+     * Through the registry, never straight off the column.
+     *
+     * These three read `ws?.flags?.[key] === true` until 2026-09-25, which was the same answer
+     * as `isEnabled` only for as long as every flag defaulted OFF. When the default flipped
+     * (constitution v1.5.0) the two sides silently disagreed: the web app offered Workflows,
+     * widgets and libraries to a Workspace that had stored nothing, and this process refused to
+     * act on any of them — a split brain with no error anywhere, because "the column says
+     * nothing" reads as *enabled* on one side and *disabled* on the other.
+     *
+     * `isEnabled` is the one place that merges the registry default with the Workspace's
+     * overrides, so both processes now answer from it and a later change to a default cannot
+     * reach only half the product.
+     */
+    widgetsEnabled: flagFor("ff-agent-widgets"),
+    librariesEnabled: flagFor("ff-agent-libraries"),
+    workflowsEnabled: flagFor("ff-workflows"),
     secretCiphertext: sec?.ciphertext ?? null,
   };
 }

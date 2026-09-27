@@ -1,7 +1,7 @@
 # Implementation Plan: Core Program — End-to-End Task Loop
 
 **Feature slug**: `core-program`
-**Feature flag**: `ff-core-program` (default: OFF)
+**Feature flag**: `ff-core-program` (default: ON since constitution v1.5.0, 2026-09-24; shipped default OFF)
 **Branch**: `001-core-program`
 **Date**: 2026-08-17
 **Spec**: [spec.md](./spec.md)
@@ -249,7 +249,7 @@ Zero infrastructure imports; `Result<T,E>`; no throw on business errors.
 
 | Property | Value |
 |---|---|
-| Name | `ff-core-program` (default OFF) |
+| Name | `ff-core-program` (default ON since constitution v1.5.0; shipped OFF) |
 | Registered in | `apps/web/server/flags.ts` |
 | Granularity | per-Workspace (v1: single Workspace → effectively global-local) |
 | Kill switch | immediate — flag read on every tRPC entry + orchestrator run start |

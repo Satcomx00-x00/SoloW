@@ -9,7 +9,7 @@ import { router, sessionProcedure, unwrap } from "../trpc.js";
  *
  * Deliberately NOT built on `ownerProcedure` (or any of the other `requireFlag`-gated
  * procedures in trpc.ts): every one of those requires `ff-core-program` to be ON, and
- * `ff-core-program` itself ships OFF on a fresh Workspace. Gating flag.set the same way would
+ * `ff-core-program` can be turned off for a Workspace. Gating flag.set the same way would
  * make it impossible to ever turn the core loop on from this Settings UI — the only way in
  * would stay `scripts/flag.ts` on the machine running the instance, which is exactly the
  * chicken-and-egg problem this router exists to close. `sessionProcedure` requires an

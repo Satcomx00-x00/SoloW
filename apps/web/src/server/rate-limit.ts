@@ -16,6 +16,12 @@ export interface RateLimitRule {
 export const RATE_LIMITS = {
   "secret.set": { limit: 10, windowMs: 60_000 },
   "task.launch": { limit: 20, windowMs: 60_000 },
+  /*
+   * Three an hour. Not because a reset is expensive, but because it is the one write with no
+   * undo: a loop that reached it — a retried mutation, a wedged client — would empty the
+   * Workspace repeatedly and each pass would look like it succeeded.
+   */
+  "workspace.reset": { limit: 3, windowMs: 3_600_000 },
 } as const satisfies Record<string, RateLimitRule>;
 
 export type RateLimitedProcedure = keyof typeof RATE_LIMITS;

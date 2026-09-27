@@ -2,6 +2,7 @@
 
 import { CommonErrorCode } from "@solow/contracts";
 import { TriangleAlert, Workflow as WorkflowIcon } from "lucide-react";
+import { FlagDisabled } from "@/components/features/shared/flag-disabled";
 import { WorkflowInspector } from "@/components/features/workflows/workflow-inspector";
 import { SecondaryPanel } from "@/components/shell/secondary-sidebar";
 import { trpc } from "@/trpc/react";
@@ -37,14 +38,8 @@ export function WorkflowsView({ workflowId }: { workflowId?: string | undefined 
 
   if (workflows.error) {
     return workflows.error.message === CommonErrorCode.FlagDisabled ? (
-      <div className="mx-auto w-full max-w-3xl space-y-3 px-6 py-10" role="alert">
-        <h2 className="font-medium text-sm">Workflows are not enabled here</h2>
-        <p className="max-w-md text-muted-foreground text-sm leading-relaxed">
-          Feature flags ship off. Enable it from the machine running this instance:
-        </p>
-        <pre className="w-fit rounded-lg border bg-card px-3 py-2 font-mono text-xs">
-          bun run flag enable ff-workflows
-        </pre>
+      <div className="mx-auto w-full max-w-3xl px-6 py-10">
+        <FlagDisabled flag="ff-workflows" title="Workflows are not enabled here" />
       </div>
     ) : (
       <div className="mx-auto flex w-full max-w-3xl items-start gap-2.5 px-6 py-10 text-sm">

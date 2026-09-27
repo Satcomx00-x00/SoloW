@@ -337,6 +337,52 @@ describe("harness libraries", () => {
       expect(
         await errMessage(() => c.library.skill.scan({ source: { kind: "git", url: "nope" } })),
       ).toBe(HarnessLibraryErrorCode.ImportCloneFailed);
+      expect(
+        await errMessage(() =>
+          c.library.skill.scan({ source: { kind: "locator", locator: "just-a-word" } }),
+        ),
+      ).toBe(HarnessLibraryErrorCode.ImportLocatorInvalid);
+    });
+
+    it("installs in one step what a locator names, skipping the library's own and reporting what is not there", async () => {
+      const { c } = await fixture(db, "acme");
+      await c.library.skill.create({
+        name: "deploy",
+        description: "ours",
+        source: { kind: "inline", body: "# ours" },
+      });
+
+      // The install command as a README prints it, pointed at a directory: `--skill` selects.
+      const one = await c.library.skill.install({
+        locator: `npx skills add ${tree} --skill review-checklist,deploy,nope -y`,
+        enabled: true,
+      });
+      expect(one.root).toBe(tree);
+      expect(one.found.map((s) => [s.name, s.existing])).toEqual([
+        ["deploy", true],
+        ["review-checklist", false],
+      ]);
+      expect(one.imported.map((s) => [s.name, s.enabled, s.source])).toEqual([
+        ["review-checklist", true, { kind: "path", path: join(tree, "skills", "review") }],
+      ]);
+      expect(one.skipped).toEqual(["deploy"]);
+      expect(one.missing).toEqual(["nope"]);
+
+      // Again, with nothing new: nothing imported, nothing failed.
+      const again = await c.library.skill.install({ locator: tree, skills: ["Review-Checklist"] });
+      expect(again.imported).toEqual([]);
+      expect(again.skipped).toEqual(["review-checklist"]);
+      expect(again.missing).toEqual([]);
+
+      // The scan takes the same locators, thinned the same way, without importing.
+      const scan = await c.library.skill.scan({
+        source: { kind: "locator", locator: `${tree} --skill deploy` },
+      });
+      expect(scan.skills.map((s) => s.name)).toEqual(["deploy"]);
+      expect((await c.library.skill.list({})).map((s) => s.name)).toEqual([
+        "deploy",
+        "review-checklist",
+      ]);
     });
   });
 
@@ -347,6 +393,7 @@ describe("harness libraries", () => {
     expect(findMcpTool("library_mcp_create")).toBeUndefined();
     expect(findMcpTool("library_skill_create")).toBeUndefined();
     expect(findMcpTool("library_skill_import")).toBeUndefined();
+    expect(findMcpTool("library_skill_install")).toBeUndefined();
     expect(findMcpTool("library_mcp_list")).toBeDefined();
     expect(findMcpTool("library_skill_list")).toBeDefined();
 

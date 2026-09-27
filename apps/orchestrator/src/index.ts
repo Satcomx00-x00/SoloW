@@ -21,6 +21,7 @@ import { createLocalExecutor } from "./executor/local.js";
 import { reapOrphanedContainers } from "./executor/reap.js";
 import type { Executor } from "./executor/types.js";
 import { explainWithHarness } from "./harness/explain.js";
+import { resolveHarnessConfigEnv } from "./harness/hermetic-home.js";
 import { probeHarness } from "./harness/probe.js";
 import {
   type HarnessRegistry,
@@ -152,6 +153,16 @@ export async function handleAnnouncePost(
 }
 
 /**
+ * The harness home for an out-of-band launch — an explain or a probe.
+ *
+ * Inside the scratch directory the request already makes and already removes, so the neutralised
+ * configuration of Decision 0027 costs these two routes no extra bookkeeping and leaves nothing
+ * behind. Neither is a Task, so neither wants the Task's own home: there is no conversation here
+ * to resume and nothing worth keeping once the answer is sent.
+ */
+const OUT_OF_BAND_HOME = ".solow-harness-home";
+
+/**
  * `POST /probe-agent` — start the harness a Harness Profile names, ask it what it is, and stop it.
  *
  * Why this lives here rather than in the web API: the API is forbidden to reach the execution
@@ -195,26 +206,38 @@ export async function handleExplainPost(
   } catch {
     return new Response("task_not_found", { status: 404 });
   }
-  const shaped = prepareHarnessEnv({
-    authMode: ctx.harnessProfile.authMode,
-    secretCiphertext: ctx.secretCiphertext,
-    baseEnv: process.env,
-    subscriptionEnvVar: ctx.harnessCatalog.subscriptionEnvVar,
-    meteredEnvVar: ctx.harnessCatalog.meteredEnvVar,
-    profileEnv: ctx.executorProfile.config.env ?? {},
-  });
-  if (!shaped.ok) {
-    return Response.json({
-      ok: false,
-      text: null,
-      model: null,
-      reason:
-        "this task's harness profile has no usable credential — check the Secret it points at",
-      failure: "credential",
-    });
-  }
+  /*
+   * Out of band, but not out of scope: this launches the very same harness a Task does, and a
+   * "why did you do that" answered against the operator's own `~/.claude` would be an answer
+   * about a configuration no run of theirs ever uses (Decision 0027). A temp home rather than the
+   * Task's, because there is no Task here and nothing is meant to survive the request.
+   */
   const cwd = await mkdtemp(join(tmpdir(), "solow-explain-"));
   try {
+    const configEnv = await resolveHarnessConfigEnv({
+      kind: "local",
+      home: join(cwd, OUT_OF_BAND_HOME),
+      baseEnv: process.env,
+    });
+    const shaped = prepareHarnessEnv({
+      authMode: ctx.harnessProfile.authMode,
+      secretCiphertext: ctx.secretCiphertext,
+      baseEnv: process.env,
+      subscriptionEnvVar: ctx.harnessCatalog.subscriptionEnvVar,
+      meteredEnvVar: ctx.harnessCatalog.meteredEnvVar,
+      profileEnv: ctx.executorProfile.config.env ?? {},
+      configEnv,
+    });
+    if (!shaped.ok) {
+      return Response.json({
+        ok: false,
+        text: null,
+        model: null,
+        reason:
+          "this task's harness profile has no usable credential — check the Secret it points at",
+        failure: "credential",
+      });
+    }
     const report = await explainWithHarness(createLocalExecutor(cwd), {
       command: ctx.harnessCatalog.command,
       args: ctx.harnessCatalog.argsTemplate ?? [],
@@ -252,34 +275,42 @@ export async function handleProbePost(
   if (!ctx) return new Response("agent_profile_not_found", { status: 404 });
 
   /*
-   * The same environment a real run would get, from the same billing guard — because "works with
-   * my credential" is most of what the question means, and a probe that shaped its own env would
-   * be testing a configuration no run will ever use.
-   */
-  const shaped = prepareHarnessEnv({
-    authMode: ctx.harnessProfile.authMode,
-    secretCiphertext: ctx.secretCiphertext,
-    baseEnv: process.env,
-    subscriptionEnvVar: ctx.harnessCatalog.subscriptionEnvVar,
-    meteredEnvVar: ctx.harnessCatalog.meteredEnvVar,
-  });
-  if (!shaped.ok) {
-    return Response.json({
-      ok: false,
-      reason: "this Profile has no usable credential — check the Secret it points at",
-      protocolVersion: null,
-      authMethods: [],
-      capabilities: { models: [], modes: [] },
-    });
-  }
-
-  /*
    * A scratch directory, not a worktree. An ACP agent is handed a `cwd` it may read, and giving
    * it a real Repository to answer "are you installed" would put a probe's blast radius above
    * its purpose. Removed either way — a probe must not leave anything behind.
    */
   const cwd = await mkdtemp(join(tmpdir(), "solow-probe-"));
   try {
+    /*
+     * The same environment a real run would get, from the same billing guard — because "works
+     * with my credential" is most of what the question means, and a probe that shaped its own env
+     * would be testing a configuration no run will ever use. That now includes the blank,
+     * app-owned configuration of Decision 0027: a probe that passed only because the operator's
+     * own `~/.claude` happened to be logged in would be answering for a Task that will not be.
+     */
+    const configEnv = await resolveHarnessConfigEnv({
+      kind: "local",
+      home: join(cwd, OUT_OF_BAND_HOME),
+      baseEnv: process.env,
+    });
+    const shaped = prepareHarnessEnv({
+      authMode: ctx.harnessProfile.authMode,
+      secretCiphertext: ctx.secretCiphertext,
+      baseEnv: process.env,
+      subscriptionEnvVar: ctx.harnessCatalog.subscriptionEnvVar,
+      meteredEnvVar: ctx.harnessCatalog.meteredEnvVar,
+      configEnv,
+    });
+    if (!shaped.ok) {
+      return Response.json({
+        ok: false,
+        reason: "this Profile has no usable credential — check the Secret it points at",
+        protocolVersion: null,
+        authMethods: [],
+        capabilities: { models: [], modes: [] },
+      });
+    }
+
     const report = await probeHarness(createLocalExecutor(cwd), {
       command: ctx.harnessCatalog.command,
       args: ctx.harnessCatalog.argsTemplate ?? [],

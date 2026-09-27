@@ -70,7 +70,8 @@ function requireFlag(flag: FlagKey) {
  *
  * For the handful of endpoints that must stay reachable while the core loop is OFF — reading a
  * Workspace's setup state, and turning `ff-core-program` on. Gating those behind
- * `ownerProcedure` would be a deadlock: the flag ships off, and the only way to set it would be
+ * `ownerProcedure` would be a deadlock: an operator can turn the flag off, and the only way back
+ * would then be
  * a script on the host. Tenancy is unaffected — every DAL call below is still scoped to
  * `ctx.rctx.workspaceId` (Principle V).
  */
@@ -112,6 +113,19 @@ export const libraryProcedure = publicProcedure
   .use(requireSession)
   .use(requireFlag("ff-core-program"))
   .use(requireFlag("ff-agent-libraries"));
+
+/**
+ * Emptying a Workspace, and the per-user theme and new-Task defaults Settings writes (spec F16).
+ *
+ * On `sessionProcedure`'s footing rather than `ownerProcedure`'s, with only its own switch: the
+ * reset is the surface an Owner reaches for precisely when the Workspace is in a state they want
+ * gone, and requiring `ff-core-program` to be ON to clean up after it would make the broken half
+ * of the product the gate on fixing it. Tenancy is untouched — the Workspace is the session's own
+ * (Principle V).
+ */
+export const workspaceControlsProcedure = publicProcedure
+  .use(requireSession)
+  .use(requireFlag("ff-workspace-controls"));
 
 /**
  * Per-Owner rate limit for a sensitive write. Returns a middleware to chain after

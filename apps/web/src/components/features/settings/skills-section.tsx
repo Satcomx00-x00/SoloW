@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { trpc } from "@/trpc/react";
-import { ImportSkillsDialog } from "./import-skills-dialog";
+import { type ImportReport, ImportSkillsDialog } from "./import-skills-dialog";
 import { LibraryEmpty, LibraryForm, LibraryQueryState, LibraryRow } from "./library-ui";
 import { SectionStatus, SettingsLoading, SettingsSection } from "./settings-shell";
 
@@ -39,7 +39,7 @@ export function SkillsSection() {
   const [body, setBody] = useState("");
   const [path, setPath] = useState("");
   const [enabled, setEnabled] = useState(false);
-  const [imported, setImported] = useState<{ count: number; skipped: number } | null>(null);
+  const [imported, setImported] = useState<ImportReport | null>(null);
   // A .zip dragged over the card: the overlay while it hovers, the file once it lands. Counted
   // rather than flagged because dragenter/dragleave fire for every child crossed on the way.
   const [dragDepth, setDragDepth] = useState(0);
@@ -118,7 +118,7 @@ export function SkillsSection() {
         {usable && !adding && (
           <div className="flex items-center gap-2">
             <ImportSkillsDialog
-              onImported={(count, skipped) => setImported({ count, skipped })}
+              onImported={setImported}
               droppedFile={dropped}
               onDroppedFileTaken={() => setDropped(null)}
               trigger={
@@ -141,7 +141,7 @@ export function SkillsSection() {
             Imported {imported.count} skill{imported.count === 1 ? "" : "s"}
             {imported.skipped > 0 &&
               ` · ${imported.skipped} skipped (already here, or no SKILL.md any more)`}
-            .
+            {imported.missing.length > 0 && ` · not found there: ${imported.missing.join(", ")}`}.
           </p>
         )}
 
@@ -174,7 +174,7 @@ export function SkillsSection() {
             onAdd={() => setAdding(true)}
             secondary={
               <ImportSkillsDialog
-                onImported={(count, skipped) => setImported({ count, skipped })}
+                onImported={setImported}
                 trigger={
                   <Button type="button" variant="outline" size="sm">
                     <Download aria-hidden />

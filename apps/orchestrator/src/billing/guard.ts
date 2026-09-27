@@ -22,6 +22,11 @@ export function prepareHarnessEnv(params: {
   meteredEnvVar: string;
   /** The Task's Executor Profile environment (issue #73); never able to reach the credential. */
   profileEnv?: Readonly<Record<string, string>>;
+  /**
+   * Where the harness looks for its configuration (Decision 0027) — `harness/hermetic-home.ts`.
+   * Applied over the profile's environment, so the isolation is not something a profile can undo.
+   */
+  configEnv?: Readonly<Record<string, string>>;
 }): Result<Record<string, string>, typeof BillingErrorCode.MissingCredential> {
   if (!params.secretCiphertext) return err(BillingErrorCode.MissingCredential);
   const credentialValue = decryptForHarnessRun(params.secretCiphertext);
@@ -32,6 +37,7 @@ export function prepareHarnessEnv(params: {
     subscriptionEnvVar: params.subscriptionEnvVar,
     meteredEnvVar: params.meteredEnvVar,
     ...(params.profileEnv ? { profileEnv: params.profileEnv } : {}),
+    ...(params.configEnv ? { configEnv: params.configEnv } : {}),
   });
 }
 

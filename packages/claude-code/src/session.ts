@@ -147,8 +147,25 @@ export function buildArgs(options: {
      * cannot go stale.
      */
     ...(options.model ? ["--model", options.model] : []),
-    // Hooks and the like for this one launch, on top of whatever settings the host has. Before
-    // the extras so a configured extra can still override it — the operator's argv is last.
+    /*
+     * Which settings files the CLI is allowed to read (Decision 0027).
+     *
+     * `user` is left out: the operator's `~/.claude/settings.json` is their machine's
+     * configuration, not this Task's, and a run whose behaviour changes when someone edits a file
+     * in their home directory is a run nothing can reproduce. `project` and `local` are the
+     * checkout's own — `.claude/settings.json` and `.claude/settings.local.json` — and a Task is
+     * supposed to obey those.
+     *
+     * The belt is the environment (`harness/hermetic-home.ts` points `$HOME` and
+     * `CLAUDE_CONFIG_DIR` at a directory SoloW made, so there are no user settings to find); this
+     * is the braces, and it is the half that still holds if a future CLI grows another way to
+     * reach them.
+     */
+    "--setting-sources",
+    "project,local",
+    // Hooks and the like for this one launch, layered over those. Before the extras so a
+    // configured extra can still override it — the operator's argv is last, which is also the
+    // residual hole Decision 0027 records: an `args_template` may append a `--settings` of its own.
     ...(options.settings ? ["--settings", options.settings] : []),
     ...(options.extraArgs ?? []),
   ];

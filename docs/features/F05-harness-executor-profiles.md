@@ -65,6 +65,41 @@ sign-up (`apps/web/src/server/auth/auth.ts`) and in the dev/test seed alike
 an Owner adding anything first; the seed guarantees a floor, the create mutation removes the
 ceiling.
 
+## The configuration a harness runs against (Decision 0027)
+
+A Task's harness runs against a **blank, app-owned configuration**, never the operator's
+machine-level one. At launch the run is given `$HOME` — and `XDG_CONFIG_HOME`, `XDG_DATA_HOME`,
+`XDG_CACHE_HOME`, `XDG_STATE_HOME` and `CLAUDE_CONFIG_DIR` with it — pointing at a directory
+SoloW made for that Task (`<SOLOW_WORKTREE_ROOT>/<taskId>--harness-home`), so `~/.claude/`,
+`~/.claude.json`, `$HOME/CLAUDE.md`, the operator's `settings.json`, their user-level MCP servers
+and their user-level Skills are all somewhere the harness never looks. Claude Code is additionally
+launched with `--setting-sources project,local`, which omits the user tier in argv as well.
+
+Three boundaries define what this does and does not mean:
+
+- **Configuration discovery is isolated; the environment is not.** `PATH`, `LANG`, `TERM` and the
+  proxy variables reach the harness unchanged — they are what let it run at all — and an Executor
+  Profile's own `env` (FR-5) still applies over them.
+- **Repository-level configuration stays.** A `CLAUDE.md` or a `.claude/` committed in the checkout
+  is the *project's* configuration and a Task is supposed to obey it. Only the user/machine tier is
+  neutralised.
+- **What the app wants loaded still arrives explicitly** — MCP servers and Skills from the
+  libraries as `--mcp-config`/`--plugin-dir` ([F24](./F24-harness-libraries.md)), and a Step's
+  checkpoint hook as `--settings` ([F03](./F03-workflow-designer.md)). The home is seeded empty
+  precisely so there is one source of truth for that.
+
+The directory is per-Task rather than per-round, so a resumed conversation still finds whatever its
+harness cached, and it is removed with the Task's worktrees and transcripts by the retention sweep
+([F11](./F11-sessions-conversations.md), Decision 0025).
+
+An Executor Profile cannot undo this: the isolation is applied *after* the profile's `env`, so a
+profile that names `HOME` is accepted at the API (nothing stored becomes invalid) and ignored at
+launch. Two things are deliberately **not** closed, and Decision 0027 records both: a custom
+harness's `agent_catalog.argsTemplate` is appended last and can therefore add a `--settings` of its
+own, and the harness's own shell can read its environment and the filesystem the executor gives it.
+None of this is a sandbox — the container Executor ([F07](./F07-execution-environments.md)) is what
+a Task that must not reach the host is pointed at.
+
 ## Functional requirements
 
 ### Harness Profiles

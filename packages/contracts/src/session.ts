@@ -531,6 +531,27 @@ export const sessionRoundDto = z.object({
 });
 export type SessionRoundDto = z.infer<typeof sessionRoundDto>;
 
+/**
+ * Something the run did outside this app, read back out of what it printed (`runLinkOf` in
+ * `@solow/core`): the merge request it opened, the pipeline it started, the commit it pushed.
+ *
+ * Derived, never stored. Nothing writes a link anywhere — the transcript is the record, and a
+ * separate table of "links this run made" would be a second source of truth for a fact the log
+ * already holds, plus a migration for every forge whose URLs change shape.
+ */
+export const runLinkDto = z.object({
+  kind: z.enum(["merge_request", "pipeline", "commit", "release", "issue"]),
+  /** The resource's own page, canonicalised — never the tab or anchor the harness pasted. */
+  url: z.string().url(),
+  /** How it is named where it lives: "Merge request !42", "Pipeline #1204". */
+  label: z.string().min(1),
+  /** The instance serving it, for a Task whose links span more than one. */
+  host: z.string().min(1),
+  /** `owner/repo`, or the full group path on GitLab; null when the URL does not say. */
+  repository: z.string().nullable(),
+});
+export type RunLinkDto = z.infer<typeof runLinkDto>;
+
 export const sessionDetailDto = z.object({
   session: sessionDto,
   /**
@@ -561,6 +582,12 @@ export const sessionDetailDto = z.object({
   cursor: sessionCursorDto.nullable(),
   /** Every review round so far, oldest first; the last is the one `diffs` and `review` describe. */
   rounds: z.array(sessionRoundDto),
+  /**
+   * Where the run went outside this app — the merge request, the pipeline, the commits — read
+   * from the *whole* log and so unaffected by a Step scope, for the reason `diffs` and `cursor`
+   * are: an MR opened in Step 2 is a fact about the Session, not about the Step on screen.
+   */
+  links: z.array(runLinkDto),
 });
 export type SessionDetailDto = z.infer<typeof sessionDetailDto>;
 

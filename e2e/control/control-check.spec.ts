@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { expect, type Page, test } from "@playwright/test";
-import { HARNESS_PROFILE_NAME, PATHS } from "../support/fixture.js";
+import { HARNESS_PROFILE_NAME, PATHS, SCRIPTED_LINKS } from "../support/fixture.js";
 import {
   awaitWorkflowGate,
   connectRepository,
@@ -204,9 +204,11 @@ test.describe("control check — the main line of the product, end to end", () =
       await name2.fill(stepNames[1]);
       await name2.blur();
       await page.getByRole("button", { name: `Edit the prompt for ${stepNames[1]}` }).click();
-      await page
-        .getByRole("textbox", { name: `Prompt for ${stepNames[1]}` })
-        .fill("Carry out what the investigation in the handoff above proposes.");
+      await page.getByRole("textbox", { name: `Prompt for ${stepNames[1]}` }).fill(
+        // `[opens-mr]` has this Step's harness push the branch and open a merge request
+        // through the shell, as a real one does — which is what the Links block below reads.
+        "Carry out what the investigation in the handoff above proposes. [opens-mr]",
+      );
       await page.getByRole("button", { name: "Save prompt" }).click();
 
       // What the API holds, not what the canvas drew: two Steps, in order, with the gates set.
@@ -287,12 +289,29 @@ test.describe("control check — the main line of the product, end to end", () =
 
     await test.step("the rail says what is true about the task, with the decision at its foot", async () => {
       const rail = page.getByRole("complementary", { name: "About this task" });
-      for (const name of ["Status", "Repository", "Dependencies", "Run"]) {
+      for (const name of ["Status", "Repository", "Links", "Dependencies", "Run"]) {
         await expect(rail.getByRole("region", { name })).toBeVisible();
       }
       // The run's harness, named — out of a popover and onto the page.
       await expect(rail.getByRole("region", { name: "Run" })).toContainText(HARNESS_PROFILE_NAME);
       await expect(rail.getByRole("button", { name: "Approve" })).toBeVisible();
+
+      // What the run did outside SoloW (F10 FR-12a): Step 2's harness opened the merge request
+      // and read the pipeline back, and both are doors rather than URLs buried in a transcript.
+      const links = rail.getByRole("region", { name: "Links" });
+      await expect(links.getByRole("link", { name: /Merge request !42/ })).toHaveAttribute(
+        "href",
+        SCRIPTED_LINKS.mergeRequest,
+      );
+      await expect(links.getByRole("link", { name: /Pipeline #1204/ })).toHaveAttribute(
+        "href",
+        SCRIPTED_LINKS.pipeline,
+      );
+      // `git push` offers to open a merge request on every push; nothing opened that one.
+      await expect(links.locator(`a[href="${SCRIPTED_LINKS.offer}"]`)).toHaveCount(0);
+      // That these survive a Step scope — Step 1 opened nothing — is the same claim the fork
+      // cursor makes, and is asserted where it is free: `session.step.test.ts`. This walk pays
+      // for the things only a browser can answer.
     });
 
     await test.step("Explain on a criterion answers from the task's harness", async () => {

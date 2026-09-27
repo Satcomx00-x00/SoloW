@@ -12,7 +12,13 @@ import {
 import { createTestDb, type TestDb } from "@solow/db/testing";
 import { eq } from "drizzle-orm";
 import { ctxFor, seedWorkspaceGraph } from "./test-fixtures.js";
-import { getSyncStatus, getWorkspace, getWorkspaceSetup, renameWorkspace } from "./workspace.js";
+import {
+  getSyncStatus,
+  getWorkspace,
+  getWorkspaceFlags,
+  getWorkspaceSetup,
+  renameWorkspace,
+} from "./workspace.js";
 
 /**
  * The Workspace, as something an Owner can read and act on (2026-08-28).
@@ -88,21 +94,17 @@ describe("renameWorkspace", () => {
 describe("getWorkspaceSetup", () => {
   it("reports a bare Workspace as unready, naming what it lacks", async () => {
     // The state a real sign-up leaves behind, and the one the retired fixture hid: no
-    // credential, no profile, no executor, no repository, and the core loop off.
+    // credential, no profile, no executor, no repository. The core loop is *not* among them any
+    // more — flags default ON (constitution v1.5.0), so a fresh Workspace arrives with that step
+    // already done and what it lacks is only ever rows somebody has to create.
     const id = await bareWorkspace();
 
     const data = await stepsOf(id);
 
     expect(data.ready).toBe(false);
     expect(step(data, "workspace")?.done).toBe(true);
-    for (const key of [
-      "agents",
-      "secret",
-      "agent-profile",
-      "executor",
-      "repository",
-      "core-loop",
-    ]) {
+    expect(step(data, "core-loop")?.done).toBe(true);
+    for (const key of ["agents", "secret", "agent-profile", "executor", "repository"]) {
       expect(step(data, key)?.done).toBe(false);
     }
   });
@@ -147,8 +149,13 @@ describe("getWorkspaceSetup", () => {
   });
 
   it("is ready only when every step is, including the flag the core loop hides behind", async () => {
-    // `ff-core-program` ships OFF, which is why a fully-configured Workspace can still refuse to
-    // run a Task. It is a step rather than a footnote for exactly that reason.
+    /*
+     * `ff-core-program` defaults ON now, so the direction of this test is reversed: it used to
+     * prove a fully-configured Workspace stays unready until the flag is switched on, and it
+     * proves the same coupling from the other side — a fully-configured Workspace goes *back* to
+     * unready the moment somebody kills that flag. The step exists for the kill switch, which is
+     * the case where a Workspace has everything and still refuses to run a Task.
+     */
     const graph = await seedWorkspaceGraph(db, "full");
     await db.insert(secret).values({
       workspaceId: graph.workspaceId,
@@ -158,17 +165,17 @@ describe("getWorkspaceSetup", () => {
     });
 
     const before = await stepsOf(graph.workspaceId);
-    expect(before.ready).toBe(false);
-    expect(step(before, "core-loop")?.done).toBe(false);
+    expect(step(before, "core-loop")?.done).toBe(true);
+    expect(before.ready).toBe(true);
 
     await db
       .update(workspace)
-      .set({ enabledFlags: { "ff-core-program": true } })
+      .set({ enabledFlags: { "ff-core-program": false } })
       .where(eq(workspace.id, graph.workspaceId));
 
     const after = await stepsOf(graph.workspaceId);
-    expect(step(after, "core-loop")?.done).toBe(true);
-    expect(after.ready).toBe(true);
+    expect(step(after, "core-loop")?.done).toBe(false);
+    expect(after.ready).toBe(false);
   });
 
   it("goes back to unready when something it counted is deleted", async () => {
@@ -184,10 +191,7 @@ describe("getWorkspaceSetup", () => {
       kind: "api_key",
       ciphertext: "cipher",
     });
-    await db
-      .update(workspace)
-      .set({ enabledFlags: { "ff-core-program": true } })
-      .where(eq(workspace.id, graph.workspaceId));
+    // No flag write: it defaults ON, so a Workspace with every row is ready as it stands.
     expect((await stepsOf(graph.workspaceId)).ready).toBe(true);
 
     await db.delete(executorProfile).where(eq(executorProfile.workspaceId, graph.workspaceId));
@@ -345,5 +349,76 @@ describe("getSyncStatus reports the repository that is furthest behind", () => {
     if (!result.ok) return;
     expect(result.data.repositories).toBe(1);
     expect(result.data.stale).toBe(0);
+  });
+});
+
+/**
+ * Reading a Workspace's flag overrides (constitution v1.5.0).
+ *
+ * This is the web app's half of the boundary the orchestrator's `loadTaskRunContext` owns on the
+ * other side, and the flip to default-ON reversed what its failure mode buys. It used to resolve
+ * an unreadable column to "no overrides", which meant everything OFF — fail-closed. The same
+ * code now means everything ON.
+ *
+ * That was an accepted trade rather than an oversight (see the function's own comment), so it is
+ * pinned here deliberately: if the shape of this ever changes, it should change because someone
+ * decided to, not because a `?? {}` moved.
+ */
+describe("getWorkspaceFlags", () => {
+  const overridesFor = async (stored: unknown) => {
+    const [ws] = await db
+      .insert(workspace)
+      .values({ name: "flags", ownerUserId: "owner-flags" })
+      .returning();
+    if (!ws) throw new Error("failed to insert workspace");
+    await db
+      .update(workspace)
+      .set({ enabledFlags: stored as Record<string, boolean> | null })
+      .where(eq(workspace.id, ws.id));
+    return getWorkspaceFlags(db, ws.id);
+  };
+
+  it("reads a Workspace that has said nothing as no overrides", async () => {
+    // Which, with defaults ON, is every capability available — the state a fresh install is in.
+    expect(await overridesFor(null)).toEqual({});
+    expect(await overridesFor({})).toEqual({});
+  });
+
+  it("carries an explicit false through, because that is the only way off is expressible", async () => {
+    expect(await overridesFor({ "ff-workflows": false })).toEqual({ "ff-workflows": false });
+  });
+
+  it("carries an explicit true through", async () => {
+    expect(await overridesFor({ "ff-mcp": true })).toEqual({ "ff-mcp": true });
+  });
+
+  it("drops a key the build does not recognise, rather than passing it on", async () => {
+    /*
+     * Forward compatibility in the one direction that matters: a column written by a newer build
+     * that knows a flag this one does not must not put an unknown key into the context, where
+     * `isEnabled` would index `FLAGS` with it. The row is left intact — downgrading is not a
+     * reason to lose the newer build's setting.
+     */
+    expect(await overridesFor({ "ff-from-the-future": false, "ff-mcp": false })).toEqual({
+      "ff-mcp": false,
+    });
+  });
+
+  it("drops a non-boolean value rather than coercing it", async () => {
+    // `"false"` is truthy. Guessing what a hand-edited row meant is worse than falling through
+    // to the registry default, which is a decision somebody actually made.
+    expect(await overridesFor({ "ff-mcp": "false" })).toEqual({});
+    expect(await overridesFor({ "ff-mcp": 0 })).toEqual({});
+  });
+
+  it("reads a column that is not an object at all as no overrides", async () => {
+    // A corrupt column must not throw: this runs on the way in to *every* request, so an
+    // exception here would take the whole app down rather than one feature.
+    expect(await overridesFor("nonsense")).toEqual({});
+    expect(await overridesFor(["ff-mcp"])).toEqual({});
+  });
+
+  it("reads a Workspace that does not exist as no overrides", async () => {
+    expect(await getWorkspaceFlags(db, "no-such-workspace")).toEqual({});
   });
 });

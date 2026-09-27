@@ -51,6 +51,31 @@ export const SEED_WORKSPACE_B = "22222222-2222-4222-8222-222222222222";
 export const HARNESS_PROFILE_NAME = "Claude Code (subscription)";
 export const EXECUTOR_PROFILE_NAME = "Local executor";
 
+/**
+ * What the fixture harness prints when a Task's brief carries `[opens-mr]`: the URLs a real
+ * `git push` and `glab` pair leaves behind in the log (F10 FR-12a).
+ *
+ * One definition for both ends, for the reason the profile names above are — the orchestrator
+ * fixture prints these and the spec asserts on them, and two copies would drift the first time
+ * either side changed a digit.
+ *
+ * `.test` is the reserved TLD: these can never resolve, so a test that somehow followed one
+ * fails loudly instead of reaching something real.
+ */
+export const SCRIPTED_LINKS = {
+  /** What `glab mr create` reports when it has opened one. */
+  mergeRequest: "https://gitlab.example.test/acme/gate/-/merge_requests/42",
+  /** The CI pipeline that ran on the push. */
+  pipeline: "https://gitlab.example.test/acme/gate/-/pipelines/1204",
+  /**
+   * What `git push` prints on a branch with no merge request behind it — an *offer* to open
+   * one, on every push. Nothing opened it, so it must produce no button: the negative this
+   * fixture exists to let a test assert, and the one a naive URL scrape gets wrong.
+   */
+  offer:
+    "https://gitlab.example.test/acme/gate/-/merge_requests/new?merge_request%5Bsource_branch%5D=solow",
+} as const;
+
 /** Deterministic test-only values — never used by a real deployment. */
 export const E2E_ENV = {
   SOLOW_SQLITE_PATH: PATHS.db,

@@ -1822,6 +1822,32 @@ describe("the diff a reviewer is shown", () => {
       expect(runner.envs[0]?.["BUILD_FLAVOUR"]).toBe("debug");
     });
 
+    it("runs the harness against an app-owned configuration, not the operator's (Decision 0027)", async () => {
+      const ids = freshIds();
+      // A profile that names the configuration variables stands in for one an operator pointed
+      // back at their own machine. The app's answer is applied after the profile's, so it wins.
+      await seedRun(db, ids, {
+        executorConfig: {
+          kind: "local",
+          env: { HOME: "/home/operator", CLAUDE_CONFIG_DIR: "/home/operator/.claude" } as Record<
+            string,
+            string
+          >,
+        },
+      });
+      const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
+      const { deps } = makeDeps(db, runner, nullStream());
+
+      await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+      const home = `/wt/${ids.taskId}--harness-home`;
+      expect(runner.envs[0]?.["HOME"]).toBe(home);
+      expect(runner.envs[0]?.["CLAUDE_CONFIG_DIR"]).toBe(`${home}/.claude`);
+      expect(runner.envs[0]?.["XDG_CONFIG_HOME"]).toBe(`${home}/.config`);
+      // …and configuration discovery only: the harness still has a usable PATH.
+      expect(runner.envs[0]?.["PATH"]).toBe(process.env["PATH"]);
+    });
+
     it("AC-6: a profile environment cannot divert the run to metered billing", async () => {
       const ids = freshIds();
       // The contract refuses such a profile; this row stands in for one written before that
@@ -3222,6 +3248,20 @@ describe("task-run widgets", () => {
       .where(eq(workspace.id, ids.workspaceId));
   }
 
+  /**
+   * Turn widgets off for a Workspace.
+   *
+   * Needed at all only since flags began defaulting ON (constitution v1.5.0): a Workspace that
+   * has said nothing now has widgets *enabled*, so a case about the flag being off has to say so
+   * rather than rely on a seeded Workspace staying quiet.
+   */
+  async function disableWidgets(ids: ReturnType<typeof freshIds>): Promise<void> {
+    await db
+      .update(workspace)
+      .set({ enabledFlags: { "ff-agent-widgets": false } })
+      .where(eq(workspace.id, ids.workspaceId));
+  }
+
   it("records what the harness said about stopping, when it said anything", async () => {
     // Without a `task_complete` the marker still gets written — the fix must not depend on an
     // harness knowing SoloW exists — so this is about the enrichment, not the mechanism.
@@ -3308,6 +3348,7 @@ describe("task-run widgets", () => {
 
     const off = freshIds();
     await seedRun(db, off);
+    await disableWidgets(off);
     const quiet = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps: offDeps } = makeDeps(db, quiet, nullStream());
     await runTaskLifecycle(offDeps, { event: { data: off }, step: scriptedStep(["approve"]) });
@@ -3318,6 +3359,7 @@ describe("task-run widgets", () => {
   it("leaves the output untouched for a Workspace with the flag off", async () => {
     const ids = freshIds();
     await seedRun(db, ids);
+    await disableWidgets(ids);
     const runner = new ScriptedRunner(
       [{ kind: "completed", stopReason: "end_turn" }],
       [
@@ -3507,6 +3549,20 @@ describe("the harness's completion declaration", () => {
     await db
       .update(workspace)
       .set({ enabledFlags: { "ff-agent-widgets": true } })
+      .where(eq(workspace.id, ids.workspaceId));
+  }
+
+  /**
+   * Turn widgets off for a Workspace.
+   *
+   * Needed at all only since flags began defaulting ON (constitution v1.5.0): a Workspace that
+   * has said nothing now has widgets *enabled*, so a case about the flag being off has to say so
+   * rather than rely on a seeded Workspace staying quiet.
+   */
+  async function disableWidgets(ids: ReturnType<typeof freshIds>): Promise<void> {
+    await db
+      .update(workspace)
+      .set({ enabledFlags: { "ff-agent-widgets": false } })
       .where(eq(workspace.id, ids.workspaceId));
   }
 
@@ -5216,10 +5272,11 @@ describe("a Task following a Workflow", () => {
 
   it("ignores the Workflow entirely when the flag is off", async () => {
     /*
-     * THE FLAG-OFF TEST. `ff-workflows` default OFF is the Definition of Done, and a Task that
-     * happens to carry a `workflowId` in a Workspace with the flag off must behave exactly as a
-     * Task with none: its own Harness Profile, integration on the first approve, and a cursor
-     * nothing writes to.
+     * THE FLAG-OFF TEST. `ff-workflows` defaults ON, so this is the kill switch: `seedWorkflow`
+     * stores an explicit `false` rather than leaving the column silent, which is what "off" has
+     * to be now that absence means on. A Task that happens to carry a `workflowId` in a Workspace
+     * with the flag off must behave exactly as a Task with none: its own Harness Profile,
+     * integration on the first approve, and a cursor nothing writes to.
      */
     const ids = freshIds();
     await seedRun(db, ids);
@@ -5620,6 +5677,12 @@ describe("the harness libraries a run is handed (spec F24)", () => {
   it("hands the harness nothing while the flag is off, whatever the library rows say", async () => {
     const ids = freshIds();
     await seedRun(db, ids);
+    // Stored explicitly, because a Workspace that has said nothing now has libraries *enabled*
+    // (constitution v1.5.0) — this case is the kill switch, so it has to use the switch.
+    await db
+      .update(workspace)
+      .set({ enabledFlags: { "ff-agent-libraries": false } })
+      .where(eq(workspace.id, ids.workspaceId));
     await seedLibraries(ids.workspaceId, true);
 
     const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);

@@ -47,23 +47,58 @@ export interface ResolveEnvParams {
    * running, not only the two names the contract layer recognises.
    */
   profileEnv?: Readonly<Record<string, string>>;
+  /**
+   * Where the harness is to look for its configuration (Decision 0027): an app-owned `$HOME` and
+   * the `XDG_*`/`CLAUDE_CONFIG_DIR` names that would otherwise still point at the operator's own.
+   *
+   * Applied **after** `profileEnv` and alongside the credential shaping, for the same reason and
+   * with the same ordering argument: a Task's harness must run against the configuration the app
+   * decided on, so an Executor Profile cannot be a route back to the operator's `~/.claude`,
+   * `~/.claude.json` or `$HOME/CLAUDE.md`. The names carried here are also dropped from
+   * `profileEnv` below — silently, because the contract deliberately still *accepts* a profile
+   * that sets them (see `HARNESS_CONFIG_ENV_VARS`).
+   *
+   * Only configuration discovery. `PATH`, `LANG`, proxy settings and the rest of the base
+   * environment are what make the harness able to run at all and are left alone; repository-level
+   * configuration is the project's and is reached through the working directory, not through this.
+   *
+   * Empty (or absent) when the execution host answers the question itself — a container's `HOME`
+   * is already a tmpfs nobody has ever configured, and a host path imposed on it would name a
+   * directory that does not exist inside it.
+   */
+  configEnv?: Readonly<Record<string, string>>;
 }
 
 export function resolveHarnessRunEnv(
   params: ResolveEnvParams,
 ): Result<Record<string, string>, typeof BillingErrorCode.MissingCredential> {
-  const { authMode, credentialValue, baseEnv, subscriptionEnvVar, meteredEnvVar, profileEnv } =
-    params;
+  const {
+    authMode,
+    credentialValue,
+    baseEnv,
+    subscriptionEnvVar,
+    meteredEnvVar,
+    profileEnv,
+    configEnv,
+  } = params;
   if (!credentialValue) return err(BillingErrorCode.MissingCredential);
 
   // Copy the base env, dropping undefined values.
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(baseEnv)) if (v !== undefined) env[k] = v;
 
+  // Keyed on what `configEnv` actually carries rather than on the name list itself: when the host
+  // answers the configuration question on its own (a container), nothing is imposed and nothing
+  // is taken away, so a Docker profile that names `HOME` for its own image still means it.
+  const appOwned = new Set(Object.keys(configEnv ?? {}));
+
   for (const [k, v] of Object.entries(profileEnv ?? {})) {
     if (isGuardedEnvVar(k) || k === subscriptionEnvVar || k === meteredEnvVar) continue;
+    if (appOwned.has(k)) continue;
     env[k] = v;
   }
+
+  for (const [k, v] of Object.entries(configEnv ?? {})) env[k] = v;
 
   if (authMode === "subscription") {
     env[subscriptionEnvVar] = credentialValue;

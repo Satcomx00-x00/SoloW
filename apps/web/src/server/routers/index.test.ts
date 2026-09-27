@@ -29,11 +29,17 @@ function ctx(
   workspaceId: string | null,
   opts?: { flag?: boolean; userId?: string },
 ): BaseContext {
+  /*
+   * `flag: false` writes an explicit `false` override rather than omitting the overrides.
+   * Omitting them used to be enough, because the registry default was OFF; since it is ON
+   * (constitution v1.5.0) an absent override means *enabled*, and the kill-switch case below
+   * would have quietly started asserting nothing.
+   */
   const flag = opts?.flag ?? true;
   return {
     db,
     session: workspaceId ? { workspaceId, userId: opts?.userId ?? "user-1" } : null,
-    ...(flag ? { flagOverrides: { "ff-core-program": true } } : {}),
+    flagOverrides: { "ff-core-program": flag },
   };
 }
 
@@ -107,7 +113,7 @@ describe("tRPC router integration", () => {
     expect(await errCode(() => c.issue.list({}))).toBe("UNAUTHORIZED");
   });
 
-  it("blocks every procedure when the flag is OFF (kill switch)", async () => {
+  it("blocks every procedure when the flag is turned OFF (kill switch)", async () => {
     const wsId = await seedWs(db, "acme");
     const c = caller(db, wsId, { flag: false });
     expect(await errCode(() => c.issue.list({}))).toBe("FORBIDDEN");

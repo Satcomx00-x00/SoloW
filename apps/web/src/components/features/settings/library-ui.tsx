@@ -5,6 +5,7 @@ import type { LucideIcon } from "lucide-react";
 import { Plus, Trash2, TriangleAlert, X } from "lucide-react";
 import { type ReactNode, useId } from "react";
 import { ConfirmAction } from "@/components/features/confirm-action";
+import { FlagDisabled } from "@/components/features/shared/flag-disabled";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -26,15 +27,7 @@ export function LibraryQueryState({ error }: { error: { message: string } | null
   if (!error) return null;
   if (error.message === CommonErrorCode.FlagDisabled) {
     return (
-      <div className="space-y-2" role="alert">
-        <p className="text-muted-foreground text-sm leading-relaxed">
-          Harness libraries are not enabled here. Feature flags ship off — enable it from the
-          machine running this instance:
-        </p>
-        <pre className="w-fit rounded-lg border bg-card px-3 py-2 font-mono text-xs">
-          bun run flag enable ff-agent-libraries
-        </pre>
-      </div>
+      <FlagDisabled flag="ff-agent-libraries" title="Harness libraries are not enabled here" />
     );
   }
   return (

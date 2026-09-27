@@ -39,6 +39,23 @@ const handlers = {
     nextCursor: null,
   }),
   "task.list": () => ({ items: [], nextCursor: null }),
+  "task.create": (input: unknown) => ({ id: "task-1", ...(input as object) }),
+  /** No stored defaults unless a case says otherwise — the form opens on its own blanks. */
+  "preference.getTaskDefaults": () => ({
+    workspaceId: "ws-1",
+    userId: "ada",
+    defaults: { harnessProfileId: null, executorProfileId: null },
+  }),
+};
+
+/** The same server, with the Owner having chosen what a new Task starts as (spec F16). */
+const withDefaults = {
+  ...handlers,
+  "preference.getTaskDefaults": () => ({
+    workspaceId: "ws-1",
+    userId: "ada",
+    defaults: { harnessProfileId: "harness-1", executorProfileId: "exec-1" },
+  }),
 };
 
 async function pick(label: string, option: string): Promise<void> {
@@ -135,6 +152,87 @@ describe("CreateTaskDialog — a caller's preset", () => {
     );
     // The picker resolved the id to a real Issue, rather than holding an id it could not draw.
     expect(await screen.findByRole("region", { name: "Selected issue" })).toBeDefined();
+  });
+
+  it("names the Task after a preset Issue, not only a hand-picked one", async () => {
+    /*
+     * The regression this case exists for. Naming the Task after its Issue used to hang off the
+     * picker's `onChange`, so it fired for an Issue chosen by hand and never for one arriving in
+     * a preset — which is every Task cut from an Issue's own page, i.e. the common path. The
+     * form opened with an empty Title and the Owner retyped what was already on screen.
+     */
+    renderWithTrpc(
+      <CreateTaskDialog
+        trigger={null}
+        open
+        preset={{ repositoryId: "repo-1", issueId: "issue-1" }}
+      />,
+      handlers,
+    );
+
+    await waitFor(() =>
+      expect((screen.getByLabelText("Title") as HTMLInputElement).value).toBe("Ship it"),
+    );
+  });
+});
+
+/**
+ * What a new Task starts as (spec F16).
+ *
+ * A default, never a lock: both pickers stay editable and an answer the Owner gave is never
+ * overwritten. These pin both halves, because a "default" that clobbered a deliberate choice
+ * would be worse than no default at all.
+ */
+describe("CreateTaskDialog — the Owner's stored defaults", () => {
+  it("opens with the stored harness and executor already chosen", async () => {
+    renderWithTrpc(<CreateTaskDialog />, withDefaults);
+    fireEvent.click(await screen.findByRole("button", { name: "New task" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Harness profile" }).textContent).toContain(
+        "Claude",
+      ),
+    );
+    expect(screen.getByRole("combobox", { name: "Executor" }).textContent).toContain("Local");
+  });
+
+  it("opens both pickers empty when nothing is stored", async () => {
+    renderWithTrpc(<CreateTaskDialog />, handlers);
+    fireEvent.click(await screen.findByRole("button", { name: "New task" }));
+
+    expect(
+      (await screen.findByRole("combobox", { name: "Harness profile" })).textContent,
+    ).not.toContain("Claude");
+  });
+
+  it("still sends the stored pair on submit, so the default is a real answer", async () => {
+    const { log } = renderWithTrpc(
+      <CreateTaskDialog
+        trigger={null}
+        open
+        preset={{ repositoryId: "repo-1", issueId: "issue-1" }}
+      />,
+      withDefaults,
+    );
+
+    await waitFor(() =>
+      expect((screen.getByLabelText("Title") as HTMLInputElement).value).toBe("Ship it"),
+    );
+    // Submitted on the form rather than by clicking the button: the click-to-submit path is the
+    // browser's, and the test DOM does not implement it.
+    const submit = screen.getByRole("button", { name: "Create task" }) as HTMLButtonElement;
+    fireEvent.submit(submit.closest("form") as HTMLFormElement);
+
+    await waitFor(() => {
+      const created = log.calls.filter((c) => c.path === "task.create").at(-1);
+      // The point of the whole feature: an Issue, two clicks fewer, and a Task that launches.
+      expect(created?.input).toMatchObject({
+        issueId: "issue-1",
+        title: "Ship it",
+        agentProfileId: "harness-1",
+        executorProfileId: "exec-1",
+      });
+    });
   });
 });
 

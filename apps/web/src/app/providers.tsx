@@ -5,6 +5,7 @@ import { httpBatchStreamLink } from "@trpc/client";
 import type { ReactNode } from "react";
 import { useState } from "react";
 import superjson from "superjson";
+import { ThemeSync } from "@/components/theme";
 import { ToastProvider } from "@/components/ui/toast";
 import { trpc } from "@/trpc/react";
 import { createQueryClient } from "./query-client";
@@ -36,7 +37,12 @@ export function Providers({ children }: { children: ReactNode }) {
     <trpc.Provider client={trpcClient} queryClient={queryClient}>
       <QueryClientProvider client={queryClient}>
         {/* Toasts sit above the query providers so an Undo on one can still reach a mutation. */}
-        <ToastProvider>{children}</ToastProvider>
+        <ToastProvider>
+          {/* Renders nothing; reconciles the document's theme class with the stored preference
+              once the client is up. The pre-paint class comes from `THEME_BOOT_SCRIPT`. */}
+          <ThemeSync />
+          {children}
+        </ToastProvider>
       </QueryClientProvider>
     </trpc.Provider>
   );

@@ -37,7 +37,7 @@ export async function createContext({ req }: { req: Request }): Promise<BaseCont
   const session = await resolveSession(req.headers);
   if (!session) return { db, requestHost, session: null };
 
-  // Flags are per-Workspace and default OFF; the override comes from the Workspace row, so
+  // Flags are per-Workspace and default ON; the override comes from the Workspace row, so
   // enabling the core loop is a deliberate act and clearing it is the kill switch.
   return {
     db,

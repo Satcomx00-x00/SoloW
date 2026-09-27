@@ -34,7 +34,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { TaskStateBadge } from "@/components/features/board/task-state-badge";
 import { ConfirmDialog } from "@/components/features/confirm-action";
 import { useBackToProject } from "@/components/features/shared/back-to-project";
@@ -64,6 +64,7 @@ import { collateDecisions, collateFeedback, joinFeedback } from "./review-feedba
 import { groupChanges, summariseConsequences } from "./review-groups";
 import type { LineAnchor } from "./review-notes";
 import { RoundSelector } from "./round-selector";
+import { noticesNewRunLink, RunLinks } from "./run-links";
 import { TaskAdvance } from "./task-advance";
 import { TaskDependencies, useBlockedByEditor, useTaskDependencies } from "./task-dependencies";
 import { TaskFooter } from "./task-footer";
@@ -379,8 +380,19 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
    * on purpose. Naming `latest.id` would refresh the Session this render happens to know about,
    * which is precisely the one that has just been superseded.
    */
+  /**
+   * Links this page has already accounted for, so the same MR printed by every later
+   * `glab mr view` costs nothing. Per mount, which is exactly the lifetime of the socket whose
+   * frames fill it; a reload starts over and the first frame carrying a known link refetches
+   * once, which is harmless.
+   */
+  const seenLinks = useRef<Set<string>>(new Set());
   const onLive = useCallback(
     (event: TaskEvent) => {
+      // A merge request opened mid-run produces no `status` and no `diff`, so nothing below
+      // would refetch the Session that holds the link. Noticing it here is what puts the button
+      // on the page while the run is still going (see `noticesNewRunLink`).
+      if (noticesNewRunLink(event, seenLinks.current)) utils.session.get.invalidate();
       if (event.kind === "status" || event.kind === "diff") {
         utils.task.get.invalidate({ id: taskId });
         utils.session.listForTask.invalidate({ taskId });
@@ -1370,6 +1382,13 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
                 ) : primary ? (
                   <p className="text-muted-foreground text-xs">from {primary.baseRef ?? "HEAD"}</p>
                 ) : null}
+              </RailSection>
+
+              {/* Where the run went outside this app, beneath the branch it went there from.
+                  Never hidden when empty: "it opened nothing" is an answer a reviewer needs
+                  before going to look for a merge request that was never created. */}
+              <RailSection title="Links">
+                <RunLinks links={detail.data?.links ?? []} />
               </RailSection>
 
               <RailSection

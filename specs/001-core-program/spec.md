@@ -1,7 +1,7 @@
 # Feature Specification: Core Program — End-to-End Task Loop
 
 **Feature slug**: `core-program`
-**Feature flag**: `ff-core-program` (default: OFF)
+**Feature flag**: `ff-core-program` (default: ON since constitution v1.5.0, 2026-09-24; shipped default OFF)
 **Feature branch**: `001-core-program`
 **Created**: 2026-08-17
 **Status**: Draft
@@ -335,7 +335,9 @@ all of the above. No third-party personal data is processed.
   implementation).
 - Both Subscription and API-key billing modes are supported in v1, with a default subscription
   concurrency cap of 3 per Agent Profile (clarified 2026-08-17).
-- The feature ships behind `ff-core-program`, default OFF, enabled for the local Owner first
+- The feature ships behind `ff-core-program`. It shipped default OFF and enabled for the local
+  Owner first; since constitution v1.5.0 (2026-09-24) every flag defaults ON and the switch is a
+  kill switch. Originally: enabled for the local Owner first
   (default — confirm before implementation).
 - Data & privacy handling is minimal with secrets encrypted; no sensitive-data retention
   controls in v1 (default — confirm before implementation).

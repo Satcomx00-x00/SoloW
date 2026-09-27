@@ -60,7 +60,7 @@ export function FlagsSection() {
 
   return (
     <SettingsSection
-      caption="Every flag ships OFF until turned on here for this Workspace. Turning a flag off is a kill switch — it takes effect immediately for everyone signed into this Workspace."
+      caption="Every flag ships ON. Turning one off is a kill switch for this Workspace — it takes effect immediately for everyone signed into it, and nothing else here is gated behind the flag it kills, so you can always turn it back on."
       id="flags"
       status={
         list.isSuccess ? (

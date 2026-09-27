@@ -23,6 +23,7 @@ import { useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ConfirmDialog } from "@/components/features/confirm-action";
+import { FlagDisabled } from "@/components/features/shared/flag-disabled";
 import { DeleteTaskAction } from "@/components/features/task/delete-task-action";
 import { Button } from "@/components/ui/button";
 import {
@@ -338,14 +339,8 @@ export function Board({
     // rather than showing the raw error code to someone who cannot act on it.
     if (loadError.message === CommonErrorCode.FlagDisabled) {
       return (
-        <div className="flex flex-col items-start gap-3 px-6 py-16" role="alert">
-          <h2 className="font-medium text-sm">The core program is not enabled here</h2>
-          <p className="max-w-md text-muted-foreground text-sm leading-relaxed">
-            Feature flags ship off. Enable it from the machine running this instance:
-          </p>
-          <pre className="rounded-lg border bg-card px-3 py-2 font-mono text-xs">
-            bun run flag enable ff-core-program
-          </pre>
+        <div className="px-6 py-16">
+          <FlagDisabled flag="ff-core-program" title="The core program is not enabled here" />
         </div>
       );
     }

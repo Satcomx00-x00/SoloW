@@ -65,6 +65,22 @@ const HANDLERS = {
     userId: "ada",
     layout: { order: [], hidden: [], shown: [], widths: {} },
   }),
+  "preference.getTaskDefaults": () => ({
+    workspaceId: "ws-1",
+    userId: "ada",
+    defaults: { harnessProfileId: null, executorProfileId: null },
+  }),
+  "preference.getAppearance": () => ({
+    workspaceId: "ws-1",
+    userId: "ada",
+    appearance: { theme: "dark" },
+  }),
+  "workspace.get": () => ({ id: "ws-1", name: "acme", createdAt: "2026-01-01T00:00:00.000Z" }),
+  "workspace.setup": () => ({
+    workspace: { id: "ws-1", name: "acme", createdAt: "2026-01-01T00:00:00.000Z" },
+    steps: [],
+    ready: true,
+  }),
 };
 
 describe("the settings registry", () => {
@@ -133,12 +149,14 @@ describe("the settings page", () => {
 
     await screen.findByRole("heading", { name: "Harnesses", level: 1 });
     // A Secret, then the Harness Profile that spends it, then somewhere to execute — the sequence
-    // the old single column was arranged to show, kept — and then what the harness is handed once
-    // it runs: the MCP servers it can call and the Skills it reads (spec F24).
+    // the old single column was arranged to show, kept — then what a new Task picks from those
+    // two by default (spec F16), and then what the harness is handed once it runs: the MCP
+    // servers it can call and the Skills it reads (spec F24).
     expect(settingsSectionsIn("Harnesses").map((s) => s.id)).toEqual([
       "secrets",
       "agent-profiles",
       "executor-profiles",
+      "task-defaults",
       "mcp-servers",
       "skills",
     ]);
