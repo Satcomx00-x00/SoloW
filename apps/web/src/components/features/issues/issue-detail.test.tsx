@@ -60,6 +60,8 @@ function makeTask(id: string, state: TaskState, title: string): TaskDto {
   return {
     id,
     issueId: issue.id,
+    parentTaskId: null,
+    forkedFrom: null,
     title,
     state,
     agentProfileId: "harness-1",

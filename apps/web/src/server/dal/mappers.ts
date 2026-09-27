@@ -113,6 +113,15 @@ export function taskToDto(row: TaskRow, attachments: readonly TaskRepositoryRow[
   return {
     id: row.id,
     issueId: row.issueId,
+    parentTaskId: row.parentTaskId,
+    // The three fork columns travel as the cursor they were minted from, or as nothing at all
+    // (issue #56). They are written together and are null together, so a partial triple would be
+    // a row nothing can produce — but the DTO still has to commit to one shape, and a cursor
+    // missing its hash is not a cursor: nothing could tell a live fork point from a rewritten one.
+    forkedFrom:
+      row.forkSessionId !== null && row.forkSeq !== null && row.forkHash !== null
+        ? { sessionId: row.forkSessionId, seq: row.forkSeq, hash: row.forkHash }
+        : null,
     title: row.title,
     state: row.state,
     agentProfileId: row.agentProfileId,

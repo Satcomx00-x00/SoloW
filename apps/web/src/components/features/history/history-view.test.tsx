@@ -28,6 +28,8 @@ function task(over: Partial<TaskDto>): TaskDto {
   return {
     id: "task-1",
     issueId: "issue-1",
+    parentTaskId: null,
+    forkedFrom: null,
     title: "Fix the latch",
     state: "done",
     agentProfileId: "harness-1",

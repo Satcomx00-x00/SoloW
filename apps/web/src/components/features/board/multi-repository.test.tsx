@@ -31,6 +31,8 @@ function task(repositories: TaskRepositoryDto[]): TaskDto {
   return {
     id: "task-1",
     issueId: "issue-1",
+    parentTaskId: null,
+    forkedFrom: null,
     title: "Cross-repository change",
     state: "review",
     agentProfileId: "harness-1",

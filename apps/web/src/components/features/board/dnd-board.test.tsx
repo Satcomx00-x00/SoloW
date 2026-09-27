@@ -17,6 +17,8 @@ function makeTask(over: Partial<TaskDto> = {}): TaskDto {
   return {
     id: "task-1",
     issueId: "issue-1",
+    parentTaskId: null,
+    forkedFrom: null,
     title: "Investigate servo stall",
     state: "backlog",
     agentProfileId: "harness-1",

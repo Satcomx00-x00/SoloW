@@ -34,6 +34,8 @@ beforeEach(() => {
 function makeTask(over: Partial<TaskDto> & { id: string; state: TaskState }): TaskDto {
   return {
     issueId: "issue-1",
+    parentTaskId: null,
+    forkedFrom: null,
     title: `Task ${over.id}`,
     agentProfileId: "harness-1",
     executorProfileId: "exec-1",

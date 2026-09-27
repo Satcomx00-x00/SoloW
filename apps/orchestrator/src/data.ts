@@ -10,6 +10,7 @@ import {
   type CompactionRange,
   planCompaction,
   type SessionLogEvent,
+  verifySessionCursor,
 } from "@solow/core/session-log";
 import {
   type Db,
@@ -1070,4 +1071,121 @@ export async function listTaskEventsSince(
     workflowStepId: r.workflowStepId,
     payload: parseSessionEventPayload(r.kind, r.payload),
   }));
+}
+
+/**
+ * Where a sub-task's run starts reading from — the fork point on its own row, resolved against
+ * the parent's transcript (issue #56, AC-3).
+ *
+ * Four answers rather than one, because the caller has to do something different with each:
+ *
+ * - `none` — this Task was not split from another, or was split with no transcript to carry.
+ * - `stale` — the parent's log no longer hashes to what the cursor promised. A fork that
+ *   continued from a history nobody promised is exactly the silent wrong answer the hash exists
+ *   to prevent.
+ * - `missing` — the point itself is gone (the parent's Session was purged, or the row the cursor
+ *   names is not there). Distinguished from `stale` for the reason `verifySessionCursor`
+ *   distinguishes them: only one of the two is evidence that something rewrote history.
+ * - `ok` — the parent's transcript up to and including the point.
+ *
+ * **Reads only.** Nothing on this path writes to the parent's Session or its log, which is the
+ * whole of AC-4 — a parent that is still running must not notice that it has been forked. And a
+ * log that only ever grows keeps verifying while the parent carries on appending past the point:
+ * the hash covers the prefix up to `seq`, nothing after it.
+ */
+export interface ForkOrigin {
+  cursor: { sessionId: string; seq: number; hash: string };
+  /** The Task the cursor's Session belongs to, for the brief's opening line. */
+  parentTitle: string | null;
+  /** The parent's events up to and including the fork point, oldest first. */
+  events: SessionLogEvent[];
+}
+
+export type ForkOriginResult =
+  | { kind: "none" }
+  | { kind: "stale" }
+  | { kind: "missing" }
+  | { kind: "ok"; origin: ForkOrigin };
+
+export async function loadForkOrigin(
+  db: Db,
+  workspaceId: string,
+  t: Pick<typeof task.$inferSelect, "forkSessionId" | "forkSeq" | "forkHash">,
+): Promise<ForkOriginResult> {
+  // All three are written together and null together (see the column comments), so a partial
+  // triple is a row nothing produces — but a cursor missing its hash could not be verified, and
+  // an unverifiable fork point is not one this may act on.
+  if (t.forkSessionId === null || t.forkSeq === null || t.forkHash === null) {
+    return { kind: "none" };
+  }
+  const cursor = { sessionId: t.forkSessionId, seq: t.forkSeq, hash: t.forkHash };
+
+  const rows = await db
+    .select({ seq: sessionEvent.seq, kind: sessionEvent.kind, payload: sessionEvent.payload })
+    .from(sessionEvent)
+    .where(
+      and(eq(sessionEvent.workspaceId, workspaceId), eq(sessionEvent.sessionId, cursor.sessionId)),
+    )
+    .orderBy(asc(sessionEvent.seq));
+  // `stored` alongside the parsed payload, because the hash covers the row rather than the
+  // reading of it — the web app minted this cursor over the same bytes, and a digest taken over
+  // the parse would refuse every cursor whose payload carried a key the union does not declare.
+  const log: SessionLogEvent[] = rows.map((r) => ({
+    seq: r.seq,
+    payload: parseSessionEventPayload(r.kind, r.payload),
+    stored: r.payload,
+  }));
+
+  const check = verifySessionCursor(log, cursor);
+  if (!check.ok) {
+    return check.error === "cursor_hash_mismatch" ? { kind: "stale" } : { kind: "missing" };
+  }
+
+  // The title is looked up through the Session rather than `parent_task_id`, because the fork
+  // point is a fact about history and the parent link is not: a sub-task re-parented since still
+  // started from where it started.
+  const [parent] = await db
+    .select({ title: task.title })
+    .from(session)
+    .innerJoin(task, and(eq(task.workspaceId, session.workspaceId), eq(task.id, session.taskId)))
+    .where(and(eq(session.workspaceId, workspaceId), eq(session.id, cursor.sessionId)))
+    .limit(1);
+
+  return {
+    kind: "ok",
+    origin: {
+      cursor,
+      parentTitle: parent?.title ?? null,
+      events: log.filter((e) => e.seq <= cursor.seq),
+    },
+  };
+}
+
+/**
+ * Whether this Task has run before the Session now starting (issue #56).
+ *
+ * What decides how hard a fork point that no longer resolves bites. Before a sub-task's first
+ * run it is refused outright — the Owner split it to carry that context, and starting cold would
+ * hide that it cannot. After one, the context has already been handed over once and the work
+ * since is the Task's own; a parent purged from History in the meantime is not a reason to make
+ * that work unrunnable.
+ */
+export async function hasEarlierSession(
+  db: Db,
+  workspaceId: string,
+  taskId: string,
+  currentSessionId: string,
+): Promise<boolean> {
+  const [row] = await db
+    .select({ id: session.id })
+    .from(session)
+    .where(
+      and(
+        eq(session.workspaceId, workspaceId),
+        eq(session.taskId, taskId),
+        ne(session.id, currentSessionId),
+      ),
+    )
+    .limit(1);
+  return row !== undefined;
 }

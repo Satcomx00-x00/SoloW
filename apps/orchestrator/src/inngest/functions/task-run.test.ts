@@ -9,6 +9,7 @@ import { Writable } from "node:stream";
 import {
   type ExecutorConfig,
   type HarnessProtocol,
+  parseSessionEventPayload,
   type RepositorySource,
   TaskErrorCode,
   WIDGET_ANSWER_PREFIX,
@@ -16,6 +17,7 @@ import {
   type WorkflowStepCondition,
 } from "@solow/contracts";
 import { CREDENTIAL_EXPIRED_REASON } from "@solow/core";
+import { type SessionCursor, sessionCursorAt } from "@solow/core/session-log";
 import {
   encryptSecret,
   executorProfile,
@@ -40,7 +42,7 @@ import {
 } from "@solow/db";
 import { createTestDb, type TestDb } from "@solow/db/testing";
 import { createLogger } from "@solow/observability";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { listTaskEventsSince, setTaskState } from "../../data.js";
 import type { ExecutorFactoryOpts } from "../../executor/factory.js";
 import type { Executor } from "../../executor/types.js";
@@ -57,6 +59,7 @@ import type { HarnessLaunchSettings } from "../../harness/runners.js";
 import { STRANDED_PARK_REASON } from "../../reconcile.js";
 import { RepositoryUnusableError, worktreePath } from "../../worktree/manager.js";
 import {
+  harnessBrief,
   runTaskLifecycle,
   type StepLike,
   type TaskRunDeps,
@@ -5942,6 +5945,318 @@ describe("resuming the harness conversation", () => {
     expect(runner.sends[0]).toContain("# Review feedback");
     expect(await notices(ids.sessionId)).toContain(
       "Could not continue the previous conversation; the harness started from the brief instead, which was re-sent in full.",
+    );
+  });
+});
+
+describe("a sub-task forked from its parent's transcript (issue #56)", () => {
+  let db: TestDb;
+
+  beforeAll(() => {
+    process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 3).toString("base64");
+  });
+
+  beforeEach(() => {
+    db = createTestDb();
+  });
+
+  async function notices(sessionId: string): Promise<string[]> {
+    const rows = await db
+      .select()
+      .from(sessionEvent)
+      .where(eq(sessionEvent.sessionId, sessionId))
+      .orderBy(asc(sessionEvent.seq));
+    return rows
+      .filter((row) => row.kind === "notice")
+      .map((row) => (row.payload as { text: string }).text);
+  }
+
+  /** The log as the hash sees it — the stored row, not the parse of it (issue #2). */
+  async function storedLog(sessionId: string) {
+    const rows = await db
+      .select()
+      .from(sessionEvent)
+      .where(eq(sessionEvent.sessionId, sessionId))
+      .orderBy(asc(sessionEvent.seq));
+    return rows.map((row) => ({
+      seq: row.seq,
+      payload: parseSessionEventPayload(row.kind, row.payload),
+      stored: row.payload,
+    }));
+  }
+
+  /**
+   * A parent Task with a finished run, and the Task `seedRun` made pointed at a fork point in it.
+   *
+   * The parent is seeded into the same Workspace by hand rather than through a second `seedRun`,
+   * because what the child needs from it is exactly three things — a Task row to be named after,
+   * a Session, and a transcript with a hash.
+   */
+  async function seedParentFork(
+    ids: Ids,
+    opts: { events?: number; forkSeq?: number } = {},
+  ): Promise<{ parentTaskId: string; parentSessionId: string; cursor: SessionCursor }> {
+    const parentTaskId = `${ids.taskId}-parent`;
+    const parentSessionId = `${ids.sessionId}-parent`;
+    const [child] = await db.select().from(task).where(eq(task.id, ids.taskId)).limit(1);
+    if (!child) throw new Error("seedRun must run first");
+
+    await db.insert(task).values({
+      id: parentTaskId,
+      workspaceId: ids.workspaceId,
+      issueId: child.issueId,
+      title: "Rewire the latch",
+      state: "review",
+      agentProfileId: child.agentProfileId,
+      executorProfileId: child.executorProfileId,
+    });
+    await db.insert(session).values({
+      id: parentSessionId,
+      workspaceId: ids.workspaceId,
+      taskId: parentTaskId,
+      state: "awaiting_review",
+      harnessSessionId: "parent-conv",
+    });
+    for (let seq = 0; seq < (opts.events ?? 3); seq++) {
+      await db.insert(sessionEvent).values({
+        workspaceId: ids.workspaceId,
+        sessionId: parentSessionId,
+        seq,
+        kind: "assistant_turn",
+        payload: { kind: "assistant_turn", text: `parent line ${seq}`, thinking: false },
+      });
+    }
+    const cursor = sessionCursorAt(parentSessionId, await storedLog(parentSessionId), opts.forkSeq);
+    if (!cursor) throw new Error("parent has no fork point");
+
+    await db
+      .update(task)
+      .set({
+        parentTaskId,
+        forkSessionId: cursor.sessionId,
+        forkSeq: cursor.seq,
+        forkHash: cursor.hash,
+      })
+      .where(eq(task.id, ids.taskId));
+    return { parentTaskId, parentSessionId, cursor };
+  }
+
+  it("briefs the child with the parent's transcript up to the fork point (AC-3)", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    await seedParentFork(ids, { events: 4, forkSeq: 2 });
+    const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    const brief = runner.prompts[0] ?? "";
+    expect(brief).toContain("# Where this came from");
+    expect(brief).toContain('split out of "Rewire the latch", at event 2 of its transcript');
+    expect(brief).toContain("Agent: parent line 0");
+    expect(brief).toContain("Agent: parent line 2");
+    // The fork point is where the child starts reading, not the parent's head.
+    expect(brief).not.toContain("parent line 3");
+    // Context, not instructions — the child's own Task still leads the brief.
+    expect(brief.indexOf("# Task")).toBeLessThan(brief.indexOf("# Where this came from"));
+  });
+
+  it("never opens the parent's conversation: each Task's harness home is its own", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    await seedParentFork(ids);
+    const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    // Resuming `parent-conv` would continue the parent's conversation in the child's run — the
+    // mutation AC-4 forbids — and under Decision 0027 the CLI could not even find it.
+    expect(runner.resumeSessionIds).toEqual([null]);
+  });
+
+  it("leaves the parent's Session and transcript untouched (AC-4)", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const { parentTaskId, parentSessionId } = await seedParentFork(ids);
+    const eventsBefore = await db
+      .select()
+      .from(sessionEvent)
+      .where(eq(sessionEvent.sessionId, parentSessionId));
+    const [sessionBefore] = await db.select().from(session).where(eq(session.id, parentSessionId));
+    const [parentBefore] = await db.select().from(task).where(eq(task.id, parentTaskId));
+    const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    expect(
+      await db.select().from(sessionEvent).where(eq(sessionEvent.sessionId, parentSessionId)),
+    ).toEqual(eventsBefore);
+    // Including `harness_session_id`: the child's own conversation id is recorded on the child's
+    // Session, and a fork that overwrote the parent's would have stolen its resume point.
+    expect((await db.select().from(session).where(eq(session.id, parentSessionId)))[0]).toEqual(
+      sessionBefore,
+    );
+    expect((await db.select().from(task).where(eq(task.id, parentTaskId)))[0]).toEqual(
+      parentBefore,
+    );
+  });
+
+  it("keeps verifying while the parent carries on past the fork point", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const { parentSessionId } = await seedParentFork(ids);
+    // The parent is still running: its log grows after the split. The hash covers the prefix,
+    // so this is not a rewrite and must not be refused as one.
+    await db.insert(sessionEvent).values({
+      workspaceId: ids.workspaceId,
+      sessionId: parentSessionId,
+      seq: 3,
+      kind: "assistant_turn",
+      payload: { kind: "assistant_turn", text: "parent carries on", thinking: false },
+    });
+    const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    expect(runner.starts).toBe(1);
+    expect(runner.prompts[0] ?? "").not.toContain("parent carries on");
+  });
+
+  it("still gives the child its own worktree, not the parent's (AC-5, Principle II)", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    await seedParentFork(ids);
+    const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    expect(runner.worktreeNames).toEqual([worktreeNameForTask(ids.taskId)]);
+  });
+
+  it("briefs the same way on a protocol with a different runtime (ACP)", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids, { agentProtocol: "acp" });
+    await seedParentFork(ids);
+    const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    expect(runner.prompts[0] ?? "").toContain("Agent: parent line 2");
+  });
+
+  it("refuses to start when the parent's transcript changed under the fork point (AC-4)", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const { parentSessionId } = await seedParentFork(ids);
+    // A rewrite of history behind the cursor. Nothing in the product does this — which is the
+    // point: the hash is what makes an outside rewrite visible rather than silently inherited.
+    await db
+      .update(sessionEvent)
+      .set({ payload: { kind: "assistant_turn", text: "tampered", thinking: false } })
+      .where(and(eq(sessionEvent.sessionId, parentSessionId), eq(sessionEvent.seq, 1)));
+    const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    expect(runner.starts).toBe(0);
+    expect(await taskState(db, ids.taskId)).toBe("failed");
+    expect(await notices(ids.sessionId)).toContain(
+      "This task was split from a point in another task's transcript, and that transcript has changed since — the fork point no longer means what it meant. Nothing has been started. Split the sub-task again from the parent's current transcript.",
+    );
+  });
+
+  it("refuses a first run whose fork point no longer exists, rather than starting cold", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const { parentSessionId } = await seedParentFork(ids);
+    await db.delete(sessionEvent).where(eq(sessionEvent.sessionId, parentSessionId));
+    const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    expect(runner.starts).toBe(0);
+    expect(await taskState(db, ids.taskId)).toBe("failed");
+    expect(await notices(ids.sessionId)).toContain(
+      "This task was split from a point in another task's transcript, and that point no longer exists — the parent's session has been deleted. Nothing has been started.",
+    );
+  });
+
+  it("runs again without the digest once it has run, if the parent has since been purged", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const { parentSessionId } = await seedParentFork(ids);
+    await db.delete(sessionEvent).where(eq(sessionEvent.sessionId, parentSessionId));
+    // A Session from an earlier run of this sub-task: it was handed the context once already.
+    await db.insert(session).values({
+      id: `${ids.sessionId}-earlier`,
+      workspaceId: ids.workspaceId,
+      taskId: ids.taskId,
+      state: "closed",
+    });
+    const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    expect(runner.starts).toBe(1);
+    expect(runner.prompts[0] ?? "").not.toContain("# Where this came from");
+    expect(await notices(ids.sessionId)).toContain(
+      "The parent task's session has been deleted since this task was split from it, so this round is briefed without the parent's transcript.",
+    );
+  });
+
+  it("changes nothing for a Task that was not split from another", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
+    const { deps } = makeDeps(db, runner, nullStream());
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    expect(runner.resumeSessionIds).toEqual([null]);
+    expect(runner.prompts[0] ?? "").not.toContain("# Where this came from");
+  });
+});
+
+describe("harnessBrief — where a sub-task came from (issue #56)", () => {
+  const origin = { title: "Rewire the latch", seq: 4, digest: "Agent: done so far" };
+  // Only the fields the brief reads; the rest of a run context is irrelevant to its text.
+  const ctx = {
+    task: { title: "Order a servo" },
+    issue: { title: "Fix the latch", description: null },
+    widgetsEnabled: false,
+  } as unknown as Parameters<typeof harnessBrief>[0];
+
+  it("follows the Task, Issue and Step rather than leading the brief", () => {
+    const brief = harnessBrief(
+      ctx,
+      undefined,
+      [],
+      { name: "Build", brief: "Build it." },
+      undefined,
+      origin,
+    );
+    expect(brief.indexOf("# Step")).toBeLessThan(brief.indexOf("# Where this came from"));
+    expect(brief).toContain('split out of "Rewire the latch", at event 4');
+    expect(brief.endsWith("Agent: done so far")).toBe(true);
+  });
+
+  it("names no parent it does not know", () => {
+    expect(
+      harnessBrief(ctx, undefined, [], undefined, undefined, { ...origin, title: null }),
+    ).toContain("split out of another task");
+  });
+
+  it("is left out of a continuing brief, whose conversation already holds it", () => {
+    expect(harnessBrief(ctx, undefined, [], undefined, "interruption", origin)).not.toContain(
+      "Where this came from",
     );
   });
 });

@@ -2,6 +2,7 @@ import "server-only";
 import {
   type AddTaskDependencyInput,
   CommonErrorCode,
+  type CreateSubtaskInput,
   type CreateTaskInput,
   type DeleteTaskInput,
   err,
@@ -9,6 +10,8 @@ import {
   type ListTasksInput,
   ok,
   type Result,
+  type SessionCursorDto,
+  type SetTaskParentInput,
   type SetTaskRepositoriesInput,
   type TaskDeletionImpactDto,
   type TaskDependencyCycleError,
@@ -16,13 +19,18 @@ import {
   type TaskDto,
   TaskErrorCode,
   type TaskListDto,
+  type TaskParentCycleError,
   type TaskState,
 } from "@solow/contracts";
 import {
   buildDependencyGraph,
   CREDENTIAL_EXPIRED_REASON,
   checkDependencyEdge,
+  checkParentEdge,
+  resumeWorkflowCursor,
   taskCheckoutBranch,
+  taskSubtree,
+  validateWorkflowGraph,
   withinRetention,
 } from "@solow/core";
 import {
@@ -32,12 +40,34 @@ import {
   task,
   taskDependency,
   taskRepository,
+  workflow,
+  workflowStep,
   worktree,
 } from "@solow/db";
 import { and, asc, desc, eq, inArray, isNotNull, isNull, like, notInArray } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
 import { taskToDto } from "./mappers.js";
 import { pageAfter, pageLimit, pageOrder, pageProbe, toPage } from "./page.js";
+
+/** The transaction object drizzle hands a callback — same surface as `db`, and it exports no type. */
+type Tx = Parameters<Parameters<RequestContext["db"]["transaction"]>[0]>[0];
+
+/**
+ * A Task and its live descendants, following the parent link down (issue #56).
+ *
+ * Live only: a sub-task already in History went there with a delete of its own, and keeps the
+ * `deletedAt` that says when. One scan of `(id, parent_task_id)` and a walk in memory
+ * (`taskSubtree`) rather than a recursive CTE, because the query has to run on both dialects
+ * Decision 0008 names and this shape is the same on each.
+ */
+function liveSubtree(tx: Tx, ctx: RequestContext, rootId: string): string[] {
+  const rows = tx
+    .select({ id: task.id, parentTaskId: task.parentTaskId })
+    .from(task)
+    .where(and(eq(task.workspaceId, ctx.workspaceId), liveTask()))
+    .all() as Array<{ id: string; parentTaskId: string | null }>;
+  return taskSubtree(new Map(rows.map((row) => [row.id, row.parentTaskId])), [rootId]);
+}
 
 /**
  * The Repository attachments of a set of Tasks, keyed by Task id (issue #7).
@@ -113,6 +143,15 @@ export async function listTasks(
   // `query` was accepted by the input schema and then dropped on the floor, so a filtered
   // request came back unfiltered and looked like it had worked. Matches `listIssues`.
   if (input.query) conditions.push(like(task.title, `%${input.query}%`));
+  // `null` is a filter, not an absent one: it asks for the top-level Tasks (issue #56).
+  // `undefined` — the field left out — is the unfiltered list, so `!== undefined` is the check.
+  if (input.parentTaskId !== undefined) {
+    conditions.push(
+      input.parentTaskId === null
+        ? isNull(task.parentTaskId)
+        : eq(task.parentTaskId, input.parentTaskId),
+    );
+  }
 
   /*
    * A Task belongs to a Project through its Issue — there is no `task.project_id`, and there
@@ -236,6 +275,218 @@ export async function createTaskRecord(
     },
     { behavior: "immediate" },
   );
+}
+
+/**
+ * Create a sub-task from a parent, inheriting everything the Owner did not override (issue #56,
+ * AC-1/AC-2).
+ *
+ * One `BEGIN IMMEDIATE` transaction for the reason `createTaskRecord` gives, with one addition:
+ * the parent is *read inside it*. Reading the parent first and then writing a child from what it
+ * said would let a concurrent `setRepositories` land in between, producing a sub-task that
+ * inherited an attachment set its parent no longer has.
+ *
+ * The fork cursor is minted by the caller, outside this transaction, and that is deliberate: it
+ * is a point in a log that only ever grows, so a cursor a few events behind the head is a
+ * slightly earlier fork point, not a wrong one. Reading the parent's whole transcript under the
+ * write lock to shave that off would hold it for as long as the transcript is long.
+ */
+export async function createSubtaskRecord(
+  ctx: RequestContext,
+  input: CreateSubtaskInput,
+  fork: SessionCursorDto | null,
+): Promise<
+  Result<TaskDto, typeof CommonErrorCode.NotFound | typeof CommonErrorCode.ValidationFailed>
+> {
+  return ctx.db.transaction(
+    (tx) => {
+      const [parent] = tx
+        .select()
+        .from(task)
+        .where(
+          and(eq(task.workspaceId, ctx.workspaceId), eq(task.id, input.parentTaskId), liveTask()),
+        )
+        .limit(1)
+        .all();
+      if (!parent) return err(CommonErrorCode.NotFound);
+
+      const [row] = tx
+        .insert(task)
+        .values({
+          workspaceId: ctx.workspaceId,
+          // Never overridable: a sub-task under a different Issue from its parent is a new Task
+          // with a misleading breadcrumb, not a split (see `createSubtaskInput`).
+          issueId: parent.issueId,
+          parentTaskId: parent.id,
+          title: input.title,
+          state: "backlog",
+          agentProfileId: input.agentProfileId ?? parent.agentProfileId,
+          executorProfileId: input.executorProfileId ?? parent.executorProfileId,
+          forkSessionId: fork?.sessionId ?? null,
+          forkSeq: fork?.seq ?? null,
+          forkHash: fork?.hash ?? null,
+          ...inheritedWorkflow(tx, ctx, parent),
+        })
+        .returning()
+        .all();
+      if (!row) return err(CommonErrorCode.ValidationFailed);
+
+      const attachments = tx
+        .insert(taskRepository)
+        .values(
+          attachmentValues(
+            ctx,
+            row.id,
+            input.repositories ?? inheritedRepositories(tx, ctx, parent.id),
+          ),
+        )
+        .returning()
+        .all();
+      return ok(taskToDto(row, attachments));
+    },
+    { behavior: "immediate" },
+  );
+}
+
+/**
+ * The parent's attachments as create input — its Repositories and base refs, and **not** its
+ * checkout branches (AC-5).
+ *
+ * Dropping the branch is the isolation guarantee, not a detail: `attachmentValues` derives
+ * `solow/task-<child id>` for every entry that omits one, so a sub-task provisions its own
+ * worktrees. Copying the parent's branch names would put two Tasks in one working tree, which is
+ * precisely the failure Principle II is written against — and it would do it silently, since
+ * both Tasks would look correctly configured.
+ */
+function inheritedRepositories(
+  tx: Tx,
+  ctx: RequestContext,
+  parentTaskId: string,
+): CreateTaskInput["repositories"] {
+  const rows = tx
+    .select()
+    .from(taskRepository)
+    .where(
+      and(eq(taskRepository.workspaceId, ctx.workspaceId), eq(taskRepository.taskId, parentTaskId)),
+    )
+    .orderBy(asc(taskRepository.position))
+    .all() as (typeof taskRepository.$inferSelect)[];
+  return rows.map((row) => ({
+    repositoryId: row.repositoryId,
+    ...(row.baseRef ? { baseRef: row.baseRef } : {}),
+  })) as CreateTaskInput["repositories"];
+}
+
+/**
+ * The Workflow columns a sub-task inherits: the parent's pipeline, at its **first** Step.
+ *
+ * Not the parent's cursor. A sub-task is a fresh run down the same pipeline — inheriting a
+ * cursor parked on "review" would hand the child a Task that has, as far as the run loop is
+ * concerned, already done the work it was split off to do.
+ *
+ * Inheritance is dropped rather than refused when the pipeline can no longer be entered — an
+ * empty Workflow, or one whose graph has been edited into an invalid shape since the parent
+ * attached. `attachTaskWorkflow` refuses in that situation because the Owner asked for that
+ * specific Workflow and has to be told it is unusable; here the Owner asked to split a Task, and
+ * failing that on the state of a pipeline they did not mention would be a refusal with nothing
+ * actionable in it. The child is created on no Workflow, which the Task page shows plainly and
+ * `workflow.attachTask` can still correct.
+ */
+function inheritedWorkflow(
+  tx: Tx,
+  ctx: RequestContext,
+  parent: typeof task.$inferSelect,
+): Pick<typeof task.$inferInsert, "workflowId" | "workflowStepId" | "workflowVersion"> {
+  if (!parent.workflowId) return {};
+  const steps = tx
+    .select()
+    .from(workflowStep)
+    .where(
+      and(
+        eq(workflowStep.workspaceId, ctx.workspaceId),
+        eq(workflowStep.workflowId, parent.workflowId),
+      ),
+    )
+    .all() as (typeof workflowStep.$inferSelect)[];
+  const first = resumeWorkflowCursor(steps, null);
+  if (!first.ok || validateWorkflowGraph(steps).length > 0) return {};
+  const [current] = tx
+    .select({ version: workflow.version })
+    .from(workflow)
+    .where(and(eq(workflow.workspaceId, ctx.workspaceId), eq(workflow.id, parent.workflowId)))
+    .limit(1)
+    .all() as Array<{ version: number }>;
+  return {
+    workflowId: parent.workflowId,
+    workflowStepId: first.data.id,
+    // The version in force *now*, not the parent's: this attachment is being made today, and
+    // recording the parent's older version would make a mid-run edit look like it happened to
+    // the child when it happened before the child existed.
+    workflowVersion: current?.version ?? parent.workflowVersion,
+  };
+}
+
+/**
+ * Re-parent a Task, or detach it, refusing a link that would close a chain (issue #56, AC-6).
+ *
+ * Same transaction shape as `addTaskDependencyEdge`, for the same two reasons stated there: the
+ * read→decide→write window must not be interleaved with another handler (two concurrent calls
+ * asking for `A under B` and `B under A` would both read an acyclic graph and both pass), and
+ * `BEGIN IMMEDIATE` extends that to a second connection.
+ *
+ * Both Tasks must be live and in this Workspace. A parent in History would make its new child
+ * vanish from under a breadcrumb that no longer resolves; a parent from another Workspace is
+ * `NotFound` like every other cross-tenant id (Principle V). And the two must share an Issue, for
+ * the reason `createSubtaskInput` refuses an `issueId`: a sub-task hanging off a Task on another
+ * Issue is a misleading breadcrumb, not a split.
+ */
+export async function setTaskParent(
+  ctx: RequestContext,
+  input: SetTaskParentInput,
+): Promise<
+  Result<
+    TaskDto,
+    typeof CommonErrorCode.NotFound | typeof CommonErrorCode.ValidationFailed | TaskParentCycleError
+  >
+> {
+  const written = ctx.db.transaction(
+    (
+      tx,
+    ): Result<
+      void,
+      | typeof CommonErrorCode.NotFound
+      | typeof CommonErrorCode.ValidationFailed
+      | TaskParentCycleError
+    > => {
+      const rows = tx
+        .select({ id: task.id, parentTaskId: task.parentTaskId, issueId: task.issueId })
+        .from(task)
+        .where(and(eq(task.workspaceId, ctx.workspaceId), liveTask()))
+        .all() as Array<{ id: string; parentTaskId: string | null; issueId: string }>;
+      const self = rows.find((row) => row.id === input.id);
+      if (!self) return err(CommonErrorCode.NotFound);
+
+      if (input.parentTaskId !== null) {
+        const parent = rows.find((row) => row.id === input.parentTaskId);
+        if (!parent) return err(CommonErrorCode.NotFound);
+        if (parent.issueId !== self.issueId) return err(CommonErrorCode.ValidationFailed);
+        const check = checkParentEdge(
+          new Map(rows.map((row) => [row.id, row.parentTaskId])),
+          input.id,
+          input.parentTaskId,
+        );
+        if (!check.ok) return err(check.error);
+      }
+
+      tx.update(task)
+        .set({ parentTaskId: input.parentTaskId, updatedAt: new Date().toISOString() })
+        .where(and(eq(task.workspaceId, ctx.workspaceId), eq(task.id, input.id)))
+        .run();
+      return ok(undefined);
+    },
+    { behavior: "immediate" },
+  );
+  return written.ok ? getTaskById(ctx, input.id) : err(written.error);
 }
 
 /**
@@ -500,32 +751,45 @@ export async function deleteTask(
       .all();
     if (!existing) return err(CommonErrorCode.NotFound);
 
-    const activeSession = tx
-      .select({ id: session.id })
+    // The delete takes the live sub-tasks with it (issue #56), so every check below asks about
+    // the whole subtree rather than the Task named. Checking only the root would refuse a delete
+    // that stops nothing and allow one that sends a running grandchild's harness to History.
+    const subtree = liveSubtree(tx, ctx, input.id);
+
+    const activeSessions = tx
+      .select({ taskId: session.taskId })
       .from(session)
       .where(
         and(
           eq(session.workspaceId, ctx.workspaceId),
-          eq(session.taskId, input.id),
+          inArray(session.taskId, subtree),
           eq(session.state, "active"),
         ),
       )
-      .limit(1)
-      .all();
-    if (activeSession.length > 0 && !opts.stopIssued) return err(TaskErrorCode.StillRunning);
+      .all() as Array<{ taskId: string }>;
+    // `stopIssued` says the caller already stopped *this* Task's run — the router's
+    // `activeSessionForTask(input.id)` path and nothing else. It cannot vouch for a descendant,
+    // so a running sub-task still refuses the delete.
+    if (activeSessions.some((row) => !(opts.stopIssued && row.taskId === input.id))) {
+      return err(TaskErrorCode.StillRunning);
+    }
 
     if (!input.force) {
-      const dependents = tx
-        .select({ id: taskDependency.id })
-        .from(taskDependency)
-        .where(
-          and(
-            eq(taskDependency.workspaceId, ctx.workspaceId),
-            eq(taskDependency.blockedByTaskId, input.id),
-          ),
-        )
-        .limit(1)
-        .all();
+      const dependents = (
+        tx
+          .select({ taskId: taskDependency.taskId })
+          .from(taskDependency)
+          .where(
+            and(
+              eq(taskDependency.workspaceId, ctx.workspaceId),
+              inArray(taskDependency.blockedByTaskId, subtree),
+            ),
+          )
+          .all() as Array<{ taskId: string }>
+      )
+        // An edge from inside the subtree is going too, so it gates nothing: refusing on it
+        // would make a parent undeletable because its own sub-task declared it a blocker.
+        .filter((row) => !subtree.includes(row.taskId));
       if (dependents.length > 0) return err(TaskErrorCode.HasDependents);
     }
 
@@ -537,16 +801,20 @@ export async function deleteTask(
      * back, and a restored one gets no edges back — the Owner who forced past `HasDependents`
      * decided that.
      */
+    //
+    // The whole live subtree goes with one timestamp (issue #56). The shared `deletedAt` is what
+    // `restoreTask` reads to bring back exactly the Tasks that left together — not a sub-task
+    // the Owner had deleted on its own beforehand.
     const now = new Date().toISOString();
     tx.update(task)
       .set({ deletedAt: now, updatedAt: now })
-      .where(and(eq(task.workspaceId, ctx.workspaceId), eq(task.id, input.id)))
+      .where(and(eq(task.workspaceId, ctx.workspaceId), inArray(task.id, subtree)))
       .run();
     tx.delete(taskDependency)
       .where(
         and(
           eq(taskDependency.workspaceId, ctx.workspaceId),
-          inArray(taskDependency.taskId, [input.id]),
+          inArray(taskDependency.taskId, subtree),
         ),
       )
       .run();
@@ -554,7 +822,7 @@ export async function deleteTask(
       .where(
         and(
           eq(taskDependency.workspaceId, ctx.workspaceId),
-          inArray(taskDependency.blockedByTaskId, [input.id]),
+          inArray(taskDependency.blockedByTaskId, subtree),
         ),
       )
       .run();
@@ -582,18 +850,57 @@ export async function restoreTask(
   >
 > {
   const [existing] = await ctx.db
-    .select({ id: task.id, deletedAt: task.deletedAt })
+    .select({ id: task.id, deletedAt: task.deletedAt, parentTaskId: task.parentTaskId })
     .from(task)
     .where(and(eq(task.workspaceId, ctx.workspaceId), eq(task.id, id)))
     .limit(1);
   if (!existing) return err(CommonErrorCode.NotFound);
   if (existing.deletedAt === null) return err(TaskErrorCode.NotDeleted);
   if (!withinRetention(existing.deletedAt)) return err(TaskErrorCode.RetentionExpired);
+  const deletedAt = existing.deletedAt;
 
-  await ctx.db
-    .update(task)
-    .set({ deletedAt: null, updatedAt: new Date().toISOString() })
-    .where(and(eq(task.workspaceId, ctx.workspaceId), eq(task.id, id)));
+  ctx.db.transaction(
+    (tx) => {
+      /*
+       * The sub-tasks that left with it come back with it (issue #56): the descendants carrying
+       * the same `deletedAt`, which `deleteTask` stamps on the whole subtree at once. One the
+       * Owner had deleted separately before keeps its own timestamp and stays in History.
+       */
+      const rows = tx
+        .select({ id: task.id, parentTaskId: task.parentTaskId, deletedAt: task.deletedAt })
+        .from(task)
+        .where(and(eq(task.workspaceId, ctx.workspaceId), eq(task.deletedAt, deletedAt)))
+        .all() as Array<{ id: string; parentTaskId: string | null }>;
+      const together = taskSubtree(new Map(rows.map((row) => [row.id, row.parentTaskId])), [id]);
+      const now = new Date().toISOString();
+      tx.update(task)
+        .set({ deletedAt: null, updatedAt: now })
+        .where(and(eq(task.workspaceId, ctx.workspaceId), inArray(task.id, together)))
+        .run();
+
+      /*
+       * A sub-task restored while its parent stays in History is detached to the top level. The
+       * alternative — a live Task whose breadcrumb points into History — would sit on the board
+       * under nothing, and the retention sweep would detach it anyway the night the parent is
+       * purged. Its fork point stays: where it started is still true.
+       */
+      if (existing.parentTaskId !== null) {
+        const [parent] = tx
+          .select({ deletedAt: task.deletedAt })
+          .from(task)
+          .where(and(eq(task.workspaceId, ctx.workspaceId), eq(task.id, existing.parentTaskId)))
+          .limit(1)
+          .all() as Array<{ deletedAt: string | null }>;
+        if (!parent || parent.deletedAt !== null) {
+          tx.update(task)
+            .set({ parentTaskId: null })
+            .where(and(eq(task.workspaceId, ctx.workspaceId), eq(task.id, id)))
+            .run();
+        }
+      }
+    },
+    { behavior: "immediate" },
+  );
   return getTaskById(ctx, id);
 }
 
@@ -651,10 +958,22 @@ export async function taskDeletionImpact(
       ),
     );
 
+  // The live subtree the delete would take with it, minus the Task itself (issue #56). Counted
+  // rather than listed: the confirmation says how much work is about to go, and a dialog that
+  // named every descendant would grow without bound on the one screen that must stay readable.
+  const parents = await ctx.db
+    .select({ id: task.id, parentTaskId: task.parentTaskId })
+    .from(task)
+    .where(and(eq(task.workspaceId, ctx.workspaceId), liveTask()));
+  const descendants = taskSubtree(new Map(parents.map((row) => [row.id, row.parentTaskId])), [
+    taskId,
+  ]).filter((id) => id !== taskId);
+
   return ok({
     sessionCount: sessions.length,
     worktreeCount: worktrees.length,
     dependentCount: dependents.length,
+    subtaskCount: descendants.length,
     running: existing.state === "running" || sessions.some((s) => s.state === "active"),
   });
 }

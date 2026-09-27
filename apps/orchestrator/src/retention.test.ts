@@ -168,6 +168,44 @@ describe("retentionSweep", () => {
     );
   });
 
+  it("purges a parent and its sub-task in one sweep, whichever it reaches first (issue #56)", async () => {
+    const db = createTestDb();
+    const when = ago(WINDOW + DAY);
+    await seed(db, "old-parent", { state: "failed", deletedAt: when });
+    await seed(db, "old-child", { state: "failed", deletedAt: when });
+    await db.update(task).set({ parentTaskId: "old-parent" }).where(eq(task.id, "old-child"));
+
+    const report = await retentionSweep({ db, host: executor, retentionMs: WINDOW });
+
+    // One Task per transaction, and the parent may come first: its child's foreign key must not
+    // turn that into a failed purge.
+    expect(report.purged).toBe(2);
+    expect(await db.select().from(task)).toHaveLength(0);
+  });
+
+  it("detaches a restored sub-task when its parent is purged, rather than failing (issue #56)", async () => {
+    const db = createTestDb();
+    await seed(db, "gone-parent", { state: "failed", deletedAt: ago(WINDOW + DAY) });
+    await seed(db, "kept-child", { state: "failed" });
+    await db
+      .update(task)
+      .set({
+        parentTaskId: "gone-parent",
+        forkSessionId: "sess-gone-parent",
+        forkSeq: 0,
+        forkHash: "sha256:x",
+      })
+      .where(eq(task.id, "kept-child"));
+
+    const report = await retentionSweep({ db, host: executor, retentionMs: WINDOW });
+
+    expect(report.purged).toBe(1);
+    const [child] = await db.select().from(task).where(eq(task.id, "kept-child"));
+    expect(child?.parentTaskId).toBeNull();
+    // Where it started is still true after the parent is gone.
+    expect(child?.forkSessionId).toBe("sess-gone-parent");
+  });
+
   it("leaves a Task deleted inside the window alone — it is still restorable", async () => {
     const db = createTestDb();
     await seed(db, "fresh-deleted", { state: "failed", deletedAt: ago(DAY) });

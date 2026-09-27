@@ -252,6 +252,34 @@
                             "type": "string",
                             "minLength": 1
                           },
+                          "parentTaskId": {
+                            "type": "string",
+                            "nullable": true,
+                            "minLength": 1
+                          },
+                          "forkedFrom": {
+                            "type": "object",
+                            "nullable": true,
+                            "properties": {
+                              "sessionId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "seq": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "hash": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": [
+                              "sessionId",
+                              "seq",
+                              "hash"
+                            ]
+                          },
                           "title": {
                             "type": "string"
                           },
@@ -362,6 +390,8 @@
                         "required": [
                           "id",
                           "issueId",
+                          "parentTaskId",
+                          "forkedFrom",
                           "title",
                           "state",
                           "agentProfileId",
@@ -11751,6 +11781,34 @@
                       "type": "string",
                       "minLength": 1
                     },
+                    "parentTaskId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
+                    "forkedFrom": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "sessionId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "seq": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "hash": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "sessionId",
+                        "seq",
+                        "hash"
+                      ]
+                    },
                     "title": {
                       "type": "string"
                     },
@@ -11861,6 +11919,561 @@
                   "required": [
                     "id",
                     "issueId",
+                    "parentTaskId",
+                    "forkedFrom",
+                    "title",
+                    "state",
+                    "agentProfileId",
+                    "executorProfileId",
+                    "repositories",
+                    "failureReason",
+                    "completedAt",
+                    "completedOutcome",
+                    "completedSummary",
+                    "workflowId",
+                    "workflowStepId",
+                    "deletedAt",
+                    "createdAt",
+                    "updatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/task.createSubtask": {
+      "post": {
+        "operationId": "task-createSubtask",
+        "summary": "Split a Task into a sub-task, inheriting its Issue, Workflow, Harness Profile, Executor Profile and Repositories unless overridden. The sub-task is briefed with the parent's transcript up to a fork point rather than a cold prompt, gets its own worktree, and is created in the backlog — it does not start a harness.",
+        "tags": [
+          "task"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "parentTaskId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "agentProfileId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "executorProfileId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "repositories": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "repositoryId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "baseRef": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "checkoutBranch": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        }
+                      },
+                      "required": [
+                        "repositoryId"
+                      ]
+                    },
+                    "minItems": 1,
+                    "maxItems": 10
+                  },
+                  "forkSeq": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "fork": {
+                    "type": "boolean",
+                    "default": true
+                  }
+                },
+                "required": [
+                  "parentTaskId",
+                  "title"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "issueId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "parentTaskId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
+                    "forkedFrom": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "sessionId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "seq": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "hash": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "sessionId",
+                        "seq",
+                        "hash"
+                      ]
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "backlog",
+                        "ready",
+                        "running",
+                        "review",
+                        "parked",
+                        "failed",
+                        "done"
+                      ]
+                    },
+                    "agentProfileId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "executorProfileId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "repositories": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "repositoryId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "baseRef": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "checkoutBranch": {
+                            "type": "string"
+                          },
+                          "resultBranch": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "position": {
+                            "type": "integer",
+                            "minimum": 0
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "repositoryId",
+                          "baseRef",
+                          "checkoutBranch",
+                          "resultBranch",
+                          "position"
+                        ]
+                      }
+                    },
+                    "failureReason": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "completedAt": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "completedOutcome": {
+                      "type": "string",
+                      "nullable": true,
+                      "enum": [
+                        "changes_ready",
+                        "nothing_to_do",
+                        "blocked",
+                        null
+                      ]
+                    },
+                    "completedSummary": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "workflowId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
+                    "workflowStepId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
+                    "deletedAt": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "issueId",
+                    "parentTaskId",
+                    "forkedFrom",
+                    "title",
+                    "state",
+                    "agentProfileId",
+                    "executorProfileId",
+                    "repositories",
+                    "failureReason",
+                    "completedAt",
+                    "completedOutcome",
+                    "completedSummary",
+                    "workflowId",
+                    "workflowStepId",
+                    "deletedAt",
+                    "createdAt",
+                    "updatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/task.setParent": {
+      "post": {
+        "operationId": "task-setParent",
+        "summary": "Move a Task under another Task on the same Issue, or detach it to the top level with a null parent. Refused if the link would close a chain, naming the offending path.",
+        "tags": [
+          "task"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "parentTaskId": {
+                    "type": "string",
+                    "nullable": true,
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "id",
+                  "parentTaskId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "issueId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "parentTaskId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
+                    "forkedFrom": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "sessionId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "seq": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "hash": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "sessionId",
+                        "seq",
+                        "hash"
+                      ]
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "backlog",
+                        "ready",
+                        "running",
+                        "review",
+                        "parked",
+                        "failed",
+                        "done"
+                      ]
+                    },
+                    "agentProfileId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "executorProfileId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "repositories": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "repositoryId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "baseRef": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "checkoutBranch": {
+                            "type": "string"
+                          },
+                          "resultBranch": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "position": {
+                            "type": "integer",
+                            "minimum": 0
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "repositoryId",
+                          "baseRef",
+                          "checkoutBranch",
+                          "resultBranch",
+                          "position"
+                        ]
+                      }
+                    },
+                    "failureReason": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "completedAt": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "completedOutcome": {
+                      "type": "string",
+                      "nullable": true,
+                      "enum": [
+                        "changes_ready",
+                        "nothing_to_do",
+                        "blocked",
+                        null
+                      ]
+                    },
+                    "completedSummary": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "workflowId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
+                    "workflowStepId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
+                    "deletedAt": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "issueId",
+                    "parentTaskId",
+                    "forkedFrom",
                     "title",
                     "state",
                     "agentProfileId",
@@ -11998,6 +12611,34 @@
                       "type": "string",
                       "minLength": 1
                     },
+                    "parentTaskId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
+                    "forkedFrom": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "sessionId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "seq": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "hash": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "sessionId",
+                        "seq",
+                        "hash"
+                      ]
+                    },
                     "title": {
                       "type": "string"
                     },
@@ -12108,6 +12749,8 @@
                   "required": [
                     "id",
                     "issueId",
+                    "parentTaskId",
+                    "forkedFrom",
                     "title",
                     "state",
                     "agentProfileId",
@@ -12232,6 +12875,15 @@
           },
           {
             "in": "query",
+            "name": "parentTaskId",
+            "schema": {
+              "type": "string",
+              "nullable": true,
+              "minLength": 1
+            }
+          },
+          {
+            "in": "query",
             "name": "limit",
             "schema": {
               "type": "integer",
@@ -12267,6 +12919,34 @@
                           "issueId": {
                             "type": "string",
                             "minLength": 1
+                          },
+                          "parentTaskId": {
+                            "type": "string",
+                            "nullable": true,
+                            "minLength": 1
+                          },
+                          "forkedFrom": {
+                            "type": "object",
+                            "nullable": true,
+                            "properties": {
+                              "sessionId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "seq": {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              "hash": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": [
+                              "sessionId",
+                              "seq",
+                              "hash"
+                            ]
                           },
                           "title": {
                             "type": "string"
@@ -12378,6 +13058,8 @@
                         "required": [
                           "id",
                           "issueId",
+                          "parentTaskId",
+                          "forkedFrom",
                           "title",
                           "state",
                           "agentProfileId",
@@ -12507,6 +13189,34 @@
                       "type": "string",
                       "minLength": 1
                     },
+                    "parentTaskId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
+                    "forkedFrom": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "sessionId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "seq": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "hash": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "sessionId",
+                        "seq",
+                        "hash"
+                      ]
+                    },
                     "title": {
                       "type": "string"
                     },
@@ -12617,6 +13327,8 @@
                   "required": [
                     "id",
                     "issueId",
+                    "parentTaskId",
+                    "forkedFrom",
                     "title",
                     "state",
                     "agentProfileId",
@@ -12736,6 +13448,34 @@
                       "type": "string",
                       "minLength": 1
                     },
+                    "parentTaskId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
+                    "forkedFrom": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "sessionId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "seq": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "hash": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "sessionId",
+                        "seq",
+                        "hash"
+                      ]
+                    },
                     "title": {
                       "type": "string"
                     },
@@ -12846,6 +13586,8 @@
                   "required": [
                     "id",
                     "issueId",
+                    "parentTaskId",
+                    "forkedFrom",
                     "title",
                     "state",
                     "agentProfileId",
@@ -12968,6 +13710,34 @@
                       "type": "string",
                       "minLength": 1
                     },
+                    "parentTaskId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
+                    "forkedFrom": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "sessionId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "seq": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "hash": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "sessionId",
+                        "seq",
+                        "hash"
+                      ]
+                    },
                     "title": {
                       "type": "string"
                     },
@@ -13078,6 +13848,8 @@
                   "required": [
                     "id",
                     "issueId",
+                    "parentTaskId",
+                    "forkedFrom",
                     "title",
                     "state",
                     "agentProfileId",
@@ -13187,6 +13959,34 @@
                       "type": "string",
                       "minLength": 1
                     },
+                    "parentTaskId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
+                    "forkedFrom": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "sessionId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "seq": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "hash": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "sessionId",
+                        "seq",
+                        "hash"
+                      ]
+                    },
                     "title": {
                       "type": "string"
                     },
@@ -13297,6 +14097,8 @@
                   "required": [
                     "id",
                     "issueId",
+                    "parentTaskId",
+                    "forkedFrom",
                     "title",
                     "state",
                     "agentProfileId",
@@ -13406,6 +14208,34 @@
                       "type": "string",
                       "minLength": 1
                     },
+                    "parentTaskId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
+                    "forkedFrom": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "sessionId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "seq": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "hash": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "sessionId",
+                        "seq",
+                        "hash"
+                      ]
+                    },
                     "title": {
                       "type": "string"
                     },
@@ -13516,6 +14346,8 @@
                   "required": [
                     "id",
                     "issueId",
+                    "parentTaskId",
+                    "forkedFrom",
                     "title",
                     "state",
                     "agentProfileId",
@@ -13625,6 +14457,34 @@
                       "type": "string",
                       "minLength": 1
                     },
+                    "parentTaskId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
+                    "forkedFrom": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "sessionId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "seq": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "hash": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "sessionId",
+                        "seq",
+                        "hash"
+                      ]
+                    },
                     "title": {
                       "type": "string"
                     },
@@ -13735,6 +14595,8 @@
                   "required": [
                     "id",
                     "issueId",
+                    "parentTaskId",
+                    "forkedFrom",
                     "title",
                     "state",
                     "agentProfileId",
@@ -14223,6 +15085,10 @@
                       "type": "integer",
                       "minimum": 0
                     },
+                    "subtaskCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
                     "running": {
                       "type": "boolean"
                     }
@@ -14231,6 +15097,7 @@
                     "sessionCount",
                     "worktreeCount",
                     "dependentCount",
+                    "subtaskCount",
                     "running"
                   ]
                 }

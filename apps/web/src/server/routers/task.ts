@@ -1,6 +1,8 @@
 import "server-only";
 import {
   addTaskDependencyInput,
+  type CreateSubtaskInput,
+  createSubtaskInput,
   createTaskInput,
   deleteTaskInput,
   getTaskInput,
@@ -11,6 +13,8 @@ import {
   removeTaskDependencyInput,
   restoreTaskInput,
   retryTaskInput,
+  type SessionCursorDto,
+  setTaskParentInput,
   setTaskRepositoriesInput,
   submitTaskForReviewInput,
   TaskDependencyErrorCode,
@@ -37,11 +41,12 @@ import type { RequestContext } from "../dal/context.js";
 import { getIssueById } from "../dal/issue.js";
 import { getExecutorProfile, getHarnessProfile } from "../dal/profile.js";
 import { getRepository } from "../dal/repository.js";
-import { createSession } from "../dal/session.js";
+import { createSession, getLatestSession, sessionForkCursor } from "../dal/session.js";
 import {
   activeSessionForTask,
   addTaskDependencyEdge,
   countRunningForHarnessProfile,
+  createSubtaskRecord,
   createTaskRecord,
   deleteTask,
   getTaskById,
@@ -49,6 +54,7 @@ import {
   listTasks,
   removeTaskDependencyEdge,
   restoreTask,
+  setTaskParent,
   setTaskRepositories,
   taskDeletionImpact,
   updateTaskState,
@@ -139,6 +145,40 @@ export async function resumeTask(rctx: RequestContext, taskId: string): Promise<
   return startTaskRun(rctx, taskId);
 }
 
+/**
+ * The point in the parent's transcript a sub-task starts from (issue #56, AC-3), or null.
+ *
+ * Minted here rather than in the DAL because it is a *read of the parent*, and AC-4 is that the
+ * fork never touches it: nothing on this path writes to the parent's Session or its log.
+ * `sessionForkCursor` hashes the log it read, so the cursor the child stores is checkable
+ * against the parent's history at launch without either run coordinating with the other.
+ *
+ * Two silences and one refusal, which is the distinction that matters:
+ *
+ * - `fork: false` — the Owner asked for a cold start. No cursor.
+ * - a parent that has never run — there is no transcript to fork, so a sub-task of a Task still
+ *   in the backlog starts from its brief like any other Task. Not an error: splitting work
+ *   before starting it is a reasonable thing to do.
+ * - a `forkSeq` the log does not have — the Owner named a specific point and it is not there.
+ *   Silently starting cold would hide that, so the refusal travels.
+ */
+async function forkCursorFor(
+  rctx: RequestContext,
+  parentTaskId: string,
+  input: CreateSubtaskInput,
+): Promise<SessionCursorDto | null> {
+  if (!input.fork) return null;
+  const latest = await getLatestSession(rctx, parentTaskId);
+  if (!latest.ok) {
+    if (input.forkSeq !== undefined) throw new TRPCError({ code: "NOT_FOUND" });
+    return null;
+  }
+  const cursor = await sessionForkCursor(rctx, latest.data.id, input.forkSeq);
+  if (cursor.ok) return cursor.data;
+  if (input.forkSeq !== undefined) unwrap(cursor);
+  return null;
+}
+
 export const taskRouter = router({
   create: ownerProcedure
     .meta({
@@ -168,6 +208,65 @@ export const taskRouter = router({
 
       const payload = unwrap(buildCreateTaskPayload(input, { workspaceId: ctx.rctx.workspaceId }));
       return unwrap(await createTaskRecord(ctx.rctx, payload));
+    }),
+
+  createSubtask: ownerProcedure
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/task.createSubtask",
+        tags: ["task"],
+        protect: true,
+        summary:
+          "Split a Task into a sub-task, inheriting its Issue, Workflow, Harness Profile, Executor Profile and Repositories unless overridden. The sub-task is briefed with the parent's transcript up to a fork point rather than a cold prompt, gets its own worktree, and is created in the backlog — it does not start a harness.",
+      },
+    })
+    .input(createSubtaskInput)
+    .output(taskDto)
+    .mutation(async ({ ctx, input }) => {
+      // Ownership, exactly as `create` does it and for the same reason (Principle V) — but only
+      // for what the Owner actually named. An inherited id came off the parent row, which is
+      // workspace-scoped already; re-resolving it here would be a lookup that cannot fail.
+      const parent = unwrap(await getTaskById(ctx.rctx, input.parentTaskId));
+      if (input.agentProfileId) unwrap(await getHarnessProfile(ctx.rctx, input.agentProfileId));
+      if (input.executorProfileId) {
+        unwrap(await getExecutorProfile(ctx.rctx, input.executorProfileId));
+      }
+      for (const attachment of input.repositories ?? []) {
+        unwrap(await getRepository(ctx.rctx, attachment.repositoryId));
+      }
+
+      return unwrap(
+        await createSubtaskRecord(ctx.rctx, input, await forkCursorFor(ctx.rctx, parent.id, input)),
+      );
+    }),
+
+  setParent: ownerProcedure
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/task.setParent",
+        tags: ["task"],
+        protect: true,
+        summary:
+          "Move a Task under another Task on the same Issue, or detach it to the top level with a null parent. Refused if the link would close a chain, naming the offending path.",
+      },
+    })
+    .input(setTaskParentInput)
+    .output(taskDto)
+    .mutation(async ({ ctx, input }) => {
+      const moved = await setTaskParent(ctx.rctx, input);
+      if (moved.ok) return moved.data;
+      const refusal = moved.error;
+      if (typeof refusal === "object") {
+        // Ids and the separator `addDependency` uses, for the reason it gives: the path travels
+        // as text, and a Task title containing the separator would break it.
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `${refusal.code}: ${formatDependencyCycle(refusal.path)}`,
+        });
+      }
+      return unwrap({ ok: false, error: refusal });
     }),
 
   setRepositories: ownerProcedure

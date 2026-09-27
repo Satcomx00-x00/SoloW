@@ -225,7 +225,13 @@ describe("deleteTask", () => {
 
     expect(await taskDeletionImpact(ctx, blocker.id)).toEqual({
       ok: true,
-      data: { sessionCount: 1, worktreeCount: 1, dependentCount: 1, running: true },
+      data: {
+        sessionCount: 1,
+        worktreeCount: 1,
+        dependentCount: 1,
+        subtaskCount: 0,
+        running: true,
+      },
     });
   });
 });
