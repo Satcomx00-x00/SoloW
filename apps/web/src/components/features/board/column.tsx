@@ -1,6 +1,7 @@
 import type { TaskDependencyDto, TaskDto } from "@solow/contracts";
 import type { ReactNode } from "react";
 import type { BoardColumn } from "@/lib/board-columns";
+import { nestSubtasks } from "@/lib/subtask-nesting";
 import { cn } from "@/lib/utils";
 import { TaskCard } from "./task-card";
 
@@ -65,6 +66,16 @@ export function ColumnHeader({ column, count }: { column: BoardColumn; count: nu
   );
 }
 
+/**
+ * How far a folded sub-task steps in from its parent, by depth (issue #56). Literal classes
+ * rather than a computed margin so Tailwind sees every one of them.
+ */
+export const SUBTASK_INDENT_CLASS = ["", "ml-4", "ml-8"] as const;
+
+/** The guide down a folded sub-task's leading edge, tying it to the card above. */
+export const SUBTASK_GUIDE_CLASS =
+  "relative before:absolute before:inset-y-0 before:-left-2.5 before:w-px before:bg-border";
+
 /** The "nothing here" state, sized so an empty column keeps the board's rhythm. */
 export function ColumnEmpty({ label }: { label: string }) {
   return (
@@ -106,12 +117,20 @@ export function Column({
         <ColumnEmpty label={column.label} />
       ) : (
         <ul className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-2 pb-2">
-          {tasks.map((task) => (
-            <li key={task.id} className={CARD_ENTRANCE_CLASS}>
+          {nestSubtasks(tasks).map(({ task, depth, parentAbove }) => (
+            <li
+              key={task.id}
+              className={cn(
+                CARD_ENTRANCE_CLASS,
+                SUBTASK_INDENT_CLASS[depth],
+                depth > 0 && SUBTASK_GUIDE_CLASS,
+              )}
+            >
               <TaskCard
                 task={task}
                 actions={renderActions?.(task)}
                 blockers={blockersFor?.(task.id)}
+                parentAbove={parentAbove}
               />
             </li>
           ))}

@@ -65,6 +65,7 @@ import { groupChanges, summariseConsequences } from "./review-groups";
 import type { LineAnchor } from "./review-notes";
 import { RoundSelector } from "./round-selector";
 import { noticesNewRunLink, RunLinks } from "./run-links";
+import { ParentChain, SplitTaskButton, SubtaskList } from "./subtasks-panel";
 import { TaskAdvance } from "./task-advance";
 import { TaskDependencies, useBlockedByEditor, useTaskDependencies } from "./task-dependencies";
 import { TaskFooter } from "./task-footer";
@@ -1009,6 +1010,9 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
             <ArrowLeft />
           </Link>
         </Button>
+        {/* Where a sub-task was split from, as the crumbs before its title (issue #56): a
+            sub-task's title on its own is often meaningless without them. */}
+        {t.parentTaskId ? <ParentChain parentTaskId={t.parentTaskId} /> : null}
         {/* The one thing on the page that says what you are looking at — the Title step. */}
         <h1 className="min-w-0 truncate font-semibold text-base">{t.title}</h1>
         <TaskStateBadge state={t.state} size="sm" />
@@ -1403,6 +1407,20 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
                     blocks={dependencies.blocks}
                   />
                 )}
+              </RailSection>
+
+              {/* Beside Dependencies because it is the same kind of fact — how this Task relates
+                  to others — and splitting is decided while reading a run that has outgrown
+                  itself, not back on the board (issue #56). */}
+              <RailSection
+                title="Sub-tasks"
+                action={
+                  deleted === null ? (
+                    <SplitTaskButton hasTranscript={latest !== undefined} task={t} />
+                  ) : undefined
+                }
+              >
+                <SubtaskList task={t} />
               </RailSection>
 
               <RailSection title="Run">

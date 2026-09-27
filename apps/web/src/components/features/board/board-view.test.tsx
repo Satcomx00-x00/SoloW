@@ -16,6 +16,8 @@ import { CARD_ENTRANCE_CLASS } from "./column";
 function makeTask(over: Partial<TaskDto> & { id: string; state: TaskState }): TaskDto {
   return {
     issueId: "issue-1",
+    parentTaskId: null,
+    forkedFrom: null,
     title: `Task ${over.id}`,
     agentProfileId: "harness-1",
     executorProfileId: "exec-1",
@@ -135,5 +137,44 @@ describe("BoardView", () => {
     for (const cls of CARD_ENTRANCE_CLASS.split(" ")) {
       expect(item?.className).toContain(cls);
     }
+  });
+});
+
+describe("BoardView sub-tasks (issue #56)", () => {
+  it("folds a sub-task under its parent when both sit in the same column", () => {
+    render(
+      <BoardView
+        tasks={[
+          makeTask({ id: "child", state: "running", title: "Order the servo", parentTaskId: "p" }),
+          makeTask({ id: "other", state: "running", title: "Paint the post" }),
+          makeTask({ id: "p", state: "running", title: "Rewire the latch" }),
+        ]}
+      />,
+    );
+    const column = screen.getByRole("region", { name: "Running column" });
+    const titles = [...column.querySelectorAll("li")].map(
+      (li) => li.querySelector("a")?.textContent,
+    );
+    // The child follows its parent rather than wherever the list happened to put it; the
+    // top-level cards keep the list's own order.
+    expect(titles).toEqual(["Paint the post", "Rewire the latch", "Order the servo"]);
+    const child = screen.getByText("Order the servo").closest("li");
+    expect(child?.className).toContain("ml-4");
+    // Folded, so the indent says it and the card does not repeat it.
+    expect(screen.queryByText("Split from")).toBeNull();
+  });
+
+  it("leaves a sub-task in the column its own state puts it in", () => {
+    render(
+      <BoardView
+        tasks={[
+          makeTask({ id: "p", state: "running", title: "Rewire the latch" }),
+          makeTask({ id: "child", state: "review", title: "Order the servo", parentTaskId: "p" }),
+        ]}
+      />,
+    );
+    const review = screen.getByRole("region", { name: "Review column" });
+    expect(review.textContent).toContain("Order the servo");
+    expect(screen.getByText("Order the servo").closest("li")?.className).not.toContain("ml-4");
   });
 });

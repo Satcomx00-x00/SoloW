@@ -51,6 +51,8 @@ function task(over: Partial<TaskDto> = {}): TaskDto {
   return {
     id: TASK_ID,
     issueId: "issue-1",
+    parentTaskId: null,
+    forkedFrom: null,
     title: "Fix the gate latch",
     state: "review",
     agentProfileId: "harness-1",
@@ -531,10 +533,14 @@ describe("TaskWorkspace dependencies (issue #6)", () => {
       "task.get": () => task({ state: "ready" }),
       "session.listForTask": () => [],
       "task.dependencies": () => edges,
-      "task.list": () => ({
-        items: [task({ id: "task-9", title: "Hang the gate", state: "backlog" })],
-        nextCursor: null,
-      }),
+      // The Sub-tasks rail asks the same procedure for this Task's children; it has none.
+      "task.list": (input) =>
+        (input as { parentTaskId?: string } | undefined)?.parentTaskId
+          ? { items: [], nextCursor: null }
+          : {
+              items: [task({ id: "task-9", title: "Hang the gate", state: "backlog" })],
+              nextCursor: null,
+            },
     });
 
     const blocker = await screen.findByRole("link", { name: /Pour the foundation/ });
@@ -692,6 +698,48 @@ describe("TaskWorkspace links in the rail", () => {
   });
 });
 
+describe("TaskWorkspace sub-tasks (issue #56)", () => {
+  it("lists the children in the rail, with the Split control beside the caption", async () => {
+    const { log } = renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
+      "task.get": () => task({ state: "review" }),
+      "session.listForTask": () => [session],
+      "session.get": () => detail(),
+      "task.list": () => ({
+        items: [task({ id: "child-1", title: "Order the servo", state: "backlog" })],
+        nextCursor: null,
+      }),
+    });
+
+    const about = await screen.findByRole("complementary", { name: "About this task" });
+    const section = within(about).getByRole("region", { name: "Sub-tasks" });
+    expect(
+      (await within(section).findByRole("link", { name: /Order the servo/ })).getAttribute("href"),
+    ).toBe("/task/child-1");
+    expect(within(section).getByRole("button", { name: "Split into sub-task" })).toBeDefined();
+    expect(
+      log.calls.some(
+        (c) =>
+          c.path === "task.list" && (c.input as { parentTaskId?: string }).parentTaskId === TASK_ID,
+      ),
+    ).toBe(true);
+  });
+
+  it("names the task it was split from before its own title", async () => {
+    renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
+      "task.get": (input) =>
+        (input as { id: string }).id === TASK_ID
+          ? task({ state: "ready", parentTaskId: "parent-1" })
+          : task({ id: "parent-1", title: "Rewire the whole gate", state: "running" }),
+      "session.listForTask": () => [],
+      "task.list": () => ({ items: [], nextCursor: null }),
+    });
+
+    const crumbs = await screen.findByRole("navigation", { name: "Split from" });
+    const parent = await within(crumbs).findByRole("link", { name: "Rewire the whole gate" });
+    expect(parent.getAttribute("href")).toBe("/task/parent-1");
+  });
+});
+
 describe("TaskWorkspace in History (Decision 0025)", () => {
   it("reads a deleted task, says how long it has left, and offers Restore and nothing else", async () => {
     const deletedAt = new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString();
@@ -715,6 +763,7 @@ describe("TaskWorkspace in History (Decision 0025)", () => {
     expect(await screen.findByText(/the record survives/)).toBeDefined();
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
     expect(screen.queryByRole("button", { name: `Delete ${"Fix the gate latch"}` })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Split into sub-task" })).toBeNull();
     // A deleted Task is never running, so there is no steering field — a sentence, not a form.
     fireEvent.mouseDown(screen.getByRole("tab", { name: "Run" }), { button: 0 });
     expect(screen.queryByLabelText(/Message the harness/)).toBeNull();

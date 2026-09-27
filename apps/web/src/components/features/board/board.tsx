@@ -195,11 +195,13 @@ export function Board({
   const references = useMemo<BoardReferences>(() => {
     const byRepository = new Map((repositoriesQuery.data?.items ?? []).map((r) => [r.id, r.name]));
     const byIssue = new Map((issuesQuery.data?.items ?? []).map((i) => [i.id, i]));
+    const byTask = new Map((tasksQuery.data?.items ?? []).map((t) => [t.id, t.title]));
     return {
       repositoryName: (id) => byRepository.get(id) ?? null,
       issue: (id) => byIssue.get(id) ?? null,
+      taskTitle: (id) => byTask.get(id) ?? null,
     };
-  }, [repositoriesQuery.data, issuesQuery.data]);
+  }, [repositoriesQuery.data, issuesQuery.data, tasksQuery.data]);
   const refresh = () => {
     void utils.task.list.invalidate();
     void utils.task.dependencies.invalidate();

@@ -19,6 +19,8 @@ import { TaskCard } from "./task-card";
 const task: TaskDto = {
   id: "task-1",
   issueId: "issue-1",
+  parentTaskId: null,
+  forkedFrom: null,
   title: "Cap the upload size",
   state: "ready",
   agentProfileId: "harness-1",
@@ -73,6 +75,7 @@ const issue: IssueDto = {
 const references: BoardReferences = {
   repositoryName: (id) => (id === "repo-1" ? "api" : null),
   issue: (id) => (id === "issue-1" ? issue : null),
+  taskTitle: (id) => (id === "parent-1" ? "Rewire the whole gate" : null),
 };
 
 function show(over: Partial<TaskDto> = {}, refs: BoardReferences = references) {
@@ -289,5 +292,32 @@ describe("the completion gate", () => {
     expect(screen.queryByRole("button", { name: /open review/i })).toBeNull();
     // ...but still says the harness finished, because that is a fact about the Task.
     expect(screen.getByText("Finished")).toBeDefined();
+  });
+});
+
+describe("TaskCard — a sub-task (issue #56)", () => {
+  it("names the task it was split from when that task is in another column", () => {
+    show({ parentTaskId: "parent-1" });
+    expect(screen.getByText("Split from")).toBeDefined();
+    expect(screen.getByText("Rewire the whole gate")).toBeDefined();
+  });
+
+  it("says nothing when the parent is folded directly above it", () => {
+    renderWithTrpc(
+      <BoardReferencesProvider value={references}>
+        <TaskCard task={{ ...task, parentTaskId: "parent-1" }} parentAbove />
+      </BoardReferencesProvider>,
+    );
+    expect(screen.queryByText("Split from")).toBeNull();
+  });
+
+  it("still marks a sub-task whose parent this board is not showing", () => {
+    show({ parentTaskId: "unknown" });
+    expect(screen.getByText("another task")).toBeDefined();
+  });
+
+  it("carries no line at all for a top-level task", () => {
+    show();
+    expect(screen.queryByText("Split from")).toBeNull();
   });
 });

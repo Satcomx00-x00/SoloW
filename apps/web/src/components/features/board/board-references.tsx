@@ -33,9 +33,19 @@ export interface BoardReferences {
    * fetching again what the board already holds.
    */
   issue: (issueId: string) => IssueDto | null;
+  /**
+   * The title of another Task on this board (issue #56) — what a sub-task's card names when the
+   * Task it was split from sits in a different column. From the board's own `task.list`, so it
+   * costs nothing; null for a parent this board is not showing.
+   */
+  taskTitle: (taskId: string) => string | null;
 }
 
-const EMPTY: BoardReferences = { repositoryName: () => null, issue: () => null };
+const EMPTY: BoardReferences = {
+  repositoryName: () => null,
+  issue: () => null,
+  taskTitle: () => null,
+};
 
 const BoardReferencesContext = createContext<BoardReferences>(EMPTY);
 

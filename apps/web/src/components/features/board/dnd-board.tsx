@@ -18,8 +18,15 @@ import { GripVertical } from "lucide-react";
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { type BoardColumn, columnIdFor, lifecycleColumns } from "@/lib/board-columns";
+import { nestSubtasks } from "@/lib/subtask-nesting";
 import { cn } from "@/lib/utils";
-import { CARD_ENTRANCE_CLASS, ColumnEmpty, ColumnHeader } from "./column";
+import {
+  CARD_ENTRANCE_CLASS,
+  ColumnEmpty,
+  ColumnHeader,
+  SUBTASK_GUIDE_CLASS,
+  SUBTASK_INDENT_CLASS,
+} from "./column";
 import { TaskCard } from "./task-card";
 
 /**
@@ -36,6 +43,7 @@ function DraggableCard({
   draggable,
   workflowName,
   showState,
+  parentAbove,
 }: {
   task: TaskDto;
   actions?: ReactNode;
@@ -52,6 +60,8 @@ function DraggableCard({
    * it, which is worse than not offering it.
    */
   draggable: boolean;
+  /** See `TaskCard`: whether this sub-task's parent is folded directly above it. */
+  parentAbove: boolean;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: task.id,
@@ -84,6 +94,7 @@ function DraggableCard({
         submitting={submitting ?? false}
         workflowName={workflowName ?? null}
         showState={showState}
+        parentAbove={parentAbove}
       />
     </div>
   );
@@ -186,9 +197,17 @@ function ColumnShell({
         <ColumnEmpty label={column.label} />
       ) : (
         <ul className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-2 pb-2">
-          {tasks.map((task) => (
-            <li key={task.id} className={CARD_ENTRANCE_CLASS}>
+          {nestSubtasks(tasks).map(({ task, depth, parentAbove }) => (
+            <li
+              key={task.id}
+              className={cn(
+                CARD_ENTRANCE_CLASS,
+                SUBTASK_INDENT_CLASS[depth],
+                depth > 0 && SUBTASK_GUIDE_CLASS,
+              )}
+            >
               <DraggableCard
+                parentAbove={parentAbove}
                 task={task}
                 actions={renderActions?.(task)}
                 blockers={blockersFor?.(task.id)}

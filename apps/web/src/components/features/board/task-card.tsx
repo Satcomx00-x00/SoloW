@@ -1,6 +1,6 @@
 import type { TaskDependencyDto, TaskDto } from "@solow/contracts";
 import { canOpenReview, primaryTaskRepository, unsatisfiedDependencies } from "@solow/core";
-import { CheckCircle2, GitBranch, Library, Lock, Workflow } from "lucide-react";
+import { CheckCircle2, CornerDownRight, GitBranch, Library, Lock, Workflow } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -74,6 +74,7 @@ export function TaskCard({
   submitting = false,
   workflowName,
   showState = false,
+  parentAbove = false,
 }: {
   task: TaskDto;
   actions?: ReactNode;
@@ -108,6 +109,12 @@ export function TaskCard({
    * stays in Step 2, which is the useful place for it, but only if the card says it failed.
    */
   showState?: boolean;
+  /**
+   * Whether the Task this one was split from is drawn directly above it (issue #56). When it is,
+   * the indent already says so; when it is not — the parent is in another column — the card
+   * names it, because a sub-task's title is often meaningless without its parent's.
+   */
+  parentAbove?: boolean;
 }) {
   const attention = needsAttention(task.state);
   const references = useBoardReferences();
@@ -122,6 +129,10 @@ export function TaskCard({
   // run has produced something.
   const branch = primary?.resultBranch ?? primary?.checkoutBranch ?? null;
   const issue = references.issue(task.issueId);
+  const splitFrom =
+    task.parentTaskId !== null && !parentAbove
+      ? (references.taskTitle(task.parentTaskId) ?? "another task")
+      : null;
   const extraRepositories = Math.max(task.repositories.length - 1, 0);
   const outstanding = unsatisfiedDependencies(blockers ?? []);
   const first = outstanding[0];
@@ -158,6 +169,13 @@ export function TaskCard({
       )}
 
       <div className="px-3.5 py-3">
+        {splitFrom ? (
+          <p className="mb-1 flex min-w-0 items-center gap-1 text-2xs text-muted-foreground">
+            <CornerDownRight className="size-3 shrink-0" aria-hidden />
+            <span className="shrink-0">Split from</span>
+            <span className="truncate">{splitFrom}</span>
+          </p>
+        ) : null}
         <div className="flex items-start gap-1.5">
           <Link
             href={`/task/${task.id}`}
