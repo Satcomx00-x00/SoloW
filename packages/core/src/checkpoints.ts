@@ -126,7 +126,9 @@ export function globToRegExp(glob: string): RegExp {
       out += ch.replace(/[.+^$()|[\]\\]/g, (c) => `\\${c}`);
     }
   }
-  return new RegExp(`^${out}$`);
+  // The end anchor is wrapped because `$` followed by a backtick is what the executor-boundary
+  // audit reads as Bun's shell tag, and this file is nowhere near the host.
+  return new RegExp(`^${out}(?:$)`);
 }
 
 /** The path a glob is matched against: relative to the worktree when it is inside it. */

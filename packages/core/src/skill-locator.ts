@@ -197,7 +197,7 @@ function parseLocator(raw: string): SkillLocator | null {
   if (prefixed?.[2]) {
     const host = (prefixed[1] as string).toLowerCase();
     return withRef(
-      host === "github"
+      host === "github" // provider-branch-ok: parsing the text prefix the operator typed
         ? parseShorthand(prefixed[2])
         : parseUrl(`https://gitlab.com/${prefixed[2].replace(/^\/+/, "")}`),
     );
