@@ -176,6 +176,67 @@ test.describe("@critical isolation", () => {
       .toContain(id);
   });
 
+  test("a sub-task runs in its own worktree, not its parent's (issue #56, Principle II)", async ({
+    page,
+  }) => {
+    const stamp = Date.now();
+    const issueTitle = `Split work ${stamp}`;
+    const parentTitle = `Task to split ${stamp}`;
+    const childTitle = `Split off ${stamp}`;
+
+    await ensureRepository(page);
+    const issue = seedIssue(SEED_WORKSPACE_A, issueTitle, REPO_NAME);
+    await createTask(page, {
+      title: parentTitle,
+      issueId: issue.id,
+      issue: issueTitle,
+      repository: REPO_NAME,
+    });
+
+    // The parent runs first, because a fork point is a point in a transcript: splitting a Task
+    // that has never run is legal and carries nothing, which is not what this test is about.
+    const parentId = await openTask(page, issue.id, parentTitle);
+    await launchToReview(page);
+
+    // The split, through the affordance an operator actually has — the rail on the Task page.
+    const rail = page.getByRole("complementary", { name: "About this task" });
+    await rail.getByRole("button", { name: "Split into sub-task" }).click();
+    await page.getByPlaceholder("What this piece is for").fill(childTitle);
+    await page.getByRole("button", { name: "Create sub-task" }).click();
+
+    /*
+     * Scoped to the rail's section and matched loosely on purpose: the link's accessible name is
+     * the title *and* the state badge beside it ("… Backlog"), so an exact match would never hit.
+     *
+     * The id comes off the href rather than off the URL after the click. Both pages are
+     * `/task/<uuid>`, so a URL pattern is satisfied by the page already on screen — the assertion
+     * would pass against the parent before the client navigation had happened.
+     */
+    const childLink = rail
+      .getByRole("region", { name: "Sub-tasks" })
+      .getByRole("link", { name: childTitle });
+    const childId = ((await childLink.getAttribute("href")) ?? "").split("/").pop() as string;
+    expect(childId).not.toBe(parentId);
+    await childLink.click();
+    await expect(page).toHaveURL(new RegExp(`/task/${childId}$`));
+
+    // The breadcrumb names where it came from — what makes a sub-task's title meaningful.
+    await expect(
+      page.getByRole("navigation", { name: "Split from" }).getByRole("link", { name: parentTitle }),
+    ).toBeVisible();
+
+    await launchTask(page);
+
+    // Two worktrees, and neither holds the other's marker. This is the claim that a fork carries
+    // *context* and not a directory: the child inherited the parent's setup and its transcript,
+    // and still got a working tree of its own (AC-5).
+    const parentPath = join(PATHS.worktrees, `solow-task-${parentId}`);
+    const childPath = join(PATHS.worktrees, `solow-task-${childId}`);
+    expect(readdirSync(childPath)).toContain(`marker-solow-task-${childId}.txt`);
+    expect(readdirSync(childPath)).not.toContain(`marker-solow-task-${parentId}.txt`);
+    expect(readdirSync(parentPath)).not.toContain(`marker-solow-task-${childId}.txt`);
+  });
+
   test("another Workspace's Task is unreachable by URL (Principle V)", async ({ page }) => {
     await page.goto(`/task/${OTHER_WORKSPACE_TASK}`);
 

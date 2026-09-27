@@ -56,6 +56,10 @@ harness work.
   outright.
 - **FR-11** Multiple Tasks can be Running at once, bounded by configured concurrency limits
   (see [F06](./F06-authentication-billing.md)).
+- **FR-12** A user can split a Task into sub-tasks. A sub-task is a Task — same lifecycle, same
+  review gate, same isolation — that inherits its parent's Issue, Workflow, Harness Profile,
+  Executor Profile and Repositories unless overridden, and is briefed with the parent's
+  transcript up to a fork point rather than starting from a cold prompt.
 
 ## Non-functional requirements
 
@@ -73,6 +77,16 @@ harness work.
   Task that silently never starts.
 - Moving a Running Task backward interrupts its Session (with confirmation).
 - A Task in Review cannot reach Done until a human Review outcome is recorded.
+- A sub-task is a Task, not a checklist item: it gets its own worktree and branch, and its own
+  review gate. Its parent link is not a dependency — a sub-task may run beside the Task it was
+  split from, which is the point of splitting one. It stays on its parent's Issue, and on the
+  Board it sits in the column its own state puts it in, folded under its parent when both are in
+  the same column.
+- A parent link that would close a chain is refused when it is made, naming the offending path,
+  the same way a dependency cycle is. So is one that reaches another Issue or another Workspace.
+- Forking is a *read* of the parent. A parent that is still running is not disturbed by being
+  split from, and the fork point carries a hash of the transcript behind it: if that history is
+  rewritten, the sub-task refuses to start rather than continuing from a history nobody promised.
 
 ## Edge cases & failure handling
 
@@ -82,6 +96,14 @@ harness work.
   and can be retried.
 - If a subscription quota is exhausted while running, the Task moves to Parked rather than
   Failed (see [F06](./F06-authentication-billing.md)).
+- If a sub-task's fork point no longer resolves before its first run — the parent's Session was
+  purged, or its transcript changed behind the cursor — the run fails before a harness starts,
+  saying which of the two happened. It does not silently start cold. A sub-task that has already
+  run once carries on without the parent's transcript if the parent is purged later, and says so.
+- Deleting a Task sends its live sub-tasks to History with it; the confirmation says how many, and
+  the delete is refused while any Task in that subtree is still running. Restoring it brings back
+  the ones that left with it. A sub-task restored on its own while its parent stays in History is
+  detached to the top level, keeping its fork point.
 
 ## Out of scope
 
@@ -95,3 +117,13 @@ harness work.
 - [F09 — Integrated Review Workspace](./F09-integrated-workspace.md)
 - [Decision 0006 — Kanban scoped to Issues](../decisions/0006-kanban-scoped-to-issues.md)
 - Issue #6 — FR-8 as built: dependencies are Workspace-scoped `blocked_by` edges, a cycle is refused at write time naming the offending path, and a Task with an unsatisfied predecessor is never started by any automated path. Not built: chained creation that fires a dependent Task automatically once every predecessor succeeds — unblocking lifts a refusal, it does not launch anything.
+- Issue #56 — FR-12 as built: `task.parent_task_id` with a fork cursor (`session_id`, `seq`,
+  `sha256` of the history behind it) on the child's row; inheritance and cycle refusal in
+  `task.createSubtask` / `task.setParent`, which the MCP surface exposes as tools like every
+  other procedure. The fork reaches the harness as a reading of the parent's transcript in the
+  brief (`renderForkDigest`), for every protocol and Executor: branching the parent's *harness
+  conversation* (Claude Code's `--resume … --fork-session`) is not used, because each Task's
+  harness runs against its own app-owned home ([Decision 0027](../decisions/0027-hermetic-harness-configuration.md))
+  and the parent's conversation is not there to open. The Task page lists sub-tasks in its rail
+  with a Split control and shows the parent chain before the title; Board cards fold under a
+  parent in the same column and name it otherwise.
