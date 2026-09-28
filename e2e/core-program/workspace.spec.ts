@@ -30,6 +30,11 @@ async function ensureRepository(page: import("@playwright/test").Page): Promise<
 }
 
 test.describe("the Task page", () => {
+  // Each of these walks a real run and several page loads on the e2e `next dev`, which on a
+  // loaded host costs 2–4 s a request: the delete-and-undo case measured 3.9 min passing, past
+  // the runner's 180 s default. The budget follows the walk, as in `subtasks.spec.ts`.
+  test.describe.configure({ timeout: 6 * 60_000 });
+
   test("is four tabs: the pick is in the URL, survives a reload, and arrows move focus without switching", async ({
     page,
   }) => {

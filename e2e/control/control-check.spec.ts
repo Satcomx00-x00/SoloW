@@ -7,6 +7,7 @@ import {
   createTask,
   openTask,
   openWorkspaceTab,
+  trpc,
 } from "../support/flows.js";
 
 /**
@@ -36,25 +37,6 @@ const REPO_NAME = "e2e-fixture-repo";
 
 const git = (args: string[]) =>
   execFileSync("git", args, { cwd: PATHS.repo, encoding: "utf8" }).trim();
-
-/** One tRPC call over HTTP, the way the SPA makes it (superjson envelope, dev-owner session). */
-async function trpc<T>(
-  page: Page,
-  path: string,
-  input: unknown,
-  kind: "query" | "mutation",
-): Promise<T> {
-  const url = `/api/trpc/${path}`;
-  const res =
-    kind === "query"
-      ? await page.request.get(
-          `${url}?input=${encodeURIComponent(JSON.stringify({ json: input }))}`,
-        )
-      : await page.request.post(url, { data: { json: input } });
-  expect(res.ok(), `${path}: HTTP ${res.status()} ${await res.text()}`).toBe(true);
-  const body = (await res.json()) as { result: { data: { json: T } } };
-  return body.result.data.json;
-}
 
 async function pickOption(page: Page, label: string | RegExp, option: string | RegExp) {
   // Exact: "Gate" is also a substring of "Permissions for Investigate".

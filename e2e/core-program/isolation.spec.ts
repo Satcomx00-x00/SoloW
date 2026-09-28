@@ -8,6 +8,7 @@ import {
   createTask,
   launchTask,
   launchToReview,
+  openReview,
   openTask,
 } from "../support/flows.js";
 import { seedIssue, seedTask } from "../support/seed.js";
@@ -113,6 +114,14 @@ test.describe("@critical isolation", () => {
     expect(readFileSync(join(pathB, "visible.txt"), "utf8").trim()).toBe(
       `marker-solow-task-${idB}.txt`,
     );
+
+    // Both settled at the gate before the next test. A run the harness has finished still holds
+    // one of the harness profile's slots (its cap is 3) until someone opens the review, and
+    // every spec after this one launches on the same profile.
+    for (const id of [idA, idB]) {
+      await page.goto(`/task/${id}`);
+      await openReview(page);
+    }
   });
 
   test("a multi-Repository Task gets one isolated worktree per Repository (issue #7)", async ({
@@ -238,6 +247,9 @@ test.describe("@critical isolation", () => {
     expect(readdirSync(childPath)).toContain(`marker-solow-task-${childId}.txt`);
     expect(readdirSync(childPath)).not.toContain(`marker-solow-task-${parentId}.txt`);
     expect(readdirSync(parentPath)).not.toContain(`marker-solow-task-${childId}.txt`);
+
+    // Settled at the gate, for the reason the concurrent-Tasks case above gives.
+    await openReview(page);
   });
 
   test("another Workspace's Task is unreachable by URL (Principle V)", async ({ page }) => {

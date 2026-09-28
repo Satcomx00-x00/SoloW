@@ -197,6 +197,17 @@ class FixtureHarnessRunner implements HarnessRunner {
         .sort()
         .join(",");
       writeFileSync(join(worktree, "visible.txt"), `${visible}\n`);
+      // The launch as the harness received it — which `HOME` it was pointed at (Decision 0027)
+      // and what its brief said (a sub-task's carries its parent's transcript, issue #56).
+      writeFileSync(
+        join(PATHS.harnessRuns, `${label}.json`),
+        JSON.stringify({
+          home: opts.env["HOME"] ?? null,
+          claudeConfigDir: opts.env["CLAUDE_CONFIG_DIR"] ?? null,
+          xdgConfigHome: opts.env["XDG_CONFIG_HOME"] ?? null,
+          prompt: opts.prompt,
+        }),
+      );
       opts.onEvent({ kind: "stdout", channel: "assistant", text: `harness edited ${label}\n` });
 
       // A harness that ships what it wrote: the shell calls a real one makes once the edit is

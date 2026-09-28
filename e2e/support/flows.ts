@@ -37,6 +37,25 @@ export async function connectRepository(page: Page, name: string, location: stri
   await expect(row).toBeVisible();
 }
 
+/** One tRPC call over HTTP, the way the SPA makes it (superjson envelope, dev-owner session). */
+export async function trpc<T>(
+  page: Page,
+  path: string,
+  input: unknown,
+  kind: "query" | "mutation",
+): Promise<T> {
+  const url = `/api/trpc/${path}`;
+  const res =
+    kind === "query"
+      ? await page.request.get(
+          `${url}?input=${encodeURIComponent(JSON.stringify({ json: input }))}`,
+        )
+      : await page.request.post(url, { data: { json: input } });
+  expect(res.ok(), `${path}: HTTP ${res.status()} ${await res.text()}`).toBe(true);
+  const body = (await res.json()) as { result: { data: { json: T } } };
+  return body.result.data.json;
+}
+
 async function pickOption(page: Page, label: string, option: string): Promise<void> {
   await page.getByRole("combobox", { name: label }).click();
   await page.getByRole("option", { name: option }).click();

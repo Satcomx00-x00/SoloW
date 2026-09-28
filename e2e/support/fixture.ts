@@ -27,6 +27,12 @@ export const PATHS = {
   repo2: join(SCRATCH, "fixture-shared-lib"),
   worktrees: join(SCRATCH, "worktrees"),
   repoCache: join(SCRATCH, "repos"),
+  /**
+   * What the fixture harness was launched with, one `<worktree>.json` per run — its `HOME` and
+   * its brief. Outside the worktrees on purpose: a record written into the checkout would be
+   * committed on approval and show up in every diff the suite reads.
+   */
+  harnessRuns: join(SCRATCH, "harness-runs"),
 } as const;
 
 export const PORTS = { web: 5050, orchestrator: 5051, ws: 5052 } as const;
@@ -146,6 +152,7 @@ export function prepareFixture(): void {
   mkdirSync(PATHS.repo2, { recursive: true });
   mkdirSync(PATHS.worktrees, { recursive: true });
   mkdirSync(PATHS.repoCache, { recursive: true });
+  mkdirSync(PATHS.harnessRuns, { recursive: true });
 
   // Two repositories, each with a file only it has: that is what makes "no worktree can see
   // another's files" checkable for a Task that spans both (issue #7 AC-5).
