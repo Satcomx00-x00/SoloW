@@ -1,9 +1,11 @@
 import {
   assertPromptBlocks,
+  HarnessVersionError,
   initializeParams,
   type NegotiatedCapabilities,
   negotiate,
   requireCapability,
+  requireMinimumVersion,
 } from "./capabilities.js";
 import { JsonRpcError, JsonRpcErrorCode, JsonRpcPeer } from "./jsonrpc.js";
 import {
@@ -97,6 +99,13 @@ export interface AcpOutcome {
   stopReason: string | null;
   /** Why the session failed outside a turn. Diagnostic prose only — never a credential. */
   error: string | null;
+  /**
+   * Set when the session was refused for a standing condition of the harness itself — today, a
+   * version below the catalog's pin (`HarnessVersionError`). Unlike `error`, which is whatever
+   * the transport happened to say, this is written for the operator and no retry would change
+   * it, so the caller can file it as the run's reason verbatim.
+   */
+  verdict?: string;
 }
 
 export interface AcpSessionOptions {
@@ -148,6 +157,16 @@ export interface AcpSessionOptions {
   modeId?: string;
   /** Model to select. Only sent when the agent listed it, same rule as the mode. */
   modelId?: string;
+  /**
+   * The oldest harness version this run accepts — the catalog row's `minVersion`. Checked
+   * against `initialize`'s `agentInfo.version` before any session is opened, so an old or
+   * unidentified harness fails the run with `HarnessVersionError` rather than half-working.
+   */
+  minVersion?: string | null;
+  /** How the harness is named in a version refusal: the catalog row's display name. */
+  harnessName?: string;
+  /** The catalog row's install hint, quoted in a version refusal as the way to upgrade. */
+  installHint?: string | null;
   /**
    * Distinguishes this run's permission ids from every other run of the same Task. Defaults to
    * a fresh random tag; a caller with a durable id of its own (a session id, a round number)
@@ -374,6 +393,14 @@ export function startAcpSession(options: AcpSessionOptions, prompt: string): Acp
       const initResult = await peer.request(AcpMethod.Initialize, initializeParams());
       const negotiated = negotiate(initResult);
       caps = negotiated;
+      // Before any session exists: an agent older than the catalog's pin is refused while it has
+      // done nothing, rather than discovered mid-run by a wire shape it does not send.
+      if (options.minVersion) {
+        requireMinimumVersion(negotiated, options.minVersion, {
+          ...(options.harnessName ? { harness: options.harnessName } : {}),
+          installHint: options.installHint ?? null,
+        });
+      }
 
       /*
        * Load the conversation the caller named, or open a new one — and either way, carry on
@@ -494,7 +521,12 @@ export function startAcpSession(options: AcpSessionOptions, prompt: string): Acp
         ? { ok: true, stopReason: "cancelled", error: null }
         : // No stop reason ever arrived for the turn that was in flight: the agent died, or
           // refused the handshake. An exit code alone does not say it succeeded.
-          { ok: false, stopReason: "no_result", error: message };
+          {
+            ok: false,
+            stopReason: "no_result",
+            error: message,
+            ...(cause instanceof HarnessVersionError ? { verdict: message } : {}),
+          };
     } finally {
       finished = true;
       resolveSessionId(sessionId);

@@ -54,6 +54,8 @@ export interface AcpScript {
   protocolVersion?: number;
   /** Verbatim `agentCapabilities`. Absent means an agent that advertised nothing. */
   agentCapabilities?: Record<string, unknown>;
+  /** Verbatim `agentInfo` — who is answering, and which build. Absent means it did not say. */
+  agentInfo?: Record<string, unknown>;
   /** Modes offered by `session/new`. */
   modes?: { currentModeId?: string; availableModes: Array<{ id: string; name: string }> };
   /** What `session/new` advertises as selectable models, when the script wants to say any. */
@@ -156,6 +158,7 @@ class ScriptedAgent {
           protocolVersion: this.script.protocolVersion ?? 1,
           agentCapabilities: this.script.agentCapabilities ?? {},
           authMethods: [],
+          ...(this.script.agentInfo ? { agentInfo: this.script.agentInfo } : {}),
         };
       }
       /*

@@ -1,12 +1,16 @@
 import { describe, expect, it } from "bun:test";
+import { readFileSync } from "node:fs";
 import {
   ACP_PROTOCOL_VERSION,
   assertPromptBlocks,
   CapabilityUnavailableError,
+  HarnessVersionError,
   initializeParams,
+  meetsMinimumVersion,
   negotiate,
   ProtocolVersionError,
   requireCapability,
+  requireMinimumVersion,
   SOLOW_CLIENT_CAPABILITIES,
 } from "./capabilities.js";
 
@@ -63,6 +67,107 @@ describe("negotiate", () => {
     const caps = negotiate("not an object");
     expect(caps.loadSession).toBe(false);
     expect(caps.protocolVersion).toBe(ACP_PROTOCOL_VERSION);
+  });
+});
+
+describe("agentInfo", () => {
+  // Captured from `opencode acp` 1.18.33 on 2026-09-28 — the build the catalog pins.
+  const opencode = JSON.parse(
+    readFileSync(new URL("./fixtures/opencode-1.18.33-initialize.json", import.meta.url), "utf8"),
+  );
+
+  it("reads which build answered from a real opencode handshake", () => {
+    const caps = negotiate(opencode);
+    expect(caps.agent).toEqual({ name: "OpenCode", version: "1.18.33" });
+    // The rest of the handshake still reads as it did: the new field takes nothing away.
+    expect(caps.loadSession).toBe(true);
+    expect(caps.authMethods).toEqual(["opencode-login"]);
+  });
+
+  it("is null when the agent does not say who it is", () => {
+    expect(negotiate({ protocolVersion: 1 }).agent).toBeNull();
+  });
+
+  it("keeps the name and reads the version as unknown when only the name was sent", () => {
+    expect(negotiate({ protocolVersion: 1, agentInfo: { name: "x" } }).agent).toEqual({
+      name: "x",
+      version: null,
+    });
+  });
+
+  it("ignores a malformed agentInfo rather than failing the handshake over it", () => {
+    const caps = negotiate({
+      protocolVersion: 1,
+      agentInfo: "opencode",
+      agentCapabilities: { loadSession: true },
+    });
+    expect(caps.agent).toBeNull();
+    expect(caps.loadSession).toBe(true);
+  });
+});
+
+describe("meetsMinimumVersion", () => {
+  const table: Array<[actual: string, minimum: string, meets: boolean, why: string]> = [
+    ["1.18.33", "1.18.33", true, "the pinned build itself"],
+    ["1.18.34", "1.18.33", true, "a newer patch"],
+    ["1.19.0", "1.18.33", true, "a newer minor, with a smaller patch"],
+    ["2.0.0", "1.18.33", true, "a newer major"],
+    ["1.18.32", "1.18.33", false, "an older patch"],
+    ["1.9.99", "1.18.33", false, "numeric, not lexical: 9 < 18"],
+    ["v1.18.33", "1.18.33", true, "a leading v, as release tags spell it"],
+    ["1.18.33", "v1.18.33", true, "a leading v on the pin"],
+    ["1.18.33-beta.2", "1.18.33", false, "a pre-release of the minimum comes before it"],
+    ["1.18.34-beta.1", "1.18.33", true, "a pre-release of a later build is still later"],
+    ["1.18.33+build.7", "1.18.33", true, "build metadata changes nothing"],
+    ["1.18", "1.18.0", true, "a missing part counts as zero"],
+    ["latest", "1.18.33", false, "garbage never meets a pin"],
+    ["", "1.18.33", false, "nothing never meets a pin"],
+    ["1.18.33", "not-a-version", false, "an unreadable pin refuses rather than passes"],
+  ];
+  for (const [actual, minimum, meets, why] of table) {
+    it(`${actual || '""'} against ${minimum}: ${meets ? "meets" : "does not meet"} — ${why}`, () => {
+      expect(meetsMinimumVersion(actual, minimum)).toBe(meets);
+    });
+  }
+});
+
+describe("requireMinimumVersion", () => {
+  const withVersion = (version?: string) =>
+    negotiate({
+      protocolVersion: 1,
+      ...(version === undefined ? {} : { agentInfo: { name: "OpenCode", version } }),
+    });
+
+  it("lets the pinned build through", () => {
+    expect(() => requireMinimumVersion(withVersion("1.18.33"), "1.18.33")).not.toThrow();
+  });
+
+  it("refuses an older build naming the harness, both versions and how to upgrade", () => {
+    let thrown: unknown;
+    try {
+      requireMinimumVersion(withVersion("1.17.2"), "1.18.33", {
+        harness: "opencode",
+        installHint: "npm install -g opencode-ai@latest",
+      });
+    } catch (cause) {
+      thrown = cause;
+    }
+    expect(thrown).toBeInstanceOf(HarnessVersionError);
+    expect((thrown as Error).message).toBe(
+      "opencode 1.17.2 is older than 1.18.33, the oldest version this build supports — upgrade it (npm install -g opencode-ai@latest)",
+    );
+  });
+
+  it("refuses an agent that will not say its version — a pin that passes on silence is none", () => {
+    expect(() => requireMinimumVersion(withVersion(), "1.18.33", { harness: "opencode" })).toThrow(
+      "could not confirm the opencode version: it did not report one, and this build needs at least 1.18.33 — upgrade it",
+    );
+  });
+
+  it("falls back to the agent's own name when the caller gives none", () => {
+    expect(() => requireMinimumVersion(withVersion("1.0.0"), "1.18.33")).toThrow(
+      /^OpenCode 1\.0\.0 is older than 1\.18\.33/,
+    );
   });
 });
 

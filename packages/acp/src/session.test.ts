@@ -301,6 +301,53 @@ describe("startAcpSession — capability refusal (AC-2)", () => {
   });
 });
 
+describe("startAcpSession — the catalog's minimum version", () => {
+  const pin = { minVersion: "1.18.33", harnessName: "opencode", installHint: "npm i -g opencode" };
+
+  it("refuses an older harness before any session is opened, with the refusal as the verdict", async () => {
+    const { session, peer } = drive({ agentInfo: { name: "OpenCode", version: "1.17.2" } }, pin);
+    const outcome = await session.outcome;
+
+    expect(outcome.ok).toBe(false);
+    // Nothing past the handshake: no session exists to half-work in, and no turn was spent.
+    expect(peer.methods).toEqual(["initialize"]);
+    expect(outcome.verdict).toBe(
+      "opencode 1.17.2 is older than 1.18.33, the oldest version this build supports — upgrade it (npm i -g opencode)",
+    );
+    expect(outcome.error).toBe(outcome.verdict ?? null);
+  });
+
+  it("refuses a harness that does not report a version at all", async () => {
+    const { session, peer } = drive({}, pin);
+    const outcome = await session.outcome;
+
+    expect(outcome.ok).toBe(false);
+    expect(peer.methods).not.toContain("session/new");
+    expect(outcome.verdict).toContain("could not confirm the opencode version");
+  });
+
+  it("runs the pinned build exactly as it runs an unpinned one", async () => {
+    const { session, peer } = drive({ agentInfo: { name: "OpenCode", version: "1.18.33" } }, pin);
+    const outcome = await session.outcome;
+
+    expect(outcome.ok).toBe(true);
+    expect(peer.methods.slice(0, 3)).toEqual(["initialize", "session/new", "session/prompt"]);
+    expect(outcome.verdict).toBeUndefined();
+  });
+
+  it("checks nothing when the row sets no pin, whatever the agent reports", async () => {
+    const { session } = drive({}, { minVersion: null });
+    expect((await session.outcome).ok).toBe(true);
+  });
+
+  it("leaves verdict unset for an ordinary failure, which is not the operator's to act on", async () => {
+    const { session } = drive({ failInitialize: "boom" });
+    const outcome = await session.outcome;
+    expect(outcome.ok).toBe(false);
+    expect(outcome.verdict).toBeUndefined();
+  });
+});
+
 /**
  * Carrying a conversation across a re-spawn.
  *

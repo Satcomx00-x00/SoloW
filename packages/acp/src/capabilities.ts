@@ -55,6 +55,15 @@ export const initializeResultSchema = z
       .passthrough()
       .optional(),
     authMethods: z.array(z.object({ id: z.string() }).passthrough()).optional(),
+    /**
+     * Who is answering, and which build. Optional in the spec and read permissively: a peer that
+     * sends a malformed one has told us nothing, not something wrong.
+     */
+    agentInfo: z
+      .object({ name: z.string().optional(), version: z.string().optional() })
+      .passthrough()
+      .optional()
+      .catch(undefined),
   })
   .passthrough();
 
@@ -70,9 +79,17 @@ export interface NegotiatedCapabilities {
   promptEmbeddedContext: boolean;
   /** Authentication methods the agent offers. Empty means it needs none from us. */
   authMethods: string[];
+  /**
+   * The `agentInfo` the peer sent, or null when it sent none. `version` is null when the peer
+   * named itself but not its build — which, for a minimum-version check, is the same as silence.
+   */
+  agent: { name: string; version: string | null } | null;
 }
 
-export type AcpCapability = keyof Omit<NegotiatedCapabilities, "protocolVersion" | "authMethods">;
+export type AcpCapability = keyof Omit<
+  NegotiatedCapabilities,
+  "protocolVersion" | "authMethods" | "agent"
+>;
 
 /** Thrown when SoloW was about to use something the peer never advertised. */
 export class CapabilityUnavailableError extends Error {
@@ -133,7 +150,85 @@ export function negotiate(result: unknown): NegotiatedCapabilities {
     promptAudio: prompt?.audio === true,
     promptEmbeddedContext: prompt?.embeddedContext === true,
     authMethods: (data.authMethods ?? []).map((m) => m.id),
+    agent: data.agentInfo
+      ? { name: data.agentInfo.name ?? "", version: data.agentInfo.version?.trim() || null }
+      : null,
   };
+}
+
+/**
+ * A dotted version, read the way release tags are written: `1.18.33`, `v1.18.33`,
+ * `1.18.33-beta.2`. Null for anything that is not one — a version this cannot read is not one
+ * it can vouch for.
+ */
+function parseVersion(text: string): { parts: number[]; prerelease: boolean } | null {
+  const match = /^v?(\d+(?:\.\d+)*)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/.exec(text.trim());
+  if (!match?.[1]) return null;
+  return { parts: match[1].split(".").map(Number), prerelease: match[2] !== undefined };
+}
+
+/**
+ * Whether `actual` is at least `minimum`. Numeric, part by part, a missing part counting as 0
+ * (`1.18` is `1.18.0`). A pre-release of the minimum does **not** meet it: `1.18.33-beta` is the
+ * build before `1.18.33`, and the minimum names the release whose behaviour was verified.
+ * Anything unreadable on either side fails — a pin that passes on garbage is not a pin.
+ */
+export function meetsMinimumVersion(actual: string, minimum: string): boolean {
+  const a = parseVersion(actual);
+  const m = parseVersion(minimum);
+  if (!a || !m) return false;
+  const length = Math.max(a.parts.length, m.parts.length);
+  for (let i = 0; i < length; i++) {
+    const x = a.parts[i] ?? 0;
+    const y = m.parts[i] ?? 0;
+    if (x !== y) return x > y;
+  }
+  // The same numbers: a pre-release sits below its release, and a release meets its own number.
+  return !a.prerelease || m.prerelease;
+}
+
+/** Whether a string is a version `meetsMinimumVersion` can read — what a pin is validated by. */
+export function isReadableVersion(text: string): boolean {
+  return parseVersion(text) !== null;
+}
+
+/**
+ * Thrown when a harness is older than its catalog row's `minVersion`, or will not say which
+ * version it is. The message is the Task's failure reason as the operator reads it, so it names
+ * the harness, both versions, and what to do about it.
+ */
+export class HarnessVersionError extends Error {
+  constructor(
+    readonly harness: string,
+    readonly actual: string | null,
+    readonly minimum: string,
+    readonly installHint: string | null = null,
+  ) {
+    const fix = installHint ? ` — upgrade it (${installHint})` : " — upgrade it";
+    super(
+      actual === null
+        ? `could not confirm the ${harness} version: it did not report one, and this build needs at least ${minimum}${fix}`
+        : `${harness} ${actual} is older than ${minimum}, the oldest version this build supports${fix}`,
+    );
+    this.name = "HarnessVersionError";
+  }
+}
+
+/**
+ * Refuse a harness below the catalog's minimum — straight after the handshake, before any
+ * session exists. `harness` names it in the message: the catalog's display name, since that is
+ * what the operator chose; the peer's own `agentInfo.name` is only the fallback.
+ */
+export function requireMinimumVersion(
+  caps: NegotiatedCapabilities,
+  minimum: string,
+  opts: { harness?: string; installHint?: string | null } = {},
+): void {
+  const version = caps.agent?.version ?? null;
+  const harness = opts.harness || caps.agent?.name || "the harness";
+  if (version === null || !meetsMinimumVersion(version, minimum)) {
+    throw new HarnessVersionError(harness, version, minimum, opts.installHint ?? null);
+  }
 }
 
 /** Refuse to proceed with something the peer never advertised. */

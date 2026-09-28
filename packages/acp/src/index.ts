@@ -14,11 +14,15 @@ export {
   type AcpCapability,
   assertPromptBlocks,
   CapabilityUnavailableError,
+  HarnessVersionError,
   initializeParams,
+  isReadableVersion,
+  meetsMinimumVersion,
   type NegotiatedCapabilities,
   negotiate,
   ProtocolVersionError,
   requireCapability,
+  requireMinimumVersion,
   SOLOW_CLIENT_CAPABILITIES,
 } from "./capabilities.js";
 export {

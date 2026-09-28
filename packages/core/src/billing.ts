@@ -177,6 +177,13 @@ export interface FailureSignal {
    * started again from the brief, once, in the same worktree.
    */
   resumeLost?: boolean;
+  /**
+   * A refusal the transport already has in operator-facing words, for a standing condition no
+   * retry would change — a harness older than its catalog row's `minVersion`. Still a hard
+   * failure by class; the words replace the bare class as the Task's `failureReason`, because
+   * "fail" tells an operator nothing about what to go and upgrade.
+   */
+  verdict?: string;
 }
 
 /**
