@@ -58,6 +58,11 @@ async function ensureBothRepositories(page: Page): Promise<void> {
 }
 
 test.describe("@critical isolation", () => {
+  // The first case here runs on a cold e2e `next dev` and now settles both of its runs at the
+  // gate as well, which took it past the runner's 180 s default after every assertion had
+  // passed. The budget follows the walk, as in `subtasks.spec.ts`.
+  test.describe.configure({ timeout: 6 * 60_000 });
+
   test("concurrent Tasks never observe each other's worktree files (Principle II)", async ({
     page,
   }) => {
