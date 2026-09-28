@@ -5,6 +5,7 @@ import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { DEFAULT_HARNESS_CATALOG } from "./harness-catalog-defaults.js";
 
 /**
  * `0042` applied to a database that already holds catalog rows.
@@ -68,9 +69,12 @@ describe(`${TARGET}: the catalog's minimum version`, () => {
 
     applyTarget(db);
 
+    // The same pin and hint a fresh Workspace is seeded with, so an old Workspace and a new one
+    // cannot disagree about which build they accept or how to get it back.
+    const seeded = DEFAULT_HARNESS_CATALOG.find((row) => row.key === "opencode");
     expect(read(db, "oc")).toEqual({
-      min_version: "1.18.33",
-      install_hint: "npm install -g opencode-ai@latest",
+      min_version: seeded?.minVersion ?? null,
+      install_hint: seeded?.installHint ?? null,
     });
   });
 

@@ -1,7 +1,7 @@
 {
   "name": "@satcomx00-x00/solow",
   "version": "0.17.3",
-  "description": "Solo Workflow \u2014 a self-hostable control plane for orchestrating AI coding agents in parallel under human review. Run it with `npx @satcomx00-x00/solow`.",
+  "description": "Solo Workflow — a self-hostable control plane for orchestrating AI coding agents in parallel under human review. Run it with `npx @satcomx00-x00/solow`.",
   "license": "Apache-2.0",
   "type": "module",
   "homepage": "https://github.com/Satcomx00-x00/SoloW#readme",
@@ -38,7 +38,8 @@
   },
   "dependencies": {
     "bun": "^1.4.0",
-    "inngest-cli": "^1.44.0"
+    "inngest-cli": "^1.44.0",
+    "opencode-ai": "1.18.33"
   },
   "optionalDependencies": {
     "@satcomx00-x00/solow-inngest-linux-x64": "1.44.0",

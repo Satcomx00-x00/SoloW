@@ -53,14 +53,15 @@ describe("ensureDefaultHarnessCatalog", () => {
     });
   });
 
-  it("pins opencode to the build it was verified against, and tells an Owner how to upgrade", async () => {
+  it("pins opencode to the build SoloW ships, and says the fix is SoloW's own install", async () => {
     await ensureDefaultHarnessCatalog(db, workspaceId);
 
     const seeded = await rows();
-    expect(seeded.find((r) => r.key === "opencode")).toMatchObject({
-      minVersion: "1.18.33",
-      installHint: "npm install -g opencode-ai@latest",
-    });
+    const opencode = seeded.find((r) => r.key === "opencode");
+    expect(opencode?.minVersion).toBe("1.18.33");
+    // Not `npm install -g opencode-ai@latest`: the bundled copy is what runs, so the way back
+    // from a refusal is to restore it, not to land on a build nobody verified.
+    expect(opencode?.installHint).toContain("opencode-ai@1.18.33");
     // Claude Code's protocol has no handshake that names a build, so a pin would check nothing.
     expect(seeded.find((r) => r.key === "claude_code")?.minVersion).toBeNull();
   });

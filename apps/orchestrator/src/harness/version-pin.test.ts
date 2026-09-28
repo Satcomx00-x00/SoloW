@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { isReadableVersion } from "@solow/acp";
 import { harnessVersionSchema } from "@solow/contracts";
 import { DEFAULT_HARNESS_CATALOG } from "@solow/db";
+import { bundledBinary } from "../executor/bundled-binaries.js";
 import { createLocalExecutor } from "../executor/local.js";
 import { probeHarness } from "./probe.js";
 
@@ -44,12 +45,13 @@ describe("the version grammar", () => {
 });
 
 /**
- * The pin against the real binary, opt-in like the Docker contract: `SOLOW_TEST_OPENCODE_BIN`
- * names an `opencode` to probe. Through the same `probeHarness` Settings uses — `initialize` and
- * `session/new`, never a prompt, so no credential and no inference — in a blank home, the way a
- * Task's harness is started (Decision 0027).
+ * The pin against the real binary — the one SoloW installs (`opencode-ai`, an exact dependency),
+ * so this runs wherever the dependencies are installed, not only on a machine someone set up.
+ * `SOLOW_TEST_OPENCODE_BIN` points it at another build instead. Through the same `probeHarness`
+ * Settings uses — `initialize` and `session/new`, never a prompt, so no credential and no
+ * inference — in a blank home, the way a Task's harness is started (Decision 0027).
  */
-const OPENCODE = process.env["SOLOW_TEST_OPENCODE_BIN"];
+const OPENCODE = process.env["SOLOW_TEST_OPENCODE_BIN"] ?? bundledBinary("opencode");
 const opencodeRow = DEFAULT_HARNESS_CATALOG.find((row) => row.key === "opencode");
 
 if (OPENCODE) {
@@ -96,6 +98,6 @@ if (OPENCODE) {
   });
 } else {
   describe("the opencode pin against the real binary (live)", () => {
-    it.skip("needs an opencode binary: re-run with SOLOW_TEST_OPENCODE_BIN=<path>", () => {});
+    it.skip("no opencode build for this platform was installed, and SOLOW_TEST_OPENCODE_BIN is unset", () => {});
   });
 }

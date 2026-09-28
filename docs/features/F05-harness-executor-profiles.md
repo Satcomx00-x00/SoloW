@@ -65,14 +65,26 @@ after `initialize` and before any session is opened (`@solow/acp` → `requireMi
 by a real run and by Settings' "Test" probe — which also shows the build that answered. A harness
 below the pin, or one that does not report a version while a pin is set, fails the Task with the
 refusal itself as its `failureReason` (e.g. `opencode 1.17.2 is older than 1.18.33, the oldest
-version this build supports — upgrade it (npm install -g opencode-ai@latest)`), quoting the row's
-`installHint`. Only ACP can be pinned: stream-json and plain CLIs have no handshake that names a
+version this build supports — upgrade it (…)`), quoting the row's `installHint`. Only ACP can be pinned: stream-json and plain CLIs have no handshake that names a
 build, so the field is ignored for them. The seeded `opencode` row is pinned to **1.18.33**, the
 build verified end to end; to raise it, change `minVersion` in
 `packages/db/src/harness-catalog-defaults.ts` and add a migration that updates existing rows the
 way `0042` does (guarded on the old value, so a Workspace's own pin is kept). The pin is checked
-against a real binary by `apps/orchestrator/src/harness/version-pin.test.ts` with
-`SOLOW_TEST_OPENCODE_BIN=<path>`.
+against the real bundled binary by `apps/orchestrator/src/harness/version-pin.test.ts` on every
+test run (`SOLOW_TEST_OPENCODE_BIN=<path>` points it at another build).
+
+**opencode is installed by SoloW, not by the operator.** `opencode-ai` is an exact dependency of
+the orchestrator and of the published `@satcomx00-x00/solow`, so `bun install` or `npx` brings the
+pinned build with everything else. The package's postinstall is never needed — a current npm
+blocks it and Bun skips it — because the executable already ships inside a per-platform optional
+dependency (`opencode-linux-x64`, …), fetched from the registry with no third-party download.
+The local Executor swaps a bare `opencode` in a catalog row for that binary at spawn
+(`apps/orchestrator/src/executor/bundled-binaries.ts`, choosing the glibc/musl and AVX2/baseline
+build the way the postinstall would); an absolute path or any other command is left alone, and a
+missing bundled copy falls back to PATH. The Docker Executor is unaffected: a container is another
+machine, so its image carries its own harness. **The dependency and the pin move together** —
+bump `opencode-ai` in both `package.json` files, `minVersion` in the defaults and a migration in one
+change; `bundled-binaries.test.ts` fails when the installed build and the seeded pin differ.
 
 Every Workspace is still seeded with a `claude_code` catalog entry the moment it exists — at
 sign-up (`apps/web/src/server/auth/auth.ts`) and in the dev/test seed alike

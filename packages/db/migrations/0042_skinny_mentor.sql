@@ -13,5 +13,5 @@
 ALTER TABLE `agent_catalog` ADD `min_version` text;--> statement-breakpoint
 UPDATE `agent_catalog` SET `min_version` = '1.18.33'
 WHERE `key` = 'opencode' AND `min_version` IS NULL;--> statement-breakpoint
-UPDATE `agent_catalog` SET `install_hint` = 'npm install -g opencode-ai@latest'
+UPDATE `agent_catalog` SET `install_hint` = 'SoloW installs opencode-ai@1.18.33 itself: reinstall its dependencies (bun install from source, or npx @satcomx00-x00/solow@latest)'
 WHERE `key` = 'opencode' AND `install_hint` IS NULL;

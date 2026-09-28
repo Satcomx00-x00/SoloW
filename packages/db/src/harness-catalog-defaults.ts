@@ -67,7 +67,11 @@ export const DEFAULT_HARNESS_CATALOG: readonly CatalogDefault[] = [
     protocol: "acp",
     command: "opencode",
     argsTemplate: ["acp"],
-    installHint: "npm install -g opencode-ai@latest",
+    // SoloW ships opencode as an exact npm dependency and spawns that copy (`executor/
+    // bundled-binaries.ts`), so an old build only answers when the bundled one is missing and
+    // PATH supplied another — the fix is to put the bundled one back, not to chase `@latest`.
+    installHint:
+      "SoloW installs opencode-ai@1.18.33 itself: reinstall its dependencies (bun install from source, or npx @satcomx00-x00/solow@latest)",
     /*
      * The build this row was verified against, end to end. Not a formality: `@solow/acp` reads
      * shapes opencode added along the way — the `configOptions` its 1.18 line answers

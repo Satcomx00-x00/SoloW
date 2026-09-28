@@ -2,6 +2,7 @@
 import { copyFile, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { cpus, freemem, loadavg, totalmem } from "node:os";
 import { dirname, resolve, sep } from "node:path";
+import { withBundledCommand } from "./bundled-binaries.js";
 import type {
   ExecOpts,
   ExecResult,
@@ -90,7 +91,9 @@ export function createLocalExecutor(root: string): Executor {
 
   return {
     spawn(cmd: string[], opts: SpawnOpts): ProcessHandle {
-      const proc = Bun.spawn(cmd, {
+      // A harness SoloW installs itself runs from its own package, not from PATH — the child's
+      // environment is replaced below, so PATH could not be relied on to find it anyway.
+      const proc = Bun.spawn(withBundledCommand(cmd), {
         cwd: opts.cwd,
         // Replaces the environment rather than extending it: the child sees exactly what the
         // caller shaped, and nothing else of the executor's own process (Principle IV).
