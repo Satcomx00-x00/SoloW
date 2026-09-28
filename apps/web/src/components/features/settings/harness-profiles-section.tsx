@@ -140,9 +140,12 @@ const PERMISSION_MODES: Array<{
  * would not know a separate login is what stands between this and a real run.
  */
 function probeSummary(report: HarnessProbeReport): string {
+  // A version refusal already names both versions; anything else stays as the harness said it.
   if (!report.ok) return report.reason ?? "did not respond";
   const { models, modes } = report.capabilities;
   const parts: string[] = [];
+  // Which build answered comes first: it is what an Owner checks against a catalog pin.
+  if (report.agent?.version) parts.push(report.agent.version);
   if (models.length > 0) parts.push(`${models.length} models`);
   if (modes.length > 0) parts.push(`${modes.length} modes`);
   if (report.authMethods.length > 0) parts.push(`sign-in: ${report.authMethods.join(", ")}`);

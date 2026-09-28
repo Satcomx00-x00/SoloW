@@ -161,6 +161,38 @@ describe("AcpRunner", () => {
     if (outcome.kind === "failed") expect(outcome.signal).toEqual({});
   });
 
+  it("fails a harness below the catalog's pin, carrying the refusal as the run's verdict", async () => {
+    workdir = await mkdtemp(join(tmpdir(), "solow-acp-"));
+    const command = await writeFakeAcpBin(workdir, {
+      agentInfo: { name: "OpenCode", version: "1.17.2" },
+    });
+    handle = new AcpRunner({
+      executor: createLocalExecutor(workdir),
+      minVersion: "1.18.33",
+      harnessName: "opencode",
+      installHint: "npm install -g opencode-ai@latest",
+    }).start({
+      command,
+      args: [],
+      cwd: workdir,
+      env: { PATH: process.env["PATH"] ?? "" },
+      worktreeName: null,
+      prompt: "go",
+      onEvent: () => {},
+    });
+
+    const outcome = await handle.outcome;
+    expect(outcome.kind).toBe("failed");
+    // A hard failure by class — nothing to park or renew — with words the operator can act on.
+    if (outcome.kind === "failed") {
+      expect(outcome.signal).toEqual({
+        verdict:
+          "opencode 1.17.2 is older than 1.18.33, the oldest version this build supports — upgrade it (npm install -g opencode-ai@latest)",
+      });
+    }
+    expect(await handle.harnessSessionId).toBeNull();
+  });
+
   it("fails rather than hangs when the binary does not exist", async () => {
     workdir = await mkdtemp(join(tmpdir(), "solow-acp-"));
     handle = new AcpRunner({ executor: createLocalExecutor(workdir) }).start({

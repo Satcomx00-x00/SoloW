@@ -168,6 +168,21 @@ const catalogKey = z
   .regex(/^[a-z][a-z0-9_]*$/, "lowercase snake_case, e.g. claude_code");
 
 /**
+ * A harness version as a release tag spells it: `1.18.33`, `v1.18.33`, `1.18.33-beta.2`.
+ *
+ * The same grammar `@solow/acp`'s `meetsMinimumVersion` reads — a pin it could not read would
+ * refuse every run, so the form refuses it first. (`@solow/acp` depends on nothing but zod, so the
+ * grammar is stated in both places; `harness/version-pin.test.ts` in the orchestrator holds the
+ * two to the same answers.)
+ */
+export const HARNESS_VERSION_PATTERN = /^v?\d+(?:\.\d+)*(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+export const harnessVersionSchema = z
+  .string()
+  .trim()
+  .max(64)
+  .regex(HARNESS_VERSION_PATTERN, "a dotted version, e.g. 1.18.33");
+
+/**
  * `subscriptionEnvVar` / `meteredEnvVar` are the reason this table exists rather than a JSON
  * blob: the billing strip in `billing.ts` used to hardcode `CLAUDE_CODE_OAUTH_TOKEN` /
  * `ANTHROPIC_API_KEY`. That guarantee — subscription billing can never leak into metered API
@@ -182,6 +197,11 @@ export const createHarnessCatalogEntryInput = z.object({
   command: z.string().min(1),
   argsTemplate: z.array(z.string()).max(64).default([]),
   installHint: z.string().max(500).nullable().default(null),
+  /**
+   * The oldest build a run accepts, or null for no pin. Only a protocol whose handshake says
+   * which build is answering (ACP's `agentInfo.version`) can enforce it.
+   */
+  minVersion: harnessVersionSchema.nullable().default(null),
   subscriptionEnvVar: envVarName,
   meteredEnvVar: envVarName,
   capabilities: harnessCapabilitiesSchema.default(DEFAULT_HARNESS_CAPABILITIES),
@@ -197,6 +217,7 @@ export const harnessCatalogEntryDto = z
     command: z.string(),
     argsTemplate: z.array(z.string()),
     installHint: z.string().nullable(),
+    minVersion: z.string().nullable(),
     subscriptionEnvVar: z.string(),
     meteredEnvVar: z.string(),
     capabilities: harnessCapabilitiesSchema,
@@ -238,6 +259,12 @@ export const harnessProbeReport = z.object({
    * to a green result rather than hiding behind one.
    */
   authMethods: z.array(z.string()),
+  /**
+   * Which build answered, from the handshake's `agentInfo` — null when the protocol has no
+   * handshake or the harness did not say. Shown beside the result so an Owner can see what a
+   * version refusal was about without opening a terminal.
+   */
+  agent: z.object({ name: z.string(), version: z.string().nullable() }).nullable(),
   /** What it advertised, which is also what gets cached for the Profile form's pickers. */
   capabilities: z.object({ models: z.array(z.string()), modes: z.array(z.string()) }),
 });

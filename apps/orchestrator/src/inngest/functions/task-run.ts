@@ -235,6 +235,17 @@ function launchSettingsFor(leg: RunLeg, checkpointStore: string): HarnessLaunchS
     ...(leg.checkpoints.length > 0
       ? { checkpoints: { rules: leg.checkpoints, store: checkpointStore } }
       : {}),
+    // The catalog row's pin, per leg for the same reason as the Profile: a Step boundary can
+    // change which harness runs, and the next one's minimum is its own.
+    ...(leg.harnessCatalog.minVersion
+      ? {
+          version: {
+            minimum: leg.harnessCatalog.minVersion,
+            harness: leg.harnessCatalog.displayName,
+            installHint: leg.harnessCatalog.installHint,
+          },
+        }
+      : {}),
   };
 }
 
@@ -477,6 +488,7 @@ export function defaultDeps(): TaskRunDeps {
         ...(settings.model ? { model: settings.model } : {}),
         ...(settings.modeId ? { modeId: settings.modeId } : {}),
         ...(settings.checkpoints ? { checkpoints: settings.checkpoints } : {}),
+        ...(settings.version ? { version: settings.version } : {}),
         unattendedPermissionPosture: env.SOLOW_ACP_UNATTENDED_PERMISSION,
       }),
     worktreeRoot: env.SOLOW_WORKTREE_ROOT,
@@ -2691,6 +2703,7 @@ export async function runTaskLifecycle(
             cls: classifyRunFailure(outcome.signal),
             worktree: adopted,
             stopReason: outcome.stopReason,
+            ...(outcome.signal.verdict ? { verdict: outcome.signal.verdict } : {}),
           };
         }
         // Across every worktree, not just the primary: a round that only touched a secondary
@@ -2890,14 +2903,17 @@ export async function runTaskLifecycle(
           if (stillParked) announce("parked");
           continue;
         }
-        // credential_expired or hard failure: pause/stop with the reason preserved.
+        // credential_expired or hard failure: pause/stop with the reason preserved. A verdict the
+        // transport put in words (a harness below its catalog pin) is the reason itself — "fail"
+        // would leave the operator guessing what to upgrade.
+        const reason = ("verdict" in run && run.verdict) || run.cls;
         await step.run(`fail-${round}`, async () => {
-          await setTaskState(db, workspaceId, taskId, "failed", { failureReason: run.cls });
-          await recordTransition("running", "failed", leg.stepId, run.cls);
+          await setTaskState(db, workspaceId, taskId, "failed", { failureReason: reason });
+          await recordTransition("running", "failed", leg.stepId, reason);
         });
         logStateTransition(log, { workspaceId, taskId, from: "running", to: "failed" });
         announce("failed");
-        captureException(log, new Error(`task run failed: ${run.cls}`), { failureReason: run.cls });
+        captureException(log, new Error(`task run failed: ${reason}`), { failureReason: reason });
         return { taskId, result: run.cls };
       }
 

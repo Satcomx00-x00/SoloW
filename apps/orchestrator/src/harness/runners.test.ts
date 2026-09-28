@@ -72,6 +72,17 @@ describe("createHarnessRunner", () => {
     expect(options["unattendedPermissionPosture"]).toBe("allow_once");
   });
 
+  it("carries the catalog's version pin to the ACP runner, the one protocol that can check it", () => {
+    const runner = createHarnessRunner("acp", {
+      executor,
+      version: { minimum: "1.18.33", harness: "opencode", installHint: "npm i -g opencode-ai" },
+    });
+    const options = (runner as unknown as { options: Record<string, unknown> }).options;
+    expect(options["minVersion"]).toBe("1.18.33");
+    expect(options["harnessName"]).toBe("opencode");
+    expect(options["installHint"]).toBe("npm i -g opencode-ai");
+  });
+
   it("leaves an asking Profile on the deployment's own posture", () => {
     const runner = createHarnessRunner("acp", {
       executor,

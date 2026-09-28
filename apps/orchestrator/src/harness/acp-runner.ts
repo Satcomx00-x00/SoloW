@@ -48,6 +48,14 @@ export interface AcpRunnerOptions {
   modeId?: string;
   /** The model the Harness Profile pinned, under the same advertised-only rule as `modeId`. */
   modelId?: string;
+  /**
+   * The catalog row's `minVersion`: the oldest build of this harness the run accepts, checked
+   * against the handshake's `agentInfo.version` before any session is opened.
+   */
+  minVersion?: string | null;
+  /** The catalog row's display name and install hint, for the words of a version refusal. */
+  harnessName?: string;
+  installHint?: string | null;
   /** How long an operator has to answer a permission before the policy decides (AC-4). */
   permissionDeadlineMs?: number;
   /**
@@ -91,6 +99,13 @@ export class AcpRunner implements HarnessRunner {
             : {}),
           ...(this.options.modeId ? { modeId: this.options.modeId } : {}),
           ...(this.options.modelId ? { modelId: this.options.modelId } : {}),
+          ...(this.options.minVersion
+            ? {
+                minVersion: this.options.minVersion,
+                ...(this.options.harnessName ? { harnessName: this.options.harnessName } : {}),
+                installHint: this.options.installHint ?? null,
+              }
+            : {}),
           spawn: (cmd, spawnOpts) => this.options.executor.spawn(cmd, spawnOpts),
           onUpdate: (update) => {
             const event = toStreamEvent(update);
@@ -164,7 +179,12 @@ export class AcpRunner implements HarnessRunner {
       if (stopRequested) return { kind: "completed", stopReason: "cancelled" };
       const stopReason = stopReasonFor(result);
       if (result.ok) return { kind: "completed", stopReason };
-      return { kind: "failed", signal: signalFor(result, live.stderrTail()), stopReason };
+      const signal = signalFor(result, live.stderrTail());
+      return {
+        kind: "failed",
+        signal: result.verdict ? { ...signal, verdict: result.verdict } : signal,
+        stopReason,
+      };
     });
 
     return {

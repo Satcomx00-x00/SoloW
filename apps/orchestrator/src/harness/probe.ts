@@ -2,9 +2,12 @@ import {
   AcpMethod,
   advertisedOptions,
   type ChildProcessHandle,
+  HarnessVersionError,
   initializeParams,
   JsonRpcPeer,
+  type NegotiatedCapabilities,
   negotiate,
+  requireMinimumVersion,
   sessionNewResultSchema,
 } from "@solow/acp";
 import { harnessProtocolDescriptor } from "@solow/contracts";
@@ -37,6 +40,11 @@ export interface HarnessProbeInput {
   env: Record<string, string>;
   cwd: string;
   protocol: string;
+  /** The catalog row's `minVersion` — checked exactly as a run checks it. Absent for no pin. */
+  minVersion?: string | null;
+  /** The catalog row's display name and install hint, for the words of a version refusal. */
+  harnessName?: string;
+  installHint?: string | null;
 }
 
 export interface HarnessProbeResult {
@@ -47,6 +55,8 @@ export interface HarnessProbeResult {
   protocolVersion: number | null;
   /** Authentication the harness offers. Non-empty means it may need a credential SoloW is not giving it. */
   authMethods: string[];
+  /** Which build answered (`agentInfo`). Null for a protocol without a handshake, or silence. */
+  agent: { name: string; version: string | null } | null;
   /** Advertised ids, for the Profile form's pins. Empty for a protocol that advertises nothing. */
   capabilities: { models: string[]; modes: string[] };
 }
@@ -54,6 +64,7 @@ export interface HarnessProbeResult {
 const EMPTY: Omit<HarnessProbeResult, "ok" | "reason"> = {
   protocolVersion: null,
   authMethods: [],
+  agent: null,
   capabilities: { models: [], modes: [] },
 };
 
@@ -171,9 +182,19 @@ export async function probeHarness(
       }
     })();
 
+    // Kept outside the timed block so a version refusal can still report which build answered.
+    let negotiated: NegotiatedCapabilities | undefined;
     const result = await withTimeout(
       (async () => {
-        const negotiated = negotiate(await peer.request(AcpMethod.Initialize, initializeParams()));
+        negotiated = negotiate(await peer.request(AcpMethod.Initialize, initializeParams()));
+        // The same check a real run makes, at the same point — before `session/new` — so the
+        // probe answers "would a Task on this Profile start?" and not a more lenient question.
+        if (input.minVersion) {
+          requireMinimumVersion(negotiated, input.minVersion, {
+            ...(input.harnessName ? { harness: input.harnessName } : {}),
+            installHint: input.installHint ?? null,
+          });
+        }
         // The same parse a real session does — the shape of `session/new` is the ACP package's
         // to own, not something a probe should re-describe and drift from.
         const created = sessionNewResultSchema.parse(
@@ -183,13 +204,29 @@ export async function probeHarness(
       })(),
       PROBE_TIMEOUT_MS,
       kill,
-    );
+    ).catch((cause: unknown) => {
+      if (cause instanceof HarnessVersionError && negotiated) {
+        return { refused: cause.message, negotiated };
+      }
+      throw cause;
+    });
 
+    if ("refused" in result) {
+      return {
+        ok: false,
+        reason: result.refused,
+        protocolVersion: result.negotiated.protocolVersion,
+        authMethods: result.negotiated.authMethods,
+        agent: result.negotiated.agent,
+        capabilities: { models: [], modes: [] },
+      };
+    }
     return {
       ok: true,
       reason: null,
       protocolVersion: result.negotiated.protocolVersion,
       authMethods: result.negotiated.authMethods,
+      agent: result.negotiated.agent,
       capabilities: advertisedOptions(result.created),
     };
   } catch (cause) {

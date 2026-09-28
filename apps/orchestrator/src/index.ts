@@ -307,6 +307,7 @@ export async function handleProbePost(
         reason: "this Profile has no usable credential — check the Secret it points at",
         protocolVersion: null,
         authMethods: [],
+        agent: null,
         capabilities: { models: [], modes: [] },
       });
     }
@@ -317,6 +318,9 @@ export async function handleProbePost(
       env: shaped.data,
       cwd,
       protocol: ctx.harnessCatalog.protocol,
+      minVersion: ctx.harnessCatalog.minVersion,
+      harnessName: ctx.harnessCatalog.displayName,
+      installHint: ctx.harnessCatalog.installHint,
     });
 
     /*

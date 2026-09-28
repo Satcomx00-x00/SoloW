@@ -563,8 +563,45 @@ describe("HarnessProfilesSection — testing a profile", () => {
     reason: null,
     protocolVersion: 1,
     authMethods: [],
+    agent: null,
     capabilities: { models: [], modes: [] },
     ...over,
+  });
+
+  it("names the build that answered, first, beside a green result", async () => {
+    renderWithTrpc(<HarnessProfilesSection />, {
+      ...oneProfile,
+      "profile.agent.probe": () =>
+        report({
+          agent: { name: "OpenCode", version: "1.18.33" },
+          capabilities: { models: ["a"], modes: [] },
+        }),
+    });
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Test the harness profile opencode" }),
+    );
+
+    expect(await screen.findByText(/works · 1\.18\.33 · 1 models/)).toBeDefined();
+  });
+
+  it("puts a version refusal on screen in the words the run would use", async () => {
+    renderWithTrpc(<HarnessProfilesSection />, {
+      ...oneProfile,
+      "profile.agent.probe": () =>
+        report({
+          ok: false,
+          reason:
+            "opencode 1.17.2 is older than 1.18.33, the oldest version this build supports — upgrade it (npm install -g opencode-ai@latest)",
+          agent: { name: "OpenCode", version: "1.17.2" },
+        }),
+    });
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Test the harness profile opencode" }),
+    );
+
+    expect(await screen.findByText(/1\.17\.2 is older than 1\.18\.33/)).toBeDefined();
   });
 
   it("says what a working harness offers, not merely that it worked", async () => {

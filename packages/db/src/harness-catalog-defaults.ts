@@ -27,6 +27,10 @@ interface CatalogDefault {
   protocol: HarnessProtocol;
   command: string;
   argsTemplate: string[];
+  /** How to get or upgrade the harness — quoted in a version refusal. Null for none. */
+  installHint: string | null;
+  /** The oldest build a run accepts (see `harnessCatalog.minVersion`). Null for no pin. */
+  minVersion: string | null;
   subscriptionEnvVar: string;
   meteredEnvVar: string;
 }
@@ -38,6 +42,10 @@ export const DEFAULT_HARNESS_CATALOG: readonly CatalogDefault[] = [
     protocol: "claude_code_stream_json",
     command: "claude",
     argsTemplate: [],
+    installHint: null,
+    // No pin: stream-json has no handshake that says which build is answering, so there would be
+    // nothing to check it against (`HarnessVersionPin`).
+    minVersion: null,
     subscriptionEnvVar: "CLAUDE_CODE_OAUTH_TOKEN",
     meteredEnvVar: "ANTHROPIC_API_KEY",
   },
@@ -59,6 +67,16 @@ export const DEFAULT_HARNESS_CATALOG: readonly CatalogDefault[] = [
     protocol: "acp",
     command: "opencode",
     argsTemplate: ["acp"],
+    installHint: "npm install -g opencode-ai@latest",
+    /*
+     * The build this row was verified against, end to end. Not a formality: `@solow/acp` reads
+     * shapes opencode added along the way — the `configOptions` its 1.18 line answers
+     * `session/new` with instead of `models`/`modes` (protocol.ts), the `agentInfo` this pin is
+     * checked against — and an older opencode fails in ways that look like SoloW's fault (an
+     * empty model list, a Profile with nothing to suggest). Raise it when a newer build has been
+     * run through the same checks; `0042_skinny_mentor.sql` shows how existing rows get it.
+     */
+    minVersion: "1.18.33",
     subscriptionEnvVar: "OPENCODE_API_KEY",
     meteredEnvVar: "ANTHROPIC_API_KEY",
   },

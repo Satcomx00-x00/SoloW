@@ -85,6 +85,7 @@ export async function createHarnessCatalogEntry(
       command: input.command,
       argsTemplate: input.argsTemplate,
       installHint: input.installHint,
+      minVersion: input.minVersion,
       subscriptionEnvVar: input.subscriptionEnvVar,
       meteredEnvVar: input.meteredEnvVar,
       capabilities: input.capabilities,

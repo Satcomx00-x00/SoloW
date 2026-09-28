@@ -84,7 +84,10 @@ export {
   setWorkspaceFlag,
   type WorkspaceFlags,
 } from "./flags.js";
-export { ensureDefaultHarnessCatalog } from "./harness-catalog-defaults.js";
+export {
+  DEFAULT_HARNESS_CATALOG,
+  ensureDefaultHarnessCatalog,
+} from "./harness-catalog-defaults.js";
 export { loadHarnessLibrariesForRun } from "./harness-library-run.js";
 export { DEFAULT_MCP_SERVER, DEFAULT_SKILL, ensureDefaultLibraries } from "./library-defaults.js";
 export {

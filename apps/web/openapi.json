@@ -16157,6 +16157,23 @@
                         "type": "string"
                       }
                     },
+                    "agent": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "version": {
+                          "type": "string",
+                          "nullable": true
+                        }
+                      },
+                      "required": [
+                        "name",
+                        "version"
+                      ]
+                    },
                     "capabilities": {
                       "type": "object",
                       "properties": {
@@ -16184,6 +16201,7 @@
                     "reason",
                     "protocolVersion",
                     "authMethods",
+                    "agent",
                     "capabilities"
                   ]
                 }
@@ -16289,6 +16307,10 @@
                         "type": "string",
                         "nullable": true
                       },
+                      "minVersion": {
+                        "type": "string",
+                        "nullable": true
+                      },
                       "subscriptionEnvVar": {
                         "type": "string"
                       },
@@ -16338,6 +16360,7 @@
                       "command",
                       "argsTemplate",
                       "installHint",
+                      "minVersion",
                       "subscriptionEnvVar",
                       "meteredEnvVar",
                       "capabilities",
@@ -16458,6 +16481,13 @@
                     "maxLength": 500,
                     "default": null
                   },
+                  "minVersion": {
+                    "type": "string",
+                    "nullable": true,
+                    "pattern": "^v?\\d+(?:\\.\\d+)*(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$",
+                    "maxLength": 64,
+                    "default": null
+                  },
                   "subscriptionEnvVar": {
                     "type": "string",
                     "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
@@ -16549,6 +16579,10 @@
                       "type": "string",
                       "nullable": true
                     },
+                    "minVersion": {
+                      "type": "string",
+                      "nullable": true
+                    },
                     "subscriptionEnvVar": {
                       "type": "string"
                     },
@@ -16598,6 +16632,7 @@
                     "command",
                     "argsTemplate",
                     "installHint",
+                    "minVersion",
                     "subscriptionEnvVar",
                     "meteredEnvVar",
                     "capabilities",

@@ -268,6 +268,12 @@ export const harnessCatalog = sqliteTable(
       .notNull()
       .default(sql`'[]'`),
     installHint: text("install_hint"),
+    /**
+     * The oldest build of this harness a run accepts, or null for no pin. Checked against the ACP
+     * handshake's `agentInfo.version` before a session opens (`@solow/acp`'s
+     * `requireMinimumVersion`); a protocol with no such handshake ignores it.
+     */
+    minVersion: text("min_version"),
     subscriptionEnvVar: text("subscription_env_var").notNull(),
     meteredEnvVar: text("metered_env_var").notNull(),
     /** A cache of the harness's last advertised models/modes — see `HarnessCapabilities`. */

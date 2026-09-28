@@ -63,6 +63,8 @@ export interface HarnessRunnerDeps {
   unattendedPermissionPosture?: UnattendedPermissionPosture;
   /** The Step's checkpoints and where their hook talks to the orchestrator (`harness/checkpoints.ts`). */
   checkpoints?: HarnessCheckpoints;
+  /** The catalog row's version pin (see `HarnessVersionPin`). */
+  version?: HarnessVersionPin;
 }
 
 /** A Step's checkpoint rules, with the per-Task store the hook relays through. */
@@ -84,6 +86,21 @@ export interface HarnessLaunchSettings {
   modeId?: string;
   /** Absent when the Step declared none — a Task on no Workflow never has any. */
   checkpoints?: HarnessCheckpoints;
+  /** The catalog row's version pin, absent when the row sets none. */
+  version?: HarnessVersionPin;
+}
+
+/**
+ * The oldest build of a harness a run accepts — the catalog row's `minVersion` — with what the
+ * refusal needs to be actionable: the name the operator chose and how to upgrade.
+ *
+ * Only ACP can check it, because only ACP's handshake says which build is answering
+ * (`agentInfo.version`). The other protocols ignore it rather than guess from a banner.
+ */
+export interface HarnessVersionPin {
+  minimum: string;
+  harness: string;
+  installHint: string | null;
 }
 
 export function createHarnessRunner(
@@ -109,6 +126,13 @@ export function createHarnessRunner(
         // handshake before sending either pin, rather than sending a guess and reading the error.
         ...(deps.modeId === undefined ? {} : { modeId: deps.modeId }),
         ...(deps.model === undefined || deps.model === null ? {} : { modelId: deps.model }),
+        ...(deps.version
+          ? {
+              minVersion: deps.version.minimum,
+              harnessName: deps.version.harness,
+              installHint: deps.version.installHint,
+            }
+          : {}),
         ...(bypassing
           ? { permissionDeadlineMs: 0, unattendedPermissionPosture: "allow_once" as const }
           : {

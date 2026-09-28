@@ -53,6 +53,18 @@ describe("ensureDefaultHarnessCatalog", () => {
     });
   });
 
+  it("pins opencode to the build it was verified against, and tells an Owner how to upgrade", async () => {
+    await ensureDefaultHarnessCatalog(db, workspaceId);
+
+    const seeded = await rows();
+    expect(seeded.find((r) => r.key === "opencode")).toMatchObject({
+      minVersion: "1.18.33",
+      installHint: "npm install -g opencode-ai@latest",
+    });
+    // Claude Code's protocol has no handshake that names a build, so a pin would check nothing.
+    expect(seeded.find((r) => r.key === "claude_code")?.minVersion).toBeNull();
+  });
+
   it("names an env var for each auth mode, never a value (Principle IV)", async () => {
     await ensureDefaultHarnessCatalog(db, workspaceId);
 

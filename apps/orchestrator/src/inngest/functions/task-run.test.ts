@@ -3892,6 +3892,101 @@ describe("caching what a harness advertises", () => {
   });
 });
 
+describe("the catalog row's minimum version", () => {
+  let db: TestDb;
+
+  beforeAll(() => {
+    process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 3).toString("base64");
+  });
+
+  beforeEach(() => {
+    db = createTestDb();
+  });
+
+  const pin = async (taskId: string, minVersion: string | null) =>
+    db
+      .update(harnessCatalog)
+      .set({
+        minVersion,
+        installHint: "npm install -g opencode-ai@latest",
+        displayName: "opencode",
+      })
+      .where(eq(harnessCatalog.id, `catalog-${taskId}`));
+
+  it("hands the runner the row's pin, with the name and hint a refusal quotes", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids, { agentProtocol: "acp" });
+    await pin(ids.taskId, "1.18.33");
+    const { deps } = makeDeps(
+      db,
+      new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]),
+      nullStream(),
+    );
+    const asked: HarnessLaunchSettings[] = [];
+    const wrapped: TaskRunDeps = {
+      ...deps,
+      runner: (_protocol: HarnessProtocol, settings: HarnessLaunchSettings) => {
+        asked.push(settings);
+        return new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
+      },
+    };
+
+    await runTaskLifecycle(wrapped, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    expect(asked[0]?.version).toEqual({
+      minimum: "1.18.33",
+      harness: "opencode",
+      installHint: "npm install -g opencode-ai@latest",
+    });
+  });
+
+  it("hands the runner no pin when the row sets none", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids, { agentProtocol: "acp" });
+    const { deps } = makeDeps(
+      db,
+      new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]),
+      nullStream(),
+    );
+    const asked: HarnessLaunchSettings[] = [];
+    const wrapped: TaskRunDeps = {
+      ...deps,
+      runner: (_protocol: HarnessProtocol, settings: HarnessLaunchSettings) => {
+        asked.push(settings);
+        return new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
+      },
+    };
+
+    await runTaskLifecycle(wrapped, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    expect(asked[0]?.version).toBeUndefined();
+  });
+
+  it("fails a Task on a harness below the pin with the refusal itself as the reason", async () => {
+    // "fail" would leave the operator guessing; the refusal names what to upgrade and to what.
+    const ids = freshIds();
+    await seedRun(db, ids, { agentProtocol: "acp" });
+    await pin(ids.taskId, "1.18.33");
+    const verdict =
+      "opencode 1.17.2 is older than 1.18.33, the oldest version this build supports — upgrade it (npm install -g opencode-ai@latest)";
+    const { deps } = makeDeps(
+      db,
+      new ScriptedRunner([{ kind: "failed", signal: { verdict }, stopReason: "no_result" }]),
+      nullStream(),
+    );
+
+    const result = await runTaskLifecycle(deps, {
+      event: { data: ids },
+      step: scriptedStep(["approve"]),
+    });
+
+    expect(result).toEqual({ taskId: ids.taskId, result: "fail" });
+    const [row] = await db.select().from(task).where(eq(task.id, ids.taskId)).limit(1);
+    expect(row?.state).toBe("failed");
+    expect(row?.failureReason).toBe(verdict);
+  });
+});
+
 /**
  * Walking a Workflow's Steps (issue #5, AC-2/AC-3/AC-5).
  *

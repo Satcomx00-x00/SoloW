@@ -31,7 +31,7 @@ Workspace-scoped table — `packages/db/src/schema.ts` → `harnessCatalog` — 
 
 ```
 agent_catalog (id, workspaceId, key, displayName, protocol, command, argsTemplate,
-               installHint, subscriptionEnvVar, meteredEnvVar, capabilities)
+               installHint, minVersion, subscriptionEnvVar, meteredEnvVar, capabilities)
 ```
 
 A Harness Profile's `agentCatalogId` points at one of these rather than switching on a closed
@@ -58,6 +58,21 @@ Two fields carry the weight:
   protocols actually have a runner (today: one), and the Task lifecycle fails a Task pointed at
   an undriven protocol before a harness starts, rather than crashing inside a runner never built
   to speak it — the same pattern F07 uses for an Executor kind with no driver yet.
+
+**The version pin (`minVersion`, migration `0042`).** A row may name the oldest build of its
+harness a run accepts. It is checked against the ACP handshake's `agentInfo.version`, straight
+after `initialize` and before any session is opened (`@solow/acp` → `requireMinimumVersion`), both
+by a real run and by Settings' "Test" probe — which also shows the build that answered. A harness
+below the pin, or one that does not report a version while a pin is set, fails the Task with the
+refusal itself as its `failureReason` (e.g. `opencode 1.17.2 is older than 1.18.33, the oldest
+version this build supports — upgrade it (npm install -g opencode-ai@latest)`), quoting the row's
+`installHint`. Only ACP can be pinned: stream-json and plain CLIs have no handshake that names a
+build, so the field is ignored for them. The seeded `opencode` row is pinned to **1.18.33**, the
+build verified end to end; to raise it, change `minVersion` in
+`packages/db/src/harness-catalog-defaults.ts` and add a migration that updates existing rows the
+way `0042` does (guarded on the old value, so a Workspace's own pin is kept). The pin is checked
+against a real binary by `apps/orchestrator/src/harness/version-pin.test.ts` with
+`SOLOW_TEST_OPENCODE_BIN=<path>`.
 
 Every Workspace is still seeded with a `claude_code` catalog entry the moment it exists — at
 sign-up (`apps/web/src/server/auth/auth.ts`) and in the dev/test seed alike

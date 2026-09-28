@@ -104,6 +104,48 @@ describe("probeHarness", () => {
     expect(result.protocolVersion).toBe(1);
   });
 
+  it("reports which build answered the handshake", async () => {
+    const cwd = await dir();
+    const command = await writeFakeAcpBin(cwd, {
+      agentInfo: { name: "OpenCode", version: "1.18.33" },
+    });
+
+    const result = await probeHarness(createLocalExecutor(cwd), {
+      ...base(cwd),
+      command,
+      protocol: "acp",
+      minVersion: "1.18.33",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.agent).toEqual({ name: "OpenCode", version: "1.18.33" });
+  });
+
+  it("fails a build below the catalog's pin in the words a run would fail it in", async () => {
+    // The probe asks "would a Task on this Profile start?", so it must refuse what a run refuses —
+    // and still say which build it found, so the Owner sees the version without a terminal.
+    const cwd = await dir();
+    const command = await writeFakeAcpBin(cwd, {
+      agentInfo: { name: "OpenCode", version: "1.17.2" },
+    });
+
+    const result = await probeHarness(createLocalExecutor(cwd), {
+      ...base(cwd),
+      command,
+      protocol: "acp",
+      minVersion: "1.18.33",
+      harnessName: "opencode",
+      installHint: "npm install -g opencode-ai@latest",
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe(
+      "opencode 1.17.2 is older than 1.18.33, the oldest version this build supports — upgrade it (npm install -g opencode-ai@latest)",
+    );
+    expect(result.agent).toEqual({ name: "OpenCode", version: "1.17.2" });
+    expect(result.protocolVersion).toBe(1);
+  });
+
   it("refuses a protocol this build cannot drive, without starting anything", async () => {
     const cwd = await dir();
 

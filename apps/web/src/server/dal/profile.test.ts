@@ -206,12 +206,24 @@ describe("createHarnessCatalogEntry", () => {
       command: "claude-agent-acp",
       argsTemplate: [],
       installHint: null,
+      minVersion: null,
       subscriptionEnvVar: "CLAUDE_CODE_OAUTH_TOKEN",
       meteredEnvVar: "ANTHROPIC_API_KEY",
       capabilities: { models: [], modes: [] },
       ...over,
     };
   }
+
+  it("stores a row's minimum version and hands it back", async () => {
+    const g = await seedWorkspaceGraph(db, "acme");
+    const ctx = ctxFor(db, g.workspaceId);
+
+    const created = await createHarnessCatalogEntry(ctx, acpEntry({ minVersion: "2.0.1" }));
+
+    expect(created.ok && created.data.minVersion).toBe("2.0.1");
+    const listed = await listHarnessCatalog(ctx);
+    expect(listed.ok && listed.data.find((e) => e.key === "claude_acp")?.minVersion).toBe("2.0.1");
+  });
 
   it("adds a second row beside the seeded Claude Code entry", async () => {
     const g = await seedWorkspaceGraph(db, "acme");
