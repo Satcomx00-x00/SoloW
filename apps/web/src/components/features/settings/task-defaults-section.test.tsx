@@ -104,4 +104,43 @@ describe("the new-task defaults section", () => {
 
     expect(await screen.findByText("Nothing chosen")).toBeDefined();
   });
+
+  it("says a default needs a profile to point at, rather than offering two empty pickers", async () => {
+    renderWithTrpc(<TaskDefaultsSection />, {
+      ...NOTHING_CHOSEN,
+      "profile.agent.list": () => ({ items: [], nextCursor: null }),
+      "profile.executor.list": () => ({ items: [], nextCursor: null }),
+    });
+
+    expect(await screen.findByText(/Create a harness profile and an executor first/)).toBeDefined();
+    expect(screen.queryByRole("combobox", { name: "Default harness profile" })).toBeNull();
+  });
+
+  it("retries the choice that failed, not the one that was already stored", async () => {
+    let attempts = 0;
+    const { log } = renderWithTrpc(<TaskDefaultsSection />, {
+      ...CHOSEN,
+      "preference.setTaskDefaults": (input: unknown) => {
+        attempts += 1;
+        if (attempts === 1) throw new Error("database is locked");
+        return { workspaceId: "ws-1", userId: "ada", defaults: input };
+      },
+    });
+
+    await pick("Default harness profile", "opencode");
+    expect((await screen.findByRole("alert")).textContent).toContain("database is locked");
+
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+
+    await waitFor(() => {
+      const writes = log.calls.filter((c) => c.path === "preference.setTaskDefaults");
+      expect(writes).toHaveLength(2);
+      // The retry exists to finish what the Owner asked for. Re-sending the stored pair would
+      // report success while quietly dropping their choice.
+      expect(writes[1]?.input).toEqual({
+        harnessProfileId: "harness-2",
+        executorProfileId: "exec-1",
+      });
+    });
+  });
 });

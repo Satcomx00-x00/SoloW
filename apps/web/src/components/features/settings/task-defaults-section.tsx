@@ -143,9 +143,15 @@ export function TaskDefaultsSection() {
       )}
 
       {/* Nothing to submit — each picker saves on change. The button exists only as the retry
-          for a write that failed, so it appears only then. */}
-      {save.error && current && (
-        <Button loading={save.isPending} onClick={() => save.mutate(current)} type="button">
+          for a write that failed, so it appears only then. It re-sends the failed write's own
+          input: `current` is still the stored pair, because the write did not land, and
+          retrying that would report success while dropping the choice that failed. */}
+      {save.error && save.variables && (
+        <Button
+          loading={save.isPending}
+          onClick={() => save.variables && save.mutate(save.variables)}
+          type="button"
+        >
           Try again
         </Button>
       )}

@@ -47,6 +47,23 @@ describe("sessionRunLinks", () => {
     expect(links.map((l) => l.kind)).toEqual(["merge_request"]);
   });
 
+  it("takes what the machinery said, which may be the only copy a truncated run left", () => {
+    const links = sessionRunLinks([row({ kind: "notice", text: `Pipeline started: ${PIPELINE}` })]);
+    expect(links.map((l) => l.kind)).toEqual(["pipeline"]);
+  });
+
+  it("reads every value of a tool's input, not only the one named `command`", () => {
+    const links = sessionRunLinks([
+      row({
+        kind: "tool_call",
+        name: "WebFetch",
+        callId: "c1",
+        input: { url: MR, prompt: "status?" },
+      }),
+    ]);
+    expect(links.map((l) => l.url)).toEqual([MR]);
+  });
+
   it("takes the completion report, where a well-behaved harness names it", () => {
     const links = sessionRunLinks([
       row({

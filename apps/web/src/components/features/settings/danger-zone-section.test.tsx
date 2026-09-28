@@ -93,4 +93,51 @@ describe("the reset section", () => {
 
     expect(await screen.findByText(/Removed 3 rows across 1 table/)).toBeDefined();
   });
+
+  it("forgets the typed name when cancelled, so the next opening starts disarmed", async () => {
+    renderWithTrpc(<DangerZoneSection />, HANDLERS);
+    let dialog = await openDialog("Reset work data");
+    fireEvent.change(dialog.getByLabelText("Type acme to confirm"), { target: { value: "acme" } });
+
+    fireEvent.click(dialog.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    // Reopened from the *other* button: an armed field carried across would turn "I changed my
+    // mind about the work" into one click from erasing the setup as well.
+    dialog = await openDialog("Erase everything");
+
+    expect((dialog.getByLabelText("Type acme to confirm") as HTMLInputElement).value).toBe("");
+    expect(
+      (dialog.getByRole("button", { name: "Erase everything" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
+  it("shows the server's refusal and stays open, rather than looking as if it worked", async () => {
+    renderWithTrpc(<DangerZoneSection />, {
+      ...HANDLERS,
+      "workspace.reset": () => {
+        throw new Error("Too many resets — try again in an hour");
+      },
+    });
+    const dialog = await openDialog("Reset work data");
+    fireEvent.change(dialog.getByLabelText("Type acme to confirm"), { target: { value: "acme" } });
+
+    fireEvent.click(dialog.getByRole("button", { name: "Reset work data" }));
+
+    expect((await dialog.findByRole("alert")).textContent).toContain("Too many resets");
+    expect(screen.getByRole("dialog")).toBeDefined();
+    expect(screen.queryByText(/Removed \d+ rows/)).toBeNull();
+  });
+
+  it("cannot be opened before the Workspace's name is known", async () => {
+    // With no name to type back, the gate would compare against an empty string.
+    renderWithTrpc(<DangerZoneSection />, {
+      ...HANDLERS,
+      "workspace.get": () => new Promise(() => {}),
+    });
+
+    const trigger = (await screen.findByRole("button", {
+      name: "Reset work data",
+    })) as HTMLButtonElement;
+    expect(trigger.disabled).toBe(true);
+  });
 });
