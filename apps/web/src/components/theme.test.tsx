@@ -102,9 +102,13 @@ describe("useTheme", () => {
     localStorage.setItem(THEME_STORAGE_KEY, "light");
     renderWithTrpc(<Probe />, { "preference.getAppearance": () => appearance("dark") });
 
-    await waitFor(() => expect(screen.getByLabelText("theme").textContent).toBe("dark"));
-    expect(isDark()).toBe(true);
-    expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe("dark");
+    // All three inside the wait: the label, the class and the cache are written by separate
+    // effects, and on a loaded machine the label can be read before the cache write has run.
+    await waitFor(() => {
+      expect(screen.getByLabelText("theme").textContent).toBe("dark");
+      expect(isDark()).toBe(true);
+      expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe("dark");
+    });
   });
 
   it("paints from the cache while the row is still on its way", async () => {

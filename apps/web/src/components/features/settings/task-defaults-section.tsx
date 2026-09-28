@@ -40,8 +40,25 @@ export function TaskDefaultsSection() {
   const harnesses = trpc.profile.agent.list.useQuery({ ...WHOLE_PAGE });
   const executors = trpc.profile.executor.list.useQuery({ ...WHOLE_PAGE });
   const defaults = trpc.preference.getTaskDefaults.useQuery({});
+  /*
+   * Written into the cache before the request goes, not after it lands. `set` builds each write
+   * from `current`, so without this a second pick made before the first write's refetch arrived
+   * was built on the pair from *before* the first — picking a harness and then an executor in
+   * quick succession saved the executor and silently put the harness back to "Ask every time".
+   */
   const save = trpc.preference.setTaskDefaults.useMutation({
-    onSuccess: () => utils.preference.getTaskDefaults.invalidate(),
+    onMutate: async (next) => {
+      await utils.preference.getTaskDefaults.cancel();
+      const previous = utils.preference.getTaskDefaults.getData({});
+      utils.preference.getTaskDefaults.setData({}, (old) =>
+        old ? { ...old, defaults: next } : old,
+      );
+      return { previous };
+    },
+    onError: (_error, _next, context) => {
+      utils.preference.getTaskDefaults.setData({}, context?.previous);
+    },
+    onSettled: () => utils.preference.getTaskDefaults.invalidate(),
   });
 
   const harnessItems = harnesses.data?.items ?? [];

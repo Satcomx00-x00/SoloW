@@ -82,6 +82,39 @@ describe("the new-task defaults section", () => {
     });
   });
 
+  it("keeps the first of two quick picks when the second is made before the first comes back", async () => {
+    // The first read answers; every read after it is held, so the second pick is made while the
+    // refetch that follows the first write is still in flight — a person choosing a harness and
+    // then an executor without waiting.
+    let reads = 0;
+    const { log } = renderWithTrpc(<TaskDefaultsSection />, {
+      ...NOTHING_CHOSEN,
+      "preference.getTaskDefaults": () =>
+        reads++ === 0
+          ? {
+              workspaceId: "ws-1",
+              userId: "ada",
+              defaults: { harnessProfileId: null, executorProfileId: null },
+            }
+          : new Promise(() => {}),
+    });
+    await screen.findByRole("combobox", { name: "Default harness profile" });
+
+    await pick("Default harness profile", "opencode");
+    await waitFor(() =>
+      expect(log.calls.filter((c) => c.path === "preference.setTaskDefaults")).toHaveLength(1),
+    );
+    await pick("Default executor", "Local");
+
+    await waitFor(() => {
+      const writes = log.calls.filter((c) => c.path === "preference.setTaskDefaults");
+      expect(writes.at(-1)?.input).toEqual({
+        harnessProfileId: "harness-2",
+        executorProfileId: "exec-1",
+      });
+    });
+  });
+
   it("can clear a default back to asking every time", async () => {
     const { log } = renderWithTrpc(<TaskDefaultsSection />, CHOSEN);
     await screen.findByRole("combobox", { name: "Default executor" });
