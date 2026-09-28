@@ -247,6 +247,64 @@ describe("renderForkDigest (issue #56, AC-3)", () => {
     expect(lines.at(-1)).toBe(`Agent: line ${FORK_DIGEST_MAX_EVENTS + 4}`);
   });
 
+  it("spends its budget on the work, so a burst of machinery before the fork cannot crowd it out", () => {
+    // A run's last minutes are often nothing but notices and usage ticks. Counting those against
+    // the cap would hand the child an empty history while dropping the work that preceded them.
+    const events = [
+      at(0, { kind: "user_turn", text: "Fix the latch" }),
+      at(1, { kind: "assistant_turn", text: "Rewired it", thinking: false }),
+      ...Array.from({ length: FORK_DIGEST_MAX_EVENTS + 10 }, (_, i) =>
+        at(2 + i, { kind: "notice", text: `tick ${i}` }),
+      ),
+    ];
+
+    expect(renderForkDigest(events).split("\n")).toEqual([
+      "Operator: Fix the latch",
+      "Agent: Rewired it",
+    ]);
+  });
+
+  it("counts only what it would have shown when it says how much it dropped", () => {
+    const events = [
+      at(0, { kind: "notice", text: "machinery, never shown anyway" }),
+      ...Array.from({ length: FORK_DIGEST_MAX_EVENTS + 1 }, (_, i) =>
+        at(1 + i, { kind: "assistant_turn", text: `line ${i}`, thinking: false }),
+      ),
+    ];
+
+    expect(renderForkDigest(events).split("\n")[0]).toBe("[1 earlier event not shown]");
+  });
+
+  it("names the files a diff touched", () => {
+    const digest = renderForkDigest([
+      at(0, {
+        kind: "diff",
+        files: [{ path: "src/latch.ts" }, { path: "src/servo.ts" }],
+      } as SessionEventPayload),
+      at(1, { kind: "diff", files: [{ path: "README.md" }] } as SessionEventPayload),
+    ]);
+    expect(digest.split("\n")).toEqual([
+      "Diff: 2 files changed (src/latch.ts, src/servo.ts)",
+      "Diff: 1 file changed (README.md)",
+    ]);
+  });
+
+  it("prefers the harness's own summary of how it ended over the declared outcome", () => {
+    const digest = renderForkDigest([
+      at(0, {
+        kind: "agent_done",
+        changed: true,
+        summary: "Servo fitted; latch holds",
+        outcome: "changes_ready",
+      } as SessionEventPayload),
+      at(1, { kind: "agent_done", changed: false, outcome: "blocked" } as SessionEventPayload),
+    ]);
+    expect(digest.split("\n")).toEqual([
+      "Agent finished: Servo fitted; latch holds",
+      "Agent finished: blocked",
+    ]);
+  });
+
   it("clips one enormous turn rather than letting it crowd out the rest", () => {
     const digest = renderForkDigest([
       at(0, { kind: "user_turn", text: "x".repeat(FORK_DIGEST_MAX_TURN_CHARS + 50) }),

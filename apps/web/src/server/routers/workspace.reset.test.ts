@@ -99,6 +99,53 @@ describe("workspace.reset", () => {
       ),
     ).toBe("UNAUTHORIZED");
   });
+
+  it("forgives stray spaces around the typed name, but nothing else", async () => {
+    const api = caller({ workspaceId: seeded.workspaceId, userId: "ada" });
+
+    // Pasting a name picks up whitespace; that is the same name, and refusing it would read as
+    // the gate being broken. A different case is a different name.
+    expect(
+      await errCode(() => api.workspace.reset({ scope: "work-data", confirmName: "ACME" })),
+    ).toBe("BAD_REQUEST");
+    await api.workspace.reset({ scope: "work-data", confirmName: "  acme " });
+    expect(await db.select().from(task)).toHaveLength(0);
+  });
+
+  it("empties only the caller's own Workspace, whatever name is typed (Principle V)", async () => {
+    const other = await seedWorkspaceGraph(db, "other");
+    await db.insert(issue).values({ id: "iss-2", workspaceId: other.workspaceId, title: "Theirs" });
+    const api = caller({ workspaceId: seeded.workspaceId, userId: "ada" });
+
+    // The other Workspace's name is not a way to reach it: the name is checked against the
+    // session's own Workspace, never used to find one.
+    expect(
+      await errCode(() => api.workspace.reset({ scope: "everything", confirmName: "other" })),
+    ).toBe("BAD_REQUEST");
+    await api.workspace.reset({ scope: "everything", confirmName: "acme" });
+
+    const left = await db.select().from(issue);
+    expect(left.map((row) => row.id)).toEqual(["iss-2"]);
+    expect((await db.select().from(harnessProfile)).map((row) => row.workspaceId)).toEqual([
+      other.workspaceId,
+    ]);
+  });
+
+  it("allows three attempts an hour, and counts a refused one among them", async () => {
+    const api = caller({ workspaceId: seeded.workspaceId, userId: "ada" });
+
+    // Counted before the name is read, deliberately: a wedged client retrying a wrong name is
+    // exactly the loop the limit is for, and it should stop that loop too.
+    expect(
+      await errCode(() => api.workspace.reset({ scope: "work-data", confirmName: "nope" })),
+    ).toBe("BAD_REQUEST");
+    await api.workspace.reset({ scope: "work-data", confirmName: "acme" });
+    await api.workspace.reset({ scope: "work-data", confirmName: "acme" });
+
+    expect(
+      await errCode(() => api.workspace.reset({ scope: "work-data", confirmName: "acme" })),
+    ).toBe("TOO_MANY_REQUESTS");
+  });
 });
 
 describe("preference.setTaskDefaults", () => {

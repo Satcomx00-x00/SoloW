@@ -7,6 +7,8 @@ import {
   sessionEvent,
   session as sessionTable,
   task as taskTable,
+  workflowStep as workflowStepTable,
+  workflow as workflowTable,
   workspace,
 } from "@solow/db";
 import { createTestDb, type TestDb } from "@solow/db/testing";
@@ -279,6 +281,67 @@ describe("sub-tasks (issue #56)", () => {
       expect(child.workflowId).toBeNull();
       expect(child.workflowStepId).toBeNull();
     });
+
+    it("records the Workflow version in force today, not the one the parent attached under", async () => {
+      const { c, newTask, harness } = await fixture(db, "acme");
+      const wf = await c.workflow.create({ name: "One step" });
+      await c.workflow.addStep({
+        workflowId: wf.id,
+        name: "Build",
+        agentProfileId: harness.id,
+        promptTemplate: "Build it.",
+        gate: "auto",
+        advanceOn: "agent-signal",
+      });
+      const parent = await newTask("Parent");
+      await c.workflow.attachTask({ taskId: parent.id, workflowId: wf.id });
+      const [attached] = await db.select().from(taskTable).where(eq(taskTable.id, parent.id));
+      // The pipeline is edited after the parent attached: the child's attachment is made now,
+      // so a mid-run edit must not look as if it happened to a child that did not yet exist.
+      const edited = (attached?.workflowVersion ?? 0) + 4;
+      await db.update(workflowTable).set({ version: edited }).where(eq(workflowTable.id, wf.id));
+
+      const child = await c.task.createSubtask({ parentTaskId: parent.id, title: "Child" });
+
+      const [row] = await db.select().from(taskTable).where(eq(taskTable.id, child.id));
+      expect(row?.workflowVersion).toBe(edited);
+      const [parentRow] = await db.select().from(taskTable).where(eq(taskTable.id, parent.id));
+      expect(parentRow?.workflowVersion).toBe(attached?.workflowVersion ?? null);
+    });
+
+    it("creates the sub-task on no Workflow when the parent's has been edited into a loop with no way out", async () => {
+      const { c, newTask, harness } = await fixture(db, "acme");
+      const wf = await c.workflow.create({ name: "Plan then build" });
+      for (const name of ["Plan", "Build"]) {
+        await c.workflow.addStep({
+          workflowId: wf.id,
+          name,
+          agentProfileId: harness.id,
+          promptTemplate: `${name} it.`,
+          gate: "auto",
+          advanceOn: "agent-signal",
+        });
+      }
+      const parent = await newTask("Parent");
+      await c.workflow.attachTask({ taskId: parent.id, workflowId: wf.id });
+      const [plan] = (await c.workflow.get({ id: wf.id })).steps;
+      if (!plan) throw new Error("expected a first Step");
+      // Written straight to the row: the editor refuses this graph, but a pipeline can still end
+      // up in it, and the Owner asked to split a Task — not to be told about a pipeline.
+      await db
+        .update(workflowStepTable)
+        .set({
+          branch: { when: { kind: "produced-changes" }, thenStepId: plan.id, elseStepId: plan.id },
+        })
+        .where(eq(workflowStepTable.id, plan.id));
+
+      const child = await c.task.createSubtask({ parentTaskId: parent.id, title: "Child" });
+
+      expect(child.workflowId).toBeNull();
+      expect(child.workflowStepId).toBeNull();
+      // The parent keeps its attachment; dropping it on the child is not a repair of the parent.
+      expect((await c.task.get({ id: parent.id })).workflowId).toBe(wf.id);
+    });
   });
 
   describe("AC-3 — starting from a fork point in the parent's transcript", () => {
@@ -464,6 +527,22 @@ describe("sub-tasks (issue #56)", () => {
         "BAD_REQUEST",
       );
       expect((await c.task.get({ id: a.id })).parentTaskId).toBeNull();
+    });
+
+    it("refuses a parent that is in History, and a Task that is", async () => {
+      const { c, newTask } = await fixture(db, "acme");
+      const live = await newTask("Live");
+      const gone = await newTask("Gone");
+      await c.task.delete({ id: gone.id });
+
+      // A child under a deleted parent would sit beneath a breadcrumb that no longer resolves.
+      expect(await errCode(() => c.task.setParent({ id: live.id, parentTaskId: gone.id }))).toBe(
+        "NOT_FOUND",
+      );
+      expect(await errCode(() => c.task.setParent({ id: gone.id, parentTaskId: live.id }))).toBe(
+        "NOT_FOUND",
+      );
+      expect((await c.task.get({ id: live.id })).parentTaskId).toBeNull();
     });
 
     it("refuses to split a Task that is in History", async () => {
