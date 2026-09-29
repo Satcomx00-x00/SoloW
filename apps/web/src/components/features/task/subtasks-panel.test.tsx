@@ -141,6 +141,34 @@ describe("SplitTaskButton", () => {
     });
   });
 
+  it("shows the new sub-task even when the list's first read was still in flight", async () => {
+    // The rail renders both. The list's first read is slow and started before the create, so it
+    // answers from before the sub-task existed; every read after it knows about the child.
+    const child = task({ id: "child-1", parentTaskId: "task-1", title: "Split early" });
+    let reads = 0;
+    renderWithTrpc(
+      <>
+        <SubtaskList task={task()} />
+        <SplitTaskButton hasTranscript task={task()} />
+      </>,
+      {
+        "task.list": () =>
+          reads++ === 0
+            ? new Promise((resolve) => setTimeout(() => resolve(page([])), 300))
+            : page([child]),
+        "task.createSubtask": () => child,
+      },
+    );
+
+    await split("Split early");
+
+    const link = await screen.findByRole("link", { name: /Split early/ });
+    expect(link.getAttribute("href")).toBe("/task/child-1");
+    // And the stale first answer, landing afterwards, does not take it away again.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(screen.getByRole("link", { name: /Split early/ })).toBeTruthy();
+  });
+
   it("refuses an empty title before asking the server", async () => {
     const rendered = renderWithTrpc(<SplitTaskButton hasTranscript task={task()} />, {});
 

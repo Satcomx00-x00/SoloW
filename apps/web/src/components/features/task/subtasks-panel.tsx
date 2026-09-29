@@ -145,7 +145,25 @@ function SplitTaskDialog({
   });
 
   const create = trpc.task.createSubtask.useMutation({
-    onSuccess: () => {
+    onSuccess: async (created) => {
+      /*
+       * The new sub-task goes into this Task's list directly, not only through invalidation.
+       * Split right after opening a Task and the list's *first* read can still be in flight, one
+       * that started before the create; React Query answers an invalidation of a query with no
+       * data yet by joining that fetch rather than starting another, so the list settled on the
+       * empty answer and the sub-task never appeared (found by the e2e suite on CI). Cancelling
+       * the stale read first means it cannot land on top of the row written here; the
+       * invalidation after it then confirms against the server.
+       */
+      const key = { parentTaskId: task.id, ...WHOLE_PAGE };
+      await utils.task.list.cancel(key);
+      utils.task.list.setData(key, (old) =>
+        old
+          ? old.items.some((t) => t.id === created.id)
+            ? old
+            : { ...old, items: [...old.items, created] }
+          : { items: [created], nextCursor: null },
+      );
       void utils.task.list.invalidate();
       onOpenChange(false);
       form.reset({ title: "", fork: true });
