@@ -11,7 +11,10 @@
 set -euo pipefail
 
 MANIFEST="$(dirname "$0")/../.github/labels.json"
-[ -f "$MANIFEST" ] || { echo "manifest not found: $MANIFEST" >&2; exit 1; }
+[ -f "$MANIFEST" ] || {
+    echo "manifest not found: $MANIFEST" >&2
+    exit 1
+}
 
 GH_ARGS=()
 [ $# -gt 0 ] && GH_ARGS=(--repo "$1")
@@ -21,15 +24,15 @@ created=0
 updated=0
 
 while IFS=$'\t' read -r name color description; do
-  if printf '%s\n' "$existing" | grep -qxF "$name"; then
-    gh label edit "$name" "${GH_ARGS[@]}" --color "$color" --description "$description"
-    printf 'updated  %-24s #%s\n' "$name" "$color"
-    updated=$((updated + 1))
-  else
-    gh label create "$name" "${GH_ARGS[@]}" --color "$color" --description "$description"
-    printf 'created  %-24s #%s\n' "$name" "$color"
-    created=$((created + 1))
-  fi
+    if printf '%s\n' "$existing" | grep -qxF "$name"; then
+        gh label edit "$name" "${GH_ARGS[@]}" --color "$color" --description "$description"
+        printf 'updated  %-24s #%s\n' "$name" "$color"
+        updated=$((updated + 1))
+    else
+        gh label create "$name" "${GH_ARGS[@]}" --color "$color" --description "$description"
+        printf 'created  %-24s #%s\n' "$name" "$color"
+        created=$((created + 1))
+    fi
 done < <(jq -r '.[] | [.name, .color, .description] | @tsv' "$MANIFEST")
 
 echo "Labels synced — $created created, $updated updated."

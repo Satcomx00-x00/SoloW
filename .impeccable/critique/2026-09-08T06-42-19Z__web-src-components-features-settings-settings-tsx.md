@@ -2,7 +2,7 @@
 target: the settings page
 total_score: 21
 max_score: 40
-na_heuristics: 
+na_heuristics:
 p0_count: 1
 p1_count: 3
 target_identity: "file:/home/debian/GateControl/apps/web/src/components/features/settings/settings.tsx"

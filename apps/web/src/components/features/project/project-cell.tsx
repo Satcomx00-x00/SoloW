@@ -334,7 +334,7 @@ function SelectCell({ field, value, rowTitle, onEdit, pending, fallback }: Edita
                 >
                   {/*
                     The option as the *token it will become*, in the provider's own colour.
-                    
+
                     This used to be a neutral dot beside a plain name — "a choice in a set" without
                     encoding which one. It is the wrong trade here: a chosen cell shows `Ready` in
                     green and the menu it was chosen from showed grey, so the two readings of one

@@ -495,7 +495,7 @@ export function CreateTaskDialog({
                 </div>
                 {/*
                   The two escape hatches, folded away.
-                  
+
                   Both were asked to go: they sat between the Owner and the Create button on
                   every Task, and neither is answered on more than a handful. Base ref defaults
                   to HEAD, which is what almost every run wants; a second repository is the

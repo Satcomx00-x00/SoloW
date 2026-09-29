@@ -284,7 +284,7 @@ export function TaskCard({
 
         {/*
           The one action that opens the review gate.
-          
+
           Green, and only present when the harness has declared `changes_ready` — a Task still
           working, or one that finished with nothing to show, offers nothing to click. The label
           says what will happen rather than naming a column, because "Review" beside a card

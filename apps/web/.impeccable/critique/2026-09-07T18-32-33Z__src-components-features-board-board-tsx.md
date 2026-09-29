@@ -2,7 +2,7 @@
 target: the board
 total_score: 27
 max_score: 40
-na_heuristics: 
+na_heuristics:
 p0_count: 0
 p1_count: 3
 target_identity: "file:/home/debian/GateControl/apps/web/src/components/features/board/board.tsx"

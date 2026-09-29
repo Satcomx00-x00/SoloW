@@ -77,14 +77,48 @@ export function bumpFor(messages: readonly string[]): Bump {
 }
 
 function bumpForOne(message: string): Bump {
+  const parsed = parseSubject(message);
+  if (parsed === null) return null;
+  // A breaking change outranks whatever type declared it: `fix!:` is a major, not a patch.
+  if (parsed.breaking) return "major";
+  return TYPE_BUMP[parsed.type] ?? null;
+}
+
+/**
+ * Every type this repository writes. The release reads only `TYPE_BUMP`'s three; the rest are
+ * here so the commit-msg hook (`scripts/check-commit-msg.ts`) can refuse a typo — `feta:` would
+ * otherwise parse, move no digit, and fall out of the changelog's groups without a word.
+ */
+export const COMMIT_TYPES = [
+  "feat",
+  "fix",
+  "perf",
+  "refactor",
+  "docs",
+  "test",
+  "build",
+  "ci",
+  "chore",
+  "style",
+  "revert",
+] as const;
+
+/**
+ * A commit message read the way the release reads it: its type, lower-cased, and whether it
+ * declares a breaking change (`!` or a `BREAKING CHANGE:` footer). Null when the subject is not a
+ * Conventional Commit at all. Exported so the hook that guards messages and the release that
+ * counts them cannot disagree about what a message says.
+ */
+export function parseSubject(message: string): { type: string; breaking: boolean } | null {
   const trimmed = message.trim();
   if (trimmed === "") return null;
   const groups = SUBJECT.exec(trimmed)?.groups;
   const type = groups?.["type"];
   if (type === undefined) return null;
-  // A breaking change outranks whatever type declared it: `fix!:` is a major, not a patch.
-  if (groups?.["breaking"] || BREAKING_FOOTER.test(trimmed)) return "major";
-  return TYPE_BUMP[type.toLowerCase()] ?? null;
+  return {
+    type: type.toLowerCase(),
+    breaking: Boolean(groups?.["breaking"]) || BREAKING_FOOTER.test(trimmed),
+  };
 }
 
 /** `x.y.z`, and nothing else. */

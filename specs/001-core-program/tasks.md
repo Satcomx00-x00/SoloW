@@ -572,7 +572,7 @@ mirror of the schema (Decision 0008 follow-up).
       over `FORBIDDEN` so existence is not revealed); cross-tenant `task.create` reference rejected.
 - [X] Flag OFF → procedures unavailable; invalid input → validation error.
 - [X] Rate-limit trips on `secret.set`. *Idempotent-create (2×→no duplicate) NOT implemented — the v1
-      contracts carry no idempotency key; deferred (would require a client key + dedup).* 
+      contracts carry no idempotency key; deferred (would require a client key + dedup).*
 **Directives**: V, VI.
 
 ### TASK-013 — [P] OpenAPI export artifact

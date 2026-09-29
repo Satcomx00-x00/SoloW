@@ -1,0 +1,89 @@
+# Git hooks, run by prek (https://prek.j178.dev) — `@j178/prek`, an exact devDependency, so a
+# checkout that ran `bun install` has it. Once per clone: `bun run hooks:install`.
+#
+# Everything here is fast and local. The slow gates — unit tests, e2e, the control check — stay
+# in CI and `make verify`; a hook that takes minutes gets skipped with --no-verify, and then it
+# guards nothing. Typecheck runs on push, not on every commit, for the same reason.
+#
+# The tools are the ones the editor and CI already use: biome from this repo's node_modules, and
+# gitleaks, shellcheck and shfmt from the machine (installed by mise). No hook pulls a second copy
+# of a linter from a hook repository — `language: system` on purpose.
+
+default_install_hook_types: [pre-commit, commit-msg, pre-push]
+default_stages: [pre-commit]
+
+# Vendored, generated, or someone else's code: not ours to reformat or lint. Migrations are
+# history — drizzle writes them and nothing may rewrite one after it has run anywhere.
+exclude: |
+  (?x)^(
+    \.specify/.*|
+    \.claude/skills/.*|
+    \.github/skills/.*|
+    apps/web/openapi\.json|
+    packages/db/migrations/.*|
+    packages/core/src/workflow-store/vendored\.generated\.json|
+    CHANGELOG\.md
+  )$
+
+repos:
+  # prek's native built-ins: no Python, no network.
+  - repo: builtin
+    hooks:
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+        # tsconfig and VS Code settings are JSONC (comments, trailing commas); biome reads those.
+        exclude: (^|/)(tsconfig[^/]*|\.vscode/[^/]*)\.json$
+      # A committed binary or dump is almost always a mistake, and history keeps it forever.
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+        # Two trailing spaces are a hard line break in Markdown.
+        args: [--markdown-linebreak-ext=md]
+
+  - repo: local
+    hooks:
+      # Staged content only, with the redaction CI uses — the global rule is that gitleaks guards
+      # every commit, and CI's history scan (verify.yml) is the last line, not the first.
+      - id: gitleaks
+        name: gitleaks (staged)
+        entry: gitleaks git --pre-commit --staged --redact --no-banner
+        language: system
+        pass_filenames: false
+
+      - id: biome
+        name: biome check --write
+        entry: bunx biome check --write --no-errors-on-unmatched --files-ignore-unknown=true
+        language: system
+        types_or: [javascript, jsx, ts, tsx, json, css]
+
+      - id: shellcheck
+        name: shellcheck
+        entry: shellcheck
+        language: system
+        types: [shell]
+
+      # The machine-wide shell style (`shfmt -i 4 -ci -sr`), the same flags the editor uses.
+      - id: shfmt
+        name: shfmt
+        entry: shfmt -i 4 -ci -sr -w
+        language: system
+        types: [shell]
+
+      # The subject is what next-version.ts decides the release from and what git-cliff writes
+      # CHANGELOG.md from; see scripts/check-commit-msg.ts.
+      - id: conventional-commit
+        name: conventional commit subject
+        entry: bun run scripts/check-commit-msg.ts
+        language: system
+        stages: [commit-msg]
+
+      - id: typecheck
+        name: typecheck (turbo, cached)
+        entry: bun run typecheck
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
