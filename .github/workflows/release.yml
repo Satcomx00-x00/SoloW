@@ -125,9 +125,15 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # The changelog is part of the release commit, written for the tag about to exist:
+          # `--tag` names the unreleased commits as this version before the tag is created, so the
+          # file on main and the tag always describe the same range. Rendering only — the number
+          # came from next-version.ts above (see cliff.toml).
+          bun install --frozen-lockfile
+          bun run changelog -- --tag "$TAG"
           # `chore(release)` on purpose: it is the type that asks for no release, so the Verify run
           # this commit triggers finds nothing to cut and the loop ends after one pass.
-          git commit --quiet -m "chore(release): ${TAG}" -- packages/cli/package.json
+          git commit --quiet -m "chore(release): ${TAG}" -- packages/cli/package.json CHANGELOG.md
           # Annotated, so the tag carries an author and a date of its own — `git describe` and the
           # releases list both read better for it.
           git tag -a "$TAG" -m "$TAG"

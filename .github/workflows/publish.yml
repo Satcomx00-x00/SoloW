@@ -48,7 +48,11 @@ jobs:
     # Room for the tarball smoke below: it installs a ~100MB vendored binary and boots the stack.
     timeout-minutes: 45
     steps:
+      # The whole history and its tags: the Release notes below are written from the commits
+      # since the previous tag, which a shallow clone does not have.
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       # Whether this run ships, decided once and read by every step that would.
       #
@@ -175,9 +179,9 @@ jobs:
 
       # The release the tag has been standing in for. Created last, and only once npm has the
       # version: a Release is an announcement, and one that outlives a failed publish tells every
-      # reader the opposite of what happened. `--generate-notes` writes them from the commits and
-      # pull requests since the previous tag, which is the same history the tag already implies —
-      # so nothing has to be maintained by hand for it to be right.
+      # reader the opposite of what happened. The notes are git-cliff's section for this tag — the
+      # same text the release commit wrote into CHANGELOG.md, grouped by what each commit is
+      # (cliff.toml) — so nothing has to be maintained by hand for them to be right.
       - name: Create the GitHub Release
         if: steps.mode.outputs.publish == 'true' && startsWith(github.ref, 'refs/tags/v')
         env:
@@ -190,7 +194,10 @@ jobs:
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             echo "::notice::Release $GITHUB_REF_NAME already exists — leaving it as it is."
           else
-            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes --verify-tag
+            # `--latest`: the range ending at the newest tag, which is the one this run is at.
+            bunx git-cliff --latest --strip all > "$RUNNER_TEMP/notes.md"
+            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" \
+              --notes-file "$RUNNER_TEMP/notes.md" --verify-tag
           fi
 
       - name: Dry run complete

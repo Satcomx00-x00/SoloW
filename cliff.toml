@@ -1,0 +1,90 @@
+# git-cliff — how CHANGELOG.md and each GitHub Release's notes are written from the commits.
+#
+# The commits already say what each change is: this repository writes Conventional Commits
+# throughout, and `packages/cli/scripts/next-version.ts` reads the same subjects to decide the
+# version. This file only *renders* them; it never decides a number. Run `bun run changelog` to
+# regenerate the whole file, `bun run changelog:unreleased` to preview what the next release says.
+#
+# Deliberately offline: issue and pull-request numbers are linked by rewriting the subject, not
+# through `[remote.github]`, which would call the GitHub API (and need a token) on every run.
+
+[changelog]
+header = """
+# Changelog
+
+Every release of SoloW, written from its commits by [git-cliff](https://git-cliff.org) — see
+`cliff.toml`. Versions follow [Semantic Versioning](https://semver.org); the number itself is
+decided by `packages/cli/scripts/next-version.ts` from the same commits.
+"""
+body = """
+{%- set repo = "https://github.com/Satcomx00-x00/SoloW" -%}
+{% if version %}
+## [{{ version | trim_start_matches(pat="v") }}]\
+{%- if previous and previous.version %}({{ repo }}/compare/{{ previous.version }}...{{ version }}){% else %}({{ repo }}/releases/tag/{{ version }}){% endif %} \
+— {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}
+## [Unreleased]
+{% endif %}
+{%- set breaking = commits | filter(attribute="breaking", value=true) %}
+{%- if breaking | length > 0 %}
+
+### ⚠ Breaking changes
+{% for commit in breaking %}
+- {% if commit.scope %}**{{ commit.scope }}:** {% endif %}{{ commit.message | split(pat="\n") | first | trim | upper_first }} \
+([`{{ commit.id | truncate(length=7, end="") }}`]({{ repo }}/commit/{{ commit.id }}))\
+{%- if commit.breaking_description and commit.breaking_description != commit.message %}
+  {{ commit.breaking_description }}{% endif %}
+{%- endfor %}
+{%- endif %}
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | striptags | trim }}
+{% for commit in commits %}
+- {% if commit.scope %}**{{ commit.scope }}:** {% endif %}{{ commit.message | split(pat="\n") | first | trim | upper_first }} \
+([`{{ commit.id | truncate(length=7, end="") }}`]({{ repo }}/commit/{{ commit.id }}))
+{%- endfor %}
+{% endfor %}
+"""
+footer = ""
+trim = true
+# Template whitespace around the optional sections leaves runs of blank lines; one is enough.
+postprocessors = [{ pattern = '\n{3,}', replace = "\n\n" }]
+
+[git]
+conventional_commits = true
+# Kept, not dropped: the few non-conventional commits on main that are not merges are real
+# changes (the Apache-2.0 relicence, #137), and a changelog that silently loses one is wrong.
+# Merges are skipped by name below; anything else unconventional lands under "Other".
+filter_unconventional = false
+split_commits = false
+protect_breaking_commits = true
+filter_commits = false
+tag_pattern = "^v[0-9]+\\.[0-9]+\\.[0-9]+$"
+topo_order = false
+sort_commits = "oldest"
+
+commit_preprocessors = [
+  # `(#56)` and `#56` become links. Issues and pull requests share one number space on GitHub and
+  # `/issues/N` redirects to a pull request when N is one, so a single form serves both.
+  { pattern = '\(#([0-9]+)\)', replace = "([#${1}](https://github.com/Satcomx00-x00/SoloW/issues/${1}))" },
+  { pattern = '(^|[^\[\w/])#([0-9]+)\b', replace = "${1}[#${2}](https://github.com/Satcomx00-x00/SoloW/issues/${2})" },
+]
+
+# Order is the order a reader wants: what they can use, what was broken, then how it was built.
+# The HTML comments only sort the groups; `striptags` removes them from the headings.
+commit_parsers = [
+  # Housekeeping that describes no change to SoloW: the release commit itself, and the scheduled
+  # refresh of vendored Workflow-store Skills (a bot commit, several a day).
+  { message = '^Merge (remote-tracking branch|branch|pull request) ', skip = true },
+  { message = '^chore\(release\)', skip = true },
+  { message = '^chore\(store\): refresh vendored Skills', skip = true },
+  { message = '^feat', group = "<!-- 0 -->Features" },
+  { message = '^fix', group = "<!-- 1 -->Fixes" },
+  { message = '^perf', group = "<!-- 2 -->Performance" },
+  { message = '^refactor', group = "<!-- 3 -->Refactoring" },
+  { message = '^docs', group = "<!-- 4 -->Documentation" },
+  { message = '^test', group = "<!-- 5 -->Tests" },
+  { message = '^(build|ci)', group = "<!-- 6 -->Build and CI" },
+  { message = '^revert', group = "<!-- 7 -->Reverts" },
+  { message = '^(chore|style)', group = "<!-- 8 -->Maintenance" },
+  { message = '.*', group = "<!-- 9 -->Other" },
+]
