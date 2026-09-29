@@ -324,10 +324,15 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   const task = trpc.task.get.useQuery({ id: taskId, includeDeleted: true });
   const deleted = task.data?.deletedAt ?? null;
   const restore = trpc.task.restore.useMutation({
-    onSuccess: () => {
-      utils.task.get.invalidate({ id: taskId });
-      utils.task.list.invalidate();
-      utils.history.list.invalidate();
+    onSuccess: async () => {
+      // Cancelled before invalidating: a list still on its first read (this page opened a moment
+      // ago — the rail's Sub-tasks) would otherwise have the invalidation join that read, which
+      // began while the Task was in History, and settle on its answer (see `SplitTaskButton`).
+      // A cancelled read with no data yet goes back to unloaded, and the invalidation reads anew.
+      await utils.task.list.cancel();
+      void utils.task.get.invalidate({ id: taskId });
+      void utils.task.list.invalidate();
+      void utils.history.list.invalidate();
     },
   });
   // Back goes to the board of the Project holding this Task's Issue (see `useBackToProject`).

@@ -772,6 +772,37 @@ describe("TaskWorkspace in History (Decision 0025)", () => {
     fireEvent.click(within(banner).getByRole("button", { name: "Restore" }));
     await waitFor(() => expect(log.calls.filter((c) => c.path === "task.restore")).toHaveLength(1));
   });
+
+  it("lists the sub-tasks a Restore brought back, even if the list's first read was in flight", async () => {
+    // Restored moments after the page opened: the rail's first read of its sub-tasks began while
+    // the Task — and so its children — were in History, and answers late with nothing.
+    const deletedAt = new Date(Date.now() - 3600 * 1000).toISOString();
+    let restored = false;
+    let childReads = 0;
+    const child = task({ id: "child-1", parentTaskId: TASK_ID, title: "Order the servo" });
+    renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
+      "task.get": () => task({ state: "failed", deletedAt: restored ? null : deletedAt }),
+      "task.list": (input: unknown) =>
+        (input as { parentTaskId?: string }).parentTaskId === TASK_ID
+          ? childReads++ === 0
+            ? new Promise((resolve) =>
+                setTimeout(() => resolve({ items: [], nextCursor: null }), 300),
+              )
+            : { items: [child], nextCursor: null }
+          : { items: [], nextCursor: null },
+      "task.restore": () => {
+        restored = true;
+        return task({ state: "failed" });
+      },
+    });
+
+    const banner = await screen.findByRole("status");
+    fireEvent.click(within(banner).getByRole("button", { name: "Restore" }));
+
+    const rail = await screen.findByRole("complementary", { name: "About this task" });
+    const link = await within(rail).findByRole("link", { name: /Order the servo/ });
+    expect(link.getAttribute("href")).toBe("/task/child-1");
+  });
 });
 
 describe("TaskWorkspace destructive actions", () => {
