@@ -162,10 +162,23 @@ jobs:
       - name: Scan repository and history
         run: gitleaks detect --source . --no-banner --redact
 
+  # Three shards, each on its own runner with its own servers and database. The suite outgrew one
+  # job: 27 walks through a real stack, several of them minutes long, ran past the 30-minute limit
+  # and GitHub cancelled the job (2026-09-29) — which reads as "no verdict", so Release never ran.
+  # Raising the limit would only hide the next increase; sharding keeps each job well inside it.
+  #
+  # `--shard` splits by whole spec file here (`fullyParallel: false`), so a file's walks still run
+  # in order against one database, as they are written to. The @critical isolation spec is whole
+  # in shard 1; `make e2e-critical` still runs it alone.
   e2e:
-    name: E2E (includes the @critical isolation gate)
+    name: E2E ${{ matrix.shard }}/3 (includes the @critical isolation gate)
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      # Every shard reports: a failure in one must not hide the verdict of the others.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v5
 
@@ -191,17 +204,17 @@ jobs:
       - name: Install Chromium for Playwright
         run: bunx playwright install chromium
 
-      # The suite boots its own orchestrator and Next dev server (see
+      # Each shard boots its own orchestrator and Next dev server (see
       # playwright.config.ts webServer) and runs serially on one database —
       # the isolation spec launches concurrent Tasks on purpose.
-      - name: Full E2E suite
-        run: make e2e
+      - name: E2E suite, shard ${{ matrix.shard }}/3
+        run: bunx playwright test --shard=${{ matrix.shard }}/3
 
       - name: Upload Playwright artefacts
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report
+          name: playwright-report-shard-${{ matrix.shard }}
           path: |
             playwright-report/
             test-results/
