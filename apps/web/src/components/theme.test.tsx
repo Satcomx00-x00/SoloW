@@ -97,6 +97,39 @@ describe("resolveTheme", () => {
 });
 
 describe("useTheme", () => {
+  it("never paints or caches its placeholder before reading the cache — no dark flash on a light install", async () => {
+    // What the boot script left: a light install, painted light before any of this ran.
+    localStorage.setItem(THEME_STORAGE_KEY, "light");
+    document.documentElement.classList.remove("dark");
+    const paintedDark: boolean[] = [];
+    const observer = new MutationObserver(() => paintedDark.push(isDark()));
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    const writes = spyOn(localStorage, "setItem");
+    try {
+      // Two hooks on one page, as in Settings: Appearance beside the shell's ThemeSync.
+      renderWithTrpc(
+        <>
+          <Probe />
+          <Probe />
+        </>,
+        { "preference.getAppearance": () => new Promise(() => {}) },
+      );
+      await waitFor(() =>
+        expect(screen.getAllByLabelText("theme").map((el) => el.textContent)).toEqual([
+          "light",
+          "light",
+        ]),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(paintedDark).not.toContain(true);
+      expect(writes.mock.calls.filter(([, value]) => value === "dark")).toEqual([]);
+      expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe("light");
+    } finally {
+      observer.disconnect();
+      writes.mockRestore();
+    }
+  });
+
   it("lets the stored row win over the cache on load, and re-caches what it said", async () => {
     // Another browser chose dark since this one last cached light.
     localStorage.setItem(THEME_STORAGE_KEY, "light");

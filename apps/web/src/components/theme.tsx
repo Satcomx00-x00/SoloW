@@ -75,7 +75,16 @@ export function useTheme(): {
   error: string | null;
 } {
   const utils = trpc.useUtils();
-  const [theme, setLocal] = useState<Theme>("dark");
+  /*
+   * Null until the cache has been read. Rendering still shows `dark` meanwhile (the server's
+   * answer, so the markup agrees with itself), but nothing is *applied or cached* from that
+   * placeholder: an effect that painted it would undo the boot script — a dark flash on every
+   * load of a light install — and would overwrite the cache before a second `useTheme` on the
+   * page (Settings' Appearance beside `ThemeSync`) had read it. Found by the e2e check that the
+   * theme is on `<html>` at DOMContentLoaded, which CI's faster hydration made fail.
+   */
+  const [chosen, setLocal] = useState<Theme | null>(null);
+  const theme: Theme = chosen ?? "dark";
 
   // After mount, never during render: the value comes from `localStorage`, which the server does
   // not have, so reading it while rendering would make the markup disagree with itself.
@@ -113,23 +122,24 @@ export function useTheme(): {
   }, [fromServer]);
 
   useEffect(() => {
-    applyTheme(theme);
+    if (chosen === null) return;
+    applyTheme(chosen);
     try {
-      localStorage.setItem(THEME_STORAGE_KEY, theme);
+      localStorage.setItem(THEME_STORAGE_KEY, chosen);
     } catch {
       // See the note on `cachedTheme` — an uncacheable theme still applies, it just flashes.
     }
-  }, [theme]);
+  }, [chosen]);
 
   // `system` is not a fixed answer: the OS can change it while the page is open, and a console
   // left open overnight is exactly where that happens.
   useEffect(() => {
-    if (theme !== "system" || !window.matchMedia) return;
+    if (chosen !== "system" || !window.matchMedia) return;
     const query = window.matchMedia("(prefers-color-scheme: dark)");
     const onChange = () => applyTheme("system");
     query.addEventListener("change", onChange);
     return () => query.removeEventListener("change", onChange);
-  }, [theme]);
+  }, [chosen]);
 
   const setTheme = useCallback(
     (next: Theme) => {
