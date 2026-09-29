@@ -75,9 +75,6 @@ describe("secret.set — resuming Tasks after a credential is replaced", () => {
   let db: TestDb;
 
   beforeAll(() => {
-    process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 6).toString("base64");
-    process.env.SOLOW_STREAM_SECRET ??= "test-stream-secret";
-    process.env.SOLOW_AUTH_SECRET ??= "test-auth-secret";
     // Without an orchestrator wired, `enqueueTaskRun` throws unless dev-owner mode is on — and a
     // resume that throws is exactly what the router's per-Task try/catch swallows, so the count
     // this whole file asserts on would silently read 0 without this (task.dependency.test.ts /

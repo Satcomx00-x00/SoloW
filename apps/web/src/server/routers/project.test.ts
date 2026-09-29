@@ -7,10 +7,6 @@ import { seedWorkspaceGraph } from "../dal/test-fixtures.js";
 import type { BaseContext } from "../trpc.js";
 import { appRouter } from "./index.js";
 
-// The secret store reads SOLOW_SECRET_KEY lazily (via the validated env module), so the
-// mirrored-Project fixture that encrypts a PAT needs it set before that runs.
-process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 13).toString("base64");
-
 /**
  * Local Projects, end to end through the router (spec F23, Decision 0018's reversal, user
  * request 2026-08-27).

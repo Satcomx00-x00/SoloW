@@ -1,9 +1,5 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 
-// The secret store reads SOLOW_SECRET_KEY lazily (via the validated env module),
-// so setting it before the first encryptSecret call is sufficient. 32 bytes, base64.
-process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 7).toString("base64");
-
 import { harnessProfile, integration, secret } from "@solow/db";
 import { createTestDb, type TestDb } from "@solow/db/testing";
 import { eq } from "drizzle-orm";

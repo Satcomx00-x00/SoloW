@@ -93,9 +93,6 @@ describe("tRPC router integration", () => {
   let db: TestDb;
 
   beforeAll(() => {
-    process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 5).toString("base64");
-    process.env.SOLOW_STREAM_SECRET ??= "test-stream-secret";
-    process.env.SOLOW_AUTH_SECRET ??= "test-auth-secret";
     // Without an orchestrator wired, `enqueueTaskRun` throws unless dev-owner mode is on — and
     // moving a Task to "running" is exactly the transition that calls it. Passed locally only
     // because a dev shell already has SOLOW_DEV_OWNER=on; a clean environment (CI) does not

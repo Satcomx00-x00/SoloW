@@ -1,5 +1,5 @@
 /// <reference types="bun-types" />
-import { beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
 import { encryptSecret, integration, repository, secret, workspace } from "@solow/db";
 import { createTestDb, type TestDb } from "@solow/db/testing";
 import { ctxFor } from "./test-fixtures.js";
@@ -30,10 +30,6 @@ const client: MirrorSyncRequester = {
 };
 
 let db: TestDb;
-
-beforeAll(() => {
-  process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 9).toString("base64");
-});
 
 beforeEach(() => {
   db = createTestDb();

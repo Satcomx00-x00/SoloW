@@ -65,7 +65,6 @@ const github = (secretId: string) => ({
 describe("harness libraries", () => {
   let db: TestDb;
   beforeAll(async () => {
-    process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 7).toString("base64");
     // Where an unpacked archive lands: a temp directory, never the default `.solow/skills`
     // under whatever directory the test runner started in.
     process.env.SOLOW_SKILLS_ROOT = await mkdtemp(join(tmpdir(), "solow-skills-root-"));

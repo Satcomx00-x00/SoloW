@@ -1,6 +1,6 @@
 /// <reference types="bun-types" />
 
-import { beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
 import { issue as issueTable, workspace } from "@solow/db";
 import { createTestDb, type TestDb } from "@solow/db/testing";
 import { eq } from "drizzle-orm";
@@ -18,13 +18,6 @@ import { resolveSession } from "./session.js";
  */
 
 const OWNER = { email: "owner@solow.test", password: "correct-horse-battery", name: "Owner" };
-
-beforeAll(() => {
-  process.env["SOLOW_AUTH_SECRET"] ??= "test-auth-secret-at-least-32-characters";
-  process.env["SOLOW_STREAM_SECRET"] ??= "test-stream-secret";
-  process.env["SOLOW_WEB_URL"] ??= "http://localhost:5000";
-  process.env["SOLOW_SECRET_KEY"] ??= Buffer.alloc(32, 7).toString("base64");
-});
 
 let db: TestDb;
 let auth: ReturnType<typeof createAuth>;

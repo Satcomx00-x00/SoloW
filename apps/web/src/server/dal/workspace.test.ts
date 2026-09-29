@@ -1,5 +1,5 @@
 /// <reference types="bun-types" />
-import { beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
 import {
   encryptSecret,
   executorProfile,
@@ -31,10 +31,6 @@ import {
  */
 
 let db: TestDb;
-
-beforeAll(() => {
-  process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 7).toString("base64");
-});
 
 beforeEach(() => {
   db = createTestDb();

@@ -1,6 +1,6 @@
 /// <reference types="bun-types" />
 
-import { beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
 import { generateMcpToken, issue as issueTable, mcpToken, workspace } from "@solow/db";
 import { createTestDb, type TestDb } from "@solow/db/testing";
 import { resetRateLimits } from "../rate-limit.js";
@@ -18,10 +18,6 @@ import { listMcpTools } from "./tools.js";
  */
 
 let db: TestDb;
-
-beforeAll(() => {
-  process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 7).toString("base64");
-});
 
 beforeEach(() => {
   db = createTestDb();

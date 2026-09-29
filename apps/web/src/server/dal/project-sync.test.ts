@@ -44,7 +44,6 @@ let carriedItems: ExternalProjectItem[] = [];
 let knownRepositories: Record<string, { name: string; cloneUrl: string }> = {};
 
 beforeAll(() => {
-  process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 3).toString("base64");
   testing.register({
     id: FIXTURE,
     name: "Fixture Planner",

@@ -130,9 +130,6 @@ describe("task dependencies", () => {
   let db: TestDb;
 
   beforeAll(() => {
-    process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 5).toString("base64");
-    process.env.SOLOW_STREAM_SECRET ??= "test-stream-secret";
-    process.env.SOLOW_AUTH_SECRET ??= "test-auth-secret";
     // Launch hands the run to the orchestrator; dev mode logs-and-returns so these tests can
     // exercise the start paths without a workflow engine running.
     process.env.SOLOW_DEV_OWNER ??= "on";

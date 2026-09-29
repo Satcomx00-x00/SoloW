@@ -14,10 +14,6 @@ import {
 import { createTestDb, type TestDb } from "@solow/db/testing";
 import { eq } from "drizzle-orm";
 
-// The secret store reads SOLOW_SECRET_KEY lazily (via the validated env module), so a
-// mirrored-Project fixture that encrypts a PAT needs it set before that runs.
-process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 11).toString("base64");
-
 import {
   attachProjectRepository,
   createLocalProject,

@@ -26,7 +26,6 @@ let acme: string;
 let _profiles: { agentProfileId: string; executorProfileId: string };
 
 beforeEach(async () => {
-  process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 9).toString("base64");
   db = createTestDb();
   const graph = await seedWorkspaceGraph(db, "acme");
   acme = graph.workspaceId;

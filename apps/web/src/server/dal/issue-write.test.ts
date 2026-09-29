@@ -40,7 +40,6 @@ let thread: Array<{
 }> = [];
 
 beforeAll(() => {
-  process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 5).toString("base64");
   const readIssue = {
     externalId: "9001",
     number: 42,

@@ -2,13 +2,6 @@
 
 import { beforeEach, describe, expect, it } from "bun:test";
 
-// `seedProject` encrypts a PAT, and the secret store reads SOLOW_SECRET_KEY lazily through the
-// validated env module — so it has to be set before the first `encryptSecret` call. Set here
-// rather than relied on from another test file's own setup: bun runs one process for the whole
-// suite, file order is not guaranteed, and this file passing only when some other file happened
-// to run first is precisely the bug that broke a release's CI run (see index.test.ts).
-process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 12).toString("base64");
-
 import {
   encryptSecret,
   integration,

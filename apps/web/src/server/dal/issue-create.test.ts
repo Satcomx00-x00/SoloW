@@ -121,7 +121,6 @@ function throwing(reason: string) {
 }
 
 beforeAll(() => {
-  process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 7).toString("base64");
   testing.register({
     id: EPICS,
     name: "Fixture Creator",

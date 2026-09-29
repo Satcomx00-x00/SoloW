@@ -57,7 +57,6 @@ const PROJECTS: Record<string, { issues: unknown[]; mrs: unknown[]; branches: un
 };
 
 beforeAll(() => {
-  process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 4).toString("base64");
   server = Bun.serve({
     port: 0,
     fetch(req) {

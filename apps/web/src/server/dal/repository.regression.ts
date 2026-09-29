@@ -22,7 +22,6 @@ let receivedMethods: string[] = [];
 let existingLabels: Array<{ name: string; color: string; description: string | null }> = [];
 
 beforeAll(() => {
-  process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 4).toString("base64");
   server = Bun.serve({
     port: 0,
     async fetch(req) {

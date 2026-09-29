@@ -1,6 +1,6 @@
 /// <reference types="bun-types" />
 
-import { beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
 import { authSchema, harnessCatalog, workspace } from "@solow/db";
 import { createTestDb, type TestDb } from "@solow/db/testing";
 import { eq } from "drizzle-orm";
@@ -15,12 +15,6 @@ import { resolveSession } from "./session.js";
  */
 
 const OWNER = { email: "owner@solow.test", password: "correct-horse-battery", name: "Owner" };
-
-beforeAll(() => {
-  process.env["SOLOW_AUTH_SECRET"] ??= "test-auth-secret-at-least-32-characters";
-  process.env["SOLOW_STREAM_SECRET"] ??= "test-stream-secret";
-  process.env["SOLOW_WEB_URL"] ??= "http://localhost:5000";
-});
 
 let db: TestDb;
 let auth: ReturnType<typeof createAuth>;
@@ -68,14 +62,15 @@ describe("owner account creation", () => {
     expect(users).toHaveLength(1);
   });
 
-  it("starts a new Workspace with every flag off", async () => {
+  it("starts a new Workspace with no flag overrides — every flag at its registry default", async () => {
     const { userId } = await signUpOwner();
     const [row] = await db
       .select()
       .from(workspace)
       .where(eq(workspace.ownerUserId, userId))
       .limit(1);
-    // Signing up must not switch the core loop on — flags are an operator decision.
+    // Sign-up writes no overrides: every flag reads its registry default, which is ON since
+    // constitution v1.5.0. Turning one off is an operator's kill switch, never sign-up's.
     expect(row?.enabledFlags ?? null).toBeNull();
   });
 

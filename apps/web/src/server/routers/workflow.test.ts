@@ -200,9 +200,6 @@ describe("workflows", () => {
   let db: TestDb;
 
   beforeAll(() => {
-    process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 7).toString("base64");
-    process.env.SOLOW_STREAM_SECRET ??= "test-stream-secret";
-    process.env.SOLOW_AUTH_SECRET ??= "test-auth-secret";
     process.env.SOLOW_DEV_OWNER ??= "on";
   });
 
