@@ -60,8 +60,10 @@ test.describe("workspace controls", () => {
   }) => {
     // What the class was when the document finished parsing — before React, before any
     // request. A theme applied later than this is a flash, whatever the page looks like after.
+    // The cache the boot script read is recorded beside the class, so a failure says which half
+    // went wrong: a cache that was not "light" by the reload, or a later script that painted dark.
     await page.addInitScript(
-      "document.addEventListener('DOMContentLoaded', () => { window.__darkAtParse = document.documentElement.classList.contains('dark'); });",
+      "window.__cacheAtBoot = (() => { try { return localStorage.getItem('solow.theme'); } catch (e) { return 'unreadable'; } })(); document.addEventListener('DOMContentLoaded', () => { window.__darkAtParse = document.documentElement.classList.contains('dark'); });",
     );
     await page.goto("/settings?section=appearance");
     // A fresh install looks the way it always did.
@@ -84,8 +86,12 @@ test.describe("workspace controls", () => {
       )
       .toBe("light");
 
+    // What the page will read from the cache on reload must already be the choice.
+    await expect.poll(() => page.evaluate("localStorage.getItem('solow.theme')")).toBe("light");
     await page.reload();
-    expect(await page.evaluate("window.__darkAtParse")).toBe(false);
+    expect(
+      await page.evaluate("({ dark: window.__darkAtParse, cache: window.__cacheAtBoot })"),
+    ).toEqual({ dark: false, cache: "light" });
     await expect(page.getByRole("radio", { name: /Light/ })).toBeChecked();
 
     // Another browser has none of this one's cache: the stored preference is what reaches it.
