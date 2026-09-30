@@ -1,6 +1,7 @@
 /// <reference types="bun-types" />
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { resetThemeStore } from "@/components/theme";
 import { THEME_STORAGE_KEY } from "@/lib/theme-boot";
 import { renderWithTrpc } from "@/test/trpc-harness";
 import { AppearanceSection } from "./appearance-section";
@@ -18,6 +19,7 @@ import { AppearanceSection } from "./appearance-section";
 afterEach(cleanup);
 
 beforeEach(() => {
+  resetThemeStore();
   document.documentElement.className = "";
   try {
     localStorage.removeItem(THEME_STORAGE_KEY);

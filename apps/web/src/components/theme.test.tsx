@@ -5,7 +5,7 @@ import type { Theme } from "@solow/contracts";
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { THEME_STORAGE_KEY } from "@/lib/theme-boot";
 import { renderWithTrpc } from "@/test/trpc-harness";
-import { resolveTheme, useTheme } from "./theme";
+import { resetThemeStore, resolveTheme, useTheme } from "./theme";
 
 /**
  * The theme's two sources, and what happens when they disagree (spec F16).
@@ -60,6 +60,7 @@ const isDark = () => document.documentElement.classList.contains("dark");
 let media: ReturnType<typeof fakeMatchMedia> | null = null;
 
 beforeEach(() => {
+  resetThemeStore();
   document.documentElement.className = "";
   document.documentElement.style.colorScheme = "";
   localStorage.removeItem(THEME_STORAGE_KEY);
@@ -97,6 +98,37 @@ describe("resolveTheme", () => {
 });
 
 describe("useTheme", () => {
+  it("keeps a press made before the page's first read of the row answered — on every hook", async () => {
+    // Settings a moment after opening it: the row's first read is still out when Light is
+    // pressed, and it answers afterwards with the value from before the press.
+    let reads = 0;
+    renderWithTrpc(
+      <>
+        <Probe />
+        <Probe />
+      </>,
+      {
+        "preference.getAppearance": () =>
+          reads++ === 0
+            ? new Promise((resolve) => setTimeout(() => resolve(appearance("dark")), 300))
+            : appearance("light"),
+        "preference.setAppearance": () => appearance("light"),
+      },
+    );
+    fireEvent.click(screen.getAllByRole("button", { name: "Light" })[0] as HTMLElement);
+
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    await waitFor(() => {
+      // Both hooks — the one pressed and the shell's — agree, and so do the page and its cache.
+      expect(screen.getAllByLabelText("theme").map((el) => el.textContent)).toEqual([
+        "light",
+        "light",
+      ]);
+      expect(isDark()).toBe(false);
+      expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe("light");
+    });
+  });
+
   it("never paints or caches its placeholder before reading the cache — no dark flash on a light install", async () => {
     // What the boot script left: a light install, painted light before any of this ran.
     localStorage.setItem(THEME_STORAGE_KEY, "light");

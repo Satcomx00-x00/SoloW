@@ -2,6 +2,7 @@
 
 import { afterEach, describe, expect, it, mock } from "bun:test";
 import { cleanup, screen } from "@testing-library/react";
+import { resetThemeStore } from "@/components/theme";
 import {
   SETTINGS_GROUPS,
   SETTINGS_SECTIONS,
@@ -41,6 +42,7 @@ mock.module("next/navigation", () => ({
 const { Settings } = await import("./settings");
 
 afterEach(() => {
+  resetThemeStore();
   cleanup();
   params = new URLSearchParams();
   replaced.length = 0;

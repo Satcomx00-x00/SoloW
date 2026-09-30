@@ -1,7 +1,7 @@
 "use client";
 
 import { type Theme, themeSchema } from "@solow/contracts";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { THEME_STORAGE_KEY } from "@/lib/theme-boot";
 import { trpc } from "@/trpc/react";
 
@@ -60,6 +60,46 @@ function cachedTheme(): Theme {
   return "dark";
 }
 
+/*
+ * One theme per page, shared by every `useTheme` — the shell's `ThemeSync` and Settings'
+ * Appearance are both mounted at once, and while each kept its own state they could disagree:
+ * the section repainted light on a press while the shell, which never saw the press, adopted a
+ * stale "dark" from the server and painted and cached it right back. Module state behind
+ * `useSyncExternalStore` rather than a context, for the reason `ThemeSync` gives: nothing reads a
+ * theme through the tree — the document's class is the state.
+ *
+ * `chosen` is null until the cache has been read. Rendering shows `dark` meanwhile (the server's
+ * answer, so the markup agrees with itself), but nothing is *applied or cached* from that
+ * placeholder: painting it would undo the boot script — a dark flash on every load of a light
+ * install — and overwrite the cache before it was read.
+ */
+const store = {
+  chosen: null as Theme | null,
+  /** The last answer the server gave, so only a genuinely new one is adopted. */
+  lastFromServer: null as Theme | null,
+  /** A press not yet confirmed by the server; answers that disagree predate it. */
+  pending: null as Theme | null,
+  listeners: new Set<() => void>(),
+};
+
+function choose(next: Theme): void {
+  if (store.chosen === next) return;
+  store.chosen = next;
+  for (const listener of store.listeners) listener();
+}
+
+function subscribe(listener: () => void): () => void {
+  store.listeners.add(listener);
+  return () => store.listeners.delete(listener);
+}
+
+/** For tests: every render in a test file shares this module, and a test must start clean. */
+export function resetThemeStore(): void {
+  store.chosen = null;
+  store.lastFromServer = null;
+  store.pending = null;
+}
+
 /**
  * Read and change the theme.
  *
@@ -75,20 +115,19 @@ export function useTheme(): {
   error: string | null;
 } {
   const utils = trpc.useUtils();
-  /*
-   * Null until the cache has been read. Rendering still shows `dark` meanwhile (the server's
-   * answer, so the markup agrees with itself), but nothing is *applied or cached* from that
-   * placeholder: an effect that painted it would undo the boot script — a dark flash on every
-   * load of a light install — and would overwrite the cache before a second `useTheme` on the
-   * page (Settings' Appearance beside `ThemeSync`) had read it. Found by the e2e check that the
-   * theme is on `<html>` at DOMContentLoaded, which CI's faster hydration made fail.
-   */
-  const [chosen, setLocal] = useState<Theme | null>(null);
+  const chosen = useSyncExternalStore(
+    subscribe,
+    () => store.chosen,
+    () => null,
+  );
   const theme: Theme = chosen ?? "dark";
 
   // After mount, never during render: the value comes from `localStorage`, which the server does
-  // not have, so reading it while rendering would make the markup disagree with itself.
-  useEffect(() => setLocal(cachedTheme()), []);
+  // not have, so reading it while rendering would make the markup disagree with itself. Only the
+  // first hook to mount reads it; the rest share what it read.
+  useEffect(() => {
+    if (store.chosen === null) choose(cachedTheme());
+  }, []);
 
   const stored = trpc.preference.getAppearance.useQuery(
     {},
@@ -99,26 +138,41 @@ export function useTheme(): {
     },
   );
   const save = trpc.preference.setAppearance.useMutation({
-    onSettled: () => utils.preference.getAppearance.invalidate(),
+    onSettled: async () => {
+      // Cancelled first: a press made before the page's first read of the row answered would
+      // otherwise have this invalidation join that read — which began before the write — and the
+      // row would never be read again (the same React Query behaviour `SplitTaskButton` notes).
+      await utils.preference.getAppearance.cancel();
+      void utils.preference.getAppearance.invalidate();
+    },
+    onError: () => {
+      // The row keeps its old value, and the page keeps the press — nothing to wait for.
+      store.pending = null;
+    },
   });
 
   /*
    * The row is the record, so a change made in another browser has to arrive here — but only
-   * when it is genuinely *new*.
+   * when it is genuinely *new*, and never one that predates a press still being saved.
    *
-   * Comparing the server's answer against the local value instead would fight every change the
-   * user makes: `setTheme` repaints immediately and the refetch behind it takes a moment, so for
-   * that moment the cached row still says the old theme and a naive "the row wins" rule drags
-   * the page back to it before letting it go again. Comparing against the last value the server
-   * gave narrows the rule to what it was for — an external change — and leaves a local one
-   * alone. The first answer after mount is always adopted, which is the record winning on load.
+   * Comparing the server's answer against the local value would fight every change the user
+   * makes: `setTheme` repaints immediately and the refetch behind it takes a moment, so for that
+   * moment the row still says the old theme. Comparing against the last value the server gave
+   * narrows the rule to an external change; and while a press is pending, an answer that
+   * disagrees with it came from a read begun before it — the first read of a page opened a moment
+   * ago is the common case — so it is not adopted. The first answer after mount wins otherwise,
+   * which is the record winning on load.
    */
   const fromServer = stored.data?.appearance.theme;
-  const lastFromServer = useRef<Theme | null>(null);
   useEffect(() => {
-    if (!fromServer || lastFromServer.current === fromServer) return;
-    lastFromServer.current = fromServer;
-    setLocal(fromServer);
+    if (!fromServer) return;
+    if (store.pending !== null) {
+      if (fromServer !== store.pending) return;
+      store.pending = null;
+    }
+    if (store.lastFromServer === fromServer) return;
+    store.lastFromServer = fromServer;
+    choose(fromServer);
   }, [fromServer]);
 
   useEffect(() => {
@@ -143,7 +197,8 @@ export function useTheme(): {
 
   const setTheme = useCallback(
     (next: Theme) => {
-      setLocal(next);
+      store.pending = next;
+      choose(next);
       save.mutate({ theme: next });
     },
     [save.mutate],
