@@ -4,7 +4,7 @@ Every release of SoloW, written from its commits by [git-cliff](https://git-clif
 `cliff.toml`. Versions follow [Semantic Versioning](https://semver.org); the number itself is
 decided by `packages/cli/scripts/next-version.ts` from the same commits.
 
-## [Unreleased]
+## [0.18.0](https://github.com/Satcomx00-x00/SoloW/compare/v0.17.3...v0.18.0) — 2026-09-30
 
 ### Features
 
@@ -63,6 +63,11 @@ decided by `packages/cli/scripts/next-version.ts` from the same commits.
 - **tasks:** A sub-task's digest caps the work it shows, not the machinery around it ([`3c880d9`](https://github.com/Satcomx00-x00/SoloW/commit/3c880d93465638c35aafe861ff9918ac4509ab44))
 - **settings:** "Try again" on Task defaults retries the choice that failed ([`8ca8dfc`](https://github.com/Satcomx00-x00/SoloW/commit/8ca8dfc5a0431f8ac88b3f2eb0d4a222f59e1533))
 - **settings:** Two quick picks in Task defaults no longer lose the first ([`ec62491`](https://github.com/Satcomx00-x00/SoloW/commit/ec62491ef4fa68d1fd3d6cefe6166199ccbbf531))
+- **web:** One test env for every server test, so the suite no longer depends on file order ([`d372b55`](https://github.com/Satcomx00-x00/SoloW/commit/d372b558fbd766539e5185bb48571ae97e6377a7))
+- **tasks:** A sub-task split right after opening its parent appears in the list ([`04d3034`](https://github.com/Satcomx00-x00/SoloW/commit/04d3034bbcbef068f33dd9ad1a2c3a088a661c86))
+- **web:** The theme hook no longer paints dark before reading the cache ([`71c1054`](https://github.com/Satcomx00-x00/SoloW/commit/71c1054fdf1cf14aa34e4a7c72385ee34010569f))
+- **tasks:** Restore right after opening a Task shows the sub-tasks it brought back ([`72d3487`](https://github.com/Satcomx00-x00/SoloW/commit/72d34873a8063950867c6ffd29f2a5070e3629a5))
+- **web:** A theme chosen right after opening Settings is no longer reverted ([`035ab51`](https://github.com/Satcomx00-x00/SoloW/commit/035ab51703c33f6995c0b18a63aae866644041b7))
 
 ### Documentation
 
@@ -80,6 +85,13 @@ decided by `packages/cli/scripts/next-version.ts` from the same commits.
 - **web:** The project picker, the theme hook and the pre-paint script ([`99f5761`](https://github.com/Satcomx00-x00/SoloW/commit/99f5761d28ef9d54b96c0b2d05c362339e529714))
 - **e2e:** Sub-tasks, workspace controls and the harness home, end to end ([`004bbc5`](https://github.com/Satcomx00-x00/SoloW/commit/004bbc5396d903b6201179262af7ec26365dc7f2))
 - **e2e:** The isolation suite gets the six-minute budget the others have ([`888d6ea`](https://github.com/Satcomx00-x00/SoloW/commit/888d6ea2d4f6f8a917928320dbe7aa85ea48198e))
+- **e2e:** The theme-at-parse check says which half failed, and waits for the cache ([`21217f0`](https://github.com/Satcomx00-x00/SoloW/commit/21217f05ccdb3d006c74aab9bc439c20fb0f343e))
+
+### Build and CI
+
+- **release:** Git-cliff writes CHANGELOG.md and each GitHub Release's notes ([`9b62f0a`](https://github.com/Satcomx00-x00/SoloW/commit/9b62f0acc986a2647568445ee20ec3e5d6793cc9))
+- **hooks:** Prek runs the git hooks — gitleaks, biome, shell, and a commit-msg check ([`1da278b`](https://github.com/Satcomx00-x00/SoloW/commit/1da278bf11760e307e23eddc33192629ed7d817c))
+- **verify:** Shard the E2E suite across three runners ([`c51d237`](https://github.com/Satcomx00-x00/SoloW/commit/c51d237811d96da41ec3a68ad527054ae65aba3d))
 
 ## [0.17.3](https://github.com/Satcomx00-x00/SoloW/compare/v0.17.2...v0.17.3) — 2026-09-10
 
