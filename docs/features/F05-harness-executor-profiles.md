@@ -66,25 +66,38 @@ by a real run and by Settings' "Test" probe — which also shows the build that 
 below the pin, or one that does not report a version while a pin is set, fails the Task with the
 refusal itself as its `failureReason` (e.g. `opencode 1.17.2 is older than 1.18.33, the oldest
 version this build supports — upgrade it (…)`), quoting the row's `installHint`. Only ACP can be pinned: stream-json and plain CLIs have no handshake that names a
-build, so the field is ignored for them. The seeded `opencode` row is pinned to **1.18.33**, the
-build verified end to end; to raise it, change `minVersion` in
+build, so the field is ignored for them. The seeded `opencode` row is pinned to **2.0.22**
+(OpenCode 2, migration `0044`; it was 1.18.33 from `0042`), the build verified end to end; to raise it, change `minVersion` in
 `packages/db/src/harness-catalog-defaults.ts` and add a migration that updates existing rows the
 way `0042` does (guarded on the old value, so a Workspace's own pin is kept). The pin is checked
 against the real bundled binary by `apps/orchestrator/src/harness/version-pin.test.ts` on every
 test run (`SOLOW_TEST_OPENCODE_BIN=<path>` points it at another build).
 
-**opencode is installed by SoloW, not by the operator.** `opencode-ai` is an exact dependency of
+**opencode is installed by SoloW, not by the operator.** `@opencode/cli` (OpenCode 2; formerly
+`opencode-ai`) is an exact dependency of
 the orchestrator and of the published `@satcomx00-x00/solow`, so `bun install` or `npx` brings the
 pinned build with everything else. The package's postinstall is never needed — a current npm
 blocks it and Bun skips it — because the executable already ships inside a per-platform optional
-dependency (`opencode-linux-x64`, …), fetched from the registry with no third-party download.
+dependency (`@opencode/cli-linux-x64`, …), fetched from the registry with no third-party download.
 The local Executor swaps a bare `opencode` in a catalog row for that binary at spawn
 (`apps/orchestrator/src/executor/bundled-binaries.ts`, choosing the glibc/musl and AVX2/baseline
 build the way the postinstall would); an absolute path or any other command is left alone, and a
 missing bundled copy falls back to PATH. The Docker Executor is unaffected: a container is another
 machine, so its image carries its own harness. **The dependency and the pin move together** —
-bump `opencode-ai` in both `package.json` files, `minVersion` in the defaults and a migration in one
+bump `@opencode/cli` in both `package.json` files, `minVersion` in the defaults and a migration in one
 change; `bundled-binaries.test.ts` fails when the installed build and the seeded pin differ.
+
+**OpenCode 2 (2026-10-02).** The major release's breaking changes are the plugin API, the HTTP
+server API and the terminal client's `tui.json` → `cli.json`; SoloW uses none of them. What it does
+use was re-verified on 2.0.22: `opencode acp` still speaks ACP protocol 1, still answers
+`session/new` with `configOptions` (now with an `effort` option beside `model` and `mode`), and
+hosts its own server rather than leaving OpenCode 2's shared background service running; every
+path it writes follows the app-owned `XDG_*` home (Decision 0027); `OPENCODE_CONFIG_CONTENT` is
+still merged as a config source (Decision 0028), with v1 and native v2 keys both accepted. Two
+things did change for SoloW: Skills are written to `.opencode/skills/` (v2's preferred layout),
+and the handshake no longer offers SSE MCP transport — harmless, since SoloW hands ACP agents
+only `http` servers. A Harness Config's credential guard reads both config spellings
+(`provider.*.options.apiKey` and v2's `providers.*.settings.apiKey` / credential `headers`).
 
 Every Workspace is still seeded with a `claude_code` catalog entry the moment it exists — at
 sign-up (`apps/web/src/server/auth/auth.ts`) and in the dev/test seed alike

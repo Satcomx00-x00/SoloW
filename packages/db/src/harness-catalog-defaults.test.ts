@@ -58,10 +58,10 @@ describe("ensureDefaultHarnessCatalog", () => {
 
     const seeded = await rows();
     const opencode = seeded.find((r) => r.key === "opencode");
-    expect(opencode?.minVersion).toBe("1.18.33");
-    // Not `npm install -g opencode-ai@latest`: the bundled copy is what runs, so the way back
+    expect(opencode?.minVersion).toBe("2.0.22");
+    // Not `npm install -g @opencode/cli@latest`: the bundled copy is what runs, so the way back
     // from a refusal is to restore it, not to land on a build nobody verified.
-    expect(opencode?.installHint).toContain("opencode-ai@1.18.33");
+    expect(opencode?.installHint).toContain("@opencode/cli@2.0.22");
     // Claude Code's protocol has no handshake that names a build, so a pin would check nothing.
     expect(seeded.find((r) => r.key === "claude_code")?.minVersion).toBeNull();
   });

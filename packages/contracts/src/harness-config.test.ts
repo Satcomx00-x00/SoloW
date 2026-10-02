@@ -49,6 +49,31 @@ describe("harnessConfigViolations", () => {
       }),
     ).toEqual(["provider.anthropic.options.apiKey belongs in the profile's Secret"]);
   });
+  test("opencode 2: native providers settings and credential headers", () => {
+    expect(
+      harnessConfigViolations("opencode", {
+        providers: {
+          acme: {
+            package: "aisdk:@ai-sdk/openai-compatible",
+            settings: { baseURL: "https://llm.example.com/v1", apiKey: "k" },
+            headers: { Authorization: "Bearer k", "X-Trace": "1" },
+          },
+        },
+      }),
+    ).toEqual([
+      "providers.acme.settings.apiKey belongs in the profile's Secret",
+      "providers.acme.headers.Authorization belongs in the profile's Secret",
+    ]);
+  });
+  test("opencode 2: native permissions and agents pass", () => {
+    expect(
+      harnessConfigViolations("opencode", {
+        permissions: [{ action: "shell", resource: "git push *", effect: "ask" }],
+        agents: { reviewer: { system: "Review.", model: "anthropic/claude-sonnet-4-5#high" } },
+        providers: { acme: { settings: { baseURL: "https://llm.example.com/v1" } } },
+      }),
+    ).toEqual([]);
+  });
   test("an ordinary config passes", () => {
     expect(harnessConfigViolations("claude_code", { permissions: { allow: [] } })).toEqual([]);
   });

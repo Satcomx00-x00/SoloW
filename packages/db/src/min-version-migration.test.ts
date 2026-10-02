@@ -5,7 +5,6 @@ import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DEFAULT_HARNESS_CATALOG } from "./harness-catalog-defaults.js";
 
 /**
  * `0042` applied to a database that already holds catalog rows.
@@ -15,6 +14,10 @@ import { DEFAULT_HARNESS_CATALOG } from "./harness-catalog-defaults.js";
  * already chose. Applied by hand, as `migration.test.ts` does, so the rows can be written the way
  * the schema before it held them.
  */
+
+/** What 0042 wrote, verbatim — history, so not read from today's defaults. */
+const OPENCODE_1_HINT =
+  "SoloW installs opencode-ai@1.18.33 itself: reinstall its dependencies (bun install from source, or npx @satcomx00-x00/solow@latest)";
 
 const MIGRATIONS = join(dirname(fileURLToPath(import.meta.url)), "..", "migrations");
 const TARGET = "0042";
@@ -69,12 +72,11 @@ describe(`${TARGET}: the catalog's minimum version`, () => {
 
     applyTarget(db);
 
-    // The same pin and hint a fresh Workspace is seeded with, so an old Workspace and a new one
-    // cannot disagree about which build they accept or how to get it back.
-    const seeded = DEFAULT_HARNESS_CATALOG.find((row) => row.key === "opencode");
+    // The pin and hint the defaults seeded at the time; `0044` moves both to OpenCode 2, and
+    // `opencode-2-migration.test.ts` checks the end state against today's defaults.
     expect(read(db, "oc")).toEqual({
-      min_version: seeded?.minVersion ?? null,
-      install_hint: seeded?.installHint ?? null,
+      min_version: "1.18.33",
+      install_hint: OPENCODE_1_HINT,
     });
   });
 

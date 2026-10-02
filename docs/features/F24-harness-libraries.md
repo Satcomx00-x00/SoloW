@@ -108,7 +108,7 @@ each harness runtime is handed it, because Claude Code and an ACP agent take it 
 | Runtime | MCP servers | Skills |
 | --- | --- | --- |
 | Claude Code (stream-json) | `--mcp-config <file>` written under the Task's own directory | `--plugin-dir <dir>` — a generated plugin whose `skills/` are the Skills; nothing is written into the worktree the harness creates for itself |
-| opencode (ACP) | `session/new.mcpServers` — the protocol's own channel | `.opencode/skill/<name>/SKILL.md` in the worktree SoloW provisioned, excluded from git through the worktree's `info/exclude` |
+| opencode (ACP) | `session/new.mcpServers` — the protocol's own channel | `.opencode/skills/<name>/SKILL.md` (OpenCode 2's preferred layout; `.opencode/skill/` before 2026-10-02) in the worktree SoloW provisioned, excluded from git through the worktree's `info/exclude` |
 | Claude Code over ACP | `session/new.mcpServers` | `.claude/skills/<name>/SKILL.md`, excluded the same way |
 | Anything else | not loaded — the transcript says so | not loaded — the transcript says so |
 

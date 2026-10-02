@@ -46,6 +46,8 @@ export const HARNESS_CONFIG_TARGETS: Readonly<Record<HarnessConfigHarness, Harne
     fileName: "opencode.json",
     label: "opencode",
     // opencode's inline config: the highest-precedence source it reads, and no file involved.
+    // Verified on OpenCode 2.0.22 (`opencode debug config` lists it as a document source); v1 and
+    // native v2 keys are both accepted in it (`providers`, `permissions`, `agents`, …).
     delivery: { kind: "env", name: "OPENCODE_CONFIG_CONTENT" },
     template: { $schema: "https://opencode.ai/config.json" },
   },
@@ -92,10 +94,51 @@ export const HARNESS_CONFIG_RESERVED_ENV_VARS: readonly string[] = [
   "OPENCODE_API_KEY",
   "OPENCODE_CONFIG",
   "OPENCODE_CONFIG_DIR",
+  // OpenCode 2's terminal-client config, merged over `cli.json`: the same discovery door.
+  "OPENCODE_CLI_CONFIG_CONTENT",
 ];
 
 const isObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
+
+/** Request headers that carry a credential, however a provider spells them. */
+const CREDENTIAL_HEADERS = new Set(["authorization", "x-api-key", "api-key"]);
+
+/**
+ * A provider credential written into an opencode config, in either shape OpenCode 2 reads.
+ *
+ * v1's `provider.<id>.options.apiKey` is still accepted beside the native v2
+ * `providers.<id>.settings.apiKey` (and `headers`), and both may sit in one file, so both are
+ * checked — a guard that read only one spelling would be a guard with a documented way around it.
+ */
+function opencodeCredentialViolations(content: Readonly<Record<string, unknown>>): string[] {
+  const out: string[] = [];
+  for (const [root, blocks] of [
+    ["provider", ["options", "settings"]],
+    ["providers", ["settings", "options"]],
+  ] as const) {
+    const providers = content[root];
+    if (!isObject(providers)) continue;
+    for (const [id, provider] of Object.entries(providers)) {
+      if (!isObject(provider)) continue;
+      for (const block of blocks) {
+        const settings = provider[block];
+        if (isObject(settings) && "apiKey" in settings) {
+          out.push(`${root}.${id}.${block}.apiKey belongs in the profile's Secret`);
+        }
+      }
+      const headers = provider["headers"];
+      if (isObject(headers)) {
+        for (const name of Object.keys(headers)) {
+          if (CREDENTIAL_HEADERS.has(name.toLowerCase())) {
+            out.push(`${root}.${id}.headers.${name} belongs in the profile's Secret`);
+          }
+        }
+      }
+    }
+  }
+  return out;
+}
 
 /**
  * What in a config would route around the billing guard or back to the operator's own
@@ -119,12 +162,8 @@ export function harnessConfigViolations(
       }
     }
     if ("apiKeyHelper" in content) out.push("apiKeyHelper would bypass the profile's credential");
-  } else if (isObject(content["provider"])) {
-    for (const [id, provider] of Object.entries(content["provider"])) {
-      if (isObject(provider) && isObject(provider["options"]) && "apiKey" in provider["options"]) {
-        out.push(`provider.${id}.options.apiKey belongs in the profile's Secret`);
-      }
-    }
+  } else {
+    out.push(...opencodeCredentialViolations(content));
   }
   return out;
 }
