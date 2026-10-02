@@ -177,10 +177,10 @@ describe("materializeLibraries", () => {
     expect(out.extraArgs).toEqual([]);
     expect(out.mcpServers.map((s) => s.name)).toEqual(["github", "docs"]);
     expect(
-      await readFile(join(worktree, ".opencode", "skill", "review-checklist", "SKILL.md"), "utf8"),
+      await readFile(join(worktree, ".opencode", "skills", "review-checklist", "SKILL.md"), "utf8"),
     ).toContain("name: review-checklist");
     expect(await gitInfoExcludePath(worktree)).toBe(join(gitdir, "info", "exclude"));
-    expect(await readFile(join(gitdir, "info", "exclude"), "utf8")).toBe("/.opencode/skill/\n");
+    expect(await readFile(join(gitdir, "info", "exclude"), "utf8")).toBe("/.opencode/skills/\n");
     // Nothing was written for Claude Code's sake.
     expect(await stat(join(root, "task")).catch(() => null)).toBeNull();
   });

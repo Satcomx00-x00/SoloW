@@ -16,7 +16,7 @@ and they take the same two things three different ways:
   inside the checkout the harness works in before the harness exists.
 - **ACP agents** (opencode, Claude Code over ACP) take servers on `session/new.mcpServers` — the
   protocol has a channel for exactly this — and have no channel for Skills: they discover them as
-  files in their working directory, under a directory each runtime scans (`.opencode/skill/`,
+  files in their working directory, under a directory each runtime scans (`.opencode/skills/` since OpenCode 2, `.opencode/skill/` before,
   `.claude/skills/`). SoloW provisions that worktree itself, so it *can* write there.
 - A **pass-through CLI** takes neither.
 

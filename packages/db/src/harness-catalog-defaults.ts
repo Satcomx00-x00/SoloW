@@ -71,16 +71,22 @@ export const DEFAULT_HARNESS_CATALOG: readonly CatalogDefault[] = [
     // bundled-binaries.ts`), so an old build only answers when the bundled one is missing and
     // PATH supplied another — the fix is to put the bundled one back, not to chase `@latest`.
     installHint:
-      "SoloW installs opencode-ai@1.18.33 itself: reinstall its dependencies (bun install from source, or npx @satcomx00-x00/solow@latest)",
+      "SoloW installs @opencode/cli@2.0.22 itself: reinstall its dependencies (bun install from source, or npx @satcomx00-x00/solow@latest)",
     /*
      * The build this row was verified against, end to end. Not a formality: `@solow/acp` reads
      * shapes opencode added along the way — the `configOptions` its 1.18 line answers
      * `session/new` with instead of `models`/`modes` (protocol.ts), the `agentInfo` this pin is
      * checked against — and an older opencode fails in ways that look like SoloW's fault (an
      * empty model list, a Profile with nothing to suggest). Raise it when a newer build has been
-     * run through the same checks; `0042_skinny_mentor.sql` shows how existing rows get it.
+     * run through the same checks; `0044_opencode_2.sql` shows how existing rows get it.
+     *
+     * OpenCode 2 (2026-10-02): same `opencode acp`, same ACP protocol version 1, same
+     * `configOptions` shape (plus an `effort` option), and `acp` still hosts its own server
+     * rather than leaving the new background service running. The major release's breaking
+     * changes — the plugin API, the HTTP server API and `tui.json` → `cli.json` — are surfaces
+     * SoloW does not use; v1 `opencode.json` keys keep working beside the native v2 ones.
      */
-    minVersion: "1.18.33",
+    minVersion: "2.0.22",
     subscriptionEnvVar: "OPENCODE_API_KEY",
     meteredEnvVar: "ANTHROPIC_API_KEY",
   },

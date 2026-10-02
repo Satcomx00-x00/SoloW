@@ -71,18 +71,24 @@ describe("negotiate", () => {
 });
 
 describe("agentInfo", () => {
-  // Captured from `opencode acp` 1.18.33 on 2026-09-28 — the build the catalog pins.
-  const opencode = JSON.parse(
-    readFileSync(new URL("./fixtures/opencode-1.18.33-initialize.json", import.meta.url), "utf8"),
-  );
+  const fixture = (name: string) =>
+    JSON.parse(readFileSync(new URL(`./fixtures/${name}`, import.meta.url), "utf8"));
+  // Captured from `opencode acp` on 2026-09-28 (1.18.33) and 2026-10-02 (2.0.22, the build the
+  // catalog pins). Both stay: a Workspace whose operator put a 1.x on PATH still answers this way.
+  const handshakes = [
+    ["1.18.33", fixture("opencode-1.18.33-initialize.json")],
+    ["2.0.22", fixture("opencode-2.0.22-initialize.json")],
+  ] as const;
 
-  it("reads which build answered from a real opencode handshake", () => {
-    const caps = negotiate(opencode);
-    expect(caps.agent).toEqual({ name: "OpenCode", version: "1.18.33" });
-    // The rest of the handshake still reads as it did: the new field takes nothing away.
-    expect(caps.loadSession).toBe(true);
-    expect(caps.authMethods).toEqual(["opencode-login"]);
-  });
+  for (const [version, handshake] of handshakes) {
+    it(`reads which build answered from a real opencode ${version} handshake`, () => {
+      const caps = negotiate(handshake);
+      expect(caps.agent).toEqual({ name: "OpenCode", version });
+      // The rest of the handshake still reads as it did: new fields take nothing away.
+      expect(caps.loadSession).toBe(true);
+      expect(caps.authMethods).toEqual(["opencode-login"]);
+    });
+  }
 
   it("is null when the agent does not say who it is", () => {
     expect(negotiate({ protocolVersion: 1 }).agent).toBeNull();

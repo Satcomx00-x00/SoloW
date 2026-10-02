@@ -37,9 +37,9 @@
     "node": ">=20"
   },
   "dependencies": {
+    "@opencode/cli": "2.0.22",
     "bun": "^1.4.0",
-    "inngest-cli": "^1.44.0",
-    "opencode-ai": "1.18.33"
+    "inngest-cli": "^1.44.0"
   },
   "optionalDependencies": {
     "@satcomx00-x00/solow-inngest-linux-x64": "1.44.0",

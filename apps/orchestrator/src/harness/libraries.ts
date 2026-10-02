@@ -90,9 +90,14 @@ export function skillMarkdown(skill: ResolvedSkill & { source: { kind: "inline" 
   return `---\nname: ${skill.name}\ndescription: "${description}"\n---\n\n${body.trimEnd()}\n`;
 }
 
-/** The directory a runtime scans for Skills, relative to the harness's working directory. */
+/**
+ * The directory a runtime scans for Skills, relative to the harness's working directory.
+ *
+ * `.opencode/skills/` is OpenCode 2's preferred layout (its migration guide; it still discovers the
+ * `.opencode/skill/` this used to write), and OpenCode 2 is the build SoloW bundles.
+ */
 export function skillsDirFor(catalogKey: string): string {
-  return catalogKey === "opencode" ? ".opencode/skill" : ".claude/skills";
+  return catalogKey === "opencode" ? ".opencode/skills" : ".claude/skills";
 }
 
 /** Write one Skill as `<root>/<name>/SKILL.md` (inline) or a copy of its directory (path). */

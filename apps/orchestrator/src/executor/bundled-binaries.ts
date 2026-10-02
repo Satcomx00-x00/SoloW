@@ -5,17 +5,17 @@ import { dirname, join } from "node:path";
 /**
  * Harness binaries SoloW installs itself, as npm dependencies, rather than expecting on PATH.
  *
- * opencode is the first (user decision, 2026-09-28): "the program must install opencode using
+ * opencode is the first (user decision, 2026-09-28; OpenCode 2 since 2026-10-02): "the program must install opencode using
  * npm/bun". It is an exact dependency of the orchestrator here and of `@satcomx00-x00/solow` for
  * the published launcher, so the build that runs is the build the catalog pins
  * (`harness-catalog-defaults.ts`, `minVersion`) — not whatever an operator happened to have
  * installed, and not a second install step anyone has to remember.
  *
- * **Why not `opencode-ai/bin/opencode.exe`.** That path is a shell placeholder until the
+ * **Why not `@opencode/cli/bin/opencode.exe`.** That path is a shell placeholder until the
  * package's postinstall copies the real executable over it, and install scripts are exactly what
  * a current npm blocks by default and Bun skips for untrusted packages. The postinstall does not
  * download anything, though: the executable already sits inside a per-platform optional
- * dependency (`opencode-linux-x64`, …) that the package manager fetched from the registry like
+ * dependency (`@opencode/cli-linux-x64`, …) that the package manager fetched from the registry like
  * any other package. So this reads it from there, the way `packages/cli` reads Bun from
  * `@oven/bun-*`, and never runs a script — the postinstall's own fallback is an `npm install`
  * over the network, which a spawn must not do.
@@ -28,9 +28,15 @@ import { dirname, join } from "node:path";
  * Docker executor keeps spawning the bare command and its image has to carry the harness.
  */
 
-/** A bare command name this build can supply, and the npm package that supplies it. */
-const BUNDLED: Readonly<Record<string, { pkg: string; binary: string }>> = {
-  opencode: { pkg: "opencode-ai", binary: "opencode" },
+/**
+ * A bare command name this build can supply: the npm package that supplies it, the prefix its
+ * per-platform builds are published under, and the executable's name inside their `bin/`.
+ *
+ * OpenCode 2 moved from `opencode-ai` + `opencode-<os>-<arch>` to `@opencode/cli` +
+ * `@opencode/cli-<os>-<arch>`; the variant suffixes and the `bin/opencode` layout are unchanged.
+ */
+const BUNDLED: Readonly<Record<string, { pkg: string; platformPrefix: string; binary: string }>> = {
+  opencode: { pkg: "@opencode/cli", platformPrefix: "@opencode/cli", binary: "opencode" },
 };
 
 type Resolve = (id: string) => string;
@@ -133,7 +139,7 @@ export function isNativeExecutable(path: string): boolean {
  * such command or it is not installed for this platform.
  *
  * Resolved *through* the package that depends on the platform builds, not from this file: under
- * Bun's isolated linker `opencode-linux-x64` is a dependency of `opencode-ai` and nothing else can
+ * Bun's isolated linker `@opencode/cli-linux-x64` is a dependency of `@opencode/cli` and nothing else can
  * see it, and in the published launcher's flat `node_modules` resolving through the parent finds
  * the same hoisted copy.
  */
@@ -156,7 +162,7 @@ export function bundledBinary(
 
   const fromPkg = (id: string) => createRequire(pkgJson).resolve(id);
   const file = host.platform === "win32" ? `${entry.binary}.exe` : entry.binary;
-  for (const name of platformPackages(entry.binary, host)) {
+  for (const name of platformPackages(entry.platformPrefix, host)) {
     try {
       const candidate = join(dirname(fromPkg(`${name}/package.json`)), "bin", file);
       if (isNativeExecutable(candidate)) return candidate;
