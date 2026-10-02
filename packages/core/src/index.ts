@@ -1,6 +1,7 @@
 export * from "./billing.js";
 export * from "./change-nature.js";
 export * from "./checkpoints.js";
+export * from "./harness-config.js";
 export * from "./integrations.js";
 export * from "./issue.js";
 export * from "./mcp-store.js";

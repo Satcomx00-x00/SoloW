@@ -2,6 +2,7 @@ import { count, eq } from "drizzle-orm";
 import {
   changeRequest,
   executorProfile,
+  harnessConfig,
   harnessProfile,
   integration,
   issue,
@@ -105,6 +106,8 @@ const SETUP_TABLES = [
   { table: "mcp_token", t: mcpToken },
   { table: "provider_identity", t: providerIdentity },
   { table: "harness_profile", t: harnessProfile },
+  // After the Profiles that select it.
+  { table: "harness_config", t: harnessConfig },
   { table: "executor_profile", t: executorProfile },
   { table: "repository_branch", t: repositoryBranch },
   { table: "repository_label", t: repositoryLabel },

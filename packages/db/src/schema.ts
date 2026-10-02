@@ -5,6 +5,8 @@ import type {
   ExecutorConfig,
   ExecutorKind,
   HarnessCapabilities,
+  HarnessConfigContent,
+  HarnessConfigHarness,
   HarnessPermissionMode,
   HarnessProtocol,
   IssueMilestone,
@@ -290,6 +292,37 @@ export const harnessCatalog = sqliteTable(
   }),
 );
 
+/**
+ * Harness Configs (Decision 0028, spec F05): a harness's own JSON configuration — Claude Code's
+ * `settings.json`, opencode's `opencode.json` — kept here instead of in the operator's home, so a
+ * run never reads or writes a file the operator owns. A Harness Profile selects one; the run hands
+ * it to the harness by flag or variable (`HARNESS_CONFIG_TARGETS`).
+ *
+ * `content` is JSON because its shape is the harness's, not SoloW's: nothing queries into it.
+ */
+export const harnessConfig = sqliteTable(
+  "harness_config",
+  {
+    id: id(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspace.id),
+    name: text("name").notNull(),
+    description: text("description"),
+    harness: text("harness").$type<HarnessConfigHarness>().notNull(),
+    content: text("content", { mode: "json" })
+      .$type<HarnessConfigContent>()
+      .notNull()
+      .default(sql`'{}'`),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => ({
+    byWs: index("harness_config_ws").on(t.workspaceId),
+    byName: uniqueIndex("harness_config_ws_name").on(t.workspaceId, t.name),
+  }),
+);
+
 export const harnessProfile = sqliteTable(
   "agent_profile",
   {
@@ -322,6 +355,8 @@ export const harnessProfile = sqliteTable(
      */
     model: text("model"),
     modeId: text("mode_id"),
+    /** The Harness Config this Profile launches with, or null for the harness's own defaults. */
+    harnessConfigId: text("harness_config_id").references(() => harnessConfig.id),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -1636,6 +1671,7 @@ export const schema = {
   integration,
   issue,
   harnessCatalog,
+  harnessConfig,
   harnessProfile,
   executorProfile,
   repository,

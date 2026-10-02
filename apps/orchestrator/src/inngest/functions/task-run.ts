@@ -93,6 +93,7 @@ import {
 import type { PreflightResult } from "../../executor/preflight.js";
 import type { Executor } from "../../executor/types.js";
 import { worktreeNameForTask } from "../../harness/claude-code-runner.js";
+import { profileHarnessConfig } from "../../harness/harness-config.js";
 import { resolveHarnessConfigEnv } from "../../harness/hermetic-home.js";
 import { materializeLibraries } from "../../harness/libraries.js";
 import {
@@ -1850,11 +1851,24 @@ export async function runTaskLifecycle(
          * operator's `~/.claude` is somewhere it never looks. Idempotent, which is the point —
          * every round of the Task passes through here and round two resumes round one's home.
          */
-        const configEnv = await resolveHarnessConfigEnv({
+        const homeEnv = await resolveHarnessConfigEnv({
           kind: ctx.executorProfile.config.kind,
           home: harnessHomePath(deps.worktreeRoot, taskId),
           baseEnv: hostEnv,
         });
+        /*
+         * The configuration the app *does* hand this harness (Decision 0028): the leg's Profile's
+         * Harness Config, read here so an edit is the next round's config, and delivered by
+         * variable or flag — never a file in a home — so it reaches a container the same way.
+         * Its variable rides with the home's, above the Executor Profile and under the credential.
+         */
+        const { config: harnessConfig, launch: configLaunch } = await profileHarnessConfig(
+          db,
+          workspaceId,
+          leg.harnessProfile,
+          leg.harnessCatalog,
+        );
+        const configEnv = { ...homeEnv, ...(configLaunch.ok ? configLaunch.data.env : {}) };
         const shaped = prepareHarnessEnv({
           authMode: leg.harnessProfile.authMode,
           secretCiphertext: legCiphertext,
@@ -2304,6 +2318,19 @@ export async function runTaskLifecycle(
         }
         const resuming = wt;
 
+        // A Harness Config the run cannot use fails the round by name (Decision 0028), the same
+        // way a library Secret that is gone does below — never a run on a configuration guessed at.
+        if (!configLaunch.ok) {
+          emit({
+            kind: "notice",
+            text: `The harness config "${harnessConfig?.name}" cannot be used: ${configLaunch.error}. Fix it in Settings → Harness configs, then relaunch.`,
+          });
+          return { kind: "failed" as const, cls: "fail" as const };
+        }
+        if (harnessConfig) {
+          emit({ kind: "notice", text: `Harness config: ${harnessConfig.name}.` });
+        }
+
         /*
          * What this leg loads from the libraries (spec F24): everything enabled Workspace-wide,
          * plus whatever its Workflow Step names. Resolved *here*, inside the step that spawns
@@ -2449,6 +2476,7 @@ export async function runTaskLifecycle(
           ...(resumeSessionId ? { resumeSessionId } : {}),
           prompt: brief,
           ...(loaded.mcpServers.length > 0 ? { mcpServers: loaded.mcpServers } : {}),
+          ...(configLaunch.data.settings ? { harnessSettings: configLaunch.data.settings } : {}),
           onEvent: (e) => {
             // The harness's channel decides what kind of record this is. `user` is the operator's
             // own steering echoed back, `system` is the machinery talking about itself, and the

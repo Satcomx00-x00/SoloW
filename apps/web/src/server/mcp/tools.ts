@@ -77,7 +77,17 @@ const WITHHELD_NAMESPACES = new Set([
 ]);
 
 /** Withheld one procedure at a time, inside a namespace that is otherwise exposed. */
-const WITHHELD_PROCEDURES = new Set(["workflow.advanceTask", "workflow.acknowledgeDrift"]);
+const WITHHELD_PROCEDURES = new Set([
+  "workflow.advanceTask",
+  "workflow.acknowledgeDrift",
+  // Writing a Harness Config is writing what every run of its Profiles loads (Decision 0028) —
+  // the `library` reasoning above, one namespace over. Reading them stays exposed.
+  "profile.harnessConfig.create",
+  "profile.harnessConfig.update",
+  "profile.harnessConfig.duplicate",
+  "profile.harnessConfig.delete",
+  "profile.harnessConfig.import",
+]);
 
 /** Exposed one procedure at a time, inside a namespace that is otherwise withheld. */
 const EXPOSED_PROCEDURES = new Set(["library.mcp.list", "library.skill.list"]);

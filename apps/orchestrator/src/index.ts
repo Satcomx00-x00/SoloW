@@ -21,6 +21,7 @@ import { createLocalExecutor } from "./executor/local.js";
 import { reapOrphanedContainers } from "./executor/reap.js";
 import type { Executor } from "./executor/types.js";
 import { explainWithHarness } from "./harness/explain.js";
+import { profileHarnessConfig } from "./harness/harness-config.js";
 import { resolveHarnessConfigEnv } from "./harness/hermetic-home.js";
 import { probeHarness } from "./harness/probe.js";
 import {
@@ -219,6 +220,14 @@ export async function handleExplainPost(
       home: join(cwd, OUT_OF_BAND_HOME),
       baseEnv: process.env,
     });
+    // The Profile's Harness Config travels as it does on a run (Decision 0028); one that cannot
+    // be used is the run's problem to report, so an explanation simply goes without it.
+    const { launch } = await profileHarnessConfig(
+      deps.db,
+      workspaceId,
+      ctx.harnessProfile,
+      ctx.harnessCatalog,
+    );
     const shaped = prepareHarnessEnv({
       authMode: ctx.harnessProfile.authMode,
       secretCiphertext: ctx.secretCiphertext,
@@ -226,7 +235,7 @@ export async function handleExplainPost(
       subscriptionEnvVar: ctx.harnessCatalog.subscriptionEnvVar,
       meteredEnvVar: ctx.harnessCatalog.meteredEnvVar,
       profileEnv: ctx.executorProfile.config.env ?? {},
-      configEnv,
+      configEnv: { ...configEnv, ...(launch.ok ? launch.data.env : {}) },
     });
     if (!shaped.ok) {
       return Response.json({
@@ -293,13 +302,30 @@ export async function handleProbePost(
       home: join(cwd, OUT_OF_BAND_HOME),
       baseEnv: process.env,
     });
+    // A Harness Config a run would refuse is a failed probe, said by name (Decision 0028).
+    const { config, launch } = await profileHarnessConfig(
+      deps.db,
+      workspaceId,
+      ctx.harnessProfile,
+      ctx.harnessCatalog,
+    );
+    if (!launch.ok) {
+      return Response.json({
+        ok: false,
+        reason: `the harness config "${config?.name}" cannot be used: ${launch.error}`,
+        protocolVersion: null,
+        authMethods: [],
+        agent: null,
+        capabilities: { models: [], modes: [] },
+      });
+    }
     const shaped = prepareHarnessEnv({
       authMode: ctx.harnessProfile.authMode,
       secretCiphertext: ctx.secretCiphertext,
       baseEnv: process.env,
       subscriptionEnvVar: ctx.harnessCatalog.subscriptionEnvVar,
       meteredEnvVar: ctx.harnessCatalog.meteredEnvVar,
-      configEnv,
+      configEnv: { ...configEnv, ...launch.data.env },
     });
     if (!shaped.ok) {
       return Response.json({

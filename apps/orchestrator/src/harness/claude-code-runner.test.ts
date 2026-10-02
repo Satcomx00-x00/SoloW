@@ -9,6 +9,7 @@ import { createLocalExecutor } from "../executor/local.js";
 import {
   ClaudeCodeRunner,
   createStreamMapper,
+  launchSettings,
   toStreamEvent,
   worktreeNameForTask,
 } from "./claude-code-runner.js";
@@ -339,5 +340,25 @@ describe("what the run says about how it stopped", () => {
     });
     expect(await carried.resumed).toBe(true);
     await carried.outcome;
+  });
+});
+
+describe("launchSettings (Decision 0028)", () => {
+  it("nothing configured adds no --settings", () => {
+    expect(launchSettings(undefined, undefined)).toEqual({});
+  });
+
+  it("a Harness Config alone is the --settings", () => {
+    expect(launchSettings({ model: "opus" }, undefined)).toEqual({
+      settings: JSON.stringify({ model: "opus" }),
+    });
+  });
+
+  it("the checkpoint hook is merged over the config, never dropped", () => {
+    const app = JSON.stringify({ hooks: { PreToolUse: [{ matcher: "Bash" }] } });
+    const merged = launchSettings({ hooks: { PreToolUse: [{ matcher: "Edit" }] } }, app);
+    expect(JSON.parse(merged.settings ?? "{}")).toEqual({
+      hooks: { PreToolUse: [{ matcher: "Edit" }, { matcher: "Bash" }] },
+    });
   });
 });

@@ -141,6 +141,11 @@ export interface HarnessStartOpts {
    * runtime that takes them as arguments finds them in `args` instead (spec F24).
    */
   mcpServers?: AcpMcpServer[];
+  /**
+   * The Profile's Harness Config for a runtime that takes settings inline (Claude Code's
+   * `--settings`, Decision 0028). A runtime that takes its config as a variable finds it in `env`.
+   */
+  harnessSettings?: Record<string, unknown>;
   onEvent: (e: HarnessStreamEvent) => void;
 }
 

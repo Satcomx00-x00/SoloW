@@ -302,6 +302,13 @@
       "when": 1790593441314,
       "tag": "0042_skinny_mentor",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "6",
+      "when": 1790931764366,
+      "tag": "0043_harness_config",
+      "breakpoints": true
     }
   ]
 }

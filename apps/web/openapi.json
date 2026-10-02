@@ -15321,6 +15321,12 @@
                     "minLength": 1,
                     "maxLength": 120,
                     "default": null
+                  },
+                  "harnessConfigId": {
+                    "type": "string",
+                    "nullable": true,
+                    "minLength": 1,
+                    "default": null
                   }
                 },
                 "required": [
@@ -15386,6 +15392,11 @@
                       "minLength": 1,
                       "maxLength": 120
                     },
+                    "harnessConfigId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
                     "usage": {
                       "type": "object",
                       "properties": {
@@ -15437,6 +15448,7 @@
                     "permissionMode",
                     "model",
                     "modeId",
+                    "harnessConfigId",
                     "usage",
                     "createdAt",
                     "updatedAt"
@@ -15576,6 +15588,11 @@
                             "minLength": 1,
                             "maxLength": 120
                           },
+                          "harnessConfigId": {
+                            "type": "string",
+                            "nullable": true,
+                            "minLength": 1
+                          },
                           "usage": {
                             "type": "object",
                             "properties": {
@@ -15627,6 +15644,7 @@
                           "permissionMode",
                           "model",
                           "modeId",
+                          "harnessConfigId",
                           "usage",
                           "createdAt",
                           "updatedAt"
@@ -15702,7 +15720,7 @@
     "/profile.agent.update": {
       "post": {
         "operationId": "profile-agent-update",
-        "summary": "Edit a Harness Profile's name, concurrency cap or permission mode. The harness it runs and the credential it runs on are fixed at creation — changing those would rewrite what its finished runs meant.",
+        "summary": "Edit a Harness Profile's name, concurrency cap, permission mode, model/mode pins or Harness Config. The harness it runs and the credential it runs on are fixed at creation — changing those would rewrite what its finished runs meant.",
         "tags": [
           "profile"
         ],
@@ -15751,6 +15769,11 @@
                     "nullable": true,
                     "minLength": 1,
                     "maxLength": 120
+                  },
+                  "harnessConfigId": {
+                    "type": "string",
+                    "nullable": true,
+                    "minLength": 1
                   }
                 },
                 "required": [
@@ -15813,6 +15836,11 @@
                       "minLength": 1,
                       "maxLength": 120
                     },
+                    "harnessConfigId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
                     "usage": {
                       "type": "object",
                       "properties": {
@@ -15864,6 +15892,7 @@
                     "permissionMode",
                     "model",
                     "modeId",
+                    "harnessConfigId",
                     "usage",
                     "createdAt",
                     "updatedAt"
@@ -15999,6 +16028,11 @@
                       "minLength": 1,
                       "maxLength": 120
                     },
+                    "harnessConfigId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
                     "usage": {
                       "type": "object",
                       "properties": {
@@ -16050,6 +16084,7 @@
                     "permissionMode",
                     "model",
                     "modeId",
+                    "harnessConfigId",
                     "usage",
                     "createdAt",
                     "updatedAt"
@@ -16636,6 +16671,1017 @@
                     "subscriptionEnvVar",
                     "meteredEnvVar",
                     "capabilities",
+                    "createdAt",
+                    "updatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/profile.harnessConfig.list": {
+      "get": {
+        "operationId": "profile-harnessConfig-list",
+        "summary": "List this Workspace's Harness Configs, optionally for one harness, with how many Harness Profiles launch with each.",
+        "tags": [
+          "profile"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "harness",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "claude_code",
+                "opencode"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "description": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "harness": {
+                        "type": "string",
+                        "enum": [
+                          "claude_code",
+                          "opencode"
+                        ]
+                      },
+                      "content": {
+                        "type": "object",
+                        "additionalProperties": {}
+                      },
+                      "profileCount": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "createdAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      },
+                      "updatedAt": {
+                        "type": "string",
+                        "format": "date-time"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "name",
+                      "description",
+                      "harness",
+                      "content",
+                      "profileCount",
+                      "createdAt",
+                      "updatedAt"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.NOT_FOUND"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/profile.harnessConfig.create": {
+      "post": {
+        "operationId": "profile-harnessConfig-create",
+        "summary": "Store a harness's JSON configuration (Claude Code settings.json, opencode.json). Refused when it sets a credential or a variable SoloW owns — credentials belong in the Profile's Secret.",
+        "tags": [
+          "profile"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 2000
+                  },
+                  "harness": {
+                    "type": "string",
+                    "enum": [
+                      "claude_code",
+                      "opencode"
+                    ]
+                  },
+                  "content": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "name",
+                  "harness",
+                  "content"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "harness": {
+                      "type": "string",
+                      "enum": [
+                        "claude_code",
+                        "opencode"
+                      ]
+                    },
+                    "content": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    },
+                    "profileCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "description",
+                    "harness",
+                    "content",
+                    "profileCount",
+                    "createdAt",
+                    "updatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/profile.harnessConfig.update": {
+      "post": {
+        "operationId": "profile-harnessConfig-update",
+        "summary": "Change a Harness Config's name, description or JSON. `harness` restates the config's own and cannot change it. Takes effect at each selecting Profile's next launch.",
+        "tags": [
+          "profile"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "harness": {
+                    "type": "string",
+                    "enum": [
+                      "claude_code",
+                      "opencode"
+                    ]
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "description": {
+                    "type": "string",
+                    "nullable": true,
+                    "maxLength": 2000
+                  },
+                  "content": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "id",
+                  "harness"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "harness": {
+                      "type": "string",
+                      "enum": [
+                        "claude_code",
+                        "opencode"
+                      ]
+                    },
+                    "content": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    },
+                    "profileCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "description",
+                    "harness",
+                    "content",
+                    "profileCount",
+                    "createdAt",
+                    "updatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/profile.harnessConfig.duplicate": {
+      "post": {
+        "operationId": "profile-harnessConfig-duplicate",
+        "summary": "Copy a Harness Config under a new name, leaving the Profiles of the original as they are.",
+        "tags": [
+          "profile"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "harness": {
+                      "type": "string",
+                      "enum": [
+                        "claude_code",
+                        "opencode"
+                      ]
+                    },
+                    "content": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    },
+                    "profileCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "description",
+                    "harness",
+                    "content",
+                    "profileCount",
+                    "createdAt",
+                    "updatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/profile.harnessConfig.delete": {
+      "post": {
+        "operationId": "profile-harnessConfig-delete",
+        "summary": "Delete a Harness Config. Refused while a Harness Profile still selects it.",
+        "tags": [
+          "profile"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "harness": {
+                      "type": "string",
+                      "enum": [
+                        "claude_code",
+                        "opencode"
+                      ]
+                    },
+                    "content": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    },
+                    "profileCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "description",
+                    "harness",
+                    "content",
+                    "profileCount",
+                    "createdAt",
+                    "updatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/profile.harnessConfig.export": {
+      "get": {
+        "operationId": "profile-harnessConfig-export",
+        "summary": "A Harness Config in its portable form — no ids, no Workspace — to share and import elsewhere.",
+        "tags": [
+          "profile"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "id",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "solow.harness-config"
+                      ]
+                    },
+                    "version": {
+                      "type": "number",
+                      "enum": [
+                        1
+                      ]
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 120
+                    },
+                    "description": {
+                      "type": "string",
+                      "nullable": true,
+                      "maxLength": 2000,
+                      "default": null
+                    },
+                    "harness": {
+                      "type": "string",
+                      "enum": [
+                        "claude_code",
+                        "opencode"
+                      ]
+                    },
+                    "content": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "version",
+                    "name",
+                    "description",
+                    "harness",
+                    "content"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.NOT_FOUND"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/profile.harnessConfig.import": {
+      "post": {
+        "operationId": "profile-harnessConfig-import",
+        "summary": "Add a shared Harness Config from its portable form. A taken name gets a \"(copy)\" suffix.",
+        "tags": [
+          "profile"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "document": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "solow.harness-config"
+                        ]
+                      },
+                      "version": {
+                        "type": "number",
+                        "enum": [
+                          1
+                        ]
+                      },
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 120
+                      },
+                      "description": {
+                        "type": "string",
+                        "nullable": true,
+                        "maxLength": 2000,
+                        "default": null
+                      },
+                      "harness": {
+                        "type": "string",
+                        "enum": [
+                          "claude_code",
+                          "opencode"
+                        ]
+                      },
+                      "content": {
+                        "type": "object",
+                        "additionalProperties": {}
+                      }
+                    },
+                    "required": [
+                      "kind",
+                      "version",
+                      "name",
+                      "harness",
+                      "content"
+                    ]
+                  }
+                },
+                "required": [
+                  "document"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "harness": {
+                      "type": "string",
+                      "enum": [
+                        "claude_code",
+                        "opencode"
+                      ]
+                    },
+                    "content": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    },
+                    "profileCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "description",
+                    "harness",
+                    "content",
+                    "profileCount",
                     "createdAt",
                     "updatedAt"
                   ]

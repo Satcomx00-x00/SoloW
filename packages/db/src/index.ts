@@ -88,6 +88,7 @@ export {
   DEFAULT_HARNESS_CATALOG,
   ensureDefaultHarnessCatalog,
 } from "./harness-catalog-defaults.js";
+export { type HarnessConfigForRun, loadHarnessConfigForRun } from "./harness-config-run.js";
 export { loadHarnessLibrariesForRun } from "./harness-library-run.js";
 export { DEFAULT_MCP_SERVER, DEFAULT_SKILL, ensureDefaultLibraries } from "./library-defaults.js";
 export {
