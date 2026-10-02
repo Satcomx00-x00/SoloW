@@ -17,7 +17,9 @@ afterEach(cleanup);
 const NO_USAGE = { taskCount: 0, workflowStepCount: 0, sessionUsageCount: 0 };
 
 const baseHandlers = {
-  "profile.agentCatalog.list": () => [{ id: "cat-1", displayName: "Claude Code" }],
+  "profile.agentCatalog.list": () => [
+    { id: "cat-1", displayName: "Claude Code", command: "claude" },
+  ],
   "secret.list": () => [{ id: "secret-1", name: "anthropic-key", kind: "api_key", usedBy: [] }],
 };
 
@@ -246,6 +248,7 @@ describe("HarnessProfilesSection — harness catalog", () => {
           id: "cat-1",
           key: "claude_code",
           displayName: "Claude Code",
+          command: "claude",
           protocol: "claude_code_stream_json",
         },
       ],
@@ -360,7 +363,9 @@ describe("model and mode on a Harness Profile", () => {
  */
 describe("advertised capabilities in the Profile form", () => {
   const CAPS = { models: ["claude-opus-4", "claude-sonnet-4"], modes: ["plan"] };
-  const catalogWithCaps = () => [{ id: "cat-1", displayName: "Claude Code", capabilities: CAPS }];
+  const catalogWithCaps = () => [
+    { id: "cat-1", displayName: "Claude Code", command: "claude", capabilities: CAPS },
+  ];
 
   it("offers the cached models and modes as suggestions", async () => {
     renderWithTrpc(<HarnessProfilesSection />, {
@@ -413,7 +418,12 @@ describe("advertised capabilities in the Profile form", () => {
     renderWithTrpc(<HarnessProfilesSection />, {
       ...baseHandlers,
       "profile.agentCatalog.list": () => [
-        { id: "cat-1", displayName: "Claude Code", capabilities: { models: [], modes: [] } },
+        {
+          id: "cat-1",
+          displayName: "Claude Code",
+          command: "claude",
+          capabilities: { models: [], modes: [] },
+        },
       ],
       "profile.agent.list": () => ({
         items: [
@@ -451,9 +461,14 @@ describe("HarnessProfilesSection — two harnesses with different protocols", ()
   const twoHarnesses = {
     ...baseHandlers,
     "profile.agentCatalog.list": () => [
-      { id: "cat-1", displayName: "Claude Code", protocol: "claude_code_stream_json" },
-      { id: "cat-2", displayName: "opencode", protocol: "acp" },
-      { id: "cat-3", displayName: "my-script", protocol: "cli_passthrough" },
+      {
+        id: "cat-1",
+        displayName: "Claude Code",
+        command: "claude",
+        protocol: "claude_code_stream_json",
+      },
+      { id: "cat-2", displayName: "opencode", command: "opencode", protocol: "acp" },
+      { id: "cat-3", displayName: "my-script", command: "my-script", protocol: "cli_passthrough" },
     ],
     "profile.agent.list": () => ({ items: [], nextCursor: null }),
   };
