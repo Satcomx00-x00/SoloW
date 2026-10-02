@@ -4,6 +4,18 @@ Every release of SoloW, written from its commits by [git-cliff](https://git-clif
 `cliff.toml`. Versions follow [Semantic Versioning](https://semver.org); the number itself is
 decided by `packages/cli/scripts/next-version.ts` from the same commits.
 
+## [0.19.0](https://github.com/Satcomx00-x00/SoloW/compare/v0.18.0...v0.19.0) — 2026-10-02
+
+### Features
+
+- **harness:** Store harness configs in the app, not the host ([`f885236`](https://github.com/Satcomx00-x00/SoloW/commit/f8852365eb6a69d3f4de960d5f444b74581d36e6))
+- **opencode:** Upgrade the bundled harness to OpenCode 2 (@opencode/cli 2.0.22) ([`914ebdf`](https://github.com/Satcomx00-x00/SoloW/commit/914ebdfda374b26d9179fb5aec93d7beb96f592b))
+
+### Tests
+
+- **web:** Give catalog fixtures the command a config picker reads ([`93a5e5e`](https://github.com/Satcomx00-x00/SoloW/commit/93a5e5ef03cace859644dccbfa10b8bfe2abe2d8))
+- **web:** Harness configs follow Harness profiles in the Harnesses group ([`7285cd8`](https://github.com/Satcomx00-x00/SoloW/commit/7285cd8c7b8e3c58766f4a0ba090d78916fe9792))
+
 ## [0.18.0](https://github.com/Satcomx00-x00/SoloW/compare/v0.17.3...v0.18.0) — 2026-09-30
 
 ### Features
