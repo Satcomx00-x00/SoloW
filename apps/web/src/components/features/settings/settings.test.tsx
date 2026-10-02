@@ -53,6 +53,7 @@ const HANDLERS = {
   "secret.list": () => [],
   "profile.agent.list": () => ({ items: [], nextCursor: null }),
   "profile.agentCatalog.list": () => [],
+  "profile.harnessConfig.list": () => [],
   "profile.executor.list": () => ({ items: [], nextCursor: null }),
   "repository.list": () => ({ items: [], nextCursor: null }),
   "integration.list": () => [],
@@ -153,10 +154,12 @@ describe("the settings page", () => {
     // A Secret, then the Harness Profile that spends it, then somewhere to execute — the sequence
     // the old single column was arranged to show, kept — then what a new Task picks from those
     // two by default (spec F16), and then what the harness is handed once it runs: the MCP
-    // servers it can call and the Skills it reads (spec F24).
+    // servers it can call and the Skills it reads (spec F24). A Profile's Harness Config sits
+    // right after the Profiles that select it (Decision 0028).
     expect(settingsSectionsIn("Harnesses").map((s) => s.id)).toEqual([
       "secrets",
       "agent-profiles",
+      "harness-configs",
       "executor-profiles",
       "task-defaults",
       "mcp-servers",
