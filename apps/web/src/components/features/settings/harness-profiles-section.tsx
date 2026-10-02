@@ -8,6 +8,7 @@ import type {
   HarnessProtocol,
 } from "@solow/contracts";
 import {
+  configHarnessFor,
   DEFAULT_HARNESS_PERMISSION_MODE,
   HARNESS_PROTOCOL_PINS,
   HARNESS_PROTOCOLS,
@@ -30,6 +31,7 @@ import {
 import { WHOLE_PAGE } from "@/lib/paged";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
+import { HarnessConfigSelect } from "./harness-configs-section";
 import {
   SectionStatus,
   SettingsCreate,
@@ -198,6 +200,8 @@ export function HarnessProfilesSection() {
   const [permissionMode, setPermissionMode] = useState<HarnessPermissionMode>(
     DEFAULT_HARNESS_PERMISSION_MODE,
   );
+  /** The Harness Config it launches with (Decision 0028); null is the harness's own defaults. */
+  const [harnessConfigId, setHarnessConfigId] = useState<string | null>(null);
 
   const catalogOptions = catalog.data ?? [];
   /**
@@ -215,7 +219,14 @@ export function HarnessProfilesSection() {
    * ignore (see `HARNESS_PROTOCOL_PINS`). Defaults to allowing both until a harness is chosen,
    * because disabling a field before there is a protocol to justify it explains nothing.
    */
-  const chosenProtocol = catalogOptions.find((c) => c.id === harnessCatalogId)?.protocol;
+  const chosenEntry = catalogOptions.find((c) => c.id === harnessCatalogId);
+  const chosenProtocol = chosenEntry?.protocol;
+  /** Which config format the chosen harness takes — a config for another harness is not offered. */
+  const configHarness = chosenEntry ? configHarnessFor(chosenEntry) : null;
+  const configHarnessOf = (catalogId: string) => {
+    const entry = catalogOptions.find((c) => c.id === catalogId);
+    return entry ? configHarnessFor(entry) : null;
+  };
   const pins = chosenProtocol ? HARNESS_PROTOCOL_PINS[chosenProtocol] : { model: true, mode: true };
 
   // Preselect once the list loads. A Workspace now ships with two entries (Claude Code and
@@ -224,6 +235,9 @@ export function HarnessProfilesSection() {
   useEffect(() => {
     if (!harnessCatalogId && catalogOptions[0]) setHarnessCatalogId(catalogOptions[0].id);
   }, [harnessCatalogId, catalogOptions]);
+  // A config picked for one harness means nothing to another.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset on the harness changing, by design.
+  useEffect(() => setHarnessConfigId(null), [harnessCatalogId]);
 
   const create = trpc.profile.agent.create.useMutation({
     onSuccess: () => {
@@ -464,6 +478,13 @@ export function HarnessProfilesSection() {
                         ? `${p.usage.runningCount} of ${p.concurrencyCap} · ${p.usage.parkedCount} parked`
                         : `${p.usage.runningCount} of ${p.concurrencyCap} running`}
                     </SectionStatus>
+                    <HarnessConfigSelect
+                      className="w-40 shrink-0"
+                      harness={configHarnessOf(p.agentCatalogId)}
+                      label={`Harness config for ${p.name}`}
+                      onChange={(id) => updateProfile.mutate({ id: p.id, harnessConfigId: id })}
+                      value={p.harnessConfigId}
+                    />
                     <Select
                       onValueChange={(v) => requestPermissionChange(p, v as HarnessPermissionMode)}
                       value={p.permissionMode}
@@ -550,6 +571,7 @@ export function HarnessProfilesSection() {
               // Profile that every run reports it could not honour.
               model: pins.model && model.trim() !== "" ? model.trim() : null,
               modeId: pins.mode && modeId.trim() !== "" ? modeId.trim() : null,
+              harnessConfigId: configHarness ? harnessConfigId : null,
             });
           }}
         >
@@ -688,6 +710,19 @@ export function HarnessProfilesSection() {
             Left empty, the harness chooses. A pin the harness's protocol cannot select is reported
             in the run's log rather than silently ignored.
           </p>
+          <div className="grid gap-2">
+            <Label htmlFor="harness-config">Harness config</Label>
+            <HarnessConfigSelect
+              harness={configHarness}
+              id="harness-config"
+              onChange={setHarnessConfigId}
+              value={harnessConfigId}
+            />
+            <p className="text-muted-foreground text-xs leading-relaxed">
+              The settings JSON this harness launches with, from Settings → Harness configs. Your
+              machine's own configuration is never read.
+            </p>
+          </div>
           <div className="grid gap-2">
             <Label htmlFor="harness-permission">Permission mode</Label>
             {/*

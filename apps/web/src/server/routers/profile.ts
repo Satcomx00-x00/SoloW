@@ -2,20 +2,38 @@ import "server-only";
 import {
   createExecutorProfileInput,
   createHarnessCatalogEntryInput,
+  createHarnessConfigInput,
   createHarnessProfileInput,
   deleteExecutorProfileInput,
+  deleteHarnessConfigInput,
   deleteHarnessProfileInput,
+  duplicateHarnessConfigInput,
   executorProfileDto,
   executorProfileListDto,
+  exportHarnessConfigInput,
   harnessCatalogEntryDto,
+  harnessConfigDocument,
+  harnessConfigDto,
   harnessProbeReport,
   harnessProfileDto,
   harnessProfileListDto,
+  importHarnessConfigInput,
+  listHarnessConfigsInput,
   listProfilesInput,
   updateExecutorProfileInput,
+  updateHarnessConfigInput,
   updateHarnessProfileInput,
 } from "@solow/contracts";
 import { z } from "zod";
+import {
+  createHarnessConfig,
+  deleteHarnessConfig,
+  duplicateHarnessConfig,
+  exportHarnessConfig,
+  importHarnessConfig,
+  listHarnessConfigs,
+  updateHarnessConfig,
+} from "../dal/harness-config.js";
 import {
   createExecutorProfile,
   createHarnessCatalogEntry,
@@ -69,7 +87,7 @@ export const profileRouter = router({
           tags: ["profile"],
           protect: true,
           summary:
-            "Edit a Harness Profile's name, concurrency cap or permission mode. The harness it runs and the credential it runs on are fixed at creation — changing those would rewrite what its finished runs meant.",
+            "Edit a Harness Profile's name, concurrency cap, permission mode, model/mode pins or Harness Config. The harness it runs and the credential it runs on are fixed at creation — changing those would rewrite what its finished runs meant.",
         },
       })
       .input(updateHarnessProfileInput)
@@ -151,6 +169,113 @@ export const profileRouter = router({
       .input(createHarnessCatalogEntryInput)
       .output(harnessCatalogEntryDto)
       .mutation(async ({ ctx, input }) => unwrap(await createHarnessCatalogEntry(ctx.rctx, input))),
+  }),
+  /**
+   * Harness Configs (Decision 0028): the harness's own JSON configuration, stored in the app and
+   * handed to the harness at launch — the operator's own `~/.claude` or `~/.config/opencode` is
+   * never read. Owner-only, and absent from the external MCP surface for the reason the libraries
+   * are: what a config says is loaded into every run of the Profiles that select it.
+   */
+  harnessConfig: router({
+    list: ownerProcedure
+      .meta({
+        openapi: {
+          method: "GET",
+          path: "/profile.harnessConfig.list",
+          tags: ["profile"],
+          protect: true,
+          summary:
+            "List this Workspace's Harness Configs, optionally for one harness, with how many Harness Profiles launch with each.",
+        },
+      })
+      .input(listHarnessConfigsInput)
+      .output(z.array(harnessConfigDto))
+      .query(async ({ ctx, input }) => unwrap(await listHarnessConfigs(ctx.rctx, input))),
+    create: ownerProcedure
+      .meta({
+        openapi: {
+          method: "POST",
+          path: "/profile.harnessConfig.create",
+          tags: ["profile"],
+          protect: true,
+          summary:
+            "Store a harness's JSON configuration (Claude Code settings.json, opencode.json). Refused when it sets a credential or a variable SoloW owns — credentials belong in the Profile's Secret.",
+        },
+      })
+      .input(createHarnessConfigInput)
+      .output(harnessConfigDto)
+      .mutation(async ({ ctx, input }) => unwrap(await createHarnessConfig(ctx.rctx, input))),
+    update: ownerProcedure
+      .meta({
+        openapi: {
+          method: "POST",
+          path: "/profile.harnessConfig.update",
+          tags: ["profile"],
+          protect: true,
+          summary:
+            "Change a Harness Config's name, description or JSON. `harness` restates the config's own and cannot change it. Takes effect at each selecting Profile's next launch.",
+        },
+      })
+      .input(updateHarnessConfigInput)
+      .output(harnessConfigDto)
+      .mutation(async ({ ctx, input }) => unwrap(await updateHarnessConfig(ctx.rctx, input))),
+    duplicate: ownerProcedure
+      .meta({
+        openapi: {
+          method: "POST",
+          path: "/profile.harnessConfig.duplicate",
+          tags: ["profile"],
+          protect: true,
+          summary:
+            "Copy a Harness Config under a new name, leaving the Profiles of the original as they are.",
+        },
+      })
+      .input(duplicateHarnessConfigInput)
+      .output(harnessConfigDto)
+      .mutation(async ({ ctx, input }) => unwrap(await duplicateHarnessConfig(ctx.rctx, input))),
+    delete: ownerProcedure
+      .meta({
+        openapi: {
+          method: "POST",
+          path: "/profile.harnessConfig.delete",
+          tags: ["profile"],
+          protect: true,
+          summary: "Delete a Harness Config. Refused while a Harness Profile still selects it.",
+        },
+      })
+      .input(deleteHarnessConfigInput)
+      .output(harnessConfigDto)
+      .mutation(async ({ ctx, input }) => unwrap(await deleteHarnessConfig(ctx.rctx, input.id))),
+    export: ownerProcedure
+      .meta({
+        openapi: {
+          method: "GET",
+          path: "/profile.harnessConfig.export",
+          tags: ["profile"],
+          protect: true,
+          summary:
+            "A Harness Config in its portable form — no ids, no Workspace — to share and import elsewhere.",
+        },
+      })
+      .input(exportHarnessConfigInput)
+      .output(harnessConfigDocument)
+      .query(async ({ ctx, input }) => unwrap(await exportHarnessConfig(ctx.rctx, input.id))),
+    import: ownerProcedure
+      .meta({
+        openapi: {
+          method: "POST",
+          path: "/profile.harnessConfig.import",
+          tags: ["profile"],
+          protect: true,
+          summary:
+            'Add a shared Harness Config from its portable form. A taken name gets a "(copy)" suffix.',
+        },
+      })
+      .input(importHarnessConfigInput)
+      .output(harnessConfigDto)
+      .mutation(async ({ ctx, input }) =>
+        unwrap(await importHarnessConfig(ctx.rctx, input.document)),
+      ),
   }),
   executor: router({
     create: ownerProcedure

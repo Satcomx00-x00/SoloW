@@ -78,6 +78,8 @@ export const createHarnessProfileInput = z.object({
   /** Null — the default — leaves the choice to the harness. See `harnessModelIdSchema`. */
   model: harnessModelIdSchema.nullable().default(null),
   modeId: harnessModeIdSchema.nullable().default(null),
+  /** The Harness Config it launches with (Decision 0028), or null for the harness's defaults. */
+  harnessConfigId: idSchema.nullable().default(null),
 });
 export type CreateHarnessProfileInput = z.infer<typeof createHarnessProfileInput>;
 
@@ -123,6 +125,7 @@ export const harnessProfileDto = z
     permissionMode: harnessPermissionModeSchema,
     model: harnessModelIdSchema.nullable(),
     modeId: harnessModeIdSchema.nullable(),
+    harnessConfigId: idSchema.nullable(),
     usage: harnessProfileUsageDto,
   })
   .merge(timestampsSchema);
@@ -146,6 +149,8 @@ export const updateHarnessProfileInput = z.object({
    */
   model: harnessModelIdSchema.nullable().optional(),
   modeId: harnessModeIdSchema.nullable().optional(),
+  /** Applies to the next launch, like the permission mode; null goes back to no config. */
+  harnessConfigId: idSchema.nullable().optional(),
 });
 export type UpdateHarnessProfileInput = z.infer<typeof updateHarnessProfileInput>;
 

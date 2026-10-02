@@ -65,6 +65,7 @@ describe("Harness Profile usage and deletion", () => {
       permissionMode: "acceptEdits",
       model: null,
       modeId: null,
+      harnessConfigId: null,
     });
     if (!created.ok) throw new Error("seed failed");
 
@@ -281,6 +282,7 @@ describe("createHarnessCatalogEntry", () => {
       permissionMode: "acceptEdits",
       model: null,
       modeId: null,
+      harnessConfigId: null,
     });
 
     expect(profile.ok).toBe(true);

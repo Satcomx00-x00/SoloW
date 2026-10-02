@@ -23,6 +23,7 @@ import { AppearanceSection } from "./appearance-section";
 import { DangerZoneSection } from "./danger-zone-section";
 import { ExecutorProfilesSection } from "./executor-profiles-section";
 import { FlagsSection } from "./flags-section";
+import { HarnessConfigsSection } from "./harness-configs-section";
 import { HarnessProfilesSection } from "./harness-profiles-section";
 import { IntegrationsSection } from "./integrations-section";
 import { McpSection } from "./mcp-section";
@@ -217,6 +218,7 @@ const SECTION_COMPONENTS: Record<string, () => React.ReactNode> = {
   "provider-identity": () => <ProviderIdentitySection />,
   secrets: () => <SecretsSection />,
   "agent-profiles": () => <HarnessProfilesSection />,
+  "harness-configs": () => <HarnessConfigsSection />,
   "executor-profiles": () => <ExecutorProfilesSection />,
   "task-defaults": () => <TaskDefaultsSection />,
   "mcp-servers": () => <McpServersSection />,

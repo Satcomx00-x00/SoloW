@@ -46,3 +46,4 @@ Rules for this log ([per our conventions](../CONVENTIONS.md)):
 | [0025](./0025-history-retention.md) | Closed and deleted Tasks stay resumable for seven days | Accepted |
 | [0026](./0026-checkpoints-through-harness-hooks.md) | Workflow checkpoints are enforced through the harness's own hooks, relayed over the filesystem | Accepted |
 | [0027](./0027-hermetic-harness-configuration.md) | A Task's harness runs against a blank, app-owned configuration | Accepted |
+| [0028](./0028-harness-configs-in-the-app.md) | Harness configuration is stored in the app and handed over at launch | Accepted |

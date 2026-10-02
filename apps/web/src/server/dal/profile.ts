@@ -4,6 +4,7 @@ import {
   type CreateExecutorProfileInput,
   type CreateHarnessCatalogEntryInput,
   type CreateHarnessProfileInput,
+  configHarnessFor,
   type DeleteExecutorProfileInput,
   type DeleteHarnessProfileInput,
   type ExecutorProfileDto,
@@ -12,6 +13,7 @@ import {
   err,
   type HarnessCatalogEntryDto,
   HarnessCatalogErrorCode,
+  HarnessConfigErrorCode,
   type HarnessProfileDto,
   HarnessProfileErrorCode,
   type HarnessProfileListDto,
@@ -26,6 +28,7 @@ import {
   ensureDefaultWorkflows,
   executorProfile,
   harnessCatalog,
+  harnessConfig,
   harnessProfile,
   sessionUsage,
   task,
@@ -94,10 +97,57 @@ export async function createHarnessCatalogEntry(
   return row ? ok(row) : err(CommonErrorCode.ValidationFailed);
 }
 
+/**
+ * A Profile may select a Harness Config only if it is this Workspace's (Principle V) and written
+ * for the harness the Profile runs (Decision 0028) — an opencode config handed to Claude Code
+ * would be refused at launch, after a Task was already queued behind it.
+ */
+async function checkHarnessConfig(
+  ctx: RequestContext,
+  harnessConfigId: string | null | undefined,
+  agentCatalogId: string,
+): Promise<
+  Result<
+    void,
+    typeof CommonErrorCode.ValidationFailed | typeof HarnessConfigErrorCode.HarnessMismatch
+  >
+> {
+  if (!harnessConfigId) return ok(undefined);
+  const [[config], [entry]] = await Promise.all([
+    ctx.db
+      .select({ harness: harnessConfig.harness })
+      .from(harnessConfig)
+      .where(
+        and(eq(harnessConfig.workspaceId, ctx.workspaceId), eq(harnessConfig.id, harnessConfigId)),
+      )
+      .limit(1),
+    ctx.db
+      .select({
+        protocol: harnessCatalog.protocol,
+        key: harnessCatalog.key,
+        command: harnessCatalog.command,
+      })
+      .from(harnessCatalog)
+      .where(
+        and(eq(harnessCatalog.workspaceId, ctx.workspaceId), eq(harnessCatalog.id, agentCatalogId)),
+      )
+      .limit(1),
+  ]);
+  if (!config || !entry) return err(CommonErrorCode.ValidationFailed);
+  return config.harness === configHarnessFor(entry)
+    ? ok(undefined)
+    : err(HarnessConfigErrorCode.HarnessMismatch);
+}
+
 export async function createHarnessProfile(
   ctx: RequestContext,
   input: CreateHarnessProfileInput,
-): Promise<Result<HarnessProfileDto>> {
+): Promise<
+  Result<
+    HarnessProfileDto,
+    typeof CommonErrorCode.ValidationFailed | typeof HarnessConfigErrorCode.HarnessMismatch
+  >
+> {
   // The FK alone only proves the catalog row exists *somewhere* — without this check, an
   // Harness Profile could point at another Workspace's catalog entry and inherit its launch
   // command and billing variable names (Principle V).
@@ -112,6 +162,8 @@ export async function createHarnessProfile(
     )
     .limit(1);
   if (!entry) return err(CommonErrorCode.ValidationFailed);
+  const config = await checkHarnessConfig(ctx, input.harnessConfigId, input.agentCatalogId);
+  if (!config.ok) return config;
 
   const [row] = await ctx.db
     .insert(harnessProfile)
@@ -125,6 +177,7 @@ export async function createHarnessProfile(
       permissionMode: input.permissionMode,
       model: input.model,
       modeId: input.modeId,
+      harnessConfigId: input.harnessConfigId,
     })
     .returning();
   // The Workspace's first Profile is what the default Workflows were waiting for: a Step has to
@@ -251,7 +304,24 @@ export async function getHarnessProfile(
 export async function updateHarnessProfile(
   ctx: RequestContext,
   input: UpdateHarnessProfileInput,
-): Promise<Result<HarnessProfileDto, typeof CommonErrorCode.NotFound>> {
+): Promise<
+  Result<
+    HarnessProfileDto,
+    | typeof CommonErrorCode.NotFound
+    | typeof CommonErrorCode.ValidationFailed
+    | typeof HarnessConfigErrorCode.HarnessMismatch
+  >
+> {
+  if (input.harnessConfigId) {
+    const [current] = await ctx.db
+      .select({ agentCatalogId: harnessProfile.agentCatalogId })
+      .from(harnessProfile)
+      .where(and(eq(harnessProfile.workspaceId, ctx.workspaceId), eq(harnessProfile.id, input.id)))
+      .limit(1);
+    if (!current) return err(CommonErrorCode.NotFound);
+    const config = await checkHarnessConfig(ctx, input.harnessConfigId, current.agentCatalogId);
+    if (!config.ok) return config;
+  }
   const [row] = await ctx.db
     .update(harnessProfile)
     .set({
@@ -261,6 +331,7 @@ export async function updateHarnessProfile(
       // Absent leaves the pin alone; null clears it back to "whatever the harness chooses".
       ...(input.model !== undefined ? { model: input.model } : {}),
       ...(input.modeId !== undefined ? { modeId: input.modeId } : {}),
+      ...(input.harnessConfigId !== undefined ? { harnessConfigId: input.harnessConfigId } : {}),
       updatedAt: new Date().toISOString(),
     })
     .where(and(eq(harnessProfile.workspaceId, ctx.workspaceId), eq(harnessProfile.id, input.id)))

@@ -127,6 +127,20 @@ own, and the harness's own shell can read its environment and the filesystem the
 None of this is a sandbox — the container Executor ([F07](./F07-execution-environments.md)) is what
 a Task that must not reach the host is pointed at.
 
+## Harness Configs (Decision 0028)
+
+The configuration a harness *does* get lives in the app. A **Harness Config** is the harness's own
+JSON — Claude Code's `settings.json`, opencode's `opencode.json` — stored per Workspace and edited
+in Settings → Harness configs, where it can be created, edited, duplicated, exported to a file and
+imported from one. A Harness Profile selects at most one config written for its harness; none means
+the harness's own defaults.
+
+At launch the selected config is handed over without touching any file: Claude Code receives it as
+`--settings` (with a Step's checkpoint hook merged over it, never dropped), opencode as
+`OPENCODE_CONFIG_CONTENT`. Both work identically on the local and container Executors. A config may
+not carry a credential or name a variable SoloW owns — billing, configuration discovery — and is
+refused, key by key, when it tries; the Profile's Secret is where a credential belongs.
+
 ## Functional requirements
 
 ### Harness Profiles
@@ -158,6 +172,8 @@ a Task that must not reach the host is pointed at.
   Profile runs — name, concurrency cap, permission mode. The harness it points at, its auth mode
   and its Secret are fixed at creation: those are what a Profile *is*, and changing them under
   Tasks that already reference it would rewrite what finished runs meant.
+- **FR-2a** A Harness Profile can select a Harness Config for its harness, changeable at any time;
+  a config is refused for deletion while a Profile selects it (Decision 0028).
 - **FR-3** A Harness Profile can be referenced by many Tasks and Workflow Steps.
 - **FR-4** Editing a Harness Profile affects future Sessions; Sessions already running are
   unaffected.

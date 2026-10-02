@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { type ClaudeSession, type ClaudeUpdate, startClaudeSession } from "@solow/claude-code";
 import type { HarnessStopReason } from "@solow/contracts";
-import { detectFailureSignal, type FailureSignal } from "@solow/core";
+import { detectFailureSignal, type FailureSignal, mergeHarnessSettings } from "@solow/core";
 import type { Executor } from "../executor/types.js";
 import { CheckpointRelay } from "./checkpoints.js";
 import type {
@@ -60,6 +60,19 @@ export function worktreeNameForTask(taskId: string): string {
   return `solow-task-${taskId}`;
 }
 
+/**
+ * One `--settings` for the launch: the Profile's Harness Config (Decision 0028) with the app's own
+ * checkpoint hook merged over it, so a config can add hooks but never displace the checkpoint.
+ */
+export function launchSettings(
+  config: Record<string, unknown> | undefined,
+  app: string | undefined,
+): { settings?: string } {
+  if (!config) return app ? { settings: app } : {};
+  const merged = app ? mergeHarnessSettings(config, JSON.parse(app)) : config;
+  return { settings: JSON.stringify(merged) };
+}
+
 export interface ClaudeCodeRunnerOptions {
   /** Where the CLI process actually runs — issue #1's `Executor`. */
   executor: Executor;
@@ -111,7 +124,7 @@ export class ClaudeCodeRunner implements HarnessRunner {
           ...(opts.resumeSessionId ? { resumeSessionId: opts.resumeSessionId } : {}),
           permissionMode: this.options.permissionMode ?? DEFAULT_PERMISSION_MODE,
           ...(this.options.model ? { model: this.options.model } : {}),
-          ...(relay ? { settings: relay.settings } : {}),
+          ...launchSettings(opts.harnessSettings, relay?.settings),
           onUpdate: (update) => {
             const event = mapUpdate(update);
             if (event) opts.onEvent(event);

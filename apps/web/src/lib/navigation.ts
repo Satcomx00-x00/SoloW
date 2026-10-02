@@ -5,6 +5,7 @@ import {
   Building2,
   Columns3,
   Eraser,
+  FileJson,
   FlaskConical,
   FolderGit2,
   History,
@@ -296,6 +297,13 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
     caption: "Which harness runs, how it authenticates, how many at once",
     group: "Harnesses",
     icon: Bot,
+  },
+  {
+    id: "harness-configs",
+    label: "Harness configs",
+    caption: "The harness's own settings JSON, stored here instead of in your home directory",
+    group: "Harnesses",
+    icon: FileJson,
   },
   {
     id: "executor-profiles",

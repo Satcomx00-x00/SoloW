@@ -1,6 +1,6 @@
 # 0027 — A Task's harness runs against a blank, app-owned configuration
 
-**Status:** Accepted · **Date:** 2026-09-24 · **Deciders:** Architecture
+**Status:** Accepted, extended by [0028](./0028-harness-configs-in-the-app.md) · **Date:** 2026-09-24 · **Deciders:** Architecture
 **Builds on:** [0023](./0023-docker-executor-cli.md), [0024](./0024-agent-libraries-loading.md),
 [0026](./0026-checkpoints-through-harness-hooks.md) ·
 **Enables:** [F05](../features/F05-harness-executor-profiles.md),
