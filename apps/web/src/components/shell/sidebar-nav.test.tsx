@@ -2,7 +2,7 @@
 
 import { afterEach, describe, expect, it, mock } from "bun:test";
 import type { TaskDto } from "@solow/contracts";
-import { cleanup, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { renderWithTrpc } from "@/test/trpc-harness";
 
 /**
@@ -129,6 +129,44 @@ describe("Sidebar — counts stay current", () => {
     await waitFor(() =>
       expect(log.calls.filter((c) => c.path === "workspace.counts").length).toBeGreaterThan(1),
     );
+  });
+});
+
+describe("Sidebar — a long list of Projects", () => {
+  const many = Array.from({ length: 10 }, (_, i) => ({
+    id: `proj-${i + 1}`,
+    title: i === 0 ? "Features ToDeb" : `Project ${i + 1}`,
+    itemCount: 0,
+  }));
+
+  it("has no filter box while the list is short", async () => {
+    pathname = "/projects";
+    renderWithTrpc(<SidebarNav workspaceName="Acme" signedIn={false} />, handlers());
+
+    await screen.findByRole("link", { name: /GlabTest/ });
+    expect(screen.queryByRole("searchbox", { name: "Filter projects" })).toBeNull();
+  });
+
+  it("filters by title, keeping the open Project in view", async () => {
+    pathname = "/projects/proj-1/board";
+    renderWithTrpc(
+      <SidebarNav workspaceName="Acme" signedIn={false} />,
+      handlers({ "project.list": () => many }),
+    );
+
+    const box = await screen.findByRole("searchbox", { name: "Filter projects" });
+    fireEvent.change(box, { target: { value: "project 1" } });
+
+    const projects = screen.getByRole("navigation", { name: "Projects" });
+    const names = within(projects)
+      .getAllByRole("link")
+      .map((l) => l.getAttribute("title"))
+      .filter(Boolean);
+    // "Project 10" matches; "Features ToDeb" is open, so it stays.
+    expect(names).toEqual(["Features ToDeb", "Project 10"]);
+
+    fireEvent.keyDown(box, { key: "Escape" });
+    expect(within(projects).getAllByRole("link").length).toBeGreaterThan(10);
   });
 });
 
