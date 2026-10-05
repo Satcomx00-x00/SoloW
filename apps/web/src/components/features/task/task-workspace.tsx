@@ -1010,11 +1010,8 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
         Below `lg` the rail stacks under the evidence and keeps its own scroll.
       */}
       <header className="flex h-11 shrink-0 items-center gap-2 border-b px-3">
-        <Button asChild variant="ghost" size="icon-sm" className="shrink-0">
-          <Link href={back.href} aria-label={back.label}>
-            <ArrowLeft />
-          </Link>
-        </Button>
+        {/* No back arrow: the breadcrumb above already reads Projects › Project › Board › this
+            Task, every crumb a link, so a third way back on one screen was one too many. */}
         {/* Where a sub-task was split from, as the crumbs before its title (issue #56): a
             sub-task's title on its own is often meaningless without them. */}
         {t.parentTaskId ? <ParentChain parentTaskId={t.parentTaskId} /> : null}
