@@ -69,7 +69,7 @@ function handlers(extra: Record<string, (input: unknown) => unknown> = {}) {
       return { id: projectId, title: projectId === "proj-1" ? "Features ToDeb" : "GlabTest" };
     },
     "workspace.counts": () => ({ unassignedIssues: 2, reviewByProject: [] }),
-    "preference.getRecentTasks": () => RECENTS([]),
+    "task.recent": () => [],
     "preference.recordRecentTask": () => RECENTS([]),
     "workflow.list": () => [],
     ...extra,
@@ -257,17 +257,18 @@ describe("Sidebar — Recent tasks", () => {
     expect(screen.queryByRole("navigation", { name: "Recent tasks" })).toBeNull();
   });
 
-  it("lists the saved Tasks, most recent first, leaving out the one that is open", async () => {
+  it("lists the saved Tasks in one request, most recent first, leaving out the open one", async () => {
     pathname = "/task/t3";
-    renderWithTrpc(
+    const { log } = renderWithTrpc(
       <SidebarNav workspaceName="Acme" signedIn={false} />,
       handlers({
-        "preference.getRecentTasks": () => RECENTS(["t3", "t2", "t1"]),
+        "task.recent": () => [
+          { task: task({ id: "t3", title: "The open one" }) },
+          { task: task({ id: "t2", title: "Fix the gate latch" }) },
+          { task: task({ id: "t1", title: "Add farewell()" }) },
+        ],
         "project.forIssue": () => ({ projectId: "proj-1" }),
-        "task.get": (input) => {
-          const { id } = input as { id: string };
-          return task({ id, title: { t1: "Add farewell()", t2: "Fix the gate latch" }[id] ?? id });
-        },
+        "task.get": (input) => task({ id: (input as { id: string }).id, title: "The open one" }),
       }),
     );
 
@@ -279,6 +280,13 @@ describe("Sidebar — Recent tasks", () => {
           .map((l) => l.textContent),
       ).toEqual(["Fix the gate latch", "Add farewell()"]),
     );
+    // One request for the list — never a `task.get` per row. The only `task.get` is the open
+    // Task's own, which places the page.
+    expect(
+      log.calls
+        .filter((c) => c.path === "task.get")
+        .every((c) => (c.input as { id: string }).id === "t3"),
+    ).toBe(true);
   });
 });
 
