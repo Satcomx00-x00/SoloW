@@ -263,9 +263,12 @@ describe("Sidebar — Recent tasks", () => {
       <SidebarNav workspaceName="Acme" signedIn={false} />,
       handlers({
         "task.recent": () => [
-          { task: task({ id: "t3", title: "The open one" }) },
-          { task: task({ id: "t2", title: "Fix the gate latch" }) },
-          { task: task({ id: "t1", title: "Add farewell()" }) },
+          { task: task({ id: "t3", title: "The open one" }), project: null },
+          {
+            task: task({ id: "t2", title: "Fix the gate latch" }),
+            project: { id: "proj-2", title: "GlabTest" },
+          },
+          { task: task({ id: "t1", title: "Add farewell()" }), project: null },
         ],
         "project.forIssue": () => ({ projectId: "proj-1" }),
         "task.get": (input) => task({ id: (input as { id: string }).id, title: "The open one" }),
@@ -278,7 +281,7 @@ describe("Sidebar — Recent tasks", () => {
         within(recent)
           .getAllByRole("link")
           .map((l) => l.textContent),
-      ).toEqual(["Fix the gate latch", "Add farewell()"]),
+      ).toEqual(["Fix the gate latch, in GlabTest", "Add farewell()"]),
     );
     // One request for the list — never a `task.get` per row. The only `task.get` is the open
     // Task's own, which places the page.

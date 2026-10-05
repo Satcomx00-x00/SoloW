@@ -396,7 +396,7 @@ function RecentTasks({ excludeTaskId }: { excludeTaskId: string | null }) {
       <GroupLabel>Recent</GroupLabel>
       <ul className="space-y-px px-2">
         {rows.map((r) => (
-          <RecentTaskRow key={r.task.id} task={r.task} />
+          <RecentTaskRow key={r.task.id} task={r.task} project={r.project} />
         ))}
       </ul>
     </nav>
@@ -406,16 +406,31 @@ function RecentTasks({ excludeTaskId }: { excludeTaskId: string | null }) {
 /**
  * One recalled Task, by itself: title, and the same lifecycle glyph and colour the board and the
  * state badge already use for it — the point of the list is to say "here is one waiting on you"
- * as readily as "here is one you were just in", and a bare title cannot say which.
+ * as readily as "here is one you were just in", and a bare title cannot say which. The Project
+ * goes after it, muted, so two Tasks with the same name in different Projects are two rows.
  */
-function RecentTaskRow({ task: t }: { task: TaskDto }) {
+function RecentTaskRow({
+  task: t,
+  project,
+}: {
+  task: TaskDto;
+  project: { id: string; title: string } | null;
+}) {
   const style = STATE_STYLE[t.state];
   return (
     <NavItem
       href={`/task/${t.id}`}
       label={t.title}
-      title={t.title}
+      title={project ? `${t.title} · ${project.title}` : t.title}
       active={false}
+      trailing={
+        project ? (
+          <span className="max-w-[40%] shrink-0 truncate text-muted-foreground text-xs">
+            <span className="sr-only">, in </span>
+            {project.title}
+          </span>
+        ) : undefined
+      }
       leading={
         <style.icon
           aria-hidden
