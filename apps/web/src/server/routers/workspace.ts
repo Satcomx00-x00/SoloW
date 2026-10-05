@@ -93,7 +93,7 @@ export const workspaceRouter = router({
         tags: ["workspace"],
         protect: true,
         summary:
-          "The counts shown beside the app's navigation: how many Issues belong to no Project.",
+          "The counts shown beside the app's navigation: how many Issues belong to no Project, and how many Tasks await review in each Project.",
       },
     })
     .input(workspaceDto.pick({}).optional())

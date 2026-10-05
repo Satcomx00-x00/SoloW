@@ -37719,7 +37719,7 @@
     "/workspace.counts": {
       "get": {
         "operationId": "workspace-counts",
-        "summary": "The counts shown beside the app's navigation: how many Issues belong to no Project.",
+        "summary": "The counts shown beside the app's navigation: how many Issues belong to no Project, and how many Tasks await review in each Project.",
         "tags": [
           "workspace"
         ],
@@ -37739,10 +37739,31 @@
                     "unassignedIssues": {
                       "type": "integer",
                       "minimum": 0
+                    },
+                    "reviewByProject": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "projectId": {
+                            "type": "string"
+                          },
+                          "tasks": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "exclusiveMinimum": true
+                          }
+                        },
+                        "required": [
+                          "projectId",
+                          "tasks"
+                        ]
+                      }
                     }
                   },
                   "required": [
-                    "unassignedIssues"
+                    "unassignedIssues",
+                    "reviewByProject"
                   ]
                 }
               }

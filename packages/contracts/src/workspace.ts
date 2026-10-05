@@ -205,5 +205,11 @@ export type WorkspaceResetDto = z.infer<typeof workspaceResetDto>;
 export const workspaceCountsDto = z.object({
   /** Issues held by no Project — what the Unassigned page lists. */
   unassignedIssues: z.number().int().nonnegative(),
+  /**
+   * Tasks waiting on a person's review, per Project that holds their Issue. Only Projects with
+   * at least one appear. Review is the one Task state that is waiting on a human (Principle I),
+   * so it is the one the navigation points at.
+   */
+  reviewByProject: z.array(z.object({ projectId: z.string(), tasks: z.number().int().positive() })),
 });
 export type WorkspaceCountsDto = z.infer<typeof workspaceCountsDto>;

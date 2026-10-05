@@ -28,7 +28,7 @@ const { TooltipProvider } = await import("@/components/ui/tooltip");
 
 const handlers = {
   "project.list": () => [],
-  "workspace.counts": () => ({ unassignedIssues: 0 }),
+  "workspace.counts": () => ({ unassignedIssues: 0, reviewByProject: [] }),
   "preference.getRecentTasks": () => ({ workspaceId: "ws-1", userId: "user-1", taskIds: [] }),
   "preference.recordRecentTask": () => ({ workspaceId: "ws-1", userId: "user-1", taskIds: [] }),
   "workflow.list": () => [],
