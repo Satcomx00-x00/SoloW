@@ -9,7 +9,6 @@ import {
   useContext,
   useEffect,
   useMemo,
-  useRef,
   useState,
 } from "react";
 import { Button } from "@/components/ui/button";
@@ -55,6 +54,25 @@ export function useSidebar(): SidebarHandle | null {
 }
 
 const MOBILE_QUERY = "(max-width: 767px)";
+const DEFAULT_APP_PATH = "/projects";
+const LAST_APP_PATH_KEY = "solow.lastAppPath";
+
+// Storage can throw (a private window, blocked site data); the back link then just goes home.
+function readSession(key: string): string | null {
+  try {
+    return window.sessionStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeSession(key: string, value: string): void {
+  try {
+    window.sessionStorage.setItem(key, value);
+  } catch {
+    // See `readSession`.
+  }
+}
 
 function isEditable(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -77,10 +95,22 @@ export function SidebarProvider({
   const pathname = usePathname();
   const [open, setOpen] = useState(defaultOpen);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const lastAppPath = useRef("/projects");
+  const [lastAppPath, setLastAppPath] = useState(DEFAULT_APP_PATH);
 
+  /*
+   * Where Settings' back link goes. Kept in `sessionStorage` as well as state, because a reload on
+   * a Settings page starts with no history of its own and the link fell back to the Projects list
+   * — the one place you were demonstrably not. Per tab, on purpose: two tabs are two trails.
+   */
   useEffect(() => {
-    if (!pathname.startsWith("/settings")) lastAppPath.current = pathname;
+    if (pathname.startsWith("/settings")) {
+      const stored = readSession(LAST_APP_PATH_KEY);
+      if (stored) setLastAppPath(stored);
+      return;
+    }
+    const here = `${pathname}${window.location.search}`;
+    setLastAppPath(here);
+    writeSession(LAST_APP_PATH_KEY, here);
   }, [pathname]);
 
   // Navigating is what closes a drawer: it covers the page you just asked for.
@@ -115,12 +145,9 @@ export function SidebarProvider({
     return () => window.removeEventListener("keydown", onKey);
   }, [toggle]);
 
-  // `pathname` is a dependency for `lastAppPath`: the ref is read when the handle is built, so the
-  // handle has to be rebuilt on the navigation that changed it.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: see above
   const handle = useMemo<SidebarHandle>(
-    () => ({ open, mobileOpen, setMobileOpen, toggle, lastAppPath: lastAppPath.current }),
-    [open, mobileOpen, toggle, pathname],
+    () => ({ open, mobileOpen, setMobileOpen, toggle, lastAppPath }),
+    [open, mobileOpen, toggle, lastAppPath],
   );
 
   return <SidebarContext.Provider value={handle}>{children}</SidebarContext.Provider>;
