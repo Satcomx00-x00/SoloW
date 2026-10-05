@@ -26,8 +26,8 @@ them have running code behind them.
 
 **Already in the repo** — `Button`, `Input`, `Textarea`, `Label`, `Form` (react-hook-form +
 zod), `Select`, `Dialog`, `AlertDialog`/`ConfirmAction`, `Card`, `Badge`, `Tabs`,
-`ScrollArea`, `Separator`, `Tooltip`, `Command` (cmdk), plus the shell (`ActivityBar`,
-`HeaderBar`, `Navigator`, `StatusBar`, `CommandPalette`), the board (`DndBoard`, `Column`,
+`ScrollArea`, `Separator`, `Tooltip`, `Command` (cmdk), plus the shell
+(`HeaderBar`, `Sidebar`, `StatusBar`, `CommandPalette`), the board (`DndBoard`, `Column`,
 `TaskCard`, `TaskStateBadge`) and `DiffView`. Libraries on hand: radix-ui, dnd-kit, cmdk,
 lucide-react, TanStack Query, Tailwind 4.
 
@@ -94,7 +94,7 @@ lucide-react, TanStack Query, Tailwind 4.
 | 39 | Approve / reject / request changes | All three recorded with actor, timestamp, feedback | ✅ | Replace the single feedback box with **line-anchored comments on the diff**, submitted as one review. A paragraph of prose is a much weaker instruction to a harness than "this line, this problem" — this is the highest-leverage change to harness success rate in the whole table | Hover "+" on the diff gutter → **new** Popover comment box; a pending-comments tray; submit through the review `existing` Dialog |
 | 40 | Nothing ships without a human decision | Enforced in the durable workflow (`waitForEvent`) | ✅ ⭐ | Make the **gate configurable per workflow step** (auto-approve a lint step, mandatory human on integration) while keeping "no integration without a recorded decision" as an unconditional invariant. Once 6 lands, an unconfigurable gate will simply be bypassed | Gate-rule `existing` Select on the step editor; a lock icon on steps that may never auto-approve |
 | 41 | Push the branch / open a PR on approval | Commits onto a **local branch only** | 🟡 | Integration becomes a **strategy resolved per repository** — local branch / push / open PR / merge — with a git credential from the secret store and the title and body written by the utility harness (22). Needs 68 for auth. This is the most-requested missing outcome in the product | Integration `existing` Select on the repository card; the approve `existing` Dialog states the concrete outcome ("push to origin, open PR against `main`") before confirming; the result becomes a PR `existing` Badge with a link on the card |
-| 42 | Command palette / keyboard navigation | `cmdk` palette, activity bar, navigator, status bar | ✅ | Make it **registry-driven** — commands contributed by feature modules with `when` clauses — because that registry is precisely what a plugin API (100) extends, and retrofitting one later means touching every command | `existing` Command; add a **new** Kbd primitive, recency ordering, and nested groups |
+| 42 | Command palette / keyboard navigation | `cmdk` palette, sidebar, status bar | ✅ | Make it **registry-driven** — commands contributed by feature modules with `when` clauses — because that registry is precisely what a plugin API (100) extends, and retrofitting one later means touching every command | `existing` Command; add a **new** Kbd primitive, recency ordering, and nested groups |
 | 43 | Mobile / phone orchestration UI | Responsive layout only | ❌ | The phone job is **triage and approve**, not authoring. Ship a dedicated route — single-column board, swipeable task sheet, review gate — rather than compressing the desktop grid, which is how "mobile support" usually ends up unusable | **new** Sheet/Drawer, a bottom action bar, segmented control in place of `existing` Tabs, dnd-kit `TouchSensor` |
 
 ## 4. Executors & runtime

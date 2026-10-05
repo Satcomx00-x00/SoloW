@@ -6,22 +6,20 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppContextProvider } from "@/lib/app-context";
 import type { AppContext, ShellIdentity } from "@/lib/contributions";
 import { WorkspaceEventsProvider } from "@/lib/workspace-events";
-import { ActivityBar } from "./activity-bar";
 import { CommandPalette } from "./command-palette";
 import { HeaderBar } from "./header-bar";
-import { Navigator } from "./navigator";
 import { SecondarySidebar, SecondarySidebarProvider } from "./secondary-sidebar";
+import { Sidebar, SidebarProvider } from "./sidebar";
 
 export type { ShellIdentity };
 
 /**
- * VS-Code-style dashboard shell: activity bar + primary sidebar + header'd main + secondary
- * sidebar + status bar.
+ * The dashboard shell: sidebar + header'd main + secondary sidebar + status bar.
  *
- * Two sidebars, as in VS Code, because they answer different questions and a single column cannot
- * hold both without one of them losing: the `Navigator` on the left lists what there is to open,
- * the `SecondarySidebar` on the right inspects what is open. The right-hand one is a portal
- * outlet, so it exists only on a surface that fills it — see `secondary-sidebar.tsx`.
+ * Two sidebars, because they answer different questions and a single column cannot hold both
+ * without one of them losing: the `Sidebar` on the left lists where there is to go, the
+ * `SecondarySidebar` on the right inspects what is open. The right-hand one is a portal outlet,
+ * so it exists only on a surface that fills it — see `secondary-sidebar.tsx`.
  *
  * The shell is where the `AppContext` is published (issue #3), because it is the one component
  * that has the facts a contribution's `when` predicate is judged against and sits above every
@@ -33,11 +31,14 @@ export function DashboardShell({
   children,
   identity,
   workspaceName,
+  sidebarOpen,
 }: {
   children: ReactNode;
   /** The signed-in Owner, or null when running on the local dev-owner path. */
   identity: ShellIdentity | null;
   workspaceName: string;
+  /** Whether the sidebar starts shown — the remembered choice, read from a cookie by the layout. */
+  sidebarOpen: boolean;
 }) {
   const appContext = useMemo<AppContext>(() => ({ identity }), [identity]);
 
@@ -52,29 +53,29 @@ export function DashboardShell({
       */}
       <WorkspaceEventsProvider>
         <TooltipProvider delayDuration={200}>
-          <SecondarySidebarProvider>
-            <div className="flex h-[100dvh] flex-col overflow-hidden bg-background text-foreground">
-              {/*
+          <SidebarProvider defaultOpen={sidebarOpen}>
+            <SecondarySidebarProvider>
+              <div className="flex h-[100dvh] flex-col overflow-hidden bg-background text-foreground">
+                {/*
                 Skip to content — the first thing in the tab order, invisible until focused.
 
                 WCAG 2.4.1 is met by a skip link *or* a heading outline, and Settings had neither:
-                nineteen tab stops separate the document start from its first control, because the
-                activity rail and all twelve navigator links come first on every single visit. The
-                rail is the same on every page, so this is not a Settings fix that happens to live
-                in the shell — it is a shell fix that Settings made impossible to keep ignoring.
+                nineteen tab stops separated the document start from its first control, because the
+                navigation came first on every single visit. The sidebar is the same on every page,
+                so this is not a Settings fix that happens to live in the shell — it is a shell fix
+                that Settings made impossible to keep ignoring.
               */}
-              <a
-                href="#main"
-                className="-translate-y-full focus-visible:-translate-y-0 absolute top-0 left-0 z-50 rounded-br-md bg-primary px-3 py-2 font-medium text-primary-foreground text-sm transition-transform focus-visible:relative"
-              >
-                Skip to content
-              </a>
-              <div className="flex min-h-0 flex-1">
-                <ActivityBar signedIn={identity !== null} />
-                <Navigator workspaceName={workspaceName} />
-                <div className="flex min-w-0 flex-1 flex-col">
-                  <HeaderBar workspaceName={workspaceName} />
-                  {/*
+                <a
+                  href="#main"
+                  className="-translate-y-full focus-visible:-translate-y-0 absolute top-0 left-0 z-50 rounded-br-md bg-primary px-3 py-2 font-medium text-primary-foreground text-sm transition-transform focus-visible:relative"
+                >
+                  Skip to content
+                </a>
+                <div className="flex min-h-0 flex-1">
+                  <Sidebar workspaceName={workspaceName} signedIn={identity !== null} />
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <HeaderBar />
+                    {/*
                 `relative` is load-bearing, not decoration.
 
                 This is the SPA's only scrolling region, and without a positioning context on it
@@ -90,25 +91,26 @@ export function DashboardShell({
                 places at once. Making this element the containing block puts those descendants
                 back inside the region that owns them, and the document stays exactly `100dvh`.
               */}
-                  <div className="flex min-h-0 flex-1">
-                    <main
-                      id="main"
-                      tabIndex={-1}
-                      className="relative min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden outline-none"
-                    >
-                      {children}
-                    </main>
-                    {/* Inside the header'd column and beside `main`, not beside the whole column:
+                    <div className="flex min-h-0 flex-1">
+                      <main
+                        id="main"
+                        tabIndex={-1}
+                        className="relative min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden outline-none"
+                      >
+                        {children}
+                      </main>
+                      {/* Inside the header'd column and beside `main`, not beside the whole column:
                       the panel belongs to the document being inspected, so the breadcrumb stays
                       above both and the status bar stays below both. */}
-                    <SecondarySidebar />
+                      <SecondarySidebar />
+                    </div>
                   </div>
                 </div>
+                <StatusBar />
               </div>
-              <StatusBar />
-            </div>
-            <CommandPalette />
-          </SecondarySidebarProvider>
+              <CommandPalette />
+            </SecondarySidebarProvider>
+          </SidebarProvider>
         </TooltipProvider>
       </WorkspaceEventsProvider>
     </AppContextProvider>

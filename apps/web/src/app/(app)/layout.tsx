@@ -1,8 +1,9 @@
 import { createDb, LOCAL_WORKSPACE_ID } from "@solow/db";
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
 import { DashboardShell } from "@/components/shell/dashboard-shell";
+import { SIDEBAR_COOKIE } from "@/components/shell/sidebar-cookie";
 import { resolveSession } from "@/server/auth/session";
 import { getWorkspaceName } from "@/server/dal/workspace";
 import { devOwnerMode } from "@/server/env";
@@ -35,8 +36,15 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   // decode the cookie and read the session and user rows twice, in series, before painting.
   const workspaceName = (await getWorkspaceName(createDb(), session.workspaceId)) ?? "Workspace";
 
+  // Read here so the first paint already has the sidebar the Owner left it in; shown by default.
+  const sidebarOpen = (await cookies()).get(SIDEBAR_COOKIE)?.value !== "closed";
+
   return (
-    <DashboardShell identity={session.identity} workspaceName={workspaceName}>
+    <DashboardShell
+      identity={session.identity}
+      sidebarOpen={sidebarOpen}
+      workspaceName={workspaceName}
+    >
       {children}
     </DashboardShell>
   );

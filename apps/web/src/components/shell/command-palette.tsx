@@ -281,6 +281,8 @@ export function CommandPaletteTrigger() {
   return (
     <button
       type="button"
+      // Named outright: below `sm` the word is hidden and the button would be called "Ctrl K".
+      aria-label="Search"
       onClick={openCommandPalette}
       className="flex h-7 items-center gap-2 rounded-md border bg-background/50 py-0 pr-1 pl-2 text-muted-foreground text-xs transition-colors hover:border-ring/40 hover:text-foreground"
     >

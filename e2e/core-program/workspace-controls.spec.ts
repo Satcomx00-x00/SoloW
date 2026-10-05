@@ -179,9 +179,7 @@ test.describe("workspace controls", () => {
     await expect(page.getByRole("alert").filter({ hasText: "not enabled" })).toHaveCount(0);
   });
 
-  test("the project picker switches project and keeps you on the same section", async ({
-    page,
-  }) => {
+  test("the sidebar switches project and keeps you on the same section", async ({ page }) => {
     const stamp = Date.now();
     const ids: string[] = [];
     for (const name of [`Picker A ${stamp}`, `Picker B ${stamp}`]) {
@@ -196,20 +194,22 @@ test.describe("workspace controls", () => {
     const [a, b] = ids as [string, string];
 
     await page.goto(`/projects/${a}/board`);
-    await page.getByRole("button", { name: `Picker A ${stamp} — switch project` }).click();
-    await page.getByPlaceholder("Find a project…").fill(`Picker B ${stamp}`);
-    await page.getByRole("option", { name: new RegExp(`Picker B ${stamp}`) }).click();
-    await expect(page).toHaveURL(new RegExp(`/projects/${b}/board$`));
+    const projects = page.getByRole("navigation", { name: "Projects" });
+    // The open Project's sections are nested under it; the other one is folded.
     await expect(
-      page.getByRole("button", { name: `Picker B ${stamp} — switch project` }),
+      projects.getByRole("list", { name: `Picker A ${stamp} sections` }).getByRole("link", {
+        name: "Board",
+      }),
+    ).toHaveAttribute("aria-current", "page");
+    await projects.getByRole("link", { name: `Picker B ${stamp}` }).click();
+    await expect(page).toHaveURL(new RegExp(`/projects/${b}/board$`));
+    await expect(projects.getByRole("list", { name: `Picker B ${stamp} sections` })).toBeVisible();
+    await expect(
+      page.getByRole("navigation", { name: "Breadcrumb" }).getByText(`Picker B ${stamp}`),
     ).toBeVisible();
 
-    // A search that matches nothing says so; the way to make a project is always there.
-    await page.getByRole("button", { name: `Picker B ${stamp} — switch project` }).click();
-    await page.getByPlaceholder("Find a project…").fill(`no such project ${stamp}`);
-    await expect(page.getByText("No project matches.")).toBeVisible();
-    await page.getByPlaceholder("Find a project…").fill("");
-    await page.getByRole("option", { name: "New or adopted project…" }).click();
+    // The Projects list itself is always one click away.
+    await projects.getByRole("link", { name: "All projects" }).click();
     await expect(page).toHaveURL(/\/projects$/);
 
     for (const id of ids) await trpc(page, "project.delete", { projectId: id }, "mutation");

@@ -95,11 +95,9 @@ describe("the command palette's entries", () => {
     // because it would have to name a Project to do it.
     expect(offered).toContain("Unassigned");
     expect(offered).toContain("Settings");
-    // And *not* Projects: picking a Project is the navigator title's job now (spec F16), so the
-    // rail entry this registration mirrored no longer exists. Asserted rather than merely
-    // achieved — a stray re-registration would draw a row leading back to the hub the change
-    // removed from the chrome.
-    expect(offered).not.toContain("Projects");
+    // And Projects, first: the app's front door is a destination again (Decision 0029), and the
+    // palette is one more way to reach it.
+    expect(offered[0]).toBe("Projects");
   });
 
   it("offers no create command, because there is no create action left to run one", () => {
