@@ -195,3 +195,15 @@ export const workspaceResetDto = z.object({
   worktrees: z.array(z.string()),
 });
 export type WorkspaceResetDto = z.infer<typeof workspaceResetDto>;
+
+/**
+ * Counts the app's navigation shows beside its destinations, computed in SQL.
+ *
+ * Its own read rather than the length of a list: the sidebar used to download every unassigned
+ * Issue on every page to show one number beside "Unassigned".
+ */
+export const workspaceCountsDto = z.object({
+  /** Issues held by no Project — what the Unassigned page lists. */
+  unassignedIssues: z.number().int().nonnegative(),
+});
+export type WorkspaceCountsDto = z.infer<typeof workspaceCountsDto>;
