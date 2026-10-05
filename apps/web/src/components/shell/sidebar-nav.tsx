@@ -132,6 +132,21 @@ function Count({ value }: { value: number }) {
   return <span className="font-mono text-muted-foreground text-xs tabular-nums">{value}</span>;
 }
 
+/**
+ * Tasks waiting on your review, in the review colour — the one count in the sidebar that is asking
+ * for something. The number is hidden from screen readers and said in words instead, because a
+ * bare "2" folded into a link's name ("Board 2") says nothing about what is waiting.
+ */
+function ReviewCount({ value }: { value: number }) {
+  return (
+    <span className="flex shrink-0 items-center gap-1 font-medium font-mono text-state-review text-xs tabular-nums">
+      <span aria-hidden className="size-1.5 rounded-full bg-current" />
+      <span aria-hidden>{value}</span>
+      <span className="sr-only">, {value === 1 ? "1 task" : `${value} tasks`} awaiting review</span>
+    </span>
+  );
+}
+
 function Wip() {
   return (
     <span
@@ -214,7 +229,9 @@ function WorkspaceMenu({ workspaceName, signedIn }: { workspaceName: string; sig
  */
 function ProjectsGroup({ place }: { place: Place }) {
   const projects = trpc.project.list.useQuery({});
+  const counts = trpc.workspace.counts.useQuery();
   const list = projects.data ?? [];
+  const review = new Map(counts.data?.reviewByProject.map((r) => [r.projectId, r.tasks]));
   const keepSection = place.projectSection && !place.taskId && !place.issueId;
   const sectionPath = keepSection ? (place.projectSection?.path ?? "") : "";
 
@@ -238,6 +255,7 @@ function ProjectsGroup({ place }: { place: Place }) {
               open={open}
               href={projectSectionHref(project.id, sectionPath)}
               place={place}
+              awaitingReview={review.get(project.id) ?? 0}
             />
           );
         })}
@@ -252,13 +270,18 @@ function ProjectRow({
   open,
   href,
   place,
+  awaitingReview,
 }: {
   id: string;
   title: string;
   open: boolean;
   href: string;
   place: Place;
+  awaitingReview: number;
 }) {
+  // On the Project while it is folded; on its Board once open, which is where the Tasks are —
+  // never both, so one review is not counted twice on screen.
+  const badge = awaitingReview > 0 ? <ReviewCount value={awaitingReview} /> : undefined;
   return (
     <>
       <NavItem
@@ -268,6 +291,7 @@ function ProjectRow({
         active={false}
         open={open}
         title={title}
+        trailing={open ? undefined : badge}
       />
       {open && (
         <li>
@@ -280,7 +304,7 @@ function ProjectRow({
                 icon={s.icon}
                 depth={1}
                 active={place.projectSection?.path === s.path}
-                trailing={s.wip ? <Wip /> : undefined}
+                trailing={s.wip ? <Wip /> : s.path === "/board" ? badge : undefined}
               />
             ))}
           </ul>

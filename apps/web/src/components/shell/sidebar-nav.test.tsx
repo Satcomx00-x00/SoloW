@@ -68,7 +68,7 @@ function handlers(extra: Record<string, (input: unknown) => unknown> = {}) {
       const { projectId } = input as { projectId: string };
       return { id: projectId, title: projectId === "proj-1" ? "Features ToDeb" : "GlabTest" };
     },
-    "workspace.counts": () => ({ unassignedIssues: 2 }),
+    "workspace.counts": () => ({ unassignedIssues: 2, reviewByProject: [] }),
     "preference.getRecentTasks": () => RECENTS([]),
     "preference.recordRecentTask": () => RECENTS([]),
     "workflow.list": () => [],
@@ -154,6 +154,38 @@ describe("Sidebar — inside a Project", () => {
 
     const other = await screen.findByRole("link", { name: /GlabTest/ });
     expect(other.getAttribute("href")).toBe("/projects/proj-2/issues");
+  });
+});
+
+describe("Sidebar — tasks awaiting review", () => {
+  const withReview = () =>
+    handlers({
+      "workspace.counts": () => ({
+        unassignedIssues: 0,
+        reviewByProject: [
+          { projectId: "proj-1", tasks: 2 },
+          { projectId: "proj-2", tasks: 1 },
+        ],
+      }),
+    });
+
+  it("marks a folded Project, and says what the number means", async () => {
+    pathname = "/projects";
+    renderWithTrpc(<SidebarNav workspaceName="Acme" signedIn={false} />, withReview());
+
+    const glab = await screen.findByRole("link", { name: /GlabTest/ });
+    await waitFor(() => expect(glab.textContent).toContain("1 task awaiting review"));
+  });
+
+  it("moves the mark from the open Project onto its Board, so it is shown once", async () => {
+    pathname = "/projects/proj-1/issues";
+    renderWithTrpc(<SidebarNav workspaceName="Acme" signedIn={false} />, withReview());
+
+    const sections = await screen.findByRole("list", { name: "Features ToDeb sections" });
+    const board = within(sections).getByRole("link", { name: /Board/ });
+    await waitFor(() => expect(board.textContent).toContain("2 tasks awaiting review"));
+    const project = screen.getByRole("link", { name: "Features ToDeb" });
+    expect(project.textContent).not.toContain("awaiting review");
   });
 });
 
