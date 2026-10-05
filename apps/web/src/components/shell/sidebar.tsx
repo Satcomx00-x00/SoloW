@@ -15,7 +15,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { SIDEBAR_COOKIE } from "./sidebar-cookie";
+import {
+  clampSidebarWidth,
+  SIDEBAR_COOKIE,
+  SIDEBAR_DEFAULT_WIDTH,
+  SIDEBAR_MAX_WIDTH,
+  SIDEBAR_MIN_WIDTH,
+  SIDEBAR_WIDTH_COOKIE,
+} from "./sidebar-cookie";
 import { SidebarNav } from "./sidebar-nav";
 
 /**
@@ -45,6 +52,10 @@ interface SidebarHandle {
   toggle: () => void;
   /** The last page outside Settings, so Settings' back link returns where you were. */
   lastAppPath: string;
+  /** Desktop width in pixels, docked or peeking. */
+  width: number;
+  /** Set the width; `persist` once the drag or key press that set it is over. */
+  setWidth: (width: number, persist: boolean) => void;
 }
 
 const SidebarContext = createContext<SidebarHandle | null>(null);
@@ -91,15 +102,28 @@ function isEditable(target: EventTarget | null): boolean {
 export function SidebarProvider({
   children,
   defaultOpen,
+  defaultWidth = SIDEBAR_DEFAULT_WIDTH,
 }: {
   children: ReactNode;
   /** From the cookie, read by the layout on the server. */
   defaultOpen: boolean;
+  /** Likewise. */
+  defaultWidth?: number;
 }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(defaultOpen);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [lastAppPath, setLastAppPath] = useState(DEFAULT_APP_PATH);
+  const [width, setWidthState] = useState(() => clampSidebarWidth(defaultWidth));
+
+  const setWidth = useCallback((next: number, persist: boolean) => {
+    const clamped = clampSidebarWidth(next);
+    setWidthState(clamped);
+    if (persist) {
+      // biome-ignore lint/suspicious/noDocumentCookie: the server reads this on the next render
+      document.cookie = `${SIDEBAR_WIDTH_COOKIE}=${clamped}; path=/; max-age=31536000; samesite=lax`;
+    }
+  }, []);
 
   /*
    * Where Settings' back link goes. Kept in `sessionStorage` as well as state, because a reload on
@@ -169,8 +193,8 @@ export function SidebarProvider({
   }, [toggle]);
 
   const handle = useMemo<SidebarHandle>(
-    () => ({ open, mobileOpen, setMobileOpen, toggle, lastAppPath }),
-    [open, mobileOpen, toggle, lastAppPath],
+    () => ({ open, mobileOpen, setMobileOpen, toggle, lastAppPath, width, setWidth }),
+    [open, mobileOpen, toggle, lastAppPath, width, setWidth],
   );
 
   return <SidebarContext.Provider value={handle}>{children}</SidebarContext.Provider>;
@@ -186,9 +210,11 @@ export function Sidebar({ workspaceName, signedIn }: { workspaceName: string; si
         <aside
           id={SIDEBAR_ID}
           aria-label="Sidebar"
-          className="hidden w-60 shrink-0 flex-col border-r bg-sidebar md:flex"
+          className="relative hidden shrink-0 flex-col border-r bg-sidebar md:flex"
+          style={{ width: handle.width }}
         >
           <SidebarNav workspaceName={workspaceName} signedIn={signedIn} />
+          <ResizeHandle />
         </aside>
       )}
       {!handle.open && <SidebarPeek workspaceName={workspaceName} signedIn={signedIn} />}
@@ -209,6 +235,69 @@ export function Sidebar({ workspaceName, signedIn }: { workspaceName: string; si
   );
 }
 
+/** How far one arrow-key press moves the edge. */
+const RESIZE_STEP = 16;
+
+/**
+ * The sidebar's right edge, draggable — an ARIA window splitter, so it is also a keyboard control:
+ * focus it and the arrow keys move it, Home and End jump to the limits, and a double-click (or
+ * Enter) puts it back to the default. The width is saved when the drag or key press is over, not
+ * on every pixel of it.
+ */
+function ResizeHandle() {
+  const handle = useSidebar();
+  const drag = useRef<{ startX: number; startWidth: number } | null>(null);
+  if (!handle) return null;
+  const { width, setWidth } = handle;
+
+  return (
+    // biome-ignore lint/a11y/useSemanticElements: a window splitter has no HTML element; `separator` with a value is the ARIA pattern
+    <div
+      role="separator"
+      aria-label="Resize sidebar"
+      aria-orientation="vertical"
+      aria-valuemin={SIDEBAR_MIN_WIDTH}
+      aria-valuemax={SIDEBAR_MAX_WIDTH}
+      aria-valuenow={width}
+      aria-controls={SIDEBAR_ID}
+      tabIndex={0}
+      className="-right-1 absolute inset-y-0 z-10 w-2 cursor-col-resize touch-none outline-none after:absolute after:inset-y-0 after:left-1/2 after:w-px after:bg-transparent after:transition-colors hover:after:bg-ring/60 focus-visible:after:bg-ring"
+      onPointerDown={(e) => {
+        e.preventDefault();
+        e.currentTarget.setPointerCapture(e.pointerId);
+        drag.current = { startX: e.clientX, startWidth: width };
+      }}
+      onPointerMove={(e) => {
+        if (!drag.current) return;
+        setWidth(drag.current.startWidth + e.clientX - drag.current.startX, false);
+      }}
+      onPointerUp={(e) => {
+        if (!drag.current) return;
+        setWidth(drag.current.startWidth + e.clientX - drag.current.startX, true);
+        drag.current = null;
+      }}
+      onDoubleClick={() => setWidth(SIDEBAR_DEFAULT_WIDTH, true)}
+      onKeyDown={(e) => {
+        const next =
+          e.key === "ArrowLeft"
+            ? width - RESIZE_STEP
+            : e.key === "ArrowRight"
+              ? width + RESIZE_STEP
+              : e.key === "Home"
+                ? SIDEBAR_MIN_WIDTH
+                : e.key === "End"
+                  ? SIDEBAR_MAX_WIDTH
+                  : e.key === "Enter"
+                    ? SIDEBAR_DEFAULT_WIDTH
+                    : null;
+        if (next === null) return;
+        e.preventDefault();
+        setWidth(next, true);
+      }}
+    />
+  );
+}
+
 /** How long the pointer rests at the edge before the sidebar slides out, and lingers after. */
 const PEEK_OPEN_DELAY_MS = 120;
 const PEEK_CLOSE_DELAY_MS = 250;
@@ -224,6 +313,7 @@ const PEEK_CLOSE_DELAY_MS = 250;
  */
 function SidebarPeek({ workspaceName, signedIn }: { workspaceName: string; signedIn: boolean }) {
   const pathname = usePathname();
+  const handle = useSidebar();
   const [peeking, setPeeking] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -260,7 +350,8 @@ function SidebarPeek({ workspaceName, signedIn }: { workspaceName: string; signe
       {peeking && (
         <aside
           aria-label="Sidebar"
-          className="fade-in-0 slide-in-from-left-4 fixed inset-y-0 left-0 z-40 hidden w-60 animate-in flex-col border-r bg-sidebar shadow-2xl duration-150 md:flex"
+          className="fade-in-0 slide-in-from-left-4 fixed inset-y-0 left-0 z-40 hidden animate-in flex-col border-r bg-sidebar shadow-2xl duration-150 md:flex"
+          style={{ width: handle?.width }}
           onMouseEnter={() => schedule(true, 0)}
           onMouseLeave={() => schedule(false, PEEK_CLOSE_DELAY_MS)}
           onKeyDown={(e) => {

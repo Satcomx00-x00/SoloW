@@ -132,3 +132,41 @@ describe("Sidebar — peeking while hidden", () => {
     expect(document.querySelector("aside")).toBeNull();
   });
 });
+
+describe("Sidebar — width", () => {
+  it("is a keyboard window splitter: arrows move it, Home and End clamp it, Enter resets it", () => {
+    pathname = "/projects";
+    // happy-dom keeps no cookies on its default URL, so the write itself is what is checked.
+    const written: string[] = [];
+    Object.defineProperty(document, "cookie", {
+      configurable: true,
+      get: () => "",
+      set: (value: string) => written.push(value),
+    });
+    renderShell();
+
+    const edge = screen.getByRole("separator", { name: "Resize sidebar" });
+    const aside = screen.getByRole("complementary", { name: "Sidebar" });
+    expect(aside.style.width).toBe("240px");
+
+    fireEvent.keyDown(edge, { key: "ArrowRight" });
+    expect(aside.style.width).toBe("256px");
+    expect(edge.getAttribute("aria-valuenow")).toBe("256");
+    // Saved once the key press is over, for the server to read on the next page load.
+    expect(written.at(-1)).toStartWith("solow-sidebar-width=256;");
+
+    fireEvent.keyDown(edge, { key: "End" });
+    expect(aside.style.width).toBe("360px");
+    fireEvent.keyDown(edge, { key: "ArrowRight" });
+    expect(aside.style.width).toBe("360px");
+
+    fireEvent.keyDown(edge, { key: "Home" });
+    expect(aside.style.width).toBe("200px");
+
+    fireEvent.keyDown(edge, { key: "Enter" });
+    expect(aside.style.width).toBe("240px");
+
+    // The own property shadowed the prototype's accessor; removing it restores that.
+    delete (document as { cookie?: string }).cookie;
+  });
+});
