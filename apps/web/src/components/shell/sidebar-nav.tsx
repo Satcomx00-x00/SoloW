@@ -1,5 +1,6 @@
 "use client";
 
+import type { TaskDto } from "@solow/contracts";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ChevronsUpDown, LogOut, type LucideIcon, Settings } from "lucide-react";
 import Link from "next/link";
@@ -385,17 +386,17 @@ function WorkflowList({ pathname }: { pathname: string }) {
 }
 
 function RecentTasks({ excludeTaskId }: { excludeTaskId: string | null }) {
-  const recents = trpc.preference.getRecentTasks.useQuery({});
-  const ids = (recents.data?.taskIds ?? [])
-    .filter((id) => id !== excludeTaskId)
+  const recent = trpc.task.recent.useQuery({});
+  const rows = (recent.data ?? [])
+    .filter((r) => r.task.id !== excludeTaskId)
     .slice(0, RECENT_LIMIT);
-  if (ids.length === 0) return null;
+  if (rows.length === 0) return null;
   return (
     <nav aria-label="Recent tasks">
       <GroupLabel>Recent</GroupLabel>
       <ul className="space-y-px px-2">
-        {ids.map((id) => (
-          <RecentTaskRow key={id} taskId={id} />
+        {rows.map((r) => (
+          <RecentTaskRow key={r.task.id} task={r.task} />
         ))}
       </ul>
     </nav>
@@ -406,15 +407,8 @@ function RecentTasks({ excludeTaskId }: { excludeTaskId: string | null }) {
  * One recalled Task, by itself: title, and the same lifecycle glyph and colour the board and the
  * state badge already use for it — the point of the list is to say "here is one waiting on you"
  * as readily as "here is one you were just in", and a bare title cannot say which.
- *
- * A dangling id — the Task was deleted since it was recorded — renders nothing rather than a
- * broken row; it ages out of the stored list on its own the next time five newer Tasks are
- * visited.
  */
-function RecentTaskRow({ taskId }: { taskId: string }) {
-  const task = trpc.task.get.useQuery({ id: taskId });
-  if (!task.data) return null;
-  const t = task.data;
+function RecentTaskRow({ task: t }: { task: TaskDto }) {
   const style = STATE_STYLE[t.state];
   return (
     <NavItem
@@ -486,7 +480,7 @@ function SettingsNav() {
 function useRecordVisit(taskId: string | null) {
   const utils = trpc.useUtils();
   const recordVisit = trpc.preference.recordRecentTask.useMutation({
-    onSuccess: () => utils.preference.getRecentTasks.invalidate(),
+    onSuccess: () => utils.task.recent.invalidate(),
   });
   const recordedTaskId = useRef<string | null>(null);
   useEffect(() => {

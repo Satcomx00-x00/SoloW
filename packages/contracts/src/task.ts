@@ -396,6 +396,17 @@ export type TaskDto = z.infer<typeof taskDto>;
  * a harness every Task in the Workspace to answer a question about one — see `page.ts`.
  */
 export const taskListDto = pageOf(taskDto);
+
+/**
+ * One of the signed-in user's recently opened Tasks, as the sidebar shows it.
+ *
+ * An object around the Task rather than the Task itself, so what the list says *about* a Task
+ * (where it lives, say) can be added beside it without becoming a field every Task carries.
+ */
+export const recentTaskDto = z.object({ task: taskDto });
+export type RecentTaskDto = z.infer<typeof recentTaskDto>;
+export const recentTaskListDto = z.array(recentTaskDto);
+export type RecentTaskListDto = z.infer<typeof recentTaskListDto>;
 export type TaskListDto = z.infer<typeof taskListDto>;
 
 /**

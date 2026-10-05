@@ -10,6 +10,7 @@ import {
   listTaskDependenciesInput,
   listTasksInput,
   moveTaskInput,
+  recentTaskListDto,
   removeTaskDependencyInput,
   restoreTaskInput,
   retryTaskInput,
@@ -40,6 +41,7 @@ import { z } from "zod";
 import type { RequestContext } from "../dal/context.js";
 import { getIssueById } from "../dal/issue.js";
 import { getExecutorProfile, getHarnessProfile } from "../dal/profile.js";
+import { listRecentTasks } from "../dal/recent-tasks.js";
 import { getRepository } from "../dal/repository.js";
 import { createSession, getLatestSession, sessionForkCursor } from "../dal/session.js";
 import {
@@ -303,6 +305,22 @@ export const taskRouter = router({
     .input(listTasksInput)
     .output(taskListDto)
     .query(async ({ ctx, input }) => unwrap(await listTasks(ctx.rctx, input))),
+
+  /** The signed-in user's recently opened Tasks, loaded in one request rather than one per id. */
+  recent: ownerProcedure
+    .meta({
+      openapi: {
+        method: "GET",
+        path: "/task.recent",
+        tags: ["task"],
+        protect: true,
+        summary:
+          "The signed-in user's recently opened Tasks, most recent first, loaded. A deleted Task is left out.",
+      },
+    })
+    .input(z.object({}))
+    .output(recentTaskListDto)
+    .query(async ({ ctx }) => unwrap(await listRecentTasks(ctx.rctx))),
 
   get: ownerProcedure
     .meta({
