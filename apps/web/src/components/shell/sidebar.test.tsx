@@ -74,3 +74,32 @@ describe("Sidebar — Settings' way back", () => {
     );
   });
 });
+
+describe("Sidebar — focus follows ⌘B", () => {
+  it("moves focus to the show button when the column is hidden from inside it", async () => {
+    pathname = "/projects";
+    renderShell();
+
+    const hide = screen.getByRole("button", { name: "Hide sidebar" });
+    hide.focus();
+    act(() => {
+      fireEvent.keyDown(window, { key: "b", ctrlKey: true });
+    });
+
+    await waitFor(() =>
+      expect(screen.queryByRole("complementary", { name: "Sidebar" })).toBeNull(),
+    );
+    expect(document.activeElement?.id).toBe("sidebar-show");
+  });
+
+  it("moves focus into the column when it is shown from the header", async () => {
+    pathname = "/projects";
+    renderShell(false);
+
+    const show = screen.getByRole("button", { name: "Show sidebar" });
+    show.focus();
+    fireEvent.click(show);
+
+    await waitFor(() => expect(document.activeElement?.id).toBe("sidebar-hide"));
+  });
+});
