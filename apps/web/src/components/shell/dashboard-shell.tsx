@@ -32,6 +32,7 @@ export function DashboardShell({
   identity,
   workspaceName,
   sidebarOpen,
+  sidebarWidth,
 }: {
   children: ReactNode;
   /** The signed-in Owner, or null when running on the local dev-owner path. */
@@ -39,6 +40,8 @@ export function DashboardShell({
   workspaceName: string;
   /** Whether the sidebar starts shown — the remembered choice, read from a cookie by the layout. */
   sidebarOpen: boolean;
+  /** Its remembered width in pixels, from the same place. */
+  sidebarWidth: number;
 }) {
   const appContext = useMemo<AppContext>(() => ({ identity }), [identity]);
 
@@ -53,7 +56,7 @@ export function DashboardShell({
       */}
       <WorkspaceEventsProvider>
         <TooltipProvider delayDuration={200}>
-          <SidebarProvider defaultOpen={sidebarOpen}>
+          <SidebarProvider defaultOpen={sidebarOpen} defaultWidth={sidebarWidth}>
             <SecondarySidebarProvider>
               <div className="flex h-[100dvh] flex-col overflow-hidden bg-background text-foreground">
                 {/*

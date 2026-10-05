@@ -3,7 +3,11 @@ import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
 import { DashboardShell } from "@/components/shell/dashboard-shell";
-import { SIDEBAR_COOKIE } from "@/components/shell/sidebar-cookie";
+import {
+  clampSidebarWidth,
+  SIDEBAR_COOKIE,
+  SIDEBAR_WIDTH_COOKIE,
+} from "@/components/shell/sidebar-cookie";
 import { resolveSession } from "@/server/auth/session";
 import { getWorkspaceName } from "@/server/dal/workspace";
 import { devOwnerMode } from "@/server/env";
@@ -36,13 +40,17 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   // decode the cookie and read the session and user rows twice, in series, before painting.
   const workspaceName = (await getWorkspaceName(createDb(), session.workspaceId)) ?? "Workspace";
 
-  // Read here so the first paint already has the sidebar the Owner left it in; shown by default.
-  const sidebarOpen = (await cookies()).get(SIDEBAR_COOKIE)?.value !== "closed";
+  // Read here so the first paint already has the sidebar as the Owner left it: shown or hidden,
+  // and at the width they dragged it to.
+  const jar = await cookies();
+  const sidebarOpen = jar.get(SIDEBAR_COOKIE)?.value !== "closed";
+  const sidebarWidth = clampSidebarWidth(jar.get(SIDEBAR_WIDTH_COOKIE)?.value);
 
   return (
     <DashboardShell
       identity={session.identity}
       sidebarOpen={sidebarOpen}
+      sidebarWidth={sidebarWidth}
       workspaceName={workspaceName}
     >
       {children}
