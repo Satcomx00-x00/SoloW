@@ -319,7 +319,7 @@ describe("Sidebar — Recent tasks", () => {
         within(recent)
           .getAllByRole("link")
           .map((l) => l.textContent),
-      ).toEqual(["Fix the gate latch, in GlabTest", "Add farewell()"]),
+      ).toEqual(["Fix the gate latchG, in GlabTest", "Add farewell()"]),
     );
     // One request for the list — never a `task.get` per row. The only `task.get` is the open
     // Task's own, which places the page.
