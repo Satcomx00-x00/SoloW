@@ -5,7 +5,15 @@ import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ChevronsUpDown, LogOut, type LucideIcon, Settings } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Fragment, type ReactNode, Suspense, useCallback, useEffect, useRef } from "react";
+import {
+  Fragment,
+  type ReactNode,
+  Suspense,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -14,6 +22,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { signOut } from "@/lib/auth-client";
 import {
@@ -35,6 +44,9 @@ import { type Place, usePlace } from "./use-place";
 
 /** How many recently opened Tasks the sidebar keeps in view. */
 const RECENT_LIMIT = 5;
+
+/** Past this many Projects, the list gets a filter box: scanning stops being quicker than typing. */
+const PROJECT_FILTER_THRESHOLD = 8;
 
 const PROJECTS = WORKSPACE_SECTIONS.find((s) => s.href === "/projects");
 
@@ -235,10 +247,35 @@ function ProjectsGroup({ place }: { place: Place }) {
   const review = new Map(counts.data?.reviewByProject.map((r) => [r.projectId, r.tasks]));
   const keepSection = place.projectSection && !place.taskId && !place.issueId;
   const sectionPath = keepSection ? (place.projectSection?.path ?? "") : "";
+  const [filter, setFilter] = useState("");
+  const filterable = list.length > PROJECT_FILTER_THRESHOLD;
+  const needle = filterable ? filter.trim().toLowerCase() : "";
+  // The open Project always stays: filtering for another must not hide where you are.
+  const shown = needle
+    ? list.filter((p) => p.id === place.projectId || p.title.toLowerCase().includes(needle))
+    : list;
 
   return (
     <nav aria-label="Projects">
       <GroupLabel>Projects</GroupLabel>
+      {filterable && (
+        <div className="px-2 pb-1">
+          <Input
+            aria-label="Filter projects"
+            className="h-7 text-xs"
+            onChange={(e) => setFilter(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape" && filter) {
+                e.stopPropagation();
+                setFilter("");
+              }
+            }}
+            placeholder={`Filter ${list.length} projects…`}
+            type="search"
+            value={filter}
+          />
+        </div>
+      )}
       <ul className="space-y-px px-2">
         <NavItem
           href="/projects"
@@ -246,7 +283,7 @@ function ProjectsGroup({ place }: { place: Place }) {
           icon={PROJECTS?.icon}
           active={place.pathname === "/projects"}
         />
-        {list.map((project) => {
+        {shown.map((project) => {
           const open = project.id === place.projectId;
           return (
             <ProjectRow
@@ -261,6 +298,9 @@ function ProjectsGroup({ place }: { place: Place }) {
           );
         })}
       </ul>
+      {needle && shown.length === 0 && (
+        <p className="px-4 py-1 text-muted-foreground text-xs">No project matches.</p>
+      )}
     </nav>
   );
 }
