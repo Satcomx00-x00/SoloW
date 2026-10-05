@@ -403,7 +403,14 @@ export const taskListDto = pageOf(taskDto);
  * An object around the Task rather than the Task itself, so what the list says *about* a Task
  * (where it lives, say) can be added beside it without becoming a field every Task carries.
  */
-export const recentTaskDto = z.object({ task: taskDto });
+export const recentTaskDto = z.object({
+  task: taskDto,
+  /**
+   * The Project holding the Task's Issue, or null for one in no Project. Two Tasks called "test"
+   * in different Projects are otherwise the same row in a list of five.
+   */
+  project: z.object({ id: z.string(), title: z.string() }).nullable(),
+});
 export type RecentTaskDto = z.infer<typeof recentTaskDto>;
 export const recentTaskListDto = z.array(recentTaskDto);
 export type RecentTaskListDto = z.infer<typeof recentTaskListDto>;

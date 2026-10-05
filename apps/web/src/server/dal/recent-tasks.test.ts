@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { beforeEach, describe, expect, it } from "bun:test";
-import { task } from "@solow/db";
+import { encryptSecret, integration, project, projectItem, secret, task } from "@solow/db";
 import { createTestDb, type TestDb } from "@solow/db/testing";
 import { eq } from "drizzle-orm";
 import { recordRecentTask } from "./preference.js";
@@ -60,5 +60,47 @@ describe("listRecentTasks", () => {
   it("is empty when nothing has been visited", async () => {
     const recent = await listRecentTasks(ctxFor(db, acme));
     expect(recent.ok && recent.data).toEqual([]);
+  });
+});
+
+describe("listRecentTasks — where each one lives", () => {
+  it("names the Project holding the Task's Issue, and null for one in none", async () => {
+    const ctx = ctxFor(db, acme);
+    const loose = await seedTask("Loose");
+    const held = await seedTask("Held");
+    const [heldRow] = await db.select().from(task).where(eq(task.id, held));
+    const [token] = await db
+      .insert(secret)
+      .values({ workspaceId: acme, name: "pat", kind: "scm_pat", ciphertext: encryptSecret("t") })
+      .returning();
+    const [connected] = await db
+      .insert(integration)
+      .values({ workspaceId: acme, provider: "github", secretId: token?.id ?? "" })
+      .returning();
+    const [roadmap] = await db
+      .insert(project)
+      .values({
+        workspaceId: acme,
+        integrationId: connected?.id ?? "",
+        providerProjectId: "PVT_roadmap",
+        title: "Roadmap",
+      })
+      .returning();
+    await db.insert(projectItem).values({
+      workspaceId: acme,
+      projectId: roadmap?.id ?? "",
+      issueId: heldRow?.issueId ?? "",
+      providerItemId: "it-1",
+      position: 0,
+    });
+    await recordRecentTask(ctx, loose);
+    await recordRecentTask(ctx, held);
+
+    const recent = await listRecentTasks(ctx);
+
+    expect(recent.ok && recent.data.map((r) => [r.task.title, r.project?.title ?? null])).toEqual([
+      ["Held", "Roadmap"],
+      ["Loose", null],
+    ]);
   });
 });

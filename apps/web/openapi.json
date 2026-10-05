@@ -13331,10 +13331,27 @@
                           "createdAt",
                           "updatedAt"
                         ]
+                      },
+                      "project": {
+                        "type": "object",
+                        "nullable": true,
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "title": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "title"
+                        ]
                       }
                     },
                     "required": [
-                      "task"
+                      "task",
+                      "project"
                     ]
                   }
                 }
