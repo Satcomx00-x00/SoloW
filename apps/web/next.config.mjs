@@ -35,6 +35,9 @@ const nextConfig = {
   // build-time passes (they use a separate resolver that conflicts with the bun-types setup).
   typescript: { ignoreBuildErrors: true },
   eslint: { ignoreDuringBuilds: true },
+  // Dev only. Its default corner, bottom-left, sits on the sidebar's Settings link; over the
+  // page's bottom-right it covers content rather than navigation.
+  devIndicators: { position: "bottom-right" },
   /**
    * Compile in a worker, and let the server/edge compiles and the build-trace collection overlap.
    *
