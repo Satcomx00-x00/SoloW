@@ -28,6 +28,15 @@ above are used in earnest, walking the user through the configuration needed to 
 Workspace Ready (see [F18](../features/F18-onboarding-setup-workflow.md)). It is resumable
 and can be re-run at any time from Settings.
 
+## Navigation
+
+One labelled sidebar, the same on every page ([Decision 0029](../decisions/0029-one-sidebar-navigation.md)):
+the Workspace menu; **Projects** (all of them, the open one's Planning, Board and Issues nested
+under it); **Workspace** (Unassigned, Workflows, History); **Recent** Tasks; and Settings at the
+foot. The header carries the breadcrumb, `Projects › Project › Section › item`, so any page,
+a Task included, says which Project it belongs to. The sidebar hides with ⌘B and becomes a
+drawer on a phone.
+
 ## Primary navigation flow
 
 A user typically moves: **Issues → Board (Tasks under an Issue) → Task Detail (review) →

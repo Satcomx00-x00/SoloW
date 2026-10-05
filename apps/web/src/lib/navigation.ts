@@ -3,11 +3,13 @@ import {
   BookOpen,
   Bot,
   Building2,
+  CircleDot,
   Columns3,
   Eraser,
   FileJson,
   FlaskConical,
   FolderGit2,
+  FolderKanban,
   History,
   Inbox,
   KeyRound,
@@ -37,8 +39,8 @@ import {
  *
  * Two lists, because there are genuinely two kinds of destination:
  *
- *  - `WORKSPACE_SECTIONS` — the few things that exist without a Project: the Project list itself,
- *    the unassigned escape hatch, Workflows, and Settings.
+ *  - `WORKSPACE_SECTIONS` — the things that exist without a Project: the Project list itself,
+ *    the unassigned escape hatch, Workflows, History and Settings.
  *  - `PROJECT_SECTIONS` — everything inside one, resolved against a Project id.
  *
  * **Workflows is in the first list, not the second.** It sat under `/projects/:id/workflows` for
@@ -48,15 +50,16 @@ import {
  * not have is a route that lies; it is a top-level destination now, which is also what
  * docs/features/F03-workflow-designer.md said all along.
  *
- * Search is deliberately in neither. In VS Code it is a rail icon that opens a panel; here the
- * search surface is the command palette, so the rail entry opens that instead of navigating — a
- * different kind of thing, and a nav list holding it would have to lie about `href`.
+ * Search is deliberately in neither: the search surface is the command palette, which a button
+ * opens rather than a route — a nav list holding it would have to lie about `href`.
+ *
+ * The sidebar (`components/shell/sidebar-nav.tsx`) draws both lists in one column, Projects first
+ * with the open one's sections nested under it — see Decision 0029 for why the activity rail and
+ * the per-route navigator it replaced were taken out.
  */
 export interface Section {
   href: string;
   label: string;
-  /** What the navigator's header says underneath the section name. */
-  caption: string;
   icon: LucideIcon;
   /**
    * True for a section whose UI is live but not functionally complete — see
@@ -67,45 +70,22 @@ export interface Section {
 }
 
 /**
- * Destinations that exist with no Project selected.
+ * Destinations that exist with no Project selected, in sidebar order.
  *
- * No `/projects` entry, by decision (spec F16): which Project you are in is chosen by clicking
- * the navigator's own title, not by visiting a hub and clicking through to one. A rail entry for
- * it was the first half of the double-sidebar problem — two columns to traverse before reaching
- * the work, and a "Projects" destination whose content was mostly links back out of itself.
- *
- * The `/projects` *routes* deliberately stay: they are where a deep link, a bookmark and the
- * redirect after deleting a Project land, and the hub is still where a Project is created. What
- * changed is that nothing in the chrome sends you there in order to pick one.
+ * `/projects` is first, and is a destination again. It was left out on the argument that the
+ * navigator's title picked the Project (spec F16), but that made the front door of the app — where
+ * `/` redirects, and where a Project is created — the one page nothing in the chrome linked to;
+ * the only way back to it was a "New or adopted project…" entry inside the switcher. The sidebar
+ * now lists the Projects themselves under this entry, so choosing one is still a single click.
  */
 export const WORKSPACE_SECTIONS: readonly Section[] = [
-  {
-    href: "/unassigned",
-    label: "Unassigned",
-    caption: "Issues in no project",
-    icon: Inbox,
-  },
-  {
-    href: "/workflows",
-    label: "Workflows",
-    // Deliberately not "…in this project": a Workflow names Harness Profiles and Steps, never a
-    // Project, so the caption must not imply a scope the data does not have.
-    caption: "Repeatable multi-harness pipelines",
-    icon: Workflow,
-    wip: true,
-  },
-  {
-    href: "/history",
-    label: "History",
-    caption: "Closed and deleted tasks, 7 days",
-    icon: History,
-  },
-  {
-    href: "/settings",
-    label: "Settings",
-    caption: "Profiles, repositories, secrets",
-    icon: Settings,
-  },
+  { href: "/projects", label: "Projects", icon: FolderKanban },
+  { href: "/unassigned", label: "Unassigned", icon: Inbox },
+  // Deliberately not "…in this project": a Workflow names Harness Profiles and Steps, never a
+  // Project, so nothing about this entry may imply a scope the data does not have.
+  { href: "/workflows", label: "Workflows", icon: Workflow, wip: true },
+  { href: "/history", label: "History", icon: History },
+  { href: "/settings", label: "Settings", icon: Settings },
 ];
 
 /**
@@ -118,15 +98,14 @@ export const WORKSPACE_SECTIONS: readonly Section[] = [
 export interface ProjectSection {
   path: string;
   label: string;
-  caption: string;
   icon: LucideIcon;
   wip?: boolean;
 }
 
 export const PROJECT_SECTIONS: readonly ProjectSection[] = [
-  { path: "", label: "Planning", caption: "The project table", icon: Table2 },
-  { path: "/board", label: "Board", caption: "Harness runs, by state", icon: Columns3 },
-  { path: "/issues", label: "Issues", caption: "Work in this project", icon: Inbox },
+  { path: "", label: "Planning", icon: Table2 },
+  { path: "/board", label: "Board", icon: Columns3 },
+  { path: "/issues", label: "Issues", icon: CircleDot },
 ];
 
 /** The href for one section of one Project. */
@@ -165,6 +144,11 @@ export function taskIdFromPath(pathname: string): string | null {
   return /^\/task\/([^/]+)/.exec(pathname)?.[1] ?? null;
 }
 
+/** The Issue a path has open, or null. Flat for the same reason a Task's route is. */
+export function issueIdFromPath(pathname: string): string | null {
+  return /^\/issues\/([^/]+)/.exec(pathname)?.[1] ?? null;
+}
+
 /** Which project section a path is in. Longest match wins, so `/issues` beats the empty overview. */
 export function projectSectionFor(pathname: string): ProjectSection | null {
   const projectId = projectIdFromPath(pathname);
@@ -181,11 +165,9 @@ export function projectSectionFor(pathname: string): ProjectSection | null {
 export function sectionFor(pathname: string): Section | null {
   /*
    * A Task is work inside a Project, but its route is flat (`/task/:id`) because a Task outlives
-   * the Project view it was opened from. It used to light `WORKSPACE_SECTIONS[0]`, which *was*
-   * the Projects rail entry — an index that would silently come to mean "Unassigned" the moment
-   * that entry was removed, lighting the wrong destination for every Task in a Project. No rail
-   * entry is true about a Task any more, so it lights none: the navigator names the Task itself
-   * in its title, which is the honest statement of where you are.
+   * the Project view it was opened from. Matching it here would answer "Projects" for every Task,
+   * including one whose Issue is in no Project at all — so it matches nothing, and the sidebar and
+   * breadcrumb ask the server which Project holds it instead.
    */
   if (pathname.startsWith("/task/")) return null;
   return (
@@ -196,8 +178,8 @@ export function sectionFor(pathname: string): Section | null {
 /**
  * Every destination the command palette can offer, flattened.
  *
- * The palette cannot know which Projects exist without asking the server, so this is the static
- * half — the workspace destinations — and the palette adds one entry per Project itself.
+ * The static half only — the workspace destinations. The palette cannot know which Projects exist
+ * without asking the server.
  */
 export const SECTIONS = WORKSPACE_SECTIONS;
 

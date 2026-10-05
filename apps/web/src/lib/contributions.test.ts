@@ -81,13 +81,9 @@ describe("a feature module contributing commands", () => {
   it("migrated the palette's own entries, so the destination list is a registration too", () => {
     const resolved = ids(commandRegistry.resolve(SIGNED_OUT));
     expect(resolved).toContain("goto.unassigned");
-    /*
-     * `goto.projects` is deliberately absent. Picking a Project is the navigator title's job now
-     * (spec F16), so the rail entry this registration mirrored is gone — and because these ids
-     * are derived from the route, the registration went with it rather than lingering as a row
-     * leading back to a hub the chrome no longer sends anyone to.
-     */
-    expect(resolved).not.toContain("goto.projects");
+    // Projects is a destination again (Decision 0029), and these ids are derived from the route,
+    // so its registration came back with it.
+    expect(resolved).toContain("goto.projects");
     /*
      * And the four create entries that used to sit beside them are gone from the *registry*, not
      * merely hidden by the palette.

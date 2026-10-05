@@ -4,9 +4,11 @@ import { CommonErrorCode } from "@solow/contracts";
 import { TriangleAlert, Workflow as WorkflowIcon } from "lucide-react";
 import { FlagDisabled } from "@/components/features/shared/flag-disabled";
 import { WorkflowInspector } from "@/components/features/workflows/workflow-inspector";
+import { HeaderActions } from "@/components/shell/header-actions";
 import { SecondaryPanel } from "@/components/shell/secondary-sidebar";
 import { trpc } from "@/trpc/react";
 import { WorkflowCanvas } from "./workflow-canvas";
+import { WorkflowCreateActions } from "./workflow-create-actions";
 
 /**
  * The Workflows surface (issue #5, spec F03).
@@ -17,9 +19,9 @@ import { WorkflowCanvas } from "./workflow-canvas";
  * **This surface is now the canvas and nothing else.** It used to be a three-column page — a
  * create form and a list in a 16rem column, the graph in the rest, all inside a `max-w-7xl` with
  * page padding — which spent a third of the width and a fixed 36rem of height on chrome that the
- * shell already has a place for. The list and the create button moved into the primary sidebar
- * (`Navigator`), the pipeline's own properties into the secondary one, and what is left fills the
- * viewport. That is also why the selection is a prop read from the route rather than component
+ * shell already has a place for. The list moved into the sidebar (nested under Workflows), the
+ * create controls into the header, the pipeline's own properties into the secondary sidebar, and
+ * what is left fills the viewport. That is also why the selection is a prop read from the route rather than component
  * state: three surfaces now draw the same choice, and a `useState` here could only be read by one
  * of them.
  */
@@ -34,6 +36,12 @@ export function WorkflowsView({ workflowId }: { workflowId?: string | undefined 
   const detail = trpc.workflow.get.useQuery(
     { id: selected?.id ?? "" },
     { enabled: selected !== null },
+  );
+
+  const actions = (
+    <HeaderActions>
+      <WorkflowCreateActions installed={list} />
+    </HeaderActions>
   );
 
   if (workflows.error) {
@@ -57,6 +65,7 @@ export function WorkflowsView({ workflowId }: { workflowId?: string | undefined 
   if (detail.data) {
     return (
       <>
+        {actions}
         <WorkflowCanvas workflow={detail.data} />
         {/* The pipeline's own settings — its name, its Steps as a list — go to the secondary
             sidebar rather than onto the canvas, which is the whole point of having one. */}
@@ -69,6 +78,7 @@ export function WorkflowsView({ workflowId }: { workflowId?: string | undefined 
 
   return (
     <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
+      {actions}
       <WorkflowIcon aria-hidden className="size-6 text-muted-foreground/50" strokeWidth={1.5} />
       <p className="text-muted-foreground text-sm">
         {selected
@@ -78,7 +88,7 @@ export function WorkflowsView({ workflowId }: { workflowId?: string | undefined 
             : "No workflows yet. A workflow chains harnesses: one plans, another implements, a third reviews."}
       </p>
       {!selected && !workflows.isLoading && (
-        <p className="text-muted-foreground/70 text-xs">Create one from the sidebar.</p>
+        <p className="text-muted-foreground/70 text-xs">Start one with New workflow, above.</p>
       )}
     </div>
   );

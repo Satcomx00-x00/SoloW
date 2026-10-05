@@ -2,43 +2,43 @@
 
 import { ChevronRight } from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { projectIdFromPath, projectSectionFor, sectionFor } from "@/lib/navigation";
+import { useSearchParams } from "next/navigation";
+import { type ReactNode, Suspense } from "react";
+import { projectSectionHref, settingsSectionFor } from "@/lib/navigation";
 import { trpc } from "@/trpc/react";
 import { CommandPaletteTrigger } from "./command-palette";
 import { HeaderActionsOutlet } from "./header-actions";
 import { SecondarySidebarToggle } from "./secondary-sidebar";
+import { SidebarShowButton } from "./sidebar";
+import { type Place, usePlace } from "./use-place";
 
 /**
  * The shell's header: where you are on the left, what you can do on the right.
  *
- * The breadcrumb is a real trail, not a label — every segment but the last is a link, so a Task
- * page has a one-click way back that is not the browser's Back button.
+ * The breadcrumb is a real trail, not a label — every segment but the last is a link — and it
+ * states the hierarchy in words: **Projects › Project › Section › leaf.** It starts at Projects,
+ * not at the Workspace's name: the Workspace is named at the top of the sidebar, and the root
+ * crumb used to link to its *settings*, so the first thing in the trail led out of the app.
  *
- * Its shape is the hierarchy stated in words: **Workspace › Project › Section › leaf.** That
- * middle segment is the whole change — the trail used to read `Workspace › Board`, which said a
- * board was a thing the Workspace had. It is not; it is a thing a Project has, and the crumb now
- * says so on every screen and links back to the Project rather than to a flat list.
+ * A Task or an Issue is placed by `usePlace`, which asks the server for its Project; a Task page
+ * used to read `Workspace › Task` because its flat route carries no Project, and now reads
+ * `Projects › Acme › Board › Fix the login` like every other page under a Project.
  *
- * Nothing in this header creates anything any more. A global `Create` split-button used to sit
- * here on the argument that making a Task or an Issue is not a property of the route you are on —
- * true, but it bought a permanently visible button for actions that are reached from the place
- * they belong to anyway, and a header control that is nearly never the next thing you want is
- * cost with no matching use. It was removed on request, and the ⌘⇧T / ⌘⇧I shortcuts and the
- * palette's four create commands went with it: they existed only to open the dialogs that menu
- * owned, so keeping them would have left key bindings dispatching at nothing.
- *
- * Creating work now happens where the thing being created lives — a Project's own `New` menu,
- * `New task` on an Issue's page — and each of those surfaces mounts its own dialog, so a button
- * cannot ask for something nothing is listening for. `HeaderActionsOutlet` stays for controls
- * that genuinely do belong to one page.
+ * Nothing in this header creates anything: creating work happens where the thing being created
+ * lives, and each of those surfaces puts its own controls here through `HeaderActionsOutlet`.
  */
-function Crumb({ href, children }: { href?: string | undefined; children: React.ReactNode }) {
-  if (!href) return <span className="truncate px-1 font-medium">{children}</span>;
+function Crumb({ href, children }: { href?: string | undefined; children: ReactNode }) {
+  if (!href) {
+    return (
+      <span aria-current="page" className="min-w-0 truncate px-1 font-medium">
+        {children}
+      </span>
+    );
+  }
   return (
     <Link
       href={href}
-      className="shrink-0 truncate rounded px-1 py-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+      className="min-w-0 shrink truncate rounded px-1 py-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
     >
       {children}
     </Link>
@@ -49,91 +49,88 @@ function Separator() {
   return <ChevronRight className="size-3.5 shrink-0 text-muted-foreground/40" aria-hidden />;
 }
 
-export function HeaderBar({ workspaceName }: { workspaceName: string }) {
-  const pathname = usePathname();
-  const projectId = projectIdFromPath(pathname);
-  const projectSection = projectSectionFor(pathname);
-  const section = sectionFor(pathname);
+interface Segment {
+  label: string;
+  href?: string | undefined;
+}
 
-  // Named, not just identified: a crumb reading the project's id would be a worse label than no
-  // crumb at all. Only asked for when there is a Project in the path.
+/** The leaf a flat route names: the Task's or the Issue's own title. */
+function useLeaf(place: Place): Segment | null {
+  const task = trpc.task.get.useQuery({ id: place.taskId ?? "" }, { enabled: !!place.taskId });
+  const issue = trpc.issue.get.useQuery(
+    { id: place.issueId ?? "" },
+    { enabled: !!place.issueId && !place.taskId },
+  );
+  if (place.taskId) return { label: task.data?.title ?? "Task" };
+  if (place.issueId) return { label: issue.data?.title ?? "Issue" };
+  return null;
+}
+
+function SettingsLeaf() {
+  const params = useSearchParams();
+  return <Crumb>{settingsSectionFor(params.get("section")).label}</Crumb>;
+}
+
+function Trail() {
+  const place = usePlace();
+  const leaf = useLeaf(place);
   const project = trpc.project.get.useQuery(
-    { projectId: projectId ?? "" },
-    { enabled: projectId !== null },
+    { projectId: place.projectId ?? "" },
+    { enabled: place.projectId !== null },
   );
 
-  // A Task's own title is fetched by the page, not here; the shell only knows it is *a* task.
-  const leaf = pathname.startsWith("/task/")
-    ? "Task"
-    : pathname.startsWith("/issues/")
-      ? "Issue"
-      : null;
+  const segments: Segment[] = [];
+  if (place.projectId) {
+    segments.push({ label: "Projects", href: "/projects" });
+    segments.push({
+      label: project.data?.title ?? "Project",
+      href: projectSectionHref(place.projectId, ""),
+    });
+    if (place.projectSection) {
+      segments.push({
+        label: place.projectSection.label,
+        href: projectSectionHref(place.projectId, place.projectSection.path),
+      });
+    }
+  } else if (place.section) {
+    segments.push({ label: place.section.label, href: place.section.href });
+  }
+  if (leaf) segments.push(leaf);
+
+  const inSettings = place.section?.href === "/settings";
+  // The last segment is where you are, so it is text rather than a link to itself.
+  const last = segments.length - 1;
 
   return (
+    <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1 text-sm">
+      {segments.map((segment, i) => (
+        <span key={segment.href ?? segment.label} className="flex min-w-0 items-center gap-1">
+          {i > 0 && <Separator />}
+          <Crumb href={i === last && !inSettings ? undefined : segment.href}>{segment.label}</Crumb>
+        </span>
+      ))}
+      {inSettings && (
+        <>
+          <Separator />
+          <Suspense fallback={null}>
+            <SettingsLeaf />
+          </Suspense>
+        </>
+      )}
+    </nav>
+  );
+}
+
+export function HeaderBar() {
+  return (
     <header className="flex h-11 shrink-0 items-center gap-2 border-b px-3">
-      <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1 text-sm">
-        {/* The trail's root, and now a place you can actually go: the Workspace owns everything
-            downstream of it in this crumb, and it was the one link in the chain that led
-            nowhere. */}
-        <Link
-          href="/settings?section=workspace"
-          className="shrink-0 truncate text-muted-foreground transition-colors hover:text-foreground"
-          title={`Workspace: ${workspaceName}`}
-        >
-          {workspaceName}
-        </Link>
-
-        {projectId ? (
-          <>
-            <Separator />
-            {/* Always a link, even on the Project's own overview: it is the trail's real hinge,
-                and the one crumb someone reaches for to get back out of a section. */}
-            <Crumb
-              href={projectSection?.path === "" && !leaf ? undefined : `/projects/${projectId}`}
-            >
-              {project.data?.title ?? "Project"}
-            </Crumb>
-            {projectSection && projectSection.path !== "" && (
-              <>
-                <Separator />
-                <Crumb href={leaf ? `/projects/${projectId}${projectSection.path}` : undefined}>
-                  {projectSection.label}
-                </Crumb>
-              </>
-            )}
-          </>
-        ) : (
-          /*
-           * No section crumb on a Task's own page.
-           *
-           * `/task/:id` is a flat route, so the trail has nothing in it to say which Project the
-           * Task belongs to — and `sectionFor` answers "Projects" for every one of them, which
-           * is a guess. It reads as a fact: a Task whose Issue is in no Project at all showed
-           * `Workspace › Projects › Task`, naming a container it is not in. Saying less is the
-           * honest option, and the crumb was never a link on this route anyway.
-           */
-          !pathname.startsWith("/task/") &&
-          section && (
-            <>
-              <Separator />
-              <Crumb href={leaf ? section.href : undefined}>{section.label}</Crumb>
-            </>
-          )
-        )}
-
-        {leaf && (
-          <>
-            <Separator />
-            <span className="truncate px-1 font-medium">{leaf}</span>
-          </>
-        )}
-      </nav>
-
-      <div className="ml-auto flex items-center gap-2">
+      <SidebarShowButton />
+      <Trail />
+      <div className="ml-auto flex shrink-0 items-center gap-2">
         <HeaderActionsOutlet />
-        {/* The right-hand panel's switch, at the right-hand end of the header — where VS Code
-            puts it, and the only chrome in this bar that is about the shell rather than about a
-            page. It renders nothing on a surface that contributes no panel. */}
+        {/* The right-hand panel's switch, at the right-hand end of the header — the only chrome
+            in this bar that is about the shell rather than about a page. It renders nothing on a
+            surface that contributes no panel. */}
         <SecondarySidebarToggle />
         <span className="h-4 w-px bg-border" aria-hidden />
         <CommandPaletteTrigger />
