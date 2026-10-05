@@ -22,6 +22,7 @@ import { ISSUE_STATUS_LABELS, ISSUE_STATUS_STYLE } from "@/lib/issue-status";
 import { STATE_LABELS, STATE_STYLE } from "@/lib/task-states";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
+import { matchProjects, ProjectCommands } from "./project-commands";
 
 /**
  * Command palette (⌘K) — the app's search surface, and a consumer of the command registry
@@ -79,6 +80,8 @@ export function CommandPalette() {
       enabled: open,
     },
   );
+  // The same key the sidebar reads, so opening the palette usually costs no request at all.
+  const projects = trpc.project.list.useQuery({}, { enabled: open });
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -127,22 +130,32 @@ export function CommandPalette() {
   const taskRows = tasks.data?.items ?? [];
   const issueRows = issues.data?.items ?? [];
   const loading = tasks.isFetching || issues.isFetching;
-  const nothingFound = searching && !loading && taskRows.length === 0 && issueRows.length === 0;
+  const projectRows = matchProjects(projects.data ?? [], debouncedQuery);
+  const nothingFound =
+    searching &&
+    !loading &&
+    taskRows.length === 0 &&
+    issueRows.length === 0 &&
+    projectRows.length === 0;
 
   return (
     <CommandDialog open={open} onOpenChange={setOpen} shouldFilter={false}>
       <CommandInput
-        placeholder="Search tasks and issues, or jump to a section…"
+        placeholder="Search projects, tasks and issues, or jump to a section…"
         value={query}
         onValueChange={setQuery}
       />
       <CommandList>
-        {nothingFound && <CommandEmpty>No task or issue matches “{debouncedQuery}”.</CommandEmpty>}
+        {nothingFound && (
+          <CommandEmpty>No project, task or issue matches “{debouncedQuery}”.</CommandEmpty>
+        )}
 
         {/* Commands only when browsing; during a search they are noise. This is the palette's
             own mode, not a judgement about any one command — which is why it gates the whole
             resolved list rather than naming anything in it. */}
         {!searching && <ContributedCommands actions={actions} layout={commandLayout} />}
+
+        <ProjectCommands projects={projectRows} searching={searching} onSelect={go} />
 
         {taskRows.length > 0 && (
           <CommandGroup heading={searching ? `Tasks (${taskRows.length})` : "Recent tasks"}>

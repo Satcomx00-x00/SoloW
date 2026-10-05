@@ -7,6 +7,7 @@ import { Command, CommandList } from "@/components/ui/command";
 import { AppContextProvider } from "@/lib/app-context";
 import { type CommandActions, type CommandItem, commandRegistry } from "@/lib/contributions";
 import { ContributedCommands } from "./command-palette";
+import { matchProjects, ProjectCommands } from "./project-commands";
 
 /**
  * The command palette as a consumer of the command registry (issue #3, AC-2/AC-4).
@@ -188,5 +189,49 @@ describe("the command palette's entries", () => {
     // "Manage secrets" stands in for the Settings group's contents: `Settings` is also a
     // destination in "Go to", so its heading is not a string this can search for.
     expect(text.indexOf("Go to")).toBeLessThan(text.indexOf("Manage secrets"));
+  });
+});
+
+describe("the command palette's projects", () => {
+  const PROJECTS = [
+    { id: "p1", title: "Features ToDeb" },
+    { id: "p2", title: "GlabTest" },
+  ];
+
+  function renderProjects(query: string) {
+    const opened: string[] = [];
+    render(
+      <Command shouldFilter={false}>
+        <CommandList>
+          <ProjectCommands
+            projects={matchProjects(PROJECTS, query)}
+            searching={query !== ""}
+            onSelect={(href) => opened.push(href)}
+          />
+        </CommandList>
+      </Command>,
+    );
+    return opened;
+  }
+
+  it("offers each Project once while browsing, to its overview", () => {
+    renderProjects("");
+
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual([
+      "Features ToDeb",
+      "GlabTest",
+    ]);
+  });
+
+  it("offers every section of a matching Project while searching, case-insensitively", () => {
+    const opened = renderProjects("todeb");
+
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual([
+      "Features ToDeb › Planning",
+      "Features ToDeb › Board",
+      "Features ToDeb › Issues",
+    ]);
+    fireEvent.click(screen.getByRole("option", { name: /Board/ }));
+    expect(opened).toEqual(["/projects/p1/board"]);
   });
 });
