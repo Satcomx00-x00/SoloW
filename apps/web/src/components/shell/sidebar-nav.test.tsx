@@ -68,7 +68,7 @@ function handlers(extra: Record<string, (input: unknown) => unknown> = {}) {
       const { projectId } = input as { projectId: string };
       return { id: projectId, title: projectId === "proj-1" ? "Features ToDeb" : "GlabTest" };
     },
-    "issue.list": () => ({ items: [{ id: "i1" }, { id: "i2" }], nextCursor: null }),
+    "workspace.counts": () => ({ unassignedIssues: 2 }),
     "preference.getRecentTasks": () => RECENTS([]),
     "preference.recordRecentTask": () => RECENTS([]),
     "workflow.list": () => [],

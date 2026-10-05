@@ -24,7 +24,6 @@ import {
   WORKSPACE_SECTIONS,
   workflowIdFromPath,
 } from "@/lib/navigation";
-import { WHOLE_PAGE } from "@/lib/paged";
 import { STATE_STYLE } from "@/lib/task-states";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
@@ -291,8 +290,8 @@ function ProjectRow({
 
 /** The Workspace-wide destinations: Unassigned, Workflows (with its pipelines while open), History. */
 function WorkspaceGroup({ place }: { place: Place }) {
-  const unassigned = trpc.issue.list.useQuery({ ...WHOLE_PAGE, unassigned: true });
-  const unassignedCount = unassigned.data?.items.length ?? 0;
+  const counts = trpc.workspace.counts.useQuery();
+  const unassignedCount = counts.data?.unassignedIssues ?? 0;
   const rows = WORKSPACE_SECTIONS.filter((s) => s.href !== "/projects" && s.href !== "/settings");
 
   return (

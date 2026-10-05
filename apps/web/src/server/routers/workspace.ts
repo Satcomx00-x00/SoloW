@@ -4,10 +4,12 @@ import {
   resetWorkspaceInput,
   syncRequestDto,
   syncStatusDto,
+  workspaceCountsDto,
   workspaceDto,
   workspaceResetDto,
   workspaceSetupDto,
 } from "@solow/contracts";
+import { workspaceCounts } from "../dal/counts.js";
 import {
   getSyncStatus,
   getWorkspace,
@@ -81,6 +83,22 @@ export const workspaceRouter = router({
     .input(workspaceDto.pick({}).optional())
     .output(workspaceSetupDto)
     .query(async ({ ctx }) => unwrap(await getWorkspaceSetup(ctx.rctx))),
+
+  /** The numbers the sidebar shows beside its links, counted in SQL rather than by listing. */
+  counts: sessionProcedure
+    .meta({
+      openapi: {
+        method: "GET",
+        path: "/workspace.counts",
+        tags: ["workspace"],
+        protect: true,
+        summary:
+          "The counts shown beside the app's navigation: how many Issues belong to no Project.",
+      },
+    })
+    .input(workspaceDto.pick({}).optional())
+    .output(workspaceCountsDto)
+    .query(async ({ ctx }) => unwrap(await workspaceCounts(ctx.rctx))),
 
   /**
    * How current the mirror is. A local read — no provider is contacted to answer it, which is
