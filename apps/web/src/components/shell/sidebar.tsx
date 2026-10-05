@@ -1,6 +1,6 @@
 "use client";
 
-import { PanelLeft, PanelLeftClose } from "lucide-react";
+import { PanelLeft, PanelLeftClose, Pin } from "lucide-react";
 import { usePathname } from "next/navigation";
 import {
   createContext,
@@ -191,6 +191,7 @@ export function Sidebar({ workspaceName, signedIn }: { workspaceName: string; si
           <SidebarNav workspaceName={workspaceName} signedIn={signedIn} />
         </aside>
       )}
+      {!handle.open && <SidebarPeek workspaceName={workspaceName} signedIn={signedIn} />}
       <Sheet open={handle.mobileOpen} onOpenChange={handle.setMobileOpen}>
         <SheetContent
           side="left"
@@ -205,6 +206,98 @@ export function Sidebar({ workspaceName, signedIn }: { workspaceName: string; si
         </SheetContent>
       </Sheet>
     </>
+  );
+}
+
+/** How long the pointer rests at the edge before the sidebar slides out, and lingers after. */
+const PEEK_OPEN_DELAY_MS = 120;
+const PEEK_CLOSE_DELAY_MS = 250;
+
+/**
+ * The hidden sidebar, on demand: rest the pointer on the window's left edge and it slides out over
+ * the page; move away and it slides back. The Task page is where you hide the sidebar for width,
+ * and also where you most often want one quick jump out — this is that jump without undoing the
+ * choice to hide it. ⌘B is still the keyboard's way in; this is a pointer affordance only.
+ *
+ * It stays out while a menu opened from it is showing: Radix renders the menu in a portal outside
+ * this element, so moving onto it would otherwise count as leaving and close both.
+ */
+function SidebarPeek({ workspaceName, signedIn }: { workspaceName: string; signedIn: boolean }) {
+  const pathname = usePathname();
+  const [peeking, setPeeking] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const schedule = useCallback((next: boolean, delay: number) => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => {
+      if (!next && document.querySelector('[role="menu"]')) return;
+      setPeeking(next);
+    }, delay);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+    },
+    [],
+  );
+
+  // A link inside it was followed: the page it opened is what you wanted to see.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the pathname is the trigger, not an input
+  useEffect(() => setPeeking(false), [pathname]);
+
+  return (
+    <>
+      <div
+        aria-hidden
+        data-testid="sidebar-peek-edge"
+        className="fixed inset-y-0 left-0 z-30 hidden w-2 md:block"
+        onMouseEnter={() => schedule(true, PEEK_OPEN_DELAY_MS)}
+        onMouseLeave={() => {
+          if (!peeking) schedule(false, 0);
+        }}
+      />
+      {peeking && (
+        <aside
+          aria-label="Sidebar"
+          className="fade-in-0 slide-in-from-left-4 fixed inset-y-0 left-0 z-40 hidden w-60 animate-in flex-col border-r bg-sidebar shadow-2xl duration-150 md:flex"
+          onMouseEnter={() => schedule(true, 0)}
+          onMouseLeave={() => schedule(false, PEEK_CLOSE_DELAY_MS)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setPeeking(false);
+          }}
+        >
+          <SidebarNav
+            workspaceName={workspaceName}
+            signedIn={signedIn}
+            footerAction={<SidebarPinButton />}
+          />
+        </aside>
+      )}
+    </>
+  );
+}
+
+/** Turns a peek into the docked sidebar — the same as ⌘B, offered where the pointer already is. */
+function SidebarPinButton() {
+  const handle = useSidebar();
+  if (!handle) return null;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Keep sidebar open"
+          onClick={handle.toggle}
+          className="text-muted-foreground"
+        >
+          <Pin aria-hidden className="size-4" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="top">Keep open · ⌘B</TooltipContent>
+    </Tooltip>
   );
 }
 

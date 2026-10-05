@@ -103,3 +103,32 @@ describe("Sidebar — focus follows ⌘B", () => {
     await waitFor(() => expect(document.activeElement?.id).toBe("sidebar-hide"));
   });
 });
+
+describe("Sidebar — peeking while hidden", () => {
+  it("slides out from the left edge, and can be kept open from there", async () => {
+    pathname = "/projects";
+    renderShell(false);
+    expect(screen.queryByRole("complementary", { name: "Sidebar" })).toBeNull();
+
+    fireEvent.mouseEnter(screen.getByTestId("sidebar-peek-edge"));
+    const peek = await screen.findByRole("complementary", { name: "Sidebar" });
+    expect(peek.className).toContain("fixed");
+
+    fireEvent.click(screen.getByRole("button", { name: "Keep sidebar open" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Hide sidebar" })).toBeDefined());
+    expect(screen.queryByTestId("sidebar-peek-edge")).toBeNull();
+  });
+
+  it("slides back once the pointer leaves it", async () => {
+    pathname = "/projects";
+    renderShell(false);
+
+    fireEvent.mouseEnter(screen.getByTestId("sidebar-peek-edge"));
+    const peek = await screen.findByRole("complementary", { name: "Sidebar" });
+    fireEvent.mouseLeave(peek);
+
+    // Past the close delay. A role query polled by `waitFor` is too slow to observe it reliably.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 400)));
+    expect(document.querySelector("aside")).toBeNull();
+  });
+});

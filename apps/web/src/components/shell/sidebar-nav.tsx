@@ -581,9 +581,12 @@ function useLiveCounts() {
 export function SidebarNav({
   workspaceName,
   signedIn,
+  footerAction = <SidebarHideButton />,
 }: {
   workspaceName: string;
   signedIn: boolean;
+  /** The control at the foot of the column: hide it, or — while peeking — keep it open. */
+  footerAction?: ReactNode;
 }) {
   const place = usePlace();
   const inSettings = place.section?.href === "/settings";
@@ -614,7 +617,7 @@ export function SidebarNav({
             <NavItem href="/settings" label="Settings" icon={Settings} active={false} />
           </ul>
         )}
-        <SidebarHideButton />
+        {footerAction}
       </div>
     </div>
   );
