@@ -1,9 +1,10 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ChevronsUpDown, LogOut, type LucideIcon, Settings } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Fragment, type ReactNode, Suspense, useEffect, useRef } from "react";
+import { Fragment, type ReactNode, Suspense, useCallback, useEffect, useRef } from "react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -26,6 +27,7 @@ import {
 } from "@/lib/navigation";
 import { STATE_STYLE } from "@/lib/task-states";
 import { cn } from "@/lib/utils";
+import { useWorkspaceEvents } from "@/lib/workspace-events";
 import { trpc } from "@/trpc/react";
 import { SidebarHideButton, useSidebar } from "./sidebar";
 import { type Place, usePlace } from "./use-place";
@@ -470,6 +472,39 @@ function useRecordVisit(taskId: string | null) {
   }, [taskId, recordVisit.mutate]);
 }
 
+/**
+ * Keep the sidebar's counts current without polling.
+ *
+ * They change for two kinds of reason, and each has a signal already: work done elsewhere arrives
+ * on the Workspace socket (a mirror pass that wrote Issues, a Task changing state), and work done
+ * here is a mutation finishing in this tab. Either one re-reads `workspace.counts` — a single
+ * `count()` query, cheap enough not to work out which mutations could have moved it.
+ */
+function useLiveCounts() {
+  const utils = trpc.useUtils();
+  const queryClient = useQueryClient();
+
+  const onEvent = useCallback(
+    (event: { kind: string; scope?: string }) => {
+      if (event.kind === "status" || (event.kind === "mirror" && event.scope === "issues")) {
+        void utils.workspace.counts.invalidate();
+      }
+    },
+    [utils],
+  );
+  useWorkspaceEvents(onEvent);
+
+  useEffect(
+    () =>
+      queryClient.getMutationCache().subscribe((event) => {
+        if (event.type === "updated" && event.action.type === "success") {
+          void utils.workspace.counts.invalidate();
+        }
+      }),
+    [queryClient, utils],
+  );
+}
+
 export function SidebarNav({
   workspaceName,
   signedIn,
@@ -480,6 +515,7 @@ export function SidebarNav({
   const place = usePlace();
   const inSettings = place.section?.href === "/settings";
   useRecordVisit(place.taskId);
+  useLiveCounts();
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">

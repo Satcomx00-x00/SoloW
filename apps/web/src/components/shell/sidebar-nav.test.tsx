@@ -114,6 +114,24 @@ describe("Sidebar — the same destinations everywhere", () => {
   });
 });
 
+describe("Sidebar — counts stay current", () => {
+  it("re-reads the counts when a mutation in this tab succeeds", async () => {
+    // Visiting a Task records it as recent — a mutation, so the counts are read again after it.
+    pathname = "/task/t1";
+    const { log } = renderWithTrpc(
+      <SidebarNav workspaceName="Acme" signedIn={false} />,
+      handlers({
+        "task.get": (input) => task({ id: (input as { id: string }).id }),
+        "project.forIssue": () => ({ projectId: "proj-1" }),
+      }),
+    );
+
+    await waitFor(() =>
+      expect(log.calls.filter((c) => c.path === "workspace.counts").length).toBeGreaterThan(1),
+    );
+  });
+});
+
 describe("Sidebar — inside a Project", () => {
   it("nests the open Project's sections and fills exactly the current one", async () => {
     pathname = "/projects/proj-1/board";
