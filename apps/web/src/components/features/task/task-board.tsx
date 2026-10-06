@@ -17,7 +17,7 @@ import {
   ReactFlowProvider,
   useReactFlow,
 } from "@xyflow/react";
-import { Check, CircleDot, Locate, LocateFixed, X } from "lucide-react";
+import { Check, LoaderCircle, Locate, LocateFixed, X } from "lucide-react";
 import {
   type ReactNode,
   type RefObject,
@@ -83,10 +83,16 @@ interface ColumnData extends Record<string, unknown> {
 }
 type ColumnNode = Node<ColumnData, "column">;
 
+/*
+ * The two live states breathe (`.board-pulse-*` in globals.css): the one Step a harness is working
+ * on, and the one waiting on you. Everything else on the board is still, so the eye finds those
+ * two before it has read a word — the halo was there before, but a still halo next to four still
+ * borders reads as one more colour, not as "this one is happening".
+ */
 const STATUS_STYLE: Record<BoardColumn["status"], string> = {
   done: "border-state-done/70 text-foreground",
-  running: "border-state-running text-foreground shadow-[0_0_0_4px] shadow-state-running/15",
-  waiting: "border-state-review text-foreground shadow-[0_0_0_4px] shadow-state-review/15",
+  running: "board-pulse-running border-state-running text-foreground",
+  waiting: "board-pulse-waiting border-state-review text-foreground",
   failed: "border-state-failed text-foreground",
   upcoming: "border-border text-muted-foreground",
 };
@@ -135,7 +141,7 @@ function StepHeader({
       {status === "done" ? (
         <Check aria-hidden className="size-3.5 shrink-0 text-state-done" />
       ) : column.status === "running" ? (
-        <CircleDot aria-hidden className="size-3.5 shrink-0 text-state-running" />
+        <LoaderCircle aria-hidden className="spinner size-3.5 shrink-0 text-state-running" />
       ) : column.status === "failed" ? (
         <X aria-hidden className="size-3.5 shrink-0 text-state-failed" />
       ) : null}

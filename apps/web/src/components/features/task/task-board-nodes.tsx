@@ -29,11 +29,14 @@ export interface DecisionAnswer {
 
 type Tone = "plain" | "live" | "attention" | "settled";
 
+/*
+ * `live` and `attention` breathe — the card a harness is writing to, and the cards waiting on you
+ * (`.board-pulse-*` in globals.css). Brightness only, so it holds under reduced motion too.
+ */
 const TONE: Record<Tone, string> = {
   plain: "border-border bg-card hover:border-foreground/25",
-  live: "border-state-running/60 bg-card hover:border-state-running",
-  attention:
-    "border-state-review bg-card shadow-[0_0_0_4px] shadow-state-review/10 hover:shadow-state-review/25",
+  live: "board-pulse-running board-pulse-soft border-state-running/60 bg-card hover:border-state-running",
+  attention: "board-pulse-waiting board-pulse-soft border-state-review bg-card",
   settled: "border-state-done/50 bg-card hover:border-state-done",
 };
 
