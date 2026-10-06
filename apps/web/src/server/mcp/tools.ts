@@ -80,6 +80,8 @@ const WITHHELD_NAMESPACES = new Set([
 const WITHHELD_PROCEDURES = new Set([
   "workflow.advanceTask",
   "workflow.acknowledgeDrift",
+  // A review forced on a Step is a person's call about a gate; a harness must not lift its own.
+  "workflow.forceReview",
   // Writing a Harness Config is writing what every run of its Profiles loads (Decision 0028) —
   // the `library` reasoning above, one namespace over. Reading them stays exposed.
   "profile.harnessConfig.create",

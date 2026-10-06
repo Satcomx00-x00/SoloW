@@ -11,11 +11,13 @@ import {
   appendRank,
   buildStepBrief,
   carryHarnessDecision,
+  carryHarnessReview,
   describeWorkflowDecision,
   evaluateStepCondition,
   rankBetween,
   rankForMove,
   readHarnessDecision,
+  readHarnessReview,
   resumeWorkflowCursor,
   sortSteps,
   stepExits,
@@ -610,6 +612,7 @@ describe("what an advance says about itself", () => {
       condition: null,
       exit: null,
       producedChanges: false,
+      reviewReason: "gate",
     });
   });
 
@@ -937,5 +940,81 @@ describe("the handoff brief", () => {
 
   it("treats a blank handoff as no handoff at all", () => {
     expect(buildStepBrief({ promptTemplate: "Draw up a plan." }, "   \n ")).toBe("Draw up a plan.");
+  });
+});
+
+describe("when a Step waits for a review", () => {
+  const two = (gate: WorkflowStepGate) => {
+    const a = appendRank(null);
+    return [step("clarify", a, gate), step("plan", appendRank(a), "auto")];
+  };
+
+  it("asks the harness on an agent-decides gate, and waits unless it says REVIEW: no", () => {
+    const yes = unwrap(
+      advanceWorkflowStep(
+        two("agent-decides"),
+        "clarify",
+        outcome({ handoff: "Done.\n\nREVIEW: yes" }),
+      ),
+    );
+    expect(yes.status).toBe("awaiting-decision");
+    expect(yes.explanation.reviewReason).toBe("agent");
+
+    const silent = unwrap(advanceWorkflowStep(two("agent-decides"), "clarify", outcome()));
+    expect(silent.status).toBe("awaiting-decision");
+
+    const no = unwrap(
+      advanceWorkflowStep(
+        two("agent-decides"),
+        "clarify",
+        outcome({ handoff: "Done.\nreview: No" }),
+      ),
+    );
+    expect(no.status).toBe("advanced");
+    expect(no.explanation.reviewReason).toBeUndefined();
+  });
+
+  it("waits for a person whenever the Step asked decisions, even on an automatic gate", () => {
+    const asked = unwrap(
+      advanceWorkflowStep(
+        two("auto"),
+        "clarify",
+        outcome({ decisionsAsked: true, handoff: "REVIEW: no" }),
+      ),
+    );
+    expect(asked.status).toBe("awaiting-decision");
+    expect(asked.explanation.reviewReason).toBe("decisions");
+  });
+
+  it("waits when a review was forced on the Step for this Task", () => {
+    const forced = unwrap(
+      advanceWorkflowStep(two("auto"), "clarify", outcome({ forceReview: true })),
+    );
+    expect(forced.status).toBe("awaiting-decision");
+    expect(forced.explanation.reviewReason).toBe("forced");
+    // And once approved, it moves on like any human gate.
+    const approved = unwrap(
+      advanceWorkflowStep(
+        two("auto"),
+        "clarify",
+        outcome({ forceReview: true, unspentApproval: true }),
+      ),
+    );
+    expect(approved.status).toBe("advanced");
+  });
+
+  it("asks the review question in the brief of an agent-decides Step only", () => {
+    expect(buildStepBrief({ promptTemplate: "Clarify.", gate: "agent-decides" }, null)).toContain(
+      "REVIEW: yes",
+    );
+    expect(buildStepBrief({ promptTemplate: "Clarify.", gate: "auto" }, null)).not.toContain(
+      "REVIEW:",
+    );
+  });
+
+  it("carries the harness's review answer into the handoff, the widget's field first", () => {
+    expect(carryHarnessReview("Summary.", "…\nREVIEW: yes", null)).toBe("Summary.\n\nREVIEW: yes");
+    expect(carryHarnessReview("Summary.", "REVIEW: yes", "no")).toBe("Summary.\n\nREVIEW: no");
+    expect(readHarnessReview("REVIEW: no\nREVIEW: yes")).toBe("yes");
   });
 });

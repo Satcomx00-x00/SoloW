@@ -9,6 +9,7 @@ import {
   deleteWorkflowStepInput,
   detachTaskWorkflowInput,
   exportWorkflowInput,
+  forceTaskStepReviewInput,
   getTaskWorkflowInput,
   getWorkflowInput,
   importWorkflowInput,
@@ -41,6 +42,7 @@ import {
   deleteWorkflowStep,
   detachTaskWorkflow,
   exportWorkflow,
+  forceTaskStepReview,
   getTaskWorkflowBinding,
   getWorkflowWithSteps,
   importWorkflow,
@@ -332,6 +334,21 @@ export const workflowRouter = router({
     .input(getTaskWorkflowInput)
     .output(taskWorkflowBindingDto)
     .query(async ({ ctx, input }) => unwrap(await getTaskWorkflowBinding(ctx.rctx, input.taskId))),
+
+  forceReview: workflowProcedure
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/workflow.forceReview",
+        tags: ["workflow"],
+        protect: true,
+        summary:
+          "Make one Step of a Task's Workflow wait for a person's review whatever its gate says, or stop forcing it — taking effect at that Step's next finish.",
+      },
+    })
+    .input(forceTaskStepReviewInput)
+    .output(taskWorkflowBindingDto)
+    .mutation(async ({ ctx, input }) => unwrap(await forceTaskStepReview(ctx.rctx, input))),
 
   acknowledgeDrift: workflowProcedure
     .meta({

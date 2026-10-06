@@ -25,7 +25,10 @@ Step on its own harness session, and the handoff (summary, diff, decision) trave
      just read the issue and the handoff of the previous Step; say what to do, what not to touch,
      and what its summary must report.
    - \`gate\` — \`"auto"\` (advance on its own), \`"human"\` (a person approves before advancing),
-     \`"auto-unless-changes"\` (automatic unless the Step produced a diff).
+     \`"auto-unless-changes"\` (automatic unless the Step produced a diff), or \`"agent-decides"\`
+     (the Step's harness says whether it needs a review — a \`REVIEW: yes|no\` line or its
+     \`task_complete\` widget's \`review\` field; no answer means yes). Whatever the gate, a Step
+     that asks the reviewer \`decision\` widgets waits for a person.
    - \`advanceOn\` — \`"agent-signal"\` (the harness says it is done) or \`"review"\` (a review lands).
    - \`mcpServerIds\` / \`skillIds\` — library items loaded for this Step on top of the
      Workspace-wide ones (\`library_mcp_list\`, \`library_skill_list\`). Additive; ids only.

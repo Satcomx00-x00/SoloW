@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import {
   type ExecutorConfig,
   type HarnessProtocol,
@@ -27,6 +27,7 @@ import {
 import {
   CREDENTIAL_EXPIRED_REASON,
   carryHarnessDecision,
+  carryHarnessReview,
   classifyRunFailure,
   PARTIAL_INTEGRATION_REASON,
   primaryTaskRepository,
@@ -1607,6 +1608,11 @@ export async function runTaskLifecycle(
           signal: input.signal,
           gate: result.data.explanation.gate,
           needsApproval: result.data.explanation.needsApproval,
+          // Why a person is asked, when one is — the gate, the harness's `REVIEW:`, decisions it
+          // asked, or a review forced for this Task — so the record says which.
+          ...(result.data.explanation.reviewReason
+            ? { reviewReason: result.data.explanation.reviewReason }
+            : {}),
           condition: result.data.explanation.condition,
           status: result.data.status,
           nextStepId: advanced ? result.data.currentStepId : null,
@@ -1851,10 +1857,18 @@ export async function runTaskLifecycle(
          * operator's `~/.claude` is somewhere it never looks. Idempotent, which is the point —
          * every round of the Task passes through here and round two resumes round one's home.
          */
+        const homePath = harnessHomePath(deps.worktreeRoot, taskId);
         const homeEnv = await resolveHarnessConfigEnv({
           kind: ctx.executorProfile.config.kind,
-          home: harnessHomePath(deps.worktreeRoot, taskId),
+          home: homePath,
           baseEnv: hostEnv,
+          // Where a round from before the home was resolved left it: the same relative path, read
+          // against the harness's working directory — the worktree, or the checkout it began in.
+          legacyHomes: isAbsolute(homePath)
+            ? []
+            : [wt?.path, repoPath]
+                .filter((d): d is string => Boolean(d))
+                .map((d) => resolve(d, homePath)),
         });
         /*
          * The configuration the app *does* hand this harness (Decision 0028): the leg's Profile's
@@ -2765,10 +2779,16 @@ export async function runTaskLifecycle(
         // carried in when the summary has none — this is what the next Step is briefed with.
         // The widget's own `decision` field outranks anything read off prose — see
         // `carryHarnessDecision`.
-        const summary = carryHarnessDecision(
-          completion.widget?.summary ?? null,
+        // …and its answer to an `agent-decides` gate's "does this need a review?", carried the same
+        // way, so the gate reads one `REVIEW:` line whichever channel the answer came on.
+        const summary = carryHarnessReview(
+          carryHarnessDecision(
+            completion.widget?.summary ?? null,
+            assistantText,
+            completion.widget?.decision ?? null,
+          ),
           assistantText,
-          completion.widget?.decision ?? null,
+          completion.widget?.review ?? null,
         );
         emit({
           kind: "agent_done",
@@ -3137,11 +3157,16 @@ export async function runTaskLifecycle(
        * abandoned run asks a person to sign off on nothing — the same line `canOpenReview` draws.
        * Idempotent on a redrive: `setTaskState` writes the same value and `recordTransition`
        * drops an identical adjacent transition.
+       *
+       * `failureReason: null` because a run about to park at its own gate is the proof that a
+       * decision will be heard — whatever an earlier round left on the row is overtaken. Kept, a
+       * `review_decision_not_applied` from before a Retry made this live gate read as dead:
+       * the page offered Retry instead of Approve, over a run sitting there waiting for one.
        */
       if (wf && leg.stepId && run.outcome !== "blocked") {
         const stepId = leg.stepId;
         await step.run(`open-gate-${round}`, async () => {
-          await setTaskState(db, workspaceId, taskId, "review");
+          await setTaskState(db, workspaceId, taskId, "review", { failureReason: null });
           await recordTransition("running", "review", stepId);
         });
         logStateTransition(log, { workspaceId, taskId, from: "running", to: "review" });

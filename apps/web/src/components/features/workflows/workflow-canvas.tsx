@@ -49,7 +49,17 @@ import {
   useReactFlow,
   useStore,
 } from "@xyflow/react";
-import { ChevronsUpDown, GitBranch, Plus, Trash2, TriangleAlert, X } from "lucide-react";
+import {
+  BotMessageSquare,
+  ChevronsUpDown,
+  FastForward,
+  GitBranch,
+  Plus,
+  Trash2,
+  TriangleAlert,
+  UserCheck,
+  X,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConfirmAction } from "@/components/features/confirm-action";
 import { Badge } from "@/components/ui/badge";
@@ -140,12 +150,17 @@ import { COMPACT_ZOOM, FIT_VIEW } from "./workflow-canvas-zoom";
  * the keystroke: an operator building a loop passes through both on the way.
  */
 
-// Short enough to read whole in a half-width control; the label is the whole explanation a
-// node has room for.
+/**
+ * What the gate means for the run, in the words the node summary uses. The gate is set with the
+ * "Wait for review" button: on, the Step ends only when a person approves its review and the
+ * next Step waits until then; off, the run moves on by itself — unless asked to still wait when
+ * the Step changed files.
+ */
 const GATE_LABELS: Record<WorkflowStepGate, string> = {
-  human: "A human approves",
-  auto: "Automatic",
-  "auto-unless-changes": "Automatic unless changed",
+  human: "Waits for review",
+  auto: "Moves on by itself",
+  "auto-unless-changes": "Waits for review if it changed files",
+  "agent-decides": "The AI decides on review",
 };
 
 const ADVANCE_LABELS: Record<WorkflowAdvanceOn, string> = {
@@ -1105,6 +1120,94 @@ function StepSummary({
   );
 }
 
+/**
+ * Whether the run waits for a person before this Step's successor starts — the Step's gate, as
+ * one button.
+ *
+ * Pressed (`human`): the Step ends only when its review is approved, and the next Step waits for
+ * that. Released: the run moves on as soon as the Step finishes — with "Still wait if it changed
+ * files" as the one refinement (`auto-unless-changes`), so a Step that only read or planned goes
+ * straight on while one that touched the code still stops for a look. A three-way select used to
+ * say this as "A human approves / Automatic / Automatic unless changed", and nothing on the board
+ * then told a reviewer why a later Step had already run.
+ */
+function WaitForReview({
+  step,
+  save,
+}: {
+  step: WorkflowStepDto;
+  save: (gate: WorkflowStepGate) => void;
+}) {
+  const movesOn = step.gate === "auto" || step.gate === "auto-unless-changes";
+  const options: Array<{
+    gate: WorkflowStepGate;
+    label: string;
+    pressed: boolean;
+    icon: typeof UserCheck;
+  }> = [
+    { gate: "human", label: "Wait for review", pressed: step.gate === "human", icon: UserCheck },
+    {
+      gate: "agent-decides",
+      label: "AI decides",
+      pressed: step.gate === "agent-decides",
+      icon: BotMessageSquare,
+    },
+    { gate: "auto", label: "Move on", pressed: movesOn, icon: FastForward },
+  ];
+  return (
+    <div className="grid gap-1.5">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="font-medium text-xs">Review</span>
+        <span className="truncate text-2xs text-muted-foreground">
+          {step.gate === "agent-decides"
+            ? "The harness answers REVIEW: yes or no"
+            : step.gate === "human"
+              ? "The next step waits for your approval"
+              : "Questions it asks still wait for you"}
+        </span>
+      </div>
+      <fieldset
+        aria-label={`Review for ${step.name}`}
+        className={`${FIELD} m-0 grid min-w-0 grid-cols-3 gap-1 border-0 p-0`}
+      >
+        {options.map((option) => (
+          <button
+            key={option.gate}
+            type="button"
+            aria-pressed={option.pressed}
+            onClick={() => {
+              if (!option.pressed) save(option.gate);
+            }}
+            className={`flex h-7 min-w-0 items-center justify-center gap-1 rounded-md border px-1.5 font-medium text-xs transition-colors ${
+              option.pressed
+                ? "border-state-review/60 bg-state-review/10 text-foreground"
+                : "text-muted-foreground hover:bg-accent/50"
+            }`}
+          >
+            <option.icon aria-hidden className="size-3.5 shrink-0" />
+            <span className="truncate">{option.label}</span>
+          </button>
+        ))}
+      </fieldset>
+      {movesOn ? (
+        <div className={`${FIELD} flex items-center gap-1.5`}>
+          <Checkbox
+            id={`step-wait-if-changed-${step.id}`}
+            checked={step.gate === "auto-unless-changes"}
+            onCheckedChange={(on) => save(on === true ? "auto-unless-changes" : "auto")}
+          />
+          <Label
+            htmlFor={`step-wait-if-changed-${step.id}`}
+            className="font-normal text-2xs text-muted-foreground"
+          >
+            Still wait if it changed files
+          </Label>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function StepNodeView({ data }: NodeProps<StepNode>) {
   const { step, index, dotColor, libraries, problems, profiles, siblings, onAddAfter, adding } =
     data;
@@ -1267,32 +1370,11 @@ function StepNodeView({ data }: NodeProps<StepNode>) {
                 </SelectContent>
               </Select>
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="grid gap-1.5">
-                <Label htmlFor={`step-gate-${step.id}`} className="text-xs">
-                  Gate
-                </Label>
-                <Select
-                  value={step.gate}
-                  onValueChange={(v) =>
-                    update.mutate({ stepId: step.id, gate: v as WorkflowStepGate })
-                  }
-                >
-                  <SelectTrigger
-                    id={`step-gate-${step.id}`}
-                    className={`${FIELD} h-7 w-full text-xs`}
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(GATE_LABELS).map(([value, label]) => (
-                      <SelectItem key={value} value={value}>
-                        {label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+            <div className="grid gap-2">
+              <WaitForReview
+                step={step}
+                save={(gate) => update.mutate({ stepId: step.id, gate })}
+              />
               <div className="grid gap-1.5">
                 <Label htmlFor={`step-advance-${step.id}`} className="text-xs">
                   Finished when

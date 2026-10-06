@@ -27275,6 +27275,13 @@
                                               "yes",
                                               "no"
                                             ]
+                                          },
+                                          "review": {
+                                            "type": "string",
+                                            "enum": [
+                                              "yes",
+                                              "no"
+                                            ]
                                           }
                                         },
                                         "required": [
@@ -27532,11 +27539,21 @@
                                     "enum": [
                                       "human",
                                       "auto",
-                                      "auto-unless-changes"
+                                      "auto-unless-changes",
+                                      "agent-decides"
                                     ]
                                   },
                                   "needsApproval": {
                                     "type": "boolean"
+                                  },
+                                  "reviewReason": {
+                                    "type": "string",
+                                    "enum": [
+                                      "gate",
+                                      "agent",
+                                      "decisions",
+                                      "forced"
+                                    ]
                                   },
                                   "condition": {
                                     "type": "object",
@@ -29333,6 +29350,13 @@
                                           "yes",
                                           "no"
                                         ]
+                                      },
+                                      "review": {
+                                        "type": "string",
+                                        "enum": [
+                                          "yes",
+                                          "no"
+                                        ]
                                       }
                                     },
                                     "required": [
@@ -29590,11 +29614,21 @@
                                 "enum": [
                                   "human",
                                   "auto",
-                                  "auto-unless-changes"
+                                  "auto-unless-changes",
+                                  "agent-decides"
                                 ]
                               },
                               "needsApproval": {
                                 "type": "boolean"
+                              },
+                              "reviewReason": {
+                                "type": "string",
+                                "enum": [
+                                  "gate",
+                                  "agent",
+                                  "decisions",
+                                  "forced"
+                                ]
                               },
                               "condition": {
                                 "type": "object",
@@ -30699,6 +30733,13 @@
                                           "yes",
                                           "no"
                                         ]
+                                      },
+                                      "review": {
+                                        "type": "string",
+                                        "enum": [
+                                          "yes",
+                                          "no"
+                                        ]
                                       }
                                     },
                                     "required": [
@@ -30956,11 +30997,21 @@
                                 "enum": [
                                   "human",
                                   "auto",
-                                  "auto-unless-changes"
+                                  "auto-unless-changes",
+                                  "agent-decides"
                                 ]
                               },
                               "needsApproval": {
                                 "type": "boolean"
+                              },
+                              "reviewReason": {
+                                "type": "string",
+                                "enum": [
+                                  "gate",
+                                  "agent",
+                                  "decisions",
+                                  "forced"
+                                ]
                               },
                               "condition": {
                                 "type": "object",
@@ -31552,7 +31603,8 @@
                             "enum": [
                               "human",
                               "auto",
-                              "auto-unless-changes"
+                              "auto-unless-changes",
+                              "agent-decides"
                             ]
                           },
                           "advanceOn": {
@@ -32287,7 +32339,8 @@
                             "enum": [
                               "human",
                               "auto",
-                              "auto-unless-changes"
+                              "auto-unless-changes",
+                              "agent-decides"
                             ],
                             "default": "human"
                           },
@@ -32619,7 +32672,8 @@
                               "enum": [
                                 "human",
                                 "auto",
-                                "auto-unless-changes"
+                                "auto-unless-changes",
+                                "agent-decides"
                               ],
                               "default": "human"
                             },
@@ -32905,7 +32959,8 @@
                                 "enum": [
                                   "human",
                                   "auto",
-                                  "auto-unless-changes"
+                                  "auto-unless-changes",
+                                  "agent-decides"
                                 ]
                               },
                               "advanceOn": {
@@ -33423,7 +33478,8 @@
                                 "enum": [
                                   "human",
                                   "auto",
-                                  "auto-unless-changes"
+                                  "auto-unless-changes",
+                                  "agent-decides"
                                 ]
                               },
                               "advanceOn": {
@@ -33738,7 +33794,8 @@
                     "enum": [
                       "human",
                       "auto",
-                      "auto-unless-changes"
+                      "auto-unless-changes",
+                      "agent-decides"
                     ]
                   },
                   "advanceOn": {
@@ -33992,7 +34049,8 @@
                             "enum": [
                               "human",
                               "auto",
-                              "auto-unless-changes"
+                              "auto-unless-changes",
+                              "agent-decides"
                             ]
                           },
                           "advanceOn": {
@@ -34288,7 +34346,8 @@
                     "enum": [
                       "human",
                       "auto",
-                      "auto-unless-changes"
+                      "auto-unless-changes",
+                      "agent-decides"
                     ]
                   },
                   "advanceOn": {
@@ -34535,7 +34594,8 @@
                             "enum": [
                               "human",
                               "auto",
-                              "auto-unless-changes"
+                              "auto-unless-changes",
+                              "agent-decides"
                             ]
                           },
                           "advanceOn": {
@@ -34904,7 +34964,8 @@
                             "enum": [
                               "human",
                               "auto",
-                              "auto-unless-changes"
+                              "auto-unless-changes",
+                              "agent-decides"
                             ]
                           },
                           "advanceOn": {
@@ -35261,7 +35322,8 @@
                             "enum": [
                               "human",
                               "auto",
-                              "auto-unless-changes"
+                              "auto-unless-changes",
+                              "agent-decides"
                             ]
                           },
                           "advanceOn": {
@@ -35617,7 +35679,8 @@
                           "enum": [
                             "human",
                             "auto",
-                            "auto-unless-changes"
+                            "auto-unless-changes",
+                            "agent-decides"
                           ]
                         },
                         "advanceOn": {
@@ -35848,7 +35911,8 @@
                             "enum": [
                               "human",
                               "auto",
-                              "auto-unless-changes"
+                              "auto-unless-changes",
+                              "agent-decides"
                             ]
                           },
                           "advanceOn": {
@@ -36051,6 +36115,14 @@
                     },
                     "brief": {
                       "type": "string"
+                    },
+                    "forcedReviewStepIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "default": []
                     }
                   },
                   "required": [
@@ -36063,7 +36135,8 @@
                     "currentStep",
                     "steps",
                     "handoff",
-                    "brief"
+                    "brief",
+                    "forcedReviewStepIds"
                   ]
                 }
               }
@@ -36294,7 +36367,8 @@
                           "enum": [
                             "human",
                             "auto",
-                            "auto-unless-changes"
+                            "auto-unless-changes",
+                            "agent-decides"
                           ]
                         },
                         "advanceOn": {
@@ -36525,7 +36599,8 @@
                             "enum": [
                               "human",
                               "auto",
-                              "auto-unless-changes"
+                              "auto-unless-changes",
+                              "agent-decides"
                             ]
                           },
                           "advanceOn": {
@@ -36728,6 +36803,14 @@
                     },
                     "brief": {
                       "type": "string"
+                    },
+                    "forcedReviewStepIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "default": []
                     }
                   },
                   "required": [
@@ -36740,7 +36823,8 @@
                     "currentStep",
                     "steps",
                     "handoff",
-                    "brief"
+                    "brief",
+                    "forcedReviewStepIds"
                   ]
                 }
               }
@@ -36782,6 +36866,617 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/error.NOT_FOUND"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workflow.forceReview": {
+      "post": {
+        "operationId": "workflow-forceReview",
+        "summary": "Make one Step of a Task's Workflow wait for a person's review whatever its gate says, or stop forcing it — taking effect at that Step's next finish.",
+        "tags": [
+          "workflow"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "taskId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "stepId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "force": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "taskId",
+                  "stepId",
+                  "force"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "taskId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "workflowId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "workflowName": {
+                      "type": "string"
+                    },
+                    "attachedVersion": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "exclusiveMinimum": true
+                    },
+                    "currentVersion": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "exclusiveMinimum": true
+                    },
+                    "definitionDrifted": {
+                      "type": "boolean"
+                    },
+                    "currentStep": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "workflowId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "position": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "rank": {
+                          "type": "string"
+                        },
+                        "agentProfileId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "promptTemplate": {
+                          "type": "string"
+                        },
+                        "gate": {
+                          "type": "string",
+                          "enum": [
+                            "human",
+                            "auto",
+                            "auto-unless-changes",
+                            "agent-decides"
+                          ]
+                        },
+                        "advanceOn": {
+                          "type": "string",
+                          "enum": [
+                            "agent-signal",
+                            "review"
+                          ]
+                        },
+                        "onEnter": {
+                          "type": "object",
+                          "nullable": true,
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 64
+                            },
+                            "config": {
+                              "type": "object",
+                              "additionalProperties": {},
+                              "default": {}
+                            }
+                          },
+                          "required": [
+                            "kind",
+                            "config"
+                          ]
+                        },
+                        "branch": {
+                          "type": "object",
+                          "nullable": true,
+                          "properties": {
+                            "when": {
+                              "oneOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "agent-decides"
+                                      ]
+                                    },
+                                    "question": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 500
+                                    }
+                                  },
+                                  "required": [
+                                    "kind",
+                                    "question"
+                                  ]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "produced-changes"
+                                      ]
+                                    }
+                                  },
+                                  "required": [
+                                    "kind"
+                                  ]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "kind": {
+                                      "type": "string",
+                                      "enum": [
+                                        "outcome"
+                                      ]
+                                    },
+                                    "is": {
+                                      "type": "string",
+                                      "enum": [
+                                        "changes_ready",
+                                        "nothing_to_do",
+                                        "blocked"
+                                      ]
+                                    }
+                                  },
+                                  "required": [
+                                    "kind",
+                                    "is"
+                                  ]
+                                }
+                              ]
+                            },
+                            "thenStepId": {
+                              "type": "string",
+                              "nullable": true,
+                              "minLength": 1
+                            },
+                            "elseStepId": {
+                              "type": "string",
+                              "nullable": true,
+                              "minLength": 1
+                            }
+                          },
+                          "required": [
+                            "when",
+                            "thenStepId",
+                            "elseStepId"
+                          ]
+                        },
+                        "mcpServerIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "skillIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "permissionMode": {
+                          "type": "string",
+                          "nullable": true,
+                          "enum": [
+                            "acceptEdits",
+                            "plan",
+                            "bypassPermissions",
+                            null
+                          ]
+                        },
+                        "checkpoints": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "on": {
+                                "type": "string",
+                                "enum": [
+                                  "command",
+                                  "write"
+                                ]
+                              },
+                              "match": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "label": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 120
+                              }
+                            },
+                            "required": [
+                              "on",
+                              "match",
+                              "label"
+                            ]
+                          },
+                          "maxItems": 20
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "workflowId",
+                        "name",
+                        "position",
+                        "rank",
+                        "agentProfileId",
+                        "promptTemplate",
+                        "gate",
+                        "advanceOn",
+                        "onEnter",
+                        "branch",
+                        "mcpServerIds",
+                        "skillIds",
+                        "permissionMode",
+                        "checkpoints",
+                        "createdAt",
+                        "updatedAt"
+                      ]
+                    },
+                    "steps": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "workflowId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "position": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "rank": {
+                            "type": "string"
+                          },
+                          "agentProfileId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "promptTemplate": {
+                            "type": "string"
+                          },
+                          "gate": {
+                            "type": "string",
+                            "enum": [
+                              "human",
+                              "auto",
+                              "auto-unless-changes",
+                              "agent-decides"
+                            ]
+                          },
+                          "advanceOn": {
+                            "type": "string",
+                            "enum": [
+                              "agent-signal",
+                              "review"
+                            ]
+                          },
+                          "onEnter": {
+                            "type": "object",
+                            "nullable": true,
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 64
+                              },
+                              "config": {
+                                "type": "object",
+                                "additionalProperties": {},
+                                "default": {}
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "config"
+                            ]
+                          },
+                          "branch": {
+                            "type": "object",
+                            "nullable": true,
+                            "properties": {
+                              "when": {
+                                "oneOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "agent-decides"
+                                        ]
+                                      },
+                                      "question": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 500
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "question"
+                                    ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "produced-changes"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "kind"
+                                    ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "enum": [
+                                          "outcome"
+                                        ]
+                                      },
+                                      "is": {
+                                        "type": "string",
+                                        "enum": [
+                                          "changes_ready",
+                                          "nothing_to_do",
+                                          "blocked"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "kind",
+                                      "is"
+                                    ]
+                                  }
+                                ]
+                              },
+                              "thenStepId": {
+                                "type": "string",
+                                "nullable": true,
+                                "minLength": 1
+                              },
+                              "elseStepId": {
+                                "type": "string",
+                                "nullable": true,
+                                "minLength": 1
+                              }
+                            },
+                            "required": [
+                              "when",
+                              "thenStepId",
+                              "elseStepId"
+                            ]
+                          },
+                          "mcpServerIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "skillIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "permissionMode": {
+                            "type": "string",
+                            "nullable": true,
+                            "enum": [
+                              "acceptEdits",
+                              "plan",
+                              "bypassPermissions",
+                              null
+                            ]
+                          },
+                          "checkpoints": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "on": {
+                                  "type": "string",
+                                  "enum": [
+                                    "command",
+                                    "write"
+                                  ]
+                                },
+                                "match": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                },
+                                "label": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 120
+                                }
+                              },
+                              "required": [
+                                "on",
+                                "match",
+                                "label"
+                              ]
+                            },
+                            "maxItems": 20
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "updatedAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "workflowId",
+                          "name",
+                          "position",
+                          "rank",
+                          "agentProfileId",
+                          "promptTemplate",
+                          "gate",
+                          "advanceOn",
+                          "onEnter",
+                          "branch",
+                          "mcpServerIds",
+                          "skillIds",
+                          "permissionMode",
+                          "checkpoints",
+                          "createdAt",
+                          "updatedAt"
+                        ]
+                      }
+                    },
+                    "handoff": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "brief": {
+                      "type": "string"
+                    },
+                    "forcedReviewStepIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "default": []
+                    }
+                  },
+                  "required": [
+                    "taskId",
+                    "workflowId",
+                    "workflowName",
+                    "attachedVersion",
+                    "currentVersion",
+                    "definitionDrifted",
+                    "currentStep",
+                    "steps",
+                    "handoff",
+                    "brief",
+                    "forcedReviewStepIds"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
                 }
               }
             }
@@ -36895,7 +37590,8 @@
                           "enum": [
                             "human",
                             "auto",
-                            "auto-unless-changes"
+                            "auto-unless-changes",
+                            "agent-decides"
                           ]
                         },
                         "advanceOn": {
@@ -37126,7 +37822,8 @@
                             "enum": [
                               "human",
                               "auto",
-                              "auto-unless-changes"
+                              "auto-unless-changes",
+                              "agent-decides"
                             ]
                           },
                           "advanceOn": {
@@ -37329,6 +38026,14 @@
                     },
                     "brief": {
                       "type": "string"
+                    },
+                    "forcedReviewStepIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "default": []
                     }
                   },
                   "required": [
@@ -37341,7 +38046,8 @@
                     "currentStep",
                     "steps",
                     "handoff",
-                    "brief"
+                    "brief",
+                    "forcedReviewStepIds"
                   ]
                 }
               }
@@ -37492,7 +38198,8 @@
                           "enum": [
                             "human",
                             "auto",
-                            "auto-unless-changes"
+                            "auto-unless-changes",
+                            "agent-decides"
                           ]
                         },
                         "needsApproval": {
@@ -37584,6 +38291,15 @@
                         },
                         "producedChanges": {
                           "type": "boolean"
+                        },
+                        "reviewReason": {
+                          "type": "string",
+                          "enum": [
+                            "gate",
+                            "agent",
+                            "decisions",
+                            "forced"
+                          ]
                         }
                       },
                       "required": [

@@ -240,6 +240,14 @@ export interface WorkflowStepOutcome {
    * condition matches: silence is not `blocked` any more than it is `yes`.
    */
   outcome?: TaskCompletionOutcome | null;
+  /**
+   * Did the Step ask the reviewer decisions (`decision` widgets) on this pass? A decision only a
+   * person can settle is settled at the review gate, so a Step that asked any waits for one —
+   * whatever its gate says. Sourced from the server's own record, never from the harness.
+   */
+  decisionsAsked?: boolean;
+  /** A person asked, for this Task, that this Step wait for a review whatever its gate says. */
+  forceReview?: boolean;
 }
 
 /**
@@ -297,6 +305,45 @@ export function carryHarnessDecision(
   const answer = readHarnessDecision(finalText);
   if (answer === null) return summary;
   const line = `${DECISION_MARKER} ${answer}`;
+  return summary ? `${summary.trimEnd()}\n\n${line}` : line;
+}
+
+/**
+ * The line a harness answers "should a person review this before the workflow moves on?" on —
+ * the `agent-decides` gate's question, asked and read the way `DECISION_MARKER` is.
+ */
+export const REVIEW_MARKER = "REVIEW:";
+
+/** The harness's answer to its Step's review question, or null when it gave none. Last line wins. */
+export function readHarnessReview(handoff: string | null): "yes" | "no" | null {
+  if (!handoff) return null;
+  let answer: "yes" | "no" | null = null;
+  for (const line of handoff.split(/\r?\n/)) {
+    const match = /^\s*REVIEW:\s*(yes|no)\b/i.exec(line);
+    if (match) answer = match[1]?.toLowerCase() === "yes" ? "yes" : "no";
+  }
+  return answer;
+}
+
+/**
+ * The handoff with the harness's review answer in it — `carryHarnessDecision`'s rule for the
+ * `REVIEW:` line: the widget's `review` field first, then a line already in the summary, then
+ * one found in the final message.
+ */
+export function carryHarnessReview(
+  summary: string | null,
+  finalText: string | null,
+  declared: HarnessDecision | null = null,
+): string | null {
+  if (declared !== null) {
+    if (readHarnessReview(summary) === declared) return summary;
+    const line = `${REVIEW_MARKER} ${declared}`;
+    return summary ? `${summary.trimEnd()}\n\n${line}` : line;
+  }
+  if (readHarnessReview(summary) !== null) return summary;
+  const answer = readHarnessReview(finalText);
+  if (answer === null) return summary;
+  const line = `${REVIEW_MARKER} ${answer}`;
   return summary ? `${summary.trimEnd()}\n\n${line}` : line;
 }
 
@@ -458,11 +505,30 @@ export interface WorkflowAdvance {
   explanation: WorkflowAdvanceExplanation;
 }
 
-/** Does this Step's gate require a human's approval, given what happened on it? */
-function gateNeedsApproval(gate: WorkflowStepGate, outcome: WorkflowStepOutcome): boolean {
-  if (gate === "auto") return false;
-  if (gate === "auto-unless-changes") return outcome.producedChanges;
-  return true;
+type ReviewReason = NonNullable<WorkflowAdvanceExplanation["reviewReason"]>;
+
+/**
+ * Whether this Step waits for a person, given what happened on it — and why, when it does.
+ *
+ * Two things stop a Step whatever its gate says, because neither is the gate's to waive: a review
+ * a person forced on it for this Task, and decisions it asked that only a person can settle (they
+ * are settled at the gate, so moving on would carry the harness's own picks into the next Step as
+ * if confirmed). Then the gate: `human` always, `auto-unless-changes` when files changed,
+ * `agent-decides` unless the harness said `REVIEW: no` — no answer is not a "no".
+ */
+function reviewNeed(gate: WorkflowStepGate, outcome: WorkflowStepOutcome): ReviewReason | null {
+  if (outcome.forceReview) return "forced";
+  if (outcome.decisionsAsked) return "decisions";
+  switch (gate) {
+    case "auto":
+      return null;
+    case "auto-unless-changes":
+      return outcome.producedChanges ? "gate" : null;
+    case "agent-decides":
+      return readHarnessReview(outcome.handoff) === "no" ? null : "agent";
+    default:
+      return "gate";
+  }
 }
 
 /**
@@ -495,7 +561,8 @@ export function advanceWorkflowStep(
   // Read once, up front, and carried on every answer below. The gate's own reading is stated
   // even on a `held`, where it did not apply: the record says what the Step *would* have asked,
   // which is what an operator wondering why nothing moved wants to know.
-  const needsApproval = gateNeedsApproval(current.gate, outcome);
+  const reason = reviewNeed(current.gate, outcome);
+  const needsApproval = reason !== null;
   const condition = current.branch
     ? { when: current.branch.when, holds: evaluateStepCondition(current.branch.when, outcome) }
     : null;
@@ -505,6 +572,7 @@ export function advanceWorkflowStep(
     condition,
     exit,
     producedChanges: outcome.producedChanges,
+    ...(reason ? { reviewReason: reason } : {}),
   });
 
   if (outcome.signal !== current.advanceOn) {
@@ -579,10 +647,15 @@ const HANDOFF_HEADING = "## Handed over from the previous step";
 /** The heading the branch question is asked under. */
 const DECISION_HEADING = "## Decision to make";
 
+/** The heading the `agent-decides` gate's question is asked under. */
+const REVIEW_HEADING = "## Does this need a review?";
+
 /** A Step, as much of it as the brief reads. */
 export interface WorkflowStepBriefSource {
   promptTemplate: string;
   branch?: WorkflowStepBranch | null;
+  /** Read for `agent-decides`, whose question the brief asks. */
+  gate?: WorkflowStepGate;
 }
 
 /**
@@ -640,6 +713,17 @@ export function buildStepBrief(
       ].join("\n"),
     );
   }
+  if (step.gate === "agent-decides") {
+    parts.push(
+      REVIEW_HEADING,
+      [
+        "Before you finish, decide whether a person should review this step's work before the workflow moves on.",
+        "Say yes when you made a choice the person should confirm, asked them a decision, left something open, or are not confident in the result; say no only when the work is routine and complete.",
+        `Answer in the \`review\` field of your \`task_complete\` widget ("yes" or "no"), and on a line of its own, exactly \`${REVIEW_MARKER} yes\` or \`${REVIEW_MARKER} no\`, at the end of your final message.`,
+        "If yes, the workflow waits for a person's approval; if no, it moves on. No answer counts as yes.",
+      ].join("\n"),
+    );
+  }
   return parts
     .filter((part) => part.length > 0)
     .join("\n\n")
@@ -681,11 +765,17 @@ export function describeWorkflowDecision(record: WorkflowDecisionRecord): string
       break;
     case "awaiting-decision":
       parts.push(
-        record.gate === "human"
-          ? "Gate: a person decides before the task moves on."
-          : record.gate === "auto-unless-changes"
-            ? "Gate: the step produced changes, so a person decides before the task moves on."
-            : "The last step needs a person's approval before anything integrates.",
+        record.reviewReason === "forced"
+          ? "Gate: a review was asked for this step, so a person decides before the task moves on."
+          : record.reviewReason === "decisions"
+            ? "Gate: the step asked decisions only a person can settle, so a person decides before the task moves on."
+            : record.reviewReason === "agent"
+              ? "Gate: the harness asked for a review (REVIEW: yes, or no answer), so a person decides before the task moves on."
+              : record.gate === "human"
+                ? "Gate: a person decides before the task moves on."
+                : record.gate === "auto-unless-changes"
+                  ? "Gate: the step produced changes, so a person decides before the task moves on."
+                  : "The last step needs a person's approval before anything integrates.",
       );
       break;
     case "held":
