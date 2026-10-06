@@ -443,6 +443,57 @@ export async function retainedWorktree(
 }
 
 /**
+ * Where a Task's terminal opens: the newest working copy it still has on disk, across its
+ * Repositories — the one the last round ran in. Scoped by Workspace as well as Task, because
+ * the caller is a browser holding a ticket, and the ticket's Workspace is the only one it may
+ * reach. Null for a Task that has never run, or whose worktrees retention has removed.
+ */
+export async function terminalWorktree(
+  db: Db,
+  workspaceId: string,
+  taskId: string,
+): Promise<{ path: string } | null> {
+  const [row] = await db
+    .select({ path: worktree.path })
+    .from(worktree)
+    .where(
+      and(
+        eq(worktree.workspaceId, workspaceId),
+        eq(worktree.taskId, taskId),
+        eq(worktree.status, "active"),
+      ),
+    )
+    .orderBy(desc(worktree.updatedAt))
+    .limit(1);
+  return row ?? null;
+}
+
+/**
+ * The Task's newest harness conversation — the one its terminal mounts. Newest Session first,
+ * for the reason `resolveResumeHarnessSessionId` reaches back the same way: only the latest
+ * attempt describes the worktree the terminal opens in. Workspace-scoped (Principle V).
+ */
+export async function latestHarnessSessionId(
+  db: Db,
+  workspaceId: string,
+  taskId: string,
+): Promise<string | null> {
+  const [row] = await db
+    .select({ harnessSessionId: session.harnessSessionId })
+    .from(session)
+    .where(
+      and(
+        eq(session.workspaceId, workspaceId),
+        eq(session.taskId, taskId),
+        isNotNull(session.harnessSessionId),
+      ),
+    )
+    .orderBy(desc(session.startedAt))
+    .limit(1);
+  return row?.harnessSessionId ?? null;
+}
+
+/**
  * Forget every harness conversation this Task ever had, so the next round starts from the brief.
  *
  * Every Session's, not the current one's: `resolveResumeHarnessSessionId` reaches back through

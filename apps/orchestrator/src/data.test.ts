@@ -15,6 +15,7 @@ import {
   task,
   taskRepository,
   workspace,
+  worktree,
 } from "@solow/db";
 import { createTestDb, type TestDb } from "@solow/db/testing";
 import { and, asc, eq } from "drizzle-orm";
@@ -34,6 +35,7 @@ import {
   resolveResumeHarnessSessionId,
   setTaskRepositoryResultBranch,
   setTaskState,
+  terminalWorktree,
 } from "./data.js";
 
 // The secret store reads SOLOW_SECRET_KEY lazily; set it before any encryptSecret call.
@@ -156,6 +158,48 @@ async function seedImportedRepository(db: TestDb, scmCiphertext: string) {
     .set({ repositoryId: "repo-imported" })
     .where(eq(taskRepository.taskId, "task-1"));
 }
+
+describe("terminalWorktree", () => {
+  it("opens on the Task's newest working copy still on disk, and only from its own Workspace", async () => {
+    const db = createTestDb();
+    await seed(db);
+    await db.insert(worktree).values([
+      {
+        id: "wt-old",
+        workspaceId: WS,
+        taskId: "task-1",
+        repositoryId: "repo-1",
+        path: "/wt/old",
+        branch: "solow/old",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      },
+      {
+        id: "wt-new",
+        workspaceId: WS,
+        taskId: "task-1",
+        repositoryId: "repo-1",
+        path: "/wt/new",
+        branch: "solow/new",
+        updatedAt: "2026-02-01T00:00:00.000Z",
+      },
+      {
+        id: "wt-gone",
+        workspaceId: WS,
+        taskId: "task-1",
+        repositoryId: "repo-1",
+        path: "/wt/removed",
+        branch: "solow/removed",
+        status: "removed" as const,
+        updatedAt: "2026-03-01T00:00:00.000Z",
+      },
+    ]);
+
+    expect(await terminalWorktree(db, WS, "task-1")).toEqual({ path: "/wt/new" });
+    // A ticket from another Workspace naming this Task reaches nothing.
+    expect(await terminalWorktree(db, OTHER_WS, "task-1")).toBeNull();
+    expect(await terminalWorktree(db, WS, "task-never-run")).toBeNull();
+  });
+});
 
 describe("loadTaskRunContext — clone credential for an imported Repository", () => {
   it("resolves the Integration's provider and still-encrypted token", async () => {

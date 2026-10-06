@@ -82,9 +82,36 @@ export interface ExecutorMetrics {
   loadAverage: number[];
 }
 
+/** An interactive program on a pseudo-terminal: a person's shell, not a harness. */
+export interface TerminalHandle {
+  /** Keystrokes, as the browser's terminal sent them. */
+  write(data: string | Uint8Array): void;
+  resize(cols: number, rows: number): void;
+  /** Hang up: the shell gets SIGHUP, as when a real terminal window is closed. */
+  kill(): void;
+  exited: Promise<number>;
+}
+
+export interface TerminalOpts {
+  cwd: string;
+  /** Replaces the child's environment, as `SpawnOpts.env` does — never merged with the host's. */
+  env: Record<string, string>;
+  cols: number;
+  rows: number;
+  onData(data: Uint8Array): void;
+  onExit(code: number): void;
+}
+
 export interface Executor {
   /** A long-lived harness process (e.g. the `claude` CLI in stream-JSON mode). */
   spawn(cmd: string[], opts: SpawnOpts): ProcessHandle;
+  /**
+   * A program on a pseudo-terminal, for the Task page's terminal pane. Optional because only the
+   * local driver can hand a browser a terminal on its own host today; a container driver would
+   * need `docker exec -it`, and `spawn` deliberately never asks for a TTY (it merges stdout and
+   * stderr, which the harness runners depend on keeping apart).
+   */
+  openTerminal?(cmd: string[], opts: TerminalOpts): TerminalHandle;
   /** A one-shot command: git, du, version probes. Never throws on a non-zero exit. */
   exec(cmd: string[], opts?: ExecOpts): Promise<ExecResult>;
   /**
