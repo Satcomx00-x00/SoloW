@@ -806,6 +806,53 @@
   }
 }
 
+/*
+ * The Task board's live nodes breathe: a halo in the state's own colour, swelling and settling.
+ * Running is blue and quicker — work is happening; waiting is amber and slower — nothing will
+ * happen until you act. The two rhythms differ on purpose so they never fall into step and read
+ * as one signal when both are on screen.
+ *
+ * Box-shadow only — no transform, nothing that travels — which is why the reduced-motion block
+ * below keeps it: here the motion *is* the "this one is live" that a still halo failed to say,
+ * and a change of brightness is what reduced motion still allows. `board-pulse-soft` is the
+ * cards' smaller swell, so the Step's header stays the loudest thing in its column.
+ */
+.board-pulse-running {
+  --board-pulse-color: var(--state-running);
+  animation: board-pulse 1.6s ease-in-out infinite;
+}
+.board-pulse-waiting {
+  --board-pulse-color: var(--state-review);
+  animation: board-pulse 2.6s ease-in-out infinite;
+}
+.board-pulse-running,
+.board-pulse-waiting {
+  --board-pulse-from: 3px;
+  --board-pulse-to: 7px;
+}
+.board-pulse-soft {
+  --board-pulse-from: 2px;
+  --board-pulse-to: 5px;
+}
+@keyframes board-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 var(--board-pulse-from)
+      color-mix(in oklab, var(--board-pulse-color) 12%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 var(--board-pulse-to)
+      color-mix(in oklab, var(--board-pulse-color) 30%, transparent);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .board-pulse-running {
+    animation: board-pulse 1.6s ease-in-out infinite !important;
+  }
+  .board-pulse-waiting {
+    animation: board-pulse 2.6s ease-in-out infinite !important;
+  }
+}
 @keyframes workflow-edge-flow {
   to {
     stroke-dashoffset: -12;
