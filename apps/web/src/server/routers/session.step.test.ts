@@ -98,7 +98,7 @@ async function fixture(db: TestDb) {
     .values({ workspaceId: ws.id, taskId: task.id, state: "awaiting_review" })
     .returning();
   if (!session) throw new Error("failed to seed session");
-  return { workspaceId: ws.id, sessionId: session.id };
+  return { workspaceId: ws.id, sessionId: session.id, taskId: task.id };
 }
 
 /** One turn of the transcript, attributed to a Step — or to none, which is also an answer. */
@@ -244,6 +244,67 @@ describe("session.get scoped to a Workflow Step", () => {
         sessionId: alpha.sessionId,
         workflowStepId: "step-build",
       }),
+    ).rejects.toThrow();
+  });
+});
+
+describe("session.stepDecisions", () => {
+  let db: TestDb;
+  beforeEach(() => {
+    db = createTestDb();
+  });
+
+  const decision = (
+    fx: { workspaceId: string; sessionId: string },
+    seq: number,
+    stepId: string,
+    nextStepId: string | null,
+  ) =>
+    db.insert(sessionEvent).values({
+      workspaceId: fx.workspaceId,
+      sessionId: fx.sessionId,
+      seq,
+      kind: "workflow_decision",
+      payload: {
+        kind: "workflow_decision",
+        stepId,
+        stepName: stepId,
+        signal: "agent-signal",
+        gate: "auto",
+        needsApproval: false,
+        condition: null,
+        status: "advanced",
+        nextStepId,
+        nextStepName: nextStepId,
+        outcome: "changes_ready",
+        producedChanges: true,
+      },
+      workflowStepId: stepId,
+    });
+
+  it("lists every Step that finished, in log order — what tells a loop's passes apart", async () => {
+    const fx = await fixture(db);
+    await turn(db, fx, 0, "implementing", "impl");
+    await decision(fx, 1, "impl", "rev");
+    await turn(db, fx, 2, "reviewing", "rev");
+    await decision(fx, 3, "rev", "impl");
+
+    const decisions = await caller(db, fx.workspaceId).session.stepDecisions({ taskId: fx.taskId });
+
+    expect(
+      decisions.map((d) => [d.seq, d.stepId, d.nextStepId, d.status, d.needsApproval]),
+    ).toEqual([
+      [1, "impl", "rev", "advanced", false],
+      [3, "rev", "impl", "advanced", false],
+    ]);
+  });
+
+  it("does not read another Workspace's Task (Principle V)", async () => {
+    const fx = await fixture(db);
+    const other = await fixture(db);
+    await decision(fx, 1, "impl", "rev");
+    await expect(
+      caller(db, other.workspaceId).session.stepDecisions({ taskId: fx.taskId }),
     ).rejects.toThrow();
   });
 });

@@ -10,6 +10,7 @@ import {
   type SessionEventPayload,
   type SessionState,
   sessionEventPayloadSchema,
+  type TaskStepDecisionDto,
 } from "@solow/contracts";
 import {
   type SessionLogEvent,
@@ -74,6 +75,43 @@ export async function listSessionsForTask(
     .where(and(eq(session.workspaceId, ctx.workspaceId), eq(session.taskId, taskId)))
     .orderBy(desc(session.startedAt));
   return ok(rows);
+}
+
+/**
+ * Every Workflow Step that finished in a Task's run, oldest first: the `workflow_decision`
+ * records of all its Sessions, in Session order and then log order (`seq` restarts per Session).
+ */
+export async function listTaskStepDecisions(
+  ctx: RequestContext,
+  taskId: string,
+): Promise<Result<TaskStepDecisionDto[]>> {
+  const rows = await ctx.db
+    .select({ row: sessionEvent })
+    .from(sessionEvent)
+    .innerJoin(session, eq(session.id, sessionEvent.sessionId))
+    .where(
+      and(
+        eq(sessionEvent.workspaceId, ctx.workspaceId),
+        eq(session.workspaceId, ctx.workspaceId),
+        eq(session.taskId, taskId),
+        eq(sessionEvent.kind, "workflow_decision"),
+      ),
+    )
+    .orderBy(asc(session.startedAt), asc(sessionEvent.seq));
+  const out: TaskStepDecisionDto[] = [];
+  for (const { row } of rows) {
+    const payload = parseSessionEventPayload(row.kind, row.payload);
+    if (payload.kind !== "workflow_decision") continue;
+    out.push({
+      sessionId: row.sessionId,
+      seq: row.seq,
+      stepId: payload.stepId,
+      status: payload.status,
+      nextStepId: payload.nextStepId,
+      needsApproval: payload.needsApproval,
+    });
+  }
+  return ok(out);
 }
 
 /** Fetch a Session by id, scoped to the Workspace (ownership check). */
