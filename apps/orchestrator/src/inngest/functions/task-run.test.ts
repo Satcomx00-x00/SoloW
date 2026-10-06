@@ -6534,3 +6534,49 @@ describe("harnessBrief — where a sub-task came from (issue #56)", () => {
     );
   });
 });
+
+describe("harnessBrief — decisions the reviewer settled on approval", () => {
+  // Only the fields the brief reads; the rest of a run context is irrelevant to its text.
+  const ctx = {
+    task: { title: "Order a servo" },
+    issue: { title: "Fix the latch", description: null },
+    widgetsEnabled: false,
+  } as unknown as Parameters<typeof harnessBrief>[0];
+  const settled =
+    "Decisions settled by the reviewer:\n- Which servo? → The metal-gear one (overturned your choice)";
+
+  it("hands the answers to the Step as work to bring in line, not as a rejection", () => {
+    const brief = harnessBrief(
+      ctx,
+      undefined,
+      [],
+      { name: "Specify", brief: "Write the spec." },
+      undefined,
+      undefined,
+      settled,
+    );
+    expect(brief).toContain("# Your decisions, settled");
+    expect(brief).toContain("The metal-gear one (overturned your choice)");
+    expect(brief).toContain("Do not start the next step's work");
+    expect(brief).not.toContain("# Review feedback");
+    // After the Step, so the harness reads what it is doing before what to change about it.
+    expect(brief.indexOf("# Step")).toBeLessThan(brief.indexOf("# Your decisions, settled"));
+  });
+
+  it("travels on a continuing brief too — the one thing that conversation cannot hold", () => {
+    const brief = harnessBrief(ctx, undefined, [], undefined, "turn_budget", undefined, settled);
+    expect(brief.startsWith("# Continue")).toBe(true);
+    expect(brief).toContain("# Your decisions, settled");
+    expect(brief).not.toContain("# Task");
+  });
+
+  it("is absent from every brief that has no answers to apply", () => {
+    expect(harnessBrief(ctx)).not.toContain("# Your decisions, settled");
+    expect(harnessBrief(ctx, "too slow", [], undefined, "interruption")).not.toContain(
+      "# Your decisions, settled",
+    );
+    expect(harnessBrief(ctx, undefined, [], undefined, undefined, undefined, "")).not.toContain(
+      "# Your decisions, settled",
+    );
+  });
+});
