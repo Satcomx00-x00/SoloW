@@ -9,6 +9,7 @@ import { harnessVersionSchema } from "@solow/contracts";
 import { DEFAULT_HARNESS_CATALOG } from "@solow/db";
 import { bundledBinary } from "../executor/bundled-binaries.js";
 import { createLocalExecutor } from "../executor/local.js";
+import { clientDirectives } from "./client-directives.js";
 import { probeHarness } from "./probe.js";
 
 /**
@@ -61,7 +62,8 @@ if (OPENCODE) {
       try {
         return await probeHarness(createLocalExecutor(home), {
           command: OPENCODE,
-          args: opencodeRow?.argsTemplate ?? ["acp"],
+          // As the orchestrator launches it: the seeded row's `--auto` is SoloW's, not opencode's.
+          args: clientDirectives("acp", opencodeRow?.argsTemplate ?? ["acp"]).args,
           env: {
             PATH: process.env["PATH"] ?? "",
             HOME: home,

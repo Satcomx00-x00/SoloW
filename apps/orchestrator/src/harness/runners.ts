@@ -61,6 +61,11 @@ export interface HarnessRunnerDeps {
    * is reachable only by a deployment naming it (`SOLOW_ACP_UNATTENDED_PERMISSION`).
    */
   unattendedPermissionPosture?: UnattendedPermissionPosture;
+  /**
+   * Approve every permission at once, whatever the permission mode says — the catalog row's
+   * `--auto`, taken off an ACP harness's command line and applied by SoloW as its client.
+   */
+  autoApprove?: boolean;
   /** The Step's checkpoints and where their hook talks to the orchestrator (`harness/checkpoints.ts`). */
   checkpoints?: HarnessCheckpoints;
   /** The catalog row's version pin (see `HarnessVersionPin`). */
@@ -88,6 +93,8 @@ export interface HarnessLaunchSettings {
   checkpoints?: HarnessCheckpoints;
   /** The catalog row's version pin, absent when the row sets none. */
   version?: HarnessVersionPin;
+  /** The catalog row said `--auto` for an ACP harness (`client-directives.ts`). */
+  autoApprove?: boolean;
 }
 
 /**
@@ -119,7 +126,9 @@ export function createHarnessRunner(
       // A Profile that never asks answers immediately: a deadline is how long a *person* gets,
       // and making a harness wait two minutes per tool call for a decision nobody is coming to
       // make would be the same stall in slower clothing.
-      const bypassing = deps.permissionMode === "bypassPermissions";
+      // `--auto` on the catalog row forces the same answer whatever the Profile or Step says
+      // (`client-directives.ts`).
+      const bypassing = deps.permissionMode === "bypassPermissions" || deps.autoApprove === true;
       return new AcpRunner({
         executor: deps.executor,
         // Only ever an id the harness itself advertised — the client checks the list from the
