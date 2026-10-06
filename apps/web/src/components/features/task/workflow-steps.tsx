@@ -82,13 +82,13 @@ export function stepStatuses(binding: TaskWorkflowBindingDto, state: TaskState):
 }
 
 /**
- * The one panel the strip's tabs control.
+ * The one panel the strip's tabs control: the board, whose cards are read for the Step picked.
  *
  * A constant rather than a `useId`: there is exactly one Task workspace on a page, the tabs and
  * the panel are rendered by two different components several levels apart, and threading a
  * generated id between them would buy nothing but the plumbing.
  */
-export const TERMINAL_PANEL_ID = "task-terminal-panel";
+export const STEP_PANEL_ID = "task-step-panel";
 /** The tab that means "everything", which is not a Step and so has no Step id to be named by. */
 export const WHOLE_RUN_TAB_ID = "workflow-step-tab-whole-run";
 export const stepTabId = (stepId: string) => `workflow-step-tab-${stepId}`;
@@ -246,7 +246,7 @@ export function WorkflowSteps({
           role="presentation"
         >
           <button
-            aria-controls={TERMINAL_PANEL_ID}
+            aria-controls={STEP_PANEL_ID}
             aria-selected={selected === null}
             className={cn(
               "cursor-pointer rounded-md px-1.5 py-0.5 text-xs transition-colors",
@@ -267,7 +267,7 @@ export function WorkflowSteps({
         </li>
         {stepped.map(({ step, status }, i) => (
           <Step
-            controls={TERMINAL_PANEL_ID}
+            controls={STEP_PANEL_ID}
             index={i}
             key={step.id}
             last={i === stepped.length - 1}

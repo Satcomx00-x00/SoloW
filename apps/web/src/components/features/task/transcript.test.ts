@@ -4,9 +4,8 @@ import { describe, expect, it } from "bun:test";
 import type { SessionEventDto, TaskEvent } from "@solow/contracts";
 import {
   buildTranscript,
-  harnessActivity,
   inStepScope,
-  openPermission,
+  type PermissionRow,
   type TextRow,
   type ToolRow,
 } from "./transcript";
@@ -224,7 +223,10 @@ describe("buildTranscript", () => {
       [],
     );
     expect(rows).toHaveLength(1);
-    expect(openPermission(rows)).toBeNull();
+    expect((rows[0] as PermissionRow).resolution).toEqual({
+      optionId: "once",
+      decidedBy: "operator",
+    });
   });
 
   it("reports an unanswered permission as open, which is what makes the widget interactive", () => {
@@ -240,7 +242,7 @@ describe("buildTranscript", () => {
       ],
       [],
     );
-    expect(openPermission(rows)?.requestId).toBe("r1");
+    expect(rows[0]).toMatchObject({ kind: "permission", requestId: "r1", resolution: null });
   });
 
   it("keeps sessions in the order they appear, not interleaved by seq", () => {
@@ -253,96 +255,5 @@ describe("buildTranscript", () => {
       [],
     );
     expect(rows.map((r) => (r as TextRow).text)).toEqual(["round one", "round two"]);
-  });
-});
-
-describe("harnessActivity", () => {
-  const running = (rows: Parameters<typeof harnessActivity>[0]) => harnessActivity(rows, true);
-
-  it("says nothing at all when no harness is running", () => {
-    // A finished run is a record. A line under it claiming the harness is thinking would be false,
-    // and it would be false under every finished run in the product.
-    expect(harnessActivity(buildTranscript([], [liveText(0, "done")]), false)).toBeNull();
-  });
-
-  it("reports the launch while a running task has produced nothing", () => {
-    // The window the operator most needs a word for: they pressed Launch and the panel has not
-    // changed since. It used to advise them to launch the task.
-    expect(running([])).toEqual({ kind: "launching" });
-  });
-
-  it("names the tool a call is still inside", () => {
-    // "Working…" would not tell an operator that the harness has been in Bash for ninety seconds,
-    // which is the thing worth knowing.
-    const rows = buildTranscript(
-      [persisted(0, { kind: "tool_call", name: "Bash", callId: "c1", input: null })],
-      [],
-    );
-    expect(running(rows)).toEqual({ kind: "tool", name: "Bash" });
-  });
-
-  it("stops naming a tool once its result has landed", () => {
-    const rows = buildTranscript(
-      [
-        persisted(0, { kind: "tool_call", name: "Bash", callId: "c1", input: null }),
-        persisted(1, { kind: "tool_result", callId: "c1", ok: true, output: "ok" }),
-      ],
-      [],
-    );
-    expect(running(rows)).toEqual({ kind: "thinking" });
-  });
-
-  it("distinguishes a turn still arriving from a model composing one", () => {
-    expect(running(buildTranscript([], [liveText(0, "the answer is")]))).toEqual({
-      kind: "writing",
-    });
-  });
-
-  it("goes quiet under a thinking block that is still arriving", () => {
-    // The block's own header says "Thinking", dots and all, one line above where this would go.
-    // Two of them stacked on one run is what this was found as.
-    expect(running(buildTranscript([], [liveText(0, "hmm", "thinking" as never)]))).toBeNull();
-  });
-
-  it("goes quiet while the harness is blocked on a question", () => {
-    // The permission card already says what is happening, and the harness is not thinking — it is
-    // waiting for a human. Two different claims, and only one of them is true.
-    const rows = buildTranscript(
-      [
-        persisted(0, {
-          kind: "permission_request",
-          requestId: "r1",
-          title: "Run rm -rf",
-          toolKind: "execute",
-          toolCallId: null,
-          options: [{ optionId: "allow", name: "Allow", kind: "allow_once" }],
-        }),
-      ],
-      [],
-    );
-    expect(running(rows)).toBeNull();
-  });
-
-  it("resumes once that question is answered", () => {
-    const rows = buildTranscript(
-      [
-        persisted(0, {
-          kind: "permission_request",
-          requestId: "r1",
-          title: "Run rm -rf",
-          toolKind: "execute",
-          toolCallId: null,
-          options: [{ optionId: "allow", name: "Allow", kind: "allow_once" }],
-        }),
-        persisted(1, {
-          kind: "permission_resolved",
-          requestId: "r1",
-          optionId: "allow",
-          decidedBy: "operator",
-        }),
-      ],
-      [],
-    );
-    expect(running(rows)).toEqual({ kind: "thinking" });
   });
 });

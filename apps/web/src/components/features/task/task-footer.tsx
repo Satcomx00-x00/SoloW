@@ -6,11 +6,10 @@ import {
   Check,
   CheckCircle2,
   CircleDashed,
-  GitBranch,
   KeyRound,
+  Loader2,
   Play,
   RotateCcw,
-  Scale,
   ShieldQuestion,
   X,
 } from "lucide-react";
@@ -65,12 +64,17 @@ export function TaskFooter({
   waiting = null,
   notes = null,
   decidePending,
+  decisionSent = null,
   onDecide,
   onSettleDecisions,
   onLaunch,
   onRetry,
   onOpenReview,
   onReopen,
+  nextStepName = null,
+  criteria = null,
+  onOpenChanges,
+  onOpenBrief,
   openReviewPending = false,
   actionPending = false,
   renewHref,
@@ -87,7 +91,7 @@ export function TaskFooter({
   viewed?: { viewed: number; of: number } | null;
   /** What the harness said it did not do — listed above the decision, never a lock. */
   openItems?: ReadonlyArray<{ label: string; why: string | null }>;
-  /** Decisions the harness emitted that the reviewer has not settled on the Plan tab — a lock. */
+  /** Decisions the harness emitted that the reviewer has not settled on the board — a lock. */
   decisionsPending?: number;
   /** A checkpoint or permission the running harness is stopped on, until a person answers. */
   waiting?: { requestId: string; title: string } | null;
@@ -95,6 +99,12 @@ export function TaskFooter({
   notes?: { count: number; general: string; onGeneral: (text: string) => void } | null;
   /** The decision in flight, so its button spins and the other two lock (no double-approve). */
   decidePending: ReviewDecision | null;
+  /**
+   * A decision this page sent and the Task has not yet moved on from. The gate holds on it rather
+   * than offering the same buttons again: an approval is applied by the run, seconds later, and a
+   * gate that looked untouched in between was clicked twenty-five times on a real Task.
+   */
+  decisionSent?: ReviewDecision | null;
   onDecide: (decision: ReviewDecision) => void;
   /** Approve pressed with decisions unsettled: take the reviewer to the first one. */
   onSettleDecisions?: (() => void) | undefined;
@@ -104,6 +114,13 @@ export function TaskFooter({
   onOpenReview: () => void;
   /** Take a Done Task back to Ready (history: resume it from there). */
   onReopen: () => void;
+  /** The Workflow Step an approval moves on to, or null when approving finishes the Task. */
+  nextStepName?: string | null;
+  /** Acceptance criteria the reviewer has verified, when the Issue lists any. */
+  criteria?: { verified: number; of: number } | null;
+  /** Take the reviewer to the change, or to the brief — the evidence the gate is decided on. */
+  onOpenChanges?: (() => void) | undefined;
+  onOpenBrief?: (() => void) | undefined;
   openReviewPending?: boolean;
   /** A launch, retry or move in flight. */
   actionPending?: boolean;
@@ -125,12 +142,17 @@ export function TaskFooter({
     waiting,
     notes,
     decidePending,
+    decisionSent,
     onDecide,
     onSettleDecisions,
     onLaunch,
     onRetry,
     onOpenReview,
     onReopen,
+    nextStepName,
+    criteria,
+    onOpenChanges,
+    onOpenBrief,
     openReviewPending,
     actionPending,
     renewHref,
@@ -265,14 +287,14 @@ function footerBody(input: FooterInput) {
         return (
           <p className="text-muted-foreground text-sm">
             {task.completedOutcome === "blocked"
-              ? "The harness stopped — blocked. Steer it from the box under the terminal, or retry once it fails."
+              ? "The harness stopped — blocked. Steer it from the terminal, or retry once it fails."
               : "Finished — nothing to do. There is nothing to review."}
           </p>
         );
       }
       return (
         <p className="text-muted-foreground text-sm">
-          The harness is working. Steer it, or stop it, from the box under the terminal.
+          The harness is working. Steer it, or stop it, from the terminal.
         </p>
       );
     case "done":
@@ -324,171 +346,290 @@ function Row({ hint, children }: { hint: ReactNode; children: ReactNode }) {
  * scrolling the Changes column still sees it (issue #70 AC-2/AC-3).
  */
 function ReviewGate({
+  task,
   consequences,
   viewed,
   openItems,
   decisionsPending,
   notes,
   decidePending,
+  decisionSent,
   onDecide,
   onSettleDecisions,
+  nextStepName,
+  criteria,
+  onOpenChanges,
+  onOpenBrief,
 }: FooterInput) {
-  // A decision the harness emitted and nobody settled is the one thing that stands between the
-  // reviewer and Approve: the plan it belongs to is what the next Step is briefed with, and
-  // approving it unsettled is approving the harness's choice by default — the rubber stamp the
-  // Plan tab exists to replace. The button stays live, though: pressing it goes to the first
-  // unsettled decision, which is what a greyed button with a sentence about a tab made the
-  // reviewer do by hand.
-  const canDecide = decidePending === null;
+  /*
+   * Read top to bottom, the way the decision is made: what the harness says it did, what is left
+   * to check before trusting that, and then the three choices — each saying, in a sentence, what
+   * it will do. The version before this put a counter in the Approve button, a file count in a
+   * chip, the scope of the approval in a sentence of numbers and the note box between them, and
+   * a reviewer could not tell from it what they were being asked or what any button would do.
+   *
+   * A decision the harness emitted and nobody settled is the one thing that stands between the
+   * reviewer and Approve: the plan it belongs to is what the next Step is briefed with. The
+   * button stays live, though — pressing it opens those decisions.
+   */
+  const canDecide = decidePending === null && !decisionSent;
   const blockedByDecisions = decisionsPending > 0;
   const noteId = useId();
   const open = openItems.length;
   const noteCount = notes?.count ?? 0;
-  const hasFeedback = noteCount > 0 || Boolean(notes?.general.trim());
-  // "7/12 viewed" on the button itself, where the eye is when it is about to press it. Never a
-  // block: a reviewer who has read the diff whole has no ticks and nothing to answer for.
-  const unread = viewed && viewed.viewed < viewed.of;
+  const unread = viewed ? viewed.of - viewed.viewed : 0;
   return (
-    <div className="space-y-2">
-      {open > 0 ? (
-        /*
-          What the harness said it did not do, where the decision is made (point 5 of the review
-          analysis). A "changes ready" report with a migration never applied and a test never
-          executed used to say so in the last sentence of a paragraph; the gate opened green all
-          the same. Never a lock — a person may still approve — but impossible to not see.
-        */
-        <div
-          className="rounded-lg border border-feedback-caution/40 bg-feedback-caution/10 px-3 py-2 text-xs"
-          role="status"
-          data-open-items={open}
-        >
-          <p className="flex items-center gap-1.5 font-medium text-feedback-caution">
-            <CircleDashed aria-hidden className="size-3.5 shrink-0" />
-            {open === 1 ? "1 open item" : `${open} open items`} — the harness left these undone
+    <div className="space-y-5">
+      {task.completedSummary ? (
+        <section aria-label="What the harness did" className="space-y-1.5">
+          <GateHeading>What the harness says it did</GateHeading>
+          <p className="rounded-lg border-l-2 border-muted-foreground/30 bg-muted/40 px-3 py-2 text-sm leading-relaxed">
+            {task.completedSummary}
           </p>
-          <ul className="mt-1 space-y-0.5 pl-5">
-            {openItems.map((item) => (
-              <li key={item.label} className="list-disc">
-                <span className="font-medium">{item.label}</span>
-                {item.why ? <span className="text-muted-foreground"> — {item.why}</span> : null}
-              </li>
-            ))}
-          </ul>
-        </div>
+        </section>
       ) : null}
-      {decisionsPending > 0 ? (
-        <p
-          className="flex items-center gap-1.5 text-state-review text-xs"
-          role="status"
-          id="task-footer-decisions"
-        >
-          <Scale aria-hidden className="size-3.5 shrink-0" />
-          {decisionsPending === 1 ? "1 decision" : `${decisionsPending} decisions`} the harness made
-          {decisionsPending === 1 ? " is" : " are"} waiting for you on the Plan tab — Approve takes
-          you there.
-        </p>
-      ) : null}
-      <p className="flex items-center gap-1.5 text-muted-foreground text-xs">
-        <GitBranch aria-hidden className="size-3.5 shrink-0" />
-        <span>
-          Approving covers {consequences}.
+
+      <section aria-label="Before you decide" className="space-y-1.5">
+        <GateHeading>Before you decide</GateHeading>
+        <ul className="divide-y rounded-lg border">
           {viewed ? (
-            <span className={cn("ml-1", unread && "text-feedback-caution")}>
-              {viewed.viewed} of {viewed.of} files viewed.
-            </span>
+            <CheckRow
+              done={unread === 0}
+              action={
+                onOpenChanges ? { label: "Review the changes", onClick: onOpenChanges } : null
+              }
+            >
+              {unread === 0
+                ? `You have looked at all ${viewed.of} changed files.`
+                : `You have looked at ${viewed.viewed} of the ${viewed.of} changed files.`}
+            </CheckRow>
           ) : null}
-        </span>
-      </p>
-      {notes ? (
-        // The general remark, right above the button that sends it (F10 FR-7). Line notes are
-        // taken in the diff; this is for what is true of the change as a whole. Never required —
-        // the button was once refused without it, which made "request changes" the one decision
-        // that could not be taken by pressing it. The label stays put above the field: a
-        // placeholder is gone the moment the first word is typed.
-        <div className="space-y-1">
-          <label htmlFor={noteId} className="block text-2xs text-muted-foreground">
-            Note to the harness — optional, goes with Request changes
-          </label>
-          <Textarea
-            id={noteId}
-            rows={2}
-            value={notes.general}
-            onChange={(e) => notes.onGeneral(e.target.value)}
-            placeholder="e.g. The lockfile change was not asked for — revert it."
-            className="min-h-9 text-xs"
-          />
-        </div>
-      ) : null}
-      {/*
-        Reject · Request changes · Approve, right-aligned: the primary at the end and the
-        destructive one furthest from it, which is where every dialog on the page puts them —
-        so the hand that learned "confirm is on the right" never lands on Reject here.
-      */}
-      <div className="flex flex-wrap items-center justify-end gap-2">
-        {hasFeedback ? (
-          // Said here rather than as a confirm on Approve and Reject: the notes are the
-          // reviewer's own draft, and losing a draft is not the destructive act a dialog is for.
-          <span className="mr-auto text-2xs text-muted-foreground">
-            Notes go with Request changes only.
-          </span>
+          {criteria && criteria.of > 0 ? (
+            <CheckRow
+              done={criteria.verified === criteria.of}
+              action={onOpenBrief ? { label: "Open the brief", onClick: onOpenBrief } : null}
+            >
+              You have verified {criteria.verified} of the {criteria.of} acceptance criteria.
+            </CheckRow>
+          ) : null}
+          {decisionsPending > 0 ? (
+            <CheckRow
+              done={false}
+              id="task-footer-decisions"
+              role="status"
+              action={
+                onSettleDecisions ? { label: "Answer them", onClick: onSettleDecisions } : null
+              }
+            >
+              {decisionsPending === 1
+                ? "1 decision the harness made is waiting for your answer."
+                : `${decisionsPending} decisions the harness made are waiting for your answer.`}{" "}
+              Approve opens them first.
+            </CheckRow>
+          ) : null}
+          {open > 0 ? (
+            /*
+              What the harness said it did not do (point 5 of the review analysis). Never a lock —
+              a person may still approve — but impossible to not see.
+            */
+            <li className="px-3 py-2.5 text-sm" role="status" data-open-items={open}>
+              <p className="flex items-start gap-2">
+                <CircleDashed
+                  aria-hidden
+                  className="mt-0.5 size-4 shrink-0 text-feedback-caution"
+                />
+                <span>
+                  The harness left {open === 1 ? "1 thing undone" : `${open} things undone`}
+                  <span className="sr-only">
+                    {" "}
+                    ({open === 1 ? "1 open item" : `${open} open items`})
+                  </span>
+                  :
+                </span>
+              </p>
+              <ul className="mt-1.5 space-y-1 pl-6">
+                {openItems.map((item) => (
+                  <li key={item.label} className="list-disc text-muted-foreground">
+                    <span className="font-medium text-foreground">{item.label}</span>
+                    {item.why ? <> — {item.why}</> : null}
+                  </li>
+                ))}
+              </ul>
+            </li>
+          ) : null}
+          {!viewed && !(criteria && criteria.of > 0) && decisionsPending === 0 && open === 0 ? (
+            <CheckRow done action={null}>
+              Nothing is flagged. The harness reports no open items.
+            </CheckRow>
+          ) : null}
+        </ul>
+      </section>
+
+      <section aria-label="Your decision" className="space-y-1.5">
+        <GateHeading>Your decision</GateHeading>
+        {decisionSent ? (
+          <p
+            role="status"
+            data-decision-sent={decisionSent}
+            className="flex items-center gap-2 rounded-lg border border-state-review/40 bg-state-review/[0.06] px-3 py-2 text-sm"
+          >
+            <Loader2 aria-hidden className="size-4 shrink-0 animate-spin text-state-review" />
+            {SENT_WORDS[decisionSent]} The run applies it in a few seconds. If nothing changes, this
+            page will say so.
+          </p>
         ) : null}
-        <ConfirmAction
-          disabled={!canDecide}
-          title="Reject these changes?"
-          description="The harness's work is discarded and the worktree is torn down. This cannot be undone. The task returns to Ready and would have to run again from scratch."
-          confirmLabel="Discard the changes"
-          onConfirm={() => onDecide("reject")}
-          trigger={
+        <div className="divide-y rounded-lg border">
+          <Choice
+            title="Approve"
+            explanation={
+              <>
+                Keep this work. Approving covers {consequences}
+                {nextStepName
+                  ? `, and the workflow moves on to its next step, ${nextStepName}.`
+                  : ", and the task is done."}
+                {open > 0 ? " The things left undone stay undone." : ""}
+              </>
+            }
+          >
             <Button
-              size="lg"
-              variant="ghost"
               disabled={!canDecide}
-              className="mr-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
+              aria-describedby={blockedByDecisions ? "task-footer-decisions" : undefined}
+              loading={decidePending === "approve"}
+              onClick={() =>
+                blockedByDecisions && onSettleDecisions ? onSettleDecisions() : onDecide("approve")
+              }
             >
-              <X /> Reject
+              <Check />{" "}
+              {open > 0 ? `Approve with ${open} open ${open === 1 ? "item" : "items"}` : "Approve"}
             </Button>
-          }
-        />
-        <Button
-          size="lg"
-          variant="outline"
-          disabled={!canDecide}
-          loading={decidePending === "request_changes"}
-          onClick={() => onDecide("request_changes")}
-        >
-          <RotateCcw /> Request changes
-          {noteCount > 0 ? (
-            <span aria-hidden className="ml-1 font-mono text-2xs tabular-nums opacity-80">
-              {noteCount} {noteCount === 1 ? "note" : "notes"}
-            </span>
-          ) : null}
+          </Choice>
+          <Choice
+            title="Request changes"
+            explanation="Send the harness back to work on this step, with your note and any notes you left on lines of the change."
+          >
+            <div className="flex w-full flex-col gap-2">
+              {notes ? (
+                // Never required — the button was once refused without it, which made "request
+                // changes" the one decision that could not be taken by pressing it.
+                <div className="space-y-1">
+                  <label htmlFor={noteId} className="block text-muted-foreground text-xs">
+                    Note to the harness (optional)
+                  </label>
+                  <Textarea
+                    id={noteId}
+                    rows={2}
+                    value={notes.general}
+                    onChange={(e) => notes.onGeneral(e.target.value)}
+                    placeholder="e.g. Pin the package versions you updated, and run the tests."
+                    className="min-h-9 text-sm"
+                  />
+                </div>
+              ) : null}
+              <div className="flex items-center justify-end gap-2">
+                {noteCount > 0 ? (
+                  <span className="text-muted-foreground text-xs">
+                    {noteCount === 1 ? "1 note" : `${noteCount} notes`} on lines will be sent
+                  </span>
+                ) : null}
+                <Button
+                  variant="outline"
+                  disabled={!canDecide}
+                  loading={decidePending === "request_changes"}
+                  onClick={() => onDecide("request_changes")}
+                >
+                  <RotateCcw /> Request changes
+                </Button>
+              </div>
+            </div>
+          </Choice>
+          <Choice
+            title="Reject"
+            explanation="Throw this work away. Nothing is committed and the task goes back to Ready, to be run again from scratch."
+          >
+            <ConfirmAction
+              disabled={!canDecide}
+              title="Reject these changes?"
+              description="The harness's work is discarded and the worktree is torn down. This cannot be undone. The task returns to Ready and would have to run again from scratch."
+              confirmLabel="Discard the changes"
+              onConfirm={() => onDecide("reject")}
+              trigger={
+                <Button
+                  variant="ghost"
+                  disabled={!canDecide}
+                  className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                >
+                  <X /> Reject
+                </Button>
+              }
+            />
+          </Choice>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+const SENT_WORDS: Record<ReviewDecision, string> = {
+  approve: "Approved.",
+  request_changes: "Changes requested.",
+  reject: "Rejected.",
+};
+
+function GateHeading({ children }: { children: ReactNode }) {
+  return (
+    <h3 className="font-medium text-2xs text-muted-foreground uppercase tracking-[0.14em]">
+      {children}
+    </h3>
+  );
+}
+
+/** One thing to check before deciding: done or not, said in a sentence, with the way to it. */
+function CheckRow({
+  done,
+  action,
+  children,
+  ...rest
+}: {
+  done: boolean;
+  action: { label: string; onClick: () => void } | null;
+  children: ReactNode;
+  id?: string;
+  role?: string;
+}) {
+  return (
+    <li className="flex items-center gap-2 px-3 py-2.5 text-sm" {...rest}>
+      {done ? (
+        <CheckCircle2 aria-hidden className="size-4 shrink-0 text-feedback-ok" />
+      ) : (
+        <CircleDashed aria-hidden className="size-4 shrink-0 text-feedback-caution" />
+      )}
+      <span className="min-w-0 flex-1">{children}</span>
+      {action ? (
+        <Button size="xs" variant="link" className="shrink-0" onClick={action.onClick}>
+          {action.label}
         </Button>
-        <Button
-          size="lg"
-          disabled={!canDecide}
-          aria-describedby={blockedByDecisions ? "task-footer-decisions" : undefined}
-          loading={decidePending === "approve"}
-          onClick={() =>
-            blockedByDecisions && onSettleDecisions ? onSettleDecisions() : onDecide("approve")
-          }
-        >
-          <Check />{" "}
-          {open > 0 ? `Approve with ${open} open ${open === 1 ? "item" : "items"}` : "Approve"}
-          {viewed ? (
-            // Decoration on the button; the sentence above carries the same fact in words, so the
-            // button's name stays "Approve" for anyone (or any check) that finds it by name.
-            <span
-              aria-hidden
-              className={cn(
-                "ml-1 font-mono text-2xs tabular-nums opacity-80",
-                unread && "text-feedback-caution",
-              )}
-            >
-              {viewed.viewed}/{viewed.of}
-            </span>
-          ) : null}
-        </Button>
+      ) : null}
+    </li>
+  );
+}
+
+/** One of the three choices: what it is, what it will do, and the button that does it. */
+function Choice({
+  title,
+  explanation,
+  children,
+}: {
+  title: string;
+  explanation: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-2 px-3 py-3 sm:flex-row sm:items-start sm:gap-4">
+      <div className="min-w-0 flex-1">
+        <p className="font-medium text-sm">{title}</p>
+        <p className="text-muted-foreground text-xs leading-relaxed">{explanation}</p>
       </div>
+      <div className="flex shrink-0 sm:min-w-[12rem] sm:justify-end">{children}</div>
     </div>
   );
 }

@@ -62,6 +62,8 @@ export interface PermissionRow {
   toolKind: string | null;
   toolCallId: string | null;
   options: Array<{ optionId: string; name: string; kind: string }>;
+  /** The Workflow Step that asked, when the producer said; the task board files the ask under it. */
+  workflowStepId?: string | null;
   /** Null while the question is still open — that is what makes the widget interactive. */
   resolution: { optionId: string | null; decidedBy: "operator" | "policy" } | null;
 }
@@ -78,6 +80,8 @@ export interface WidgetRow {
   seq: number;
   widgetId: string;
   widget: Widget;
+  /** As on `PermissionRow`: the Step that emitted it, or null/absent when unattributed. */
+  workflowStepId?: string | null;
   /** Null while the widget is still waiting — that is what makes it interactive. */
   response: { values: string[]; text: string | null } | null;
 }
@@ -96,6 +100,8 @@ export type TranscriptRow = TextRow | ToolRow | PermissionRow | WidgetRow | Noti
 interface Normalised {
   sessionId: string;
   seq: number;
+  /** Absent and null both mean unattributed — see `inStepScope`. */
+  workflowStepId?: string | null;
   payload:
     | { kind: "text"; channel: TranscriptChannel; text: string }
     | {
@@ -343,6 +349,10 @@ export function inStepScope(event: TaskEvent, stepId: string | null): boolean {
   return on === undefined || on === null || on === stepId;
 }
 
+function withStep(n: Normalised | null, stepId: string | null | undefined): Normalised | null {
+  return n ? { ...n, workflowStepId: stepId ?? null } : null;
+}
+
 /**
  * Build the transcript.
  *
@@ -369,8 +379,11 @@ export function buildTranscript(
   };
 
   // Persisted first, so it wins the dedup: it is the copy that survived the database.
-  for (const e of persisted) take(fromPersisted(e));
-  for (const e of live) take(fromLive(e));
+  // The Step is stamped here rather than in each normaliser's eleven branches: it is the one
+  // field every variant carries the same way.
+  for (const e of persisted) take(withStep(fromPersisted(e), e.workflowStepId));
+  for (const e of live)
+    take(withStep(fromLive(e), "workflowStepId" in e ? e.workflowStepId : null));
 
   const rank = new Map(sessionOrder.map((id, i) => [id, i]));
   normalised.sort(
@@ -418,6 +431,7 @@ export function buildTranscript(
         seq: n.seq,
         widgetId: p.widgetId,
         widget: p.widget,
+        workflowStepId: n.workflowStepId ?? null,
         response: null,
       };
       widgetById.set(`${n.sessionId}:${p.widgetId}`, row);
@@ -495,6 +509,7 @@ export function buildTranscript(
         toolKind: p.toolKind,
         toolCallId: p.toolCallId,
         options: p.options,
+        workflowStepId: n.workflowStepId ?? null,
         resolution: null,
       };
       permissionByRequest.set(key, row);
@@ -526,98 +541,4 @@ export function buildTranscript(
   }
 
   return rows;
-}
-
-/** The permission still awaiting an answer, if any — what makes the widget interactive. */
-/**
- * Whether the fences in a block are all closed.
- *
- * The tail of a live turn is rendered as plain text because a fence that has only half arrived
- * would, parsed as markdown, swallow everything after it — and re-parse into something different
- * on the next chunk. That rule was applied to the whole tail, and the cost was this: a harness
- * whose last turn *ends* in a closed code block — the summary, the diff, the requirements file it
- * just wrote — showed the reader raw backticks for as long as the run stayed alive, which for a
- * run waiting on an answer is indefinitely.
- *
- * Counting the fences separates the two cases exactly. An even count means every fence that was
- * opened was closed, so the block can be parsed with no risk of a runaway; an odd count means the
- * harness is mid-block and plain text is still the honest rendering.
- */
-export function fencesBalanced(text: string): boolean {
-  let count = 0;
-  let at = text.indexOf("```");
-  while (at !== -1) {
-    count += 1;
-    at = text.indexOf("```", at + 3);
-  }
-  return count % 2 === 0;
-}
-
-export function openPermission(rows: readonly TranscriptRow[]): PermissionRow | null {
-  for (let i = rows.length - 1; i >= 0; i -= 1) {
-    const row = rows[i];
-    if (row?.kind === "permission" && row.resolution === null) return row;
-  }
-  return null;
-}
-
-/**
- * What the harness appears to be doing right now.
- *
- * A running harness is silent for long stretches — a launch takes seconds to reach the first
- * token, a `Bash` call can take a minute, and a thinking block streams nothing the operator was
- * meant to read. During any of those the panel showed a settled transcript and nothing else,
- * which is indistinguishable from a run that has hung. This is the difference, derived from the
- * rows rather than tracked in state so a reconnect cannot leave it stuck saying "launching" about
- * a harness that is already writing.
- *
- * `null` twice, and both times on purpose. Not running: there is nothing to report and a line
- * saying so would be noise under every finished run. Blocked on a question: the permission card
- * or the widget already says what is happening, and "thinking" underneath it would be a lie —
- * the harness is not thinking, it is waiting for the operator.
- */
-export type HarnessActivity =
-  | { kind: "launching" }
-  | { kind: "thinking" }
-  | { kind: "tool"; name: string }
-  | { kind: "writing" };
-
-export function harnessActivity(
-  rows: readonly TranscriptRow[],
-  isRunning: boolean,
-): HarnessActivity | null {
-  if (!isRunning) return null;
-  // Nothing has arrived yet: the orchestrator is still starting the session and checking out the
-  // worktree. This is the window the operator most needs a word for — they pressed Launch and
-  // the panel has not changed since.
-  if (rows.length === 0) return { kind: "launching" };
-  if (rows.some(awaitingOperator)) return null;
-
-  const last = rows[rows.length - 1];
-  // A call is in flight when nothing has come back from it. Read off the *result* rather than off
-  // `status`, which is null for every adapter that reports no progress at all — Claude Code among
-  // them — and would have left the longest tool calls in the product looking like dead air.
-  if (last?.kind === "tool" && last.result === null && !settled(last.status)) {
-    return { kind: "tool", name: last.name };
-  }
-  if (last?.kind === "text" && last.open && last.channel === "assistant") {
-    return { kind: "writing" };
-  }
-  // A thinking block still arriving already carries its own "Thinking" header, dots included,
-  // directly above where this line would sit. Saying it a second time reads as a mistake.
-  if (last?.kind === "text" && last.open && last.channel === "thinking") return null;
-  // Everything else — a finished tool call, a settled turn the harness has not followed up yet —
-  // is the model working with nothing to show for it.
-  return { kind: "thinking" };
-}
-
-/** Whether a tool call reported its own end, for the adapters that report one. */
-function settled(status: ToolRow["status"]): boolean {
-  return status === "completed" || status === "failed";
-}
-
-/** A question the run is stopped on until somebody answers it. */
-function awaitingOperator(row: TranscriptRow): boolean {
-  if (row.kind === "permission") return row.resolution === null;
-  return row.kind === "widget" && row.response === null;
 }

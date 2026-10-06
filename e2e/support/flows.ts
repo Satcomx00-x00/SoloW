@@ -1,4 +1,4 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 import { EXECUTOR_PROFILE_NAME, HARNESS_PROFILE_NAME } from "./fixture.js";
 
 /**
@@ -148,8 +148,40 @@ export async function launchTask(page: Page): Promise<void> {
  * operator's (Principle I is a gate a human opens, not a conveyor).
  */
 export async function openReview(page: Page): Promise<void> {
-  await page.getByRole("main").getByRole("button", { name: "Open review" }).click();
+  await (await gateButton(page, "Open review")).click();
   await expect(page.locator('[data-task-state="review"]').first()).toBeVisible();
+  // The gate stays open on the review it just opened; close it so the page is the spec's again.
+  await closeGate(page);
+}
+
+/**
+ * The gate's dialog — Approve, Request changes, Reject, Retry, Launch, Open review.
+ *
+ * The gate is a card at the foot of the current Step on the board, a strip under the brief and
+ * the change, and a button in the left pane; all three open the same dialog. This opens it (or
+ * finds it open) and returns it.
+ */
+export async function openGate(page: Page): Promise<Locator> {
+  const dialog = page.getByRole("dialog");
+  if (await dialog.isVisible()) return dialog;
+  // The left pane's gate button, rather than the card: the card can be panned off screen, where
+  // a click lands on the canvas instead.
+  await page.locator("[data-gate-open]").click();
+  await expect(dialog).toBeVisible();
+  return dialog;
+}
+
+/** One of the gate's own buttons, the gate opened first. */
+export async function gateButton(page: Page, name: string): Promise<Locator> {
+  return (await openGate(page)).getByRole("button", { name, exact: true });
+}
+
+/** Close whatever dialog the board has open. */
+export async function closeGate(page: Page): Promise<void> {
+  const dialog = page.getByRole("dialog");
+  if (!(await dialog.isVisible())) return;
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
 }
 
 /**
@@ -157,26 +189,79 @@ export async function openReview(page: Page): Promise<void> {
  *
  * Under a Workflow the only way past a human-decided Step is a review decision, so the run puts
  * the Task into review when the harness finishes (F03 FR-10: a Run that reaches a Gate *requests*
- * the decision) — there is no "Open review" to click, and the Approve is on screen already.
+ * the decision) — there is no "Open review" to click; the gate card is on the board already.
  */
 export async function awaitWorkflowGate(page: Page): Promise<void> {
   await expect(page.locator('[data-task-state="review"]').first()).toBeVisible({
     timeout: 120_000,
   });
-  await expect(page.getByRole("main").getByRole("button", { name: "Approve" })).toBeVisible();
+  await expect(page.locator('[data-board-kind="gate"]')).toHaveCount(1);
 }
 
 /**
- * The page's own tabs (Run · Brief · Plan · Changes). At the gate the page opens on the review,
- * so a spec that wants the terminal or the change has to say so — exactly as a person would.
+ * The page's own views (Board · Brief · Changes). The page opens on the board in every state, so
+ * a spec that wants the brief or the change has to say so — exactly as a person would.
  */
 export async function openWorkspaceTab(
   page: Page,
-  name: "Run" | "Brief" | "Plan" | "Changes",
+  name: "Board" | "Brief" | "Changes",
 ): Promise<void> {
   const tab = page.getByRole("tablist", { name: "Task" }).getByRole("tab", { name, exact: true });
   await tab.click();
   await expect(tab).toHaveAttribute("aria-selected", "true");
+}
+
+/**
+ * The terminal: a real shell in the Task's worktree, opened from the left pane's Terminal
+ * button. Idempotent: a pane already open stays open.
+ */
+export async function openTerminal(page: Page): Promise<void> {
+  const button = page.getByRole("button", { name: "Terminal", exact: true });
+  if ((await button.getAttribute("aria-expanded")) !== "true") await button.click();
+  await expect(page.getByRole("region", { name: "Terminal", exact: true })).toBeVisible();
+}
+
+/** The Task the page is on, from its URL. */
+export function taskIdOnPage(page: Page): string {
+  return new URL(page.url()).pathname.split("/").pop() as string;
+}
+
+/**
+ * What the harness said and did in the Task's newest Session, as one string — its turns, the
+ * operator's, the notices, and every tool call with its input — read from the Session log
+ * through the API, optionally one Workflow Step's worth.
+ *
+ * The page no longer draws the harness's log (its terminal is a real shell), so a spec that
+ * needs to know what the run did reads the record itself. Poll it: the log is written as the
+ * run goes.
+ */
+export async function sessionLog(
+  page: Page,
+  taskId: string,
+  workflowStepId?: string,
+): Promise<string> {
+  const sessions = await trpc<Array<{ id: string }>>(
+    page,
+    "session.listForTask",
+    { taskId },
+    "query",
+  );
+  const latest = sessions[0];
+  if (!latest) return "";
+  const detail = await trpc<{ events: Array<{ payload: Record<string, unknown> }> }>(
+    page,
+    "session.get",
+    { sessionId: latest.id, ...(workflowStepId ? { workflowStepId } : {}) },
+    "query",
+  );
+  return detail.events
+    .map(({ payload }) => {
+      if (typeof payload.text === "string") return payload.text;
+      if (payload.kind === "tool_call")
+        return `${payload.name} ${JSON.stringify(payload.input ?? {})}`;
+      return "";
+    })
+    .join("\n");
 }
 
 /** The whole run-up: launch, wait out the harness, open the gate. */

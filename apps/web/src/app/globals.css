@@ -741,8 +741,10 @@
  * pointed at the surface tokens above so the canvas follows the theme instead of carrying a
  * light-only default into the dark surface. The edge is the one place the canvas moves: a dash
  * flowing the way the pipeline runs, and a dot travelling it — SVG animation, nothing ticking.
+ * The Task board is the same canvas read-only, so it takes the same chrome.
  */
-.workflow-canvas .react-flow {
+.workflow-canvas .react-flow,
+.task-board .react-flow {
   --xy-background-color: var(--background);
   /* `--border` is a 10% ink: a dot grid drawn in it disappears on the dark surface. */
   --xy-background-pattern-color: color-mix(in oklch, var(--foreground) 16%, transparent);
@@ -793,6 +795,17 @@
 .workflow-canvas .workflow-edge-else {
   opacity: 0.55;
 }
+/* The Task board's backbone: the link a run is on flows; the rest are still. */
+.task-board .task-board-edge-live {
+  stroke-dasharray: 6 6;
+  animation: workflow-edge-flow 1.2s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .task-board .task-board-edge-live {
+    animation: none;
+  }
+}
+
 @keyframes workflow-edge-flow {
   to {
     stroke-dashoffset: -12;

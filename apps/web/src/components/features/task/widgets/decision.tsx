@@ -9,7 +9,7 @@ import type { WidgetRendererProps } from "./registry";
  * A decision the harness made, as a record in the transcript (review analysis, point 3).
  *
  * The transcript copy is inert — it shows the question, every option the harness weighed, the
- * one it took and why. The copy that can be answered is on the Plan tab (`DecisionForm`), where
+ * one it took and why. The copy that can be answered is on the task board (`DecisionNode`), where
  * the reviewer's pick is kept in their draft and sent with the approval. Two renderings of one
  * widget, on purpose: a form inside a scrolling log is a form nobody finds again.
  */
@@ -52,7 +52,7 @@ export function Decision({ widget }: WidgetRendererProps<DecisionWidget>) {
         <p className="text-2xs text-muted-foreground">Why: {widget.reason}</p>
       ) : null}
       <p className="text-2xs text-muted-foreground">
-        The reviewer settles this on the Plan tab before the next step runs.
+        The reviewer settles this on the board, at the step's gate, before the next step runs.
       </p>
     </section>
   );

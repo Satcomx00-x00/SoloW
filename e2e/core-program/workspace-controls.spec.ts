@@ -232,9 +232,7 @@ test.describe("workspace controls", () => {
     const worktree = join(PATHS.worktrees, `solow-task-${taskId}`);
     await expect.poll(() => existsSync(worktree), { timeout: 60_000 }).toBe(true);
     // Settled at the gate, so the reset is not racing a live harness.
-    await expect(page.getByRole("main").getByRole("button", { name: "Open review" })).toBeVisible({
-      timeout: 120_000,
-    });
+    await expect(page.locator('[data-board-kind="gate"]')).toBeVisible({ timeout: 120_000 });
 
     const { name } = await trpc<{ name: string }>(page, "workspace.get", {}, "query");
     await page.goto("/settings?section=danger-zone");
