@@ -11,6 +11,7 @@ import {
   openGate,
   openReview,
   openTask,
+  openWorkspaceTab,
 } from "../support/flows.js";
 import { seedIssue, seedTask } from "../support/seed.js";
 
@@ -171,10 +172,10 @@ test.describe("@critical isolation", () => {
     expect(readdirSync(secondary)).not.toContain(`marker-solow-task-${id}.txt`);
 
     // ...and the review page presents the change grouped per `(repository, branch)`, not as one
-    // flat list (issue #70 AC-1) — in the Changes column of the split pane, which is on screen
-    // without a click. Anchored on the repository name rather than matched loosely, so one group
-    // can never stand in for the other; the branch follows it in the same label because that is
-    // what a group *is*.
+    // flat list (issue #70 AC-1) — on the page's Changes tab, which the board opens beside.
+    // Anchored on the repository name rather than matched loosely, so one group can never stand
+    // in for the other; the branch follows it in the same label because that is what a group *is*.
+    await openWorkspaceTab(page, "Changes");
     await expect(page.getByLabel(new RegExp(`^Changes in ${REPO_NAME} on `))).toBeVisible();
     await expect(page.getByLabel(new RegExp(`^Changes in ${REPO2_NAME} on `))).toBeVisible();
 
