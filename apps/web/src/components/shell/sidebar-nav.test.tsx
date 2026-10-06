@@ -423,4 +423,117 @@ describe("Breadcrumb", () => {
 
     await waitFor(() => expect(crumbs()).toEqual(["Settings", "Secrets"]));
   });
+
+  it("places an Issue under its Project's Issues, ending on the Issue's title", async () => {
+    pathname = "/issues/i-7";
+    renderWithTrpc(
+      <HeaderBar />,
+      handlers({
+        "issue.get": () => ({ id: "i-7", title: "Pin the dependencies" }),
+        "project.forIssue": () => ({ projectId: "proj-2" }),
+      }),
+    );
+
+    await waitFor(() =>
+      expect(crumbs()).toEqual(["Projects", "GlabTest", "Issues", "Pin the dependencies"]),
+    );
+  });
+
+  it("places a Task in no Project under Unassigned", async () => {
+    pathname = "/task/t1";
+    renderWithTrpc(
+      <HeaderBar />,
+      handlers({
+        "task.get": () => task({ id: "t1", title: "Loose work" }),
+        "project.forIssue": () => ({ projectId: null }),
+      }),
+    );
+
+    await waitFor(() => expect(crumbs()).toEqual(["Unassigned", "Loose work"]));
+    const trail = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(within(trail).getByRole("link", { name: "Unassigned" }).getAttribute("href")).toBe(
+      "/unassigned",
+    );
+  });
+
+  it("is one crumb, and not a link to itself, on a workspace page", async () => {
+    pathname = "/history";
+    renderWithTrpc(<HeaderBar />, handlers());
+
+    await waitFor(() => expect(crumbs()).toEqual(["History"]));
+    const trail = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(within(trail).queryByRole("link")).toBeNull();
+  });
+
+  it("says nothing it has not been told while a Task's Project is still being asked for", async () => {
+    pathname = "/task/t1";
+    renderWithTrpc(
+      <HeaderBar />,
+      handlers({
+        "task.get": () => task({ id: "t1", title: "Waiting" }),
+        // Never answers: the trail must not guess a Project in the meantime.
+        "project.forIssue": () => new Promise(() => {}),
+      }),
+    );
+
+    await waitFor(() => expect(crumbs()).toEqual(["Waiting"]));
+  });
+});
+
+describe("Sidebar — the workspace menu", () => {
+  it("offers sign-out only to a signed-in owner", async () => {
+    pathname = "/projects";
+    const { unmount } = renderWithTrpc(
+      <SidebarNav workspaceName="Acme" signedIn={false} />,
+      handlers(),
+    );
+    const trigger = screen.getByRole("button", { name: "Acme — workspace menu" });
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+    expect(await screen.findByRole("menuitem", { name: /Workspace settings/ })).toBeDefined();
+    expect(screen.queryByRole("menuitem", { name: /Sign out/ })).toBeNull();
+    unmount();
+
+    renderWithTrpc(<SidebarNav workspaceName="Acme" signedIn />, handlers());
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Acme — workspace menu" }), {
+      button: 0,
+      ctrlKey: false,
+    });
+    expect(await screen.findByRole("menuitem", { name: /Sign out/ })).toBeDefined();
+  });
+});
+
+describe("Sidebar — the foot of the column", () => {
+  it("links Settings, and gives it up while Settings has the column", async () => {
+    pathname = "/projects";
+    const { unmount } = renderWithTrpc(
+      <SidebarNav workspaceName="Acme" signedIn={false} />,
+      handlers(),
+    );
+    expect(screen.getByRole("link", { name: "Settings" }).getAttribute("href")).toBe("/settings");
+    unmount();
+
+    pathname = "/settings";
+    renderWithTrpc(<SidebarNav workspaceName="Acme" signedIn={false} />, handlers());
+    // The section list has its own way back; a second "Settings" link to the page you are on
+    // would be a control that does nothing.
+    expect(screen.queryByRole("link", { name: "Settings" })).toBeNull();
+  });
+
+  it("shows no count beside Unassigned when there is nothing unassigned", async () => {
+    pathname = "/projects";
+    renderWithTrpc(
+      <SidebarNav workspaceName="Acme" signedIn={false} />,
+      handlers({ "workspace.counts": () => ({ unassignedIssues: 0, reviewByProject: [] }) }),
+    );
+    await screen.findByRole("link", { name: /GlabTest/ });
+    expect(screen.getByRole("link", { name: "Unassigned" }).textContent).toBe("Unassigned");
+  });
+
+  it("marks Workflows as work in progress for a screen reader as well as by eye", async () => {
+    pathname = "/projects";
+    renderWithTrpc(<SidebarNav workspaceName="Acme" signedIn={false} />, handlers());
+    const workflows = screen.getByRole("link", { name: /Workflows/ });
+    expect(workflows.getAttribute("title")).toBe("Workflows (work in progress)");
+    expect(workflows.textContent).toContain("WIP");
+  });
 });
