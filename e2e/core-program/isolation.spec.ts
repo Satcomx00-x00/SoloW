@@ -298,7 +298,10 @@ test.describe("@critical isolation", () => {
     seedIssue(OTHER_WORKSPACE, foreign);
 
     await page.goto("/unassigned");
-    await expect(page.getByText(/issues?$/).first()).toBeVisible();
+    // The list has to have arrived — this Workspace's own issues on screen — or the absence below
+    // would pass on an empty page. (This waited for the old sidebar's "All issues" count, which
+    // the one-sidebar navigation no longer draws.)
+    await expect(page.getByRole("main").locator('a[href^="/issues/"]').first()).toBeVisible();
     await expect(page.getByText(foreign)).toHaveCount(0);
     await expect(page.getByText(OTHER_WORKSPACE_TASK_TITLE)).toHaveCount(0);
   });
