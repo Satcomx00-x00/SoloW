@@ -219,12 +219,11 @@ test.describe("the Task page", () => {
     await openTask(page, issue.id, taskTitle);
     await launchToReview(page);
 
-    // With criteria to verify, the gate's chip says how many — and opens the brief.
+    // With criteria to verify, the gate says how many are left — and opens the brief.
     const tabs = page.getByRole("tablist", { name: "Task" });
-    await page
-      .locator('[data-board-kind="gate"]')
-      .getByRole("button", { name: /0\/2 criteria/ })
-      .click();
+    const gate = await openGate(page);
+    await expect(gate.getByText("You have verified 0 of the 2 acceptance criteria.")).toBeVisible();
+    await gate.getByRole("button", { name: "Open the brief" }).click();
     await expect(tabs.getByRole("tab", { name: "Brief" })).toHaveAttribute("aria-selected", "true");
     const brief = page.getByRole("region", { name: "Acceptance criteria" });
     await expect(brief.getByText("AC-1", { exact: true })).toBeVisible();
