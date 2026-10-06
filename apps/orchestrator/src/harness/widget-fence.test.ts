@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { MAX_WIDGET_CONTENT } from "@solow/contracts";
-import { WidgetFenceScanner } from "./widget-fence.js";
+import { WIDGET_BRIEF_INSTRUCTIONS, WidgetFenceScanner } from "./widget-fence.js";
 
 /**
  * The scanner runs over a live stream, so almost every test here feeds text in pieces: the
@@ -140,5 +140,18 @@ describe("WidgetFenceScanner", () => {
     });
     const out = scanner.push(`\`\`\`solow:widget\n${huge}\n\`\`\``);
     expect(out.widgets[0]?.kind).toBe("unsupported");
+  });
+});
+
+describe("WIDGET_BRIEF_INSTRUCTIONS", () => {
+  it("asks for an open question as a decision, not a marker the reviewer cannot answer", () => {
+    // A Specify step left three [NEEDS CLARIFICATION] markers "open for the reviewer" and raised no
+    // decision, so the gate listed them with nothing to pick — the reviewer could only approve past
+    // them. An unsettled question has to arrive as a `decision` with a recommendation.
+    expect(WIDGET_BRIEF_INSTRUCTIONS).toContain(
+      "A question you could not settle yourself is a `decision` too",
+    );
+    expect(WIDGET_BRIEF_INSTRUCTIONS).toContain("[NEEDS CLARIFICATION]");
+    expect(WIDGET_BRIEF_INSTRUCTIONS).toContain("put the one you recommend in `chosen`");
   });
 });
