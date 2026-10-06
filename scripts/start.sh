@@ -139,7 +139,10 @@ bun run apps/orchestrator/src/main.ts &
 PIDS="$PIDS $!"
 
 echo "[start] inngest      → http://localhost:$SOLOW_INNGEST_PORT  (Dev Server, Decision 0004)"
-bunx inngest-cli dev --no-discovery \
+# `--persist` for the reason scripts/dev.sh gives: without it every restart of this stack drops
+# each run parked at a review gate, and the next Approve on that Task is recorded and never
+# applied ("Decision not applied"). Same `.inngest/` state as dev.sh, as they share one app DB.
+bunx inngest-cli dev --no-discovery --persist \
     -u "http://localhost:$SOLOW_WS_PORT/api/inngest" \
     -p "$SOLOW_INNGEST_PORT" &
 PIDS="$PIDS $!"
