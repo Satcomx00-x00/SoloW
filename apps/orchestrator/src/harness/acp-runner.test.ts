@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type AcpScript, writeFakeAcpBin } from "@solow/acp/testing";
 import { createLocalExecutor } from "../executor/local.js";
-import { AcpRunner, toStreamEvent } from "./acp-runner.js";
+import { AcpRunner, type AcpRunnerOptions, refusalVerdict, toStreamEvent } from "./acp-runner.js";
 import { harnessConfigEnv } from "./hermetic-home.js";
 import type { HarnessHandle, HarnessStartOpts, HarnessStreamEvent } from "./runner.js";
 
@@ -36,6 +36,8 @@ async function run(
   },
   /** Per-round facts a test wants to vary — a conversation to carry on, so far. */
   over: Partial<HarnessStartOpts> = {},
+  /** The Profile's side of the run — a pinned model or mode. */
+  runnerOver: Partial<AcpRunnerOptions> = {},
 ) {
   workdir = await mkdtemp(join(tmpdir(), "solow-acp-"));
   const events: HarnessStreamEvent[] = [];
@@ -43,6 +45,7 @@ async function run(
   handle = new AcpRunner({
     executor: createLocalExecutor(workdir),
     permissionDeadlineMs: 2_000,
+    ...runnerOver,
   }).start({
     command,
     args: [],
@@ -158,7 +161,13 @@ describe("AcpRunner", () => {
     const { handle: h } = await run({ dieEarly: true, stderr: "Segmentation fault\n" });
     const outcome = await h.outcome;
     expect(outcome.kind).toBe("failed");
-    if (outcome.kind === "failed") expect(outcome.signal).toEqual({});
+    if (outcome.kind !== "failed") return;
+    // Plain by class — neither a quota nor a credential — and said in words rather than as "fail".
+    expect(outcome.signal.quotaExhausted).toBeUndefined();
+    expect(outcome.signal.credentialInvalid).toBeUndefined();
+    expect(outcome.signal.verdict).toBe(
+      "The harness ended the session: the agent closed its output stream",
+    );
   });
 
   it("fails a harness below the catalog's pin, carrying the refusal as the run's verdict", async () => {
@@ -470,5 +479,82 @@ describe("resuming a conversation", () => {
     const { handle: h } = await run({ agentCapabilities: { loadSession: true } });
     await h.outcome;
     expect(await h.resumed).toBe(false);
+  });
+});
+
+describe("AcpRunner — opencode 2's config options", () => {
+  /*
+   * opencode 2.0.22 lists its models as `configOptions` and has no `session/set_model`. Before the
+   * fix, a Profile that pinned a model failed every run with a bare "fail"; verified against the
+   * real binary, scripted here.
+   */
+  const opencode2: AcpScript = {
+    noSetModel: true,
+    configOptions: [
+      {
+        id: "model",
+        category: "model",
+        options: [{ value: "opencode/fledge-alpha-free" }, { value: "opencode/nemotron-free" }],
+      },
+      { id: "mode", category: "mode", options: [{ value: "build" }, { value: "plan" }] },
+    ],
+    turns: [{ text: ["wrote hello.txt"] }],
+  };
+
+  it("runs on the pinned model, chosen through the config option", async () => {
+    const { handle: h, events } = await run(
+      opencode2,
+      undefined,
+      {},
+      {
+        modelId: "opencode/nemotron-free",
+        modeId: "build",
+      },
+    );
+
+    expect(await h.outcome).toEqual({ kind: "completed", stopReason: "end_turn" });
+    expect(stdout(events).join("")).toContain("wrote hello.txt");
+  });
+
+  it("fails in the agent's words when it refuses a pin, rather than as a bare failure", async () => {
+    // An agent that offers models the spec way but cannot take `session/set_model`.
+    const { handle: h } = await run(
+      { noSetModel: true, models: { availableModels: [{ modelId: "m-1" }] } },
+      undefined,
+      {},
+      { modelId: "m-1" },
+    );
+    const outcome = await h.outcome;
+
+    expect(outcome.kind).toBe("failed");
+    if (outcome.kind !== "failed") return;
+    expect(outcome.signal.verdict).toStartWith("The harness ended the session:");
+    expect(outcome.signal.verdict).toContain("session/set_model");
+  });
+});
+
+describe("refusalVerdict", () => {
+  it("puts the agent's message in words for a plain failure", () => {
+    expect(refusalVerdict("Authentication required: provider authentication required", {})).toBe(
+      "The harness ended the session: Authentication required: provider authentication required",
+    );
+  });
+
+  it("leaves a classified failure its class, which is what the page acts on", () => {
+    expect(refusalVerdict("401 unauthorized", { credentialInvalid: true })).toBeUndefined();
+    expect(refusalVerdict("usage limit reached", { quotaExhausted: true })).toBeUndefined();
+    expect(refusalVerdict("no conversation found", { resumeLost: true })).toBeUndefined();
+  });
+
+  it("says nothing when the agent said nothing", () => {
+    expect(refusalVerdict(null, {})).toBeUndefined();
+    expect(refusalVerdict("   ", {})).toBeUndefined();
+  });
+
+  it("keeps a long message to one line and a bounded length", () => {
+    const said = refusalVerdict(`first line\n${"x".repeat(1000)}`, {}) ?? "";
+    expect(said).not.toContain("\n");
+    expect(said.length).toBeLessThanOrEqual("The harness ended the session: ".length + 240);
+    expect(said.endsWith("…")).toBe(true);
   });
 });

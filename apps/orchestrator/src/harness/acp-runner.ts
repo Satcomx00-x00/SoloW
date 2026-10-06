@@ -180,9 +180,10 @@ export class AcpRunner implements HarnessRunner {
       const stopReason = stopReasonFor(result);
       if (result.ok) return { kind: "completed", stopReason };
       const signal = signalFor(result, live.stderrTail());
+      const verdict = result.verdict ?? refusalVerdict(result.error, signal);
       return {
         kind: "failed",
-        signal: result.verdict ? { ...signal, verdict: result.verdict } : signal,
+        signal: verdict ? { ...signal, verdict } : signal,
         stopReason,
       };
     });
@@ -253,6 +254,29 @@ export function stopReasonFor(result: {
  * says something useful; otherwise fall back to whatever it printed on stderr, which is where
  * quota and credential problems are reported in prose.
  */
+/** Long enough for an agent's sentence, short enough for a Task's failure line. */
+const MAX_REFUSAL_LENGTH = 240;
+
+/**
+ * The agent's own words for why the session ended, as the Task's failure reason.
+ *
+ * ACP errors used to reach the operator as a bare "fail": opencode 2 refusing a pinned model
+ * ("Method not found: session/set_model") and refusing a prompt on a model that needs a login
+ * ("Authentication required") both ended a run with nothing on screen to say which. Only for a
+ * plain failure: a quota, credential or lost-conversation signal keeps its class as the reason,
+ * because that class is what the page turns into Renew, Resume now or a fresh start.
+ */
+export function refusalVerdict(error: string | null, signal: FailureSignal): string | undefined {
+  if (!error || signal.quotaExhausted || signal.credentialInvalid || signal.resumeLost) {
+    return undefined;
+  }
+  const said = error.replace(/\s+/g, " ").trim();
+  if (!said) return undefined;
+  const clipped =
+    said.length > MAX_REFUSAL_LENGTH ? `${said.slice(0, MAX_REFUSAL_LENGTH - 1)}…` : said;
+  return `The harness ended the session: ${clipped}`;
+}
+
 function signalFor(
   result: { stopReason: string | null; error: string | null },
   stderrTail: string,
