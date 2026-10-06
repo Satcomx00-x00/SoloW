@@ -20,6 +20,7 @@ import { orchestratorEnv } from "./env.js";
 import { createLocalExecutor } from "./executor/local.js";
 import { reapOrphanedContainers } from "./executor/reap.js";
 import type { Executor } from "./executor/types.js";
+import { clientDirectives } from "./harness/client-directives.js";
 import { explainWithHarness } from "./harness/explain.js";
 import { profileHarnessConfig } from "./harness/harness-config.js";
 import { resolveHarnessConfigEnv } from "./harness/hermetic-home.js";
@@ -257,7 +258,9 @@ export async function handleExplainPost(
     }
     const report = await explainWithHarness(createLocalExecutor(cwd), {
       command: ctx.harnessCatalog.command,
-      args: ctx.harnessCatalog.argsTemplate ?? [],
+      // Without `--auto` and its kind, which `opencode acp` refuses; an explanation runs in plan
+      // mode, so the approval it stands for has nothing to apply to here.
+      args: clientDirectives(ctx.harnessCatalog.protocol, ctx.harnessCatalog.argsTemplate).args,
       env: shaped.data,
       cwd,
       protocol: ctx.harnessCatalog.protocol,
@@ -348,7 +351,8 @@ export async function handleProbePost(
 
     const report = await probeHarness(createLocalExecutor(cwd), {
       command: ctx.harnessCatalog.command,
-      args: ctx.harnessCatalog.argsTemplate ?? [],
+      // As a run launches it: `--auto` is SoloW's to apply, not the ACP harness's to parse.
+      args: clientDirectives(ctx.harnessCatalog.protocol, ctx.harnessCatalog.argsTemplate).args,
       env: shaped.data,
       cwd,
       protocol: ctx.harnessCatalog.protocol,

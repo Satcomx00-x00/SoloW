@@ -72,6 +72,20 @@ describe("createHarnessRunner", () => {
     expect(options["unattendedPermissionPosture"]).toBe("allow_once");
   });
 
+  it("approves at once for a catalog row's --auto, even under a Profile that asks", () => {
+    // The row's `--auto` is opencode's own switch, applied by SoloW as the ACP client
+    // (`client-directives.ts`): it wins over an asking Profile and a refusing deployment.
+    const runner = createHarnessRunner("acp", {
+      executor,
+      permissionMode: "acceptEdits",
+      unattendedPermissionPosture: "refuse",
+      autoApprove: true,
+    });
+    const options = (runner as unknown as { options: Record<string, unknown> }).options;
+    expect(options["permissionDeadlineMs"]).toBe(0);
+    expect(options["unattendedPermissionPosture"]).toBe("allow_once");
+  });
+
   it("carries the catalog's version pin to the ACP runner, the one protocol that can check it", () => {
     const runner = createHarnessRunner("acp", {
       executor,

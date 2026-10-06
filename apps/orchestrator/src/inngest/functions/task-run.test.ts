@@ -6566,3 +6566,64 @@ describe("harnessBrief — decisions the reviewer settled on approval", () => {
     );
   });
 });
+
+describe("the catalog row's --auto (opencode)", () => {
+  /*
+   * `opencode acp` refuses `--auto` ("Unrecognized flag: --auto in command opencode acp"), so a row
+   * that says it must never put it on the command line: the run takes it off and tells the runner
+   * to approve every permission itself, as the ACP client (`client-directives.ts`).
+   */
+  let db: TestDb;
+
+  beforeAll(() => {
+    process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 3).toString("base64");
+  });
+
+  beforeEach(() => {
+    db = createTestDb();
+  });
+
+  class ArgsRunner extends ScriptedRunner {
+    readonly argv: string[][] = [];
+    override start(opts: HarnessStartOpts): HarnessHandle {
+      this.argv.push([...opts.args]);
+      return super.start(opts);
+    }
+  }
+
+  async function launch(args: string[]) {
+    const ids = freshIds();
+    await seedRun(db, ids, { agentProtocol: "acp" });
+    await db
+      .update(harnessCatalog)
+      .set({ argsTemplate: args })
+      .where(eq(harnessCatalog.id, `catalog-${ids.taskId}`));
+    const runner = new ArgsRunner([{ kind: "completed", stopReason: "end_turn" }]);
+    const { deps } = makeDeps(db, runner, nullStream());
+    const asked: HarnessLaunchSettings[] = [];
+    const wrapped: TaskRunDeps = {
+      ...deps,
+      runner: (_protocol: HarnessProtocol, settings: HarnessLaunchSettings) => {
+        asked.push(settings);
+        return runner;
+      },
+    };
+    await runTaskLifecycle(wrapped, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    return { runner, asked };
+  }
+
+  it("launches without the flag and tells the runner to approve every permission", async () => {
+    const { runner, asked } = await launch(["acp", "--auto"]);
+
+    expect(runner.argv[0]?.slice(0, 1)).toEqual(["acp"]);
+    expect(runner.argv.flat()).not.toContain("--auto");
+    expect(asked[0]?.autoApprove).toBe(true);
+  });
+
+  it("asks nothing of the kind for a row without it", async () => {
+    const { runner, asked } = await launch(["acp"]);
+
+    expect(runner.argv[0]?.slice(0, 1)).toEqual(["acp"]);
+    expect(asked[0]?.autoApprove).toBeUndefined();
+  });
+});

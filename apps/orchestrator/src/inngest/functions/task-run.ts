@@ -95,6 +95,7 @@ import {
 import type { PreflightResult } from "../../executor/preflight.js";
 import type { Executor } from "../../executor/types.js";
 import { worktreeNameForTask } from "../../harness/claude-code-runner.js";
+import { clientDirectives } from "../../harness/client-directives.js";
 import { profileHarnessConfig } from "../../harness/harness-config.js";
 import { resolveHarnessConfigEnv } from "../../harness/hermetic-home.js";
 import { materializeLibraries } from "../../harness/libraries.js";
@@ -225,7 +226,10 @@ type LegAdvance =
  */
 function launchSettingsFor(leg: RunLeg, checkpointStore: string): HarnessLaunchSettings {
   const profile = leg.harnessProfile;
+  const directives = clientDirectives(leg.harnessCatalog.protocol, leg.harnessCatalog.argsTemplate);
   return {
+    // The catalog row's `--auto`, for an ACP harness: SoloW answers every permission itself.
+    ...(directives.autoApprove ? { autoApprove: true } : {}),
     // The Step's posture wins where it has one, because a Step *is* a harness launch: the same
     // Profile is deliberately used for a `plan` Step and a `bypassPermissions` Step of one
     // pipeline. Null — and every Task on no Workflow, which has no Step — falls back to the
@@ -492,6 +496,7 @@ export function defaultDeps(): TaskRunDeps {
         ...(settings.modeId ? { modeId: settings.modeId } : {}),
         ...(settings.checkpoints ? { checkpoints: settings.checkpoints } : {}),
         ...(settings.version ? { version: settings.version } : {}),
+        ...(settings.autoApprove ? { autoApprove: true } : {}),
         unattendedPermissionPosture: env.SOLOW_ACP_UNATTENDED_PERMISSION,
       }),
     worktreeRoot: env.SOLOW_WORKTREE_ROOT,
@@ -2318,7 +2323,13 @@ export async function runTaskLifecycle(
         // Launch command and arguments come from the Harness's catalog row (issue #10) — not a
         // global env var, since two Harness Profiles in the same Workspace can point at different
         // catalog entries.
-        const { command, argsTemplate: args } = leg.harnessCatalog;
+        const { command } = leg.harnessCatalog;
+        // Without the flags addressed to SoloW as the ACP client — `opencode acp` refuses `--auto`
+        // (`client-directives.ts`); `launchSettingsFor` has already turned it into the runner's.
+        const { args } = clientDirectives(
+          leg.harnessCatalog.protocol,
+          leg.harnessCatalog.argsTemplate,
+        );
         // First round with a `--worktree`-capable harness: run in the repository and have it create
         // the Task's worktree. Later rounds continue *inside* that worktree — a reviewer asking
         // for changes wants the work carried on, and asking for the worktree again would branch a
