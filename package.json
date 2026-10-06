@@ -51,7 +51,7 @@
     "@playwright/test": "^1.63.0",
     "git-cliff": "2.14.2",
     "inngest-cli": "^1.45.1",
-    "turbo": "^2.11.3",
+    "turbo": "^2.11.7",
     "typescript": "^7.0.2"
   },
   "trustedDependencies": [
