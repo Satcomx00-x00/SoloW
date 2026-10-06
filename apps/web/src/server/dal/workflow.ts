@@ -8,6 +8,7 @@ import {
   type CreateWorkflowInput,
   type DeleteWorkflowStepInput,
   err,
+  type ForceTaskStepReviewInput,
   type ImportWorkflowInput,
   type InstallWorkflowFromStoreInput,
   ok,
@@ -984,6 +985,7 @@ const UNBOUND = {
   workflowHandoff: null,
   workflowPendingHandoff: null,
   workflowDecisionId: null,
+  workflowForceReviewStepIds: null,
 } as const;
 
 export async function detachTaskWorkflow(
@@ -1047,6 +1049,58 @@ export async function acknowledgeTaskWorkflowDrift(
 
       tx.update(task)
         .set({ workflowVersion: parent.version, updatedAt: now() })
+        .where(and(eq(task.workspaceId, ctx.workspaceId), eq(task.id, input.taskId)))
+        .run();
+      return ok(input.taskId);
+    },
+    { behavior: "immediate" },
+  );
+  return written.ok ? getTaskWorkflowBinding(ctx, written.data) : err(written.error);
+}
+
+/**
+ * Make one Step of this Task's Workflow wait for a review whatever its gate says — or stop
+ * making it (the board's "Force review").
+ *
+ * Per Task, and read by the advance inside its own transaction, so it takes effect at the
+ * Step's next finish: forcing the Step a run is on stops that run at its gate; forcing a later
+ * Step stops the run when it gets there. A Step already passed is not reached back into — the
+ * cursor has moved, and a review of work the next Step has started on would review nothing.
+ */
+export async function forceTaskStepReview(
+  ctx: RequestContext,
+  input: ForceTaskStepReviewInput,
+): Promise<Result<TaskWorkflowBindingDto, NotFound | WorkflowErrorCode>> {
+  const written = ctx.db.transaction(
+    (tx): Result<string, NotFound | WorkflowErrorCode> => {
+      const [row] = tx
+        .select()
+        .from(task)
+        .where(and(eq(task.workspaceId, ctx.workspaceId), eq(task.id, input.taskId)))
+        .limit(1)
+        .all();
+      if (!row) return err(CommonErrorCode.NotFound);
+      if (!row.workflowId) return err(WorkflowErrorCode.TaskNotOnWorkflow);
+      const [step] = tx
+        .select({ id: workflowStep.id })
+        .from(workflowStep)
+        .where(
+          and(
+            eq(workflowStep.workspaceId, ctx.workspaceId),
+            eq(workflowStep.workflowId, row.workflowId),
+            eq(workflowStep.id, input.stepId),
+          ),
+        )
+        .limit(1)
+        .all();
+      if (!step) return err(WorkflowErrorCode.StepNotInWorkflow);
+
+      const current = row.workflowForceReviewStepIds ?? [];
+      const next = input.force
+        ? [...new Set([...current, input.stepId])]
+        : current.filter((id) => id !== input.stepId);
+      tx.update(task)
+        .set({ workflowForceReviewStepIds: next, updatedAt: now() })
         .where(and(eq(task.workspaceId, ctx.workspaceId), eq(task.id, input.taskId)))
         .run();
       return ok(input.taskId);

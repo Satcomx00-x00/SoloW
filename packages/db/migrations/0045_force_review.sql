@@ -1,0 +1,1 @@
+ALTER TABLE `task` ADD `workflow_force_review_step_ids` text;

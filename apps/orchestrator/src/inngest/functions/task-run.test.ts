@@ -16,7 +16,7 @@ import {
   type WorkflowCheckpoint,
   type WorkflowStepCondition,
 } from "@solow/contracts";
-import { CREDENTIAL_EXPIRED_REASON } from "@solow/core";
+import { CREDENTIAL_EXPIRED_REASON, STRANDED_REVIEW_REASON } from "@solow/core";
 import { type SessionCursor, sessionCursorAt } from "@solow/core/session-log";
 import {
   encryptSecret,
@@ -4869,6 +4869,48 @@ describe("a Task following a Workflow", () => {
       .filter((payload) => payload.kind === "state")
       .map((s) => `${s.from}→${s.to}`);
     expect(transitions).toContain("running→review");
+  });
+
+  it("opens its gate clean of a 'decision not applied' an earlier round left on the row", async () => {
+    /*
+     * Seen on a real Task: a decision recorded mid-round stamped the row `failed` +
+     * `review_decision_not_applied`, the round then finished and parked at its gate, and the page
+     * read the stamp — offering Retry over a run that was sitting there waiting for an Approve.
+     */
+    const ids = freshIds();
+    await seedRun(db, ids);
+    await seedWorkflow(ids, [
+      {
+        key: "clarify",
+        command: "clarifier",
+        permissionMode: "acceptEdits",
+        promptTemplate: "Clarify.",
+        gate: "human",
+        advanceOn: "review",
+      },
+    ]);
+    await setTaskState(db, ids.workspaceId, ids.taskId, "failed", {
+      failureReason: STRANDED_REVIEW_REASON,
+    });
+    const runner = new ScriptedRunner(
+      [{ kind: "completed", stopReason: "end_turn" }],
+      [declares("clarified")],
+    );
+    const { deps } = makeDeps(db, runner, nullStream());
+    const deciding = decidingStep(ids, ["approve"]);
+    const atWait: { state: string; reason: string | null }[] = [];
+    const observing: StepLike = {
+      ...deciding,
+      waitForEvent: async (id, opts) => {
+        const row = await taskRow(ids.taskId);
+        atWait.push({ state: row?.state ?? "", reason: row?.failureReason ?? null });
+        return deciding.waitForEvent(id, opts);
+      },
+    };
+
+    await runTaskLifecycle(deps, { event: { data: ids }, step: observing });
+
+    expect(atWait).toEqual([{ state: "review", reason: null }]);
   });
 
   /** The harness's declaration with any extra field — the `decision` the branch reads. */

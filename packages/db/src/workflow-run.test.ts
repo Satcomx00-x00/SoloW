@@ -42,7 +42,7 @@ interface Pipeline {
 }
 
 type StepSpec = {
-  gate?: "human" | "auto" | "auto-unless-changes";
+  gate?: "human" | "auto" | "auto-unless-changes" | "agent-decides";
   advanceOn?: "review" | "agent-signal";
   /** Resolved against the seeded ids once they exist — a branch names Steps by index here. */
   branch?: { when: WorkflowStepCondition; thenStep: number | null; elseStep: number | null };
@@ -674,5 +674,104 @@ describe("loading a task's workflow run", () => {
     const loaded = await loadTaskWorkflowRun(db, p.workspaceId, p.taskId);
     expect(loaded.ok && loaded.data.currentStep.id).toBe(stepId(p, 0));
     expect((await taskRow(p.taskId)).workflowStepId).toBeNull();
+  });
+});
+
+describe("a Step that waits for a review whatever its gate says", () => {
+  /** A `decision` widget filed under a Step, the way the run loop records one. */
+  async function askDecision(p: Pipeline, index: number, seq: number, at: string) {
+    await db.insert(sessionEvent).values({
+      workspaceId: p.workspaceId,
+      sessionId: p.sessionId,
+      seq,
+      kind: "widget",
+      payload: {
+        kind: "widget",
+        widgetId: `w-${seq}`,
+        widget: {
+          kind: "decision",
+          id: `d-${seq}`,
+          question: "Which minimum Python version?",
+          options: [
+            { id: "a", label: "3.10" },
+            { id: "b", label: "3.12" },
+          ],
+          chosen: "b",
+        },
+      },
+      workflowStepId: stepId(p, index),
+      at,
+    });
+  }
+
+  const finish = (p: Pipeline, index: number) =>
+    advanceTaskWorkflow(db, p.workspaceId, {
+      taskId: p.taskId,
+      fromStepId: stepId(p, index),
+      signal: "agent-signal",
+      producedChanges: false,
+      handoff: "REVIEW: no",
+    });
+
+  it("holds an automatic Step that asked the reviewer decisions, and says why", async () => {
+    const p = await pipeline("decisions", [{ gate: "auto" }, {}]);
+    await askDecision(p, 0, 1, "2026-01-01T00:00:01.000Z");
+
+    const result = await finish(p, 0);
+    expect(result.ok && result.data.status).toBe("awaiting-decision");
+    expect(result.ok && result.data.explanation.reviewReason).toBe("decisions");
+    expect((await taskRow(p.taskId)).workflowStepId).toBe(stepId(p, 0));
+  });
+
+  it("lets the harness decide on an agent-decides gate — REVIEW: no moves on", async () => {
+    const p = await pipeline("agent", [{ gate: "agent-decides" }, {}]);
+    const result = await finish(p, 0);
+    expect(result.ok && result.data.status).toBe("advanced");
+  });
+
+  it("holds a Step a person forced a review on for this Task", async () => {
+    const p = await pipeline("forced", [{ gate: "auto" }, {}]);
+    await db
+      .update(task)
+      .set({ workflowForceReviewStepIds: [stepId(p, 0)] })
+      .where(eq(task.id, p.taskId));
+
+    const result = await finish(p, 0);
+    expect(result.ok && result.data.status).toBe("awaiting-decision");
+    expect(result.ok && result.data.explanation.reviewReason).toBe("forced");
+
+    const run = await loadTaskWorkflowRun(db, p.workspaceId, p.taskId);
+    expect(run.ok && run.data.forcedReviewStepIds).toEqual([stepId(p, 0)]);
+  });
+
+  it("does not hold a looped Step on decisions its earlier pass asked and the gate settled", async () => {
+    const p = await pipeline("loop", [{ gate: "auto" }, {}]);
+    await askDecision(p, 0, 1, "2026-01-01T00:00:01.000Z");
+    // That pass finished (its decisions settled at a gate), recorded the way the run records it.
+    await db.insert(sessionEvent).values({
+      workspaceId: p.workspaceId,
+      sessionId: p.sessionId,
+      seq: 2,
+      kind: "workflow_decision",
+      payload: {
+        kind: "workflow_decision",
+        stepId: stepId(p, 0),
+        stepName: "Step 1",
+        signal: "agent-signal",
+        gate: "auto",
+        needsApproval: true,
+        condition: null,
+        status: "advanced",
+        nextStepId: stepId(p, 1),
+        nextStepName: "Step 2",
+        outcome: null,
+        producedChanges: false,
+      },
+      workflowStepId: stepId(p, 0),
+      at: "2026-01-01T00:00:02.000Z",
+    });
+
+    const result = await finish(p, 0);
+    expect(result.ok && result.data.status).toBe("advanced");
   });
 });

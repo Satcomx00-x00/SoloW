@@ -327,6 +327,8 @@ export const taskCompleteWidget = z.object({
   openItems: z.array(openItemSchema).max(20).optional(),
   /** Its answer to the Step's branch question, where the Step asked one. See `harnessDecisionSchema`. */
   decision: harnessDecisionSchema.optional(),
+  /** Its answer to "should a person review this before the workflow moves on?", where asked. */
+  review: harnessDecisionSchema.optional(),
 });
 
 /**

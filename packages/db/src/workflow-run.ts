@@ -10,7 +10,7 @@ import {
   type WorkflowStepDto,
 } from "@solow/contracts";
 import { advanceWorkflowStep, buildStepBrief, resumeWorkflowCursor, sortSteps } from "@solow/core";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { Db } from "./index.js";
 import { review, session, sessionEvent, task, workflow, workflowStep } from "./schema.js";
 
@@ -127,6 +127,7 @@ export async function loadTaskWorkflowRun(
     steps,
     handoff: row.workflowHandoff,
     brief: buildStepBrief(current, row.workflowHandoff, steps),
+    forcedReviewStepIds: row.workflowForceReviewStepIds ?? [],
   });
 }
 
@@ -200,6 +201,46 @@ function taskHasRecordedChanges(tx: Tx, workspaceId: string, taskId: string): bo
   return rows.some((row) => {
     const files = (row.payload as { files?: unknown[] } | null)?.files;
     return Array.isArray(files) && files.length > 0;
+  });
+}
+
+/**
+ * Did this Step ask the reviewer decisions on the pass that is ending?
+ *
+ * A `decision` widget is a choice the harness made that a person confirms or overturns at the
+ * gate — so a Step that emitted one must not move on by itself, or the next Step is briefed with
+ * the harness's picks as if confirmed. "This pass": the widgets filed under this Step since it
+ * last finished, because a Workflow that loops back to a Step meets the decisions its earlier
+ * pass asked (and the gate already settled) in the same log.
+ */
+function stepAskedDecisions(tx: Tx, workspaceId: string, taskId: string, stepId: string): boolean {
+  const rows = tx
+    .select({ kind: sessionEvent.kind, payload: sessionEvent.payload, at: sessionEvent.at })
+    .from(sessionEvent)
+    .innerJoin(session, eq(sessionEvent.sessionId, session.id))
+    .where(
+      and(
+        eq(sessionEvent.workspaceId, workspaceId),
+        eq(session.workspaceId, workspaceId),
+        eq(session.taskId, taskId),
+        eq(sessionEvent.workflowStepId, stepId),
+        inArray(sessionEvent.kind, ["widget", "workflow_decision"]),
+      ),
+    )
+    .all();
+  let lastFinished = "";
+  for (const row of rows) {
+    const payload = row.payload as { kind?: string; status?: string } | null;
+    if (
+      row.kind === "workflow_decision" &&
+      (payload?.status === "advanced" || payload?.status === "completed") &&
+      row.at > lastFinished
+    )
+      lastFinished = row.at;
+  }
+  return rows.some((row) => {
+    const widget = (row.payload as { widget?: { kind?: string } } | null)?.widget;
+    return row.kind === "widget" && widget?.kind === "decision" && row.at > lastFinished;
   });
 }
 
@@ -311,6 +352,10 @@ export async function advanceTaskWorkflow(
         // `producedChanges` is, because there is nothing to corroborate it against: the
         // declaration is the harness's own account, and the Session log holds the same words.
         outcome: input.outcome ?? null,
+        // The server's own record, never the harness's word: decisions asked on this pass, and
+        // a review a person forced on this Step for this Task.
+        decisionsAsked: stepAskedDecisions(tx, workspaceId, input.taskId, resumed.data.id),
+        forceReview: (row.workflowForceReviewStepIds ?? []).includes(resumed.data.id),
       });
       if (!advance.ok) return err(advance.error);
 

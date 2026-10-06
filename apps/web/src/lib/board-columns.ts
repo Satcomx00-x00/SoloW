@@ -1,6 +1,13 @@
 import type { TaskDto, TaskState, WorkflowStepDto, WorkflowStepGate } from "@solow/contracts";
 import { sortSteps } from "@solow/core";
-import { Inbox, type LucideIcon, ShieldCheck, UserRoundCheck, Zap } from "lucide-react";
+import {
+  BotMessageSquare,
+  Inbox,
+  type LucideIcon,
+  ShieldCheck,
+  UserRoundCheck,
+  Zap,
+} from "lucide-react";
 import { BOARD_COLUMNS, STATE_LABELS, STATE_STYLE } from "./task-states";
 
 /**
@@ -128,6 +135,13 @@ const GATE_CHROME: Record<WorkflowStepGate, Omit<ColumnChrome, "label">> = {
     barClassName: "bg-muted-foreground/40",
     tintClassName: "bg-transparent",
     hint: "Advances on its own unless the run produced changes, which need your approval",
+  },
+  "agent-decides": {
+    icon: BotMessageSquare,
+    textClassName: "text-muted-foreground",
+    barClassName: "bg-muted-foreground/40",
+    tintClassName: "bg-transparent",
+    hint: "Advances on its own unless the harness asks for a review (REVIEW: yes) or asked you decisions",
   },
 };
 

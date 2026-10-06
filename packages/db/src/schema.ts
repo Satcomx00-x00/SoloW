@@ -692,6 +692,14 @@ export const task = sqliteTable(
      */
     workflowDecisionCall: text("workflow_decision_call"),
     /**
+     * Steps of this Task's Workflow a person asked to wait for a review whatever their gate says —
+     * the board's "Force review" (null reads as none). Per Task, not per Workflow: it is one
+     * reviewer's call about one run, not a change to the pipeline every Task follows.
+     */
+    workflowForceReviewStepIds: text("workflow_force_review_step_ids", { mode: "json" }).$type<
+      string[]
+    >(),
+    /**
      * When the Owner deleted this Task, or null while it is live (spec F02 FR-10, the archive
      * half; history retention).
      *

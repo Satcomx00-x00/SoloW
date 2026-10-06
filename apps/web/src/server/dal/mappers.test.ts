@@ -177,6 +177,7 @@ describe("mappers", () => {
       workflowPendingHandoff: null,
       workflowDecisionId: null,
       workflowDecisionCall: null,
+      workflowForceReviewStepIds: null,
       createdAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-01T00:00:00.000Z",
     };

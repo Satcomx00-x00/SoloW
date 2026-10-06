@@ -2,7 +2,7 @@
 
 import { afterEach, beforeAll, describe, expect, it } from "bun:test";
 import type { WorkflowStepDto, WorkflowWithStepsDto } from "@solow/contracts";
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { renderWithTrpc } from "@/test/trpc-harness";
 import { WorkflowsView } from "./workflows-view";
 
@@ -238,6 +238,25 @@ describe("WorkflowsView", () => {
           elseStepId: "s3",
         },
       });
+    });
+  });
+
+  it("sets how a step is reviewed from three choices: wait, let the AI decide, or move on", async () => {
+    const { log } = renderWithTrpc(
+      <WorkflowsView />,
+      handlersFor({ "workflow.updateStep": () => PIPELINE }),
+    );
+
+    const plan = await screen.findByLabelText("Permissions for Plan");
+    const card = plan.closest(".react-flow__node") as HTMLElement;
+    // By its text: an unmeasured canvas node is invisible to role queries in the DOM stand-in.
+    const aiDecides = within(card).getByText("AI decides").closest("button") as HTMLElement;
+    expect(aiDecides.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(aiDecides);
+
+    await waitFor(() => {
+      const call = log.calls.find((c) => c.path === "workflow.updateStep");
+      expect(call?.input).toEqual({ stepId: "s1", gate: "agent-decides" });
     });
   });
 

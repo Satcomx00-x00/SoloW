@@ -27,7 +27,20 @@ import { taskCompletionOutcomeSchema } from "./widget.js";
  * `request_changes` releases nothing at all — the `review` table holds refusals as well as
  * consents, and only one of the three is a decision to carry on.
  */
-export const workflowStepGateSchema = z.enum(["human", "auto", "auto-unless-changes"]);
+/**
+ * Whether a Step waits for a person before the next one starts.
+ *
+ * `human` always waits; `auto` never does; `auto-unless-changes` waits when the Step changed
+ * files; `agent-decides` asks the harness — it ends its report with `REVIEW: yes` or `REVIEW: no`
+ * (no answer counts as yes). Whatever the gate, a Step that asked the reviewer decisions, or one a
+ * person forced a review on for this Task, waits.
+ */
+export const workflowStepGateSchema = z.enum([
+  "human",
+  "auto",
+  "auto-unless-changes",
+  "agent-decides",
+]);
 export type WorkflowStepGate = z.infer<typeof workflowStepGateSchema>;
 
 /** Which signal counts as "this Step is finished" — the harness saying so, or a review landing. */
@@ -452,8 +465,18 @@ export const taskWorkflowBindingDto = z.object({
   steps: z.array(workflowStepDto),
   handoff: z.string().nullable(),
   brief: z.string(),
+  /** Steps a person forced to wait for a review on this Task, whatever their gate (`forceReview`). */
+  forcedReviewStepIds: z.array(idSchema).default([]),
 });
 export type TaskWorkflowBindingDto = z.infer<typeof taskWorkflowBindingDto>;
+
+/** Force a Step of this Task's Workflow to wait for a review whatever its gate says, or stop forcing it. */
+export const forceTaskStepReviewInput = z.object({
+  taskId: idSchema,
+  stepId: idSchema,
+  force: z.boolean(),
+});
+export type ForceTaskStepReviewInput = z.infer<typeof forceTaskStepReviewInput>;
 
 /**
  * The outcome of reporting a Step finished.
@@ -505,6 +528,12 @@ export const workflowAdvanceExplanationSchema = z.object({
    * decision record can carry the fact the rule used rather than the claim it was handed.
    */
   producedChanges: z.boolean(),
+  /**
+   * Why a person was asked, when one was: the gate itself, the harness's own `REVIEW: yes`,
+   * decisions the Step asked that only a person can settle, or a review forced on the Step for
+   * this Task. Absent when nobody was asked, and on records written before the field existed.
+   */
+  reviewReason: z.enum(["gate", "agent", "decisions", "forced"]).optional(),
 });
 export type WorkflowAdvanceExplanation = z.infer<typeof workflowAdvanceExplanationSchema>;
 

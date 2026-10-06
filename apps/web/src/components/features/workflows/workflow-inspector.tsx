@@ -29,10 +29,12 @@ import { trpc } from "@/trpc/react";
  * harness and prompt into this panel would undo exactly what the node graph is for. The outline
  * navigates to a Step; it does not become a second place to edit one.
  */
+// The canvas's "Wait for review" button, said in the outline in its own words.
 const GATE_SUMMARY: Record<WorkflowStepGate, string> = {
-  human: "human gate",
-  auto: "automatic",
-  "auto-unless-changes": "auto unless changed",
+  human: "waits for review",
+  auto: "moves on by itself",
+  "auto-unless-changes": "waits if it changed files",
+  "agent-decides": "the AI decides on review",
 };
 
 /**
