@@ -499,7 +499,11 @@ function ReviewGate({
                   : nextStepName
                     ? `, and the workflow moves on to its next step, ${nextStepName}.`
                     : ", and the task is done."}
-                {open > 0 ? " The things left undone stay undone." : ""}
+                {open > 0
+                  ? decisionsToApply > 0
+                    ? " What is left undone goes back with your answers, for the harness to settle."
+                    : " The things left undone stay undone."
+                  : ""}
               </>
             }
           >

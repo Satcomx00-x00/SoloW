@@ -1410,6 +1410,18 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   const openGate = () => {
     if (gateItem) setOpened({ type: "item", key: gateItem.key });
   };
+  /**
+   * A plan with unfinished items, on the Step at the gate, while that Step has decisions for the
+   * reviewer: the unfinished items are what the decisions settle. Said in the plan's dialog,
+   * because that dialog is read-only and a reviewer who opens it to "fix" a red item otherwise
+   * finds nothing to press.
+   */
+  const planWaitsOnYou = (column: BoardColumn, widget: { steps: { state: string }[] }) =>
+    t.state === "review" &&
+    deleted === null &&
+    column === gateColumn &&
+    gateDecisionList.length > 0 &&
+    widget.steps.some((step) => step.state !== "done");
   const gateStrip =
     gateItem && gateColumn ? (
       <GateStrip
@@ -1474,8 +1486,28 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
             {...common}
             title={item.widget.title ?? "The harness's plan"}
             description={`The plan the harness published on ${column.name}, as it now stands.`}
+            footer={
+              planWaitsOnYou(column, item.widget) ? (
+                decisionsPending > 0 ? (
+                  <Button onClick={goToDecisions}>Answer the decisions</Button>
+                ) : (
+                  <Button onClick={openGate}>Go to the gate</Button>
+                )
+              ) : null
+            }
           >
             <PlanBody widget={item.widget} />
+            {planWaitsOnYou(column, item.widget) ? (
+              <p className="mt-3 rounded-lg border-state-review/40 border-l-2 bg-state-review/[0.06] px-3 py-2 text-sm leading-relaxed">
+                This is the harness's own checklist — nothing here is yours to tick. What is left
+                waits on your {gateDecisionList.length === 1 ? "decision" : "decisions"}
+                {decisionsPending > 0
+                  ? `: answer ${decisionsPending === 1 ? "it" : "them"}, then approve.`
+                  : ", which you have confirmed."}{" "}
+                Approving sends your answers back to {column.name}, and the harness settles these
+                items before the workflow moves on.
+              </p>
+            ) : null}
           </BoardDialog>
         );
       case "todos":
