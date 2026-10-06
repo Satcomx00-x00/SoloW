@@ -232,20 +232,22 @@ test.describe("the Task page", () => {
     // Nothing is explained until asked; the answer lands under the criterion it is about.
     const explanation = page.locator('[data-criterion-explanation="AC-2"]');
     await expect(explanation).toHaveCount(0);
-    await brief.getByRole("button", { name: "Explain AC-2" }).click();
+    // The brief reads one criterion at a time, opening on the first; its controls are on the
+    // criterion's own panel, beside the list.
+    await page.getByRole("button", { name: "Next criterion" }).click();
+    const detail = page.getByRole("article", { name: "AC-2" });
+    await detail.getByRole("button", { name: "Explain AC-2" }).click();
     await expect(explanation).toContainText("explains AC-2");
     await expect(explanation).toContainText("not part of the record");
     await expect(page.locator('[data-criterion-explanation="AC-1"]')).toHaveCount(0);
 
-    await brief.getByRole("button", { name: "Hide the explanation of AC-2" }).click();
+    await detail.getByRole("button", { name: "Hide the explanation of AC-2" }).click();
     await expect(explanation).toHaveCount(0);
-    await brief.getByRole("button", { name: "Explain AC-2" }).click();
+    await detail.getByRole("button", { name: "Explain AC-2" }).click();
     await expect(explanation).toContainText("explains AC-2");
   });
 
-  test("stops a running harness on a held press, never on a click, and counts what a filter hides", async ({
-    page,
-  }) => {
+  test("stops a running harness on a held press, never on a click", async ({ page }) => {
     const stamp = Date.now();
     const issueTitle = `Lock jams ${stamp}`;
     const taskTitle = `Free the lock ${stamp} [steerable]`;
@@ -266,8 +268,9 @@ test.describe("the Task page", () => {
     // A click is exactly the gesture the hold exists to refuse.
     const stop = page.getByRole("button", { name: "Stop" });
     await stop.click();
-    await expect(page.getByText("harness stopped by the operator")).toHaveCount(0);
     await expect(stop).toBeEnabled();
+    // The board does not print the harness's raw output; its Session log is where it says so.
+    expect(await sessionLog(page, taskIdOnPage(page))).not.toContain("stopped by the operator");
 
     // Held for the fill to cross it, the stop goes.
     const box = await stop.boundingBox();
@@ -276,7 +279,9 @@ test.describe("the Task page", () => {
     await page.mouse.down();
     await page.waitForTimeout(600);
     await page.mouse.up();
-    await expect(page.getByText("harness stopped by the operator")).toBeVisible();
+    await expect
+      .poll(() => sessionLog(page, taskIdOnPage(page)))
+      .toContain("harness stopped by the operator");
   });
 
   test("deletes a task on the press and undoes it from the toast", async ({ page }) => {
