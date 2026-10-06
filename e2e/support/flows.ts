@@ -269,3 +269,19 @@ export async function launchToReview(page: Page): Promise<void> {
   await launchTask(page);
   await openReview(page);
 }
+
+/**
+ * A Step's header on the Task page's board — the node that names the Step and opens its dialog.
+ * Its `data-step-status` is where the run is (`running`, `waiting` at the gate, `done`), which the
+ * header strip's tabs used to carry before the board became the only place the Steps are drawn.
+ */
+export function stepHeader(page: Page, name: string): Locator {
+  return page.getByRole("button", { name: new RegExp(`^Step\\. ${name}\\b`) });
+}
+
+/** Scope the board to one Step, the way the page offers it: its header, then its dialog's button. */
+export async function showStepOnBoard(page: Page, name: string): Promise<void> {
+  await stepHeader(page, name).click();
+  await page.getByRole("button", { name: "Show this step on the board" }).click();
+  await expect(page.getByRole("dialog")).toBeHidden();
+}

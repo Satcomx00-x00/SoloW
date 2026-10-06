@@ -3,9 +3,7 @@
 import type { TaskDto, TaskState, TaskWorkflowBindingDto, WorkflowStepDto } from "@solow/contracts";
 import { Workflow } from "lucide-react";
 import { useCallback, useState } from "react";
-import { useTablistKeys } from "@/components/hooks/use-tablist-keys";
-import { Step, type StepStatus, Steps } from "@/components/ui/steps";
-import { cn } from "@/lib/utils";
+import type { StepStatus } from "@/components/ui/steps";
 import { trpc } from "@/trpc/react";
 
 /**
@@ -81,23 +79,6 @@ export function stepStatuses(binding: TaskWorkflowBindingDto, state: TaskState):
   }));
 }
 
-/**
- * The one panel the strip's tabs control: the board, whose cards are read for the Step picked.
- *
- * A constant rather than a `useId`: there is exactly one Task workspace on a page, the tabs and
- * the panel are rendered by two different components several levels apart, and threading a
- * generated id between them would buy nothing but the plumbing.
- */
-export const STEP_PANEL_ID = "task-step-panel";
-/** The tab that means "everything", which is not a Step and so has no Step id to be named by. */
-export const WHOLE_RUN_TAB_ID = "workflow-step-tab-whole-run";
-export const stepTabId = (stepId: string) => `workflow-step-tab-${stepId}`;
-
-/** Which tab is selected, so the panel can name it in `aria-labelledby`. */
-export function selectedTabId(selected: string | null): string {
-  return selected === null ? WHOLE_RUN_TAB_ID : stepTabId(selected);
-}
-
 export interface StepScope {
   /** The Task's binding, or null when it is on no Workflow. */
   binding: TaskWorkflowBindingDto | null;
@@ -150,136 +131,32 @@ export function useStepScope(task: TaskDto | null): StepScope {
 }
 
 /**
- * Where a Task is in its Workflow, and which Step's output the terminal below is showing
- * (spec F03).
+ * Where a Task is in its Workflow: the pipeline's name and the Step the run is on, in the Task's
+ * header bar (spec F03). Nothing at all for a Task on no Workflow.
  *
- * **Why a tablist.** The strip used to be an ordered list that only reported progress, and
- * `aria-current="step"` said which entry the run had reached. Selecting is a second, independent
- * fact — an operator reads Step 1 while the run is on Step 3 — and layering it onto
- * `aria-current` would have made one attribute answer two questions that routinely disagree.
- * What this is now is the textbook case for tabs: one strip of alternatives, one panel below
- * whose content each one swaps. So the steps are tabs (`aria-selected`), the terminal is their
- * panel, and `aria-current` stays on whichever tab the run is actually on. The ordered-list
- * semantics are the price — a `tablist` cannot also be a list — and they are worth it: a tab
- * announces its own position in the set, and the header line above still says "Step 2 of 3".
- *
- * **Manual activation.** The arrow keys move focus and Enter or Space selects, rather than the
- * selection following focus. Automatic activation is only appropriate when showing a panel is
- * free; each of these fires a fresh query for a Step's worth of log, and arrowing across five
- * steps to reach the sixth would fire five of them.
- *
- * Nothing at all for a Task on no Workflow: a single-harness run has no steps to be on, and its
- * terminal is never scoped.
+ * Just the position. This used to be a full strip — every Step as a tab, plus "Whole run" — and
+ * the tabs scoped the board and the transcript. The board itself now draws every Step as a node,
+ * with the one running and the one waiting on you animated, so a second row of the same Steps in
+ * the header was a duplicate competing for the eye; it was removed on request. Scoping is still
+ * there: the board follows the Step the run is on, and a Step's own dialog has "Show this step
+ * on the board".
  */
-export function WorkflowSteps({
-  scope,
-  layout = "line",
-}: {
-  scope: StepScope;
-  /**
-   * `line`: a row of its own under a header. `inline`: inside the header bar itself — one
-   * 44px line shared with the title, so the strip never wraps and scrolls instead. `vertical`:
-   * one Step per line, for a column.
-   */
-  layout?: "line" | "inline" | "vertical";
-}) {
-  const { binding, stepped, selected, select } = scope;
-
-  // Roving focus along the strip — the hook the right column's tabs share.
-  const onStripKey = useTablistKeys<HTMLOListElement>();
-
+export function WorkflowPosition({ scope }: { scope: StepScope }) {
+  const { binding, stepped } = scope;
   if (!binding) return null;
-
   const at = stepped.findIndex((s) => s.current);
-  const vertical = layout === "vertical";
-  const inline = layout === "inline";
-
   return (
-    // The header's second line, not a card of its own: where the run is belongs with what the
-    // run is, and a bordered box under a bordered header was two frames saying "separate".
-    // One row — name, position, then the Steps — at the caption step, on the header's hairline.
     <section
       aria-label="Workflow progress"
-      className={cn(
-        vertical && "flex min-w-0 flex-col gap-2",
-        inline && "flex min-w-0 items-center gap-2",
-        layout === "line" &&
-          "flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 border-b px-4 py-1.5",
-      )}
+      className="flex min-w-0 items-center gap-1.5 text-muted-foreground text-xs"
     >
-      <p
-        className={cn(
-          "flex min-w-0 shrink-0 items-center gap-1.5 text-muted-foreground text-xs",
-          // In the bar the name may give way; the position never does.
-          inline && "max-w-56",
-        )}
-      >
-        <Workflow aria-hidden className="size-3 shrink-0" />
-        <span className="truncate font-medium text-foreground/80">{binding.workflowName}</span>
-        <span className="shrink-0">
-          · Step {at + 1} of {stepped.length}
-        </span>
-      </p>
-      {vertical ? null : (
-        <span aria-hidden className="hidden h-4 w-px shrink-0 bg-border sm:inline-block" />
-      )}
-      <Steps
-        aria-label="Workflow steps"
-        onKeyDown={onStripKey}
-        orientation={vertical ? "vertical" : "horizontal"}
-        role="tablist"
-        className={cn(
-          !vertical && "w-auto min-w-0 flex-1",
-          // One line in the bar: past its width it scrolls (the strip's own scroll style),
-          // never wraps into a second row of a 44px header.
-          inline && "tabs-scroll flex-nowrap overflow-x-auto",
-        )}
-      >
-        {/*
-          The way back to everything, first and set apart — where an "All" filter sits in every
-          other strip of this shape. It belongs *in* the tablist rather than beside it because a
-          tablist with none of its tabs selected is a broken tablist, and "the whole run" is a
-          genuine alternative to the Steps, not a control that undoes them.
-        */}
-        <li
-          className={cn("flex min-w-0 items-center", vertical && "mb-1 border-b pb-1")}
-          role="presentation"
-        >
-          <button
-            aria-controls={STEP_PANEL_ID}
-            aria-selected={selected === null}
-            className={cn(
-              "cursor-pointer rounded-md px-1.5 py-0.5 text-xs transition-colors",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
-              selected === null
-                ? "bg-muted font-medium text-foreground ring-1 ring-border"
-                : "text-muted-foreground hover:bg-muted/60",
-            )}
-            id={WHOLE_RUN_TAB_ID}
-            onClick={() => select(null)}
-            role="tab"
-            tabIndex={selected === null ? 0 : -1}
-            type="button"
-          >
-            Whole run
-          </button>
-          {vertical ? null : <span aria-hidden className="mx-2 h-4 w-px shrink-0 bg-border" />}
-        </li>
-        {stepped.map(({ step, status }, i) => (
-          <Step
-            controls={STEP_PANEL_ID}
-            index={i}
-            key={step.id}
-            last={i === stepped.length - 1}
-            onSelect={() => select(step.id)}
-            selected={selected === step.id}
-            status={status}
-            tabId={stepTabId(step.id)}
-          >
-            {step.name}
-          </Step>
-        ))}
-      </Steps>
+      <Workflow aria-hidden className="size-3 shrink-0" />
+      <span className="min-w-0 max-w-56 truncate font-medium text-foreground/80">
+        {binding.workflowName}
+      </span>
+      <span className="shrink-0">
+        · Step {at + 1} of {stepped.length}
+      </span>
     </section>
   );
 }

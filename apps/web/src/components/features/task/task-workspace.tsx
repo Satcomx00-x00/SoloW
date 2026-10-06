@@ -123,7 +123,7 @@ import {
   type TaskCompleteWidget,
 } from "./todo-list";
 import { buildTranscript, inStepScope } from "./transcript";
-import { STEP_PANEL_ID, selectedTabId, useStepScope, WorkflowSteps } from "./workflow-steps";
+import { useStepScope, WorkflowPosition } from "./workflow-steps";
 
 /**
  * What the harness said about how its run ended, in the header.
@@ -1277,16 +1277,6 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
     setTabPick({ tab: next, state: t.state });
     setUrlTab(next);
   };
-  // Picking a Step scopes what the page reads — the board's cards and the terminal's log alike —
-  // so it brings the board back if the brief or the change was showing.
-  const stepScope = {
-    ...scope,
-    select: (stepId: string | null) => {
-      scope.select(stepId);
-      if (tab !== "board") pickTab("board");
-    },
-  };
-
   /**
    * The gate's footer — Approve, Retry, Launch, Open review — said once on the page: in the gate
    * dialog, which the gate card on the board and the strip under the brief and the change both
@@ -1774,16 +1764,13 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
               pending={move.isPending || launch.isPending}
             />
           ) : null}
-          {/*
-          Where the run is in its Workflow, in the bar itself — past a hairline from the title
-          group, taking the middle of the line. It is the terminal's tablist as well: picking a
-          Step opens Run and scopes it. Nothing at all for a Task on no Workflow.
-        */}
+          {/* Where the run is in its Workflow — its name and Step, past a hairline from the title
+              group. Nothing at all for a Task on no Workflow. */}
           {scope.binding ? (
             <>
               <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border" />
               <div className="min-w-0 flex-1">
-                <WorkflowSteps scope={stepScope} layout="inline" />
+                <WorkflowPosition scope={scope} />
               </div>
             </>
           ) : null}
@@ -2082,18 +2069,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
                   The board is what the Workflow strip's tabs scope — the cards are read for the
                   Step picked — so it is that strip's panel as well as this tab's.
                 */}
-                <div
-                  ref={boardPanel}
-                  tabIndex={-1}
-                  className="min-h-0 flex-1 outline-none"
-                  {...(scope.binding
-                    ? {
-                        id: STEP_PANEL_ID,
-                        role: "tabpanel",
-                        "aria-labelledby": selectedTabId(scope.selected),
-                      }
-                    : {})}
-                >
+                <div ref={boardPanel} tabIndex={-1} className="min-h-0 flex-1 outline-none">
                   <TaskBoard
                     handle={board}
                     label={`Board for ${t.title}`}

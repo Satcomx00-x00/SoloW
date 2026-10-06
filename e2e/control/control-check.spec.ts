@@ -9,6 +9,8 @@ import {
   openTask,
   openWorkspaceTab,
   sessionLog,
+  showStepOnBoard,
+  stepHeader,
   trpc,
 } from "../support/flows.js";
 
@@ -236,19 +238,18 @@ test.describe("control check — the main line of the product, end to end", () =
       await expect(page.locator('[data-task-state="ready"]')).toHaveCount(0);
     });
 
-    await test.step("the run walks both Steps, and each Step's output is on its own tab", async () => {
+    await test.step("the run walks both Steps, and each Step's output is on the board", async () => {
       const progress = page.getByRole("region", { name: "Workflow progress" });
       await expect(progress).toBeVisible();
-      const tabs = page.getByRole("tablist", { name: "Workflow steps" });
-      for (const name of stepNames) await expect(tabs.getByRole("tab", { name })).toBeVisible();
+      for (const name of stepNames) await expect(stepHeader(page, name)).toBeVisible();
 
       // Step 1's harness finishes → the advance moves the cursor → Step 2's harness runs in the
       // same worktree. The last Step does not end the run: it opens the review gate itself.
       await expect(progress).toContainText("Step 2 of 2");
       await awaitWorkflowGate(page);
 
-      // Every Step's log, read back one Step at a time: the tab scopes the board, and the
-      // Session log scoped to the same Step holds that Step's harness output.
+      // Every Step's log, read back one Step at a time: the Step's dialog scopes the board, and
+      // the Session log scoped to the same Step holds that Step's harness output.
       const bound = await trpc<{ steps: Array<{ id: string; name: string }> }>(
         page,
         "workflow.taskBinding",
@@ -256,18 +257,13 @@ test.describe("control check — the main line of the product, end to end", () =
         "query",
       );
       for (const name of stepNames) {
-        const tab = tabs.getByRole("tab", { name });
-        await tab.click();
-        await expect(tab).toHaveAttribute("aria-selected", "true");
+        await showStepOnBoard(page, name);
         const stepId = bound.steps.find((s) => s.name === name)?.id;
         expect(stepId, `step ${name} in the binding`).toBeDefined();
         expect(await sessionLog(page, taskId, stepId)).toMatch(/harness edited solow-task-/);
       }
-      // And the run's own tab lands on the Step the cursor ended on.
-      await expect(tabs.getByRole("tab", { name: stepNames[1] })).toHaveAttribute(
-        "aria-current",
-        "step",
-      );
+      // And the run is waiting on the Step the cursor ended on.
+      await expect(stepHeader(page, stepNames[1])).toHaveAttribute("data-step-status", "waiting");
     });
 
     await test.step("the page is tabs; the pick is in the URL and survives a reload", async () => {

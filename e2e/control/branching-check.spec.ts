@@ -7,6 +7,7 @@ import {
   createTask,
   gateButton,
   openTask,
+  stepHeader,
 } from "../support/flows.js";
 
 /**
@@ -303,11 +304,7 @@ test.describe("branching control check — conditions, a loop, and a gate in the
       // human gate holds the Task at the review the operator opens.
       await expect(progress).toContainText("Step 4 of 5", { timeout: 120_000 });
       await awaitWorkflowGate(page);
-      const tabs = page.getByRole("tablist", { name: "Workflow steps" });
-      await expect(tabs.getByRole("tab", { name: "Escalate" })).toHaveAttribute(
-        "aria-current",
-        "step",
-      );
+      await expect(stepHeader(page, "Escalate")).toHaveAttribute("data-step-status", "waiting");
     });
 
     await test.step("approving at Escalate releases that gate only — Ship still runs, then asks again", async () => {
