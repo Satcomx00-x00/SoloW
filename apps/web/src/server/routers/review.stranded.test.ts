@@ -1,12 +1,14 @@
 /// <reference types="bun-types" />
 
 import { beforeEach, describe, expect, it } from "bun:test";
+import { ReviewErrorCode } from "@solow/contracts";
 import { STRANDED_REVIEW_REASON } from "@solow/core";
 import {
   ensureDefaultHarnessCatalog,
   executorProfile,
   harnessProfile,
   issue as issueTable,
+  review as reviewTable,
   secret,
   session as sessionTable,
   task as taskTable,
@@ -219,5 +221,52 @@ describe("review.decide when no run is parked to apply it", () => {
       globalThis.fetch = realFetch;
       Reflect.deleteProperty(process.env, "SOLOW_ORCHESTRATOR_URL");
     }
+  });
+
+  it("refuses a decision on a Task that is not at the gate, and records nothing", async () => {
+    /*
+     * Seen on a real Task: Approve clicked three seconds after Retry, from a page still showing
+     * the gate. The round Retry had started was `running` with an `active` Session, which the
+     * branch above reads as "no run is parked" — so it failed a Task whose harness was working,
+     * and the gate that round then opened read "Decision not applied".
+     */
+    const fx = await strandedFixture(db);
+    await db.update(taskTable).set({ state: "running" }).where(eq(taskTable.id, fx.taskId));
+
+    await expect(
+      caller(db, fx.workspaceId).review.decide({ sessionId: fx.sessionId, decision: "approve" }),
+    ).rejects.toThrow(ReviewErrorCode.NotInReview);
+
+    expect(await stateOf(db, fx.taskId)).toEqual({ state: "running", failureReason: null });
+    expect(await db.select().from(reviewTable)).toHaveLength(0);
+  });
+
+  it("refuses Approve on a gate the reconciler declared dead, rather than publishing to nothing", async () => {
+    // The Session still reads `awaiting_review` — the run wrote that before it was lost — which
+    // the engine-owns branch took for a live run: twenty-five Approves, each "successful".
+    const fx = await strandedFixture(db, "awaiting_review");
+    await db
+      .update(taskTable)
+      .set({ failureReason: STRANDED_REVIEW_REASON })
+      .where(eq(taskTable.id, fx.taskId));
+
+    for (const decision of ["approve", "request_changes"] as const) {
+      await expect(
+        caller(db, fx.workspaceId).review.decide({ sessionId: fx.sessionId, decision }),
+      ).rejects.toThrow(ReviewErrorCode.RunLost);
+    }
+    expect(await db.select().from(reviewTable)).toHaveLength(0);
+  });
+
+  it("still lets a dead gate be rejected — it needs no run, and it is the way out", async () => {
+    const fx = await strandedFixture(db, "awaiting_review");
+    await db
+      .update(taskTable)
+      .set({ failureReason: STRANDED_REVIEW_REASON })
+      .where(eq(taskTable.id, fx.taskId));
+
+    await caller(db, fx.workspaceId).review.decide({ sessionId: fx.sessionId, decision: "reject" });
+
+    expect((await stateOf(db, fx.taskId)).state).toBe("ready");
   });
 });

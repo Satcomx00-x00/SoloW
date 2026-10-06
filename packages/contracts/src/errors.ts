@@ -63,6 +63,8 @@ export type BillingErrorCode = (typeof BillingErrorCode)[keyof typeof BillingErr
 
 export const ReviewErrorCode = {
   NotInReview: "REVIEW_TASK_NOT_IN_REVIEW",
+  /** The run that would apply the decision is known to be gone (`STRANDED_REVIEW_REASON`). */
+  RunLost: "REVIEW_RUN_LOST",
   AlreadyDecided: "REVIEW_ALREADY_DECIDED",
 } as const;
 export type ReviewErrorCode = (typeof ReviewErrorCode)[keyof typeof ReviewErrorCode];
