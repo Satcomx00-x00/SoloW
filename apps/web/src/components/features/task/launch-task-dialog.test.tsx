@@ -1,11 +1,24 @@
 /// <reference types="bun-types" />
 
-import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
 import type { TaskDto, TaskState } from "@solow/contracts";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { WorkspaceEventsProvider } from "@/lib/workspace-events";
 import { installFakeWebSocket, renderWithTrpc } from "@/test/trpc-harness";
-import { Board } from "../board/board";
+
+/*
+ * `Board` reads `useSearchParams` (its `?column=` scroll) and the router, which are null outside
+ * a Next app. Stubbed here, completely, rather than relying on whichever sibling file's stub bun
+ * happened to load first: run on its own, this file failed every test on a null `get`.
+ */
+mock.module("next/navigation", () => ({
+  useRouter: () => ({ push: () => {}, replace: () => {}, refresh: () => {} }),
+  usePathname: () => "/projects/p-1/board",
+  useSearchParams: () => new URLSearchParams(),
+  useParams: () => ({}),
+}));
+
+const { Board } = await import("../board/board");
 
 /**
  * A launch asks which Workflow first (spec F03): the answer is written as the Task's binding,
