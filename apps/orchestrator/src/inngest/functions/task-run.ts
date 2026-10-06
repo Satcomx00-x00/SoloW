@@ -31,6 +31,7 @@ import {
   classifyRunFailure,
   PARTIAL_INTEGRATION_REASON,
   primaryTaskRepository,
+  stepExits,
   taskCheckoutBranch,
 } from "@solow/core";
 import { renderForkDigest } from "@solow/core/session-log";
@@ -1520,6 +1521,20 @@ export async function runTaskLifecycle(
 
     /** Feedback from the previous review round; it becomes the next round's brief. */
     let pendingFeedback: string | undefined;
+    /**
+     * The decisions a reviewer settled when approving this Step, while the harness applies them.
+     *
+     * Approving a Step whose harness asked decisions does not move the Workflow on at once. The
+     * reviewer's answers are instructions to *this* Step's harness — a choice it made may have
+     * been overturned, and the spec or plan it wrote still says otherwise — so the harness gets
+     * one more round on the same Step to bring its work in line, and the approval is spent only
+     * once that round has finished. Moving on at the click handed the next Step work that did not
+     * yet reflect the answers it was being briefed with.
+     *
+     * Set by the approval, read by the round it starts (its brief) and by that round's end (the
+     * advance), cleared there and at every Step boundary.
+     */
+    let applyingDecisions: string | null = null;
 
     /**
      * The harness binding and brief this round runs under (issue #5, AC-3).
@@ -1775,6 +1790,7 @@ export async function runTaskLifecycle(
       // The previous Step's review feedback is not the next Step's brief. Left set, Step 2 would
       // open with "your previous attempt was not accepted" about work it did not do.
       pendingFeedback = undefined;
+      applyingDecisions = null;
       return null;
     };
 
@@ -2213,8 +2229,13 @@ export async function runTaskLifecycle(
          * the compiler cannot see that callback run — it would narrow a `let` to `null` at every
          * read below and refuse the field accesses.
          */
-        const completion: { widget: Extract<Widget, { kind: "task_complete" }> | null } = {
+        const completion: {
+          widget: Extract<Widget, { kind: "task_complete" }> | null;
+          /** Whether the harness asked a decision this round — see `applyingDecisions`. */
+          askedDecisions: boolean;
+        } = {
           widget: null,
+          askedDecisions: false,
         };
         /**
          * Everything the harness *said* this round, in order — its answer to a Workflow branch
@@ -2289,6 +2310,7 @@ export async function runTaskLifecycle(
                     : captureException(log, cause, { stage: "task-completion-record" }),
                 );
             }
+            if (widget.kind === "decision") completion.askedDecisions = true;
             emit({ kind: "widget", widgetId, widget });
           }
         };
@@ -2470,6 +2492,7 @@ export async function runTaskLifecycle(
           stepSection,
           undefined,
           forkSection,
+          applyingDecisions ?? undefined,
         );
         const brief = resumeSessionId
           ? harnessBrief(
@@ -2478,6 +2501,8 @@ export async function runTaskLifecycle(
               [],
               stepSection,
               continuation ? "turn_budget" : "interruption",
+              undefined,
+              applyingDecisions ?? undefined,
             )
           : fullBrief;
 
@@ -2809,6 +2834,7 @@ export async function runTaskLifecycle(
           outcome: completion.widget?.outcome ?? null,
           summary,
           stopReason: outcome.stopReason,
+          askedDecisions: completion.askedDecisions,
         };
       });
 
@@ -3102,7 +3128,93 @@ export async function runTaskLifecycle(
        *
        * **Before `waitForEvent`,** because an `auto` Step must not need a human at all.
        */
-      if (wf && leg.advanceOn === "agent-signal" && leg.stepId) {
+      /*
+       * The round that applied a reviewer's decisions has ended: spend the approval it was started
+       * by, and move on — unless there is a reason a person has to look again first.
+       *
+       * Three reasons, each a gate reopened on the same Step rather than an advance:
+       *
+       * - The harness asked new decisions while applying the old ones. Those are as unconfirmed
+       *   as the first ones were, and confirming them is the whole point of the gate.
+       * - The harness gave up (`blocked`). There is nothing finished to move on from.
+       * - This Step can end the Workflow. Ending it integrates, and integration happens only on an
+       *   approval of the work being integrated (Principle I) — this round's work has not been
+       *   seen by anyone yet. One more click on the last Step is the price of never committing a
+       *   change nobody looked at.
+       *
+       * `holdForReview` keeps the `agent-signal` advance below from spending the same approval in
+       * any of those cases: the decision row the reviewer wrote is still unspent until the cursor
+       * moves, so that call would otherwise carry the Step past the gate this block just kept.
+       */
+      let holdForReview = false;
+      if (applyingDecisions !== null) {
+        const settled = applyingDecisions;
+        applyingDecisions = null;
+        const stepId = leg.stepId;
+        const canEnd =
+          !wf ||
+          !stepId ||
+          (stepExits(wf.steps).get(stepId) ?? []).some((exit) => exit.stepId === null);
+        const reopenBecause = run.askedDecisions
+          ? "new-decisions"
+          : run.outcome === "blocked"
+            ? null
+            : canEnd
+              ? "last-step"
+              : null;
+        if (wf && stepId && leg.advanceOn && run.outcome !== "blocked" && reopenBecause === null) {
+          // What the next Step is briefed with: this round's summary — the work *after* the
+          // answers — and the answers themselves, so it is told what was settled either way.
+          const carried = handoffWith(run.summary, settled);
+          const reported = await reportStepFinished(
+            `workflow-applied-${round}`,
+            `workflow-recheck-applied-${round}`,
+            {
+              fromStepId: stepId,
+              signal: leg.advanceOn,
+              producedChanges: run.outcome === "changes_ready",
+              ...(carried ? { handoff: carried } : {}),
+              ...(run.outcome ? { outcome: run.outcome } : {}),
+            },
+          );
+          if (reported.kind === "failed") {
+            return await failRun(
+              `workflow-advance-failed-${round}`,
+              "workflow_advance_failed",
+              stepId,
+              "running",
+            );
+          }
+          if (reported.kind === "advanced") {
+            const terminal = await takeAdvance(round, reported);
+            if (terminal) return terminal;
+            continue;
+          }
+          // Not advanced by the Step's own rule (`held`, `awaiting-decision`): the gate below
+          // opens, which is the conservative reading — nothing moves on without a decision.
+          holdForReview = true;
+        } else {
+          holdForReview = true;
+          if (reopenBecause !== null && stepId) {
+            await step.run(`decisions-reopened-${round}`, async () => {
+              await appendSessionEvent(db, workspaceId, {
+                sessionId,
+                seq: await nextSessionEventSeq(db, workspaceId, sessionId),
+                workflowStepId: stepId,
+                payload: {
+                  kind: "notice",
+                  text:
+                    reopenBecause === "new-decisions"
+                      ? "Applying your decisions raised new ones. Confirm them, then approve again to move on."
+                      : "Your decisions are applied. This step can end the workflow, so nothing is integrated until you approve the result.",
+                },
+              });
+            });
+          }
+        }
+      }
+
+      if (wf && leg.advanceOn === "agent-signal" && leg.stepId && !holdForReview) {
         const reported = await reportStepFinished(
           `workflow-signal-${round}`,
           `workflow-recheck-${round}`,
@@ -3183,6 +3295,39 @@ export async function runTaskLifecycle(
       const { decision, feedback } = reviewData.parse(decidedEvent.data);
 
       if (decision === "approve") {
+        /*
+         * Approved with decisions the reviewer settled: those go back to *this* Step's harness
+         * first (see `applyingDecisions`), and the advance happens when it has applied them.
+         *
+         * The approval's feedback is exactly the settled decisions — the gate sends nothing else
+         * with an approval — so its presence is the signal. The decision row is left unspent: the
+         * advance at the end of the next round spends it, and `review.decide` already recorded it.
+         */
+        if (wf && leg.stepId && leg.advanceOn && feedback?.trim()) {
+          applyingDecisions = feedback.trim();
+          // Not a redo: the round being started was approved, and an earlier request for changes
+          // on this Step has been answered by the work that just got approved.
+          pendingFeedback = undefined;
+          const stepId = leg.stepId;
+          const stepName = leg.stepName ?? "this step";
+          await step.run(`apply-decisions-${round}`, async () => {
+            await setTaskState(db, workspaceId, taskId, "running");
+            await clearTaskCompletion(db, workspaceId, taskId);
+            await recordTransition("review", "running", stepId);
+            await appendSessionEvent(db, workspaceId, {
+              sessionId,
+              seq: await nextSessionEventSeq(db, workspaceId, sessionId),
+              workflowStepId: stepId,
+              payload: {
+                kind: "notice",
+                text: `Approved with your decisions. The harness applies them to ${stepName} before the workflow moves on.`,
+              },
+            });
+          });
+          logStateTransition(log, { workspaceId, taskId, from: "review", to: "running" });
+          announce("running");
+          continue;
+        }
         /*
          * A human approved, and under a Workflow that is the second of the two facts a Step
          * boundary needs — the harness finished (we are past `to-review`) and a person said yes.
@@ -3727,6 +3872,12 @@ export function harnessBrief(
    * carried on already holds it.
    */
   origin?: { title: string | null; seq: number; digest: string } | undefined,
+  /**
+   * The decisions a reviewer settled when approving this Step, for the round that applies them
+   * before the Workflow moves on (`applyingDecisions` in the run loop). Sent on a continuing brief
+   * too: like feedback, it is the one thing the conversation cannot already contain.
+   */
+  decisions?: string | undefined,
 ): string {
   if (continuing) {
     const parts = [
@@ -3738,6 +3889,7 @@ export function harnessBrief(
     ];
     // The one thing the conversation cannot already contain: a decision made after it stopped.
     if (feedback !== undefined) parts.push(reviewFeedbackSection(feedback));
+    if (decisions) parts.push(settledDecisionsSection(decisions));
     return parts.join("\n\n");
   }
   // Widgets are taught, not assumed: a harness emits one only because the brief told it how, so
@@ -3790,6 +3942,7 @@ export function harnessBrief(
   // handed the original instructions in a worktree already holding its own rejected work, with
   // nothing anywhere telling it the work had been turned down.
   if (feedback !== undefined) parts.push(reviewFeedbackSection(feedback));
+  if (decisions) parts.push(settledDecisionsSection(decisions));
   if (ctx.widgetsEnabled) parts.push(`# Widgets\n${WIDGET_BRIEF_INSTRUCTIONS}`);
   return parts.join("\n\n");
 }
@@ -3806,6 +3959,16 @@ export function harnessBrief(
  * words reading differently depending on whether the conversation survived would be a difference
  * with no meaning behind it.
  */
+/**
+ * The reviewer's answers to the decisions this Step's harness asked, for the round that applies
+ * them. Not a rejection — the work was approved — so it says so, and asks for the Step's own
+ * output to be brought in line rather than redone, and for the next Step to be left alone: the
+ * Workflow moves on by itself once this round ends.
+ */
+function settledDecisionsSection(decisions: string): string {
+  return `# Your decisions, settled\nThe reviewer approved this step and answered the decisions you asked. Before the workflow moves on, bring this step's work in line with their answers: where they picked a different option from yours, change what you wrote or did to match it; where they confirmed your choice, make sure the work states it as settled rather than open. Do not start the next step's work, and do not ask these decisions again.\n${decisions.trim()}`;
+}
+
 function reviewFeedbackSection(feedback: string): string {
   const detail = feedback.trim();
   return detail

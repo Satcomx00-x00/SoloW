@@ -312,6 +312,13 @@ The model, its seam and the designing canvas ship; the monitor does not. Concret
   it spent (`task.workflow_decision_id`), so approving the plan does not silently authorise the
   implementation and the final integration. A Workflow of three `human` Steps costs three
   decisions; a Workflow of `auto` Steps spends nothing until the last one, which costs one.
+- **A Step finishes after its decisions are applied, not when they are answered.** Approving a
+  Step whose harness asked decisions sends the reviewer's answers back to *that* Step's harness for
+  one more round, and the approval is spent — the Workflow moves on — only when that round ends,
+  with no second click. The gate reopens on the same Step instead when that round asks new
+  decisions, when the harness gives up, or when the Step can end the Workflow (ending integrates,
+  and the applied work has not been seen). The gate only ever asks about the latest round's
+  decisions; earlier rounds' are a record.
 - **`producedChanges` is corroborated, not believed.** The `auto-unless-changes` gate exists to
   catch a Step that wrote something, and the party reporting the Step finished is the party the
   gate is for. The claim is OR-ed with the server's own record — a `diff` event in the Session log

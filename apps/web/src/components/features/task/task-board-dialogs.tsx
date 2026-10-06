@@ -258,7 +258,7 @@ function DecisionEditor({
           {choice === "other" ? (
             <div className="space-y-1 pl-1">
               <label htmlFor={`${name}-note`} className="block text-muted-foreground text-xs">
-                Your decision — sent to the next step's harness verbatim
+                Your decision — sent to this step's harness verbatim
               </label>
               <Textarea
                 id={`${name}-note`}
