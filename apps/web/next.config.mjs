@@ -35,9 +35,10 @@ const nextConfig = {
   // build-time passes (they use a separate resolver that conflicts with the bun-types setup).
   typescript: { ignoreBuildErrors: true },
   eslint: { ignoreDuringBuilds: true },
-  // Dev only. Its default corner, bottom-left, sits on the sidebar's Settings link; over the
-  // page's bottom-right it covers content rather than navigation.
-  devIndicators: { position: "bottom-right" },
+  // Off. Every corner of this app has a control under it: bottom-left is the sidebar's Settings
+  // link, bottom-right the Task page's Send and held Stop — where the badge took the clicks and
+  // failed the Stop e2e. Next's error overlay still opens on an error; only the badge is gone.
+  devIndicators: false,
   /**
    * Compile in a worker, and let the server/edge compiles and the build-trace collection overlap.
    *
