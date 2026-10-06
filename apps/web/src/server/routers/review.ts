@@ -1,9 +1,10 @@
 import "server-only";
-import { reviewDecisionInput, reviewDto } from "@solow/contracts";
+import { ReviewErrorCode, reviewDecisionInput, reviewDto } from "@solow/contracts";
 import { STRANDED_REVIEW_REASON } from "@solow/core";
+import { TRPCError } from "@trpc/server";
 import { recordReview } from "../dal/review.js";
 import { getSessionById, setSessionState } from "../dal/session.js";
-import { updateTaskState } from "../dal/task.js";
+import { getTaskById, updateTaskState } from "../dal/task.js";
 import { devOwnerMode } from "../env.js";
 import { orchestrator } from "../orchestrator-client.js";
 import { ownerProcedure, router, unwrap } from "../trpc.js";
@@ -39,6 +40,33 @@ export const reviewRouter = router({
     .mutation(async ({ ctx, input }) => {
       // Ownership: the Session must belong to this Workspace before we record a decision.
       const session = unwrap(await getSessionById(ctx.rctx, input.sessionId));
+
+      /*
+       * A decision is only taken at the gate. Recorded anywhere else it is delivered to nothing —
+       * a run mid-round is not yet waiting on `review.decided`, and Inngest does not replay an
+       * event to a wait that opens after it — and the dev-owner branch below then reads the
+       * Session's `active` as "no run is parked" and fails a Task whose harness is working.
+       * Seen on a real Task: an Approve clicked three seconds after Retry, from a page that still
+       * showed the gate, failed the round that Retry had just started and left the gate it then
+       * opened reading "Decision not applied". Refused before anything is recorded.
+       */
+      const current = unwrap(await getTaskById(ctx.rctx, session.taskId));
+      if (current.state !== "review") {
+        throw new TRPCError({ code: "CONFLICT", message: ReviewErrorCode.NotInReview });
+      }
+      /*
+       * Nor on a gate the reconciler has already declared dead. `STRANDED_REVIEW_REASON` on a
+       * `review` row means no run is parked to hear `review.decided` (the run clears it the moment
+       * it parks, so it is never stale on a live gate) — yet its Session still reads
+       * `awaiting_review`, so the branch below would take that for a live run, publish to nothing
+       * and report success. A real Task took twenty-five Approves that way. Approve and Request
+       * changes need a run; only Retry brings one back. Reject needs none — it is pure state, and
+       * it stays available as the way out.
+       */
+      const runLost = current.failureReason === STRANDED_REVIEW_REASON;
+      if (runLost && input.decision !== "reject") {
+        throw new TRPCError({ code: "CONFLICT", message: ReviewErrorCode.RunLost });
+      }
 
       // `request_changes` resumes the harness, so it is a start (issue #6 AC-3: "SHALL NOT start
       // it by any automated path"). The reading applied is the one `task.move` already applies —
@@ -86,7 +114,8 @@ export const reviewRouter = router({
       //
       // Dev-owner only, exactly as before: a hosted deployment runs a persistent engine and must
       // not have the API second-guess whether a run is parked (Principle VII).
-      const engineOwnsTransition = orchestrator.isWired() && session.state === "awaiting_review";
+      const engineOwnsTransition =
+        orchestrator.isWired() && session.state === "awaiting_review" && !runLost;
       if (devOwnerMode() && !engineOwnsTransition) {
         /*
          * **Only reject may be applied on this path.**
