@@ -39,8 +39,9 @@ build: install store-sync lint typecheck db-generate openapi-check ## Install, s
 test: ## Run all unit tests (per-package, picks up each bunfig preload)
 	bun run test
 
-smoke: ## Run the end-to-end smoke test (in-memory DB, fake agent, temp git repo)
+smoke: ## Run the smoke tests: the core loop (in-memory DB, fake agent, temp git repo), then the API's navigation path
 	bun run scripts/smoke.ts
+	cd apps/web && bun test src/server/api.smoke.test.ts
 
 smoke-tarball: ## Pack the CLI, install the tarball into a clean dir, and boot it (needs a build first)
 	./scripts/smoke-tarball.sh

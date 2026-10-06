@@ -5,7 +5,7 @@ import { expect, test } from "@playwright/test";
  *
  * This is a layout guarantee no unit test can hold: it needs a real layout engine, and the whole
  * failure is geometric. SoloW is a SPA whose shell is pinned to `100dvh` with a single
- * scrolling `<main>` — an activity bar, a sidebar, a header and a status bar that must all stay
+ * scrolling `<main>` — a sidebar, a header and a status bar that must all stay
  * put while the content moves under them. A second, page-level scrollbar breaks every one of
  * those: the status bar scrolls away, the header leaves with it, and the reader is given two
  * scroll positions to keep track of for one column of content.
