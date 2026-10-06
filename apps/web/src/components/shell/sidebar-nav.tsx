@@ -360,6 +360,10 @@ function WorkspaceGroup({ place }: { place: Place }) {
   const counts = trpc.workspace.counts.useQuery();
   const unassignedCount = counts.data?.unassignedIssues ?? 0;
   const rows = WORKSPACE_SECTIONS.filter((s) => s.href !== "/projects" && s.href !== "/settings");
+  const onWorkflows = place.section?.href === "/workflows";
+  // Only asked for while Workflows is open, on the same key the page itself reads.
+  const workflows = trpc.workflow.list.useQuery({}, { enabled: onWorkflows });
+  const pipelines = workflows.data ?? [];
 
   return (
     <nav aria-label="Workspace">
@@ -367,7 +371,9 @@ function WorkspaceGroup({ place }: { place: Place }) {
       <ul className="space-y-px px-2">
         {rows.map((s) => {
           const here = place.section?.href === s.href;
-          const nests = s.href === "/workflows" && here;
+          // Nested only when there is a pipeline to light: with none yet, Workflows itself is the
+          // page you are on, and a parent styled "open" over no child left nothing marked current.
+          const nests = s.href === "/workflows" && here && pipelines.length > 0;
           return (
             <Fragment key={s.href}>
               <NavItem
@@ -385,7 +391,7 @@ function WorkspaceGroup({ place }: { place: Place }) {
                   ) : undefined
                 }
               />
-              {nests && <WorkflowList pathname={place.pathname} />}
+              {nests && <WorkflowList pathname={place.pathname} list={pipelines} />}
             </Fragment>
           );
         })}
@@ -401,12 +407,17 @@ function WorkspaceGroup({ place }: { place: Place }) {
  * Creating, importing and deleting moved out to the page header and the inspector: the sidebar is
  * for going places, and a create form in it was the reason it read differently on this one route.
  */
-function WorkflowList({ pathname }: { pathname: string }) {
-  const workflows = trpc.workflow.list.useQuery({});
-  const list = workflows.data ?? [];
-  // `/workflows` alone opens the first pipeline (see `WorkflowsView`), so that is the one lit.
-  const current = workflowIdFromPath(pathname) ?? list[0]?.id ?? null;
-  if (list.length === 0) return null;
+function WorkflowList({
+  pathname,
+  list,
+}: {
+  pathname: string;
+  list: readonly { id: string; name: string; stepCount: number }[];
+}) {
+  // `/workflows` alone opens the first pipeline, and so does a stale id — a pipeline deleted in
+  // another tab (see `WorkflowsView`) — so the first is the one lit in both cases.
+  const routed = workflowIdFromPath(pathname);
+  const current = list.some((w) => w.id === routed) ? routed : (list[0]?.id ?? null);
   return (
     <li>
       <ul aria-label="Workflows" className="space-y-px">

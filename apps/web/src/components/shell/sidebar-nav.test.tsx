@@ -286,6 +286,46 @@ describe("Sidebar — Workflows", () => {
   });
 });
 
+describe("Sidebar — Workflows, edge cases", () => {
+  it("fills Workflows itself while there is no pipeline yet", async () => {
+    pathname = "/workflows";
+    renderWithTrpc(
+      <SidebarNav workspaceName="Acme" signedIn={false} />,
+      handlers({ "workflow.list": () => [] }),
+    );
+
+    await waitFor(() => expect(current().map((l) => l.textContent)).toEqual(["WorkflowsWIP"]));
+    expect(screen.queryByRole("list", { name: "Workflows" })).toBeNull();
+  });
+
+  it("lights the first pipeline for an id that no longer exists, as the page opens it", async () => {
+    pathname = "/workflows/wf-gone";
+    renderWithTrpc(
+      <SidebarNav workspaceName="Acme" signedIn={false} />,
+      handlers({
+        "workflow.list": () => [
+          { id: "wf-1", name: "Plan, build, review", stepCount: 3, version: 2 },
+          { id: "wf-2", name: "Bug fix", stepCount: 2, version: 1 },
+        ],
+      }),
+    );
+
+    await screen.findByRole("list", { name: "Workflows" });
+    expect(current().map((l) => l.textContent)).toEqual(["Plan, build, review"]);
+  });
+
+  it("does not ask for the pipelines away from Workflows", async () => {
+    pathname = "/history";
+    const { log } = renderWithTrpc(
+      <SidebarNav workspaceName="Acme" signedIn={false} />,
+      handlers(),
+    );
+
+    await screen.findByRole("link", { name: /GlabTest/ });
+    expect(log.calls.some((c) => c.path === "workflow.list")).toBe(false);
+  });
+});
+
 describe("Sidebar — Recent tasks", () => {
   it("is absent when nothing has been visited yet", async () => {
     pathname = "/projects";
