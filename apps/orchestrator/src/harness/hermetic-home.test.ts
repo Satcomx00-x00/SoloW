@@ -1,9 +1,9 @@
 /// <reference types="bun-types" />
 
 import { afterEach, describe, expect, it } from "bun:test";
-import { mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { HARNESS_CONFIG_ENV_VARS } from "@solow/contracts";
 import { harnessHomePath } from "../worktree/manager.js";
 import { harnessConfigEnv, needsAppOwnedHome, resolveHarnessConfigEnv } from "./hermetic-home.js";
@@ -132,5 +132,53 @@ describe("resolveHarnessConfigEnv — the environment a run is actually given", 
     const env = await resolveHarnessConfigEnv({ kind: "local", home, baseEnv: {} });
     expect(env["HOME"]).toBe(home);
     expect(env["HOME"]).not.toBe(process.env["HOME"]);
+  });
+});
+
+describe("resolveHarnessConfigEnv — a home a relative root put inside the worktree", () => {
+  const conversation = async (home: string, id: string, body = "{}\n") => {
+    const project = join(home, ".claude", "projects", "-wt");
+    await mkdir(project, { recursive: true });
+    await writeFile(join(project, `${id}.jsonl`), body);
+  };
+
+  it("hands the harness an absolute home, whatever it was given", async () => {
+    root = await mkdtemp(join(tmpdir(), "solow-home-"));
+    const env = await resolveHarnessConfigEnv({
+      kind: "local",
+      home: ".solow/worktrees/task-1--harness-home",
+      baseEnv: {},
+    });
+    expect(isAbsolute(env.HOME ?? "")).toBe(true);
+    expect(isAbsolute(env.CLAUDE_CONFIG_DIR ?? "")).toBe(true);
+  });
+
+  it("copies an earlier round's home out of the worktree once, so --resume still finds the conversation", async () => {
+    root = await mkdtemp(join(tmpdir(), "solow-home-"));
+    const home = join(root, "real", "task-1--harness-home");
+    const legacy = join(root, "worktree", ".solow", "worktrees", "task-1--harness-home");
+    await conversation(legacy, "conv-1");
+
+    await resolveHarnessConfigEnv({ kind: "local", home, baseEnv: {}, legacyHomes: [legacy] });
+
+    expect(await readFile(join(home, ".claude", "projects", "-wt", "conv-1.jsonl"), "utf8")).toBe(
+      "{}\n",
+    );
+    // The worktree's copy is the operator's to remove; it is not moved.
+    expect((await stat(join(legacy, ".claude", "projects"))).isDirectory()).toBe(true);
+  });
+
+  it("never overwrites a home that has conversations of its own", async () => {
+    root = await mkdtemp(join(tmpdir(), "solow-home-"));
+    const home = join(root, "real", "task-1--harness-home");
+    const legacy = join(root, "worktree", "task-1--harness-home");
+    await conversation(home, "conv-1", "newer\n");
+    await conversation(legacy, "conv-1", "older\n");
+
+    await resolveHarnessConfigEnv({ kind: "local", home, baseEnv: {}, legacyHomes: [legacy] });
+
+    expect(await readFile(join(home, ".claude", "projects", "-wt", "conv-1.jsonl"), "utf8")).toBe(
+      "newer\n",
+    );
   });
 });

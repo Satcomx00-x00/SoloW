@@ -1,5 +1,5 @@
-import { mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { cp, mkdir, stat } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import type { ExecutorKind } from "@solow/contracts";
 
 /**
@@ -72,6 +72,18 @@ export interface HarnessConfigEnvParams {
   home: string;
   /** The execution host's own environment (`Executor.baseEnv()`), which answers for a container. */
   baseEnv: Readonly<Record<string, string | undefined>>;
+  /**
+   * Where an earlier round may have put this home instead: inside the worktree.
+   *
+   * `SOLOW_WORKTREE_ROOT` defaults to a *relative* path, and until the home was resolved here a
+   * run handed the harness `HOME=.solow/worktrees/<task>--harness-home` — which the harness read
+   * against its own working directory, the Task's checkout. Its configuration, its credentials
+   * file and every conversation landed inside the worktree, where `git` stages them as part of
+   * the change. A Task from then carries its conversation there; the first round after the fix
+   * copies it to the real home, so `--resume` still finds it. The copy in the worktree is left
+   * alone: removing it is a change to the Task's checkout, and that is the operator's to make.
+   */
+  legacyHomes?: readonly string[];
 }
 
 /**
@@ -101,7 +113,10 @@ export interface HarnessConfigEnvParams {
 export async function resolveHarnessConfigEnv(
   params: HarnessConfigEnvParams,
 ): Promise<Record<string, string>> {
-  const { kind, home, baseEnv } = params;
+  const { kind, baseEnv } = params;
+  // Absolute, always: a relative `HOME` is resolved by the harness against its working directory,
+  // which is the Task's checkout (see `legacyHomes`).
+  const home = resolve(params.home);
 
   if (!needsAppOwnedHome(kind)) {
     const hostHome = baseEnv["HOME"];
@@ -109,6 +124,7 @@ export async function resolveHarnessConfigEnv(
   }
 
   const env = harnessConfigEnv(home);
+  await adoptLegacyHome(home, params.legacyHomes ?? []);
   try {
     // The home itself and the config directory the harness will write into. Nothing else: the
     // `XDG_*` directories are created by whichever tool first wants one, exactly as they are in
@@ -118,4 +134,32 @@ export async function resolveHarnessConfigEnv(
     // See above: nothing to report and nothing to abort. The variables below are the isolation.
   }
   return env;
+}
+
+/** Whether a Claude Code configuration directory has any conversation in it. */
+async function hasConversations(home: string): Promise<boolean> {
+  try {
+    return (await stat(join(home, ".claude", "projects"))).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Copy the first legacy home that holds conversations into `home`, once — only while `home`
+ * holds none, so a home that has been used since is never overwritten by an older copy.
+ * Best-effort, like the `mkdir` beside it: a copy that fails leaves the round to start a fresh
+ * conversation, which is what it would have done without this.
+ */
+async function adoptLegacyHome(home: string, legacyHomes: readonly string[]): Promise<void> {
+  if (legacyHomes.length === 0 || (await hasConversations(home))) return;
+  for (const legacy of legacyHomes) {
+    if (resolve(legacy) === home || !(await hasConversations(legacy))) continue;
+    try {
+      await cp(legacy, home, { recursive: true, preserveTimestamps: true, force: false });
+    } catch {
+      // See above.
+    }
+    return;
+  }
 }
