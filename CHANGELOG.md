@@ -4,6 +4,13 @@ Every release of SoloW, written from its commits by [git-cliff](https://git-clif
 `cliff.toml`. Versions follow [Semantic Versioning](https://semver.org); the number itself is
 decided by `packages/cli/scripts/next-version.ts` from the same commits.
 
+## [0.21.0](https://github.com/Satcomx00-x00/SoloW/compare/v0.20.1...v0.21.0) — 2026-10-06
+
+### Features
+
+- **harness:** Apply opencode's --auto as the ACP client ([`05d210b`](https://github.com/Satcomx00-x00/SoloW/commit/05d210b4c0cef595f6eb662f1d3b84841816dbb3))
+- **db:** Seed opencode with --auto, and give it to existing rows (0046) ([`5ca55ed`](https://github.com/Satcomx00-x00/SoloW/commit/5ca55ed2cdd798c75764dd6c3e6ddb42b300403e))
+
 ## [0.20.1](https://github.com/Satcomx00-x00/SoloW/compare/v0.20.0...v0.20.1) — 2026-10-06
 
 ### Fixes
