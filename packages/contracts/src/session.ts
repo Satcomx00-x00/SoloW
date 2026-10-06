@@ -56,6 +56,25 @@ export const getTaskSessionsInput = z.object({ taskId: idSchema });
 export type GetTaskSessionsInput = z.infer<typeof getTaskSessionsInput>;
 
 /**
+ * One Workflow Step finishing in a Task's run — a `workflow_decision` record, reduced to what a
+ * reader needs to tell the passes apart: which Step, where the cursor went, and where in the log.
+ *
+ * A Workflow can loop (a Review that sends the work back to Implement), and a Step that ran once
+ * and will run again is neither "not started" nor "done". Counting these per Step is how the task
+ * board says "pass 2" instead of drawing an earlier pass's cards under a Step it calls unstarted.
+ */
+export const taskStepDecisionDto = z.object({
+  sessionId: idSchema,
+  seq: z.number().int().nonnegative(),
+  stepId: idSchema,
+  status: workflowAdvanceStatusSchema,
+  nextStepId: idSchema.nullable(),
+  /** Whether the Step's gate asked a person — false is a Step that moved on by itself. */
+  needsApproval: z.boolean(),
+});
+export type TaskStepDecisionDto = z.infer<typeof taskStepDecisionDto>;
+
+/**
  * `workflowStepId` narrows the transcript to one Workflow Step (and is ignored by a Session that
  * ran under no Workflow, whose events carry no Step). Only the events narrow: `cursor`, `diffs`
  * and `review` in the response are facts about the whole Session, and a request scoped to one
@@ -328,6 +347,8 @@ export const sessionEventPayloadSchema = z.discriminatedUnion("kind", [
     gate: workflowStepGateSchema,
     /** Whether the Step's gate asked for a person, given what happened on it. */
     needsApproval: z.boolean(),
+    /** Why a person was asked — see `workflowAdvanceExplanationSchema.reviewReason`. */
+    reviewReason: z.enum(["gate", "agent", "decisions", "forced"]).optional(),
     /** The Step's branch condition and how it evaluated; null for an unbranched Step. */
     condition: z.object({ when: workflowStepConditionSchema, holds: z.boolean() }).nullable(),
     status: workflowAdvanceStatusSchema,
@@ -657,3 +678,23 @@ export const criterionExplanationDto = z.object({
   cached: z.boolean(),
 });
 export type CriterionExplanationDto = z.infer<typeof criterionExplanationDto>;
+
+/**
+ * "Explain to me" on a decision the harness made (the board's decisions dialog): the question,
+ * its options and the harness's pick, read back in plain words by the Task's own harness.
+ */
+export const explainDecisionInput = z.object({
+  sessionId: idSchema,
+  decisionId: z.string().min(1).max(200),
+  language: z.string().min(2).max(35).default("en"),
+});
+export type ExplainDecisionInput = z.infer<typeof explainDecisionInput>;
+
+export const decisionExplanationDto = z.object({
+  decisionId: z.string(),
+  /** Markdown, a few short paragraphs. */
+  text: z.string(),
+  model: z.string().nullable(),
+  cached: z.boolean(),
+});
+export type DecisionExplanationDto = z.infer<typeof decisionExplanationDto>;

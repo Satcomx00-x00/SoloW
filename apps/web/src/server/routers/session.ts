@@ -1,7 +1,9 @@
 import "server-only";
 import {
   criterionExplanationDto,
+  decisionExplanationDto,
   explainCriterionInput,
+  explainDecisionInput,
   getReviewBriefInput,
   getSessionInput,
   getTaskSessionsInput,
@@ -15,9 +17,11 @@ import {
   sessionEventRangeInput,
   sessionEventsFromInput,
   sessionForkCursorInput,
+  taskStepDecisionDto,
 } from "@solow/contracts";
 import { z } from "zod";
 import { explainCriterion } from "../dal/explain-criterion.js";
+import { explainDecision } from "../dal/explain-decision.js";
 import { getReviewForSession, listReviewsForSession } from "../dal/review.js";
 import { getReviewBrief } from "../dal/review-brief.js";
 import {
@@ -27,6 +31,7 @@ import {
   listSessionEventsInRange,
   listSessionSummaries,
   listSessionsForTask,
+  listTaskStepDecisions,
   sessionCursorOf,
   sessionForkCursor,
   type TypedSessionEvent,
@@ -68,6 +73,24 @@ export const sessionRouter = router({
       unwrap(await getTaskById(ctx.rctx, input.taskId));
       const rows = unwrap(await listSessionsForTask(ctx.rctx, input.taskId));
       return rows.map((r) => toSessionDto(r as SessionRow));
+    }),
+
+  stepDecisions: ownerProcedure
+    .meta({
+      openapi: {
+        method: "GET",
+        path: "/session.stepDecisions",
+        tags: ["session"],
+        protect: true,
+        summary:
+          "Every Workflow Step that finished in a Task's run, oldest first — which Step, where the cursor went, and whether a person was asked. What tells a Step's passes apart when a Workflow loops.",
+      },
+    })
+    .input(getTaskSessionsInput)
+    .output(z.array(taskStepDecisionDto))
+    .query(async ({ ctx, input }) => {
+      unwrap(await getTaskById(ctx.rctx, input.taskId));
+      return unwrap(await listTaskStepDecisions(ctx.rctx, input.taskId));
     }),
 
   /** One Session with its event log, its summarised ranges and any recorded review decision. */
@@ -185,6 +208,21 @@ export const sessionRouter = router({
     .input(explainCriterionInput)
     .output(criterionExplanationDto)
     .mutation(async ({ ctx, input }) => unwrap(await explainCriterion(ctx.rctx, input))),
+
+  explainDecision: ownerProcedure
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/session.explainDecision",
+        tags: ["session"],
+        protect: true,
+        summary:
+          "Explain one decision the harness made — the question, the options it weighed and the one it picked — in plain words, through the Task's own harness.",
+      },
+    })
+    .input(explainDecisionInput)
+    .output(decisionExplanationDto)
+    .mutation(async ({ ctx, input }) => unwrap(await explainDecision(ctx.rctx, input))),
 
   /**
    * The events one summarised range stands in for (issue #2, AC-3).
