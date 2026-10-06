@@ -66,7 +66,14 @@ export const DEFAULT_HARNESS_CATALOG: readonly CatalogDefault[] = [
     displayName: "opencode",
     protocol: "acp",
     command: "opencode",
-    argsTemplate: ["acp"],
+    /*
+     * `--auto`: approve every permission opencode asks for that its config does not deny. It is
+     * opencode's own client switch, and `opencode acp` itself refuses it — under ACP SoloW is the
+     * client, so the orchestrator takes it off the command line and answers the requests itself,
+     * still logging each as decided by policy (`client-directives.ts`). `0046_opencode_auto.sql`
+     * gives it to existing rows.
+     */
+    argsTemplate: ["acp", "--auto"],
     // SoloW ships opencode as an exact npm dependency and spawns that copy (`executor/
     // bundled-binaries.ts`), so an old build only answers when the bundled one is missing and
     // PATH supplied another — the fix is to put the bundled one back, not to chase `@latest`.

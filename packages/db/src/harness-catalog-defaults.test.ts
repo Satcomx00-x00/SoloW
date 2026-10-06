@@ -40,7 +40,7 @@ describe("ensureDefaultHarnessCatalog", () => {
     expect(seeded.find((r) => r.key === "claude_code")?.id).toBe(id);
   });
 
-  it("gives opencode the ACP protocol and the `acp` subcommand", async () => {
+  it("gives opencode the ACP protocol, the `acp` subcommand, and `--auto`", async () => {
     // opencode speaks ACP natively, which is the whole reason it needs no adapter of its own:
     // `opencode acp` is an Agent Client Protocol server at protocol version 1.
     await ensureDefaultHarnessCatalog(db, workspaceId);
@@ -49,7 +49,7 @@ describe("ensureDefaultHarnessCatalog", () => {
     expect(opencode).toMatchObject({
       protocol: "acp",
       command: "opencode",
-      argsTemplate: ["acp"],
+      argsTemplate: ["acp", "--auto"],
     });
   });
 

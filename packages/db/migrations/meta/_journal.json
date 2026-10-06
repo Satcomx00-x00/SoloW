@@ -323,6 +323,13 @@
       "when": 1791126444436,
       "tag": "0045_force_review",
       "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "6",
+      "when": 1791292003114,
+      "tag": "0046_opencode_auto",
+      "breakpoints": true
     }
   ]
 }
