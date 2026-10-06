@@ -1984,6 +1984,13 @@ describe("TaskWorkspace workflow steps", () => {
     }),
   };
 
+  /** Each Step header's status on the board, in Workflow order. */
+  function stepStatuses(): (string | null)[] {
+    return Array.from(document.querySelectorAll("[data-step-status]")).map((el) =>
+      el.getAttribute("data-step-status"),
+    );
+  }
+
   it("names the current Step, with the ones before it done and the ones after still to come", async () => {
     renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
       ...base,
@@ -1991,22 +1998,12 @@ describe("TaskWorkspace workflow steps", () => {
       "workflow.taskBinding": () => binding("st-2"),
     });
 
+    // The header says where the run is, in words; the Steps themselves are the board's nodes.
     const strip = await screen.findByRole("region", { name: "Workflow progress" });
     expect(strip.textContent).toContain("Implement & review");
     expect(strip.textContent).toContain("Step 2 of 3");
-    // The steps are the strip's tabs now — the `<li>`s stepped aside (role="presentation") so the
-    // tablist could own its tabs directly, which takes them out of the listitem role they used to
-    // be found by. The status still rides on the same element; it is read off the slot instead.
-    const items = Array.from(strip.querySelectorAll("[data-slot='step']"));
-    expect(items.map((li) => li.getAttribute("data-status"))).toEqual([
-      "done",
-      "running",
-      "upcoming",
-    ]);
-    // `aria-current` still means one thing only: this is where the run is. It rides on the tab
-    // rather than on the presentational `<li>`, which is out of the accessibility tree.
-    const tabs = within(strip).getAllByRole("tab");
-    expect(tabs.map((t) => t.getAttribute("aria-current"))).toEqual([null, null, "step", null]);
+    expect(within(strip).queryAllByRole("tab")).toHaveLength(0);
+    await waitFor(() => expect(stepStatuses()).toEqual(["done", "running", "upcoming"]));
   });
 
   it("marks the last Step done once the Task is, rather than leaving it current forever", async () => {
@@ -2016,9 +2013,8 @@ describe("TaskWorkspace workflow steps", () => {
       "workflow.taskBinding": () => binding("st-3"),
     });
 
-    const strip = await screen.findByRole("region", { name: "Workflow progress" });
-    const items = Array.from(strip.querySelectorAll("[data-slot='step']"));
-    expect(items.map((li) => li.getAttribute("data-status"))).toEqual(["done", "done", "done"]);
+    await screen.findByRole("region", { name: "Workflow progress" });
+    await waitFor(() => expect(stepStatuses()).toEqual(["done", "done", "done"]));
   });
 
   it("opens a Step from its header on the board: its prompt, and the way to scope the board to it", async () => {
@@ -2136,6 +2132,12 @@ describe("TaskWorkspace step-scoped board", () => {
 
   const sessionGets = (log: CallLog) => log.calls.filter((c) => c.path === "session.get");
 
+  /** Scope the board to a Step the way the page offers it: its header, then its dialog's button. */
+  async function showStep(name: string) {
+    fireEvent.click(await screen.findByRole("button", { name: new RegExp(`^Step\\. ${name}`) }));
+    fireEvent.click(await screen.findByRole("button", { name: "Show this step on the board" }));
+  }
+
   it("opens on the Step the run is on, and asks for only that Step's log", async () => {
     const { log } = renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, bound("st-2"));
 
@@ -2148,21 +2150,10 @@ describe("TaskWorkspace step-scoped board", () => {
     }
   });
 
-  it("makes the board the panel the Step strip controls", async () => {
-    renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, bound("st-2"));
-
-    const strip = await screen.findByRole("region", { name: "Workflow progress" });
-    const tab = within(strip).getByRole("tab", { name: /Review/ });
-    const panel = document.getElementById(tab.getAttribute("aria-controls") ?? "");
-    expect(panel?.getAttribute("role")).toBe("tabpanel");
-    expect(panel?.getAttribute("aria-labelledby")).toBe(tab.id);
-    expect(panel?.querySelector(".task-board")).not.toBeNull();
-  });
-
-  it("re-asks the server, scoped, when a Step is clicked", async () => {
+  it("re-asks the server, scoped, when a Step is shown on the board", async () => {
     const { log } = renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, bound("st-2"));
 
-    fireEvent.click(await screen.findByRole("tab", { name: /Implement/ }));
+    await showStep("Implement");
 
     await waitFor(() =>
       expect(sessionGets(log).at(-1)?.input).toEqual({
@@ -2170,28 +2161,6 @@ describe("TaskWorkspace step-scoped board", () => {
         workflowStepId: "st-1",
       }),
     );
-    // The tab that is selected and the tab the run is on are two different tabs now, and each
-    // says so in its own attribute.
-    const implement = screen.getByRole("tab", { name: /Implement/ });
-    expect(implement.getAttribute("aria-selected")).toBe("true");
-    expect(implement.getAttribute("aria-current")).toBeNull();
-    expect(
-      within(screen.getByRole("region", { name: "Workflow progress" }))
-        .getByRole("tab", { name: /Review/ })
-        .getAttribute("aria-current"),
-    ).toBe("step");
-  });
-
-  it("asks for the whole run again, in the words it always used, when told to", async () => {
-    const { log } = renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, bound("st-2"));
-
-    fireEvent.click(await screen.findByRole("tab", { name: "Whole run" }));
-
-    // No `workflowStepId` key at all, not a null one: the unscoped request has to stay the exact
-    // request this page made before any of this existed.
-    await waitFor(() => expect(sessionGets(log).at(-1)?.input).toEqual({ sessionId: SESSION_ID }));
-    // ...and with nothing narrowed, the terminal stops claiming it is narrowed.
-    await waitFor(() => expect(screen.queryByText(/The rest of this run/)).toBeNull());
   });
 
   it("follows the run as it advances — until the operator picks a Step, after which it stays put", async () => {
@@ -2229,7 +2198,7 @@ describe("TaskWorkspace step-scoped board", () => {
     );
 
     // Now the operator chooses. From here the run may go where it likes; the screen does not.
-    fireEvent.click(await screen.findByRole("tab", { name: /Implement/ }));
+    await showStep("Implement");
     await waitFor(() =>
       expect(sessionGets(log).at(-1)?.input).toEqual({
         sessionId: SESSION_ID,
@@ -2246,14 +2215,12 @@ describe("TaskWorkspace step-scoped board", () => {
         at: "2026-01-01T00:00:09.000Z",
       }),
     );
-    await screen.findByRole("tab", { name: /Ship/ });
     await waitFor(() =>
-      expect(screen.getByRole("tab", { name: /Ship/ }).getAttribute("aria-current")).toBe("step"),
+      expect(
+        within(screen.getByRole("region", { name: "Workflow progress" })).getByText(/Step 3 of 3/),
+      ).toBeDefined(),
     );
-    // The cursor moved twice and the terminal is still on the Step that was asked for.
-    expect(screen.getByRole("tab", { name: /Implement/ }).getAttribute("aria-selected")).toBe(
-      "true",
-    );
+    // The cursor moved twice and the board is still on the Step that was asked for.
     expect(sessionGets(log).at(-1)?.input).toEqual({
       sessionId: SESSION_ID,
       workflowStepId: "st-1",
@@ -2294,31 +2261,6 @@ describe("TaskWorkspace step-scoped board", () => {
     expect(screen.queryByRole("button", { name: /asked on the implement step/ })).toBeNull();
   });
 
-  it("is operable from the keyboard, one tab stop for the whole strip", async () => {
-    // A strip of a dozen steps that each swallowed a Tab press would put the terminal below it a
-    // dozen presses away, so the tabs share one stop and the arrows walk them (WAI-ARIA APG).
-    // Activation is manual — arrowing to a Step must not fire a query for it on the way past.
-    const { log } = renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, bound("st-2"));
-
-    const strip = await screen.findByRole("region", { name: "Workflow progress" });
-    const review = within(strip).getByRole("tab", { name: /Review/ });
-    const tabs = within(strip).getAllByRole("tab");
-    // Exactly one of them is reachable by Tab: the selected one.
-    expect(tabs.map((t) => t.getAttribute("tabindex"))).toEqual(["-1", "-1", "0", "-1"]);
-
-    review.focus();
-    const scoped = sessionGets(log).length;
-    fireEvent.keyDown(review, { key: "ArrowLeft" });
-    expect(document.activeElement).toBe(screen.getByRole("tab", { name: /Implement/ }));
-    expect(sessionGets(log)).toHaveLength(scoped);
-
-    fireEvent.keyDown(document.activeElement as HTMLElement, { key: "Home" });
-    expect(document.activeElement).toBe(screen.getByRole("tab", { name: "Whole run" }));
-    // Wrapping, so the far end of a long strip is one press away from either end of it.
-    fireEvent.keyDown(document.activeElement as HTMLElement, { key: "ArrowLeft" });
-    expect(document.activeElement).toBe(screen.getByRole("tab", { name: /Ship/ }));
-  });
-
   it("leaves a Task on no Workflow exactly as it was", async () => {
     const { log } = renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
       "task.get": () => task({ state: "running" }),
@@ -2332,11 +2274,8 @@ describe("TaskWorkspace step-scoped board", () => {
 
     await screen.findByRole("tablist", { name: "Task" });
     await waitFor(() => expect(sessionGets(log).length).toBeGreaterThan(0));
-    // No strip, so no Step tabs, so no panel pretending to be one half of a relationship with
-    // them — and the request is the one this page has always made.
+    // No position in a Workflow to state — and the request is the one this page has always made.
     expect(screen.queryByRole("region", { name: "Workflow progress" })).toBeNull();
-    expect(screen.queryByRole("tab", { name: "Whole run" })).toBeNull();
-    expect(document.getElementById("task-step-panel")).toBeNull();
     for (const call of sessionGets(log)) {
       expect(call.input).toEqual({ sessionId: SESSION_ID });
     }
