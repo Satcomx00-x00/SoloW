@@ -4,6 +4,13 @@ Every release of SoloW, written from its commits by [git-cliff](https://git-clif
 `cliff.toml`. Versions follow [Semantic Versioning](https://semver.org); the number itself is
 decided by `packages/cli/scripts/next-version.ts` from the same commits.
 
+## [0.20.1](https://github.com/Satcomx00-x00/SoloW/compare/v0.20.0...v0.20.1) — 2026-10-06
+
+### Fixes
+
+- **acp:** Pin a model through session/set_config_option where it was offered ([`cf477cf`](https://github.com/Satcomx00-x00/SoloW/commit/cf477cfc3f277a1be54aaefd04d93bba57573ddf))
+- **harness:** Say why an ACP session ended, not a bare "fail" ([`0dedf4f`](https://github.com/Satcomx00-x00/SoloW/commit/0dedf4ff694852f2d3c6792ace00b6d926875d3d))
+
 ## [0.20.0](https://github.com/Satcomx00-x00/SoloW/compare/v0.19.0...v0.20.0) — 2026-10-06
 
 ### Features
