@@ -38,6 +38,14 @@ import { defaultRelauncher, type RunRelauncher } from "./relaunch.js";
 import { RETENTION_INTERVAL_MS, retentionSweep } from "./retention.js";
 import { hub } from "./ws/hub.js";
 import { attachSubscriber } from "./ws/replay.js";
+import {
+  authorizeTerminal,
+  closeTerminal,
+  openTerminal,
+  resolveTerminalLaunch,
+  type TerminalWsData,
+  terminalMessage,
+} from "./ws/terminal.js";
 
 export { inngest };
 // Re-exported from `serve.ts` rather than built here a second time — see that file's own comment
@@ -641,6 +649,19 @@ function sweepFailed(cause: unknown): void {
   console.error("[solow/orchestrator] reconciliation sweep failed:", cause);
 }
 
+function isTerminal(data: WsData | TerminalWsData): data is TerminalWsData {
+  return "kind" in data && data.kind === "terminal";
+}
+
+/** The socket, seen as the terminal's: the narrowing `isTerminal` makes on its data. */
+function asTerminal(ws: {
+  data: WsData | TerminalWsData;
+  send(data: string | Uint8Array): unknown;
+  close(code?: number, reason?: string): void;
+}) {
+  return ws as Parameters<typeof openTerminal>[0];
+}
+
 /**
  * Long-lived orchestrator process (Decision 0002): hosts the WebSocket hub and the Inngest
  * functions. Serverless-style Next.js cannot hold these, so they run here.
@@ -672,9 +693,9 @@ export function startWebSocketServer(
     setInterval(() => void retention(), RETENTION_INTERVAL_MS);
   }, RECONCILE_GRACE_MS);
 
-  return Bun.serve<WsData>({
+  return Bun.serve<WsData | TerminalWsData>({
     port,
-    fetch(req, server) {
+    async fetch(req, server) {
       const { pathname } = new URL(req.url);
       // The two HTTP routes the durable engine needs (Decision 0004), handled before the
       // upgrade check below so they never fall into the "websocket only" 426: `/events` is
@@ -685,6 +706,27 @@ export function startWebSocketServer(
       if (pathname === "/announce" && req.method === "POST") return handleAnnouncePost(req, deps);
       if (pathname === "/probe-agent" && req.method === "POST") return handleProbePost(req, deps);
       if (pathname === "/explain" && req.method === "POST") return handleExplainPost(req, deps);
+      // The Task page's terminal: its own socket, its own ticket check (see `ws/terminal.ts`).
+      if (pathname === "/terminal") {
+        const terminal = await authorizeTerminal(req.url, deps);
+        if (!terminal.ok) return new Response(terminal.error, { status: terminal.status });
+        const launch = await resolveTerminalLaunch(
+          {
+            db: deps.db,
+            registry: deps.registry,
+            // Raw, not resolved: a relative root is also where runs before the fix left the home
+            // inside the worktree, and the launch looks there too.
+            worktreeRoot: orchestratorEnv().SOLOW_WORKTREE_ROOT,
+          },
+          {
+            workspaceId: terminal.data.claims.workspaceId,
+            taskId: terminal.data.claims.taskId ?? "",
+            cwd: terminal.data.cwd,
+          },
+        );
+        if (server.upgrade(req, { data: { ...terminal.data, launch } })) return undefined;
+        return new Response("websocket only", { status: 426 });
+      }
 
       const auth = authorizeUpgrade(req.url, deps);
       if (!auth.ok) return new Response(auth.error, { status: auth.status });
@@ -693,17 +735,30 @@ export function startWebSocketServer(
     },
     websocket: {
       async open(ws) {
-        ws.data.unsubscribe = await attachSubscriber(deps, ws.data, (msg) =>
+        if (isTerminal(ws.data)) {
+          openTerminal(asTerminal(ws), createLocalExecutor(ws.data.cwd));
+          return;
+        }
+        const data = ws.data;
+        data.unsubscribe = await attachSubscriber(deps, data, (msg) =>
           ws.send(JSON.stringify(msg)),
         );
       },
       async message(ws, raw) {
+        if (isTerminal(ws.data)) {
+          terminalMessage(asTerminal(ws), raw);
+          return;
+        }
         const result = await handleClientFrame(deps, ws.data.claims, raw);
         // Acknowledge either way: the terminal needs to tell the operator that their input
         // went nowhere (no harness running) rather than appear to have been accepted.
         ws.send(JSON.stringify({ kind: "ack", ...result }));
       },
       close(ws) {
+        if (isTerminal(ws.data)) {
+          closeTerminal(asTerminal(ws));
+          return;
+        }
         ws.data.unsubscribe?.();
       },
     },

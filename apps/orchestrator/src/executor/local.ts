@@ -12,6 +12,8 @@ import type {
   ForwardHandle,
   ProcessHandle,
   SpawnOpts,
+  TerminalHandle,
+  TerminalOpts,
 } from "./types.js";
 
 /**
@@ -119,6 +121,31 @@ export function createLocalExecutor(root: string): Executor {
           if (signal === undefined) proc.kill();
           else proc.kill(signal as Parameters<typeof proc.kill>[0]);
         },
+      };
+    },
+
+    openTerminal(cmd: string[], opts: TerminalOpts): TerminalHandle {
+      const terminal = new Bun.Terminal({
+        cols: opts.cols,
+        rows: opts.rows,
+        name: "xterm-256color",
+        data: (_terminal, data) => opts.onData(data),
+      });
+      // The bundled harness, as for `spawn`: the terminal may be mounting the Task's own `claude`.
+      const proc = Bun.spawn(withBundledCommand(cmd), { cwd: opts.cwd, env: opts.env, terminal });
+      void proc.exited.then((code) => {
+        opts.onExit(code);
+        terminal.close();
+      });
+      return {
+        write: (data) => {
+          if (!terminal.closed) terminal.write(data);
+        },
+        resize: (cols, rows) => {
+          if (!terminal.closed) terminal.resize(cols, rows);
+        },
+        kill: () => proc.kill("SIGHUP"),
+        exited: proc.exited,
       };
     },
 
