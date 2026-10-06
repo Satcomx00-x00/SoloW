@@ -36,7 +36,7 @@ export const SPECKIT_WORKFLOWS: readonly WorkflowStoreEntry[] = [
         advanceOn: "review",
         skills: ["speckit-specify"],
         prompt:
-          "Using the speckit-specify skill, write the feature specification for what the issue describes. Say in your summary where the spec is, which user story is P1, and every [NEEDS CLARIFICATION] you left.",
+          "Using the speckit-specify skill, write the feature specification for what the issue describes. Raise every [NEEDS CLARIFICATION] you would leave as a decision for the reviewer, with your recommended answer chosen, so it is answered at this Step's gate rather than left in the file. Say in your summary where the spec is and which user story is P1.",
       },
       {
         name: "Clarify",
@@ -44,7 +44,7 @@ export const SPECKIT_WORKFLOWS: readonly WorkflowStoreEntry[] = [
         advanceOn: "review",
         skills: ["speckit-clarify"],
         prompt:
-          "Using the speckit-clarify skill, find what the spec leaves open, apply your recommended answers, and record them in the spec. Your summary lists each question and the answer you applied, so the reviewer can overrule any of them by sending this Step back with the right one.",
+          "Using the speckit-clarify skill, find what the spec leaves open, apply your recommended answers, and record them in the spec. Raise each question as a decision for the reviewer, with the answer you applied chosen, so they can confirm or overrule it at this Step's gate. Your summary lists each question and the answer you applied.",
       },
       {
         name: "Plan",
