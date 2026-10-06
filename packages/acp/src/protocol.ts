@@ -23,6 +23,7 @@ export const AcpMethod = {
   SessionCancel: "session/cancel",
   SessionSetMode: "session/set_mode",
   SessionSetModel: "session/set_model",
+  SessionSetConfigOption: "session/set_config_option",
   SessionUpdate: "session/update",
   SessionRequestPermission: "session/request_permission",
   FsReadTextFile: "fs/read_text_file",
@@ -119,6 +120,27 @@ export function advertisedOptions(created: SessionLoadResult): {
       ]),
     ],
   };
+}
+
+/**
+ * The config option through which an agent lets `value` be chosen for a category, if it offered
+ * it that way — the id `session/set_config_option` takes as `configId`.
+ *
+ * Agents that advertise in `configOptions` select through it as well: opencode 2 lists its models,
+ * modes and effort there and does not implement `session/set_model` at all, so a pinned model sent
+ * the spec-shaped way failed the round with "Method not found" before any work began. Null when the
+ * value is not among the options — the caller then falls back to `session/set_mode` or
+ * `session/set_model`, for an agent that advertised the spec-shaped lists instead.
+ */
+export function configOptionFor(
+  created: SessionLoadResult,
+  category: "model" | "mode",
+  value: string,
+): string | null {
+  const option = (created.configOptions ?? []).find(
+    (o) => (o.category ?? o.id) === category && (o.options ?? []).some((c) => c.value === value),
+  );
+  return option ? option.id : null;
 }
 
 export const promptResultSchema = z.object({ stopReason: z.string().optional() }).passthrough();

@@ -14,8 +14,10 @@ import {
   type AcpPermissionOption,
   type AcpUpdate,
   advertisedOptions,
+  configOptionFor,
   permissionRequestSchema,
   promptResultSchema,
+  type SessionLoadResult,
   sessionLoadResultSchema,
   sessionNewResultSchema,
   textPrompt,
@@ -419,6 +421,8 @@ export function startAcpSession(options: AcpSessionOptions, prompt: string): Acp
        */
       const resumeSessionId = options.resumeSessionId;
       let advertised: { models: string[]; modes: string[] };
+      /** The result the lists were read from, kept for `configOptionFor` when pinning. */
+      let offered: SessionLoadResult;
       /*
        * An agent that cannot load is asked to load anyway unless the caller opted out.
        *
@@ -443,6 +447,7 @@ export function startAcpSession(options: AcpSessionOptions, prompt: string): Acp
         );
         sessionId = resumeSessionId;
         resumed = true;
+        offered = loaded;
         advertised = advertisedOptions(loaded);
       } else {
         const created = sessionNewResultSchema.parse(
@@ -452,6 +457,7 @@ export function startAcpSession(options: AcpSessionOptions, prompt: string): Acp
           }),
         );
         sessionId = created.sessionId;
+        offered = created;
         advertised = advertisedOptions(created);
       }
 
@@ -472,10 +478,26 @@ export function startAcpSession(options: AcpSessionOptions, prompt: string): Acp
        * all: an agent that advertises no models is an agent this never speaks it to.
        */
       if (options.modeId && advertised.modes.includes(options.modeId)) {
-        await peer.request(AcpMethod.SessionSetMode, { sessionId, modeId: options.modeId });
+        const configId = configOptionFor(offered, "mode", options.modeId);
+        await (configId
+          ? peer.request(AcpMethod.SessionSetConfigOption, {
+              sessionId,
+              configId,
+              value: options.modeId,
+            })
+          : peer.request(AcpMethod.SessionSetMode, { sessionId, modeId: options.modeId }));
       }
       if (options.modelId && advertised.models.includes(options.modelId)) {
-        await peer.request(AcpMethod.SessionSetModel, { sessionId, modelId: options.modelId });
+        // Through the config option when that is how the model was offered (opencode 2 has no
+        // `session/set_model`), the spec-shaped call otherwise — see `configOptionFor`.
+        const configId = configOptionFor(offered, "model", options.modelId);
+        await (configId
+          ? peer.request(AcpMethod.SessionSetConfigOption, {
+              sessionId,
+              configId,
+              value: options.modelId,
+            })
+          : peer.request(AcpMethod.SessionSetModel, { sessionId, modelId: options.modelId }));
       }
 
       resolveSessionId(sessionId);
