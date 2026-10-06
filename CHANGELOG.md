@@ -4,6 +4,63 @@ Every release of SoloW, written from its commits by [git-cliff](https://git-clif
 `cliff.toml`. Versions follow [Semantic Versioning](https://semver.org); the number itself is
 decided by `packages/cli/scripts/next-version.ts` from the same commits.
 
+## [0.20.0](https://github.com/Satcomx00-x00/SoloW/compare/v0.19.0...v0.20.0) — 2026-10-06
+
+### Features
+
+- **web:** Replace the activity rail and navigator with one labelled sidebar ([`3f724e0`](https://github.com/Satcomx00-x00/SoloW/commit/3f724e0c098ed43cd460b8a958b410266a30b7c3))
+- **web:** Count unassigned issues on the server ([`6ea4a9c`](https://github.com/Satcomx00-x00/SoloW/commit/6ea4a9ce98d4d808dcbfba798b2064ca2270070c))
+- **web:** Keep the sidebar's counts live ([`ba7493f`](https://github.com/Satcomx00-x00/SoloW/commit/ba7493f6be6d05312c33f89b677b902415ef69bb))
+- **web:** Show tasks awaiting review in the sidebar ([`1488b57`](https://github.com/Satcomx00-x00/SoloW/commit/1488b57c60e869b62c09379e2ed6224a7c5e3fca))
+- **web:** Load recent tasks in one request ([`360db7c`](https://github.com/Satcomx00-x00/SoloW/commit/360db7c90fea272d395c6c40e706c2db4ff23ed6))
+- **web:** Name each recent task's project in the sidebar ([`5a93c4a`](https://github.com/Satcomx00-x00/SoloW/commit/5a93c4a29b296c88c97de8c71103892a52f47be5))
+- **web:** Jump to projects from the command palette ([`ea238ef`](https://github.com/Satcomx00-x00/SoloW/commit/ea238efd90122a9a9ad85aae722d578061f24ac3))
+- **web:** Filter the sidebar's projects once there are many ([`369379e`](https://github.com/Satcomx00-x00/SoloW/commit/369379e9755c96bc1df3acf55281d01071032587))
+- **web:** Peek at the hidden sidebar from the left edge ([`0d52904`](https://github.com/Satcomx00-x00/SoloW/commit/0d529048a109a370d8b0ca87361a2ad6652e80cf))
+- **web:** Resize the sidebar by dragging its edge ([`3d56a55`](https://github.com/Satcomx00-x00/SoloW/commit/3d56a5587e44cc7b12e0b632c5ab2c9eb7984497))
+- **web:** Drop the Task page's back arrow for the breadcrumb ([`adcbcb6`](https://github.com/Satcomx00-x00/SoloW/commit/adcbcb6524c915f248df43f868f58ad256ace6a2))
+- **workflows:** An agent-decides gate, and a review forced per Task ([`8a3e16b`](https://github.com/Satcomx00-x00/SoloW/commit/8a3e16b2df6f3996c98cc6369730fc4f291081c3))
+- **sessions:** Read which Steps of a Task finished, and why ([`556bbc5`](https://github.com/Satcomx00-x00/SoloW/commit/556bbc51e03cfa265ed730b41609507f6843562c))
+- **terminal:** An interactive shell in the Task's worktree ([`6a501a2`](https://github.com/Satcomx00-x00/SoloW/commit/6a501a2c17b912dd2bdabe3ba562864f60ce554f))
+- **web:** The Task page becomes a board ([`6592165`](https://github.com/Satcomx00-x00/SoloW/commit/65921652d78ce16964c2ebc40294791b0ea03d77))
+- **web:** The running Step and the one waiting on you breathe ([`476bcee`](https://github.com/Satcomx00-x00/SoloW/commit/476bceef43f442f25665af233b73912864d4df64))
+- **web:** Say how a plan's open items get settled ([`8c9abb8`](https://github.com/Satcomx00-x00/SoloW/commit/8c9abb89e159175964f7461277542a620d48664e))
+
+### Fixes
+
+- **web:** Settings' back link survives a reload ([`2474a96`](https://github.com/Satcomx00-x00/SoloW/commit/2474a967bddd4cc603932d956a6b0cc22c960490))
+- **web:** Keep keyboard focus when the sidebar is shown or hidden ([`03b7308`](https://github.com/Satcomx00-x00/SoloW/commit/03b7308c4a598b7056db9c972c42259418095eea))
+- **web:** Name a recent task's project by its initial, not in words ([`a3513aa`](https://github.com/Satcomx00-x00/SoloW/commit/a3513aad19c38feca2891c35d3ca051c7f0db437))
+- **stack:** Keep Inngest state across restarts of start.sh ([`e2eee5c`](https://github.com/Satcomx00-x00/SoloW/commit/e2eee5c727f3f8a53f1e3e1f1c8f62d7720093f8))
+- **review:** Refuse a decision whose run is known to be gone ([`e69cb40`](https://github.com/Satcomx00-x00/SoloW/commit/e69cb40e6354b59116ae2b1ac3e670150a6c9b9c))
+- **harness:** Adopt a legacy hermetic home instead of starting empty ([`5374fc3`](https://github.com/Satcomx00-x00/SoloW/commit/5374fc34b4792042f2c1a4d515570b4631907f11))
+- **workflows:** Apply settled decisions on their own Step before moving on ([`9c56de1`](https://github.com/Satcomx00-x00/SoloW/commit/9c56de12955d14ecd9e3a1946ecfde4691e695d1))
+- **harness:** An open question is a decision, not a marker ([`85fb6cb`](https://github.com/Satcomx00-x00/SoloW/commit/85fb6cbb81674e131e7b344c144c7760eb4b251d))
+- **web:** Light Workflows itself while there is no pipeline ([`dbd94f8`](https://github.com/Satcomx00-x00/SoloW/commit/dbd94f82d0eb939e4e179a5158346879ea810c45))
+- **deps:** Take source-map-js 1.2.2 for its event-loop DoS fix ([`6b766a1`](https://github.com/Satcomx00-x00/SoloW/commit/6b766a14ea304093ef27a1ba08e62502a071d37c))
+- **web:** Turn off the Next dev badge ([`c276d4b`](https://github.com/Satcomx00-x00/SoloW/commit/c276d4bda89ade3a1c219d7975eb704c68b9ebc3))
+
+### Refactoring
+
+- **web:** Drop the header's Step strip for the board's own Steps ([`ff38963`](https://github.com/Satcomx00-x00/SoloW/commit/ff389636b6c3d247718dd30cc649686b8e17642a))
+
+### Tests
+
+- **web:** Cover navigation, the sidebar, workflow creation and the board's cards ([`a7c6fbe`](https://github.com/Satcomx00-x00/SoloW/commit/a7c6fbe94bbab3819c91099d61dac7144183275a))
+- **orchestrator:** Cover the settled-decisions brief ([`d162370`](https://github.com/Satcomx00-x00/SoloW/commit/d1623708f5f83c8e816e88e1e5aeb6cbc3bc678d))
+- **orchestrator:** Drop a duplicate test helper ([`3ff7ebf`](https://github.com/Satcomx00-x00/SoloW/commit/3ff7ebfce3eace82189c0961d23617399cea5de8))
+- **web:** Stub next/navigation in the LaunchTaskDialog test ([`bb4ddc8`](https://github.com/Satcomx00-x00/SoloW/commit/bb4ddc801b3f663110af7b0d2c5593d9b18b9712))
+- Smoke the API's navigation path and the shell in a browser ([`1059a76`](https://github.com/Satcomx00-x00/SoloW/commit/1059a7699357ad9500abca519fbb10a358c04e3d))
+- **e2e:** Read a multi-Repository change on the Changes tab ([`5ce7673`](https://github.com/Satcomx00-x00/SoloW/commit/5ce7673189e0a9a041ecaa99af694c0fb12e3b43))
+- **e2e:** Wait for Unassigned's own issues, not the old sidebar's count ([`4f5c859`](https://github.com/Satcomx00-x00/SoloW/commit/4f5c859a66a81e1af523d77830387ef1b207cf21))
+- **e2e:** Reach the brief through the gate's criteria row ([`6308294`](https://github.com/Satcomx00-x00/SoloW/commit/63082941690b707e368026e3e6cf57f3dc2c62f8))
+- **e2e:** Read one criterion at a time, and the stop from the Session log ([`55767f1`](https://github.com/Satcomx00-x00/SoloW/commit/55767f17f4898e8ddc25a483cd85d859a050dee2))
+
+### Maintenance
+
+- **web:** Move the Next dev badge off the sidebar's Settings link ([`522b509`](https://github.com/Satcomx00-x00/SoloW/commit/522b5094a5734a2b725a75f2251f34061d3cd629))
+- **deps:** Bump turbo to 2.11.7 ([`9fc1dca`](https://github.com/Satcomx00-x00/SoloW/commit/9fc1dca5f01eb6e7fdc89c64678172e013ca1892))
+
 ## [0.19.0](https://github.com/Satcomx00-x00/SoloW/compare/v0.18.0...v0.19.0) — 2026-10-02
 
 ### Features
