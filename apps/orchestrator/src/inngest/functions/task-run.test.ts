@@ -3555,20 +3555,6 @@ describe("the harness's completion declaration", () => {
       .where(eq(workspace.id, ids.workspaceId));
   }
 
-  /**
-   * Turn widgets off for a Workspace.
-   *
-   * Needed at all only since flags began defaulting ON (constitution v1.5.0): a Workspace that
-   * has said nothing now has widgets *enabled*, so a case about the flag being off has to say so
-   * rather than rely on a seeded Workspace staying quiet.
-   */
-  async function disableWidgets(ids: ReturnType<typeof freshIds>): Promise<void> {
-    await db
-      .update(workspace)
-      .set({ enabledFlags: { "ff-agent-widgets": false } })
-      .where(eq(workspace.id, ids.workspaceId));
-  }
-
   const declaration = (outcome: string, summary?: string): HarnessStreamEvent => ({
     kind: "stdout",
     channel: "assistant",
