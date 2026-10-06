@@ -690,3 +690,89 @@ describe("startAcpSession — failure", () => {
     expect(await session.outcome).toMatchObject({ ok: false, stopReason: "refusal" });
   });
 });
+
+describe("startAcpSession — choices offered as config options (opencode 2)", () => {
+  /*
+   * opencode 2.0.22 answers `session/new` with `configOptions` for its model, effort and mode,
+   * and has no `session/set_model`: a pinned model sent the spec-shaped way failed the round with
+   * "Method not found" before any work began. Verified on the real binary; scripted here.
+   */
+  const opencode2 = {
+    noSetModel: true,
+    configOptions: [
+      {
+        id: "model",
+        category: "model",
+        currentValue: "opencode/fledge-alpha-free",
+        options: [{ value: "opencode/fledge-alpha-free" }, { value: "opencode/nemotron-free" }],
+      },
+      {
+        id: "effort",
+        category: "thought_level",
+        currentValue: "default",
+        options: [{ value: "default" }],
+      },
+      {
+        id: "mode",
+        category: "mode",
+        currentValue: "build",
+        options: [{ value: "build" }, { value: "plan" }],
+      },
+    ],
+  };
+
+  it("pins the model and mode through session/set_config_option, and the run completes", async () => {
+    const { session, peer } = drive(opencode2, {
+      modelId: "opencode/nemotron-free",
+      modeId: "plan",
+    });
+    const outcome = await session.outcome;
+
+    expect(outcome.ok).toBe(true);
+    expect(peer.methods).not.toContain("session/set_model");
+    expect(peer.pins).toEqual([
+      {
+        method: "session/set_config_option",
+        params: { sessionId: "acp-session-1", configId: "mode", value: "plan" },
+      },
+      {
+        method: "session/set_config_option",
+        params: { sessionId: "acp-session-1", configId: "model", value: "opencode/nemotron-free" },
+      },
+    ]);
+  });
+
+  it("still sends nothing for a model the agent did not offer", async () => {
+    const { session, peer } = drive(opencode2, { modelId: "opencode/not-offered" });
+    const outcome = await session.outcome;
+
+    expect(outcome.ok).toBe(true);
+    expect(peer.pins).toEqual([]);
+  });
+
+  it("keeps the spec-shaped calls for an agent that advertised the spec-shaped lists", async () => {
+    const { session, peer } = drive(
+      {
+        modes: { availableModes: [{ id: "plan", name: "Plan" }] },
+        models: { availableModels: [{ modelId: "claude-opus-4" }] },
+      },
+      { modeId: "plan", modelId: "claude-opus-4" },
+    );
+    await session.outcome;
+
+    expect(peer.pins.map((p) => p.method)).toEqual(["session/set_mode", "session/set_model"]);
+    expect(peer.methods).not.toContain("session/set_config_option");
+  });
+
+  it("fails the round, saying why, when an agent refuses a pin outright", async () => {
+    // What every opencode 2 run with a pinned model did before: the reason must survive.
+    const { session } = drive(
+      { noSetModel: true, models: { availableModels: [{ modelId: "m-1" }] } },
+      { modelId: "m-1" },
+    );
+    const outcome = await session.outcome;
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome.error).toContain("session/set_model");
+  });
+});

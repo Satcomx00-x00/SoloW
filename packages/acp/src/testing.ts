@@ -60,6 +60,18 @@ export interface AcpScript {
   modes?: { currentModeId?: string; availableModes: Array<{ id: string; name: string }> };
   /** What `session/new` advertises as selectable models, when the script wants to say any. */
   models?: { currentModelId?: string; availableModels: Array<{ modelId: string }> };
+  /**
+   * Choices advertised the opencode way — `configOptions` on `session/new`, set through
+   * `session/set_config_option` — instead of, or as well as, `modes` and `models`.
+   */
+  configOptions?: Array<{
+    id: string;
+    category?: string;
+    currentValue?: string;
+    options: Array<{ value: string; name?: string }>;
+  }>;
+  /** Answer `session/set_model` with "Method not found", as opencode 2 does. */
+  noSetModel?: boolean;
   turns?: AcpScriptTurn[];
   /** Refuse `initialize` with this message. */
   failInitialize?: string;
@@ -109,6 +121,8 @@ const noop = (): void => {};
 class ScriptedAgent {
   /** Every client→agent method, in order — the method-ordering conformance assertion. */
   readonly methods: string[] = [];
+  /** The params of every config-option and pin request, for asserting what was chosen. */
+  readonly pins: Array<{ method: string; params: Record<string, unknown> }> = [];
   readonly peer: JsonRpcPeer;
   private cwd = process.cwd();
   private turnIndex = 0;
@@ -183,11 +197,21 @@ class ScriptedAgent {
           ...(method === AcpMethod.SessionNew ? { sessionId: "acp-session-1" } : {}),
           ...(this.script.modes ? { modes: this.script.modes } : {}),
           ...(this.script.models ? { models: this.script.models } : {}),
+          ...(this.script.configOptions ? { configOptions: this.script.configOptions } : {}),
         };
       }
-      case AcpMethod.SessionSetMode:
       case AcpMethod.SessionSetModel:
+        if (this.script.noSetModel) {
+          throw new JsonRpcError(JsonRpcErrorCode.MethodNotFound, `method not found: ${method}`);
+        }
+        this.pins.push({ method, params: p });
         return {};
+      case AcpMethod.SessionSetMode:
+        this.pins.push({ method, params: p });
+        return {};
+      case AcpMethod.SessionSetConfigOption:
+        this.pins.push({ method, params: p });
+        return { configOptions: this.script.configOptions ?? [] };
       case AcpMethod.SessionPrompt:
         return await this.runTurn();
       default:
@@ -319,6 +343,8 @@ class ByteStream implements AsyncIterable<Uint8Array> {
 export function scriptedAcpPeer(script: AcpScript = {}): ChildProcessHandle & {
   /** Client→agent methods, in the order the agent saw them. */
   methods: string[];
+  /** Mode, model and config-option requests, with their params. */
+  pins: Array<{ method: string; params: Record<string, unknown> }>;
   killed: boolean;
 } {
   const stdout = new ByteStream();
@@ -330,6 +356,7 @@ export function scriptedAcpPeer(script: AcpScript = {}): ChildProcessHandle & {
   let ended = false;
   const handle = {
     methods: [] as string[],
+    pins: [] as Array<{ method: string; params: Record<string, unknown> }>,
     killed: false,
     stdin: {
       write: (data: string) => {
@@ -364,6 +391,7 @@ export function scriptedAcpPeer(script: AcpScript = {}): ChildProcessHandle & {
     exit: finish,
   });
   handle.methods = agent.methods;
+  handle.pins = agent.pins;
 
   if (script.stderr) stderr.push(script.stderr);
   if (script.dieEarly) queueMicrotask(finish);

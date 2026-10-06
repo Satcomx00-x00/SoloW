@@ -1,5 +1,10 @@
 import { describe, expect, it } from "bun:test";
-import { advertisedOptions, sessionNewResultSchema, toUpdates } from "./protocol.js";
+import {
+  advertisedOptions,
+  configOptionFor,
+  sessionNewResultSchema,
+  toUpdates,
+} from "./protocol.js";
 
 /**
  * Flattening `session/update` notifications. The rule under test throughout: an agent on its own
@@ -159,5 +164,30 @@ describe("advertisedOptions", () => {
     const created = sessionNewResultSchema.parse({ sessionId: "s1" });
 
     expect(advertisedOptions(created)).toEqual({ models: [], modes: [] });
+  });
+});
+
+describe("configOptionFor", () => {
+  const offered = {
+    sessionId: "s",
+    configOptions: [
+      { id: "model", category: "model", options: [{ value: "a" }, { value: "b" }] },
+      { id: "agent-mode", category: "mode", options: [{ value: "build" }] },
+      { id: "mode", options: [{ value: "plan" }] },
+    ],
+  };
+
+  it("names the option that offers the value, by category", () => {
+    expect(configOptionFor(offered, "model", "b")).toBe("model");
+    expect(configOptionFor(offered, "mode", "build")).toBe("agent-mode");
+  });
+
+  it("falls back to the option's id when it states no category", () => {
+    expect(configOptionFor(offered, "mode", "plan")).toBe("mode");
+  });
+
+  it("answers null for a value no option offers, and for an agent with no config options", () => {
+    expect(configOptionFor(offered, "model", "z")).toBeNull();
+    expect(configOptionFor({ sessionId: "s" }, "model", "a")).toBeNull();
   });
 });
