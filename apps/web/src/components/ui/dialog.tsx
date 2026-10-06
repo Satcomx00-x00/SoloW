@@ -82,13 +82,19 @@ function DialogContent({
   children,
   size = "md",
   showCloseButton = true,
+  container,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   size?: DialogSize
   showCloseButton?: boolean
+  /**
+   * Where the dialog is mounted; `document.body` when omitted. A surface that wants its dialogs
+   * inside its own landmark (the Task page keeps the board's dialogs inside `main`) names it.
+   */
+  container?: HTMLElement | null
 }) {
   return (
-    <DialogPortal data-slot="dialog-portal">
+    <DialogPortal data-slot="dialog-portal" container={container ?? undefined}>
       <DialogOverlay />
       <DialogPrimitive.Content
         data-slot="dialog-content"

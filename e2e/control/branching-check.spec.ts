@@ -1,7 +1,13 @@
 import { execFileSync } from "node:child_process";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { PATHS } from "../support/fixture.js";
-import { awaitWorkflowGate, connectRepository, createTask, openTask } from "../support/flows.js";
+import {
+  awaitWorkflowGate,
+  connectRepository,
+  createTask,
+  gateButton,
+  openTask,
+} from "../support/flows.js";
 
 /**
  * The branching control check (@control): the Workflow features that decide *where* a Task goes
@@ -179,12 +185,15 @@ test.describe("branching control check — conditions, a loop, and a gate in the
 
     await test.step("set each Step's gate, and the three branches", async () => {
       // Every Step but Escalate advances on the harness's own signal; Escalate waits for a person.
-      const gate = async (name: string, gateLabel: string, advanceLabel: string) => {
-        await pickOption(page, card(page, name), "Gate", gateLabel);
+      // A new Step waits for review; "Move on" is the run moving on by itself.
+      const movesOnByItself = async (name: string, advanceLabel: string) => {
+        const moveOn = card(page, name).getByRole("button", { name: "Move on", exact: true });
+        await moveOn.click();
+        await expect(moveOn).toHaveAttribute("aria-pressed", "true");
         await pickOption(page, card(page, name), "Finished when", advanceLabel);
       };
       for (const name of ["Implement", "Review", "Verify", "Ship"]) {
-        await gate(name, "Automatic", "Harness says done");
+        await movesOnByItself(name, "Harness says done");
       }
 
       // A branch is turned on from the card's toolbar, which shows on hover; then its condition
@@ -302,13 +311,13 @@ test.describe("branching control check — conditions, a loop, and a gate in the
     });
 
     await test.step("approving at Escalate releases that gate only — Ship still runs, then asks again", async () => {
-      await page.getByRole("main").getByRole("button", { name: "Approve" }).click();
+      await (await gateButton(page, "Approve")).click();
       const progress = page.getByRole("region", { name: "Workflow progress" });
       await expect(progress).toContainText("Step 5 of 5", { timeout: 120_000 });
       // Not Done: the approval was spent on Escalate's gate, not on the integration.
       await expect(page.locator('[data-task-state="done"]')).toHaveCount(0);
       await awaitWorkflowGate(page);
-      await page.getByRole("main").getByRole("button", { name: "Approve" }).click();
+      await (await gateButton(page, "Approve")).click();
       await expect(page.locator('[data-task-state="done"]').first()).toBeVisible();
       const branch = `solow-task-${taskId}`;
       await expect.poll(() => git(["branch", "--list", branch])).toContain(branch);

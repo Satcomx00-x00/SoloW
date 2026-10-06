@@ -6,12 +6,17 @@ import {
   SEED_WORKSPACE_A,
 } from "../support/fixture.js";
 import {
+  closeGate,
   connectRepository,
   createTask,
+  gateButton,
   launchTask,
   launchToReview,
+  openGate,
   openTask,
   openWorkspaceTab,
+  sessionLog,
+  taskIdOnPage,
 } from "../support/flows.js";
 import { seedIssue, seedIssueWithBrief } from "../support/seed.js";
 
@@ -19,7 +24,7 @@ import { seedIssue, seedIssueWithBrief } from "../support/seed.js";
  * The Task page's own interactions — the frame around the run, not the run itself (which
  * `happy.spec.ts` covers): the four tabs and the pick in the URL, the rail beside the evidence
  * with the decision at its foot, Explain on a criterion answered by the Task's harness, the
- * held Stop, the terminal's filter count, and a delete that is undone from its toast.
+ * held Stop, and a delete that is undone from its toast.
  */
 
 const REPO_NAME = "e2e-fixture-repo";
@@ -53,36 +58,36 @@ test.describe("the Task page", () => {
     await launchToReview(page);
 
     const tabs = page.getByRole("tablist", { name: "Task" });
-    for (const name of ["Run", "Brief", "Plan", "Changes"]) {
+    for (const name of ["Board", "Brief", "Changes"]) {
       await expect(tabs.getByRole("tab", { name, exact: true })).toBeVisible();
     }
-    // At the gate with no criteria, the page opens on the change.
-    await expect(tabs.getByRole("tab", { name: "Changes" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
+    // At the gate the page opens on the board, where the gate is.
+    await expect(tabs.getByRole("tab", { name: "Board" })).toHaveAttribute("aria-selected", "true");
 
-    await openWorkspaceTab(page, "Run");
-    await expect(page).toHaveURL(/[?&]tab=run/);
+    await openWorkspaceTab(page, "Brief");
+    await expect(page).toHaveURL(/[?&]tab=brief/);
     await page.reload();
-    await expect(tabs.getByRole("tab", { name: "Run", exact: true })).toHaveAttribute(
+    await expect(tabs.getByRole("tab", { name: "Brief", exact: true })).toHaveAttribute(
       "aria-selected",
       "true",
     );
 
-    // Manual activation: → moves the focus to Brief; Run stays the tab on screen until Enter.
-    await tabs.getByRole("tab", { name: "Run", exact: true }).focus();
+    // Manual activation: → moves the focus to Changes; Brief stays on screen until Enter.
+    await tabs.getByRole("tab", { name: "Brief", exact: true }).focus();
     await page.keyboard.press("ArrowRight");
-    await expect(tabs.getByRole("tab", { name: "Brief" })).toBeFocused();
-    await expect(tabs.getByRole("tab", { name: "Run", exact: true })).toHaveAttribute(
+    await expect(tabs.getByRole("tab", { name: "Changes" })).toBeFocused();
+    await expect(tabs.getByRole("tab", { name: "Brief", exact: true })).toHaveAttribute(
       "aria-selected",
       "true",
     );
     await page.keyboard.press("Enter");
-    await expect(tabs.getByRole("tab", { name: "Brief" })).toHaveAttribute("aria-selected", "true");
+    await expect(tabs.getByRole("tab", { name: "Changes" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
   });
 
-  test("keeps the dossier in a rail beside the evidence, with the decision at its foot", async ({
+  test("keeps the dossier in the left pane, and the decision on the board and under the change", async ({
     page,
   }) => {
     const stamp = Date.now();
@@ -109,10 +114,15 @@ test.describe("the Task page", () => {
     );
     await expect(rail.getByRole("button", { name: "Copy branch name" })).toBeVisible();
     await expect(rail.getByRole("region", { name: "Run" })).toContainText(HARNESS_PROFILE_NAME);
-    // The gate is in the rail, whichever tab is open.
-    await openWorkspaceTab(page, "Plan");
-    await expect(rail.getByRole("button", { name: "Approve" })).toBeVisible();
-    await expect(rail.getByRole("button", { name: "Reject" })).toBeVisible();
+    // The gate is a card on the board that opens a dialog, and a strip under the change that
+    // opens the same one.
+    const gate = await openGate(page);
+    await expect(gate.getByRole("button", { name: "Approve", exact: true })).toBeVisible();
+    await expect(gate.getByRole("button", { name: "Reject", exact: true })).toBeVisible();
+    await closeGate(page);
+    await openWorkspaceTab(page, "Changes");
+    await expect(page.locator("[data-gate-strip]")).toBeVisible();
+    await expect(await gateButton(page, "Approve")).toBeVisible();
   });
 
   test("lists what the run opened outside SoloW — the merge request and the pipeline, as links", async ({
@@ -159,12 +169,10 @@ test.describe("the Task page", () => {
     await expect(links.getByRole("link")).toHaveCount(2);
 
     // The evidence is still where it was — the links are a reading of the log, not a
-    // replacement for it. By the tool row rather than by its text: the command is on screen
-    // twice, once on the row's summary line and once in the body, and both are right.
-    await openWorkspaceTab(page, "Run");
-    await expect(
-      page.locator('[data-tool-call="Bash"]', { hasText: "glab mr create --fill --yes" }),
-    ).toHaveCount(1);
+    // replacement for it.
+    await expect
+      .poll(() => sessionLog(page, taskIdOnPage(page)))
+      .toContain("glab mr create --fill --yes");
   });
 
   test("says a run that opened nothing opened nothing, rather than showing an empty box", async ({
@@ -211,8 +219,12 @@ test.describe("the Task page", () => {
     await openTask(page, issue.id, taskTitle);
     await launchToReview(page);
 
-    // With criteria to verify, the gate opens on the brief — and says how many are left.
+    // With criteria to verify, the gate's chip says how many — and opens the brief.
     const tabs = page.getByRole("tablist", { name: "Task" });
+    await page
+      .locator('[data-board-kind="gate"]')
+      .getByRole("button", { name: /0\/2 criteria/ })
+      .click();
     await expect(tabs.getByRole("tab", { name: "Brief" })).toHaveAttribute("aria-selected", "true");
     const brief = page.getByRole("region", { name: "Acceptance criteria" });
     await expect(brief.getByText("AC-1", { exact: true })).toBeVisible();
@@ -248,15 +260,9 @@ test.describe("the Task page", () => {
     });
     await openTask(page, issue.id, taskTitle);
     await launchTask(page);
+    // The steer box and its held Stop sit under the board while the run is going.
     await expect(page.getByLabel("Message the harness")).toBeEnabled();
-    await expect(page.getByText(/harness edited/)).toBeVisible();
-
-    // The terminal's filters say how much they hid, the moment they are pressed.
-    const filters = page.getByRole("group", { name: "Transcript filters" });
-    await filters.getByRole("button", { name: "Tools", exact: true }).click();
-    await expect(page.locator("[data-transcript-shown]")).toContainText(/\d+ of \d+/);
-    await filters.getByRole("button", { name: "Tools", exact: true }).click();
-    await expect(page.locator("[data-transcript-shown]")).toHaveCount(0);
+    await expect.poll(() => sessionLog(page, taskIdOnPage(page))).toContain("harness edited");
 
     // A click is exactly the gesture the hold exists to refuse.
     const stop = page.getByRole("button", { name: "Stop" });

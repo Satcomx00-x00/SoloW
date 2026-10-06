@@ -5,8 +5,10 @@ import {
   awaitWorkflowGate,
   connectRepository,
   createTask,
+  gateButton,
   openTask,
   openWorkspaceTab,
+  sessionLog,
   trpc,
 } from "../support/flows.js";
 
@@ -164,7 +166,10 @@ test.describe("control check — the main line of the product, end to end", () =
       await expect(
         page.getByRole("button", { name: `Add a step after ${stepNames[0]}` }),
       ).toBeVisible();
-      await pickOption(page, "Gate", "Automatic");
+      // A new Step waits for review; "Move on" lets the run move on by itself.
+      const moveOn = page.getByRole("button", { name: "Move on", exact: true });
+      await moveOn.click();
+      await expect(moveOn).toHaveAttribute("aria-pressed", "true");
       await pickOption(page, "Finished when", "Harness says done");
       await page.getByRole("button", { name: `Edit the prompt for ${stepNames[0]}` }).click();
       await page
@@ -242,14 +247,21 @@ test.describe("control check — the main line of the product, end to end", () =
       await expect(progress).toContainText("Step 2 of 2");
       await awaitWorkflowGate(page);
 
-      // Every Step's transcript, read back one Step at a time — the terminal is scoped to the
-      // selected tab, and picking a Step opens the Run tab the terminal is on (at the gate the
-      // page has turned to the review).
+      // Every Step's log, read back one Step at a time: the tab scopes the board, and the
+      // Session log scoped to the same Step holds that Step's harness output.
+      const bound = await trpc<{ steps: Array<{ id: string; name: string }> }>(
+        page,
+        "workflow.taskBinding",
+        { taskId },
+        "query",
+      );
       for (const name of stepNames) {
         const tab = tabs.getByRole("tab", { name });
         await tab.click();
         await expect(tab).toHaveAttribute("aria-selected", "true");
-        await expect(page.getByText(/harness edited solow-task-/).first()).toBeVisible();
+        const stepId = bound.steps.find((s) => s.name === name)?.id;
+        expect(stepId, `step ${name} in the binding`).toBeDefined();
+        expect(await sessionLog(page, taskId, stepId)).toMatch(/harness edited solow-task-/);
       }
       // And the run's own tab lands on the Step the cursor ended on.
       await expect(tabs.getByRole("tab", { name: stepNames[1] })).toHaveAttribute(
@@ -267,14 +279,15 @@ test.describe("control check — the main line of the product, end to end", () =
       ).toHaveAttribute("aria-selected", "true");
     });
 
-    await test.step("the rail says what is true about the task, with the decision at its foot", async () => {
+    await test.step("the left pane says what is true about the task; the decision is on the page", async () => {
       const rail = page.getByRole("complementary", { name: "About this task" });
       for (const name of ["Status", "Repository", "Links", "Dependencies", "Run"]) {
         await expect(rail.getByRole("region", { name })).toBeVisible();
       }
       // The run's harness, named — out of a popover and onto the page.
       await expect(rail.getByRole("region", { name: "Run" })).toContainText(HARNESS_PROFILE_NAME);
-      await expect(rail.getByRole("button", { name: "Approve" })).toBeVisible();
+      // Under the change (the view the reload kept) the gate is a bar; on the board, a node.
+      await expect(page.locator("[data-gate-strip]")).toBeVisible();
 
       // What the run did outside SoloW (F10 FR-12a): Step 2's harness opened the merge request
       // and read the pipeline back, and both are doors rather than URLs buried in a transcript.
@@ -310,7 +323,7 @@ test.describe("control check — the main line of the product, end to end", () =
       await openWorkspaceTab(page, "Changes");
       const changed = page.getByRole("list", { name: "Changes" });
       await expect(changed.getByTitle(`marker-solow-task-${taskId}.txt`)).toBeVisible();
-      await page.getByRole("main").getByRole("button", { name: "Approve" }).click();
+      await (await gateButton(page, "Approve")).click();
       await expect(page.locator('[data-task-state="done"]').first()).toBeVisible();
 
       const branch = `solow-task-${taskId}`;

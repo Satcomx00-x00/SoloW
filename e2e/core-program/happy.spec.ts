@@ -6,11 +6,13 @@ import { PATHS, SEED_WORKSPACE_A } from "../support/fixture.js";
 import {
   connectRepository,
   createTask,
+  gateButton,
   launchTask,
   launchToReview,
   openReview,
   openTask,
   openWorkspaceTab,
+  sessionLog,
 } from "../support/flows.js";
 import { seedIssue } from "../support/seed.js";
 
@@ -56,16 +58,20 @@ test.describe("steering a running harness", () => {
       issue: issueTitle,
       repository: REPO_NAME,
     });
-    await openTask(page, issue.id, taskTitle);
+    const taskId = await openTask(page, issue.id, taskTitle);
     await launchTask(page);
 
+    // The steer box sits under the board while the run is going.
     const box = page.getByLabel("Message the harness");
     await expect(box).toBeEnabled();
     await box.fill("check the heater fuse too");
     await page.getByRole("button", { name: "Send" }).click();
 
     // SPA → hub → registry → the harness for *this* Task → back down the stream (TASK-022).
-    await expect(page.getByText("harness received: check the heater fuse too")).toBeVisible();
+    // The page draws no log; the Session's record is where the reply is.
+    await expect
+      .poll(() => sessionLog(page, taskId), { timeout: 30_000 })
+      .toContain("harness received: check the heater fuse too");
     // Having taken the instruction the harness finishes and declares — the gate is the operator's
     // to open, so the page offers it rather than moving on its own.
     await openReview(page);
@@ -92,9 +98,8 @@ test.describe("core program happy path", () => {
     const taskId = await openTask(page, issue.id, taskTitle);
     await launchToReview(page);
 
-    // The harness's output is on the Run tab — streamed live and replayed from the session log.
-    await openWorkspaceTab(page, "Run");
-    await expect(page.getByText(/harness edited/)).toBeVisible();
+    // The harness's output is in the session log — what the page's board is drawn from.
+    await expect.poll(() => sessionLog(page, taskId)).toContain("harness edited");
 
     // And the change itself is reviewable in the app: the files the harness actually wrote, in
     // the captured source-control panel, with the written line in the diff beside them.
@@ -105,7 +110,7 @@ test.describe("core program happy path", () => {
     // …and the diff body carries the line the harness actually wrote.
     await expect(page.getByText(/edited by the harness in/).first()).toBeVisible();
 
-    await page.getByRole("main").getByRole("button", { name: "Approve" }).click();
+    await (await gateButton(page, "Approve")).click();
 
     // The workflow committed the change and moved the Task to Done. The state is read from the
     // badge's own attribute — the lifecycle labels also appear as plain words elsewhere.
@@ -147,7 +152,7 @@ test.describe("core program happy path", () => {
     const taskId = await openTask(page, issue.id, taskTitle);
     await launchToReview(page);
 
-    await page.getByRole("main").getByRole("button", { name: "Reject" }).click();
+    await (await gateButton(page, "Reject")).click();
     // Rejecting discards the harness's work, so it is confirmed rather than done on one click.
     await page
       .getByRole("alertdialog")

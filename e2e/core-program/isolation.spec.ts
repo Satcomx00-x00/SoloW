@@ -8,6 +8,7 @@ import {
   createTask,
   launchTask,
   launchToReview,
+  openGate,
   openReview,
   openTask,
 } from "../support/flows.js";
@@ -179,11 +180,12 @@ test.describe("@critical isolation", () => {
 
     // The consequence of the single decision, stated before it is taken (AC-2/AC-3). One
     // approval, two repositories — the reviewer must be able to read that without scrolling.
-    await expect(page.getByText(/Approving covers 2 repositories, 2 branches/)).toBeVisible();
+    const gate = await openGate(page);
+    await expect(gate.getByText(/Approving covers 2 repositories, 2 branches/)).toBeVisible();
 
     // Approve once, and both branches exist afterwards. This is the claim that makes "one
     // decision, all consequences" true rather than merely displayed.
-    await page.getByRole("main").getByRole("button", { name: "Approve" }).click();
+    await gate.getByRole("button", { name: "Approve", exact: true }).click();
     const branch = `solow-task-${id}`;
     await expect
       .poll(() => gitIn(PATHS.repo, ["branch", "--list", branch]), { timeout: 20_000 })

@@ -110,6 +110,25 @@ function detail(payloads: SessionEventPayload[] = [], links: RunLinkDto[] = []) 
   };
 }
 
+/**
+ * The terminal is a pane beside the board, opened from the left pane — the board is what the
+ * page opens on. Every test that reads the log or steers the harness opens it first.
+ */
+async function openTerminal(): Promise<void> {
+  fireEvent.click(await screen.findByRole("button", { name: "Terminal" }));
+}
+
+/**
+ * Every card on the board is a button that opens a dialog; the card's accessible name starts
+ * with its kind ("Gate.", "Permission.", "AI decisions."). The gate's actions — Approve, Retry,
+ * Launch, Open review — are in the gate's dialog.
+ */
+async function openCard(name: RegExp): Promise<HTMLElement> {
+  fireEvent.click(await screen.findByRole("button", { name }));
+  return screen.findByRole("dialog");
+}
+const openGate = () => openCard(/^Gate\./);
+
 let restoreWebSocket: () => void;
 let sockets: FakeSocket[];
 beforeEach(() => {
@@ -137,6 +156,7 @@ describe("TaskWorkspace review gate", () => {
         }),
     });
 
+    await openGate();
     const approve = await screen.findByRole("button", { name: /Approve/ });
     expect(approve.hasAttribute("disabled")).toBe(false);
     fireEvent.click(approve);
@@ -170,6 +190,7 @@ describe("TaskWorkspace review gate", () => {
       "review.decide": () => ({ ok: true }),
     });
 
+    await openGate();
     const request = await screen.findByRole("button", { name: /Request changes/ });
     expect(request.hasAttribute("disabled")).toBe(false);
 
@@ -236,8 +257,9 @@ describe("TaskWorkspace review gate", () => {
       target: { value: "why 3?" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save note" }));
+    // And a remark about the change as a whole, at the gate — which counts the note.
+    await openGate();
     expect(await screen.findByText(/1 note/)).toBeDefined();
-    // And a remark about the change as a whole, at the gate.
     fireEvent.change(screen.getByRole("textbox", { name: /Note to the harness/ }), {
       target: { value: "Close, but check the config." },
     });
@@ -293,6 +315,11 @@ describe("TaskWorkspace review gate", () => {
         ]),
     });
 
+    // The gate card already says so; its dialog lists them.
+    expect((await screen.findByRole("button", { name: /^Gate\./ })).textContent).toContain(
+      "3 things left undone",
+    );
+    await openGate();
     const banner = await screen.findByRole("status");
     expect(banner.textContent).toContain("3 open items");
     expect(banner.textContent).toContain("Integration test executed");
@@ -301,7 +328,7 @@ describe("TaskWorkspace review gate", () => {
     expect(screen.getByRole("button", { name: /Approve with 3 open items/ })).toBeDefined();
   });
 
-  it("puts a decision the harness made on the Plan tab, holds Approve until it is settled, and sends the answer with the approval", async () => {
+  it("puts a decision the harness made on the board, holds Approve until it is settled, and sends the answer with the approval", async () => {
     const { log } = renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
       "task.get": () => task(),
       "session.listForTask": () => [session],
@@ -345,19 +372,26 @@ describe("TaskWorkspace review gate", () => {
       "review.decide": () => ({ ok: true }),
     });
 
-    // The decision is part of the plan, so the Plan tab is where it is offered — as a form.
-    const plan = await screen.findByRole("region", { name: "Harness plan" });
-    const form = within(plan).getByRole("group", { name: /What does include select/ });
-    expect(within(form).getAllByRole("radio")).toHaveLength(3);
-    expect(within(form).getByText("harness's pick")).toBeDefined();
-    // Nothing is preselected: the harness's pick is a recommendation, not an answer.
-    expect(within(form).queryByRole("radio", { checked: true })).toBeNull();
+    // The decision is a card on the board; the gate card says one is waiting to be confirmed.
+    expect((await screen.findByRole("button", { name: /^Gate\./ })).textContent).toContain(
+      "1 AI decision to confirm",
+    );
 
     // The gate waits — and Approve, still live, goes to the decision rather than approving.
+    await openGate();
     const approve = screen.getByRole("button", { name: "Approve" });
     expect(approve.hasAttribute("disabled")).toBe(false);
     expect(approve.getAttribute("aria-describedby")).toBe("task-footer-decisions");
     expect(screen.getByRole("status").textContent).toContain("1 decision");
+    fireEvent.click(approve);
+
+    // ...which opens the decisions in its place, as a form.
+    const form = await screen.findByRole("group", { name: /What does include select/ });
+    expect(log.calls.filter((c) => c.path === "review.decide")).toHaveLength(0);
+    expect(within(form).getAllByRole("radio")).toHaveLength(3);
+    expect(within(form).getByText("AI's pick")).toBeDefined();
+    // Nothing is preselected: the harness's pick is a recommendation, not an answer.
+    expect(within(form).queryByRole("radio", { checked: true })).toBeNull();
 
     // The reviewer overturns the harness. The pick is kept in the draft, per round.
     fireEvent.click(within(form).getByRole("radio", { name: /Every nested row/ }));
@@ -366,10 +400,10 @@ describe("TaskWorkspace review gate", () => {
         draft: { decisions: [{ id: "include-semantics", choice: "all" }] },
       }),
     );
-    await waitFor(() => expect(approve.hasAttribute("disabled")).toBe(false));
 
     // And the approval carries the answer, in words the next Step cannot read as a nuance.
-    fireEvent.click(approve);
+    fireEvent.click(screen.getByRole("button", { name: "Back to the gate" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
     await waitFor(() =>
       expect(log.calls.filter((c) => c.path === "review.decide")).toHaveLength(1),
     );
@@ -384,7 +418,7 @@ describe("TaskWorkspace review gate", () => {
     );
   });
 
-  it("says in the footer what the running harness is stopped on, until it is answered", async () => {
+  it("puts what the running harness is stopped on on the board, as a node that answers it", async () => {
     const ask = {
       kind: "permission_request" as const,
       requestId: "checkpoint:r1:1",
@@ -406,10 +440,19 @@ describe("TaskWorkspace review gate", () => {
       "session.listForTask": () => [session],
       "session.get": () => detail([ask]),
     });
-    expect(await screen.findByRole("button", { name: "Go to the question" })).toBeDefined();
-    expect(screen.getByRole("status").textContent).toContain("git push origin feature");
-    // The card in the transcript is still the one place it is answered.
-    expect(screen.getAllByRole("button", { name: "Allow once" })).toHaveLength(1);
+    // A card on the board, amber, and counted in the left pane — with nothing to press on it.
+    const card = await screen.findByRole("button", {
+      name: /^Permission\. .*Pushes: git push origin feature/,
+    });
+    expect(screen.queryByRole("button", { name: "Allow once" })).toBeNull();
+    expect(document.querySelector("[data-needs-you]")?.getAttribute("data-needs-you")).toBe("1");
+    // Its dialog is where it is answered.
+    fireEvent.click(card);
+    const dialog = await screen.findByRole("dialog");
+    const question = within(dialog).getByRole("group", {
+      name: "Permission request: Pushes: git push origin feature",
+    });
+    expect(within(question).getByRole("button", { name: "Allow once" })).toBeDefined();
     unmount();
 
     renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
@@ -417,8 +460,10 @@ describe("TaskWorkspace review gate", () => {
       "session.listForTask": () => [session],
       "session.get": () => detail([ask, settled]),
     });
-    await screen.findByText(/The harness is working/);
-    expect(screen.queryByRole("button", { name: "Go to the question" })).toBeNull();
+    // Settled, it stays on the board as the record of what was asked and who answered.
+    await screen.findByText(/chosen by the operator/);
+    expect(screen.queryByRole("button", { name: "Allow once" })).toBeNull();
+    expect(document.querySelector("[data-needs-you]")?.getAttribute("data-needs-you")).toBe("0");
   });
 
   it("offers Open review on a Workflow Step that finished with nothing to do — the plan is what is reviewed", async () => {
@@ -437,6 +482,7 @@ describe("TaskWorkspace review gate", () => {
       "task.submitForReview": () => task({ state: "review" }),
     });
 
+    await openGate();
     fireEvent.click(await screen.findByRole("button", { name: "Open review" }));
     await waitFor(() =>
       expect(log.calls.filter((c) => c.path === "task.submitForReview")).toHaveLength(1),
@@ -454,8 +500,11 @@ describe("TaskWorkspace review gate", () => {
       }),
     });
 
-    // The foot still says something — what the harness is doing — but offers no decision.
-    expect(await screen.findByText(/The harness is working/)).toBeDefined();
+    // The board shows the run going, and no gate under it.
+    await waitFor(() =>
+      expect(document.querySelector('[data-step-status="running"]')).not.toBeNull(),
+    );
+    expect(document.querySelector('[data-board-kind="gate"]')).toBeNull();
     expect(screen.queryByRole("button", { name: /Approve/ })).toBeNull();
   });
 
@@ -467,10 +516,11 @@ describe("TaskWorkspace review gate", () => {
       "task.retry": () => task({ state: "running" }),
     });
 
-    // Said twice on purpose — the header's chip beside the state, and the footer's badge beside
-    // Retry — so "Failed" and the reason are never read as two facts that disagree.
+    // Said twice on purpose — the header's chip beside the state, and the gate card under the
+    // Step — so "Failed" and the reason are never read as two facts that disagree.
     expect(await screen.findAllByText("Interrupted by restart")).toHaveLength(2);
     expect(document.querySelector("[data-failure-chip]")).not.toBeNull();
+    await openGate();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     await waitFor(() => {
       expect(log.calls.filter((c) => c.path === "task.retry")).toHaveLength(1);
@@ -488,25 +538,34 @@ describe("TaskWorkspace review gate", () => {
       },
     });
 
+    await openGate();
     fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).not.toContain(TaskErrorCode.ConcurrencyCapReached);
     expect(alert.textContent?.length ?? 0).toBeGreaterThan(20);
   });
 
-  it("renders recorded harness output in the terminal panel", async () => {
-    renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
+  it("opens a shell in the Task's worktree, not a log, and asks for a ticket for this Task", async () => {
+    const { log } = renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
       "task.get": () => task(),
       "session.listForTask": () => [session],
-      "session.get": () =>
-        detail([{ kind: "assistant_turn", text: "patched latch.ts\n", thinking: false }]),
+      "session.get": () => detail(),
       "stream.ticket": () => ({
         url: "ws://hub.test/?ticket=t",
         expiresAt: "2026-01-01T00:01:00.000Z",
       }),
     });
 
-    expect(await screen.findByText(/patched latch.ts/)).toBeDefined();
+    await openTerminal();
+    const pane = await screen.findByRole("region", { name: "Terminal" });
+    expect(pane.querySelector("[data-task-terminal]")).not.toBeNull();
+    await waitFor(() =>
+      expect(
+        log.calls.filter((c) => c.path === "stream.ticket").map((c) => c.input),
+      ).toContainEqual({ taskId: TASK_ID }),
+    );
+    // The harness's own log is not drawn anywhere on the page any more.
+    expect(screen.queryByRole("group", { name: "Transcript filters" })).toBeNull();
   });
 });
 
@@ -547,8 +606,13 @@ describe("TaskWorkspace dependencies (issue #6)", () => {
     expect(blocker.getAttribute("href")).toBe("/task/task-0");
     const dependant = await screen.findByRole("link", { name: /Hang the gate/ });
     expect(dependant.getAttribute("href")).toBe("/task/task-9");
+    // The gate card says what it waits on before it is opened.
+    expect((await screen.findByRole("button", { name: /^Gate\./ })).textContent).toContain(
+      "Waits on 1 task",
+    );
     // Launch is refused here, in words, rather than after a round trip as a wire code — and
     // stays live, so the refusal reaches a keyboard too.
+    await openGate();
     expect(screen.getByRole("button", { name: "Launch" }).getAttribute("aria-disabled")).toBe(
       "true",
     );
@@ -562,6 +626,7 @@ describe("TaskWorkspace dependencies (issue #6)", () => {
       "task.dependencies": () => [],
     });
 
+    await openGate();
     expect(await screen.findByRole("button", { name: "Launch" })).toBeDefined();
     expect(document.querySelector("[data-task-dependencies]")).toBeNull();
     expect(screen.getByRole("button", { name: "Launch" }).hasAttribute("disabled")).toBe(false);
@@ -759,15 +824,15 @@ describe("TaskWorkspace in History (Decision 0025)", () => {
       id: TASK_ID,
       includeDeleted: true,
     });
-    // The record is readable; nothing that would act on the Task is offered.
-    expect(await screen.findByText(/the record survives/)).toBeDefined();
+    // Nothing that would act on the Task is offered — a shell in its worktree included.
+    expect((await screen.findByRole("button", { name: "Terminal" })).hasAttribute("disabled")).toBe(
+      true,
+    );
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
     expect(screen.queryByRole("button", { name: `Delete ${"Fix the gate latch"}` })).toBeNull();
     expect(screen.queryByRole("button", { name: "Split into sub-task" })).toBeNull();
-    // A deleted Task is never running, so there is no steering field — a sentence, not a form.
-    fireEvent.mouseDown(screen.getByRole("tab", { name: "Run" }), { button: 0 });
+    // A deleted Task is never running, so there is no steering field.
     expect(screen.queryByLabelText(/Message the harness/)).toBeNull();
-    expect(screen.getByText(/Not running/)).toBeDefined();
 
     fireEvent.click(within(banner).getByRole("button", { name: "Restore" }));
     await waitFor(() => expect(log.calls.filter((c) => c.path === "task.restore")).toHaveLength(1));
@@ -818,6 +883,7 @@ describe("TaskWorkspace destructive actions", () => {
       "review.decide": () => ({ ok: true }),
     });
 
+    await openGate();
     fireEvent.click(await screen.findByRole("button", { name: /Reject/ }));
     // The click opens a confirmation; nothing has been decided yet.
     expect(log.calls.filter((c) => c.path === "review.decide")).toHaveLength(0);
@@ -846,6 +912,7 @@ describe("TaskWorkspace destructive actions", () => {
       "review.decide": () => ({ ok: true }),
     });
 
+    await openGate();
     fireEvent.click(await screen.findByRole("button", { name: /Reject/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
 
@@ -865,10 +932,38 @@ describe("TaskWorkspace destructive actions", () => {
       "review.decide": () => ({ ok: true }),
     });
 
+    await openGate();
     fireEvent.click(await screen.findByRole("button", { name: /Approve/ }));
     await waitFor(() => {
       expect(log.calls.filter((c) => c.path === "review.decide")).toHaveLength(1);
     });
+  });
+});
+
+describe("TaskWorkspace terminal pane", () => {
+  it("opens at the page's right edge, is resized from the keyboard, and closes back to its button", async () => {
+    renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
+      "task.get": () => task({ state: "running" }),
+      "session.listForTask": () => [session],
+      "session.get": () => detail(),
+    });
+    await openTerminal();
+    const pane = await screen.findByRole("region", { name: "Terminal" });
+    // Beside the page's own column — header included — not inside it.
+    expect(pane.parentElement?.contains(screen.getByRole("heading", { level: 1 }))).toBe(true);
+    expect(pane.contains(screen.getByRole("heading", { level: 1 }))).toBe(false);
+    expect(
+      screen.getByRole("heading", { level: 1 }).closest("header")?.parentElement?.contains(pane),
+    ).toBe(false);
+
+    const edge = within(pane).getByRole("separator", { name: "Resize the terminal" });
+    const before = Number(edge.getAttribute("aria-valuenow"));
+    fireEvent.keyDown(edge, { key: "ArrowLeft" });
+    expect(Number(edge.getAttribute("aria-valuenow"))).toBe(before + 20);
+
+    fireEvent.click(within(pane).getByRole("button", { name: "Close terminal" }));
+    expect(screen.queryByRole("region", { name: "Terminal" })).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Terminal" }));
   });
 });
 
@@ -904,9 +999,8 @@ describe("TaskWorkspace harness steering (TASK-022)", () => {
     // In Review the way to ask for more work is "request changes", which is recorded
     // (Principle I) — a back channel into the harness would bypass that.
     renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, handlers("review"));
-    // In Review the page opens on the review; the composer is on the Run tab.
-    fireEvent.mouseDown(await screen.findByRole("tab", { name: "Run" }), { button: 0 });
-    expect(await screen.findByText(/Not running/)).toBeDefined();
+    // The steer box is under the board only while there is a run to reach.
+    await screen.findByRole("button", { name: /^Gate\./ });
     expect(screen.queryByLabelText(/Message the harness/)).toBeNull();
     expect(screen.queryByRole("button", { name: /Send/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /^Stop/ })).toBeNull();
@@ -1007,22 +1101,16 @@ describe("TaskWorkspace permission prompt (issue #58)", () => {
     ],
   };
 
-  it("asks inline in the transcript, where the operator can still read what it is about", async () => {
-    // The modal traps focus, so with it open an operator cannot see the tool call they are being
-    // asked to approve. The inline card is the primary surface for exactly that reason; the
-    // modal is kept only for when the question is on a panel nobody is looking at.
+  it("puts the request on the board as a card, and answers it from the card's dialog", async () => {
+    // The card says what is asked; the dialog it opens is the transcript's own permission card,
+    // with the harness's options in its order and no dismiss.
     renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, handlers);
     await waitFor(() => expect(sockets[0]).toBeDefined());
 
     act(() => sockets[0]?.emit(permissionFrame));
 
-    const card = await screen.findByRole("group", {
-      name: /Write \.env in the worktree/,
-    });
-    expect(card).toBeDefined();
-    // No modal while the operator is already looking at the transcript it appeared in.
-    expect(screen.queryByRole("alertdialog")).toBeNull();
-
+    const dialog = await openCard(/^Permission\. .*Write \.env in the worktree/);
+    const card = within(dialog).getByRole("group", { name: /Write \.env in the worktree/ });
     fireEvent.click(within(card).getByRole("button", { name: "Allow once" }));
 
     await waitFor(() =>
@@ -1030,6 +1118,8 @@ describe("TaskWorkspace permission prompt (issue #58)", () => {
         { kind: "permission", taskId: TASK_ID, requestId: "req-1", optionId: "once" },
       ]),
     );
+    // Answered, there is nothing left in it to do: the dialog closes itself.
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
   it("stops offering a choice once the request is settled, however it was settled", async () => {
@@ -1039,6 +1129,8 @@ describe("TaskWorkspace permission prompt (issue #58)", () => {
     await waitFor(() => expect(sockets[0]).toBeDefined());
 
     act(() => sockets[0]?.emit(permissionFrame));
+    // Open while the policy settles it: the dialog reads the card as it is now, not as it was.
+    await openCard(/^Permission\./);
     expect(await screen.findByRole("button", { name: "Allow once" })).toBeDefined();
 
     act(() =>
@@ -1056,7 +1148,8 @@ describe("TaskWorkspace permission prompt (issue #58)", () => {
     // Wait on the settled copy appearing rather than on the button vanishing: a `waitFor` over a
     // negative assertion re-serialises the whole DOM on every retry, which on this page is slow
     // enough to look like a hang.
-    expect(await screen.findByText(/settled by policy/i)).toBeDefined();
+    const dialog = screen.getByRole("dialog");
+    expect(await within(dialog).findByText(/settled by policy/i)).toBeDefined();
     // ...and with it settled, the choice is gone: a question that no longer reaches anything must
     // not still be offering buttons.
     expect(screen.queryByRole("button", { name: "Allow once" })).toBeNull();
@@ -1193,8 +1286,10 @@ describe("the Changes tab of a multi-Repository Task", () => {
     expect(within(api).getByText(/Lockfile changed: bun.lock/)).toBeDefined();
     // The second repository changed too, and that is said once at the top, not discovered below.
     expect(screen.getByText(/Changes outside the primary repository: shared-lib/)).toBeDefined();
-    // And the gate's one line now carries the weight as well as the count.
-    expect(screen.getByText(/Approving covers .*4 files, \+342 −506/)).toBeDefined();
+    // And the gate's one line now carries the weight as well as the count — opened from the strip
+    // under the change, without going back to the board.
+    fireEvent.click(screen.getByRole("button", { name: "Open the gate" }));
+    expect(await screen.findByText(/Approving covers .*4 files, \+342 −506/)).toBeDefined();
   });
 
   it("walks back through the review rounds, read-only, with what was decided on each", async () => {
@@ -1245,8 +1340,8 @@ describe("the Changes tab of a multi-Repository Task", () => {
     // What the reviewer said then — the part a new round used to lose.
     expect(screen.getByText("Changes requested")).toBeDefined();
     expect(screen.getByText("the other config file")).toBeDefined();
-    // The gate still speaks of the latest round, whatever the tab shows.
-    expect(screen.getByRole("button", { name: /Approve/ })).toBeDefined();
+    // The gate is still a strip away, about the latest round whatever the tab shows.
+    expect(screen.getByRole("button", { name: "Open the gate" })).toBeDefined();
   });
 
   it("offers earlier launches when a Retry opened a second Session, and reads the one picked", async () => {
@@ -1269,13 +1364,14 @@ describe("the Changes tab of a multi-Repository Task", () => {
           : detail([{ kind: "assistant_turn", text: "second attempt", thinking: false }]),
     });
 
-    expect(await screen.findByText(/second attempt/)).toBeDefined();
-    const picker = screen.getByRole("combobox", { name: "Launch" });
+    fireEvent.mouseDown(await screen.findByRole("tab", { name: /Changes/ }), { button: 0 });
+    const picker = await screen.findByRole("combobox", { name: "Launch" });
     fireEvent.change(picker, { target: { value: older.id } });
-    expect(await screen.findByText(/first attempt/)).toBeDefined();
-    expect(log.calls.filter((c) => c.path === "session.get").at(-1)?.input).toMatchObject({
-      sessionId: older.id,
-    });
+    await waitFor(() =>
+      expect(log.calls.filter((c) => c.path === "session.get").at(-1)?.input).toMatchObject({
+        sessionId: older.id,
+      }),
+    );
   });
 
   it("lets the reviewer tick files off as read, counts them at the gate, and remembers per round", async () => {
@@ -1319,10 +1415,14 @@ describe("the Changes tab of a multi-Repository Task", () => {
     });
 
     await openChangesTab();
-    expect(await screen.findByText(/0 of 2 files viewed/)).toBeDefined();
+    fireEvent.click(await screen.findByRole("button", { name: "Open the gate" }));
+    expect(await screen.findByText(/looked at 0 of the 2 changed files/)).toBeDefined();
+    fireEvent.keyDown(await screen.findByRole("dialog"), { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 
     fireEvent.click(await screen.findByRole("checkbox", { name: "Mark src/a.ts viewed" }));
-    expect(await screen.findByText(/1 of 2 files viewed/)).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Open the gate" }));
+    expect(await screen.findByText(/looked at 1 of the 2 changed files/)).toBeDefined();
     await waitFor(() =>
       expect(log.calls.filter((c) => c.path === "preference.setReviewDraft")).toHaveLength(1),
     );
@@ -1339,7 +1439,7 @@ describe("the Changes tab of a multi-Repository Task", () => {
     expect(screen.getByRole("button", { name: "Approve" }).hasAttribute("disabled")).toBe(false);
   });
 
-  it("opens on the Review brief at the gate, lines criteria up with claims, and keeps the reviewer's ticks", async () => {
+  it("opens the Review brief from the gate, lines criteria up with claims, and keeps the reviewer's ticks", async () => {
     const { log } = renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
       ...baseHandlers,
       // A round to draft against: the draft's ticks are per round, and a Task at its gate has one.
@@ -1396,15 +1496,32 @@ describe("the Changes tab of a multi-Repository Task", () => {
       }),
     });
 
-    const tab = await screen.findByRole("tab", { name: /Brief/ });
+    // The gate's dialog names the criteria still to verify, and is the way to the brief.
+    await openGate();
+    expect(await screen.findByText(/verified 0 of the 3 acceptance criteria/)).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Open the brief" }));
+    const tab = screen.getByRole("tab", { name: /Brief/ });
     await waitFor(() => expect(tab.getAttribute("aria-selected")).toBe("true"));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+    // The index on the left, one entry at full size on the right — the first still to verify.
     const brief = await screen.findByRole("region", { name: "Acceptance criteria" });
     expect(within(brief).getByText(/0 of 3 verified by you/)).toBeDefined();
-    // A criterion the harness said nothing about is the loudest row.
-    expect(within(brief).getByText(/made no claim about this criterion/)).toBeDefined();
+    expect(screen.getByRole("article", { name: "AC-1" })).toBeDefined();
+    // A criterion the harness said nothing about is flagged in the index and said in full.
+    fireEvent.click(within(brief).getByRole("button", { name: /AC-15/ }));
+    expect(
+      within(screen.getByRole("article", { name: "AC-15" })).getByText(
+        /made no claim about this criterion/,
+      ),
+    ).toBeDefined();
     // A named test that never ran is said so, next to the criterion it was supposed to prove.
-    expect(within(brief).getByText(/not executed/)).toBeDefined();
+    fireEvent.click(within(brief).getByRole("button", { name: /AC-14/ }));
+    expect(
+      within(screen.getByRole("article", { name: "AC-14" })).getByText(/not executed/),
+    ).toBeDefined();
     // And a check that ran in a copy is flagged where the checks are listed.
+    fireEvent.click(screen.getByRole("button", { name: /Verifications/ }));
     const checks = screen.getByRole("region", { name: "Verifications" });
     expect(checks.textContent).toContain("811 pass / 6 fail");
     expect(checks.textContent).toContain("not this worktree");
@@ -1643,20 +1760,23 @@ describe("TaskWorkspace todo checklist", () => {
     { content: "Add a regression test", status: "pending" as const },
   ];
 
-  it("draws the list a finished run left behind", async () => {
+  it("draws the list a finished run left behind, on the board", async () => {
     renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, handlers([{ kind: "todos", items }]));
 
-    fireEvent.mouseDown(await screen.findByRole("tab", { name: /Plan/ }), { button: 0 });
-    const plan = await screen.findByRole("region", { name: "Harness plan" });
-    expect(within(plan).getByText("Read the latch code")).toBeDefined();
-    // The live item is shown in the present tense the harness wrote for exactly this moment.
-    expect(within(plan).getByText("Writing the fix")).toBeDefined();
-    expect(within(plan).getByText("1 of 3 done")).toBeDefined();
+    // The card: how far along, and the live item in the present tense the harness wrote for it.
+    const card = await screen.findByRole("button", { name: /^Todo list\./ });
+    expect(card.textContent).toContain("1/3 done");
+    expect(card.textContent).toContain("Writing the fix");
+    // The whole list is in its dialog.
+    fireEvent.click(card);
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("Read the latch code")).toBeDefined();
+    expect(within(dialog).getByText("Writing the fix")).toBeDefined();
+    expect(within(dialog).getByText("1 of 3 done")).toBeDefined();
   });
 
-  it("shows a step_card plan on the Plan tab when the harness published no todo list", async () => {
-    // A plan-first Step typically publishes its plan as a `step_card` widget and nothing else;
-    // a Plan tab that only read `todos` sat disabled beside a transcript containing the plan.
+  it("shows a step_card plan on the board when the harness published no todo list", async () => {
+    // A plan-first Step typically publishes its plan as a `step_card` widget and nothing else.
     renderWithTrpc(
       <TaskWorkspace taskId={TASK_ID} />,
       handlers([
@@ -1675,27 +1795,28 @@ describe("TaskWorkspace todo checklist", () => {
       ]),
     );
 
-    fireEvent.mouseDown(await screen.findByRole("tab", { name: /Plan/ }), { button: 0 });
-    const plan = await screen.findByRole("region", { name: "Harness plan" });
-    expect(within(plan).getByText("Plan: fix the latch")).toBeDefined();
-    expect(within(plan).getByText("Write the fix")).toBeDefined();
-    expect(screen.getByRole("tab", { name: /Plan/ }).hasAttribute("disabled")).toBe(false);
+    const card = await screen.findByRole("button", { name: /^Plan\./ });
+    expect(card.textContent).toContain("Plan: fix the latch");
+    fireEvent.click(card);
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("Study the latch code")).toBeDefined();
+    expect(within(dialog).getByText("Write the fix")).toBeDefined();
   });
 
-  it("shows no panel at all until the harness has published a plan", async () => {
+  it("draws no plan card until the harness has published one", async () => {
     renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, handlers());
 
     await screen.findByRole("tablist", { name: "Task" });
-    expect(screen.queryByRole("region", { name: "Harness plan" })).toBeNull();
-    // The tab is still there and still opens — onto a panel that says so, never a heading over
-    // nothing and never a greyed tab with a reason nobody can read.
-    const plan = screen.getByRole("tab", { name: "Plan" });
-    expect(plan.hasAttribute("disabled")).toBe(false);
-    fireEvent.mouseDown(plan, { button: 0 });
-    expect(screen.getByText("No plan yet.")).toBeDefined();
+    expect(screen.queryByRole("button", { name: /^Plan\./ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Todo list\./ })).toBeNull();
+    // The legend says so too: nothing of either kind to go to.
+    const legend = screen.getByRole("navigation", { name: "On the board" });
+    expect(within(legend).getByRole("button", { name: /Plan/ }).hasAttribute("disabled")).toBe(
+      true,
+    );
   });
 
-  it("opens on the run while the run is going, and on the change once one is captured", async () => {
+  it("opens on the board in every state, and takes a pick back to it when the gate opens", async () => {
     let state: TaskDto["state"] = "running";
     const diff: SessionEventPayload = {
       kind: "diff",
@@ -1715,20 +1836,16 @@ describe("TaskWorkspace todo checklist", () => {
       }),
     });
 
-    // The run is the thing to watch while it is going; the plan is a tab away.
-    const run = await screen.findByRole("tab", { name: "Run" });
-    await waitFor(() => expect(run.getAttribute("aria-selected")).toBe("true"));
-    const plan = screen.getByRole("tab", { name: /Plan/ });
-    fireEvent.mouseDown(plan, { button: 0 });
-    expect(screen.getByRole("region", { name: "Harness plan" })).toBeDefined();
+    // The board is the thing to watch while the run is going: its todos are on it.
+    const board = await screen.findByRole("tab", { name: "Board" });
+    await waitFor(() => expect(board.getAttribute("aria-selected")).toBe("true"));
+    expect(await screen.findByRole("button", { name: /^Todo list\./ })).toBeDefined();
 
     // The reviewer's pick wins over the default, until the Task moves on.
     fireEvent.mouseDown(screen.getByRole("tab", { name: /Changes/ }), { button: 0 });
     expect(screen.getByRole("tab", { name: /Changes/ }).getAttribute("aria-selected")).toBe("true");
-    fireEvent.mouseDown(plan, { button: 0 });
-    expect(plan.getAttribute("aria-selected")).toBe("true");
 
-    // The run reaches its gate: the diff lands and the page turns to it.
+    // The run reaches its gate: the page goes back to the board, where the gate now is.
     state = "review";
     payloads = [...payloads, diff];
     await waitFor(() => expect(sockets[0]).toBeDefined());
@@ -1740,16 +1857,15 @@ describe("TaskWorkspace todo checklist", () => {
         at: "2026-01-01T00:00:00.000Z",
       }),
     );
-    await waitFor(() =>
-      expect(screen.getByRole("tab", { name: /Changes/ }).getAttribute("aria-selected")).toBe(
-        "true",
-      ),
-    );
+    await waitFor(() => expect(board.getAttribute("aria-selected")).toBe("true"));
+    await openGate();
+    expect(await screen.findByRole("button", { name: "Approve" })).toBeDefined();
   });
 
   it("follows the run: a list published mid-run lands without a reload", async () => {
     renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, handlers([{ kind: "todos", items }]));
-    await screen.findByText("1 of 3 done");
+    const todos = await screen.findByRole("button", { name: /^Todo list\./ });
+    expect(todos.textContent).toContain("1/3 done");
     await waitFor(() => expect(sockets[0]).toBeDefined());
 
     act(() =>
@@ -1768,7 +1884,11 @@ describe("TaskWorkspace todo checklist", () => {
 
     // The whole list is republished on every write, so the newer one replaces the older outright
     // rather than merging into it — which is why the count moves and "Writing the fix" is gone.
-    expect(await screen.findByText("2 of 3 done")).toBeDefined();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /^Todo list\./ }).textContent).toContain(
+        "2/3 done",
+      ),
+    );
     expect(await screen.findByText("Adding a test")).toBeDefined();
     expect(screen.queryByText("Writing the fix")).toBeNull();
   });
@@ -1803,7 +1923,7 @@ describe("TaskWorkspace live state", () => {
       }),
     });
 
-    await screen.findByText("still going");
+    await screen.findByRole("tablist", { name: "Task" });
     await waitFor(() => expect(sockets[0]).toBeDefined());
     // Nothing to decide while it runs.
     expect(screen.queryByRole("button", { name: /Approve/ })).toBeNull();
@@ -1818,6 +1938,7 @@ describe("TaskWorkspace live state", () => {
       }),
     );
 
+    await openGate();
     expect(await screen.findByRole("button", { name: /Approve/ })).toBeDefined();
   });
 });
@@ -1900,13 +2021,59 @@ describe("TaskWorkspace workflow steps", () => {
     expect(items.map((li) => li.getAttribute("data-status"))).toEqual(["done", "done", "done"]);
   });
 
+  it("opens a Step from its header on the board: its prompt, and the way to scope the board to it", async () => {
+    const { log } = renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
+      ...base,
+      "task.get": () => task({ state: "running", workflowId: "wf-1", workflowStepId: "st-2" }),
+      "workflow.taskBinding": () => binding("st-2"),
+    });
+
+    const dialog = await openCard(/^Step\. Implement/);
+    expect(within(dialog).getByText("Step 1 of 3")).toBeDefined();
+    expect(within(dialog).getByRole("region", { name: "The step's prompt" }).textContent).toContain(
+      "Do it.",
+    );
+    // The board is read for the Step picked: the dialog closes and the page asks for that Step.
+    fireEvent.click(within(dialog).getByRole("button", { name: "Show this step on the board" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() =>
+      expect(log.calls.filter((c) => c.path === "session.get").at(-1)?.input).toEqual({
+        sessionId: SESSION_ID,
+        workflowStepId: "st-1",
+      }),
+    );
+  });
+
+  it("forces a review on a Step from its header's right-click menu", async () => {
+    const { log } = renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
+      ...base,
+      "task.get": () => task({ state: "running", workflowId: "wf-1", workflowStepId: "st-1" }),
+      "workflow.taskBinding": () => ({ ...binding("st-1"), forcedReviewStepIds: [] }),
+      "workflow.forceReview": () => ({ ...binding("st-1"), forcedReviewStepIds: ["st-1"] }),
+    });
+
+    fireEvent.contextMenu(await screen.findByRole("button", { name: /^Step\. Implement/ }));
+    fireEvent.click(
+      await screen.findByRole("menuitemcheckbox", { name: "Force review on this step" }),
+    );
+
+    await waitFor(() =>
+      expect(log.calls.find((c) => c.path === "workflow.forceReview")?.input).toEqual({
+        taskId: TASK_ID,
+        stepId: "st-1",
+        force: true,
+      }),
+    );
+  });
+
   it("shows nothing for a Task on no Workflow, and never asks for its binding", async () => {
     const { log } = renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
       ...base,
       "task.get": () => task(),
     });
 
-    await screen.findByText(/Review actions become available|Approve/);
+    // The board is drawn — one Run column with its gate — and no Workflow strip above it.
+    await screen.findByRole("button", { name: /^Gate\./ });
     expect(screen.queryByRole("region", { name: "Workflow progress" })).toBeNull();
     expect(log.calls.some((c) => c.path === "workflow.taskBinding")).toBe(false);
   });
@@ -1922,7 +2089,7 @@ describe("TaskWorkspace workflow steps", () => {
  * assertions cover the other half: frames that arrive after the query ran have to obey the same
  * scope, and the frames that carry no Step at all have to survive it.
  */
-describe("TaskWorkspace step-scoped terminal", () => {
+describe("TaskWorkspace step-scoped board", () => {
   const step = (id: string, name: string, position: number) => ({
     id,
     workflowId: "wf-1",
@@ -1981,18 +2148,15 @@ describe("TaskWorkspace step-scoped terminal", () => {
     }
   });
 
-  it("says which Step it is showing, so a short transcript is not read as a short run", async () => {
+  it("makes the board the panel the Step strip controls", async () => {
     renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, bound("st-2"));
 
-    // The terminal's panel, not the right column's — that has tabs of its own now.
     const strip = await screen.findByRole("region", { name: "Workflow progress" });
-    const panelId = within(strip)
-      .getByRole("tab", { name: /Review/ })
-      .getAttribute("aria-controls");
-    const panel = document.getElementById(panelId ?? "") as HTMLElement;
-    expect(panel.textContent).toContain("Showing");
-    expect(panel.textContent).toContain("step 2 of 3");
-    expect(panel.textContent).toContain("The rest of this run is under the other steps.");
+    const tab = within(strip).getByRole("tab", { name: /Review/ });
+    const panel = document.getElementById(tab.getAttribute("aria-controls") ?? "");
+    expect(panel?.getAttribute("role")).toBe("tabpanel");
+    expect(panel?.getAttribute("aria-labelledby")).toBe(tab.id);
+    expect(panel?.querySelector(".task-board")).not.toBeNull();
   });
 
   it("re-asks the server, scoped, when a Step is clicked", async () => {
@@ -2096,34 +2260,38 @@ describe("TaskWorkspace step-scoped terminal", () => {
     });
   });
 
-  it("keeps another Step's live output out, and everything unattributed in", async () => {
+  it("keeps another Step's live questions off the board, and everything unattributed on it", async () => {
     renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, bound("st-2"));
     await screen.findByRole("region", { name: "Workflow progress" });
     await waitFor(() => expect(sockets[0]).toBeDefined());
 
-    const line = (seq: number, text: string, workflowStepId?: string | null) => ({
-      kind: "stdout",
+    const ask = (seq: number, title: string, workflowStepId?: string | null) => ({
+      kind: "permission_request",
       taskId: TASK_ID,
       sessionId: SESSION_ID,
       seq,
-      text,
-      channel: "assistant",
+      requestId: `req-${seq}`,
+      title,
+      toolKind: "edit",
+      toolCallId: null,
+      options: [{ optionId: "once", name: "Allow once", kind: "allow_once" }],
       ...(workflowStepId === undefined ? {} : { workflowStepId }),
     });
 
     act(() => {
-      sockets[0]?.emit(line(1, "belongs to the review step", "st-2"));
-      sockets[0]?.emit(line(2, "belongs to the implement step", "st-1"));
+      sockets[0]?.emit(ask(1, "asked on the review step", "st-2"));
+      sockets[0]?.emit(ask(2, "asked on the implement step", "st-1"));
       // Null and absent are the same answer — unattributed — and neither is a Step to filter to.
-      // An orchestrator older than the column sends the second; a Task on no Workflow, the first.
-      sockets[0]?.emit(line(3, "written before Steps were recorded", null));
-      sockets[0]?.emit(line(4, "from a producer that never heard of Steps"));
+      sockets[0]?.emit(ask(3, "asked before Steps were recorded", null));
+      sockets[0]?.emit(ask(4, "asked by a producer that never heard of Steps"));
     });
 
-    expect(await screen.findByText(/belongs to the review step/)).toBeDefined();
-    expect(await screen.findByText(/written before Steps were recorded/)).toBeDefined();
-    expect(await screen.findByText(/from a producer that never heard of Steps/)).toBeDefined();
-    expect(screen.queryByText(/belongs to the implement step/)).toBeNull();
+    expect(await screen.findByRole("button", { name: /asked on the review step/ })).toBeDefined();
+    expect(screen.getByRole("button", { name: /asked before Steps were recorded/ })).toBeDefined();
+    expect(
+      screen.getByRole("button", { name: /asked by a producer that never heard of Steps/ }),
+    ).toBeDefined();
+    expect(screen.queryByRole("button", { name: /asked on the implement step/ })).toBeNull();
   });
 
   it("is operable from the keyboard, one tab stop for the whole strip", async () => {
@@ -2155,24 +2323,20 @@ describe("TaskWorkspace step-scoped terminal", () => {
     const { log } = renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
       "task.get": () => task({ state: "running" }),
       "session.listForTask": () => [session],
-      "session.get": () =>
-        detail([{ kind: "assistant_turn", text: "patched latch.ts", thinking: false }]),
+      "session.get": () => detail(),
       "stream.ticket": () => ({
         url: "ws://hub.test/?ticket=t",
         expiresAt: "2026-01-01T00:01:00.000Z",
       }),
     });
 
-    await screen.findByText(/patched latch.ts/);
+    await screen.findByRole("tablist", { name: "Task" });
+    await waitFor(() => expect(sessionGets(log).length).toBeGreaterThan(0));
     // No strip, so no Step tabs, so no panel pretending to be one half of a relationship with
-    // them — and the transcript request is the one this page has always made. (The right column
-    // has a tablist of its own; the terminal is the panel under test.)
+    // them — and the request is the one this page has always made.
     expect(screen.queryByRole("region", { name: "Workflow progress" })).toBeNull();
     expect(screen.queryByRole("tab", { name: "Whole run" })).toBeNull();
-    expect(document.getElementById("task-terminal-panel")?.getAttribute("role")).not.toBe(
-      "tabpanel",
-    );
-    expect(screen.queryByText(/The rest of this run/)).toBeNull();
+    expect(document.getElementById("task-step-panel")).toBeNull();
     for (const call of sessionGets(log)) {
       expect(call.input).toEqual({ sessionId: SESSION_ID });
     }

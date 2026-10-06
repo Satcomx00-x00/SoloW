@@ -145,7 +145,7 @@ describe("TaskFooter", () => {
 
   it("says how much of the change was read, on the gate and never as a lock", () => {
     renderFooter({ state: "review" }, { viewed: { viewed: 7, of: 12 } });
-    expect(screen.getByText(/7 of 12 files viewed/)).toBeDefined();
+    expect(screen.getByText(/looked at 7 of the 12 changed files/)).toBeDefined();
     const approve = screen.getByRole("button", { name: "Approve" });
     expect(approve.hasAttribute("disabled")).toBe(false);
   });
@@ -186,7 +186,7 @@ describe("TaskFooter", () => {
     const approve = screen.getByRole("button", { name: "Approve" });
     expect(approve.hasAttribute("disabled")).toBe(false);
     expect(screen.getByRole("status").textContent).toContain("2 decisions");
-    expect(screen.getByRole("status").textContent).toContain("Plan tab");
+    expect(screen.getByRole("status").textContent).toContain("waiting for your answer");
     fireEvent.click(approve);
     expect(sent).toBe(1);
     expect(calls).toEqual([]);
@@ -210,6 +210,18 @@ describe("TaskFooter", () => {
     for (const name of ["Approve", "Request changes", "Reject"]) {
       expect(screen.getByRole("button", { name }).hasAttribute("disabled")).toBe(true);
     }
+  });
+
+  it("holds the gate on a decision already sent, until the task moves on", () => {
+    // An approval is applied by the run seconds later; offered again in between, it was clicked
+    // twenty-five times on a real Task.
+    renderFooter({ state: "review" }, { decisionSent: "approve" });
+    for (const name of ["Approve", "Request changes", "Reject"]) {
+      expect(screen.getByRole("button", { name }).hasAttribute("disabled")).toBe(true);
+    }
+    expect(document.querySelector("[data-decision-sent=approve]")?.textContent).toContain(
+      "Approved.",
+    );
   });
 
   it("opens the gate on a finished run from the foot, where the decisions are", () => {
