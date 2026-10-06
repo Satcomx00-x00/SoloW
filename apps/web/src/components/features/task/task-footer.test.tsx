@@ -177,6 +177,47 @@ describe("TaskFooter", () => {
     expect(approve.hasAttribute("disabled")).toBe(false);
   });
 
+  it("says the answers go back to this step before the workflow moves on", () => {
+    renderFooter(
+      { state: "review" },
+      { decisionsToApply: 2, nextStepName: "Clarify", layout: "stack" },
+    );
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("The harness first applies your answers to this step");
+    expect(text).toContain("then the workflow moves on to its next step, Clarify.");
+    expect(text).not.toContain(", and the workflow moves on to its next step");
+  });
+
+  it("does not promise that what is left undone stays undone when answers will address it", () => {
+    renderFooter(
+      { state: "review" },
+      {
+        decisionsToApply: 1,
+        nextStepName: "Clarify",
+        layout: "stack",
+        openItems: [{ label: "Resolve [NEEDS CLARIFICATION]", why: null }],
+      },
+    );
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("The harness first applies your answer to this step");
+    expect(text).toContain("What is left undone goes back with your answers");
+    expect(text).not.toContain("The things left undone stay undone.");
+  });
+
+  it("still says what is left undone stays undone when there are no answers to apply", () => {
+    renderFooter(
+      { state: "review" },
+      {
+        nextStepName: "Clarify",
+        layout: "stack",
+        openItems: [{ label: "Migration applied", why: null }],
+      },
+    );
+    const text = document.body.textContent ?? "";
+    expect(text).toContain(", and the workflow moves on to its next step, Clarify.");
+    expect(text).toContain("The things left undone stay undone.");
+  });
+
   it("sends Approve to the unsettled decision while one waits, rather than approving", () => {
     let sent = 0;
     const calls = renderFooter(
