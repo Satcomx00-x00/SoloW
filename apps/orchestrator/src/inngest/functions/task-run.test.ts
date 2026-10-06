@@ -4306,12 +4306,36 @@ describe("a Task following a Workflow", () => {
     expect(step1).toBeTruthy();
   });
 
-  it("briefs the next Step with what the reviewer decided at the gate, after the harness's own handoff", async () => {
+  const OVERTURNED =
+    'Decisions settled by the reviewer:\n- What does include select? → Every nested row (overturned your choice of "Only matching rows")';
+
+  /** A harness asking the reviewer one decision — what an approval then has answers for. */
+  const asksDecision: HarnessStreamEvent = {
+    kind: "stdout",
+    channel: "assistant",
+    text: [
+      "```solow:widget",
+      JSON.stringify({
+        kind: "decision",
+        id: "include-semantics",
+        question: "What does include select?",
+        options: [
+          { id: "matching", label: "Only matching rows" },
+          { id: "nested", label: "Every nested row" },
+        ],
+        chosen: "matching",
+      }),
+      "```",
+    ].join("\n"),
+  };
+
+  it("hands the reviewer's answers back to the same Step before moving on, then briefs the next Step with them", async () => {
     /*
-     * Review analysis, point 3: a decision the harness made on a Plan Step can be overturned by
-     * the reviewer on the Plan tab, and the web client sends that as the approval's `feedback`.
-     * Without this, the Build Step would be briefed with the plan as the harness wrote it — the
-     * reviewer's "no, the other way" would be a comment nobody reads.
+     * An approval with settled decisions is not the end of the Step. A decision the reviewer
+     * overturned contradicts what the harness already wrote, so the Step's own harness gets one
+     * more round to apply the answers — and only when that round has finished does the Workflow
+     * move on, with no second approval: the reviewer already gave it. Moving on at the click
+     * briefed the next Step with a plan that still said the opposite of the answer.
      */
     const ids = freshIds();
     await seedRun(db, ids);
@@ -4334,8 +4358,11 @@ describe("a Task following a Workflow", () => {
       },
     ]);
     const planner = new ScriptedRunner(
-      [{ kind: "completed", stopReason: "end_turn" }],
-      [declares("the plan: include selects matching rows")],
+      [
+        { kind: "completed", stopReason: "end_turn" },
+        { kind: "completed", stopReason: "end_turn" },
+      ],
+      [declares("the plan: include selects every nested row")],
     );
     const builder = new ScriptedRunner(
       [{ kind: "completed", stopReason: "end_turn" }],
@@ -4348,19 +4375,23 @@ describe("a Task following a Workflow", () => {
 
     await runTaskLifecycle(deps, {
       event: { data: ids },
-      step: decidingStep(ids, [
-        {
-          decision: "approve",
-          feedback:
-            'Decisions settled by the reviewer:\n- What does include select? → Every nested row (overturned your choice of "Only matching rows")',
-        },
-        "approve",
-      ]),
+      // One approval for the plan (with its answers) and one for the build: the round that
+      // applies the answers needs none of its own.
+      step: decidingStep(ids, [{ decision: "approve", feedback: OVERTURNED }, "approve"]),
     });
 
+    // The plan Step ran twice: its work, then the answers applied to it.
+    expect(planner.starts).toBe(2);
+    const applying = planner.prompts[1] ?? "";
+    expect(applying).toContain("# Your decisions, settled");
+    expect(applying).toContain("overturned your choice");
+    // An approval, not a rejection.
+    expect(applying).not.toContain("# Review feedback");
+
+    // The build Step is briefed with the plan *after* the answers, and the answers themselves.
     const prompt = builder.prompts[0] ?? "";
     const heading = prompt.indexOf("## Handed over from the previous step");
-    const plan = prompt.indexOf("the plan: include selects matching rows");
+    const plan = prompt.indexOf("the plan: include selects every nested row");
     const decided = prompt.indexOf("Reviewer's decisions:");
     const overturned = prompt.indexOf("overturned your choice");
     const template = prompt.indexOf("Implement the plan.");
@@ -4369,8 +4400,114 @@ describe("a Task following a Workflow", () => {
     expect(decided).toBeGreaterThan(plan);
     expect(overturned).toBeGreaterThan(decided);
     expect(template).toBeGreaterThan(overturned);
-    // The approval's words are a handoff, never review feedback: the Build Step was not rejected.
     expect(prompt).not.toContain("# Review feedback");
+    expect(prompt).not.toContain("# Your decisions, settled");
+
+    // The record says the plan Step moved on once, after the second round — not at the click.
+    const moved = (await logOf(ids)).filter(
+      (p) => p.kind === "workflow_decision" && p["status"] === "advanced",
+    );
+    expect(moved).toHaveLength(1);
+  });
+
+  it("reopens the gate on the same Step when applying the answers raises new decisions", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    await seedWorkflow(ids, [
+      {
+        key: "plan",
+        command: "planner",
+        permissionMode: "plan",
+        promptTemplate: "Write the plan.",
+        gate: "human",
+        advanceOn: "review",
+      },
+      {
+        key: "build",
+        command: "builder",
+        permissionMode: "acceptEdits",
+        promptTemplate: "Implement the plan.",
+        gate: "human",
+        advanceOn: "review",
+      },
+    ]);
+    // Asks a decision on every round, including the one applying the answers.
+    const planner = new ScriptedRunner(
+      [
+        { kind: "completed", stopReason: "end_turn" },
+        { kind: "completed", stopReason: "end_turn" },
+      ],
+      [asksDecision, declares("the plan")],
+    );
+    const builder = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
+    planner.harnessSessionId = null;
+    builder.harnessSessionId = null;
+    const { deps } = makeDeps(db, planner, nullStream());
+    deps.runner = runnersByMode({ plan: planner, acceptEdits: builder });
+
+    const result = await runTaskLifecycle(deps, {
+      event: { data: ids },
+      // The second gate is never answered: the run must be waiting at it, not past it.
+      step: decidingStep(ids, [{ decision: "approve", feedback: OVERTURNED }, null]),
+    });
+
+    expect(planner.starts).toBe(2);
+    expect(builder.starts).toBe(0);
+    expect(result.result).toBe("review_timeout");
+    const log = await logOf(ids);
+    expect(log.some((p) => p.kind === "workflow_decision" && p["status"] === "advanced")).toBe(
+      false,
+    );
+    expect(
+      log.some(
+        (p) =>
+          p.kind === "notice" &&
+          String(p["text"]).startsWith("Applying your decisions raised new ones"),
+      ),
+    ).toBe(true);
+  });
+
+  it("asks once more on a Step that can end the Workflow, rather than integrating unseen work", async () => {
+    /*
+     * Ending the Workflow integrates, and integration happens only on an approval of the work
+     * being integrated (Principle I). The round that applied the answers has not been seen, so
+     * the last Step's gate reopens; the next approval — with nothing left to apply — finishes it.
+     */
+    const ids = freshIds();
+    await seedRun(db, ids);
+    await seedWorkflow(ids, [
+      {
+        key: "build",
+        command: "builder",
+        permissionMode: "acceptEdits",
+        promptTemplate: "Build it.",
+        gate: "human",
+        advanceOn: "review",
+      },
+    ]);
+    const builder = new ScriptedRunner(
+      [
+        { kind: "completed", stopReason: "end_turn" },
+        { kind: "completed", stopReason: "end_turn" },
+      ],
+      [declares("built it")],
+    );
+    builder.harnessSessionId = null;
+    const { deps, spies } = makeDeps(db, builder, nullStream());
+
+    const result = await runTaskLifecycle(deps, {
+      event: { data: ids },
+      step: decidingStep(ids, [{ decision: "approve", feedback: OVERTURNED }, "approve"]),
+    });
+
+    expect(builder.starts).toBe(2);
+    expect(result.result).toBe("done");
+    expect(spies.commit).toBeGreaterThan(0);
+    expect(
+      (await logOf(ids)).some(
+        (p) => p.kind === "notice" && String(p["text"]).startsWith("Your decisions are applied"),
+      ),
+    ).toBe(true);
   });
 
   it("hands a Step's checkpoints to the runner with the Task's store, and says so when the protocol cannot hold them", async () => {

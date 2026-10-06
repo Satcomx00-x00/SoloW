@@ -61,6 +61,7 @@ export function TaskFooter({
   viewed = null,
   openItems = [],
   decisionsPending = 0,
+  decisionsToApply = 0,
   waiting = null,
   notes = null,
   decidePending,
@@ -93,6 +94,12 @@ export function TaskFooter({
   openItems?: ReadonlyArray<{ label: string; why: string | null }>;
   /** Decisions the harness emitted that the reviewer has not settled on the board — a lock. */
   decisionsPending?: number;
+  /**
+   * Decisions the gate is about, settled or not. On a Workflow, approving with any sends the
+   * answers back to this Step's harness, which applies them before the Workflow moves on — so
+   * Approve says that rather than promising the next Step straight away.
+   */
+  decisionsToApply?: number;
   /** A checkpoint or permission the running harness is stopped on, until a person answers. */
   waiting?: { requestId: string; title: string } | null;
   /** The notes drafted so far and the general remark, which "Request changes" sends. */
@@ -139,6 +146,7 @@ export function TaskFooter({
     viewed,
     openItems,
     decisionsPending,
+    decisionsToApply,
     waiting,
     notes,
     decidePending,
@@ -203,6 +211,7 @@ type FooterInput = Omit<Parameters<typeof TaskFooter>[0], "error"> & {
   outstanding: readonly TaskDependencyDto[];
   openItems: ReadonlyArray<{ label: string; why: string | null }>;
   decisionsPending: number;
+  decisionsToApply: number;
   actionPending: boolean;
   openReviewPending: boolean;
 };
@@ -351,6 +360,7 @@ function ReviewGate({
   viewed,
   openItems,
   decisionsPending,
+  decisionsToApply,
   notes,
   decidePending,
   decisionSent,
@@ -484,9 +494,11 @@ function ReviewGate({
             explanation={
               <>
                 Keep this work. Approving covers {consequences}
-                {nextStepName
-                  ? `, and the workflow moves on to its next step, ${nextStepName}.`
-                  : ", and the task is done."}
+                {nextStepName && decisionsToApply > 0
+                  ? `. The harness first applies your ${decisionsToApply === 1 ? "answer" : "answers"} to this step, then the workflow moves on to its next step, ${nextStepName}.`
+                  : nextStepName
+                    ? `, and the workflow moves on to its next step, ${nextStepName}.`
+                    : ", and the task is done."}
                 {open > 0 ? " The things left undone stay undone." : ""}
               </>
             }

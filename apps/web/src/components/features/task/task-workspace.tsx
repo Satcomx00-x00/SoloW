@@ -69,6 +69,7 @@ import { trpc } from "@/trpc/react";
 import { ChangesPanel } from "./changes-panel";
 import { DeleteTaskAction } from "./delete-task-action";
 import { EmptyPanel } from "./empty-panel";
+import { gateDecisions } from "./gate-decisions";
 import { HarnessComposer } from "./harness-composer";
 import { LaunchTaskDialog, useWorkflowChoices } from "./launch-task-dialog";
 import { ReviewBriefPanel } from "./review-brief";
@@ -484,6 +485,8 @@ interface BoardRenderContext {
   answers: readonly DecisionAnswer[];
   /** At the gate, where the decisions are confirmed. */
   confirming: boolean;
+  /** The decisions that gate is about — the latest round's. Older ones are a record. */
+  gateDecisionIds: ReadonlySet<string>;
   /** What the gate card says: its headline, and what stands in the way. */
   gate: { headline: string; detail: string };
   open: (key: string) => void;
@@ -516,7 +519,7 @@ function renderBoardItem(item: BoardItem, column: BoardColumn, ctx: BoardRenderC
         <DecisionsNode
           widgets={item.widgets}
           answers={ctx.answers}
-          confirming={ctx.confirming}
+          confirming={ctx.confirming && item.widgets.some((w) => ctx.gateDecisionIds.has(w.id))}
           onOpen={open}
           pass={item.pass}
         />
@@ -1178,7 +1181,16 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
    * round the gate would act on, and an older round or launch is read, not reviewed.
    */
   const draft = useReviewDraft(taskId, latest?.id ?? null, latestRound);
-  const decisionsPending = decisions.filter(
+  // The latest round's decisions only — see `gateDecisions` for why not the whole Session's.
+  const gateDecisionList = useMemo(
+    () => gateDecisions(decisions, facts.origin, latest?.id ?? null, rounds),
+    [decisions, facts, latest?.id, rounds],
+  );
+  const gateDecisionIds = useMemo(
+    () => new Set(gateDecisionList.map((w) => w.id)),
+    [gateDecisionList],
+  );
+  const decisionsPending = gateDecisionList.filter(
     (w) => !draft.draft.decisions.some((d) => d.id === w.id),
   ).length;
   const viewedCount = useMemo(() => {
@@ -1299,6 +1311,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
         }
         openItems={openItems}
         decisionsPending={decisionsPending}
+        decisionsToApply={t.workflowId ? gateDecisionList.length : 0}
         waiting={null}
         notes={{
           count: draft.draft.notes.length,
@@ -1380,7 +1393,9 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
     const group = everyItem.find(
       (item) =>
         item.kind === "decisions" &&
-        item.widgets.some((w) => !draft.draft.decisions.some((d) => d.id === w.id)),
+        item.widgets.some(
+          (w) => gateDecisionIds.has(w.id) && !draft.draft.decisions.some((d) => d.id === w.id),
+        ),
     );
     if (group) setOpened({ type: "item", key: group.key });
   };
@@ -1485,7 +1500,10 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
           </BoardDialog>
         );
       case "decisions": {
-        const confirming = t.state === "review" && deleted === null;
+        const confirming =
+          t.state === "review" &&
+          deleted === null &&
+          item.widgets.some((w) => gateDecisionIds.has(w.id));
         const settled = item.widgets.filter((w) =>
           draft.draft.decisions.some((d) => d.id === w.id),
         ).length;
@@ -1501,7 +1519,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
             }
             description={
               confirming
-                ? `${settled} of ${item.widgets.length} confirmed. Pick an answer for each — the harness's pick is marked, not taken. Your answers go to the next step with the approval.`
+                ? `${settled} of ${item.widgets.length} confirmed. Pick an answer for each — the harness's pick is marked, not taken. On approval, the harness applies your answers to this step before the workflow moves on.`
                 : "The harness decided these while it worked. You confirm or overturn them at the step's gate."
             }
             onOpenAutoFocus={focusFirstUnsettled}
@@ -1617,10 +1635,11 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
     // The notes and remark go with a request for changes and nowhere else (F10 FR-7): an
     // approval has nothing to say to a harness that is done, and a rejection discards the work
     // the notes were about. Decisions the reviewer settled on the board are the exception —
-    // on an approval they become the next Step's handoff; on a request for changes they join
-    // the notes. Omitted, not empty, when there is nothing — the orchestrator has its own
+    // on an approval they go back to this Step's harness, which applies them before the Workflow
+    // moves on (and then into the next Step's handoff); on a request for changes they join the
+    // notes. Omitted, not empty, when there is nothing — the orchestrator has its own
     // sentence for "the reviewer left no notes".
-    const settled = collateDecisions(decisions, draft.draft.decisions);
+    const settled = collateDecisions(gateDecisionList, draft.draft.decisions);
     const feedback =
       decision === "request_changes"
         ? joinFeedback(
@@ -2097,6 +2116,7 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
                         answerable: isRunning,
                         answers: draft.draft.decisions,
                         confirming: t.state === "review" && deleted === null,
+                        gateDecisionIds,
                         gate: lines,
                         open: (key) => setOpened({ type: "item", key }),
                       })
