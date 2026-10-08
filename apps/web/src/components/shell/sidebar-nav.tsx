@@ -356,7 +356,10 @@ function ProjectRow({
   );
 }
 
-/** The Workspace-wide destinations: Unassigned, Workflows (with its pipelines while open), History. */
+/**
+ * The Workspace-wide destinations: Unassigned, Workflows (with its pipelines while open), History,
+ * Outcomes.
+ */
 function WorkspaceGroup({ place }: { place: Place }) {
   const counts = trpc.workspace.counts.useQuery();
   const unassignedCount = counts.data?.unassignedIssues ?? 0;
