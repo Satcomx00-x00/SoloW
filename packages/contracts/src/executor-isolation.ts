@@ -57,3 +57,28 @@ export const HOST_RUN_WARNING =
 
 /** One line for places too small for the full warning. */
 export const LOCAL_EXECUTOR_NOTE = "Local runs as you, on this machine — for trusted agents only.";
+
+/**
+ * Which profiles a Quick task runs with, since it asks for neither (roadmap E2): the Owner's
+ * stored defaults; failing that, the oldest Harness Profile, and a Docker executor when there is
+ * one (isolation by default, as above) or else the oldest. One rule for the server, which applies
+ * it, and the dialog, which shows the host-run warning for what it will pick. The lists may come
+ * in any order: the oldest is chosen by `createdAt`, never by position.
+ */
+export function quickTaskProfiles(args: {
+  /** Already checked to still exist; null when nothing is stored. */
+  stored: { harnessProfileId: string | null; executorProfileId: string | null } | null;
+  harnesses: ReadonlyArray<{ id: string; createdAt: string }>;
+  executors: ReadonlyArray<{ id: string; kind: ExecutorKind; createdAt: string }>;
+}): { agentProfileId: string | null; executorProfileId: string | null } {
+  const oldest = <T extends { id: string; createdAt: string }>(rows: readonly T[]): T | undefined =>
+    [...rows].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id))[0];
+  return {
+    agentProfileId: args.stored?.harnessProfileId ?? oldest(args.harnesses)?.id ?? null,
+    executorProfileId:
+      args.stored?.executorProfileId ??
+      oldest(args.executors.filter((x) => x.kind === "docker"))?.id ??
+      oldest(args.executors)?.id ??
+      null,
+  };
+}

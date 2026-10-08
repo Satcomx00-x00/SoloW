@@ -526,8 +526,8 @@ export type HistoryListDto = z.infer<typeof historyListDto>;
  * so everything downstream (board, review, Approve) sees an ordinary Task under an ordinary local
  * Issue. `repositoryId` is optional only because a Workspace with exactly one Repository has no
  * question to ask; with several, the server refuses rather than guessing which one to run in.
- * Harness and Executor Profiles are never asked for: the Owner's stored defaults apply, then the
- * oldest Profile of each kind.
+ * Harness and Executor Profiles are never asked for: `quickTaskProfiles` picks them — the Owner's
+ * stored defaults, else the oldest Harness Profile and a Docker executor when there is one.
  */
 export const quickTaskInput = z.object({
   prompt: z.string().trim().min(1).max(5_000),

@@ -98,13 +98,18 @@ describe("Board New task", () => {
       target: { value: "Do it" },
     });
     await screen.findByLabelText("Repository");
+    // Nothing is preselected: which codebase an agent edits is not chosen by list order.
+    fireEvent.click(screen.getByRole("button", { name: "Start task" }));
+    expect(log.calls.some((c) => c.path === "task.quickStart")).toBe(false);
+
+    fireEvent.click(screen.getByRole("combobox", { name: "Repository" }));
+    fireEvent.click(await screen.findByRole("option", { name: "web" }));
     fireEvent.click(screen.getByRole("button", { name: "Start task" }));
 
     await waitFor(() => expect(log.calls.some((c) => c.path === "task.quickStart")).toBe(true));
-    // The first repository is preselected, so the question never blocks the common case.
     expect(log.calls.find((c) => c.path === "task.quickStart")?.input).toEqual({
       prompt: "Do it",
-      repositoryId: "repo-1",
+      repositoryId: "repo-2",
     });
   });
 

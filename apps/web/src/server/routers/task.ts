@@ -12,6 +12,7 @@ import {
   moveTaskInput,
   quickTaskDto,
   quickTaskInput,
+  quickTaskProfiles,
   recentTaskListDto,
   redeliverTaskInput,
   removeTaskDependencyInput,
@@ -44,12 +45,7 @@ import { z } from "zod";
 import type { RequestContext } from "../dal/context.js";
 import { createIssue, getIssueById } from "../dal/issue.js";
 import { getTaskDefaults } from "../dal/preference.js";
-import {
-  getExecutorProfile,
-  getHarnessProfile,
-  listExecutorProfiles,
-  listHarnessProfiles,
-} from "../dal/profile.js";
+import { getExecutorProfile, getHarnessProfile, listProfileChoices } from "../dal/profile.js";
 import { listRecentTasks } from "../dal/recent-tasks.js";
 import { getRepository, listRepositories } from "../dal/repository.js";
 import {
@@ -440,13 +436,10 @@ export const taskRouter = router({
         });
       }
 
-      const stored = unwrap(await getTaskDefaults(rctx)).defaults;
-      const agentProfileId =
-        stored.harnessProfileId ??
-        unwrap(await listHarnessProfiles(rctx, { limit: 1 })).items[0]?.id;
-      const executorProfileId =
-        stored.executorProfileId ??
-        unwrap(await listExecutorProfiles(rctx, { limit: 1 })).items[0]?.id;
+      const { agentProfileId, executorProfileId } = quickTaskProfiles({
+        stored: unwrap(await getTaskDefaults(rctx)).defaults,
+        ...(await listProfileChoices(rctx)),
+      });
       if (!agentProfileId || !executorProfileId) {
         throw new TRPCError({ code: "BAD_REQUEST", message: TaskErrorCode.QuickNeedsProfiles });
       }

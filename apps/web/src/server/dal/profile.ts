@@ -7,6 +7,7 @@ import {
   configHarnessFor,
   type DeleteExecutorProfileInput,
   type DeleteHarnessProfileInput,
+  type ExecutorKind,
   type ExecutorProfileDto,
   ExecutorProfileErrorCode,
   type ExecutorProfileListDto,
@@ -473,4 +474,32 @@ export async function deleteExecutorProfile(
     .delete(executorProfile)
     .where(and(eq(executorProfile.workspaceId, ctx.workspaceId), eq(executorProfile.id, row.id)));
   return ok(row);
+}
+
+/**
+ * Every Harness and Executor Profile's id, age and kind, unpaged, for `quickTaskProfiles`.
+ *
+ * Unpaged because "the oldest" has to be read from the whole list: the paged lists are
+ * newest-first, so a bounded page of a long list would not hold it. A Workspace holds a handful
+ * of profiles, and these are three columns.
+ */
+export async function listProfileChoices(ctx: RequestContext): Promise<{
+  harnesses: Array<{ id: string; createdAt: string }>;
+  executors: Array<{ id: string; kind: ExecutorKind; createdAt: string }>;
+}> {
+  const [harnesses, executors] = await Promise.all([
+    ctx.db
+      .select({ id: harnessProfile.id, createdAt: harnessProfile.createdAt })
+      .from(harnessProfile)
+      .where(eq(harnessProfile.workspaceId, ctx.workspaceId)),
+    ctx.db
+      .select({
+        id: executorProfile.id,
+        kind: executorProfile.kind,
+        createdAt: executorProfile.createdAt,
+      })
+      .from(executorProfile)
+      .where(eq(executorProfile.workspaceId, ctx.workspaceId)),
+  ]);
+  return { harnesses, executors };
 }

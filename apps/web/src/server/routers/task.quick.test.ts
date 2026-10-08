@@ -3,6 +3,7 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import { TaskErrorCode } from "@solow/contracts";
 import {
+  executorProfile,
   harnessProfile,
   issue as issueTable,
   repository,
@@ -121,6 +122,50 @@ describe("task.quickStart", () => {
       globalThis.fetch = realFetch;
       Reflect.deleteProperty(process.env, "SOLOW_ORCHESTRATOR_URL");
     }
+  });
+
+  it("uses the oldest Harness Profile and a Docker executor when nothing is stored", async () => {
+    // The contract says "the oldest Profile of each kind"; the lists are newest-first, so taking
+    // the first row of a one-row page used the newest. And a container is what a Task starts as
+    // (roadmap B4), the rule the full create form already follows.
+    const fx = await seedWorkspaceGraph(db, "picks");
+    await db
+      .update(harnessProfile)
+      .set({ createdAt: "2026-01-01T00:00:00.000Z" })
+      .where(eq(harnessProfile.id, fx.agentProfileId));
+    await db
+      .update(executorProfile)
+      .set({ createdAt: "2026-01-01T00:00:00.000Z" })
+      .where(eq(executorProfile.id, fx.executorProfileId));
+    const [newer] = await db
+      .insert(harnessProfile)
+      .values({
+        workspaceId: fx.workspaceId,
+        name: "newer",
+        agentCatalogId: (
+          await db.select().from(harnessProfile).where(eq(harnessProfile.id, fx.agentProfileId))
+        )[0]?.agentCatalogId as string,
+        authMode: "api_key",
+        secretId: "secret-1",
+        createdAt: "2026-05-01T00:00:00.000Z",
+      })
+      .returning();
+    const [docker] = await db
+      .insert(executorProfile)
+      .values({
+        workspaceId: fx.workspaceId,
+        name: "container",
+        kind: "docker",
+        config: { kind: "docker", image: "solow/runner:latest", env: {}, mounts: [] },
+        createdAt: "2026-05-01T00:00:00.000Z",
+      })
+      .returning();
+
+    const out = await caller(db, fx.workspaceId).task.quickStart({ prompt: "Do it" });
+
+    expect(out.task.agentProfileId).toBe(fx.agentProfileId);
+    expect(out.task.agentProfileId).not.toBe(newer?.id);
+    expect(out.task.executorProfileId).toBe(docker?.id as string);
   });
 
   it("writes nothing when the Workspace has no profiles", async () => {

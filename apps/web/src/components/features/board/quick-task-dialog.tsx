@@ -1,7 +1,9 @@
 "use client";
 
+import { quickTaskProfiles } from "@solow/contracts";
 import Link from "next/link";
 import { useState } from "react";
+import { HostRunWarning } from "@/components/features/host-run-warning";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -33,8 +35,13 @@ import { trpc } from "@/trpc/react";
  * before seeing any work happen. The full form stays one click away for the cases that need those
  * choices; it is a link in the footer rather than a second button because it is the exception.
  *
- * The Repository is asked for only when there is more than one. With a single Repository the
- * question has one answer, and the server resolves it the same way.
+ * The Repository is asked for only when there is more than one, and then nothing is preselected:
+ * which codebase an agent edits is not a choice to make for the Owner by list order. With a single
+ * Repository the question has one answer, and the server resolves it the same way.
+ *
+ * The profiles are never asked for, but the host-run warning still applies to them: the dialog
+ * works out the pair the server will use, by the same `quickTaskProfiles` rule, and warns when
+ * that pair is a never-ask harness on the host.
  */
 export function QuickTaskDialog({
   open,
@@ -48,6 +55,12 @@ export function QuickTaskDialog({
 }) {
   const utils = trpc.useUtils();
   const repos = trpc.repository.list.useQuery({ ...WHOLE_PAGE }, { enabled: open });
+  const harnesses = trpc.profile.agent.list.useQuery({ ...WHOLE_PAGE }, { enabled: open });
+  const executors = trpc.profile.executor.list.useQuery({ ...WHOLE_PAGE }, { enabled: open });
+  const taskDefaults = trpc.preference.getTaskDefaults.useQuery(
+    {},
+    { enabled: open, retry: false },
+  );
   const [prompt, setPrompt] = useState("");
   const [chosenRepositoryId, setChosenRepositoryId] = useState("");
   /**
@@ -61,7 +74,12 @@ export function QuickTaskDialog({
 
   const repositories = repos.data?.items ?? [];
   const askRepository = repositories.length > 1;
-  const repositoryId = chosenRepositoryId || repositories[0]?.id || "";
+  const repositoryId = askRepository ? chosenRepositoryId : (repositories[0]?.id ?? "");
+  const picked = quickTaskProfiles({
+    stored: taskDefaults.data?.defaults ?? null,
+    harnesses: harnesses.data?.items ?? [],
+    executors: executors.data?.items ?? [],
+  });
 
   const start = trpc.task.quickStart.useMutation({
     onSuccess: (out) => {
@@ -144,6 +162,15 @@ export function QuickTaskDialog({
               </Select>
             </div>
           ) : null}
+
+          <HostRunWarning
+            executorKind={
+              executors.data?.items.find((x) => x.id === picked.executorProfileId)?.kind
+            }
+            permissionMode={
+              harnesses.data?.items.find((h) => h.id === picked.agentProfileId)?.permissionMode
+            }
+          />
 
           {notStarted ? (
             <p role="alert" className="text-sm">
