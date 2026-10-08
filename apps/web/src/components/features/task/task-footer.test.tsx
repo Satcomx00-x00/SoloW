@@ -238,12 +238,13 @@ describe("TaskFooter", () => {
     );
   });
 
-  it("re-runs a review gate whose decision was never applied, instead of offering a dead gate", () => {
+  it("lets a gate whose decision was never applied be decided again", () => {
+    // A decision starts the run that applies it, so the gate is never dead — and a Retry from
+    // `review` would only have started a second run beside it.
     const calls = renderFooter({ state: "review", failureReason: "review_decision_not_applied" });
-    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
-    expect(screen.getByText("Decision not applied")).toBeDefined();
-    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
-    expect(calls).toEqual(["retry"]);
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    expect(calls).toEqual(["decide:approve"]);
   });
 
   it("locks every decision while one is in flight", () => {

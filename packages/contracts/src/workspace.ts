@@ -112,9 +112,9 @@ export type SyncRequestDto = z.infer<typeof syncRequestDto>;
  * coupling nothing checks — they stay in step until one is renamed, and then the button goes
  * quiet with no error anywhere, which is the worst way for a feature to stop working.
  *
- * The two older orchestrator events (`task.launch.requested`, `review.decided`) are still spelled
- * out on both sides. They predate this and are not touched here, but this is the shape they
- * should take.
+ * The older orchestrator event (`task.launch.requested`, which also carries review decisions) is
+ * still spelled out on both sides. It predates this and is not touched here, but this is the
+ * shape it should take.
  */
 export const REPOSITORY_SYNC_REQUESTED = "repository.sync.requested";
 

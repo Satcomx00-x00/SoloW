@@ -189,7 +189,7 @@ const FAILURE_REASONS: Record<
     tone: "review",
     icon: TriangleAlert,
     detail:
-      "The run holding this review gate was gone when the decision arrived. Retry re-runs it; nothing was lost.",
+      "A decision was recorded here and never applied. Decide again — the decision starts the run that applies it; nothing was lost.",
   },
   // The one failure where the work is *partly landed* (issue #70 AC-4).
   [PARTIAL_INTEGRATION_REASON]: {

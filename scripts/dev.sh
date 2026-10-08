@@ -48,7 +48,7 @@ export SOLOW_WS_URL="${SOLOW_WS_URL:-ws://localhost:5001}"
 export SOLOW_WEB_URL="${SOLOW_WEB_URL:-http://localhost:5000}"
 # Where the web app's emit() POSTs task-run/review events (apps/web/src/server/orchestrator-
 # client.ts) — the orchestrator's own /events route, which forwards them into a real
-# inngest.send() (Decision 0004). Without this, enqueueTaskRun()/resumeReview() silently no-op
+# inngest.send() (Decision 0004). Without this, enqueueTaskRun()/applyReview() silently no-op
 # in dev-owner mode instead of ever reaching a harness.
 export SOLOW_ORCHESTRATOR_URL="${SOLOW_ORCHESTRATOR_URL:-http://localhost:$SOLOW_WS_PORT}"
 export SOLOW_INNGEST_PORT="${SOLOW_INNGEST_PORT:-8288}"
@@ -98,14 +98,11 @@ PIDS="$PIDS $!"
 
 echo "[dev] inngest      → http://localhost:$SOLOW_INNGEST_PORT  (Dev Server, Decision 0004)"
 # `--persist` keeps the durable engine's state (queued events AND in-flight runs)
-# across restarts. Without it the Dev Server holds everything in memory, so any run
-# parked at the review gate (`task-run`'s `waitForEvent("review.decided")`) is lost
-# the moment the server restarts, and every manual restart of the orchestrator above
-# is one such moment. A lost parked run leaves its Task
-# stranded in `review`: `review.decide` then publishes `review.decided` to a wait
-# that no longer exists, the decision is recorded but never applied, and Approve /
-# Request changes appear dead. The app DB and the secret key are already persisted
-# a few lines up for the same reason — the engine's state was the missing third.
+# across restarts. Without it the Dev Server holds everything in memory, so a run
+# mid-round — a harness working, a park sleeping out a quota window — is lost the
+# moment the server restarts. (A review gate no longer depends on it: a run ends at
+# the gate, and the decision is a row in the app DB that starts the next run.) The
+# app DB and the secret key are already persisted a few lines up for the same reason.
 bunx inngest-cli dev --no-discovery --persist \
     -u "http://localhost:$SOLOW_WS_PORT/api/inngest" \
     -p "$SOLOW_INNGEST_PORT" &

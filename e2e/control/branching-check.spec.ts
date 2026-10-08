@@ -3,6 +3,7 @@ import { expect, type Locator, type Page, test } from "@playwright/test";
 import { PATHS } from "../support/fixture.js";
 import {
   awaitWorkflowGate,
+  closeGate,
   connectRepository,
   createTask,
   gateButton,
@@ -309,8 +310,14 @@ test.describe("branching control check — conditions, a loop, and a gate in the
 
     await test.step("approving at Escalate releases that gate only — Ship still runs, then asks again", async () => {
       await (await gateButton(page, "Approve")).click();
+      // The approval starts the run that applies it; that run moves on to Ship, which runs and
+      // asks again — and the gate's dialog, left open, follows the gate there.
+      await expect(page.getByRole("dialog", { name: "Decide on step 5 of 5: Ship" })).toBeVisible({
+        timeout: 120_000,
+      });
+      await closeGate(page);
       const progress = page.getByRole("region", { name: "Workflow progress" });
-      await expect(progress).toContainText("Step 5 of 5", { timeout: 120_000 });
+      await expect(progress).toContainText("Step 5 of 5");
       // Not Done: the approval was spent on Escalate's gate, not on the integration.
       await expect(page.locator('[data-task-state="done"]')).toHaveCount(0);
       await awaitWorkflowGate(page);
@@ -384,7 +391,7 @@ test.describe("branching control check — conditions, a loop, and a gate in the
       await page.getByRole("alertdialog").getByRole("button", { name: "Delete issue" }).click();
       await expect(page).not.toHaveURL(new RegExp(`/issues/${issueId}$`));
       await page.goto(`/workflows/${workflowId}`);
-      await page.getByRole("button", { name: `Delete ${workflowName}`, exact: true }).click();
+      await page.getByRole("button", { name: "Delete workflow", exact: true }).click();
       await page.getByRole("alertdialog").getByRole("button", { name: "Delete workflow" }).click();
       await expect(page.getByRole("link", { name: new RegExp(workflowName) })).toHaveCount(0);
       const branch = `solow-task-${taskId}`;

@@ -5,8 +5,8 @@ import { inngest } from "./client.js";
  * Envelope for `POST /events` — the transport `apps/web/src/server/orchestrator-client.ts`'s
  * `emit()` already speaks, and the same shape Inngest's own event API uses (Decision 0004).
  *
- * Deliberately shallow: `data`'s actual contents (`task.launch.requested`'s launch payload,
- * `review.decided`'s decision) are `task-run.ts`'s own `launchData`/`reviewData` schemas to
+ * Deliberately shallow: `data`'s actual contents (`task.launch.requested`'s launch payload, and
+ * the review decision a run is started with) are `task-run.ts`'s own `launchData` schema to
  * validate, which this module must not duplicate or drift from (it is wiring-only). A malformed
  * `data` surfaces as a failed function run in the Dev Server / Inngest Cloud, the same place it
  * would in a hosted deployment — not as a 400 here.
@@ -32,7 +32,7 @@ function defaultEventPostDeps(): EventPostDeps {
 
 /**
  * `POST /events` handler (Decision 0004): the one thing standing between the web app's
- * `enqueueTaskRun()` / `resumeReview()` and the durable engine actually receiving the event.
+ * `enqueueTaskRun()` / `applyReview()` and the durable engine actually receiving the event.
  * Returns 202 on a successful `send()` — matching the 202 the e2e fake orchestrator's own
  * `/events` route already returns, so `orchestrator-client.ts`'s `if (!res.ok) throw` behaves
  * identically against either backend.

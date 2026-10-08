@@ -23,6 +23,7 @@ import {
   isFlagKey,
   issue,
   repository,
+  review,
   secret,
   session,
   sessionEvent,
@@ -34,7 +35,7 @@ import {
   workspace,
   worktree,
 } from "@solow/db";
-import { and, asc, desc, eq, gt, inArray, isNotNull, ne } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, ne, notInArray } from "drizzle-orm";
 
 /**
  * Orchestrator-side data access. Scoped by workspaceId (the tenant key travels on the
@@ -419,12 +420,18 @@ export async function recordWorktree(
  * retention so the harness conversation keyed to it can be continued. Null when none: a Task
  * never run, or one whose window has passed. The caller confirms the path with git before
  * trusting it (`adoptWorktree`), exactly as it would a path the harness reported.
+ *
+ * `excludePaths` are worktrees the caller knows belong to other attachments. Two attachments may
+ * name the same Repository on different branches, so "the newest row for this Repository" can be
+ * a secondary's — and a secondary re-provisioned a moment ago is the newest of all. Adopting it as
+ * the primary would commit the primary's approval onto the secondary's branch.
  */
 export async function retainedWorktree(
   db: Db,
   workspaceId: string,
   taskId: string,
   repositoryId: string,
+  excludePaths: readonly string[] = [],
 ): Promise<{ path: string; branch: string } | null> {
   const [row] = await db
     .select({ path: worktree.path, branch: worktree.branch })
@@ -435,6 +442,7 @@ export async function retainedWorktree(
         eq(worktree.taskId, taskId),
         eq(worktree.repositoryId, repositoryId),
         eq(worktree.status, "active"),
+        ...(excludePaths.length > 0 ? [notInArray(worktree.path, [...excludePaths])] : []),
       ),
     )
     .orderBy(desc(worktree.updatedAt))
@@ -507,7 +515,7 @@ export async function forgetHarnessConversations(
 ): Promise<void> {
   await db
     .update(session)
-    .set({ harnessSessionId: null })
+    .set({ harnessSessionId: null, harnessSessionStepId: null })
     .where(and(eq(session.workspaceId, workspaceId), eq(session.taskId, taskId)));
 }
 
@@ -544,7 +552,7 @@ export async function markWorktreesRemoved(
  * `request_changes` that would start a blocked Task, but that refusal lives at the API boundary,
  * and the transition into `running` is applied *here* — the durable engine is what actually
  * starts the harness (Principle III). A guard on the API only holds while the API is the sole
- * producer of `review.decided`; a guard at the transition holds whatever publishes it.
+ * producer of decisions; a guard at the transition holds whatever publishes one.
  */
 export async function unsatisfiedDependencyIds(
   db: Db,
@@ -728,10 +736,16 @@ export async function recordHarnessSessionId(
    * round that is *not* sent its Step's brief. See `resolveResumeHarnessSessionId`.
    */
   harnessSessionId: string | null,
+  /**
+   * The Workflow Step the conversation was briefed for, or null on no Workflow. Written with the
+   * id, never apart from it: a late write from a Step that has just finished then names that
+   * Step, and the next one cannot mistake it for its own.
+   */
+  workflowStepId: string | null = null,
 ): Promise<void> {
   await db
     .update(session)
-    .set({ harnessSessionId })
+    .set({ harnessSessionId, harnessSessionStepId: harnessSessionId ? workflowStepId : null })
     .where(and(eq(session.workspaceId, workspaceId), eq(session.id, sessionId)));
 }
 
@@ -753,6 +767,11 @@ export async function recordHarnessSessionId(
  *     in the worktree the retry will find, is strictly more informative than the brief that
  *     produced it. Newest first because only the latest attempt describes that worktree.
  *
+ * Both reads match the Workflow Step as well (`harness_session_step_id`). A conversation is
+ * only ever carried on by the Step that started it: a round that resumes is sent "carry on"
+ * instead of its brief, so resuming another Step's conversation means the Step's own work is
+ * never asked for — which is exactly what happened when (2) ignored the Step.
+ *
  * Workspace-scoped like every other read in this module (Principle V). A conversation id is a
  * handle onto a harness's own store, and no Task may name one belonging to another Workspace.
  */
@@ -761,11 +780,17 @@ export async function resolveResumeHarnessSessionId(
   workspaceId: string,
   taskId: string,
   sessionId: string,
+  /** The Step about to run, or null for a Task on no Workflow. */
+  workflowStepId: string | null = null,
 ): Promise<string | null> {
+  const sameStep =
+    workflowStepId === null
+      ? isNull(session.harnessSessionStepId)
+      : eq(session.harnessSessionStepId, workflowStepId);
   const [current] = await db
     .select({ harnessSessionId: session.harnessSessionId })
     .from(session)
-    .where(and(eq(session.workspaceId, workspaceId), eq(session.id, sessionId)))
+    .where(and(eq(session.workspaceId, workspaceId), eq(session.id, sessionId), sameStep))
     .limit(1);
   if (current?.harnessSessionId) return current.harnessSessionId;
 
@@ -778,6 +803,7 @@ export async function resolveResumeHarnessSessionId(
         eq(session.taskId, taskId),
         ne(session.id, sessionId),
         isNotNull(session.harnessSessionId),
+        sameStep,
       ),
     )
     // `session_task_started` is exactly this ordering, which is why the fallback costs an index
@@ -785,6 +811,34 @@ export async function resolveResumeHarnessSessionId(
     .orderBy(desc(session.startedAt))
     .limit(1);
   return prior?.harnessSessionId ?? null;
+}
+
+/**
+ * Take up a review decision for the run it started, or answer false if a run already has.
+ *
+ * One conditional write, so it is the decision's own lock: the delivery that wins applies it,
+ * and any other delivery of the same event finds it spent. Scoped to the Session the decision was
+ * made on as well as the Workspace — a decision is only ever applied to the gate it was taken at.
+ */
+export async function takeUpReviewDecision(
+  db: Db,
+  workspaceId: string,
+  sessionId: string,
+  reviewId: string,
+): Promise<boolean> {
+  const taken = await db
+    .update(review)
+    .set({ appliedAt: new Date().toISOString() })
+    .where(
+      and(
+        eq(review.workspaceId, workspaceId),
+        eq(review.sessionId, sessionId),
+        eq(review.id, reviewId),
+        isNull(review.appliedAt),
+      ),
+    )
+    .returning({ id: review.id });
+  return taken.length > 0;
 }
 
 export async function setSessionState(

@@ -43,10 +43,16 @@ import { getIssueById } from "../dal/issue.js";
 import { getExecutorProfile, getHarnessProfile } from "../dal/profile.js";
 import { listRecentTasks } from "../dal/recent-tasks.js";
 import { getRepository } from "../dal/repository.js";
-import { createSession, getLatestSession, sessionForkCursor } from "../dal/session.js";
+import {
+  createSession,
+  getLatestSession,
+  sessionForkCursor,
+  setSessionState,
+} from "../dal/session.js";
 import {
   activeSessionForTask,
   addTaskDependencyEdge,
+  claimTaskState,
   countRunningForHarnessProfile,
   createSubtaskRecord,
   createTaskRecord,
@@ -110,6 +116,12 @@ export async function requireUnblocked(rctx: RequestContext, taskId: string): Pr
  */
 export async function startTaskRun(rctx: RequestContext, taskId: string): Promise<TaskDto> {
   const existing = unwrap(await getTaskById(rctx, taskId));
+  // A Task at its gate is moved on by its decision (`review.decide`), never by a second start: a
+  // launch from there ran a fresh harness beside the decision the gate was waiting for, and the
+  // pair of them wrote the same Step's cursor in turn.
+  if (existing.state === "review") {
+    throw new TRPCError({ code: "CONFLICT", message: TaskErrorCode.AwaitingReview });
+  }
   unwrap(canTransitionTask(existing.state, "running"));
   await requireUnblocked(rctx, existing.id);
 
@@ -123,17 +135,26 @@ export async function startTaskRun(rctx: RequestContext, taskId: string): Promis
     });
   }
 
+  // Claimed from the state it was read in, and nothing else: a second click, a second tab or the
+  // run itself moving the row in between makes this one lose cleanly instead of starting a
+  // second harness on the same worktree. Clears the last run's `failureReason` as it goes.
+  const updated = unwrap(await claimTaskState(rctx, existing.id, [existing.state], "running"));
   const session = unwrap(await createSession(rctx, existing.id));
-  // `failureReason: null` explicitly, though `updateTaskState` now clears it on any exit from
-  // `failed` — a new run's Task must not carry the last one's reason whichever way it started.
-  const updated = unwrap(
-    await updateTaskState(rctx, existing.id, "running", { failureReason: null }),
-  );
-  await orchestrator.enqueueTaskRun({
-    workspaceId: rctx.workspaceId,
-    taskId: existing.id,
-    sessionId: session.id,
-  });
+  try {
+    await orchestrator.enqueueTaskRun({
+      workspaceId: rctx.workspaceId,
+      taskId: existing.id,
+      sessionId: session.id,
+    });
+  } catch (cause) {
+    // Nothing will run, so the Task must not say something is. Put it back where it was and
+    // close the Session no run will ever write to.
+    await updateTaskState(rctx, existing.id, existing.state, {
+      failureReason: existing.failureReason ?? null,
+    });
+    await setSessionState(rctx, session.id, "closed", { endedAt: new Date().toISOString() });
+    throw cause;
+  }
   await orchestrator.announceTask({
     workspaceId: rctx.workspaceId,
     taskId: existing.id,

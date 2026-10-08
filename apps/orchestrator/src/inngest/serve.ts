@@ -32,9 +32,8 @@ export const INNGEST_FUNCTIONS = [taskRun, repositorySync, taskPurge];
  * That failure is silent in the worst way, and it is the one observed end to end on 2026-08-27:
  * the harness really did edit the file, its output really was streamed to the browser and written
  * to the session log — every side effect of the step landed — while the *step* was recorded as
- * failed. Inngest then retried it from the top, so the run never reached the review gate, never
- * parked at `waitForEvent`, and the `review.decided` event published on approval arrived at a
- * run that was not listening. The trace tells the story exactly: `Attempt 0` FAILED after
+ * failed. Inngest then retried it from the top, so the run never reached the review gate and an
+ * approval had nothing to decide. The trace tells the story exactly: `Attempt 0` FAILED after
  * 8m 07s with `Unable to reach SDK URL`, `Attempt 1` running.
  *
  * Streaming is the SDK's own answer to this and says so in its options: *"may support streaming

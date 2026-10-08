@@ -15,7 +15,7 @@ import {
 } from "@solow/db";
 import { createTestDb, type TestDb } from "@solow/db/testing";
 import { and, eq } from "drizzle-orm";
-import { PARK_SLEEP_MS, REVIEW_WAIT_TIMEOUT } from "./inngest/functions/task-run.js";
+import { PARK_SLEEP_MS } from "./inngest/functions/task-run.js";
 import {
   MAX_AUTOMATIC_RECOVERIES,
   PARK_WINDOW_MS,
@@ -23,7 +23,6 @@ import {
   RECOVERED_REASON,
   RELAUNCHED_LOST_REASON,
   RELAUNCHED_TRUNCATED_REASON,
-  REVIEW_WAIT_MS,
   reclaimOrphanedRuns,
   reportStrandedParks,
   reportStrandedReviews,
@@ -64,14 +63,10 @@ const LONG_AFTER = () => new Date(Date.now() + RECLAIM_STALE_MS * 2);
 const AFTER_PARK_WINDOW = () => new Date(Date.now() + PARK_WINDOW_MS + RECLAIM_STALE_MS * 2);
 
 /**
- * And the clock a Session left at the review gate has to be read against.
- *
- * A parked round that finished waits in `waitForEvent` for seven days, which is much longer than
- * the park window above — so `AFTER_PARK_WINDOW` is *inside* it, and a case that could only
- * distinguish "waiting for a person" from "nobody is ever coming" needs a clock past the wait the
- * gate itself gives.
+ * Far past any window this module reads. A gate waits for a person with no timeout at all, so
+ * this is the clock that proves nothing is ever concluded from how long nobody has looked.
  */
-const AFTER_REVIEW_WAIT = () => new Date(Date.now() + REVIEW_WAIT_MS + RECLAIM_STALE_MS * 2);
+const A_MONTH_LATER = () => new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
 async function seedTask(
   db: TestDb,
@@ -356,6 +351,24 @@ describe("reclaimOrphanedRuns after the harness finished", () => {
     });
     return sessionId;
   }
+
+  it("leaves a run that already ended at the gate alone, however long nobody looks", async () => {
+    // The steady state of a finished Task on no Workflow: the run recorded its completion, set
+    // the Session `awaiting_review` and ended. Reclaiming it appended a "recovered after restart"
+    // record to its log every ten minutes for as long as nobody opened the review.
+    const db = createTestDb();
+    const sessionId = await seedWithMarker(db, "task-at-gate", "solow/task-at-gate");
+    await db.update(session).set({ state: "awaiting_review" }).where(eq(session.id, sessionId));
+
+    const count = await reclaimOrphanedRuns(db, fakeRegistry(), fakeHub(), LONG_AFTER);
+
+    expect(count).toBe(0);
+    const events = await db
+      .select()
+      .from(sessionEvent)
+      .where(eq(sessionEvent.sessionId, sessionId));
+    expect(events.map((e) => e.kind)).toEqual(["agent_done"]);
+  });
 
   it("records the declaration and leaves the Task for a person, not in failed", async () => {
     // The Task does not move: entering review is the operator's one action (Principle I), and
@@ -1075,9 +1088,9 @@ describe("reportStrandedParks", () => {
   });
 
   it("leaves a parked Task whose round finished and is waiting for a person", async () => {
-    // A run that woke, worked and reached the gate sets its Session `awaiting_review` and then
-    // waits in `waitForEvent` for up to seven days — silent, unregistered, and with the Task row
-    // still reading `parked` until an operator opens the gate. Waiting for a person is never
+    // A run that woke, worked and reached the gate sets its Session `awaiting_review` and ends —
+    // silent, unregistered, and with the Task row still reading `parked` until an operator opens
+    // the gate. Waiting for a person is never
     // stranded, which is the distinction `reportStrandedReviews` draws in the next column over.
     const db = createTestDb();
     const { sessionId } = await seedTask(db, { taskId: "task-at-gate", taskState: "parked" });
@@ -1090,46 +1103,149 @@ describe("reportStrandedParks", () => {
     expect(row?.failureReason).toBeNull();
   });
 
-  it("reports a parked Task whose wait for a person has itself run out", async () => {
-    /*
-     * The other end of the guard above, and until it was bounded there was no other end.
-     *
-     * A run lost at the review gate leaves the Session `awaiting_review` and the Task `parked`,
-     * and nothing in the orchestrator can reach that pair: `reportStrandedReviews` selects
-     * `task.state === "review"` and a parked round never moves the Task there, while `heldByRun`
-     * reads `parked` with no reason as held, so the reaper keeps the container too. Three sweeps
-     * at forty park windows out reported nothing and removed nothing — a permanent leak reachable
-     * only through this feature's own path.
-     *
-     * Seven days is not a guess about lost runs; it is the gate's own `waitForEvent` timeout. Past
-     * it either the run is gone or it woke, returned `review_timeout`, and left the Task exactly
-     * as it is. Both are the sentence this reason exists to say.
-     */
+  it("leaves a parked Task at the gate however long nobody looks", async () => {
+    // The gate is a row, not a run with a timeout, so there is no point past which waiting for a
+    // person turns into a lost run — and the run that opened it released its executor, so there
+    // is no container behind it to leak either.
     const db = createTestDb();
     const { sessionId } = await seedTask(db, { taskId: "task-abandoned", taskState: "parked" });
     await db.update(session).set({ state: "awaiting_review" }).where(eq(session.id, sessionId));
 
-    const count = await reportStrandedParks(db, fakeRegistry(), fakeHub(), AFTER_REVIEW_WAIT);
+    const count = await reportStrandedParks(db, fakeRegistry(), fakeHub(), A_MONTH_LATER);
 
-    expect(count).toBe(1);
+    expect(count).toBe(0);
     const [row] = await db.select().from(task).where(eq(task.id, "task-abandoned"));
-    expect(row?.failureReason).toBe(STRANDED_PARK_REASON);
-    expect(row?.state).toBe("parked");
+    expect(row?.failureReason).toBeNull();
   });
 
-  it("measures the wait the review gate actually gives a person", async () => {
-    /*
-     * The second pinned copy in this file, and it fails in the direction that matters: this module
-     * decides when a Session sitting at the gate has waited longer than the gate itself allows, so
-     * a `REVIEW_WAIT_MS` smaller than the real timeout would condemn runs — and reap containers —
-     * out from under reviewers who still have days to decide.
-     *
-     * The literal is parsed rather than restated, because the timeout `task-run.ts` hands Inngest
-     * is a duration string and the drift would be in translating it.
-     */
-    const match = REVIEW_WAIT_TIMEOUT.match(/^(\d+)d$/);
-    expect(match).not.toBeNull();
-    expect(REVIEW_WAIT_MS).toBe(Number(match?.[1]) * 24 * 60 * 60 * 1000);
+  it("does not report the same Task twice", async () => {
+    // The reason it writes is the reason it filters on, so a second sweep is a no-op.
+    const db = createTestDb();
+    const { sessionId } = await seedTask(db, { taskId: "task-once", taskState: "review" });
+    await db.insert(review).values({
+      id: "rev-once",
+      workspaceId: WS,
+      sessionId,
+      decision: "approve",
+      actorUserId: "u1",
+    });
+
+    await reportStrandedReviews(db, fakeRegistry(), fakeHub(), LONG_AFTER);
+    const second = await reportStrandedReviews(db, fakeRegistry(), fakeHub(), LONG_AFTER);
+
+    expect(second).toBe(0);
+  });
+});
+
+/**
+ * The same failure one column over: a run that went missing while its Task read `parked`.
+ *
+ * Nothing watched for this before, and nothing else ever would have — `reclaimOrphanedRuns`
+ * selects only `running` rows, and a sleeping run has no recorded decision for
+ * `reportStrandedReviews` to find. The evidence is therefore the clock, so these cases are mostly
+ * about the runs it must *not* touch: the one still inside its window, the one that woke and is
+ * working, and the one that woke, finished and is waiting for a person with the Task row still
+ * reading `parked`.
+ */
+describe("reportStrandedParks", () => {
+  it("leaves a Task still sleeping out its quota window", async () => {
+    // Twenty minutes into a five-hour sleep. A sweep that reported this would destroy work the
+    // deployment is deliberately holding, and take the container out from under it.
+    const db = createTestDb();
+    await seedTask(db, { taskId: "task-sleeping", taskState: "parked" });
+
+    const count = await reportStrandedParks(db, fakeRegistry(), fakeHub(), LONG_AFTER);
+
+    expect(count).toBe(0);
+    const [row] = await db.select().from(task).where(eq(task.id, "task-sleeping"));
+    expect(row?.state).toBe("parked");
+    expect(row?.failureReason).toBeNull();
+  });
+
+  it("names a park that slept through its own wake-up", async () => {
+    const db = createTestDb();
+    await seedTask(db, { taskId: "task-lost", taskState: "parked" });
+
+    const count = await reportStrandedParks(db, fakeRegistry(), fakeHub(), AFTER_PARK_WINDOW);
+
+    expect(count).toBe(1);
+    const [row] = await db.select().from(task).where(eq(task.id, "task-lost"));
+    // Still `parked`, like its review twin stays at the gate: the state is what happened to the
+    // Task, and the reason is what happened to the run.
+    expect(row?.state).toBe("parked");
+    expect(row?.failureReason).toBe(STRANDED_PARK_REASON);
+  });
+
+  it("announces it to the board and to the Task's own page", async () => {
+    const db = createTestDb();
+    await seedTask(db, { taskId: "task-lost", taskState: "parked" });
+    const hub = fakeHub();
+
+    await reportStrandedParks(db, fakeRegistry(), hub, AFTER_PARK_WINDOW);
+
+    expect(hub.published.map((p) => p.channel)).toEqual([`board:${WS}`, `task:${WS}:task-lost`]);
+    expect(hub.published[0]?.msg).toMatchObject({ kind: "status", state: "parked" });
+  });
+
+  it("leaves a parked Task whose run woke up and is registered", async () => {
+    // The park step moves the Task out of `running` and nothing moves it back, so a run that woke
+    // and is mid-round is working with the row still reading `parked` and its Task's last write
+    // hours old. The registry is the only thing that says so, which is why it is asked first.
+    const db = createTestDb();
+    await seedTask(db, { taskId: "task-woken", taskState: "parked" });
+    const registry = fakeRegistry(new Set([`${WS}:task-woken`]));
+
+    const count = await reportStrandedParks(db, registry, fakeHub(), AFTER_PARK_WINDOW);
+
+    expect(count).toBe(0);
+  });
+
+  it("reads the Session's own log, not just the Task row", async () => {
+    // The gap the registry leaves: between two durable steps of a woken round, nothing is
+    // registered and the Task row has not been written since the park. What the run has been
+    // doing is in its Session, and this is the half a sweep reading only `task.updatedAt` would
+    // miss — it would condemn a run that spoke five minutes ago.
+    const db = createTestDb();
+    const { sessionId } = await seedTask(db, { taskId: "task-talking", taskState: "parked" });
+    await db.insert(sessionEvent).values({
+      id: "ev-woken",
+      workspaceId: WS,
+      sessionId,
+      seq: 0,
+      kind: "message",
+      payload: { kind: "message", role: "assistant", text: "back from the quota window" },
+      at: new Date(Date.now() + PARK_WINDOW_MS).toISOString(),
+    });
+
+    const count = await reportStrandedParks(db, fakeRegistry(), fakeHub(), AFTER_PARK_WINDOW);
+
+    expect(count).toBe(0);
+  });
+
+  it("leaves a parked Task whose round finished and is waiting for a person", async () => {
+    // A run that woke, worked and reached the gate sets its Session `awaiting_review` and ends —
+    // silent, unregistered, and with the Task row still reading `parked` until an operator opens
+    // the gate. Waiting for a person is never
+    // stranded, which is the distinction `reportStrandedReviews` draws in the next column over.
+    const db = createTestDb();
+    const { sessionId } = await seedTask(db, { taskId: "task-at-gate", taskState: "parked" });
+    await db.update(session).set({ state: "awaiting_review" }).where(eq(session.id, sessionId));
+
+    const count = await reportStrandedParks(db, fakeRegistry(), fakeHub(), AFTER_PARK_WINDOW);
+
+    expect(count).toBe(0);
+    const [row] = await db.select().from(task).where(eq(task.id, "task-at-gate"));
+    expect(row?.failureReason).toBeNull();
+  });
+
+  it("leaves a parked Task at the gate however long nobody looks", async () => {
+    const db = createTestDb();
+    const { sessionId } = await seedTask(db, { taskId: "task-abandoned", taskState: "parked" });
+    await db.update(session).set({ state: "awaiting_review" }).where(eq(session.id, sessionId));
+
+    const count = await reportStrandedParks(db, fakeRegistry(), fakeHub(), A_MONTH_LATER);
+
+    expect(count).toBe(0);
   });
 
   it("does not report the same Task twice", async () => {

@@ -254,17 +254,13 @@ class FixtureHarnessRunner implements HarnessRunner {
   }
 }
 
-/** Review waits, keyed by session id — released when `review.decided` arrives. */
-const waiters = new Map<string, (data: unknown) => void>();
-
-/** Inline step tools: no memoization, no durability — see the file header. */
-function localStep(sessionId: string): StepLike {
+/**
+ * Inline step tools: no memoization, no durability — see the file header. A review gate needs
+ * nothing here: a run ends at it, and the decision arrives as another `task.launch.requested`.
+ */
+function localStep(): StepLike {
   return {
     run: async (_id, fn) => fn(),
-    waitForEvent: (_id, _opts) =>
-      new Promise((resolve) => {
-        waiters.set(sessionId, (data) => resolve({ data }));
-      }),
     // Parking would otherwise stall the suite for hours; the park path itself is covered by the
     // orchestrator integration tests (TASK-020).
     sleepUntil: async () => {},
@@ -327,17 +323,10 @@ const inFlight = new Set<Promise<unknown>>();
 
 function handleEvent(name: string, data: Record<string, unknown>): void {
   if (name === "task.launch.requested") {
-    const sessionId = String(data["sessionId"]);
-    const run = runTaskLifecycle(deps(), { event: { data }, step: localStep(sessionId) })
+    const run = runTaskLifecycle(deps(), { event: { data }, step: localStep() })
       .catch((cause) => console.error("[e2e-orchestrator] lifecycle failed:", cause))
       .finally(() => inFlight.delete(run));
     inFlight.add(run);
-    return;
-  }
-  if (name === "review.decided") {
-    const sessionId = String(data["sessionId"]);
-    waiters.get(sessionId)?.(data);
-    waiters.delete(sessionId);
     return;
   }
   if (name === "task.purge.requested") {

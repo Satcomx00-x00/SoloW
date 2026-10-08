@@ -51,6 +51,16 @@ export const TaskErrorCode = {
   RetentionExpired: "TASK_RETENTION_EXPIRED",
   /** A restore on a Task that is not deleted: there is nothing to restore it from. */
   NotDeleted: "TASK_NOT_DELETED",
+  /**
+   * A start asked of a Task sitting at its review gate. A decision moves it on; a second launch
+   * would run another harness over the work the gate is showing.
+   */
+  AwaitingReview: "TASK_AWAITING_REVIEW",
+  /**
+   * The start lost a race: by the time it was applied, the Task had already left the state it
+   * was read in — another click, another tab, or the run itself moved it.
+   */
+  AlreadyStarted: "TASK_ALREADY_STARTED",
 } as const;
 export type TaskErrorCode = (typeof TaskErrorCode)[keyof typeof TaskErrorCode];
 
@@ -63,8 +73,8 @@ export type BillingErrorCode = (typeof BillingErrorCode)[keyof typeof BillingErr
 
 export const ReviewErrorCode = {
   NotInReview: "REVIEW_TASK_NOT_IN_REVIEW",
-  /** The run that would apply the decision is known to be gone (`STRANDED_REVIEW_REASON`). */
-  RunLost: "REVIEW_RUN_LOST",
+  /** No orchestrator is wired, so no run can apply the decision (only reject is pure state). */
+  NoOrchestrator: "REVIEW_NO_ORCHESTRATOR",
   AlreadyDecided: "REVIEW_ALREADY_DECIDED",
 } as const;
 export type ReviewErrorCode = (typeof ReviewErrorCode)[keyof typeof ReviewErrorCode];

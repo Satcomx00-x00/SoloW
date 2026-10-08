@@ -20,12 +20,7 @@ import { ConfirmAction } from "@/components/features/confirm-action";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
-import {
-  CREDENTIAL_EXPIRED_REASON,
-  failureReasonLabel,
-  STATE_STYLE,
-  STRANDED_REVIEW_REASON,
-} from "@/lib/task-states";
+import { CREDENTIAL_EXPIRED_REASON, failureReasonLabel, STATE_STYLE } from "@/lib/task-states";
 import { cn } from "@/lib/utils";
 
 /**
@@ -220,10 +215,8 @@ function footerBody(input: FooterInput) {
   const { task } = input;
   switch (task.state) {
     case "review":
-      // A decision that was recorded and never applied (the run holding the gate was gone):
-      // another decision would go the same way, so the gate gives way to the one control that
-      // helps — Retry re-runs the Step, and the run that retries is the one that owns the work.
-      if (task.failureReason === STRANDED_REVIEW_REASON) return <FailedOrParked {...input} />;
+      // Every gate can be decided, a "decision not applied" one included: a decision starts the
+      // run that applies it, so there is no parked run left to have lost.
       return <ReviewGate {...input} />;
     case "failed":
     case "parked":

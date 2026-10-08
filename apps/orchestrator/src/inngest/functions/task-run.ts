@@ -82,6 +82,7 @@ import {
   setTaskState,
   type TaskRepositoryBinding,
   type TaskRunContext,
+  takeUpReviewDecision,
   unsatisfiedDependencyIds,
   updateHarnessCatalogCapabilities,
 } from "../../data.js";
@@ -263,24 +264,36 @@ function unsupportedLaunchSettingsNotice(protocol: HarnessProtocol, unsupported:
 
 /**
  * Durable Task lifecycle (plan §9 / task TASK-019). Steps are resumable: an orchestrator
- * restart resumes from the last completed step (Principle III). The review gate is a
- * `waitForEvent` (Principle I — no integration without a recorded human decision).
+ * restart resumes from the last completed step (Principle III). The review gate is a state in
+ * the database, not a pause in the engine: a run ends when it opens one, and the decision starts
+ * the next run (Principle I — no integration without a recorded human decision).
  *
  * The lifecycle body is factored into `runTaskLifecycle(deps, …)` so its collaborators (harness
  * runner, worktree ops, hub, db) can be injected — the Inngest function wires the real ones,
  * and the integration test (TASK-020) drives it with a fake ACP agent + a controllable step.
  */
 
+/**
+ * What starts a run: a launch, or a person's decision at a review gate.
+ *
+ * A run never waits at a gate. It records the work, opens the gate and ends; the decision is a
+ * row in `review`, and `review.decide` starts the next run with that row's id and contents here.
+ * Waiting inside the engine (`waitForEvent`) made the gate as durable as the engine's pause
+ * index, and the local Dev Server loses that on a restart: decisions were published to a run that
+ * no longer existed, the gate kept its Approve button, and nothing anywhere failed. The database
+ * holds the gate now, so a decision is either delivered as a run or refused where it was clicked.
+ */
 const launchData = z.object({
   workspaceId: z.string().min(1),
   taskId: z.string().min(1),
   sessionId: z.string().min(1),
-});
-
-const reviewData = z.object({
-  sessionId: z.string().min(1),
-  decision: reviewDecisionSchema,
-  feedback: z.string().nullish(),
+  review: z
+    .object({
+      id: z.string().min(1),
+      decision: reviewDecisionSchema,
+      feedback: z.string().nullish(),
+    })
+    .optional(),
 });
 
 const MAX_REVIEW_ROUNDS = 5;
@@ -333,17 +346,6 @@ const MAX_WORKFLOW_STEPS = 20;
  * legitimately asleep — so `reconcile.test.ts` pins the two equal, and this export is what lets it.
  */
 export const PARK_SLEEP_MS = 5 * 60 * 60 * 1000;
-
-/**
- * How long the review gate waits for a person before this run gives up on it.
- *
- * Exported for the same reason `PARK_SLEEP_MS` is, and not for reuse: `reconcile.ts` keeps a
- * second copy in milliseconds (`REVIEW_WAIT_MS`) because `reportStrandedParks` has to know when a
- * Session left `awaiting_review` by timing out rather than by a decision — a parked round that
- * reaches the gate leaves the Task reading `parked`, so that sweep is the only thing that will
- * ever look at the row again. `reconcile.test.ts` pins the two equal.
- */
-export const REVIEW_WAIT_TIMEOUT = "7d";
 
 /**
  * How many times Inngest re-runs the function after a failure. Declared once and read by the
@@ -524,10 +526,6 @@ export function defaultDeps(): TaskRunDeps {
 /** Minimal shape of the Inngest step tools the lifecycle uses (also satisfied by test fakes). */
 export interface StepLike {
   run<T>(id: string, fn: () => T | Promise<T>): Promise<T>;
-  waitForEvent(
-    id: string,
-    opts: { event: string; timeout: string; match: string },
-  ): Promise<{ data: unknown } | null>;
   sleepUntil(id: string, until: Date): Promise<void>;
 }
 
@@ -758,11 +756,26 @@ export async function runTaskLifecycle(
   deps: TaskRunDeps,
   { event, step, attempt = 0 }: TaskRunArgs,
 ): Promise<{ taskId: string; result: string }> {
-  const { workspaceId, taskId, sessionId } = launchData.parse(event.data);
+  const { workspaceId, taskId, sessionId, review: decidedReview } = launchData.parse(event.data);
   const { db } = deps;
   const log = withRunContext(deps.logger, { workspaceId, taskId, sessionId });
 
   const ctx = await step.run("load", () => loadTaskRunContext(db, workspaceId, taskId));
+
+  /*
+   * A run started by a decision takes it up before anything else — once.
+   *
+   * The event can be delivered twice, and a second application is not harmless: approving a
+   * middle Step twice would move the cursor past the Step after it without that Step ever
+   * running. The write is conditional, so the run that loses finds the decision spent and leaves
+   * without touching the Task.
+   */
+  if (decidedReview) {
+    const taken = await step.run("decision-take-up", () =>
+      takeUpReviewDecision(db, workspaceId, sessionId, decidedReview.id),
+    );
+    if (!taken) return { taskId, result: "decision_already_applied" };
+  }
 
   const channel = deps.hub.taskChannel(workspaceId, taskId);
   const boardChannel = deps.hub.boardChannel(workspaceId);
@@ -1024,7 +1037,9 @@ export async function runTaskLifecycle(
    * else the run said about itself.
    */
   const unsupported = unsupportedLaunchSettings(protocol, launchSettings);
-  if (unsupported.length > 0) {
+  // Said once per Step, by the run that launched it: a run a decision started is carrying on the
+  // same Step under the same Profile, and a Step it advances to says its own (`takeAdvance`).
+  if (unsupported.length > 0 && !decidedReview) {
     // The bare id stays reserved for this, the pre-loop emission. A Step boundary that finds its
     // own unsupported pins emits under `launch-settings-unsupported-${round}` instead, so a
     // Workflow cannot collide with the id a Task with no Workflow has always used.
@@ -1524,6 +1539,33 @@ export async function runTaskLifecycle(
         return worktree ? [{ binding, worktree }] : [];
       });
 
+    /**
+     * The primary worktree an earlier round or Session left on disk, confirmed with git — or null.
+     *
+     * Only a `--worktree` harness needs looking for it: everywhere else SoloW provisioned the
+     * primary above and `wt` already holds it. A row whose directory is gone is marked so, and the
+     * caller carries on as though there were none.
+     */
+    const retainedPrimary = async (): Promise<Worktree | null> => {
+      if (!harnessMakesPrimaryWorktree) return null;
+      const secondaries = [...provisionedByAttachment.values()].map((entry) => entry.path);
+      const row = await retainedWorktree(
+        db,
+        workspaceId,
+        taskId,
+        primaryBinding.repository.id,
+        secondaries,
+      );
+      if (!row) return null;
+      try {
+        return await repoAdmin.adopt(repoPath, row.path);
+      } catch (cause) {
+        captureException(log, cause, { stage: "resume-worktree", path: row.path });
+        await markWorktreesRemoved(db, workspaceId, taskId, [row.path]);
+        return null;
+      }
+    };
+
     /** Feedback from the previous review round; it becomes the next round's brief. */
     let pendingFeedback: string | undefined;
     /**
@@ -1687,7 +1729,7 @@ export async function runTaskLifecycle(
      * Returns a terminal result when the run cannot go on, and null when the loop continues.
      */
     const takeAdvance = async (
-      round: number,
+      round: number | "decision",
       next: { stepId: string; brief: string },
     ): Promise<{ taskId: string; result: string } | null> => {
       const landed = wf?.steps.find((entry) => entry.id === next.stepId);
@@ -1750,8 +1792,10 @@ export async function runTaskLifecycle(
         // Read, never assumed from `ctx.task.state`. `to-review` deliberately does not move the
         // Task into `review`, so at an agent-signal advance the row is usually still `running`
         // and no transition is due — writing one anyway would put a `review → running` pair in
-        // the log for a review that never happened.
-        const state = await readTaskState(db, workspaceId, taskId);
+        // the log for a review that never happened. An advance a decision made is the exception:
+        // the gate it decided was `review`, though `review.decide` has already taken the row.
+        const state =
+          round === "decision" ? "review" : await readTaskState(db, workspaceId, taskId);
         if (state === "review") {
           await setTaskState(db, workspaceId, taskId, "running");
           // The Step being entered, not the one just finished: this transition is the first
@@ -1819,6 +1863,316 @@ export async function runTaskLifecycle(
      * below decide what actually happens.
      */
     const maxRounds = MAX_REVIEW_ROUNDS * (1 + MAX_AUTO_CONTINUE_ROUNDS) * Math.max(1, stepCount);
+
+    /**
+     * Apply the decision this run was started with, if it was started with one.
+     *
+     * Everything a decision needs from the round it decides on is read back rather than carried:
+     * the harness's declaration from the completion it recorded at the gate, and the worktrees
+     * from the rows that say where they are. That is what lets the run that opened a gate end
+     * there, and a different run — minutes or days later, after any number of restarts — pick the
+     * decision up.
+     *
+     * Returns a terminal result, or null when the decision sends the harness back to work, in
+     * which case the round loop below starts with the state the decision set up.
+     */
+    const applyDecision = async (
+      decided: NonNullable<typeof decidedReview>,
+    ): Promise<{ taskId: string; result: string } | null> => {
+      const { decision } = decided;
+      const feedback = decided.feedback ?? null;
+      const summary = ctx.task.completedSummary ?? null;
+      const outcome = ctx.task.completedOutcome ?? null;
+
+      if (decision === "request_changes") {
+        // Resuming is a *start*, so it is gated on the Task's dependencies exactly as a launch is
+        // (issue #6 AC-3). `review.decide` already refuses it before publishing, which makes this
+        // a second line rather than the first — but the transition into `running` is applied on
+        // this side, and a guard that lives only at the API boundary holds only while the API is
+        // the sole producer of decisions.
+        const outstanding = await step.run("decision-blockers", () =>
+          unsatisfiedDependencyIds(db, workspaceId, taskId),
+        );
+        if (outstanding.length > 0) {
+          const reason = "blocked_by_dependency";
+          await step.run("decision-blocked", async () => {
+            await setTaskState(db, workspaceId, taskId, "failed", { failureReason: reason });
+            await recordTransition("review", "failed", leg.stepId, reason);
+          });
+          logStateTransition(log, { workspaceId, taskId, from: "review", to: "failed" });
+          announce("failed");
+          // The blocking ids are Task ids, not content — safe to log, and the only way an
+          // operator learns *which* predecessor stopped the resume.
+          captureException(log, new Error(`resume refused: ${reason}`), {
+            failureReason: reason,
+            blockedBy: outstanding,
+          });
+          return { taskId, result: reason };
+        }
+        // `""` rather than `undefined` when the reviewer wrote nothing: the next round's brief
+        // still has to say the last one was rejected, and only the presence of the field
+        // distinguishes a redo from a first attempt.
+        pendingFeedback = feedback ?? "";
+        await step.run("decision-resume", async () => {
+          await setTaskState(db, workspaceId, taskId, "running");
+          // The previous round's declaration does not describe the round about to start. Left in
+          // place, the board would keep offering to review work being rewritten as you look.
+          await clearTaskCompletion(db, workspaceId, taskId);
+          await setSessionState(db, workspaceId, sessionId, "active");
+          await recordTransition("review", "running", leg.stepId);
+        });
+        logStateTransition(log, { workspaceId, taskId, from: "review", to: "running" });
+        announce("running");
+        return null;
+      }
+
+      // Approve and reject both act on the work the gate showed, so both need its worktrees —
+      // confirmed with git, as a round confirms the one its harness reports, before anything is
+      // committed into or discarded from them.
+      const known = wt;
+      wt = await step.run("decision-worktree", async () =>
+        known ? repoAdmin.adopt(repoPath, known.path) : retainedPrimary(),
+      );
+      if (wt === null) {
+        // The directory the decision is about is gone (removed by hand, or past retention).
+        // Nothing can be committed or discarded, and saying so beats a `done` with no branch.
+        return await failRun("decision-worktree-missing", "worktree_missing", leg.stepId, "review");
+      }
+      const gate = worktreeBindings(wt);
+
+      if (decision === "reject") {
+        await step.run("decision-reject", async () => {
+          for (const entry of gate) await worktreeOps.discard(entry.worktree.path);
+          await setTaskState(db, workspaceId, taskId, "ready");
+          await recordTransition("review", "ready", leg.stepId);
+        });
+        /*
+         * A rejection is not a Step completion, so the cursor deliberately does not move — but the
+         * rejected attempt still parked its summary in `workflow_pending_handoff`, and that column
+         * is promoted into the handoff by whatever eventually completes this Step. Left in place,
+         * the work a human explicitly refused becomes the next Step's inbound context.
+         *
+         * Its own durable step rather than folded into `decision-reject`, which does filesystem
+         * work that can throw ahead of it.
+         */
+        if (wf && leg.stepId) {
+          const rejectedStepId = leg.stepId;
+          await step.run("decision-reject-handoff", () =>
+            clearTaskWorkflowPendingHandoff(db, workspaceId, taskId, rejectedStepId),
+          );
+        }
+        logStateTransition(log, { workspaceId, taskId, from: "review", to: "ready" });
+        announce("ready");
+        return { taskId, result: "rejected" };
+      }
+
+      /*
+       * Approved with decisions the reviewer settled: those go back to *this* Step's harness
+       * first (see `applyingDecisions`), and the advance happens when it has applied them.
+       *
+       * The approval's feedback is exactly the settled decisions — the gate sends nothing else
+       * with an approval — so its presence is the signal. The decision row is left unspent: the
+       * advance at the end of the next round spends it.
+       */
+      if (wf && leg.stepId && leg.advanceOn && feedback?.trim()) {
+        applyingDecisions = feedback.trim();
+        const stepId = leg.stepId;
+        const stepName = leg.stepName ?? "this step";
+        await step.run("decision-apply", async () => {
+          await setTaskState(db, workspaceId, taskId, "running");
+          await clearTaskCompletion(db, workspaceId, taskId);
+          await setSessionState(db, workspaceId, sessionId, "active");
+          await recordTransition("review", "running", stepId);
+          await appendSessionEvent(db, workspaceId, {
+            sessionId,
+            seq: await nextSessionEventSeq(db, workspaceId, sessionId),
+            workflowStepId: stepId,
+            payload: {
+              kind: "notice",
+              text: `Approved with your decisions. The harness applies them to ${stepName} before the workflow moves on.`,
+            },
+          });
+        });
+        logStateTransition(log, { workspaceId, taskId, from: "review", to: "running" });
+        announce("running");
+        return null;
+      }
+
+      /*
+       * A human approved, and under a Workflow that is the second of the two facts a Step
+       * boundary needs — the harness finished (it recorded its completion at the gate) and a
+       * person said yes.
+       *
+       * `signal: leg.advanceOn`, and **never the literal `"review"`**. A Step that advances on
+       * `agent-signal` sitting behind a `human` gate is an ordinary configuration: sending
+       * `"review"` to it makes `advanceWorkflowStep` return `held`, the cursor never moves, the
+       * approval is never spent, and the pipeline stalls with no error anywhere.
+       *
+       * `handoff` carries the declaration the harness made at the gate, and the reviewer's words
+       * with it; when there is neither, the transaction falls back to `workflow_pending_handoff`.
+       */
+      if (wf && leg.stepId && leg.advanceOn) {
+        const carried = handoffWith(summary, feedback);
+        const reported = await reportStepFinished("decision-advance", "decision-advance-recheck", {
+          fromStepId: leg.stepId,
+          signal: leg.advanceOn,
+          producedChanges: outcome === "changes_ready",
+          ...(carried ? { handoff: carried } : {}),
+          ...(outcome ? { outcome } : {}),
+        });
+        if (reported.kind === "failed") {
+          return await failRun(
+            "decision-advance-failed",
+            "workflow_advance_failed",
+            leg.stepId,
+            "review",
+          );
+        }
+        if (reported.kind === "advanced") {
+          const terminal = await takeAdvance("decision", reported);
+          if (terminal) return terminal;
+          return null;
+        }
+        if (reported.status !== "completed") {
+          /*
+           * Reachable when the `agent-signal` advance already spent this approval: the review
+           * that arrives afterwards finds nothing left to spend. Nothing is integrated on any
+           * status but `completed`, and the gate is put back so the person can approve again.
+           */
+          const stepId = leg.stepId;
+          await step.run("decision-not-completed", async () => {
+            await setTaskState(db, workspaceId, taskId, "review");
+            await appendSessionEvent(db, workspaceId, {
+              sessionId,
+              seq: await nextSessionEventSeq(db, workspaceId, sessionId),
+              workflowStepId: stepId,
+              payload: {
+                kind: "notice",
+                text: `This step reported ${reported.status} rather than completing, so nothing was integrated. Approve this step again to move the workflow on.`,
+              },
+            });
+          });
+          announce("review");
+          return { taskId, result: "workflow_awaiting_decision" };
+        }
+        // `completed`: the last Step, with a human's approval recorded and now spent. Falls
+        // through to the integration below — the one path that integrates.
+      }
+
+      const integration = await step.run("decision-approve", async () => {
+        // One commit per worktree, and each attachment records the branch its own change landed
+        // on: a single column on `task` could only ever name one of the branches a reviewer would
+        // then need to fetch (issue #7 AC-4).
+        //
+        // A worktree the harness never touched is skipped rather than committed: `git commit`
+        // with nothing staged exits non-zero, which would fail the approve for the repository the
+        // harness *did* change. The branch is still recorded, because it exists.
+        //
+        // Each group is integrated **inside its own try** (issue #70 AC-4). One decision covers
+        // the whole Task, so a failure part-way through leaves it partially integrated, and
+        // letting the step throw would report that as "the approve failed" — then Inngest would
+        // retry it, committing a second time to the branches that already took.
+        const integrated: string[] = [];
+        const failed: { branch: string; error: string }[] = [];
+        for (const entry of gate) {
+          try {
+            if (await worktreeOps.hasChanges(entry.worktree.path, patternsFor(entry))) {
+              await worktreeOps.commit(
+                entry.worktree.path,
+                `SoloW: task ${taskId}`,
+                patternsFor(entry),
+              );
+            }
+            // Then put the branch where a reviewer can reach it (issue #96 round 2): a Task with
+            // its own clone committed into that clone, which is torn down with its worktree. A
+            // no-op for a local run, whose branch is already in the Repository.
+            await repoAdmin.publish(
+              entry.worktree.repoPath,
+              upstreamPathFor(entry.binding),
+              entry.worktree.branch,
+            );
+            await setTaskRepositoryResultBranch(
+              db,
+              workspaceId,
+              entry.binding.attachment.id,
+              entry.worktree.branch,
+            );
+            integrated.push(entry.worktree.branch);
+          } catch (cause) {
+            failed.push({
+              branch: entry.worktree.branch,
+              error: cause instanceof Error ? cause.message : String(cause),
+            });
+          }
+        }
+
+        if (failed.length > 0) {
+          // Fail loudly, with the partial state named — in the session log, where the reviewer
+          // who has to decide what to do about a half-landed change is already looking.
+          // `failureReason` stays a class the board can match on.
+          await appendSessionEvent(db, workspaceId, {
+            sessionId,
+            seq: await nextSessionEventSeq(db, workspaceId, sessionId),
+            workflowStepId: leg.stepId,
+            payload: {
+              kind: "notice",
+              text: [
+                "Approval integrated only part of this task.",
+                integrated.length > 0
+                  ? `Committed and recorded: ${integrated.join(", ")}.`
+                  : "Nothing was committed.",
+                `Not integrated: ${failed.map((f) => `${f.branch} (${f.error})`).join("; ")}.`,
+                "The branches listed as committed are real and already hold the change — decide what to do with them by hand.",
+              ].join(" "),
+            },
+          });
+          await setTaskState(db, workspaceId, taskId, "failed", {
+            failureReason: PARTIAL_INTEGRATION_REASON,
+          });
+          await recordTransition("review", "failed", leg.stepId, PARTIAL_INTEGRATION_REASON);
+          await setSessionState(db, workspaceId, sessionId, "closed", {
+            endedAt: new Date().toISOString(),
+          });
+          return { integrated, failed };
+        }
+
+        await setTaskState(db, workspaceId, taskId, "done");
+        await recordTransition("review", "done", leg.stepId);
+        // `resumable`, not `closed` (F11 FR-3/FR-5): the worktrees stay on disk for the retention
+        // window and the harness conversation with them, so a reopened Task can carry on where
+        // this one stopped. The retention sweep closes the Session when it takes the worktree.
+        await setSessionState(db, workspaceId, sessionId, "resumable", {
+          endedAt: new Date().toISOString(),
+        });
+        return { integrated, failed };
+      });
+
+      if (integration.failed.length > 0) {
+        logStateTransition(log, { workspaceId, taskId, from: "review", to: "failed" });
+        // Branch names, not diff content — safe to log, and the only way an operator learns
+        // which half of a partially-integrated Task landed without opening the session.
+        captureException(
+          log,
+          new Error(`partial integration: ${integration.failed.length} failed`),
+          {
+            failureReason: PARTIAL_INTEGRATION_REASON,
+            integrated: integration.integrated,
+            notIntegrated: integration.failed.map((f) => f.branch),
+          },
+        );
+        announce("failed");
+        return { taskId, result: PARTIAL_INTEGRATION_REASON };
+      }
+      logStateTransition(log, { workspaceId, taskId, from: "review", to: "done" });
+      announce("done");
+      return { taskId, result: "done" };
+    };
+
+    if (decidedReview) {
+      const applied = await applyDecision(decidedReview);
+      if (applied) return applied;
+    }
+
     for (let round = 0; round < maxRounds; round++) {
       /*
        * A round carrying on a truncated conversation is the model's, not the reviewer's: it
@@ -1845,6 +2199,9 @@ export async function runTaskLifecycle(
        */
       const continuation = continuingTruncated;
       continuingTruncated = false;
+      // Captured, because `leg` is rebound at the next Step boundary while this round's harness
+      // may still be reporting its conversation id on a detached chain.
+      const roundStepId = leg.stepId;
       const run = await step.run(`agent-run-${round}`, async () => {
         /*
          * The credential for the Profile *this leg* runs under (AC-3).
@@ -2042,8 +2399,8 @@ export async function runTaskLifecycle(
          * durable run to wait on: the step never returns, so Inngest never checkpoints it, the
          * platform kills the request after its execution budget (8 minutes, observed), and the
          * whole function is retried from the top — for ever. The gate step below it never runs, so
-         * `waitForEvent` is never reached, so the `review.decided` event an approval publishes
-         * arrives at a run that is not listening. That is the failure this file's own comment
+         * the gate is never opened and an approval has nothing to decide. That is the failure this
+         * file's own comment
          * predicted ("a harness that declares and then waits for the operator does not exit") and
          * worked around for the *board* by recording the declaration mid-run; the run itself was
          * still hanging.
@@ -2352,17 +2709,7 @@ export async function runTaskLifecycle(
          * the harness reports would be; a row whose directory is gone is marked so and the round
          * proceeds as a first one.
          */
-        if (wt === null && harnessMakesPrimaryWorktree) {
-          const row = await retainedWorktree(db, workspaceId, taskId, primaryBinding.repository.id);
-          if (row) {
-            try {
-              wt = await repoAdmin.adopt(repoPath, row.path);
-            } catch (cause) {
-              captureException(log, cause, { stage: "resume-worktree", path: row.path });
-              await markWorktreesRemoved(db, workspaceId, taskId, [row.path]);
-            }
-          }
-        }
+        if (wt === null) wt = await retainedPrimary();
         const resuming = wt;
 
         // A Harness Config the run cannot use fails the round by name (Decision 0028), the same
@@ -2427,7 +2774,7 @@ export async function runTaskLifecycle(
          */
         const resumeSessionId =
           resuming && !resumeLost
-            ? await resolveResumeHarnessSessionId(db, workspaceId, taskId, sessionId)
+            ? await resolveResumeHarnessSessionId(db, workspaceId, taskId, sessionId, leg.stepId)
             : null;
 
         /*
@@ -2618,7 +2965,7 @@ export async function runTaskLifecycle(
           (id) => {
             if (!id) return;
             writes = writes
-              .then(() => recordHarnessSessionId(db, workspaceId, sessionId, id))
+              .then(() => recordHarnessSessionId(db, workspaceId, sessionId, id, roundStepId))
               .catch((cause) =>
                 isMissingParentRow(cause)
                   ? abandon("harness-session-record")
@@ -2713,9 +3060,9 @@ export async function runTaskLifecycle(
           // ...and, on the first round, use that same moment to copy the Repository's setup files
           // in. A harness announces its worktree before the model's first turn, so this is the
           // earliest point at which the directory exists — and, in practice, before the harness has
-          // looked at it. A later round skips it: the files are already there, and re-copying
-          // would overwrite anything the harness changed.
-          if (round === 0 && reported) await seed(reported);
+          // looked at it. A later round skips it, and so does a run a review decision started:
+          // the files are already there, and re-copying would overwrite what the harness changed.
+          if (round === 0 && !decidedReview && reported) await seed(reported);
           /*
            * Write the worktree down the moment the harness names it, not only after the round
            * (`record-worktree-${round}`). A round that dies mid-run — a restart, an exhausted
@@ -3015,7 +3362,7 @@ export async function runTaskLifecycle(
        * one place that acts on it.
        *
        * Nothing is recorded and nothing moves: no completion row, no `awaiting_review`, no
-       * `waitForEvent`. The Task stays `running`, the worktrees stay where they are, and the next
+       * gate. The Task stays `running`, the worktrees stay where they are, and the next
        * round picks the same conversation back up — `harness_session_id` was written mid-run by
        * the round that just stopped, so `resolveResumeHarnessSessionId` finds it with no extra
        * plumbing and the brief becomes "carry straight on" rather than the whole thing again.
@@ -3137,7 +3484,7 @@ export async function runTaskLifecycle(
        * nothing, so an `auto-unless-changes` gate opens on the harness's unverified word about its
        * own output — which is the party the gate exists to catch.
        *
-       * **Before `waitForEvent`,** because an `auto` Step must not need a human at all.
+       * **Before the gate,** because an `auto` Step must not need a human at all.
        */
       /*
        * The round that applied a reviewer's decisions has ended: spend the approval it was started
@@ -3253,14 +3600,14 @@ export async function runTaskLifecycle(
         /*
          * `completed` here means the *last* Step signalled and an unspent approval was found —
          * and it deliberately does not integrate. Integration keeps exactly one home in this
-         * file, inside `approve-${round}`, reachable only from a `review.decided` carrying
-         * `approve`. Falling through to the gate costs one extra approval in a rare state, which
+         * file, inside `decision-approve`, reachable only from a run started by an `approve`
+         * decision. Falling through to the gate costs one extra approval in a rare state, which
          * is stricter than Principle I requires and never looser.
          *
          * `awaiting-decision` and `held` fall through for the ordinary reason: the cursor did not
          * move and a person has to look. The Step's summary is parked in
-         * `workflow_pending_handoff`, which is the column's whole purpose — the caller that
-         * replays this once someone has decided no longer has the harness's words.
+         * `workflow_pending_handoff`, which is the column's whole purpose — the run that
+         * applies the decision is a different run, and has only the database to read them from.
          */
       }
 
@@ -3271,7 +3618,7 @@ export async function runTaskLifecycle(
        * The rule above — the transition into `review` is the operator's click — is about a Task
        * on no Workflow, where "the harness stopped" and "someone should look" are different facts
        * and only the person can tell which. Here they are the same fact: the only way past this
-       * point is a `review.decided`, so a Task left `running` with an "Open review" button is a
+       * point is a decision, so a Task left `running` with an "Open review" button is a
        * gate the person has to open before they can answer it. A plan-first Step showed the cost
        * in full — its harness declares `nothing_to_do` every time, and the operator was left
        * looking at "Finished — nothing to do" with the Approve they needed one click further away.
@@ -3281,10 +3628,9 @@ export async function runTaskLifecycle(
        * Idempotent on a redrive: `setTaskState` writes the same value and `recordTransition`
        * drops an identical adjacent transition.
        *
-       * `failureReason: null` because a run about to park at its own gate is the proof that a
-       * decision will be heard — whatever an earlier round left on the row is overtaken. Kept, a
-       * `review_decision_not_applied` from before a Retry made this live gate read as dead:
-       * the page offered Retry instead of Approve, over a run sitting there waiting for one.
+       * `failureReason: null` because a gate this run has just opened is a live one — whatever an
+       * earlier round left on the row is overtaken. Kept, a `review_decision_not_applied` from
+       * before a Retry made this gate read as dead: the page offered Retry instead of Approve.
        */
       if (wf && leg.stepId && run.outcome !== "blocked") {
         const stepId = leg.stepId;
@@ -3296,317 +3642,15 @@ export async function runTaskLifecycle(
         announce("review");
       }
 
-      const decidedEvent = await step.waitForEvent(`await-review-${round}`, {
-        event: "review.decided",
-        timeout: REVIEW_WAIT_TIMEOUT,
-        match: "data.sessionId",
-      });
-      if (!decidedEvent) return { taskId, result: "review_timeout" };
-
-      const { decision, feedback } = reviewData.parse(decidedEvent.data);
-
-      if (decision === "approve") {
-        /*
-         * Approved with decisions the reviewer settled: those go back to *this* Step's harness
-         * first (see `applyingDecisions`), and the advance happens when it has applied them.
-         *
-         * The approval's feedback is exactly the settled decisions — the gate sends nothing else
-         * with an approval — so its presence is the signal. The decision row is left unspent: the
-         * advance at the end of the next round spends it, and `review.decide` already recorded it.
-         */
-        if (wf && leg.stepId && leg.advanceOn && feedback?.trim()) {
-          applyingDecisions = feedback.trim();
-          // Not a redo: the round being started was approved, and an earlier request for changes
-          // on this Step has been answered by the work that just got approved.
-          pendingFeedback = undefined;
-          const stepId = leg.stepId;
-          const stepName = leg.stepName ?? "this step";
-          await step.run(`apply-decisions-${round}`, async () => {
-            await setTaskState(db, workspaceId, taskId, "running");
-            await clearTaskCompletion(db, workspaceId, taskId);
-            await recordTransition("review", "running", stepId);
-            await appendSessionEvent(db, workspaceId, {
-              sessionId,
-              seq: await nextSessionEventSeq(db, workspaceId, sessionId),
-              workflowStepId: stepId,
-              payload: {
-                kind: "notice",
-                text: `Approved with your decisions. The harness applies them to ${stepName} before the workflow moves on.`,
-              },
-            });
-          });
-          logStateTransition(log, { workspaceId, taskId, from: "review", to: "running" });
-          announce("running");
-          continue;
-        }
-        /*
-         * A human approved, and under a Workflow that is the second of the two facts a Step
-         * boundary needs — the harness finished (we are past `to-review`) and a person said yes.
-         *
-         * `signal: leg.advanceOn`, and **never the literal `"review"`**. A Step that advances on
-         * `agent-signal` sitting behind a `human` gate is an ordinary configuration: sending
-         * `"review"` to it makes `advanceWorkflowStep` return `held`, the cursor never moves, the
-         * approval is never spent, and the pipeline stalls with no error anywhere — a deadlock
-         * that reads as the run simply having stopped. The Step's own rule is what decides
-         * whether this signal finishes it.
-         *
-         * `handoff` carries this round's declaration when the harness made one, and is omitted when
-         * it did not — in which case the transaction falls back to `workflow_pending_handoff`.
-         *
-         * The plan for this change had it omitted unconditionally, on the reasoning that "the
-         * caller that noticed the decision no longer has the harness's words". That is true of the
-         * *web* caller and false here: this call site is inside the same round as the harness run,
-         * with `run.summary` in scope. Omitting it would mean a Step whose `advanceOn` is `review`
-         * never carries a handoff at all — site A is the only thing that parks one, and site A
-         * does not fire on a `review` Step — which would leave AC-2's "carrying the handoff
-         * context" unmet for half the Step configurations the designer offers. The fallback is
-         * unchanged for the case the plan was actually protecting: when the harness said nothing,
-         * nothing is sent and the parked summary is promoted.
-         */
-        if (wf && leg.stepId && leg.advanceOn) {
-          const carried = handoffWith(run.summary, feedback);
-          const reported = await reportStepFinished(
-            `workflow-review-${round}`,
-            `workflow-recheck-review-${round}`,
-            {
-              fromStepId: leg.stepId,
-              signal: leg.advanceOn,
-              producedChanges: run.outcome === "changes_ready",
-              // The reviewer's words on an approval ride into the next Step with the harness's
-              // own summary (review analysis, point 3): a decision the harness emitted and the
-              // reviewer overturned on the Plan tab reaches the Build as text it cannot miss.
-              ...(carried ? { handoff: carried } : {}),
-              ...(run.outcome ? { outcome: run.outcome } : {}),
-            },
-          );
-          if (reported.kind === "failed") {
-            return await failRun(
-              `workflow-advance-failed-${round}`,
-              "workflow_advance_failed",
-              leg.stepId,
-              "review",
-            );
-          }
-          if (reported.kind === "advanced") {
-            const terminal = await takeAdvance(round, reported);
-            if (terminal) return terminal;
-            continue;
-          }
-          if (reported.status !== "completed") {
-            /*
-             * Reachable when site A already spent this approval earlier in the same run: the
-             * `agent-signal` advance consumed it, and the review that arrives afterwards finds
-             * nothing left to spend. Nothing is integrated on any status but `completed`.
-             *
-             * The Task is left in `review` with the cursor unmoved and the worktrees intact —
-             * the same shape `resume-blocked` returns — so a relaunch resumes on this Step via
-             * the cursor rather than restarting the pipeline.
-             */
-            await step.run(`workflow-awaiting-${round}`, async () => {
-              await appendSessionEvent(db, workspaceId, {
-                sessionId,
-                seq: await nextSessionEventSeq(db, workspaceId, sessionId),
-                workflowStepId: leg.stepId,
-                payload: {
-                  kind: "notice",
-                  text: `This step reported ${reported.status} rather than completing, so nothing was integrated. Approve this step again to move the workflow on.`,
-                },
-              });
-            });
-            return { taskId, result: "workflow_awaiting_decision" };
-          }
-          // `completed`: the last Step, with a human's approval recorded and now spent. Falls
-          // through to the approve block below entirely unchanged — the one path that integrates.
-        }
-        const outcome = await step.run(`approve-${round}`, async () => {
-          // One commit per worktree, and each attachment records the branch its own change landed
-          // on: a single column on `task` could only ever name one of the branches a reviewer
-          // would then need to fetch (issue #7 AC-4).
-          //
-          // A worktree the harness never touched is skipped rather than committed. `git commit` with
-          // nothing staged exits non-zero, so committing it unconditionally would fail the whole
-          // approve step — including for the repository the harness *did* change. That case is now
-          // ordinary rather than exotic: the harness runs in one working directory, so a Task
-          // spanning three repositories routinely reaches the gate having changed one of them. The
-          // branch is still recorded, because it exists and is what a reviewer would fetch.
-          //
-          // Each group is integrated **inside its own try** (issue #70 AC-4). One decision covers
-          // the whole Task, so a failure part-way through leaves it partially integrated — the
-          // second repository committed, the third not — and letting the step simply throw would
-          // report that as "the approve failed", which is the one reading that is false. Inngest
-          // would then retry it, committing a second time to the branches that already took.
-          const integrated: string[] = [];
-          const failed: { branch: string; error: string }[] = [];
-          for (const entry of gate) {
-            try {
-              if (await worktreeOps.hasChanges(entry.worktree.path, patternsFor(entry))) {
-                await worktreeOps.commit(
-                  entry.worktree.path,
-                  `SoloW: task ${taskId}`,
-                  patternsFor(entry),
-                );
-              }
-              /*
-               * Then put the branch where a reviewer can reach it (issue #96 round 2).
-               *
-               * A Task with its own clone has committed into that clone, which is torn down with
-               * its worktree — so without this the row written below would name a branch that
-               * exists nowhere, and F08's promise of one branch per Repository per Task would be
-               * a promise about a directory the next cleanup deletes. Inside the same `try` as
-               * the commit, and before the row: a repository this failed for is one where the
-               * result is *not* integrated, and the notice below has to be able to say so.
-               *
-               * A no-op for a local run — the branch is already in the Repository, because that
-               * is where the worktree was added.
-               */
-              await repoAdmin.publish(
-                entry.worktree.repoPath,
-                upstreamPathFor(entry.binding),
-                entry.worktree.branch,
-              );
-              await setTaskRepositoryResultBranch(
-                db,
-                workspaceId,
-                entry.binding.attachment.id,
-                entry.worktree.branch,
-              );
-              integrated.push(entry.worktree.branch);
-            } catch (cause) {
-              failed.push({
-                branch: entry.worktree.branch,
-                error: cause instanceof Error ? cause.message : String(cause),
-              });
-            }
-          }
-
-          if (failed.length > 0) {
-            /*
-             * Fail loudly, with the partial state named.
-             *
-             * The names go in the session log rather than in `failureReason`, which stays a class
-             * the way `credential_expired` and `interrupted` are — the board matches on it, and a
-             * reason carrying branch names would match nothing. The log is where the reviewer who
-             * has to decide what to do about a half-landed change is already looking.
-             */
-            await appendSessionEvent(db, workspaceId, {
-              sessionId,
-              seq: await nextSessionEventSeq(db, workspaceId, sessionId),
-              workflowStepId: leg.stepId,
-              payload: {
-                kind: "notice",
-                text: [
-                  "Approval integrated only part of this task.",
-                  integrated.length > 0
-                    ? `Committed and recorded: ${integrated.join(", ")}.`
-                    : "Nothing was committed.",
-                  `Not integrated: ${failed.map((f) => `${f.branch} (${f.error})`).join("; ")}.`,
-                  "The branches listed as committed are real and already hold the change — decide what to do with them by hand.",
-                ].join(" "),
-              },
-            });
-            await setTaskState(db, workspaceId, taskId, "failed", {
-              failureReason: PARTIAL_INTEGRATION_REASON,
-            });
-            await recordTransition("review", "failed", leg.stepId, PARTIAL_INTEGRATION_REASON);
-            await setSessionState(db, workspaceId, sessionId, "closed", {
-              endedAt: new Date().toISOString(),
-            });
-            return { integrated, failed };
-          }
-
-          await setTaskState(db, workspaceId, taskId, "done");
-          await recordTransition("review", "done", leg.stepId);
-          // `resumable`, not `closed` (F11 FR-3/FR-5): the worktrees stay on disk for the retention
-          // window and the harness conversation with them, so a reopened Task can carry on where
-          // this one stopped. The retention sweep closes the Session when it takes the worktree.
-          await setSessionState(db, workspaceId, sessionId, "resumable", {
-            endedAt: new Date().toISOString(),
-          });
-          return { integrated, failed };
-        });
-
-        if (outcome.failed.length > 0) {
-          logStateTransition(log, { workspaceId, taskId, from: "review", to: "failed" });
-          // Branch names, not diff content — safe to log, and the only way an operator learns which
-          // half of a partially-integrated Task landed without opening the session.
-          captureException(log, new Error(`partial integration: ${outcome.failed.length} failed`), {
-            failureReason: PARTIAL_INTEGRATION_REASON,
-            integrated: outcome.integrated,
-            notIntegrated: outcome.failed.map((f) => f.branch),
-          });
-          announce("failed");
-          return { taskId, result: PARTIAL_INTEGRATION_REASON };
-        }
-        logStateTransition(log, { workspaceId, taskId, from: "review", to: "done" });
-        announce("done");
-        break;
-      }
-      if (decision === "reject") {
-        await step.run(`reject-${round}`, async () => {
-          for (const entry of gate) await worktreeOps.discard(entry.worktree.path);
-          await setTaskState(db, workspaceId, taskId, "ready");
-          await recordTransition("review", "ready", leg.stepId);
-        });
-        /*
-         * A rejection is not a Step completion, so the cursor deliberately does not move — but the
-         * rejected attempt still parked its summary in `workflow_pending_handoff`, and that column
-         * is promoted into the handoff by whatever eventually completes this Step. Left in place,
-         * the work a human explicitly refused becomes the next Step's inbound context, presented
-         * to that harness as what it is building on.
-         *
-         * Its own durable step rather than folded into `reject-${round}`, which does filesystem
-         * work that can throw ahead of it.
-         */
-        if (wf && leg.stepId) {
-          const rejectedStepId = leg.stepId;
-          await step.run(`workflow-reject-${round}`, () =>
-            clearTaskWorkflowPendingHandoff(db, workspaceId, taskId, rejectedStepId),
-          );
-        }
-        logStateTransition(log, { workspaceId, taskId, from: "review", to: "ready" });
-        announce("ready");
-        break;
-      }
-      // request_changes: resume the harness for another round, carrying the reviewer's feedback —
-      // without it the next round would repeat the same brief and produce the same work.
-      //
-      // Resuming is a *start*, so it is gated on the Task's dependencies exactly as a launch is
-      // (issue #6 AC-3). `review.decide` already refuses this before publishing the event, which
-      // makes the check here a second line rather than the first — but the transition into
-      // `running` is applied on this side, and a guard that lives only at the API boundary holds
-      // only while the API is the sole producer of `review.decided`.
-      const outstanding = await step.run(`resume-blockers-${round}`, () =>
-        unsatisfiedDependencyIds(db, workspaceId, taskId),
-      );
-      if (outstanding.length > 0) {
-        const reason = "blocked_by_dependency";
-        await step.run(`resume-blocked-${round}`, async () => {
-          await setTaskState(db, workspaceId, taskId, "failed", { failureReason: reason });
-          await recordTransition("review", "failed", leg.stepId, reason);
-        });
-        logStateTransition(log, { workspaceId, taskId, from: "review", to: "failed" });
-        announce("failed");
-        // The blocking ids are Task ids, not content — safe to log, and the only way an operator
-        // learns *which* predecessor stopped the resume.
-        captureException(log, new Error(`resume refused: ${reason}`), {
-          failureReason: reason,
-          blockedBy: outstanding,
-        });
-        return { taskId, result: reason };
-      }
-      // `""` rather than `undefined` when the reviewer wrote nothing: the next round's brief still
-      // has to say the last one was rejected, and only the presence of the field distinguishes a
-      // redo from a first attempt.
-      pendingFeedback = feedback ?? "";
-      await step.run(`resume-${round}`, async () => {
-        await setTaskState(db, workspaceId, taskId, "running");
-        // The previous round's declaration does not describe the round about to start. Left in
-        // place, the board would keep offering to review work that is being rewritten as you look.
-        await clearTaskCompletion(db, workspaceId, taskId);
-        await recordTransition("review", "running", leg.stepId);
-      });
-      logStateTransition(log, { workspaceId, taskId, from: "review", to: "running" });
-      announce("running");
+      /*
+       * The gate is open, and the run ends here.
+       *
+       * The decision is not waited for. It is a row someone writes later, and `review.decide`
+       * starts the next run with it (see `launchData`); that run applies it before anything else.
+       * Ending is what makes a decision impossible to lose: there is no parked run to go missing,
+       * and the executor this run holds is released instead of sitting idle behind a person.
+       */
+      return { taskId, result: "awaiting_review" };
     }
 
     /*
@@ -3619,8 +3663,12 @@ export async function runTaskLifecycle(
      * window and the sweep in `retention.ts` removes them, whichever executor made them — the
      * container is disposed below regardless; a Task's private clone on the host is what the
      * next round resumes in.
+     *
+     * Reached only when the rounds ran out without the harness ever reaching a gate — every
+     * other way out of the loop returns. That is a run going round in circles, and it is said
+     * rather than reported as `done` over a Task nobody has looked at.
      */
-    return { taskId, result: "done" };
+    return await failRun("rounds-exhausted", "round_budget_exhausted", leg.stepId, "running");
   } finally {
     /*
      * Tear the execution host down on the way out (issue #96).
@@ -3992,6 +4040,19 @@ export const taskRun = inngest.createFunction(
     id: "task-run",
     retries: TASK_RUN_RETRIES,
     triggers: [{ event: "task.launch.requested" }],
+    /**
+     * Never two runs working on one Task at the same moment.
+     *
+     * Two runs on one Task share its worktree, its Session and its harness conversation, and
+     * nothing in either can tell the other is there — it was seen as three harnesses running the
+     * same Step side by side, each writing the cursor the others read. The start paths refuse a
+     * second start in the database (`claimTaskState`, `review.decide`), and a decision is taken up
+     * once (`decision-take-up`); this is the engine's half, for whatever reaches it anyway — a
+     * reconcile relaunch, a redelivered event. A limit rather than `singleton`: a second run waits
+     * its turn and then finds out from the database that it has nothing to do, where cancelling
+     * either one could stop a decision half-applied.
+     */
+    concurrency: [{ key: "event.data.taskId", limit: 1 }],
     /**
      * Cancellation channel for a run the operator wants gone — today, the force delete of the
      * Issue the Task belongs to (`issue.delete` with `force`). Scoped by `taskId` so a stop for

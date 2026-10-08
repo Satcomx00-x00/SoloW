@@ -1287,6 +1287,16 @@ export const session = sqliteTable(
      * conversation is the one worth continuing.
      */
     harnessSessionId: text("harness_session_id"),
+    /**
+     * The Workflow Step that conversation was had under, or null for a Task on no Workflow.
+     *
+     * A conversation belongs to the Step that briefed it. Without this, the only thing keeping
+     * Step 2 from resuming Step 1's conversation was clearing `harness_session_id` at the boundary
+     * — and the fallback to an older Session of the same Task walked straight past that, so after
+     * one relaunch every Step "continued" some earlier Step's conversation and never read its own
+     * brief. Resume now matches on the pair, so the question cannot be answered across Steps.
+     */
+    harnessSessionStepId: text("harness_session_step_id"),
     startedAt: createdAt(),
     endedAt: text("ended_at"),
   },
@@ -1467,6 +1477,14 @@ export const review = sqliteTable(
     decision: text("decision").$type<ReviewDecision>().notNull(),
     feedback: text("feedback"),
     actorUserId: text("actor_user_id").notNull(),
+    /**
+     * When the run started by this decision took it up — null until one does.
+     *
+     * A decision starts a run (`review.decide`), and an event can be delivered twice. Taking the
+     * decision up is a conditional write on this column, so exactly one run applies it and a
+     * second delivery finds it spent and leaves — rather than approving a Step that has not run.
+     */
+    appliedAt: text("applied_at"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

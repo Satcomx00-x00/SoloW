@@ -1,5 +1,4 @@
 import type { TaskState } from "@solow/contracts";
-import { STRANDED_REVIEW_REASON } from "@solow/core";
 import { type Db, session, task } from "@solow/db";
 import { and, desc, eq } from "drizzle-orm";
 import { orchestratorEnv } from "../env.js";
@@ -52,10 +51,10 @@ export const REAP_GRACE_MS = 20_000;
 /**
  * The Task states a run can still be sitting inside.
  *
- * `running` is the obvious one. `review` is a run parked in `waitForEvent("review.decided")` that
- * will loop round and use the same container for the next round, and `parked` is a run inside a
- * five-hour `step.sleepUntil` waiting for a quota window. Removing a container in either of those
- * would tear down a workspace a live run is coming back to.
+ * `running` is the obvious one, and `parked` is a run inside a five-hour `step.sleepUntil`
+ * waiting for a quota window — removing its container would tear down a workspace a live run is
+ * coming back to. `review` is not on the list: a run ends when it opens the gate and disposes of
+ * its executor on the way out, and the run a decision starts builds its own.
  *
  * Everything else means no *verdict* says a run is holding this container — including `ready` and
  * `failed`, where `reclaimOrphanedRuns` leaves a Task whose run it has just declared gone. A
@@ -66,13 +65,13 @@ export const REAP_GRACE_MS = 20_000;
  * container being removed in the same sweep pass that condemned it.
  *
  * **A state on this list is never evidence of a live run by itself.** Nothing moves a Task out of
- * `review` or `parked` on its own — `reclaimOrphanedRuns` reads only `running` rows — so the
+ * `parked` on its own — `reclaimOrphanedRuns` reads only `running` rows — so the
  * state says a run *was* here and nothing more. It is exactly as true of an orchestrator that
  * crashed two hours ago, and of a live orchestrator whose durable run went missing, as it is of
  * one holding the gate right now. Those are two different failures with two different tells, and
  * `heldByRun` and `claimedByThisOrchestrator` are the two that read them.
  */
-const RUN_MAY_HOLD: readonly TaskState[] = ["running", "review", "parked"];
+const RUN_MAY_HOLD: readonly TaskState[] = ["running", "parked"];
 
 /**
  * Hosts whose `docker` binary is not there.
@@ -223,47 +222,25 @@ export async function reapOrphanedContainers(
  * Whether the Task row still describes a run that could be holding this container.
  *
  * The state is half the row, and reading only that half is what leaked a container for the life
- * of a *live* process. `reportStrandedReviews` is this codebase's answer to "the durable engine
- * lost a run while the orchestrator carried on" — the run parked in `waitForEvent` is gone, the
- * operator's decision was recorded and nothing applied it — and it records that answer here, on
- * the Task, deliberately leaving the state at `review` so the diff and the decision stay
- * readable. So `review` + `STRANDED_REVIEW_REASON` is the reconciler saying, in the one place
- * both sweeps can see, that no run is in there.
+ * of a *live* process: a Task row cannot tell a run that is coming back from one that is gone,
+ * and the reconciler's verdict on it — written in `failureReason`, in the one place both sweeps
+ * can see — is the other half. (`review` used to need the same treatment, when the gate was a run
+ * parked in the engine; a run now ends at the gate, so `review` is off `RUN_MAY_HOLD` entirely.)
  *
- * The reaper takes that verdict rather than reaching a second one. Asking the container instead
- * answers a different question — `claimedByThisOrchestrator` says which *process* created it, and
- * a process that has lost a run is still the process that created it — so a stranded Task's
- * container carried this epoch, `orphaned` came out false on every pass, and nothing else ever
- * removes it (`reclaimOrphanedRuns` selects only `running` rows). Verified on Docker 29.7.2:
- * `reportStrandedReviews` returned 1 on the same tick the reaper returned 0 and `docker inspect`
- * still said `running`.
+ * A run asleep in `step.sleepUntil` has no process and no registry entry, so before it had a tell
+ * of its own the arithmetic above came out `orphaned === false` on every sweep for the life of
+ * the process. `reportStrandedParks` is the reconciler saying that a run slept through its own
+ * wake-up, and this reads that verdict rather than reaching a second one from the clock. What
+ * separates a lost sleeper from one still inside its quota window is stated there, next to the
+ * sweep that has to be careful about it. Verified on Docker 29.7.2: one real container labelled
+ * for a `parked` Task, carrying this process's epoch and the newest Session's id, survived a sweep
+ * that returned 0 and was removed by the next one after `reportStrandedParks` had spoken.
  *
- * `parked` is the same shape of failure with the same shape of answer. A run asleep in
- * `step.sleepUntil` has no process and no registry entry either, so before it had a tell of its
- * own the arithmetic above came out `orphaned === false` on every sweep for the life of the
- * process — this time with nothing anywhere to correct it, since `reportStrandedReviews` looks
- * only at `review` rows and a sleeping run has no decision to strand. `reportStrandedParks` is
- * the reconciler saying the same sentence about a run that slept through its own wake-up, on the
- * same terms and in the same column, and this reads that verdict rather than reaching a second
- * one from the clock. What separates a lost sleeper from one still inside its quota window is
- * stated there, next to the sweep that has to be careful about it. Verified on Docker 29.7.2 the
- * same way the review case was: one real container labelled for a `parked` Task, carrying this
- * process's epoch and the newest Session's id, survived a sweep that returned 0 and was removed
- * by the next one after `reportStrandedParks` had spoken.
- *
- * Paired with the state rather than read on its own, because the review reason is not cleared when
- * a late redrive resumes the Task for another round: a harness working inside that container must
- * not be reaped on the strength of a verdict that has been overtaken. For `review` the pairing is
- * complete cover, and for a reason worth stating — the resume path moves the Task to `running`
- * (`resume-` in task-run.ts), where this function is unconditionally true, so the stamp becomes
- * unreadable here the moment the run acts on the decision it was said to have lost.
- *
- * **A `parked` row is never moved by its own run, so the same pairing is not the same cover.** A
- * woken run does its next round with the row still reading `parked` throughout, and nothing in the
- * orchestrator used to clear `failureReason` for a parked Task — so an overtaken stamp stayed
- * readable here across every gap between durable steps, for as long as it took an operator to move
- * the card. That is the asymmetry: for `review` the state moves and the stamp stops being read;
- * for `parked` the state never moves and only the reason can be taken back.
+ * **A `parked` row is never moved by its own run**, so pairing the state with the reason is not
+ * cover on its own. A woken run does its next round with the row still reading `parked`
+ * throughout, and nothing in the orchestrator used to clear `failureReason` for a parked Task —
+ * so an overtaken stamp stayed readable here across every gap between durable steps, for as long
+ * as it took an operator to move the card.
  *
  * Two things now close it, neither of them this function: the park step clears the reason the
  * moment its sleep returns, *before* the round it wakes into reaches an executor, so a stamp
@@ -293,7 +270,6 @@ export async function reapOrphanedContainers(
  */
 function heldByRun(row: { state: TaskState; failureReason: string | null }): boolean {
   if (!RUN_MAY_HOLD.includes(row.state)) return false;
-  if (row.state === "review") return row.failureReason !== STRANDED_REVIEW_REASON;
   if (row.state === "parked") return row.failureReason !== STRANDED_PARK_REASON;
   return true;
 }

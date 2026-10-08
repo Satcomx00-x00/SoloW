@@ -37,11 +37,17 @@ export interface OrchestratorClient {
    * own transaction.
    */
   stopTaskRun(input: { workspaceId: string; taskId: string; sessionId: string }): Promise<void>;
-  resumeReview(input: {
+  /**
+   * Start the run that applies a recorded review decision.
+   *
+   * The same event as a launch, carrying the decision: no run waits at a gate, so the decision is
+   * what starts the next one (see `launchData` in the orchestrator's `task-run.ts`).
+   */
+  applyReview(input: {
     workspaceId: string;
+    taskId: string;
     sessionId: string;
-    decision: ReviewDecision;
-    feedback?: string | null;
+    review: { id: string; decision: ReviewDecision; feedback: string | null };
   }): Promise<void>;
   /**
    * Tell every client watching that a Task changed, for a change this API made itself.
@@ -138,13 +144,9 @@ export const orchestrator: OrchestratorClient = {
     throw new Error(`${UNWIRED}: task-run stop unavailable`);
   },
 
-  async resumeReview(input) {
-    if (orchestratorUrl()) return emit("review.decided", input);
-    if (devOwnerMode()) {
-      console.info(`[orchestrator:dev] would resume review for session ${input.sessionId}`);
-      return;
-    }
-    throw new Error(`${UNWIRED}: review resume unavailable`);
+  async applyReview(input) {
+    if (orchestratorUrl()) return emit("task.launch.requested", input);
+    throw new Error(`${UNWIRED}: a review decision needs a run to apply it`);
   },
 
   async requestMirrorSync(input) {

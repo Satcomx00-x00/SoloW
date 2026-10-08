@@ -353,24 +353,35 @@ describe("filter 3 — quiet", () => {
     expect(host.removed).toEqual([]);
   });
 
-  it("holds a container for a Task parked in review or waiting on quota", async () => {
+  it("holds a container for a Task waiting on quota", async () => {
     const db = createTestDb();
-    const review = await seedTask(db, { taskId: "task-review", taskState: "review" });
     const parked = await seedTask(db, { taskId: "task-parked", taskState: "parked" });
     const host = fakeHost([
-      { name: "solow-review", taskId: "task-review", runId: review.sessionId },
       { name: "solow-parked", taskId: "task-parked", runId: parked.sessionId },
     ]);
 
-    // A run in `waitForEvent("review.decided")` comes back to the same container for the next
-    // round, and one inside a five-hour `step.sleepUntil` is still holding its workspace. Both
-    // outlive the quiet window by design, so the clock is moved past it here on purpose — and
-    // both containers carry this process's claim, which is the half of the story that says the
-    // orchestrator holding them is still there. The case below is the other half.
+    // A run inside a five-hour `step.sleepUntil` is still holding its workspace. It outlives the
+    // quiet window by design, so the clock is moved past it here on purpose — and the container
+    // carries this process's claim, the half of the story that says its orchestrator is there.
     const count = await reapOrphanedContainers(host.executor, db, fakeRegistry(), STALE);
 
     expect(count).toBe(0);
     expect(host.removed).toEqual([]);
+  });
+
+  it("does not hold a container for a Task at the review gate", async () => {
+    // The run that opened the gate ended there and disposed of its executor; whatever is left is
+    // a container that dispose did not reach, and the run a decision starts builds its own.
+    const db = createTestDb();
+    const atGate = await seedTask(db, { taskId: "task-review", taskState: "review" });
+    const host = fakeHost([
+      { name: "solow-review", taskId: "task-review", runId: atGate.sessionId },
+    ]);
+
+    const count = await reapOrphanedContainers(host.executor, db, fakeRegistry(), STALE);
+
+    expect(count).toBe(1);
+    expect(host.removed).toEqual(["solow-review"]);
   });
 
   it("gives a park it has just condemned the same quiet window as any other Task", async () => {
@@ -856,7 +867,7 @@ describe("the container lifecycle the reaper leans on", () => {
 
   it("keeps the relaunched run's container through a sweep that has given up on the old one", async () => {
     const db = createTestDb();
-    await seedTask(db, { taskId: "task-driver", taskState: "review" });
+    await seedTask(db, { taskId: "task-driver", taskState: "running" });
     // `startedAt` defaults to SQLite's own clock in milliseconds, and "newest Session" is what
     // the sweep compares against — two inserts inside one millisecond would leave which of them
     // is the relaunch up to the query planner.
@@ -873,8 +884,8 @@ describe("the container lifecycle the reaper leans on", () => {
 
     // The real reaper over the real driver's container, on the path a `task.stop.requested`
     // cancellation takes: the `finally` dispose never runs, the next launch's Session is a new
-    // row, and no harness is registered while a Task waits at the review gate. This is the case
-    // that used to remove the container the operator was watching.
+    // row, and no harness is registered between two of its durable steps. This is the case that
+    // used to remove the container the operator was watching.
     const host = fakeHost([
       {
         name: live.name,

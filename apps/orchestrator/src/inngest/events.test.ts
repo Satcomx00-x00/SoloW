@@ -85,7 +85,7 @@ describe("handleEventPost", () => {
       },
     };
     const res = await handleEventPost(
-      post({ name: "review.decided", data: { sessionId: "s-1" } }),
+      post({ name: "task.launch.requested", data: { sessionId: "s-1" } }),
       deps,
     );
 

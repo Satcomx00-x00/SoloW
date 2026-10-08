@@ -42,6 +42,9 @@ const MESSAGES: Record<string, string> = {
   [TaskErrorCode.NotDeleted]: "This task is not in History, so there is nothing to restore.",
   [TaskErrorCode.HasDependents]:
     "Other tasks are waiting on this one. Deleting it would unblock them.",
+  [TaskErrorCode.AwaitingReview]:
+    "This task is waiting for your review. Approve, request changes or reject it from the gate.",
+  [TaskErrorCode.AlreadyStarted]: "This task has just been started. The page has been refreshed.",
   [CommonErrorCode.RateLimited]: "Too many launches in a row. Wait a moment and try again.",
   [CommonErrorCode.Forbidden]: "You do not have permission to do that.",
   [CommonErrorCode.NotFound]: "That task no longer exists — this page may be out of date.",
@@ -52,8 +55,8 @@ const MESSAGES: Record<string, string> = {
   [BillingErrorCode.QuotaExhausted]: "The harness's quota is exhausted.",
   [ReviewErrorCode.NotInReview]:
     "This task is no longer waiting for a review, so nothing was decided. The page has been refreshed; decide again once the gate opens.",
-  [ReviewErrorCode.RunLost]:
-    "The run waiting for this decision is gone — the stack restarted while it waited. Retry runs this step again; decide once its gate reopens. Reject still works.",
+  [ReviewErrorCode.NoOrchestrator]:
+    "No orchestrator is running, so this decision cannot be applied. Start the stack, then decide again. Reject still works.",
   [WorkflowErrorCode.InUse]:
     "A task is still on this workflow. Finish it, or move it off the workflow from its launch dialog, then delete.",
   [WorkflowErrorCode.StepInUse]:

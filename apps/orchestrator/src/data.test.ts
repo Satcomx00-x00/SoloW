@@ -1146,4 +1146,59 @@ describe("resolveResumeHarnessSessionId", () => {
 
     expect(await resolveResumeHarnessSessionId(db, WS, "task-1", "sess-1")).toBeNull();
   });
+
+  it("never offers a later Step a conversation an earlier Session had on another Step", async () => {
+    // The bug as it was seen: a relaunched Task cleared its own Session's id at the Clarify → Plan
+    // boundary, the fallback found the previous Session's Clarify conversation, and Plan, Tasks,
+    // Analyze, Implement and Verify each "continued" it — five Steps returning Clarify's summary.
+    const db = createTestDb();
+    await seed(db);
+    await seedSession(db, { id: "sess-1", startedAt: "2026-01-01" });
+    await recordHarnessSessionId(db, WS, "sess-1", "clarify-conv", "step-clarify");
+    await seedSession(db, { id: "sess-2", startedAt: "2026-02-01" });
+    await recordHarnessSessionId(db, WS, "sess-2", "clarify-again", "step-clarify");
+    await recordHarnessSessionId(db, WS, "sess-2", null);
+
+    expect(await resolveResumeHarnessSessionId(db, WS, "task-1", "sess-2", "step-plan")).toBeNull();
+  });
+
+  it("still carries a Step's own conversation across a relaunch", async () => {
+    const db = createTestDb();
+    await seed(db);
+    await seedSession(db, { id: "sess-1", startedAt: "2026-01-01" });
+    await recordHarnessSessionId(db, WS, "sess-1", "plan-conv", "step-plan");
+    await seedSession(db, { id: "sess-2", startedAt: "2026-02-01" });
+
+    expect(await resolveResumeHarnessSessionId(db, WS, "task-1", "sess-2", "step-plan")).toBe(
+      "plan-conv",
+    );
+  });
+
+  it("does not resume this Session's own conversation once the Step has moved on", async () => {
+    // A late write from the round that just finished lands after the boundary cleared the id; it
+    // names its own Step, so the next Step still starts from its brief.
+    const db = createTestDb();
+    await seed(db);
+    await seedSession(db, { id: "sess-1", startedAt: "2026-01-01" });
+    await recordHarnessSessionId(db, WS, "sess-1", "specify-conv", "step-specify");
+
+    expect(
+      await resolveResumeHarnessSessionId(db, WS, "task-1", "sess-1", "step-clarify"),
+    ).toBeNull();
+    expect(await resolveResumeHarnessSessionId(db, WS, "task-1", "sess-1", "step-specify")).toBe(
+      "specify-conv",
+    );
+  });
+
+  it("keeps a Task on no Workflow resuming as before", async () => {
+    const db = createTestDb();
+    await seed(db);
+    await seedSession(db, { id: "sess-1", startedAt: "2026-01-01" });
+    await recordHarnessSessionId(db, WS, "sess-1", "plain-conv");
+    await seedSession(db, { id: "sess-2", startedAt: "2026-02-01" });
+
+    expect(await resolveResumeHarnessSessionId(db, WS, "task-1", "sess-2")).toBe("plain-conv");
+    // And a Workflow Step is never handed a conversation that had no Step.
+    expect(await resolveResumeHarnessSessionId(db, WS, "task-1", "sess-2", "step-1")).toBeNull();
+  });
 });

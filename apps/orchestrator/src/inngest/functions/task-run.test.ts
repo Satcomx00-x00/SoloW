@@ -11,6 +11,7 @@ import {
   type HarnessProtocol,
   parseSessionEventPayload,
   type RepositorySource,
+  type ReviewDecision,
   TaskErrorCode,
   WIDGET_ANSWER_PREFIX,
   type WorkflowCheckpoint,
@@ -62,6 +63,7 @@ import {
   harnessBrief,
   runTaskLifecycle,
   type StepLike,
+  type TaskRunArgs,
   type TaskRunDeps,
   type WorktreeOps,
   widgetAnswerMessage,
@@ -246,19 +248,65 @@ async function taskFailureReason(db: TestDb, taskId: string): Promise<string> {
 /** A review decision, optionally with the feedback the reviewer wrote. */
 type ScriptedDecision = string | null | { decision: string; feedback: string };
 
-/** A step that runs work inline and replays a scripted list of review decisions. */
-function scriptedStep(decisions: ScriptedDecision[]): StepLike {
-  const queue = [...decisions];
+/** A step that runs work inline, carrying the decisions a person makes at each review gate. */
+interface ScriptedStep extends StepLike {
+  decisions?: ScriptedDecision[];
+  /** Called each time a run ends at a gate, before the person decides. */
+  atGate?: () => Promise<void>;
+}
+
+function scriptedStep(decisions: ScriptedDecision[]): ScriptedStep {
   return {
     run: async (_id, fn) => fn(),
-    waitForEvent: async (_id, opts) => {
-      const next = queue.shift();
-      if (next === undefined || next === null) return null;
-      const decided = typeof next === "string" ? { decision: next } : next;
-      return { data: { sessionId: opts.match, ...decided } };
-    },
     sleepUntil: async () => {},
+    decisions: [...decisions],
   };
+}
+
+/**
+ * Drive a Task through its review gates the way production does.
+ *
+ * A run ends when it opens a gate. Then this does what `review.decide` does — takes the gate,
+ * records the decision as a `review` row (the advance reads the table, never the event) — and
+ * starts the run that applies it, with the decision in its event. Repeats until a run ends
+ * anywhere but a gate, or the scripted decisions run out (`null` is a person who never decides).
+ */
+async function lifecycle(
+  deps: TaskRunDeps,
+  args: TaskRunArgs,
+): Promise<{ taskId: string; result: string }> {
+  const step = args.step as ScriptedStep;
+  const ids = args.event.data as { workspaceId: string; taskId: string; sessionId: string };
+  let result = await runTaskLifecycle(deps, args);
+  while (result.result === "awaiting_review") {
+    await step.atGate?.();
+    const next = step.decisions?.shift();
+    if (next === undefined || next === null) break;
+    const decided = typeof next === "string" ? { decision: next, feedback: null } : next;
+    // A fresh id per decision: a second decision on the same Session is a second row.
+    const id = `review-${randomUUID()}`;
+    await deps.db.update(task).set({ state: "running" }).where(eq(task.id, ids.taskId));
+    await deps.db.insert(review).values({
+      id,
+      workspaceId: ids.workspaceId,
+      sessionId: ids.sessionId,
+      decision: decided.decision as ReviewDecision,
+      feedback: decided.feedback ?? null,
+      actorUserId: "owner",
+    });
+    result = await runTaskLifecycle(deps, {
+      ...args,
+      event: {
+        data: {
+          workspaceId: ids.workspaceId,
+          taskId: ids.taskId,
+          sessionId: ids.sessionId,
+          review: { id, decision: decided.decision, feedback: decided.feedback ?? null },
+        },
+      },
+    });
+  }
+  return result;
 }
 
 /**
@@ -589,7 +637,7 @@ describe("runTaskLifecycle (integration)", () => {
     const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps, spies } = makeDeps(db, runner, nullStream());
 
-    const result = await runTaskLifecycle(deps, {
+    const result = await lifecycle(deps, {
       event: { data: ids },
       step: scriptedStep(["approve"]),
     });
@@ -612,7 +660,7 @@ describe("runTaskLifecycle (integration)", () => {
     const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps, spies } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["reject"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["reject"]) });
 
     expect(await taskState(db, ids.taskId)).toBe("ready");
     expect(spies.discard).toBe(1);
@@ -628,7 +676,7 @@ describe("runTaskLifecycle (integration)", () => {
     ]);
     const { deps, spies } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, {
+    await lifecycle(deps, {
       event: { data: ids },
       step: scriptedStep(["request_changes", "approve"]),
     });
@@ -656,7 +704,7 @@ describe("runTaskLifecycle (integration)", () => {
       },
     };
 
-    const result = await runTaskLifecycle(deps, { event: { data: ids }, step });
+    const result = await lifecycle(deps, { event: { data: ids }, step });
 
     expect(sleeps).toBe(1); // parked once
     expect(result.result).toBe("done");
@@ -705,7 +753,7 @@ describe("runTaskLifecycle (integration)", () => {
     };
     const { deps } = makeDeps(db, watched, nullStream());
 
-    const result = await runTaskLifecycle(deps, { event: { data: ids }, step: stamped });
+    const result = await lifecycle(deps, { event: { data: ids }, step: stamped });
 
     expect(runner.starts).toBe(2);
     expect(await Promise.all(atStart)).toEqual(["", ""]);
@@ -748,7 +796,7 @@ describe("runTaskLifecycle (integration)", () => {
     };
     const { deps } = makeDeps(db, runner, nullStream());
 
-    const result = await runTaskLifecycle(deps, { event: { data: ids }, step });
+    const result = await lifecycle(deps, { event: { data: ids }, step });
 
     expect(whileParked).toBe("");
     expect(await taskState(db, ids.taskId)).toBe("done");
@@ -793,7 +841,7 @@ describe("runTaskLifecycle (integration)", () => {
     };
     const { deps, spies } = makeDeps(db, watched, nullStream());
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: operatorMoved });
+    await lifecycle(deps, { event: { data: ids }, step: operatorMoved });
 
     expect(runner.starts).toBe(2);
     expect(await Promise.all(atStart)).toEqual(["running", "done"]);
@@ -814,7 +862,7 @@ describe("runTaskLifecycle (integration)", () => {
     const runner = new ScriptedRunner([{ kind: "failed", stopReason: "error", signal: {} }]);
     const { deps, spies } = makeDeps(db, runner, nullStream());
 
-    const result = await runTaskLifecycle(deps, {
+    const result = await lifecycle(deps, {
       event: { data: ids },
       step: scriptedStep([]),
     });
@@ -843,8 +891,8 @@ describe("runTaskLifecycle (integration)", () => {
     );
 
     const [resA, resB] = await Promise.all([
-      runTaskLifecycle(depsA.deps, { event: { data: a }, step: scriptedStep(["approve"]) }),
-      runTaskLifecycle(depsB.deps, { event: { data: b }, step: scriptedStep([]) }),
+      lifecycle(depsA.deps, { event: { data: a }, step: scriptedStep(["approve"]) }),
+      lifecycle(depsB.deps, { event: { data: b }, step: scriptedStep([]) }),
     ]);
 
     expect(resA.result).toBe("done");
@@ -862,7 +910,7 @@ describe("runTaskLifecycle (integration)", () => {
       nullStream(),
     );
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     // Filtered to the harness's own turns: the log also carries the diff captured at the review
     // gate and the state transitions the run announced.
@@ -893,7 +941,7 @@ describe("runTaskLifecycle (integration)", () => {
     runner.harnessSessionId = null;
     const { deps } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, {
+    await lifecycle(deps, {
       event: { data: ids },
       step: scriptedStep(["request_changes", "approve"]),
     });
@@ -925,7 +973,7 @@ describe("runTaskLifecycle (integration)", () => {
       nullStream(),
     );
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     const board = spies.published.filter((p) => p.channel === `ws:${ids.workspaceId}:board`);
     expect(board.map((p) => p.event["state"])).toEqual(["running", "done"]);
@@ -945,7 +993,7 @@ describe("runTaskLifecycle (integration)", () => {
       nullStream(),
     );
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     const task = spies.published.filter(
       (p) =>
@@ -965,7 +1013,7 @@ describe("runTaskLifecycle (integration)", () => {
       nullStream(),
     );
 
-    await runTaskLifecycle(deps, { event: { data: a }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: a }, step: scriptedStep(["approve"]) });
 
     // One harness turn, the marker saying it finished, the diff captured at the gate, and the one
     // transition the run still records — `review → done` on approval. It no longer writes a
@@ -991,7 +1039,7 @@ describe("runTaskLifecycle (integration)", () => {
       stream,
     );
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     const events = lines.map((l) => l.event).filter(Boolean);
     expect(events).toContain("worktree.bound");
@@ -1028,7 +1076,7 @@ describe("runTaskLifecycle (integration)", () => {
     );
     const { deps } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     const logged = await db
       .select()
@@ -1088,7 +1136,7 @@ describe("runTaskLifecycle (integration)", () => {
     );
     const { deps } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     const payloads = (
       await db
@@ -1122,7 +1170,7 @@ describe("runTaskLifecycle (integration)", () => {
       nullStream(),
     );
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     const rows = await db
       .select()
@@ -1155,7 +1203,7 @@ describe("runTaskLifecycle (integration)", () => {
       nullStream(),
     );
 
-    await runTaskLifecycle(deps, {
+    await lifecycle(deps, {
       event: { data: ids },
       step: retryingStep(["approve"], "to-review-0"),
     });
@@ -1181,7 +1229,7 @@ describe("runTaskLifecycle (integration)", () => {
       nullStream(),
     );
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     const transitions = (
       await db
@@ -1225,7 +1273,7 @@ describe("runTaskLifecycle (integration)", () => {
     );
     const { deps, spies } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     const rows = await db
       .select()
@@ -1265,7 +1313,7 @@ describe("runTaskLifecycle (integration)", () => {
     );
     const { deps, spies } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     const logged = await listTaskEventsSince(db, ids.workspaceId, ids.taskId, -1);
     const kept = logged.find((e) => JSON.stringify(e.payload).includes("Write .env"));
@@ -1294,7 +1342,7 @@ describe("runTaskLifecycle (integration)", () => {
       nullStream(),
     );
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     const summaries = await db
       .select()
@@ -1335,7 +1383,7 @@ describe("the brief the harness is given", () => {
     ]);
     const { deps } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, {
+    await lifecycle(deps, {
       event: { data: ids },
       step: scriptedStep([
         { decision: "request_changes", feedback: "Add a regression test for the latch." },
@@ -1363,7 +1411,7 @@ describe("the brief the harness is given", () => {
     ]);
     const { deps } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, {
+    await lifecycle(deps, {
       event: { data: ids },
       step: scriptedStep(["request_changes", "approve"]),
     });
@@ -1378,7 +1426,7 @@ describe("the brief the harness is given", () => {
     const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     expect(runner.prompts[0]).toContain("Task");
     expect(runner.prompts[0]).toContain("Issue");
@@ -1412,7 +1460,7 @@ describe("the brief the harness is given", () => {
     };
     const { deps } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(
+    await lifecycle(
       { ...deps, registry },
       {
         event: { data: ids },
@@ -1460,7 +1508,7 @@ describe("the diff a reviewer is shown", () => {
       nullStream(),
     );
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     const [captured] = (
       await db.select().from(sessionEvent).where(eq(sessionEvent.sessionId, ids.sessionId))
@@ -1484,7 +1532,7 @@ describe("the diff a reviewer is shown", () => {
       nullStream(),
     );
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     // The worktree is no longer removed at approve (retention keeps it), but the diff is still
     // read at the gate and persisted — which is what lets it outlive the retention sweep later.
@@ -1507,7 +1555,7 @@ describe("the diff a reviewer is shown", () => {
     );
     const { deps } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     const events = await db
       .select()
@@ -1537,7 +1585,7 @@ describe("the diff a reviewer is shown", () => {
     );
     const { deps, spies } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     const stored = (
       await db.select().from(sessionEvent).where(eq(sessionEvent.sessionId, ids.sessionId))
@@ -1570,7 +1618,7 @@ describe("the diff a reviewer is shown", () => {
       }),
     };
 
-    const result = await runTaskLifecycle(flaky, {
+    const result = await lifecycle(flaky, {
       event: { data: ids },
       step: scriptedStep(["approve"]),
     });
@@ -1602,7 +1650,7 @@ describe("the diff a reviewer is shown", () => {
       }),
     };
 
-    const result = await runTaskLifecycle(failing, {
+    const result = await lifecycle(failing, {
       event: { data: ids },
       step: scriptedStep(["approve"]),
     });
@@ -1633,7 +1681,7 @@ describe("the diff a reviewer is shown", () => {
       const { deps, executor } = makeDeps(db, runner, nullStream());
       const built: Array<{ kind: string; opts: ExecutorFactoryOpts }> = [];
 
-      const result = await runTaskLifecycle(
+      const result = await lifecycle(
         {
           ...deps,
           executorFor: (profile, opts) => {
@@ -1654,8 +1702,11 @@ describe("the diff a reviewer is shown", () => {
        * branch back (issue #96 round 2). Without the split there is no way to keep the shared
        * repository out of the container's mounts, and with it reversed a Docker-profiled Task
        * would be doing its work on the orchestrator's own host.
+       *
+       * Twice over here: once for the run that opened the gate, once for the run the approval
+       * started — a run that ends at its gate releases its executor, and the next builds its own.
        */
-      expect(built.map((b) => b.kind)).toEqual(["docker", "local"]);
+      expect(built.map((b) => b.kind)).toEqual(["docker", "local", "docker", "local"]);
       /*
        * This Task's worktree and this Task's *own clone* of the repository — not `/wt`, not
        * `/cache`, and not the Repository the deployment shares. Those roots hold every Task in
@@ -1672,9 +1723,10 @@ describe("the diff a reviewer is shown", () => {
       // Still the deployment root, because the driver derives the container's name from it and
       // `guardMountSource` measures a Repository's location against it.
       expect(built[0]?.opts.worktreeRoot).toBe("/wt");
-      // The lifecycle's `finally` is the only thing that disposes on the happy path; the reaper
-      // is the net behind it, not a second caller.
-      expect(executor.disposed).toBe(1);
+      // The lifecycle's `finally` is the only thing that disposes on the happy path — once per
+      // run, so the run that ended at the gate released its executor before the approval's run
+      // built one; the reaper is the net behind it, not a second caller.
+      expect(executor.disposed).toBe(2);
     });
 
     /**
@@ -1719,7 +1771,7 @@ describe("the diff a reviewer is shown", () => {
         const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
         const { deps, executor } = makeDeps(db, runner, nullStream());
         let built: ExecutorFactoryOpts | undefined;
-        const result = await runTaskLifecycle(
+        const result = await lifecycle(
           {
             ...deps,
             executorFor: (_profile, opts) => {
@@ -1787,7 +1839,7 @@ describe("the diff a reviewer is shown", () => {
         return `/repo/${p.taskId}`;
       };
 
-      const result = await runTaskLifecycle(
+      const result = await lifecycle(
         { ...deps, preflight: async () => ({ ok: false, reason }) },
         { event: { data: ids }, step: scriptedStep(["approve"]) },
       );
@@ -1820,7 +1872,7 @@ describe("the diff a reviewer is shown", () => {
       const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
       const { deps } = makeDeps(db, runner, nullStream());
 
-      await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+      await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
       expect(runner.envs[0]?.["BUILD_FLAVOUR"]).toBe("debug");
     });
@@ -1841,7 +1893,7 @@ describe("the diff a reviewer is shown", () => {
       const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
       const { deps } = makeDeps(db, runner, nullStream());
 
-      await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+      await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
       const home = `/wt/${ids.taskId}--harness-home`;
       expect(runner.envs[0]?.["HOME"]).toBe(home);
@@ -1864,7 +1916,7 @@ describe("the diff a reviewer is shown", () => {
       const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
       const { deps } = makeDeps(db, runner, nullStream());
 
-      await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+      await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
       expect(runner.envs[0]).not.toHaveProperty("ANTHROPIC_API_KEY");
       expect(runner.envs[0]?.["CLAUDE_CODE_OAUTH_TOKEN"]).toBe("oauth-token");
@@ -1882,7 +1934,7 @@ describe("the diff a reviewer is shown", () => {
  *
  * `review.decide` refuses a `request_changes` that would start a blocked Task, but the
  * transition into `running` is applied by this lifecycle, and a guard at the API boundary holds
- * only for as long as the API is the sole producer of the `review.decided` event.
+ * only for as long as the API is the sole producer of review decisions.
  */
 describe("resuming a Task that has become blocked (issue #6)", () => {
   let db: TestDb;
@@ -1934,7 +1986,7 @@ describe("resuming a Task that has become blocked (issue #6)", () => {
     ]);
     const { deps } = makeDeps(db, runner, nullStream());
 
-    const result = await runTaskLifecycle(deps, {
+    const result = await lifecycle(deps, {
       event: { data: ids },
       step: scriptedStep([{ decision: "request_changes", feedback: "again" }, "approve"]),
     });
@@ -1956,7 +2008,7 @@ describe("resuming a Task that has become blocked (issue #6)", () => {
     ]);
     const { deps } = makeDeps(db, runner, nullStream());
 
-    const result = await runTaskLifecycle(deps, {
+    const result = await lifecycle(deps, {
       event: { data: ids },
       step: scriptedStep([{ decision: "request_changes", feedback: "again" }, "approve"]),
     });
@@ -1984,7 +2036,7 @@ describe("resuming a Task that has become blocked (issue #6)", () => {
     ]);
     const { deps } = makeDeps(db, runner, nullStream());
 
-    const result = await runTaskLifecycle(deps, {
+    const result = await lifecycle(deps, {
       event: { data: ids },
       step: scriptedStep([{ decision: "request_changes", feedback: "again" }, "approve"]),
     });
@@ -2012,7 +2064,7 @@ describe("setup files copied into the harness's worktree (issue #52)", () => {
       nullStream(),
     );
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     // The Repository's own location, not whatever `prepare` handed back (issue #96 round 2):
     // for a Task given a clone of its own, those are different directories, and the file this
@@ -2037,7 +2089,7 @@ describe("setup files copied into the harness's worktree (issue #52)", () => {
       nullStream(),
     );
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     expect(spies.seeded).toEqual([]);
   });
@@ -2055,7 +2107,7 @@ describe("setup files copied into the harness's worktree (issue #52)", () => {
     );
 
     // Round one creates the worktree; round two resumes inside it, where the files already are.
-    await runTaskLifecycle(deps, {
+    await lifecycle(deps, {
       event: { data: ids },
       step: scriptedStep([{ decision: "request_changes", feedback: "again" }, "approve"]),
     });
@@ -2072,7 +2124,7 @@ describe("setup files copied into the harness's worktree (issue #52)", () => {
       nullStream(),
     );
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     // One diff capture at the review gate, one commit on approval — both told to leave the
     // copied files alone.
@@ -2099,7 +2151,7 @@ describe("setup files copied into the harness's worktree (issue #52)", () => {
     // say nothing about which files were involved.
     ops.seed = async () => ({ copied: 1, unmatched: ["absent.env"], failed: 1 });
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     const warning = lines.find((l) => l.includes("setup-files.incomplete"));
     expect(warning).toBeDefined();
@@ -2155,7 +2207,7 @@ describe("the worktree a Task runs in", () => {
         nullStream(),
       );
 
-      await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep([]) });
+      await lifecycle(deps, { event: { data: ids }, step: scriptedStep([]) });
 
       const rows = await db.select().from(worktree).where(eq(worktree.taskId, ids.taskId));
       expect(rows).toHaveLength(1);
@@ -2175,7 +2227,7 @@ describe("the worktree a Task runs in", () => {
         nullStream(),
       );
 
-      await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep([]) });
+      await lifecycle(deps, { event: { data: ids }, step: scriptedStep([]) });
 
       const rows = await db.select().from(worktree).where(eq(worktree.taskId, ids.taskId));
       expect(rows).toHaveLength(1);
@@ -2191,7 +2243,7 @@ describe("the worktree a Task runs in", () => {
         nullStream(),
       );
 
-      await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+      await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
       expect(spies.cleanup).toBe(0);
       const rows = await db.select().from(worktree).where(eq(worktree.taskId, ids.taskId));
@@ -2210,7 +2262,7 @@ describe("the worktree a Task runs in", () => {
         nullStream(),
       );
 
-      await runTaskLifecycle(deps, {
+      await lifecycle(deps, {
         event: { data: ids },
         step: retryingStep(["approve"], "record-worktree-0"),
       });
@@ -2226,7 +2278,7 @@ describe("the worktree a Task runs in", () => {
     const runner = new WorktreeRecordingRunner();
     const { deps } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     // Run in the repository, and let `claude --worktree` make the directory. That is what
     // keeps concurrent Tasks on one repository apart (Principle II).
@@ -2243,7 +2295,7 @@ describe("the worktree a Task runs in", () => {
     const runner = new WorktreeRecordingRunner();
     const { deps } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, {
+    await lifecycle(deps, {
       event: { data: ids },
       step: scriptedStep([{ decision: "request_changes", feedback: "add a test" }, "approve"]),
     });
@@ -2274,7 +2326,7 @@ describe("the worktree a Task runs in", () => {
     };
     const { deps } = makeDeps(db, runner, nullStream());
 
-    const result = await runTaskLifecycle(deps, {
+    const result = await lifecycle(deps, {
       event: { data: ids },
       step: scriptedStep(["approve"]),
     });
@@ -2290,7 +2342,7 @@ describe("the worktree a Task runs in", () => {
     const { deps, ops, spies } = makeDeps(db, runner, nullStream());
     const cleaned: string[] = [];
 
-    await runTaskLifecycle(
+    await lifecycle(
       {
         ...deps,
         worktree: () => ({
@@ -2330,7 +2382,7 @@ describe("the worktree a Task runs in", () => {
       const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
       const { deps, spies } = makeDeps(db, runner, nullStream());
 
-      const result = await runTaskLifecycle(deps, {
+      const result = await lifecycle(deps, {
         event: { data: ids },
         step: scriptedStep(["approve"]),
       });
@@ -2349,7 +2401,7 @@ describe("the worktree a Task runs in", () => {
       const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
       const { deps } = makeDeps(db, runner, nullStream());
 
-      await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+      await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
       // seedRun's catalog row sets command "fake" — there is no SOLOW_AGENT_COMMAND any
       // more for this to have fallen back to.
@@ -2362,7 +2414,7 @@ describe("the worktree a Task runs in", () => {
       const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
       const { deps } = makeDeps(db, runner, nullStream());
 
-      await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+      await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
       expect(runner.envs[0]?.["CLAUDE_CODE_OAUTH_TOKEN"]).toBe("oauth-token");
       expect(runner.envs[0]).not.toHaveProperty("ANTHROPIC_API_KEY");
@@ -2393,7 +2445,7 @@ describe("a Task driven over ACP (issue #58)", () => {
     const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps, spies } = makeDeps(db, runner, nullStream());
 
-    const result = await runTaskLifecycle(deps, {
+    const result = await lifecycle(deps, {
       event: { data: ids },
       step: scriptedStep(["approve"]),
     });
@@ -2411,9 +2463,10 @@ describe("a Task driven over ACP (issue #58)", () => {
     const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps, spies } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
-    expect(spies.provisioned).toEqual([`/wt/solow-task-${ids.taskId}`]);
+    // Asked again by the run the approval started, and handed the same directory back.
+    expect(new Set(spies.provisioned)).toEqual(new Set([`/wt/solow-task-${ids.taskId}`]));
     expect(runner.worktreeNames).toEqual([null]);
     expect(runner.cwds).toEqual([`/wt/solow-task-${ids.taskId}`]);
   });
@@ -2424,7 +2477,7 @@ describe("a Task driven over ACP (issue #58)", () => {
     const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps, spies } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     expect(spies.provisioned).toEqual([]);
     expect(runner.worktreeNames).toEqual([worktreeNameForTask(ids.taskId)]);
@@ -2443,7 +2496,7 @@ describe("a Task driven over ACP (issue #58)", () => {
     const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     expect(runner.envs[0]?.["CLAUDE_CODE_OAUTH_TOKEN"]).toBe("oauth-token");
     expect(runner.envs[0]).not.toHaveProperty("ANTHROPIC_API_KEY");
@@ -2472,7 +2525,7 @@ describe("a Task driven over ACP (issue #58)", () => {
     );
     const { deps, spies } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     // Live, for the operator watching…
     expect(spies.published.map((p) => p.event["kind"])).toContain("permission_request");
@@ -2499,25 +2552,22 @@ describe("a Task driven over ACP (issue #58)", () => {
     ]);
     const { deps, spies } = makeDeps(db, runner, nullStream());
 
-    const rejected = await runTaskLifecycle(deps, {
+    const rejected = await lifecycle(deps, {
       event: { data: ids },
       step: scriptedStep(["reject"]),
     });
-    expect(rejected.result).toBe("done");
+    expect(rejected.result).toBe("rejected");
     expect(await taskState(db, ids.taskId)).toBe("ready");
 
-    const relaunched = await runTaskLifecycle(deps, {
+    const relaunched = await lifecycle(deps, {
       event: { data: ids },
       step: scriptedStep(["approve"]),
     });
 
     expect(relaunched.result).toBe("done");
     expect(runner.starts).toBe(2);
-    // Both launches asked for the same worktree, and the second one committed.
-    expect(spies.provisioned).toEqual([
-      `/wt/solow-task-${ids.taskId}`,
-      `/wt/solow-task-${ids.taskId}`,
-    ]);
+    // Every run asked for the same worktree, and the second launch committed.
+    expect(new Set(spies.provisioned)).toEqual(new Set([`/wt/solow-task-${ids.taskId}`]));
     expect(spies.commit).toBe(1);
   });
 
@@ -2533,7 +2583,7 @@ describe("a Task driven over ACP (issue #58)", () => {
       throw new Error("fatal: a branch named 'solow/task-1' already exists");
     };
 
-    const result = await runTaskLifecycle(deps, {
+    const result = await lifecycle(deps, {
       event: { data: ids },
       step: scriptedStep(["approve"]),
     });
@@ -2561,7 +2611,7 @@ describe("a Task driven over ACP (issue #58)", () => {
       throw new Error("command failed (128): git -c credential.helper=echo password=$TOKEN");
     };
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     expect(await taskFailureReason(db, ids.taskId)).not.toContain("credential.helper");
   });
@@ -2594,7 +2644,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
       nullStream(),
     );
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep([]) });
 
     // Two worktrees, two distinct paths. The primary's is byte-identical to what a
     // single-Repository Task gets, so nothing about the existing shape moved.
@@ -2611,7 +2661,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
     const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps, spies } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep([]) });
 
     // Only the secondary is provisioned by SoloW; the harness is still asked for its own.
     expect(spies.provisioned).toEqual([
@@ -2646,7 +2696,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
       void message;
     };
 
-    const result = await runTaskLifecycle(deps, {
+    const result = await lifecycle(deps, {
       event: { data: ids },
       step: scriptedStep(["approve"]),
     });
@@ -2687,7 +2737,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
       return `/repo/${p.taskId}`;
     };
 
-    const result = await runTaskLifecycle(deps, {
+    const result = await lifecycle(deps, {
       event: { data: ids },
       step: scriptedStep(["approve"]),
     });
@@ -2717,7 +2767,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
     };
 
     // On the last attempt, where a clone failure stops being something worth waiting on.
-    await runTaskLifecycle(deps, {
+    await lifecycle(deps, {
       event: { data: ids },
       step: scriptedStep(["approve"]),
       attempt: 2,
@@ -2736,7 +2786,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
     const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps, spies } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep([]) });
 
     expect(spies.provisionedFrom).toEqual([
       {
@@ -2756,7 +2806,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
     const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps, spies } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep([]) });
 
     expect(spies.provisionedFrom).toEqual([
       {
@@ -2786,7 +2836,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
     runner.harnessSessionId = null;
     const { deps } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, {
+    await lifecycle(deps, {
       event: { data: ids },
       step: scriptedStep([{ decision: "request_changes", feedback: "again" }, "approve"]),
     });
@@ -2825,7 +2875,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
       return provision(params);
     };
 
-    const result = await runTaskLifecycle(deps, {
+    const result = await lifecycle(deps, {
       event: { data: ids },
       step: scriptedStep(["approve"]),
     });
@@ -2849,7 +2899,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
     };
 
     await expect(
-      runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) }),
+      lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) }),
     ).rejects.toThrow("could not resolve host");
 
     // Left for Inngest to retry: not failed, and no reason written that a later attempt would
@@ -2868,7 +2918,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
       throw new Error("fatal: unable to access remote: could not resolve host");
     };
 
-    const result = await runTaskLifecycle(deps, {
+    const result = await lifecycle(deps, {
       event: { data: ids },
       step: scriptedStep(["approve"]),
       attempt: 2,
@@ -2896,7 +2946,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
       };
     };
 
-    const result = await runTaskLifecycle(deps, {
+    const result = await lifecycle(deps, {
       event: { data: ids },
       step: scriptedStep(["approve"]),
     });
@@ -2918,7 +2968,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
       nullStream(),
     );
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     const diffs = (
       await db.select().from(sessionEvent).where(eq(sessionEvent.sessionId, ids.sessionId))
@@ -2948,7 +2998,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
       return realDiff(path, patterns);
     };
 
-    const result = await runTaskLifecycle(deps, {
+    const result = await lifecycle(deps, {
       event: { data: ids },
       step: scriptedStep(["approve"]),
     });
@@ -2969,7 +3019,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
       nullStream(),
     );
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     expect(spies.commit).toBe(2);
     expect(new Set(spies.committed).size).toBe(2);
@@ -2996,7 +3046,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
       nullStream(),
     );
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["reject"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["reject"]) });
 
     // A secondary left with uncommitted work would meet the next launch as a conflict nothing
     // knows how to explain — so every worktree is discarded. None is removed: the next launch
@@ -3020,7 +3070,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
       nullStream(),
     );
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     // Each worktree gets its *own* repository's allowlist — not the primary's applied twice.
     const seededByPatterns = Object.fromEntries(
@@ -3039,7 +3089,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
     const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     const secondary = `/wt/solow-task-${ids.taskId}--${attachmentId(ids.taskId, "lib")}`;
     expect(runner.cwds).toEqual([`/wt/solow-task-${ids.taskId}`]);
@@ -3055,7 +3105,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
     const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     expect(runner.prompts[0]).not.toContain("# Repositories");
   });
@@ -3080,7 +3130,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
     const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     // The new primary keeps the Task's own path; the demoted one becomes the sibling.
     expect(runner.cwds).toEqual([`/wt/solow-task-${ids.taskId}`]);
@@ -3106,8 +3156,8 @@ describe("a Task spanning several Repositories (issue #7)", () => {
     );
 
     await Promise.all([
-      runTaskLifecycle(depsA.deps, { event: { data: a }, step: scriptedStep(["approve"]) }),
-      runTaskLifecycle(depsB.deps, { event: { data: b }, step: scriptedStep(["approve"]) }),
+      lifecycle(depsA.deps, { event: { data: a }, step: scriptedStep([]) }),
+      lifecycle(depsB.deps, { event: { data: b }, step: scriptedStep([]) }),
     ]);
 
     const all = [...depsA.spies.provisioned, ...depsB.spies.provisioned];
@@ -3147,7 +3197,7 @@ describe("approving a multi-Repository Task that changed only some of them", () 
     // The harness worked in the primary and never went near the secondary.
     ops.hasChanges = async (path) => !path.includes("--");
 
-    const result = await runTaskLifecycle(deps, {
+    const result = await lifecycle(deps, {
       event: { data: ids },
       step: scriptedStep(["approve"]),
     });
@@ -3199,7 +3249,7 @@ describe("task-run permission mode", () => {
       },
     };
 
-    await runTaskLifecycle(wrapped, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(wrapped, { event: { data: ids }, step: scriptedStep([]) });
 
     // The posture is read off the Profile the Task names, not off a process-wide default: this
     // is what lets one Workspace hold a "never asks" Profile beside a cautious one.
@@ -3220,7 +3270,7 @@ describe("task-run permission mode", () => {
       },
     };
 
-    await runTaskLifecycle(wrapped, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(wrapped, { event: { data: ids }, step: scriptedStep([]) });
     expect(asked).toEqual(["acceptEdits"]);
   });
 });
@@ -3284,7 +3334,7 @@ describe("task-run widgets", () => {
     );
     const { deps } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     const payloads = (
       await db
@@ -3315,7 +3365,7 @@ describe("task-run widgets", () => {
     );
     const { deps } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     const logged = await db
       .select()
@@ -3346,7 +3396,7 @@ describe("task-run widgets", () => {
     await enableWidgets(ids);
     const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps } = makeDeps(db, runner, nullStream());
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
     expect(runner.prompts[0]).toContain("solow:widget");
 
     const off = freshIds();
@@ -3354,7 +3404,7 @@ describe("task-run widgets", () => {
     await disableWidgets(off);
     const quiet = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps: offDeps } = makeDeps(db, quiet, nullStream());
-    await runTaskLifecycle(offDeps, { event: { data: off }, step: scriptedStep(["approve"]) });
+    await lifecycle(offDeps, { event: { data: off }, step: scriptedStep(["approve"]) });
     // A Workspace without the flag gets the brief it always got, byte for byte.
     expect(quiet.prompts[0]).not.toContain("solow:widget");
   });
@@ -3375,7 +3425,7 @@ describe("task-run widgets", () => {
     );
     const { deps } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     const logged = await db
       .select()
@@ -3406,7 +3456,7 @@ describe("task-run widgets", () => {
     );
     const { deps } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     const logged = await db
       .select()
@@ -3447,7 +3497,7 @@ describe("task-run when its Session is deleted mid-run", () => {
     );
     const { deps } = makeDeps(db, runner, nullStream());
 
-    const result = await runTaskLifecycle(deps, {
+    const result = await lifecycle(deps, {
       event: { data: ids },
       step: scriptedStep(["approve"]),
     });
@@ -3471,7 +3521,7 @@ describe("task-run when its Session is deleted mid-run", () => {
     const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps } = makeDeps(db, runner, nullStream());
 
-    const result = await runTaskLifecycle(deps, {
+    const result = await lifecycle(deps, {
       event: { data: ids },
       step: scriptedStep(["approve"]),
     });
@@ -3575,7 +3625,7 @@ describe("the harness's completion declaration", () => {
     );
     const { deps } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     const [row] = await db.select().from(task).where(eq(task.id, ids.taskId));
     expect(row?.completedOutcome).toBe("changes_ready");
@@ -3594,7 +3644,7 @@ describe("the harness's completion declaration", () => {
     );
     const { deps, spies } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     const statuses = spies.published.filter((p) => p.event["kind"] === "status");
     expect(statuses.some((p) => p.event["state"] === "running")).toBe(true);
@@ -3611,7 +3661,7 @@ describe("the harness's completion declaration", () => {
     );
     const { deps } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     const [row] = await db.select().from(task).where(eq(task.id, ids.taskId));
     expect(row?.completedOutcome).toBe("changes_ready");
@@ -3628,7 +3678,7 @@ describe("the harness's completion declaration", () => {
     );
     const { deps } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     const [row] = await db.select().from(task).where(eq(task.id, ids.taskId));
     expect(row?.completedOutcome).toBe("nothing_to_do");
@@ -3643,7 +3693,7 @@ describe("the harness's completion declaration", () => {
  * harness **process** to exit. A CLI harness that says "changes_ready" does not exit — it waits for
  * the operator. So the `agent-run` step never returned, Inngest never checkpointed it, the
  * platform killed the request after its execution budget, and the run was retried from the top
- * for ever. Every step below it — the review gate, `waitForEvent`, the commit — was unreachable,
+ * for ever. Every step below it — the review gate, the commit — was unreachable,
  * while the harness's own side effects (its edits, its transcript, its declaration) all landed
  * normally. The product looked like it was working right up to the moment approving a change
  * did nothing.
@@ -3673,7 +3723,7 @@ describe("a harness that declares it is finished and does not exit", () => {
     // Real time, shortened. The behaviour under test is a silence timer, so there has to be one.
     deps.completionGraceMs = 20;
 
-    const result = await runTaskLifecycle(deps, {
+    const result = await lifecycle(deps, {
       event: { data: ids },
       step: scriptedStep(["approve"]),
     });
@@ -3696,7 +3746,7 @@ describe("a harness that declares it is finished and does not exit", () => {
     const { deps } = makeDeps(db, new DeclaringRunner(), nullStream());
     deps.completionGraceMs = 20;
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     const [row] = await db.select().from(task).where(eq(task.id, ids.taskId)).limit(1);
     expect(row?.completedOutcome).toBe("changes_ready");
@@ -3737,7 +3787,7 @@ describe("a Harness Profile's launch settings", () => {
         return deps.runner(protocol, settings, executor);
       },
     };
-    await runTaskLifecycle(wrapped, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(wrapped, { event: { data: ids }, step: scriptedStep([]) });
     return asked;
   }
 
@@ -3784,6 +3834,35 @@ describe("a Harness Profile's launch settings", () => {
     expect(notices).toHaveLength(1);
     expect(notices[0]).toContain("claude-opus-4");
   });
+
+  it("says it once per Step, not again in the run a decision starts", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids, { agentProtocol: "cli_passthrough" });
+    await db
+      .update(harnessProfile)
+      .set({ model: "claude-opus-4" })
+      .where(eq(harnessProfile.id, `harness-${ids.taskId}`));
+    const { deps } = makeDeps(
+      db,
+      new ScriptedRunner([
+        { kind: "completed", stopReason: "end_turn" },
+        { kind: "completed", stopReason: "end_turn" },
+      ]),
+      nullStream(),
+    );
+
+    await lifecycle(deps, {
+      event: { data: ids },
+      step: scriptedStep([{ decision: "request_changes", feedback: "again" }, "approve"]),
+    });
+
+    const notices = (
+      await db.select().from(sessionEvent).where(eq(sessionEvent.sessionId, ids.sessionId))
+    )
+      .map((row) => JSON.stringify(row.payload))
+      .filter((text) => text.includes("cannot select"));
+    expect(notices).toHaveLength(1);
+  });
 });
 
 /**
@@ -3826,7 +3905,7 @@ describe("caching what a harness advertises", () => {
     );
     const { deps } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     expect(await capabilitiesOf(ids.taskId)).toEqual({
       models: ["claude-opus-4"],
@@ -3849,7 +3928,7 @@ describe("caching what a harness advertises", () => {
     );
     const { deps } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     expect(await capabilitiesOf(ids.taskId)).toEqual({ models: ["claude-opus-4"], modes: [] });
   });
@@ -3869,7 +3948,7 @@ describe("caching what a harness advertises", () => {
       nullStream(),
     );
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     expect(await capabilitiesOf(ids.taskId)).toEqual({
       models: ["claude-opus-4"],
@@ -3917,7 +3996,7 @@ describe("the catalog row's minimum version", () => {
       },
     };
 
-    await runTaskLifecycle(wrapped, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(wrapped, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     expect(asked[0]?.version).toEqual({
       minimum: "1.18.33",
@@ -3943,7 +4022,7 @@ describe("the catalog row's minimum version", () => {
       },
     };
 
-    await runTaskLifecycle(wrapped, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(wrapped, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     expect(asked[0]?.version).toBeUndefined();
   });
@@ -3961,7 +4040,7 @@ describe("the catalog row's minimum version", () => {
       nullStream(),
     );
 
-    const result = await runTaskLifecycle(deps, {
+    const result = await lifecycle(deps, {
       event: { data: ids },
       step: scriptedStep(["approve"]),
     });
@@ -4130,58 +4209,21 @@ describe("a Task following a Workflow", () => {
   }
 
   /**
-   * A step that records the review decision **as a `review` row** before publishing the event.
-   *
-   * That ordering is the whole reason this exists beside `scriptedStep`: the advance reads the
-   * `review` table, never the event payload (an input a caller controls is a claim, not a
-   * decision), so a fake that only delivered the event would be testing an approval the server
-   * has no record of and every gate would read as unapproved.
-   */
-  function decidingStep(ids: Ids, decisions: ScriptedDecision[]): StepLike {
-    const queue = [...decisions];
-    return {
-      run: async (_id, fn) => fn(),
-      waitForEvent: async (_id, opts) => {
-        const next = queue.shift();
-        if (next === undefined || next === null) return null;
-        const decided = typeof next === "string" ? { decision: next } : next;
-        await db.insert(review).values({
-          // A fresh id per decision, across runs as well as within one: a restart records a
-          // *second* decision, not the same one again.
-          id: `review-${randomUUID()}`,
-          workspaceId: ids.workspaceId,
-          sessionId: ids.sessionId,
-          decision: decided.decision as "approve" | "reject" | "request_changes",
-          actorUserId: "owner",
-        });
-        return { data: { sessionId: opts.match, ...decided } };
-      },
-      sleepUntil: async () => {},
-    };
-  }
-
-  /**
    * Inngest's own replay, modelled: a step whose id is already in the journal returns the
    * recorded value and its body is **not** executed. Sharing one map across two invocations is a
    * process that died mid-run and came back with its journal intact.
    */
   function memoizingStep(
     memo: Map<string, unknown>,
-    inner: StepLike,
+    inner: ScriptedStep,
     executed: string[],
-  ): StepLike {
+  ): ScriptedStep {
     return {
+      decisions: inner.decisions ?? [],
       run: async (id, fn) => {
         if (memo.has(id)) return memo.get(id) as never;
         executed.push(id);
         const out = await inner.run(id, fn);
-        memo.set(id, out);
-        return out;
-      },
-      waitForEvent: async (id, opts) => {
-        if (memo.has(id)) return memo.get(id) as { data: unknown } | null;
-        executed.push(id);
-        const out = await inner.waitForEvent(id, opts);
         memo.set(id, out);
         return out;
       },
@@ -4245,9 +4287,9 @@ describe("a Task following a Workflow", () => {
     const first = makeDeps(db, planner, nullStream());
     first.deps.runner = runnersByMode({ plan: planner, acceptEdits: builder });
 
-    await runTaskLifecycle(first.deps, {
+    await lifecycle(first.deps, {
       event: { data: ids },
-      step: decidingStep(ids, ["approve"]),
+      step: scriptedStep(["approve"]),
     });
 
     // The row, not the return value: this is the state a restart will actually read.
@@ -4268,9 +4310,9 @@ describe("a Task following a Workflow", () => {
     const second = makeDeps(db, builderAgain, nullStream());
     second.deps.runner = runnersByMode({ plan: plannerAgain, acceptEdits: builderAgain });
 
-    await runTaskLifecycle(second.deps, {
+    await lifecycle(second.deps, {
       event: { data: ids },
-      step: decidingStep(ids, ["approve"]),
+      step: scriptedStep(["approve"]),
     });
 
     // Completed Steps are never re-run — that is what "resume at the last completed Step" means.
@@ -4359,11 +4401,11 @@ describe("a Task following a Workflow", () => {
     const { deps } = makeDeps(db, planner, nullStream());
     deps.runner = runnersByMode({ plan: planner, acceptEdits: builder });
 
-    await runTaskLifecycle(deps, {
+    await lifecycle(deps, {
       event: { data: ids },
       // One approval for the plan (with its answers) and one for the build: the round that
       // applies the answers needs none of its own.
-      step: decidingStep(ids, [{ decision: "approve", feedback: OVERTURNED }, "approve"]),
+      step: scriptedStep([{ decision: "approve", feedback: OVERTURNED }, "approve"]),
     });
 
     // The plan Step ran twice: its work, then the answers applied to it.
@@ -4431,15 +4473,15 @@ describe("a Task following a Workflow", () => {
     const { deps } = makeDeps(db, planner, nullStream());
     deps.runner = runnersByMode({ plan: planner, acceptEdits: builder });
 
-    const result = await runTaskLifecycle(deps, {
+    const result = await lifecycle(deps, {
       event: { data: ids },
-      // The second gate is never answered: the run must be waiting at it, not past it.
-      step: decidingStep(ids, [{ decision: "approve", feedback: OVERTURNED }, null]),
+      // The second gate is never answered: the run must have stopped at it, not gone past it.
+      step: scriptedStep([{ decision: "approve", feedback: OVERTURNED }, null]),
     });
 
     expect(planner.starts).toBe(2);
     expect(builder.starts).toBe(0);
-    expect(result.result).toBe("review_timeout");
+    expect(result.result).toBe("awaiting_review");
     const log = await logOf(ids);
     expect(log.some((p) => p.kind === "workflow_decision" && p["status"] === "advanced")).toBe(
       false,
@@ -4481,9 +4523,9 @@ describe("a Task following a Workflow", () => {
     builder.harnessSessionId = null;
     const { deps, spies } = makeDeps(db, builder, nullStream());
 
-    const result = await runTaskLifecycle(deps, {
+    const result = await lifecycle(deps, {
       event: { data: ids },
-      step: decidingStep(ids, [{ decision: "approve", feedback: OVERTURNED }, "approve"]),
+      step: scriptedStep([{ decision: "approve", feedback: OVERTURNED }, "approve"]),
     });
 
     expect(builder.starts).toBe(2);
@@ -4537,7 +4579,7 @@ describe("a Task following a Workflow", () => {
         return deps.executorFor(profile, opts);
       },
     };
-    await runTaskLifecycle(wrapped, { event: { data: ids }, step: decidingStep(ids, ["approve"]) });
+    await lifecycle(wrapped, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     expect(asked[0]?.checkpoints).toEqual({ rules, store: `/wt/${ids.taskId}--checkpoints` });
     expect(built[0]?.checkpointStore).toBe(`/wt/${ids.taskId}--checkpoints`);
@@ -4597,9 +4639,11 @@ describe("a Task following a Workflow", () => {
         );
       },
     };
-    await runTaskLifecycle(wrapped, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(wrapped, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
-    expect(asked).toEqual(["plan", "acceptEdits"]);
+    // A run builds the runner for the Step it starts on; the run the approval started builds
+    // one again before it moves on, so each posture is read once per run that reaches it.
+    expect([...new Set(asked)]).toEqual(["plan", "acceptEdits"]);
   });
 
   it("falls back to the Profile for a Step that stated no posture", async () => {
@@ -4628,9 +4672,9 @@ describe("a Task following a Workflow", () => {
         );
       },
     };
-    await runTaskLifecycle(wrapped, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(wrapped, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
-    expect(asked).toEqual(["plan"]);
+    expect([...new Set(asked)]).toEqual(["plan"]);
   });
 
   it("does not integrate anything while three auto Steps advance themselves", async () => {
@@ -4671,9 +4715,9 @@ describe("a Task following a Workflow", () => {
     const { deps, spies } = makeDeps(db, a, nullStream());
     deps.runner = runnersByMode({ plan: a, acceptEdits: b, bypassPermissions: c });
 
-    const result = await runTaskLifecycle(deps, {
+    const result = await lifecycle(deps, {
       event: { data: ids },
-      step: decidingStep(ids, []),
+      step: scriptedStep([]),
     });
 
     // All three harnesses ran, so the pipeline really did walk itself.
@@ -4688,24 +4732,22 @@ describe("a Task following a Workflow", () => {
       .where(eq(taskRepository.taskId, ids.taskId));
     expect(attachment?.resultBranch ?? null).toBeNull();
     // Sitting at the review gate on the last Step, waiting for a person who never came.
-    expect(result.result).toBe("review_timeout");
+    expect(result.result).toBe("awaiting_review");
     expect((await taskRow(ids.taskId))?.workflowStepId).toBe(step3 as string);
   });
 
-  it("refuses to integrate on an approval an earlier Step already spent", async () => {
+  it("applies a decision delivered twice exactly once", async () => {
     /*
      * THE GATE-BYPASS TEST, second half — the falsifiable one.
      *
-     * The reachable bypass in this file is not "no decision exists", which the review gate itself
-     * makes impossible; it is a decision that exists and has *already been spent*. Here the
-     * harness's own signal reaches the last Step, finds the standing approval unspent, reports
-     * `completed` and marks it spent. The review event that follows carries no new `review` row —
-     * a redelivery, or a second click — so by the time the approve branch reports the Step
-     * finished there is nothing left to spend, and nothing may be integrated.
+     * The reachable bypass is not "no decision exists", which the gate makes impossible; it is a
+     * decision applied twice. An event is delivered at least once, and the run a redelivery
+     * starts would find the cursor already moved on — on a middle Step that approves the next
+     * Step without it having run; on the last, it integrates again. The decision is taken up in
+     * one conditional write, so the second delivery finds it spent and leaves.
      *
-     * Red under deleting the `reported.status !== "completed"` early return at advance call site
-     * B: the run falls into `approve-${round}`, commits, and marks the Task done on an approval
-     * that was already accounted for.
+     * Red under deleting the `decision-take-up` early return: the second run reaches
+     * `decision-advance` again with the Task already `done`.
      */
     const ids = freshIds();
     await seedRun(db, ids);
@@ -4719,15 +4761,6 @@ describe("a Task following a Workflow", () => {
         advanceOn: "agent-signal",
       },
     ]);
-    // The approval is already on the record before the run starts.
-    await db.insert(review).values({
-      id: `review-${ids.taskId}-pre`,
-      workspaceId: ids.workspaceId,
-      sessionId: ids.sessionId,
-      decision: "approve",
-      actorUserId: "owner",
-    });
-
     const solo = new ScriptedRunner(
       [{ kind: "completed", stopReason: "end_turn" }],
       [declares("done")],
@@ -4735,20 +4768,94 @@ describe("a Task following a Workflow", () => {
     const { deps, spies } = makeDeps(db, solo, nullStream());
     deps.runner = runnersByMode({ plan: solo });
 
-    // `scriptedStep`, not `decidingStep`: the event arrives with no new decision behind it.
-    const result = await runTaskLifecycle(deps, {
-      event: { data: ids },
-      step: scriptedStep(["approve"]),
+    const first = await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    expect(first.result).toBe("done");
+    expect(spies.commit).toBe(1);
+
+    // The same event again: the decision it carries is the one the first run applied.
+    const [applied] = await db.select().from(review).where(eq(review.sessionId, ids.sessionId));
+    const again = await runTaskLifecycle(deps, {
+      event: {
+        data: {
+          ...ids,
+          review: { id: applied?.id ?? "", decision: "approve", feedback: null },
+        },
+      },
+      step: scriptedStep([]),
     });
 
-    expect(result.result).toBe("workflow_awaiting_decision");
-    expect(spies.commit).toBe(0);
-    expect(spies.publishedBranches).toEqual([]);
-    // Not `done`, and not moved anywhere by this run: `to-review` deliberately leaves the Task
-    // where it was, so the state here is whatever the operator's own click last made it.
-    expect(await taskState(db, ids.taskId)).not.toBe("done");
-    // The approval the agent-signal path spent is on the row, which is what makes it spent.
-    expect((await taskRow(ids.taskId))?.workflowDecisionId).toBe(`review-${ids.taskId}-pre`);
+    expect(again.result).toBe("decision_already_applied");
+    expect(spies.commit).toBe(1);
+    expect(await taskState(db, ids.taskId)).toBe("done");
+  });
+
+  it("briefs every Step afresh after a relaunch, never resuming another Step's conversation", async () => {
+    /*
+     * The bug as an Owner saw it: a Spec Kit Task relaunched once, and from then on every Step
+     * "continued the previous conversation" — Plan, Tasks, Analyze, Implement and Verify each
+     * finished in half a minute with Clarify's summary, because none of them was ever sent its
+     * own brief. The Step boundary cleared this Session's conversation id, and the fallback to an
+     * earlier Session found Clarify's there and handed it to Plan.
+     */
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const [clarifyId, planId] = await seedWorkflow(ids, [
+      {
+        key: "clarify",
+        command: "clarifier",
+        permissionMode: "plan",
+        promptTemplate: "Clarify the spec.",
+        gate: "human",
+        advanceOn: "review",
+      },
+      {
+        key: "plan",
+        command: "planner",
+        permissionMode: "acceptEdits",
+        promptTemplate: "Write the implementation plan.",
+        gate: "human",
+        advanceOn: "review",
+      },
+    ]);
+    // The launch before this one: it got as far as a Clarify conversation.
+    await db.insert(session).values({
+      id: `sess-before-${ids.taskId}`,
+      workspaceId: ids.workspaceId,
+      taskId: ids.taskId,
+      state: "closed",
+      harnessSessionId: "clarify-conversation",
+      harnessSessionStepId: clarifyId as string,
+      startedAt: "2026-01-01T00:00:00.000Z",
+    });
+    const clarifier = new ScriptedRunner(
+      [{ kind: "completed", stopReason: "end_turn" }],
+      [declares("clarified")],
+    );
+    const planner = new ScriptedRunner(
+      [{ kind: "completed", stopReason: "end_turn" }],
+      [declares("planned")],
+    );
+    clarifier.harnessSessionId = "clarify-conversation";
+    planner.harnessSessionId = "plan-conversation";
+    const { deps } = makeDeps(db, clarifier, nullStream());
+    deps.runner = runnersByMode({ plan: clarifier, acceptEdits: planner });
+
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    // Clarify carries its own conversation on — the relaunch lost nothing it had worked out.
+    expect(clarifier.resumeSessionIds).toEqual(["clarify-conversation"]);
+    // Plan is a new Step: no conversation to carry on, and its own brief in full.
+    expect(planner.starts).toBe(1);
+    expect(planner.resumeSessionIds).toEqual([null]);
+    expect(planner.prompts[0]).toContain("Write the implementation plan.");
+    expect(planner.prompts[0]).not.toContain("# Continue");
+    expect((await taskRow(ids.taskId))?.workflowStepId).toBe(planId as string);
+    // And the transcript still says the gate was left for the next Step, though the row had
+    // already been taken out of `review` by the decision.
+    const advanced = (await logOf(ids)).filter(
+      (p) => p.kind === "state" && p["reason"] === "workflow_step_advanced",
+    );
+    expect(advanced.map((p) => `${p["from"]}→${p["to"]}`)).toEqual(["review→running"]);
   });
 
   it("sends the Step's own advance rule at the review gate, not the literal review", async () => {
@@ -4796,9 +4903,9 @@ describe("a Task following a Workflow", () => {
     const { deps, spies } = makeDeps(db, planner, nullStream());
     deps.runner = runnersByMode({ plan: planner, acceptEdits: shipper });
 
-    const result = await runTaskLifecycle(deps, {
+    const result = await lifecycle(deps, {
       event: { data: ids },
-      step: decidingStep(ids, ["approve"]),
+      step: scriptedStep(["approve"]),
     });
 
     expect(result.result).toBe("done");
@@ -4847,9 +4954,9 @@ describe("a Task following a Workflow", () => {
     const { deps } = makeDeps(db, planner, nullStream());
     deps.runner = runnersByMode({ plan: planner, acceptEdits: builder });
 
-    await runTaskLifecycle(deps, {
+    await lifecycle(deps, {
       event: { data: ids },
-      step: decidingStep(ids, ["reject"]),
+      step: scriptedStep(["reject"]),
     });
 
     const row = await taskRow(ids.taskId);
@@ -4901,9 +5008,9 @@ describe("a Task following a Workflow", () => {
     const { deps } = makeDeps(db, planner, nullStream());
     deps.runner = runnersByMode({ plan: planner, acceptEdits: builder });
 
-    await runTaskLifecycle(deps, {
+    await lifecycle(deps, {
       event: { data: ids },
-      step: decidingStep(ids, []),
+      step: scriptedStep([]),
     });
 
     const transitions = await db
@@ -4965,17 +5072,15 @@ describe("a Task following a Workflow", () => {
     const { deps } = makeDeps(db, planner, nullStream());
     deps.runner = runnersByMode({ plan: planner, acceptEdits: builder });
 
-    const deciding = decidingStep(ids, ["approve", "approve"]);
     const statesAtWait: string[] = [];
-    const observing: StepLike = {
-      ...deciding,
-      waitForEvent: async (id, opts) => {
+    const observing: ScriptedStep = {
+      ...scriptedStep(["approve", "approve"]),
+      atGate: async () => {
         statesAtWait.push(await taskState(db, ids.taskId));
-        return deciding.waitForEvent(id, opts);
       },
     };
 
-    const result = await runTaskLifecycle(deps, { event: { data: ids }, step: observing });
+    const result = await lifecycle(deps, { event: { data: ids }, step: observing });
 
     // Both gates were reached with the Task already in review — no "Open review" needed.
     expect(statesAtWait).toEqual(["review", "review"]);
@@ -5020,18 +5125,16 @@ describe("a Task following a Workflow", () => {
       [declares("clarified")],
     );
     const { deps } = makeDeps(db, runner, nullStream());
-    const deciding = decidingStep(ids, ["approve"]);
     const atWait: { state: string; reason: string | null }[] = [];
-    const observing: StepLike = {
-      ...deciding,
-      waitForEvent: async (id, opts) => {
+    const observing: ScriptedStep = {
+      ...scriptedStep(["approve"]),
+      atGate: async () => {
         const row = await taskRow(ids.taskId);
         atWait.push({ state: row?.state ?? "", reason: row?.failureReason ?? null });
-        return deciding.waitForEvent(id, opts);
       },
     };
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: observing });
+    await lifecycle(deps, { event: { data: ids }, step: observing });
 
     expect(atWait).toEqual([{ state: "review", reason: null }]);
   });
@@ -5119,9 +5222,9 @@ describe("a Task following a Workflow", () => {
     const { deps } = makeDeps(db, planner, nullStream());
     deps.runner = runnersByMode({ plan: planner, acceptEdits: builder });
 
-    await runTaskLifecycle(deps, {
+    await lifecycle(deps, {
       event: { data: ids },
-      step: decidingStep(ids, ["approve", "approve"]),
+      step: scriptedStep(["approve", "approve"]),
     });
 
     const rows = await attributedLog(ids);
@@ -5155,9 +5258,9 @@ describe("a Task following a Workflow", () => {
     );
     const { deps } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, {
+    await lifecycle(deps, {
       event: { data: ids },
-      step: decidingStep(ids, ["approve"]),
+      step: scriptedStep(["approve"]),
     });
 
     const rows = await attributedLog(ids);
@@ -5225,7 +5328,7 @@ describe("a Task following a Workflow", () => {
       bypassPermissions: escalator,
     });
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: decidingStep(ids, []) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep([]) });
 
     // The branch was taken: the escalation Step ran, the ordinary successor never did.
     expect((await taskRow(ids.taskId))?.workflowStepId).toBe(escalate as string);
@@ -5297,7 +5400,7 @@ describe("a Task following a Workflow", () => {
     const { deps } = makeDeps(db, reviewer, nullStream());
     deps.runner = runnersByMode({ plan: reviewer, acceptEdits: builder });
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: decidingStep(ids, []) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep([]) });
 
     const row = await taskRow(ids.taskId);
     expect(row?.workflowStepId).toBe(implement as string);
@@ -5350,7 +5453,7 @@ describe("a Task following a Workflow", () => {
     const { deps } = makeDeps(db, builder, nullStream());
     deps.runner = runnersByMode({ acceptEdits: builder, plan: reviewer });
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: decidingStep(ids, []) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep([]) });
 
     // The fake worktree reports a modified file, so the log holds a `diff` naming one — the
     // record the rule corroborates against — and the Task went on to Review, not to the end.
@@ -5390,12 +5493,12 @@ describe("a Task following a Workflow", () => {
     const { deps, spies } = makeDeps(db, solo, nullStream());
     deps.runner = runnersByMode({ plan: solo });
 
-    const result = await runTaskLifecycle(deps, {
+    const result = await lifecycle(deps, {
       event: { data: ids },
-      step: decidingStep(ids, []),
+      step: scriptedStep([]),
     });
 
-    expect(result.result).toBe("review_timeout");
+    expect(result.result).toBe("awaiting_review");
     const decision = (await logOf(ids)).find((p) => p.kind === "workflow_decision");
     expect(decision).toMatchObject({
       stepName: "only",
@@ -5421,7 +5524,7 @@ describe("a Task following a Workflow", () => {
     const runner = new ScriptedRunner([{ kind: "completed", stopReason: "max_turns" }]);
     const { deps } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     const marker = (await logOf(ids)).find((p) => p.kind === "agent_done");
     expect(marker?.stopReason).toBe("max_turns");
@@ -5459,9 +5562,9 @@ describe("a Task following a Workflow", () => {
     const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps } = makeDeps(db, runner, nullStream());
 
-    const result = await runTaskLifecycle(deps, {
+    const result = await lifecycle(deps, {
       event: { data: ids },
-      step: decidingStep(ids, ["approve"]),
+      step: scriptedStep(["approve"]),
     });
 
     expect(result.result).toBe("workflow_unresumable");
@@ -5490,9 +5593,9 @@ describe("a Task following a Workflow", () => {
     const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps } = makeDeps(db, runner, nullStream());
 
-    const result = await runTaskLifecycle(deps, {
+    const result = await lifecycle(deps, {
       event: { data: ids },
-      step: decidingStep(ids, ["approve"]),
+      step: scriptedStep(["approve"]),
     });
 
     expect(result.result).toBe("workflow_too_long");
@@ -5523,9 +5626,9 @@ describe("a Task following a Workflow", () => {
     const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps } = makeDeps(db, runner, nullStream());
 
-    const result = await runTaskLifecycle(deps, {
+    const result = await lifecycle(deps, {
       event: { data: ids },
-      step: decidingStep(ids, ["approve"]),
+      step: scriptedStep(["approve"]),
     });
 
     expect(result.result).toBe("workflow_step_agent_missing");
@@ -5555,9 +5658,9 @@ describe("a Task following a Workflow", () => {
     const own = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps, spies } = makeDeps(db, own, nullStream());
 
-    const result = await runTaskLifecycle(deps, {
+    const result = await lifecycle(deps, {
       event: { data: ids },
-      step: decidingStep(ids, ["approve"]),
+      step: scriptedStep(["approve"]),
     });
 
     expect(result.result).toBe("done");
@@ -5612,7 +5715,7 @@ describe("a Task following a Workflow", () => {
     const { deps } = makeDeps(db, a, nullStream());
     deps.runner = runnersByMode({ plan: a, acceptEdits: b, bypassPermissions: c });
 
-    await runTaskLifecycle(deps, {
+    await lifecycle(deps, {
       event: { data: ids },
       step: retryingStep([], "workflow-signal-0"),
     });
@@ -5664,7 +5767,7 @@ describe("a Task following a Workflow", () => {
     // `decidingStep` records a real `review` row, because the whole defect is about what the
     // second pass reads back from the database. Wrapped so that one durable step — the terminal
     // advance — has its body executed twice, which is Inngest's at-least-once window.
-    const deciding = decidingStep(ids, ["approve"]);
+    const deciding = scriptedStep(["approve"]);
     const retriedOnce = new Set<string>();
     const step: StepLike = {
       ...deciding,
@@ -5677,7 +5780,7 @@ describe("a Task following a Workflow", () => {
       },
     };
 
-    const result = await runTaskLifecycle(deps, { event: { data: ids }, step });
+    const result = await lifecycle(deps, { event: { data: ids }, step });
 
     expect(result.result).toBe("done");
     expect(await taskState(db, ids.taskId)).toBe("done");
@@ -5719,9 +5822,9 @@ describe("a Task following a Workflow", () => {
 
     const memo = new Map<string, unknown>();
     const firstIds: string[] = [];
-    await runTaskLifecycle(deps, {
+    await lifecycle(deps, {
       event: { data: ids },
-      step: memoizingStep(memo, decidingStep(ids, []), firstIds),
+      step: memoizingStep(memo, scriptedStep([]), firstIds),
     });
     // Non-vacuous on both sides: these ids have to be *durable steps* in the first run for their
     // absence in the second to mean anything. Calling the resume or the advance outside
@@ -5731,9 +5834,9 @@ describe("a Task following a Workflow", () => {
     expect(firstIds).toContain("workflow-signal-0");
 
     const replayed: string[] = [];
-    await runTaskLifecycle(deps, {
+    await lifecycle(deps, {
       event: { data: ids },
-      step: memoizingStep(memo, decidingStep(ids, []), replayed),
+      step: memoizingStep(memo, scriptedStep([]), replayed),
     });
 
     // Nothing already in the journal was executed again.
@@ -5747,8 +5850,8 @@ describe("a Task following a Workflow", () => {
 });
 
 /**
- * The regression that matters most: a Task on no Workflow emits the same durable step ids, in the
- * same order, as it did before Workflows existed (issue #5).
+ * The durable step ids a Task on no Workflow emits, in order — one run up to its gate, and one
+ * run per decision after it (`— gate —` marks where a run ended and a person decided).
  *
  * Asserted as an exact sequence rather than as "no `workflow-` id appears", because an id that
  * merely *moved* would break an in-flight run's memo just as badly as one that was added.
@@ -5763,15 +5866,15 @@ describe("a Task on no Workflow", () => {
     db = createTestDb();
   });
 
-  function recordingStep(inner: StepLike, ids: string[]): StepLike {
+  function recordingStep(inner: ScriptedStep, ids: string[]): ScriptedStep {
     return {
+      decisions: inner.decisions ?? [],
+      atGate: async () => {
+        ids.push("— gate —");
+      },
       run: (id, fn) => {
         ids.push(id);
         return inner.run(id, fn);
-      },
-      waitForEvent: (id, opts) => {
-        ids.push(id);
-        return inner.waitForEvent(id, opts);
       },
       sleepUntil: (id, until) => {
         ids.push(id);
@@ -5789,14 +5892,14 @@ describe("a Task on no Workflow", () => {
       nullStream(),
     );
     const emitted: string[] = [];
-    await runTaskLifecycle(deps, {
+    await lifecycle(deps, {
       event: { data: ids },
       step: recordingStep(scriptedStep(decisions), emitted),
     });
     return emitted;
   }
 
-  it("emits the pre-Workflow step sequence on approve", async () => {
+  it("emits the step sequence on approve", async () => {
     expect(await idsFor(["approve"])).toEqual([
       "load",
       "executor-preflight",
@@ -5805,12 +5908,17 @@ describe("a Task on no Workflow", () => {
       "compact-0",
       "record-worktree-0",
       "to-review-0",
-      "await-review-0",
-      "approve-0",
+      "— gate —",
+      "load",
+      "decision-take-up",
+      "executor-preflight",
+      "prepare-repository",
+      "decision-worktree",
+      "decision-approve",
     ]);
   });
 
-  it("emits the pre-Workflow step sequence on request_changes then approve", async () => {
+  it("emits the step sequence on request_changes then approve", async () => {
     expect(await idsFor(["request_changes", "approve"])).toEqual([
       "load",
       "executor-preflight",
@@ -5819,19 +5927,28 @@ describe("a Task on no Workflow", () => {
       "compact-0",
       "record-worktree-0",
       "to-review-0",
-      "await-review-0",
-      "resume-blockers-0",
-      "resume-0",
-      "agent-run-1",
-      "compact-1",
-      "record-worktree-1",
-      "to-review-1",
-      "await-review-1",
-      "approve-1",
+      "— gate —",
+      "load",
+      "decision-take-up",
+      "executor-preflight",
+      "prepare-repository",
+      "decision-blockers",
+      "decision-resume",
+      "agent-run-0",
+      "compact-0",
+      "record-worktree-0",
+      "to-review-0",
+      "— gate —",
+      "load",
+      "decision-take-up",
+      "executor-preflight",
+      "prepare-repository",
+      "decision-worktree",
+      "decision-approve",
     ]);
   });
 
-  it("emits the pre-Workflow step sequence on reject", async () => {
+  it("emits the step sequence on reject", async () => {
     expect(await idsFor(["reject"])).toEqual([
       "load",
       "executor-preflight",
@@ -5840,8 +5957,13 @@ describe("a Task on no Workflow", () => {
       "compact-0",
       "record-worktree-0",
       "to-review-0",
-      "await-review-0",
-      "reject-0",
+      "— gate —",
+      "load",
+      "decision-take-up",
+      "executor-preflight",
+      "prepare-repository",
+      "decision-worktree",
+      "decision-reject",
     ]);
   });
 });
@@ -5902,7 +6024,7 @@ describe("the harness libraries a run is handed (spec F24)", () => {
       }),
     };
 
-    await runTaskLifecycle(wrapped, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(wrapped, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     const args = started[0]?.args ?? [];
     const libraryDir = join(root, ids.taskId, ".solow-libraries");
@@ -5962,7 +6084,7 @@ describe("the harness libraries a run is handed (spec F24)", () => {
       }),
     };
 
-    await runTaskLifecycle(wrapped, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(wrapped, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     expect(started[0]?.args).toEqual([]);
     expect(await stat(join(root, ids.taskId, ".solow-libraries")).catch(() => null)).toBeNull();
@@ -6014,7 +6136,7 @@ describe("resuming the harness conversation", () => {
     ]);
     const { deps } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, {
+    await lifecycle(deps, {
       event: { data: ids },
       step: retryingStep(["approve"], "agent-run-0"),
     });
@@ -6058,7 +6180,7 @@ describe("resuming the harness conversation", () => {
     const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     expect(runner.cwds).toEqual([`/wt/solow-task-${ids.taskId}`]);
     expect(runner.worktreeNames).toEqual([null]);
@@ -6094,7 +6216,7 @@ describe("resuming the harness conversation", () => {
     ]);
     const { deps } = makeDeps(db, runner, nullStream());
 
-    const result = await runTaskLifecycle(deps, {
+    const result = await lifecycle(deps, {
       event: { data: ids },
       step: scriptedStep(["approve"]),
     });
@@ -6118,7 +6240,7 @@ describe("resuming the harness conversation", () => {
     const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     expect(runner.resumeSessionIds).toEqual([null]);
     expect(runner.prompts[0]).toContain("# Task");
@@ -6140,7 +6262,7 @@ describe("resuming the harness conversation", () => {
 
     // One review decision, and it is enough: a truncated round must not reach the gate at all, so
     // the only decision this run asks for belongs to the round that actually finished.
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     expect(runner.starts).toBe(2);
     expect(runner.resumeSessionIds).toEqual([null, "scripted-session"]);
@@ -6165,7 +6287,7 @@ describe("resuming the harness conversation", () => {
     ]);
     const { deps } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     expect(runner.starts).toBe(4);
     const said = await notices(ids.sessionId);
@@ -6195,7 +6317,7 @@ describe("resuming the harness conversation", () => {
     runner.resumes = false;
     const { deps } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, {
+    await lifecycle(deps, {
       event: { data: ids },
       step: scriptedStep([{ decision: "request_changes", feedback: "again" }, "approve"]),
     });
@@ -6308,7 +6430,7 @@ describe("a sub-task forked from its parent's transcript (issue #56)", () => {
     const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     const brief = runner.prompts[0] ?? "";
     expect(brief).toContain("# Where this came from");
@@ -6328,7 +6450,7 @@ describe("a sub-task forked from its parent's transcript (issue #56)", () => {
     const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     // Resuming `parent-conv` would continue the parent's conversation in the child's run — the
     // mutation AC-4 forbids — and under Decision 0027 the CLI could not even find it.
@@ -6348,7 +6470,7 @@ describe("a sub-task forked from its parent's transcript (issue #56)", () => {
     const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     expect(
       await db.select().from(sessionEvent).where(eq(sessionEvent.sessionId, parentSessionId)),
@@ -6379,7 +6501,7 @@ describe("a sub-task forked from its parent's transcript (issue #56)", () => {
     const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     expect(runner.starts).toBe(1);
     expect(runner.prompts[0] ?? "").not.toContain("parent carries on");
@@ -6392,7 +6514,7 @@ describe("a sub-task forked from its parent's transcript (issue #56)", () => {
     const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     expect(runner.worktreeNames).toEqual([worktreeNameForTask(ids.taskId)]);
   });
@@ -6404,7 +6526,7 @@ describe("a sub-task forked from its parent's transcript (issue #56)", () => {
     const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     expect(runner.prompts[0] ?? "").toContain("Agent: parent line 2");
   });
@@ -6422,7 +6544,7 @@ describe("a sub-task forked from its parent's transcript (issue #56)", () => {
     const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     expect(runner.starts).toBe(0);
     expect(await taskState(db, ids.taskId)).toBe("failed");
@@ -6439,7 +6561,7 @@ describe("a sub-task forked from its parent's transcript (issue #56)", () => {
     const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     expect(runner.starts).toBe(0);
     expect(await taskState(db, ids.taskId)).toBe("failed");
@@ -6463,7 +6585,7 @@ describe("a sub-task forked from its parent's transcript (issue #56)", () => {
     const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     expect(runner.starts).toBe(1);
     expect(runner.prompts[0] ?? "").not.toContain("# Where this came from");
@@ -6478,7 +6600,7 @@ describe("a sub-task forked from its parent's transcript (issue #56)", () => {
     const runner = new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
     const { deps } = makeDeps(db, runner, nullStream());
 
-    await runTaskLifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
 
     expect(runner.resumeSessionIds).toEqual([null]);
     expect(runner.prompts[0] ?? "").not.toContain("# Where this came from");
@@ -6608,7 +6730,7 @@ describe("the catalog row's --auto (opencode)", () => {
         return runner;
       },
     };
-    await runTaskLifecycle(wrapped, { event: { data: ids }, step: scriptedStep(["approve"]) });
+    await lifecycle(wrapped, { event: { data: ids }, step: scriptedStep(["approve"]) });
     return { runner, asked };
   }
 

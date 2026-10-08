@@ -54,3 +54,14 @@ export async function listReviewsForSession(
     .orderBy(asc(review.createdAt), asc(review.id));
   return ok(rows);
 }
+
+/**
+ * Take back a decision that was never delivered — the run that would apply it could not be
+ * started. Left in place it would read as decided-and-stranded, when the truth is that nothing
+ * was decided: the gate is still open and the person can decide again.
+ */
+export async function forgetReview(ctx: RequestContext, id: string): Promise<void> {
+  await ctx.db
+    .delete(review)
+    .where(and(eq(review.workspaceId, ctx.workspaceId), eq(review.id, id)));
+}

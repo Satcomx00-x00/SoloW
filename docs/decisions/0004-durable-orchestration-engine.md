@@ -1,6 +1,6 @@
 # 0004 — Use a durable orchestration engine for Workflows and Tasks
 
-**Status:** Accepted · **Date:** 2026-08-17 · **Deciders:** Architecture
+**Status:** Accepted, amended by [0030](./0030-review-gate-is-a-database-state.md) · **Date:** 2026-08-17 · **Deciders:** Architecture
 
 ## Context
 

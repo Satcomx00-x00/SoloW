@@ -573,6 +573,31 @@ export async function updateTaskState(
   return ok(taskToDto(row, attachments.get(row.id) ?? []));
 }
 
+/**
+ * Move a Task into `to`, but only from one of `from` — in one statement, or not at all.
+ *
+ * What a start and a decision are built on. Reading the state and then writing the new one let
+ * two clicks both read `review`, both write `running` and both start a run; the conditional
+ * write is the lock, so exactly one of them gets the row back and the other gets nothing.
+ */
+export async function claimTaskState(
+  ctx: RequestContext,
+  id: string,
+  from: readonly TaskState[],
+  to: TaskState,
+): Promise<Result<TaskDto, typeof TaskErrorCode.AlreadyStarted>> {
+  const [row] = await ctx.db
+    .update(task)
+    .set({ state: to, failureReason: null, updatedAt: new Date().toISOString() })
+    .where(
+      and(eq(task.workspaceId, ctx.workspaceId), eq(task.id, id), inArray(task.state, [...from])),
+    )
+    .returning();
+  if (!row) return err(TaskErrorCode.AlreadyStarted);
+  const attachments = await attachmentsForTasks(ctx, [row.id]);
+  return ok(taskToDto(row, attachments.get(row.id) ?? []));
+}
+
 /** Count a profile's Tasks currently in `running` (for the concurrency cap). */
 export async function countRunningForHarnessProfile(
   ctx: RequestContext,

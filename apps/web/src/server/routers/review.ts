@@ -1,28 +1,24 @@
 import "server-only";
 import { ReviewErrorCode, reviewDecisionInput, reviewDto } from "@solow/contracts";
-import { STRANDED_REVIEW_REASON } from "@solow/core";
 import { TRPCError } from "@trpc/server";
-import { recordReview } from "../dal/review.js";
+import { forgetReview, recordReview } from "../dal/review.js";
 import { getSessionById, setSessionState } from "../dal/session.js";
-import { getTaskById, updateTaskState } from "../dal/task.js";
-import { devOwnerMode } from "../env.js";
+import { claimTaskState, getTaskById, updateTaskState } from "../dal/task.js";
 import { orchestrator } from "../orchestrator-client.js";
 import { ownerProcedure, router, unwrap } from "../trpc.js";
 import { requireUnblocked } from "./task.js";
 
-/** Review → resulting Task state (mirrors the orchestrator's integrate step, plan §9). */
-const DECISION_TASK_STATE = {
-  approve: "done",
-  reject: "ready",
-  request_changes: "running",
-} as const;
-
 export const reviewRouter = router({
   /**
-   * Record a human decision on a Session's diff (Principle I). In a real deployment the
-   * orchestrator's durable workflow finalizes the Task (approve → commit + Done; reject →
-   * discard; request_changes → resume). In dev-owner mode the durable service isn't running,
-   * so the transition is applied here so the local loop is demonstrable end-to-end.
+   * Record a human decision on a Session's diff (Principle I) and start the run that applies it:
+   * approve → commit (or move the Workflow on), reject → discard, request_changes → another round
+   * with the feedback.
+   *
+   * The gate is a database state, not a run waiting somewhere. Taking the decision is one
+   * conditional write — `review` → `running` — so a second click or a second tab finds the Task
+   * already gone from the gate and is refused, rather than starting a second run on the same
+   * worktree. The run is then started with the decision in its event; if that cannot happen, the
+   * gate is put back exactly as it was and the person is told.
    */
   decide: ownerProcedure
     .meta({
@@ -40,48 +36,51 @@ export const reviewRouter = router({
     .mutation(async ({ ctx, input }) => {
       // Ownership: the Session must belong to this Workspace before we record a decision.
       const session = unwrap(await getSessionById(ctx.rctx, input.sessionId));
-
-      /*
-       * A decision is only taken at the gate. Recorded anywhere else it is delivered to nothing —
-       * a run mid-round is not yet waiting on `review.decided`, and Inngest does not replay an
-       * event to a wait that opens after it — and the dev-owner branch below then reads the
-       * Session's `active` as "no run is parked" and fails a Task whose harness is working.
-       * Seen on a real Task: an Approve clicked three seconds after Retry, from a page that still
-       * showed the gate, failed the round that Retry had just started and left the gate it then
-       * opened reading "Decision not applied". Refused before anything is recorded.
-       */
       const current = unwrap(await getTaskById(ctx.rctx, session.taskId));
+      // A decision is only taken at the gate. Refused before anything is recorded.
       if (current.state !== "review") {
         throw new TRPCError({ code: "CONFLICT", message: ReviewErrorCode.NotInReview });
       }
-      /*
-       * Nor on a gate the reconciler has already declared dead. `STRANDED_REVIEW_REASON` on a
-       * `review` row means no run is parked to hear `review.decided` (the run clears it the moment
-       * it parks, so it is never stale on a live gate) — yet its Session still reads
-       * `awaiting_review`, so the branch below would take that for a live run, publish to nothing
-       * and report success. A real Task took twenty-five Approves that way. Approve and Request
-       * changes need a run; only Retry brings one back. Reject needs none — it is pure state, and
-       * it stays available as the way out.
-       */
-      const runLost = current.failureReason === STRANDED_REVIEW_REASON;
-      if (runLost && input.decision !== "reject") {
-        throw new TRPCError({ code: "CONFLICT", message: ReviewErrorCode.RunLost });
-      }
 
-      // `request_changes` resumes the harness, so it is a start (issue #6 AC-3: "SHALL NOT start
-      // it by any automated path"). The reading applied is the one `task.move` already applies —
-      // the transition *into* `running` is the start, whoever asks for it — so a decision that
-      // would set a blocked Task going is refused with the same code, rather than the same state
-      // change being refused on the board and allowed here (and over MCP, where `review.decide`
-      // is an exposed tool). Refused before anything is recorded or released, so a rejected
-      // decision leaves no half-applied trail.
-      //
-      // Above the `devOwnerMode()` branch on purpose: the wired orchestrator applies the very
-      // same transition, and which deployment is running must not decide whether a blocked Task
-      // can be started (Principle VII).
-      if (DECISION_TASK_STATE[input.decision] === "running") {
+      // `request_changes` resumes the harness, so it is a start (issue #6 AC-3), and a blocked
+      // Task is refused it with the same code `task.move` uses — here and over MCP alike.
+      if (input.decision === "request_changes") {
         await requireUnblocked(ctx.rctx, session.taskId);
       }
+
+      // Without an orchestrator nothing can integrate or run a harness. Reject alone is pure
+      // state — back to `ready`, no claim that anything happened to the work — so it is the one
+      // decision applied here; the others are refused rather than recorded as if they had been.
+      if (!orchestrator.isWired()) {
+        if (input.decision !== "reject") {
+          throw new TRPCError({
+            code: "PRECONDITION_FAILED",
+            message: ReviewErrorCode.NoOrchestrator,
+          });
+        }
+        const recorded = unwrap(
+          await recordReview(ctx.rctx, {
+            sessionId: input.sessionId,
+            decision: input.decision,
+            feedback: input.feedback ?? null,
+          }),
+        );
+        unwrap(await updateTaskState(ctx.rctx, session.taskId, "ready"));
+        await setSessionState(ctx.rctx, input.sessionId, "closed", {
+          endedAt: new Date().toISOString(),
+        });
+        return recorded;
+      }
+
+      // Take the gate. Whoever loses this write decided on a gate that is no longer open.
+      const claimed = await claimTaskState(ctx.rctx, session.taskId, ["review"], "running");
+      if (!claimed.ok) {
+        throw new TRPCError({ code: "CONFLICT", message: ReviewErrorCode.NotInReview });
+      }
+      // The Session is live again: a run is about to work in it. Left `awaiting_review`, a run
+      // that died before it got going would leave a `running` Task the reconcile sweep reads as
+      // waiting for a person, and nothing would ever bring it back to a gate.
+      await setSessionState(ctx.rctx, input.sessionId, "active");
 
       const review = unwrap(
         await recordReview(ctx.rctx, {
@@ -90,92 +89,30 @@ export const reviewRouter = router({
           feedback: input.feedback ?? null,
         }),
       );
-
-      // Release the decision to the durable workflow (dev: logs-and-returns).
-      await orchestrator.resumeReview({
-        workspaceId: ctx.rctx.workspaceId,
-        sessionId: input.sessionId,
-        decision: input.decision,
-        feedback: input.feedback ?? null,
-      });
-
-      // Dev stand-in for the orchestrator's integrate step: apply the resulting Task state
-      // and close the session on a terminal decision.
-      //
-      // Normally skipped once a real engine is wired — there the durable `task-run` sits parked
-      // at its `waitForEvent("review.decided")` and owns the transition, so writing it here too
-      // would race it. The tell for "a run is parked" is the Session state: `task-run` sets it to
-      // `awaiting_review` immediately before it parks. So a wired engine with the Session still
-      // `awaiting_review` means the run is there to apply this — leave it. Any OTHER Session state
-      // means no run is parked to receive the event we just published: the local Inngest Dev
-      // Server holds runs in memory and loses parked ones on restart (see `scripts/dev.sh
-      // --persist`), which strands the Task in `review` with an un-decidable gate. Applying the
-      // transition here then is a recovery, not a race — there is nothing to race.
-      //
-      // Dev-owner only, exactly as before: a hosted deployment runs a persistent engine and must
-      // not have the API second-guess whether a run is parked (Principle VII).
-      const engineOwnsTransition =
-        orchestrator.isWired() && session.state === "awaiting_review" && !runLost;
-      if (devOwnerMode() && !engineOwnsTransition) {
-        /*
-         * **Only reject may be applied on this path.**
-         *
-         * Approve claims the change was *integrated* — and integration is the orchestrator's
-         * alone: committing means reaching a worktree through an Executor, which is the boundary
-         * this process sits on the wrong side of by design. Request-changes claims a harness is
-         * *running*, and no process here starts one. Reject alone is pure state: back to
-         * `ready`, no claim about the work at all.
-         *
-         * So writing `done` here was reporting a success nobody achieved. Observed end to end on
-         * 2026-08-27: a harness edited a file, the reviewer approved, the Task went Done, and the
-         * branch still pointed at the commit before the run — the work sat uncommitted in a
-         * worktree nothing would ever clean up, with no error anywhere on screen. That is the
-         * worst failure a review gate can have: it is indistinguishable from having worked.
-         *
-         * `STRANDED_REVIEW_REASON` already names exactly this and the board already renders it —
-         * "Decision not applied", with Retry. Nothing is lost: the decision is recorded above,
-         * the change is intact on its branch, and what failed is the delivery.
-         */
-        /*
-         * `request_changes` may not be applied here either, for the sibling reason.
-         *
-         * The durable path resumes the harness because the parked run consumes `review.decided`
-         * and starts the next round itself. On this path there is no run to consume it, so
-         * writing `running` produces a Task that *says* a harness is working while no process
-         * exists anywhere — the exact zombie this codebase already documents ("a Task's input
-         * box answering 'No harness is running' forever"), fixed only by the orchestrator's next
-         * boot-time reconcile. A state must not claim more than this process did.
-         *
-         * Both therefore land on `STRANDED_REVIEW_REASON`: decision recorded, delivery failed,
-         * Retry redrives a fresh run. One honest limit, stated rather than hidden — a redriven
-         * run starts from the Task brief, so the reviewer's feedback reaches the record (the
-         * review row above holds it) but not the next harness's prompt. That loses less than a
-         * permanently fake "Running".
-         *
-         * Reject stays applicable: it is pure state — back to `ready`, no claim that anything
-         * happened to the work — and refusing it too would leave a stranded Task with no exit
-         * that does not go through Retry.
-         */
-        if (input.decision !== "reject") {
-          unwrap(
-            await updateTaskState(ctx.rctx, session.taskId, "failed", {
-              failureReason: STRANDED_REVIEW_REASON,
-            }),
-          );
-          // The session is closed too, not left `active`: no process holds it, and the Issue
-          // above derives "in progress" from any active session — a stranded Task would keep
-          // its Issue reading as worked-on forever. Retry opens a fresh Session of its own.
-          await setSessionState(ctx.rctx, input.sessionId, "closed", {
-            endedAt: new Date().toISOString(),
-          });
-          return review;
-        }
-        unwrap(await updateTaskState(ctx.rctx, session.taskId, DECISION_TASK_STATE.reject));
-        await setSessionState(ctx.rctx, input.sessionId, "closed", {
-          endedAt: new Date().toISOString(),
+      try {
+        await orchestrator.applyReview({
+          workspaceId: ctx.rctx.workspaceId,
+          taskId: session.taskId,
+          sessionId: input.sessionId,
+          review: { id: review.id, decision: review.decision, feedback: review.feedback },
         });
+      } catch (cause) {
+        // No run will apply it, so it was not taken: the gate goes back to exactly what it was,
+        // and the row is forgotten rather than left to read as a decision somebody made and
+        // nothing honoured.
+        await forgetReview(ctx.rctx, review.id);
+        await setSessionState(ctx.rctx, input.sessionId, session.state);
+        await updateTaskState(ctx.rctx, session.taskId, "review", {
+          failureReason: current.failureReason ?? null,
+        });
+        throw cause;
       }
 
+      await orchestrator.announceTask({
+        workspaceId: ctx.rctx.workspaceId,
+        taskId: session.taskId,
+        state: "running",
+      });
       return review;
     }),
 });

@@ -390,8 +390,14 @@ it took is worth stating because it is not the obvious one.
   physically one Task row whose cursor moved: no commit, no publish, no result branch, no `done`,
   no cleanup. The next Step continues in the same worktrees and therefore sees the previous Step's
   uncommitted work. Ending the run and re-launching would have destroyed exactly that.
-- **Integration has one home.** It is inside `approve-${round}`, reachable only from a
-  `review.decided` carrying `approve`. The agent-signal path can report `completed` and still does
+- **A run ends at its gate, and a decision starts the next one** ([0030](../decisions/0030-review-gate-is-a-database-state.md)).
+  The gate is the Task in `review`; `review.decide` takes it in one conditional write and starts a
+  run carrying the decision, which takes it up once and applies it before anything else.
+- **A conversation belongs to its Step.** A round resumes only a conversation briefed for the same
+  Step, so a Step boundary — within a run or across a relaunch — always hands the next Step its
+  own brief.
+- **Integration has one home.** It is inside `decision-approve`, reachable only from a run started
+  by an `approve` decision. The agent-signal path can report `completed` and still does
   not integrate — it falls through to the review gate, which costs one extra approval in a rare
   state and is stricter than Principle I requires, never looser.
 - **The approve branch sends the Step's own advance rule, not the literal `review`.** A Step that
@@ -430,8 +436,8 @@ pipeline*, the badge says *what is happening to it*.
   integrates on the first approval, as if the pipeline were not there. The cursor is not cleared,
   so turning the flag back on resumes where it was — but the work done in between was done outside
   the pipeline. Turn the flag off for a Workspace with Tasks in flight only deliberately.
-- **One Session for the whole Workflow run.** `sessionId` is a run-scoped constant threaded
-  through the lifecycle and matched by `review.decided`. So `latestDecisionForTask` stays
+- **One Session for the whole Workflow run.** `sessionId` is carried by every run of the Task,
+  the ones decisions start included. So `latestDecisionForTask` stays
   *Task*-scoped, and "which Step was this review about" is answerable only from the state
   transition events. Two approvals recorded inside one Step's review round leave the newer one
   unspent and available to the next gate. Per-Step review linkage needs one Session per Step

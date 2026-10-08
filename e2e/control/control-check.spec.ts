@@ -307,11 +307,13 @@ test.describe("control check — the main line of the product, end to end", () =
       await openWorkspaceTab(page, "Brief");
       const brief = page.getByRole("region", { name: "Acceptance criteria" });
       await expect(brief.getByText("AC-1", { exact: true })).toBeVisible();
-      await brief.getByRole("button", { name: "Explain AC-1" }).click();
+      // The index lists the criteria; the one shown at full size carries its own Explain.
+      const entry = page.getByRole("article", { name: "AC-1" });
+      await entry.getByRole("button", { name: "Explain AC-1" }).click();
       const explanation = page.locator('[data-criterion-explanation="AC-1"]');
       await expect(explanation).toContainText("explains AC-1");
       await expect(explanation).toContainText("not part of the record");
-      await brief.getByRole("button", { name: "Hide the explanation of AC-1" }).click();
+      await entry.getByRole("button", { name: "Hide the explanation of AC-1" }).click();
       await expect(explanation).toHaveCount(0);
     });
 
@@ -365,7 +367,7 @@ test.describe("control check — the main line of the product, end to end", () =
       await page.goto(`/workflows/${workflowId}`);
       // The sidebar's own control for the pipeline; the inspector's is behind a panel that may
       // still be loading the Steps.
-      await page.getByRole("button", { name: `Delete ${workflowName}`, exact: true }).click();
+      await page.getByRole("button", { name: "Delete workflow", exact: true }).click();
       await page.getByRole("alertdialog").getByRole("button", { name: "Delete workflow" }).click();
       await expect(page.getByRole("link", { name: new RegExp(workflowName) })).toHaveCount(0);
 

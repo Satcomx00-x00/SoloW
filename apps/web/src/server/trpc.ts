@@ -1,5 +1,5 @@
 import "server-only";
-import { CommonErrorCode, type Result } from "@solow/contracts";
+import { CommonErrorCode, type Result, ReviewErrorCode, TaskErrorCode } from "@solow/contracts";
 import type { Db } from "@solow/db";
 import { type FlagKey, isEnabled } from "@solow/db";
 import { initTRPC, TRPCError } from "@trpc/server";
@@ -155,6 +155,9 @@ export function unwrap<T>(result: Result<T, string>): T {
     [CommonErrorCode.NotFound]: "NOT_FOUND",
     [CommonErrorCode.ValidationFailed]: "BAD_REQUEST",
     [CommonErrorCode.RateLimited]: "TOO_MANY_REQUESTS",
+    // Lost a race for the row: the request was fine, the state moved under it.
+    [TaskErrorCode.AlreadyStarted]: "CONFLICT",
+    [ReviewErrorCode.NotInReview]: "CONFLICT",
   };
   throw new TRPCError({ code: map[code] ?? "BAD_REQUEST", message: code });
 }
