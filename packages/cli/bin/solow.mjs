@@ -22,6 +22,7 @@ import {
   openSync,
   readFileSync,
   readSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
@@ -101,6 +102,8 @@ function usage() {
 
   Usage
     npx solow [options]
+    npx solow backup  [--out <dir>] [--no-engine] [--data-dir <path>]
+    npx solow restore [<backup>] [--data-dir <path>]   (lists backups without <backup>)
 
   Options
     -p, --port <n>        Port for the web UI          (default ${DEFAULTS.web})
@@ -125,6 +128,8 @@ function usage() {
 
   On first run this creates the database, applies migrations, creates your workspace and
   generates the encryption keys — all under the data directory. Nothing leaves the machine.
+  Before an upgrade changes the database, a copy of it and its keys is kept in
+  <data-dir>/backups. \`backup\` works while SoloW runs; \`restore\` needs it stopped.
 `);
 }
 
@@ -373,8 +378,13 @@ function resolveInngest() {
  * Secrets are generated once and persisted, not derived per run: the database encrypts stored
  * provider tokens with `SOLOW_SECRET_KEY`, so a key that changed between runs would leave every
  * previously stored secret undecryptable. Written 0600 — they are the keys to that data.
+ *
+ * An exported value wins, as it does in `scripts/lib/engine-env.sh`: a deployment that manages
+ * its own secrets must not have them silently replaced by the files.
  */
-function secret(dataDir, name, make) {
+function secret(dataDir, name, make, envName) {
+  const exported = process.env[envName];
+  if (exported) return exported;
   const file = join(dataDir, name);
   if (existsSync(file)) return readFileSync(file, "utf8").trim();
   const value = make();
@@ -387,6 +397,17 @@ const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
 /** The interface every service listens on. Network exposure is a choice, so it is named once. */
 function bindHost() {
   return process.env.SOLOW_BIND_HOST || "127.0.0.1";
+}
+
+/**
+ * Where the services reach each other. Not `localhost`, which can resolve to ::1 while they listen
+ * on 127.0.0.1, and which a specific LAN bind address is not listening on at all. A wildcard bind
+ * is reachable on loopback. Same rule as `scripts/lib/engine-env.sh`.
+ */
+function internalHost() {
+  const host = bindHost();
+  if (host === "0.0.0.0" || host === "::" || host === "localhost") return "127.0.0.1";
+  return host.includes(":") ? `[${host}]` : host;
 }
 
 /** Called once at start: says out loud what leaving the machine means, and refuses the worst case. */
@@ -410,19 +431,35 @@ function buildEnv(opts) {
     NODE_ENV: "production",
     SOLOW_DB_DRIVER: "sqlite",
     SOLOW_SQLITE_PATH: join(opts.dataDir, "solow.db"),
-    SOLOW_SECRET_KEY: secret(opts.dataDir, "secret.key", () => randomBytes(32).toString("base64")),
-    SOLOW_AUTH_SECRET: secret(opts.dataDir, "auth.secret", () =>
-      randomBytes(32).toString("base64"),
+    SOLOW_SECRET_KEY: secret(
+      opts.dataDir,
+      "secret.key",
+      () => randomBytes(32).toString("base64"),
+      "SOLOW_SECRET_KEY",
     ),
-    SOLOW_STREAM_SECRET: secret(opts.dataDir, "stream.secret", () =>
-      randomBytes(32).toString("base64"),
+    SOLOW_AUTH_SECRET: secret(
+      opts.dataDir,
+      "auth.secret",
+      () => randomBytes(32).toString("base64"),
+      "SOLOW_AUTH_SECRET",
+    ),
+    SOLOW_STREAM_SECRET: secret(
+      opts.dataDir,
+      "stream.secret",
+      () => randomBytes(32).toString("base64"),
+      "SOLOW_STREAM_SECRET",
     ),
     SOLOW_WORKTREE_ROOT: join(opts.dataDir, "worktrees"),
     SOLOW_REPO_CACHE_ROOT: join(opts.dataDir, "repos"),
+    // Imported Skills. Left unset, the web app put them under whatever directory `npx` ran in.
+    SOLOW_SKILLS_ROOT: join(opts.dataDir, "skills"),
     SOLOW_WS_PORT: String(opts.wsPort),
-    SOLOW_WS_URL: `ws://localhost:${opts.wsPort}`,
-    SOLOW_WEB_URL: `http://localhost:${opts.webPort}`,
-    SOLOW_ORCHESTRATOR_URL: `http://localhost:${opts.wsPort}`,
+    // The two URLs a browser uses. An exported value wins: behind a LAN address or a proxy the
+    // browser's origin is not localhost, and the sign-in check rejects any origin but this one.
+    SOLOW_WS_URL: process.env.SOLOW_WS_URL || `ws://localhost:${opts.wsPort}`,
+    SOLOW_WEB_URL: process.env.SOLOW_WEB_URL || `http://localhost:${opts.webPort}`,
+    SOLOW_ORCHESTRATOR_URL:
+      process.env.SOLOW_ORCHESTRATOR_URL || `http://${internalHost()}:${opts.wsPort}`,
     SOLOW_INNGEST_PORT: String(opts.inngestPort),
     // Sign-in is on unless the environment says otherwise: a fresh install asks the person for
     // an Owner account on first visit. The "every visitor is the Owner" stand-in is for
@@ -433,18 +470,27 @@ function buildEnv(opts) {
     SOLOW_AGENT_COMMAND: process.env.SOLOW_AGENT_COMMAND ?? "claude",
     // Web -> orchestrator bearer secret for /events (B3), and the keys that make the self-hosted
     // engine (`inngest start`) accept only signed requests (F6). Hex because the engine insists.
-    SOLOW_ORCHESTRATOR_SECRET: secret(opts.dataDir, "orchestrator.secret", () =>
-      randomBytes(32).toString("base64"),
+    SOLOW_ORCHESTRATOR_SECRET: secret(
+      opts.dataDir,
+      "orchestrator.secret",
+      () => randomBytes(32).toString("base64"),
+      "SOLOW_ORCHESTRATOR_SECRET",
     ),
-    INNGEST_SIGNING_KEY: secret(opts.dataDir, "inngest-signing.key", () =>
-      randomBytes(32).toString("hex"),
+    INNGEST_SIGNING_KEY: secret(
+      opts.dataDir,
+      "inngest-signing.key",
+      () => randomBytes(32).toString("hex"),
+      "INNGEST_SIGNING_KEY",
     ),
-    INNGEST_EVENT_KEY: secret(opts.dataDir, "inngest-event.key", () =>
-      randomBytes(32).toString("hex"),
+    INNGEST_EVENT_KEY: secret(
+      opts.dataDir,
+      "inngest-event.key",
+      () => randomBytes(32).toString("hex"),
+      "INNGEST_EVENT_KEY",
     ),
     // Any INNGEST_DEV (even inherited) would put the SDK in dev mode and skip signature checks;
     // INNGEST_BASE_URL is what points the non-dev SDK at the local engine instead of Cloud.
-    INNGEST_BASE_URL: `http://localhost:${opts.inngestPort}`,
+    INNGEST_BASE_URL: `http://${internalHost()}:${opts.inngestPort}`,
     INNGEST_DEV: undefined,
   };
 }
@@ -475,11 +521,29 @@ async function waitForPort(p, timeoutMs) {
 
 // ---------------------------------------------------------------------------- run
 
-const children = [];
+/** The running process of each service, replaced on every restart. */
+const children = new Map();
 let shuttingDown = false;
 
+function envInt(name, fallback) {
+  const n = Number(process.env[name]);
+  return Number.isInteger(n) && n > 0 ? n : fallback;
+}
+
+/**
+ * The same policy as `scripts/lib/supervise.sh` (FINDINGS F2), and the same variables: a service
+ * that exits is started again after 1s, 2s, 4s… up to 30s, while the other two keep running. The
+ * count resets once a run has lasted a minute; a service that fails five times in a row is broken
+ * rather than unlucky, and only then does the whole stack stop — so a service manager above this
+ * one (docs/operations/running-as-a-service.md) sees the failure instead of a stack half up.
+ */
+const RESTART = {
+  limit: envInt("SOLOW_RESTART_LIMIT", 5),
+  stableMs: envInt("SOLOW_RESTART_STABLE_SECS", 60) * 1000,
+  maxDelayS: envInt("SOLOW_RESTART_MAX_DELAY", 30),
+};
+
 function start(name, bin, args, env, extra = {}) {
-  const child = spawn(bin, args, { env, stdio: ["ignore", "pipe", "pipe"], ...extra });
   const tag = `[${name}]`;
   const relay = (stream, out) => {
     let buffer = "";
@@ -490,24 +554,47 @@ function start(name, bin, args, env, extra = {}) {
       for (const line of lines) out.write(`${tag} ${line}\n`);
     });
   };
-  relay(child.stdout, process.stdout);
-  relay(child.stderr, process.stderr);
-  child.on("exit", (code, signal) => {
-    if (shuttingDown) return;
-    console.error(`\nsolow: ${name} exited (${signal ?? `code ${code}`}) — stopping the rest.`);
-    shutdown(1);
-  });
-  children.push(child);
-  return child;
+  let failures = 0;
+  const launch = () => {
+    const startedAt = Date.now();
+    const child = spawn(bin, args, { env, stdio: ["ignore", "pipe", "pipe"], ...extra });
+    relay(child.stdout, process.stdout);
+    relay(child.stderr, process.stderr);
+    child.on("exit", (code, signal) => {
+      if (shuttingDown) return;
+      const how = signal ?? `code ${code}`;
+      if (Date.now() - startedAt >= RESTART.stableMs) failures = 0;
+      failures += 1;
+      if (failures > RESTART.limit) {
+        console.error(
+          `\nsolow: ${name} exited (${how}) ${RESTART.limit} times in a row — stopping the rest.`,
+        );
+        shutdown(1);
+        return;
+      }
+      const delay = Math.min(2 ** (failures - 1), RESTART.maxDelayS);
+      console.error(
+        `\nsolow: ${name} exited (${how}) — restarting in ${delay}s (attempt ${failures} of ${RESTART.limit})`,
+      );
+      setTimeout(() => {
+        if (!shuttingDown) launch();
+      }, delay * 1000);
+    });
+    children.set(name, child);
+  };
+  launch();
 }
 
 function shutdown(code) {
   if (shuttingDown) return;
   shuttingDown = true;
-  for (const child of children) child.kill("SIGTERM");
+  // Set rather than passed only to exit(): if every service is gone before the timer below, Node
+  // ends on its own, and would otherwise report success for a stack that failed.
+  process.exitCode = code;
+  for (const child of children.values()) child.kill("SIGTERM");
   // Give them a moment to close listeners, then make sure the process actually ends.
   setTimeout(() => {
-    for (const child of children) child.kill("SIGKILL");
+    for (const child of children.values()) child.kill("SIGKILL");
     process.exit(code);
   }, 2000).unref();
 }
@@ -526,7 +613,60 @@ function openBrowser(url) {
   }
 }
 
+/**
+ * Marks the data folder as in use while the stack runs (FINDINGS F1). `solow restore` refuses
+ * while this names a live process, and a second `solow` on the same folder refuses to start — two
+ * stacks on one SQLite file and one engine directory would each run the other's Tasks. Same file
+ * and same rule as `scripts/lib/data-dir.sh`.
+ */
+function claimDataDir(dataDir) {
+  const file = join(dataDir, "solow.pid");
+  if (existsSync(file)) {
+    const pid = Number.parseInt(readFileSync(file, "utf8").trim(), 10);
+    if (Number.isInteger(pid) && pid > 0 && pid !== process.pid && processAlive(pid)) {
+      fail(
+        `SoloW is already running on ${dataDir} (pid ${pid}) — stop it first.\n` +
+          `  If nothing is running, the pid file is stale: remove ${file}`,
+      );
+    }
+  }
+  writeFileSync(file, `${process.pid}\n`);
+  process.on("exit", () => {
+    try {
+      if (readFileSync(file, "utf8").trim() === String(process.pid)) unlinkSync(file);
+    } catch {
+      // already gone
+    }
+  });
+}
+
+function processAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM";
+  }
+}
+
+/**
+ * `solow backup` and `solow restore`: the same code as the repo's `scripts/backup.sh`, bundled as
+ * `dist/db/backup.js` and run under the same Bun as the stack. Neither starts anything.
+ */
+function runBackupCommand(command, rest) {
+  const args = [...rest];
+  if (!args.includes("--data-dir")) {
+    args.push("--data-dir", process.env.SOLOW_HOME || join(homedir(), ".solow"));
+  }
+  const result = spawnSync(resolveBun(), [join(DIST, "db", "backup.js"), command, ...args], {
+    stdio: "inherit",
+  });
+  process.exit(result.status ?? 1);
+}
+
 async function main() {
+  const [command, ...rest] = process.argv.slice(2);
+  if (command === "backup" || command === "restore") runBackupCommand(command, rest);
   const opts = parseArgs(process.argv.slice(2));
   const bun = resolveBun();
 
@@ -553,6 +693,7 @@ async function main() {
       fail(`port ${p} (${label}) is already in use — free it or pass a different port.`);
     }
   }
+  claimDataDir(opts.dataDir);
 
   // Migrations run on every start, not just the first: drizzle skips the ones already recorded,
   // so it is cheap, and without it an upgraded `npx solow` would open an old database and 500 on
@@ -590,7 +731,7 @@ async function main() {
       "--sqlite-dir",
       join(opts.dataDir, "inngest"),
       "-u",
-      `http://localhost:${opts.wsPort}/api/inngest`,
+      `http://${internalHost()}:${opts.wsPort}/api/inngest`,
       "-p",
       String(opts.inngestPort),
       "--host",

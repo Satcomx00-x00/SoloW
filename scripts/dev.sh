@@ -12,8 +12,13 @@ set -eu
 ROOT="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)"
 cd "$ROOT"
 
-GC_DIR="$ROOT/.solow"
-mkdir -p "$GC_DIR"
+# shellcheck disable=SC2034 # read by scripts/lib/data-dir.sh
+LOG_TAG=dev
+# The data folder ($SOLOW_HOME, default .solow/), the absolute roots under it, the pid file.
+# shellcheck source=/dev/null
+. "$ROOT/scripts/lib/data-dir.sh"
+# shellcheck source=/dev/null
+. "$ROOT/scripts/lib/supervise.sh"
 
 # Persistent 32-byte base64 key (kept out of git via .gitignore's /.solow/).
 KEY_FILE="$GC_DIR/dev-secret.key"
@@ -50,10 +55,6 @@ if [ "$SOLOW_DEV_OWNER" = "on" ]; then
             ;;
     esac
 fi
-# Signs the session cookie; the env module refuses anything under 32 characters.
-export SOLOW_AUTH_SECRET="${SOLOW_AUTH_SECRET:-dev-insecure-session-secret-32ch}"
-# Shared by web (signs stream tickets) and orchestrator (verifies them) — same value, both sides.
-export SOLOW_STREAM_SECRET="${SOLOW_STREAM_SECRET:-dev-insecure-stream}"
 # The Claude Code binary each run's agent_catalog row names (packages/db/src/harness-catalog-
 # defaults.ts seeds "claude"; these two are read by nothing in apps/orchestrator/src today, so
 # they do not override that — kept only for a deployment that wires its own catalog lookup to
@@ -61,43 +62,47 @@ export SOLOW_STREAM_SECRET="${SOLOW_STREAM_SECRET:-dev-insecure-stream}"
 # its own working tree off the repository.
 export SOLOW_AGENT_COMMAND="${SOLOW_AGENT_COMMAND:-claude}"
 export SOLOW_AGENT_ARGS="${SOLOW_AGENT_ARGS:-}"
+# `apps/web/package.json` says 5000 as well; the `--port` passed below comes later on the command
+# line and wins, the same way `--hostname` does, so a second stack can run beside the first.
+SOLOW_WEB_PORT="${SOLOW_WEB_PORT:-5000}"
 export SOLOW_WS_PORT="${SOLOW_WS_PORT:-5001}"
-export SOLOW_WS_URL="${SOLOW_WS_URL:-ws://localhost:5001}"
-export SOLOW_WEB_URL="${SOLOW_WEB_URL:-http://localhost:5000}"
-# Where the web app's emit() POSTs task-run/review events (apps/web/src/server/orchestrator-
-# client.ts) — the orchestrator's own /events route, which forwards them into a real
-# inngest.send() (Decision 0004). Without this, enqueueTaskRun()/applyReview() silently no-op
-# with sign-in off, or dev-owner mode, instead of ever reaching a harness.
-export SOLOW_ORCHESTRATOR_URL="${SOLOW_ORCHESTRATOR_URL:-http://localhost:$SOLOW_WS_PORT}"
+export SOLOW_WS_URL="${SOLOW_WS_URL:-ws://localhost:$SOLOW_WS_PORT}"
+export SOLOW_WEB_URL="${SOLOW_WEB_URL:-http://localhost:$SOLOW_WEB_PORT}"
 export SOLOW_INNGEST_PORT="${SOLOW_INNGEST_PORT:-8288}"
-# Signing + event keys for `inngest start` and the web->orchestrator secret (B3, F6).
+# The session and stream-ticket secrets, the signing + event keys for `inngest start`, the
+# web->orchestrator secret (B3, F6), and the loopback URLs the services reach each other on.
 # shellcheck source=/dev/null
 . "$ROOT/scripts/lib/engine-env.sh"
 
+# From here until exit the folder is ours: nothing else may migrate it, start on it or restore
+# into it. The traps stop the services and give the folder back however this script ends.
+cleanup() {
+    trap - INT TERM EXIT
+    supervise_stop
+    release_data_dir
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 0' TERM
+claim_data_dir
+
 # Database setup. Migrations run on every start, not just the first: drizzle skips the ones
 # already recorded, so this is cheap, and without it an existing dev database silently drifts
-# behind main and the API 500s on tables that do not exist yet.
+# behind main and the API 500s on tables that do not exist yet. When one is pending, the migration
+# first takes a consistent copy of the database and its keys into $SOLOW_HOME/backups (F1).
 if [ ! -f "$SOLOW_SQLITE_PATH" ]; then
     echo "[dev] initializing database at $SOLOW_SQLITE_PATH"
-    bun run db:migrate
-else
-    bun run db:migrate
 fi
+bun run db:migrate
 # Every start, not only the first: this creates the Workspace and its harness catalog and nothing
 # else, so it is a no-op once they exist — and a database from a build that predates the catalog
 # gets one instead of a Settings page with an empty harness picker.
 bun run db:bootstrap
 
-# Track child PIDs and stop all three services on exit.
-PIDS=""
-cleanup() {
-    trap - INT TERM EXIT
-    # shellcheck disable=SC2086
-    [ -n "$PIDS" ] && kill $PIDS 2> /dev/null || true
-}
-trap cleanup INT TERM EXIT
-
-echo "[dev] orchestrator → ws://localhost:$SOLOW_WS_PORT  (+ /events, /api/inngest)"
+# Each service under its own supervisor (scripts/lib/supervise.sh): one that crashes is started
+# again after a short backoff while the other two keep running. Only a service that keeps crashing
+# takes the stack down.
+#
 # Deliberately **not** `--hot`, where the web app below is.
 #
 # Hot-reloading the orchestrator reloads the module graph an in-flight run is executing in, and
@@ -106,24 +111,35 @@ echo "[dev] orchestrator → ws://localhost:$SOLOW_WS_PORT  (+ /events, /api/inn
 # re-render — so it keeps the fast loop, and this one trades an edit-time restart for runs that
 # survive being edited around. Restart the stack after changing anything under `apps/orchestrator`
 # or `packages/` for it to take effect.
-bun run apps/orchestrator/src/main.ts &
-PIDS="$PIDS $!"
-
-echo "[dev] inngest      → http://localhost:$SOLOW_INNGEST_PORT  (self-hosted, signed, Decision 0004)"
+run_orchestrator() {
+    exec bun run apps/orchestrator/src/main.ts
+}
 # `inngest start` persists queued events AND in-flight runs to --sqlite-dir (what `dev --persist`
 # did), so a run mid-round survives a restart. Keys come from the environment, not argv, so they
 # stay out of `ps`. (A review gate no longer depends on this: a run ends at the gate, and the
-# decision is a row in the app DB that starts the next run.)
-bunx inngest-cli start \
-    --sqlite-dir "$GC_DIR/inngest" \
-    -u "http://localhost:$SOLOW_WS_PORT/api/inngest" \
-    -p "$SOLOW_INNGEST_PORT" --host "$SOLOW_BIND_HOST" &
-PIDS="$PIDS $!"
-
-echo "[dev] web          → http://localhost:5000  (listening on $SOLOW_BIND_HOST)"
+# decision is a row in the app DB that starts the next run.) SOLOW_INNGEST_ARGS appends flags,
+# e.g. to move the connect gateway and gRPC ports a second stack on this machine would share.
+run_inngest() {
+    # shellcheck disable=SC2086 # SOLOW_INNGEST_ARGS is a list of flags
+    exec bunx inngest-cli start \
+        --sqlite-dir "$GC_DIR/inngest" \
+        -u "$SOLOW_INNGEST_SDK_URL" \
+        -p "$SOLOW_INNGEST_PORT" --host "$SOLOW_BIND_HOST" ${SOLOW_INNGEST_ARGS:-}
+}
 # `bun --bun` forces the Bun runtime so the DAL's bun:sqlite import resolves.
-(cd apps/web && exec bun --bun run dev --hostname "$SOLOW_BIND_HOST") &
-PIDS="$PIDS $!"
+run_web() {
+    cd apps/web && exec bun --bun run dev --port "$SOLOW_WEB_PORT" --hostname "$SOLOW_BIND_HOST"
+}
 
-# Wait for any service to exit, then cleanup runs via the trap.
-wait
+echo "[dev] orchestrator → ws://localhost:$SOLOW_WS_PORT  (+ /events, /api/inngest)"
+supervise orchestrator run_orchestrator
+echo "[dev] inngest      → http://localhost:$SOLOW_INNGEST_PORT  (self-hosted, signed, Decision 0004)"
+supervise inngest run_inngest
+echo "[dev] web          → http://localhost:$SOLOW_WEB_PORT  (listening on $SOLOW_BIND_HOST)"
+supervise web run_web
+echo "[dev] data         → $GC_DIR"
+
+supervise_wait || {
+    echo "[dev] a service would not stay up — stopping the rest" >&2
+    exit 1
+}

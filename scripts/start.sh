@@ -18,8 +18,13 @@ set -eu
 ROOT="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)"
 cd "$ROOT"
 
-GC_DIR="$ROOT/.solow"
-mkdir -p "$GC_DIR"
+# shellcheck disable=SC2034 # read by scripts/lib/data-dir.sh
+LOG_TAG=start
+# The data folder ($SOLOW_HOME, default .solow/), the absolute roots under it, the pid file.
+# shellcheck source=/dev/null
+. "$ROOT/scripts/lib/data-dir.sh"
+# shellcheck source=/dev/null
+. "$ROOT/scripts/lib/supervise.sh"
 
 # Persistent 32-byte base64 key (kept out of git via .gitignore's /.solow/).
 KEY_FILE="$GC_DIR/dev-secret.key"
@@ -56,10 +61,6 @@ if [ "$SOLOW_DEV_OWNER" = "on" ]; then
             ;;
     esac
 fi
-# Signs the session cookie; the env module refuses anything under 32 characters.
-export SOLOW_AUTH_SECRET="${SOLOW_AUTH_SECRET:-dev-insecure-session-secret-32ch}"
-# Shared by web (signs stream tickets) and orchestrator (verifies them) — same value, both sides.
-export SOLOW_STREAM_SECRET="${SOLOW_STREAM_SECRET:-dev-insecure-stream}"
 # The Claude Code binary each run's agent_catalog row names (packages/db/src/harness-catalog-
 # defaults.ts seeds "claude"; these two are read by nothing in apps/orchestrator/src today, so
 # they do not override that — kept only for a deployment that wires its own catalog lookup to
@@ -67,22 +68,35 @@ export SOLOW_STREAM_SECRET="${SOLOW_STREAM_SECRET:-dev-insecure-stream}"
 # its own working tree off the repository.
 export SOLOW_AGENT_COMMAND="${SOLOW_AGENT_COMMAND:-claude}"
 export SOLOW_AGENT_ARGS="${SOLOW_AGENT_ARGS:-}"
+# `apps/web/package.json` says 5000 as well; the `--port` passed below comes later on the command
+# line and wins, the same way `--hostname` does, so a second stack can run beside the first.
+SOLOW_WEB_PORT="${SOLOW_WEB_PORT:-5000}"
 export SOLOW_WS_PORT="${SOLOW_WS_PORT:-5001}"
-export SOLOW_WS_URL="${SOLOW_WS_URL:-ws://localhost:5001}"
-export SOLOW_WEB_URL="${SOLOW_WEB_URL:-http://localhost:5000}"
-# Where the web app's emit() POSTs task-run/review events (apps/web/src/server/orchestrator-
-# client.ts) — the orchestrator's own /events route, which forwards them into a real
-# inngest.send() (Decision 0004). Without this, enqueueTaskRun()/applyReview() silently no-op
-# with sign-in off, or dev-owner mode, instead of ever reaching a harness.
-export SOLOW_ORCHESTRATOR_URL="${SOLOW_ORCHESTRATOR_URL:-http://localhost:$SOLOW_WS_PORT}"
+export SOLOW_WS_URL="${SOLOW_WS_URL:-ws://localhost:$SOLOW_WS_PORT}"
+export SOLOW_WEB_URL="${SOLOW_WEB_URL:-http://localhost:$SOLOW_WEB_PORT}"
 export SOLOW_INNGEST_PORT="${SOLOW_INNGEST_PORT:-8288}"
-# Signing + event keys for `inngest start` and the web->orchestrator secret (B3, F6).
+# The session and stream-ticket secrets, the signing + event keys for `inngest start`, the
+# web->orchestrator secret (B3, F6), and the loopback URLs the services reach each other on.
 # shellcheck source=/dev/null
 . "$ROOT/scripts/lib/engine-env.sh"
 
+# From here until exit the folder is ours: nothing else may migrate it, start on it or restore
+# into it. The traps stop the services and give the folder back however this script ends.
+cleanup() {
+    trap - INT TERM EXIT
+    supervise_stop
+    release_data_dir
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+# A clean stop for a service manager, which sends TERM and reads anything else as a failure.
+trap 'exit 0' TERM
+claim_data_dir
+
 # Database setup. Migrations run on every start, not just the first: drizzle skips the ones
 # already recorded, so this is cheap, and without it an existing database silently drifts behind
-# main and the API 500s on tables that do not exist yet.
+# main and the API 500s on tables that do not exist yet. When one is pending, the migration first
+# takes a consistent copy of the database and its keys into $SOLOW_HOME/backups (FINDINGS F1).
 if [ ! -f "$SOLOW_SQLITE_PATH" ]; then
     echo "[start] initializing database at $SOLOW_SQLITE_PATH"
 fi
@@ -128,9 +142,7 @@ port_in_use() {
     ss -ltn "sport = :$1" 2> /dev/null | grep -q LISTEN
 }
 
-# 5000 is a literal because `apps/web/package.json` owns it (`next start --port 5000`), and a
-# variable here would be a second answer to the same question.
-for port in "$SOLOW_WS_PORT" "$SOLOW_INNGEST_PORT" 5000; do
+for port in "$SOLOW_WS_PORT" "$SOLOW_INNGEST_PORT" "$SOLOW_WEB_PORT"; do
     if port_in_use "$port"; then
         echo "[start] port $port is already in use — stop what holds it and try again" >&2
         echo "[start]   ss -ltnp 'sport = :$port'" >&2
@@ -138,45 +150,40 @@ for port in "$SOLOW_WS_PORT" "$SOLOW_INNGEST_PORT" 5000; do
     fi
 done
 
-# Track child PIDs and stop all three services on exit.
-PIDS=""
-cleanup() {
-    trap - INT TERM EXIT
-    # shellcheck disable=SC2086
-    [ -n "$PIDS" ] && kill $PIDS 2> /dev/null || true
+# Each service under its own supervisor (scripts/lib/supervise.sh): one that crashes is started
+# again after a short backoff while the other two keep running, and the engine redrives the run
+# it was in the middle of (docs/operations/running-as-a-service.md). Only a service that keeps
+# crashing takes the stack down, so that a service manager above this script sees it.
+run_orchestrator() {
+    exec bun run apps/orchestrator/src/main.ts
 }
-trap cleanup INT TERM EXIT
-
-echo "[start] orchestrator → ws://localhost:$SOLOW_WS_PORT  (+ /events, /api/inngest)"
-bun run apps/orchestrator/src/main.ts &
-PIDS="$PIDS $!"
-
-echo "[start] inngest      → http://localhost:$SOLOW_INNGEST_PORT  (self-hosted, signed, Decision 0004)"
 # `inngest start` persists to --sqlite-dir (what `dev --persist` did), shared with dev.sh. The
 # signing/event keys come from the environment, not argv, so they stay out of `ps`.
-bunx inngest-cli start \
-    --sqlite-dir "$GC_DIR/inngest" \
-    -u "http://localhost:$SOLOW_WS_PORT/api/inngest" \
-    -p "$SOLOW_INNGEST_PORT" --host "$SOLOW_BIND_HOST" &
-PIDS="$PIDS $!"
-
-echo "[start] web           → http://localhost:5000  (built, listening on $SOLOW_BIND_HOST)"
+# SOLOW_INNGEST_ARGS appends flags — e.g. `--connect-gateway-port` and the two gRPC ports, which
+# bind fixed ports on every interface and so collide when a second stack runs on this machine.
+run_inngest() {
+    # shellcheck disable=SC2086 # SOLOW_INNGEST_ARGS is a list of flags
+    exec bunx inngest-cli start \
+        --sqlite-dir "$GC_DIR/inngest" \
+        -u "$SOLOW_INNGEST_SDK_URL" \
+        -p "$SOLOW_INNGEST_PORT" --host "$SOLOW_BIND_HOST" ${SOLOW_INNGEST_ARGS:-}
+}
 # `bun --bun` forces the Bun runtime so the DAL's bun:sqlite import resolves.
-(cd apps/web && exec bun --bun run start --hostname "$SOLOW_BIND_HOST") &
-PIDS="$PIDS $!"
+run_web() {
+    cd apps/web && exec bun --bun run start --port "$SOLOW_WEB_PORT" --hostname "$SOLOW_BIND_HOST"
+}
 
-# Wait for **any** service to exit, then let the trap stop the rest.
-#
-# A bare `wait` waits for all of them, which is what let a dead service go unnoticed: the two
-# survivors kept the script alive and the stack ran degraded with nothing said. `wait -n` would
-# express this directly but is not POSIX, and this file is `sh`, so the same thing is done by
-# watching the pids.
-while :; do
-    for pid in $PIDS; do
-        if ! kill -0 "$pid" 2> /dev/null; then
-            echo "[start] a service exited (pid $pid) — stopping the rest" >&2
-            exit 1
-        fi
-    done
-    sleep 1
-done
+echo "[start] orchestrator → ws://localhost:$SOLOW_WS_PORT  (+ /events, /api/inngest)"
+supervise orchestrator run_orchestrator
+echo "[start] inngest      → http://localhost:$SOLOW_INNGEST_PORT  (self-hosted, signed, Decision 0004)"
+supervise inngest run_inngest
+echo "[start] web           → http://localhost:$SOLOW_WEB_PORT  (built, listening on $SOLOW_BIND_HOST)"
+supervise web run_web
+echo "[start] data         → $GC_DIR"
+
+# Until a supervisor gives up. A bare `wait` would wait for all three, which is what once let a
+# dead service go unnoticed while the two survivors kept the script alive.
+supervise_wait || {
+    echo "[start] a service would not stay up — stopping the rest" >&2
+    exit 1
+}

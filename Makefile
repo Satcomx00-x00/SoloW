@@ -6,7 +6,7 @@ SHELL := bash
 .PHONY: help install clean build lint format typecheck test smoke smoke-tarball smoke-docker \
 	test-docker-live e2e e2e-critical control-check \
 	audit audit-executor-boundary secretscan verify dev dev-web flags \
-	dev-orchestrator update db-generate db-migrate db-bootstrap openapi openapi-check \
+	dev-orchestrator update db-generate db-migrate db-bootstrap backup restore openapi openapi-check \
 	store-sync store-check
 
 help: ## Show this help
@@ -128,6 +128,14 @@ db-migrate: ## Apply migrations to the local SQLite database
 
 db-bootstrap: ## Create the local Workspace and its agent catalog (idempotent)
 	bun run db:bootstrap
+
+# The data folder is $SOLOW_HOME, default .solow/ (docs/operations/backup-and-restore.md). A backup
+# is safe while the stack runs; a restore refuses to, and keeps what it replaced as a backup.
+backup: ## Back up the database, keys and engine state into .solow/backups (OUT=<dir> elsewhere)
+	sh scripts/backup.sh backup $(if $(OUT),--out "$(OUT)")
+
+restore: ## Restore a backup: make restore FROM=<name or dir> (lists them without FROM; stack must be stopped)
+	sh scripts/backup.sh restore $(if $(FROM),"$(FROM)")
 
 flags: ## List feature flags per Workspace (enable: bun run flag enable ff-core-program)
 	bun run flag list
