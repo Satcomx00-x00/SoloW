@@ -80,12 +80,13 @@ e2e: ## Run the Playwright E2E suite (boots the SPA + an orchestrator harness)
 e2e-critical: ## Run only the @critical isolation E2E — this one blocks merge
 	bunx playwright test --grep @critical
 
-# Not a CI gate: the operator's own check, on this host, before a commit to main that touches
-# the loop. One test walks the main line end to end — Project, Issue, a two-Step Workflow drawn
-# on the canvas, a Task launched through it, every Step's output, approval onto a branch, the
-# Issue closed, everything removed — against the same servers and fixture the E2E suite boots.
-control-check: ## Walk the product's main line end to end on this host (not run in CI)
-	SOLOW_CONTROL_CHECK=1 bunx playwright test --grep @control
+# The main line walked end to end — Project, Issue, a Workflow drawn on the canvas, a Task
+# launched through it, every Step's output, approval onto a branch, the Issue closed, everything
+# removed — against the same servers and fixture the E2E suite boots. Run it on this host before
+# a commit to main that touches the loop; CI runs it on every push to main, one spec per runner
+# (`CONTROL_SPEC=e2e/control/<name>.spec.ts`), and a red one blocks the release.
+control-check: ## Walk the product's main line end to end (CONTROL_SPEC=<file> for one spec)
+	SOLOW_CONTROL_CHECK=1 bunx playwright test --grep @control $(CONTROL_SPEC)
 
 audit: ## Dependency audit at the project severity threshold
 	bun run audit
