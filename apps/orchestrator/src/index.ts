@@ -717,9 +717,9 @@ export function startWebSocketServer(
         worktreeRoot: resolve(orchestratorEnv().SOLOW_WORKTREE_ROOT),
       })
         .then((report) => {
-          if (report.purged > 0 || report.expired > 0) {
+          if (report.purged > 0 || report.expired > 0 || report.prunedSessions > 0) {
             console.log(
-              `[solow/orchestrator] retention: purged ${report.purged} deleted task(s), expired ${report.expired} done task(s)`,
+              `[solow/orchestrator] retention: purged ${report.purged} deleted task(s), expired ${report.expired} done task(s), removed ${report.prunedEvents} transcript event(s) from ${report.prunedSessions} session(s)`,
             );
           }
         })

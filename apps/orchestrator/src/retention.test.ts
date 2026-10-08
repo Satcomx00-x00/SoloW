@@ -157,7 +157,7 @@ describe("retentionSweep", () => {
 
     const report = await retentionSweep({ db, host: executor, retentionMs: WINDOW });
 
-    expect(report).toEqual({ purged: 1, expired: 0 });
+    expect(report).toEqual({ purged: 1, expired: 0, prunedSessions: 0, prunedEvents: 0 });
     expect(existsSync(path)).toBe(false);
     expect((await $`git -C ${repoDir} worktree list`.quiet()).stdout.toString()).not.toContain(
       "old-deleted",
@@ -213,7 +213,7 @@ describe("retentionSweep", () => {
 
     const report = await retentionSweep({ db, host: executor, retentionMs: WINDOW });
 
-    expect(report).toEqual({ purged: 0, expired: 0 });
+    expect(report).toEqual({ purged: 0, expired: 0, prunedSessions: 0, prunedEvents: 0 });
     expect(existsSync(path)).toBe(true);
     expect(await db.select().from(task).where(eq(task.id, "fresh-deleted"))).toHaveLength(1);
     await $`git -C ${repoDir} worktree remove --force ${path}`.quiet();
@@ -226,7 +226,7 @@ describe("retentionSweep", () => {
 
     const report = await retentionSweep({ db, host: executor, retentionMs: WINDOW });
 
-    expect(report).toEqual({ purged: 0, expired: 1 });
+    expect(report).toEqual({ purged: 0, expired: 1, prunedSessions: 0, prunedEvents: 0 });
     expect(existsSync(path)).toBe(false);
     // Readable for as long as the Task exists; only the conversation's continuation is gone.
     expect(await db.select().from(task).where(eq(task.id, "old-done"))).toHaveLength(1);
@@ -248,11 +248,53 @@ describe("retentionSweep", () => {
     expect(await retentionSweep({ db, host: executor, retentionMs: WINDOW })).toEqual({
       purged: 0,
       expired: 1,
+      prunedSessions: 0,
+      prunedEvents: 0,
     });
     expect(await retentionSweep({ db, host: executor, retentionMs: WINDOW })).toEqual({
       purged: 0,
       expired: 0,
+      prunedSessions: 0,
+      prunedEvents: 0,
     });
+  });
+
+  it("removes the transcript of a Task Done longer ago than its Workspace's window, and keeps the record", async () => {
+    const db = createTestDb();
+    await seed(db, "long-done", { state: "done", updatedAt: ago(31 * DAY) });
+    await db.insert(sessionEvent).values({
+      workspaceId: WS,
+      sessionId: "sess-long-done",
+      seq: 1,
+      kind: "state",
+      payload: { kind: "state", from: "review", to: "done" },
+    });
+
+    const report = await retentionSweep({ db, host: executor, retentionMs: WINDOW });
+
+    // The Workspace was never given a window, so it has the default — thirty days.
+    expect(report).toEqual({ purged: 0, expired: 0, prunedSessions: 1, prunedEvents: 1 });
+    const left = await db
+      .select({ kind: sessionEvent.kind })
+      .from(sessionEvent)
+      .where(eq(sessionEvent.sessionId, "sess-long-done"));
+    expect(left).toEqual([{ kind: "state" }]);
+    const [sess] = await db.select().from(session).where(eq(session.id, "sess-long-done"));
+    expect(sess?.eventsPrunedAt).not.toBeNull();
+    expect(await db.select().from(task).where(eq(task.id, "long-done"))).toHaveLength(1);
+  });
+
+  it("keeps every transcript in a Workspace set to keep forever", async () => {
+    const db = createTestDb();
+    await seed(db, "forever", { state: "done", updatedAt: ago(4000 * DAY) });
+    await db.update(workspace).set({ historyRetentionDays: null }).where(eq(workspace.id, WS));
+
+    const report = await retentionSweep({ db, host: executor, retentionMs: WINDOW });
+
+    expect(report.prunedSessions).toBe(0);
+    expect(
+      await db.select().from(sessionEvent).where(eq(sessionEvent.sessionId, "sess-forever")),
+    ).toHaveLength(1);
   });
 
   it("never touches a Task with a Session still active, however old its marks", async () => {
@@ -267,6 +309,8 @@ describe("retentionSweep", () => {
     expect(await retentionSweep({ db, host: executor, retentionMs: WINDOW })).toEqual({
       purged: 0,
       expired: 0,
+      prunedSessions: 0,
+      prunedEvents: 0,
     });
     expect(existsSync(path)).toBe(true);
     await $`git -C ${repoDir} worktree remove --force ${path}`.quiet();

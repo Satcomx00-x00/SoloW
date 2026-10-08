@@ -1,5 +1,13 @@
 import { TASK_RETENTION_MS } from "@solow/core";
-import { cascadeDeleteTasks, type Db, session, task, worktree } from "@solow/db";
+import {
+  cascadeDeleteTasks,
+  type Db,
+  type HistoryPruneOptions,
+  pruneHistory,
+  session,
+  task,
+  worktree,
+} from "@solow/db";
 import { and, eq, isNotNull, isNull, lt } from "drizzle-orm";
 import type { Executor } from "./executor/types.js";
 import {
@@ -31,6 +39,12 @@ import {
  *     `resumable`. The rows stay: History stays readable for as long as the Task exists; only
  *     the ability to continue the conversation expires.
  *
+ * A third arm runs after both, on a different clock: **prune** (Decision 0032). Each Workspace
+ * chooses how long a finished Task keeps its *transcript* — 30 days unless changed in Settings,
+ * or forever — and the transcript events of Tasks finished longer ago than that are deleted in
+ * bounded batches, leaving the record (Sessions, reviews, decisions, state changes, token usage)
+ * that History and the outcome metrics read. See `pruneHistory` in `@solow/db`.
+ *
  * Hourly rather than every sweep of reconcile's minute: a day's slack on a week's window costs
  * nothing, and a `git worktree remove` per Task per minute is churn the box would notice.
  */
@@ -47,11 +61,16 @@ export interface RetentionDeps {
   worktreeRoot?: string;
   /** Test seam: the window, defaulting to the product's one number for it. */
   retentionMs?: number;
+  /** Test seam: the transcript arm's batch bounds and pause. */
+  prune?: Omit<HistoryPruneOptions, "now">;
 }
 
 export interface RetentionReport {
   purged: number;
   expired: number;
+  /** Sessions whose transcript was removed, and how many events that was. */
+  prunedSessions: number;
+  prunedEvents: number;
 }
 
 /** A Task with any Session still live is never touched, however old its marks are. */
@@ -167,7 +186,7 @@ export async function retentionSweep(
     console.error(`[solow/orchestrator] ${message}`, cause ?? ""),
 ): Promise<RetentionReport> {
   const cutoff = new Date(now().getTime() - (deps.retentionMs ?? TASK_RETENTION_MS)).toISOString();
-  const report: RetentionReport = { purged: 0, expired: 0 };
+  const report: RetentionReport = { purged: 0, expired: 0, prunedSessions: 0, prunedEvents: 0 };
 
   // 1. Purge: deleted longer ago than the window.
   const deleted = await deps.db
@@ -225,6 +244,17 @@ export async function retentionSweep(
     } catch (cause) {
       log(`retention: expiry of task ${row.id} failed`, cause);
     }
+  }
+
+  // 3. Prune: transcripts past each Workspace's own window. Last, so a Task purged above is not
+  // pruned first only to be deleted a moment later; and on its own `try`, because a failure here
+  // must not cost the two arms above their report.
+  try {
+    const pruned = await pruneHistory(deps.db, { ...deps.prune, now: now() });
+    report.prunedSessions = pruned.sessions;
+    report.prunedEvents = pruned.events;
+  } catch (cause) {
+    log("retention: transcript pruning failed", cause);
   }
 
   return report;
