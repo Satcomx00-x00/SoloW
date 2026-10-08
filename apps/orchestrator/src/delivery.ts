@@ -238,3 +238,34 @@ export function deliveryFailedNotice(args: {
     "The branch holds the change in the repository on this machine. Fix the cause above, then choose Ship again to push it and open the request — nothing is run again. Or choose Keep local to finish the task without shipping.",
   ].join(" ");
 }
+
+/**
+ * The session-log line for an approval that integrated only part of a Task (issue #70 AC-4).
+ *
+ * The repositories that did integrate were also shipped (A1), so the line says what became of
+ * each: a request already open on the provider is not a branch to "decide about by hand", and one
+ * that failed to push is a second thing to fix, not something the reviewer should assume landed.
+ */
+export function partialIntegrationNotice(args: {
+  integrated: readonly string[];
+  failed: ReadonlyArray<{ branch: string; error: string }>;
+  delivered: readonly string[];
+  undelivered: ReadonlyArray<{ branch: string; error: string }>;
+}): string {
+  return [
+    "Approval integrated only part of this task.",
+    args.integrated.length > 0
+      ? `Committed and recorded: ${args.integrated.join(", ")}.`
+      : "Nothing was committed.",
+    `Not integrated: ${args.failed.map((f) => `${f.branch} (${f.error})`).join("; ")}.`,
+    ...(args.delivered.length > 0 ? [shippedNotice(args.delivered)] : []),
+    ...(args.undelivered.length > 0
+      ? [
+          `Committed but not shipped: ${args.undelivered.map((u) => `${u.branch} (${u.error})`).join("; ")}.`,
+        ]
+      : []),
+    args.delivered.length > 0
+      ? "The branches listed as committed are real and already hold the change, and the requests listed as shipped are open — decide what to do with them by hand."
+      : "The branches listed as committed are real and already hold the change — decide what to do with them by hand.",
+  ].join(" ");
+}

@@ -90,6 +90,7 @@ import {
 import {
   changeRequestBody,
   deliveryFailedNotice,
+  partialIntegrationNotice,
   shipAttachment,
   shippedNotice,
 } from "../../delivery.js";
@@ -2161,14 +2162,7 @@ export async function runTaskLifecycle(
             workflowStepId: leg.stepId,
             payload: {
               kind: "notice",
-              text: [
-                "Approval integrated only part of this task.",
-                integrated.length > 0
-                  ? `Committed and recorded: ${integrated.join(", ")}.`
-                  : "Nothing was committed.",
-                `Not integrated: ${failed.map((f) => `${f.branch} (${f.error})`).join("; ")}.`,
-                "The branches listed as committed are real and already hold the change — decide what to do with them by hand.",
-              ].join(" "),
+              text: partialIntegrationNotice({ integrated, failed, delivered, undelivered }),
             },
           });
           await setTaskState(db, workspaceId, taskId, "failed", {

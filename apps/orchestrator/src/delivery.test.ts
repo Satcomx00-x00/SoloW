@@ -8,7 +8,7 @@ import { taskCheckoutBranch } from "@solow/core";
 import { encryptSecret } from "@solow/db";
 import { $ } from "bun";
 import type { TaskRepositoryBinding } from "./data.js";
-import { DeliveryError, deliverBranch } from "./delivery.js";
+import { DeliveryError, deliverBranch, partialIntegrationNotice } from "./delivery.js";
 import { createLocalExecutor } from "./executor/local.js";
 import { worktreeNameForTask } from "./harness/claude-code-runner.js";
 import { pushWorktreeBranch } from "./worktree/manager.js";
@@ -137,5 +137,44 @@ describe("deliverBranch — a refused push says why", () => {
     } finally {
       await rm(repo, { recursive: true, force: true });
     }
+  });
+});
+
+/**
+ * The session-log line for an approval that integrated only part of a Task (issue #70 AC-4) — and
+ * that, for the parts it did integrate, may already have pushed and opened requests (A1). A notice
+ * that named only the commits told the reviewer "decide by hand" about branches that were in fact
+ * already up for review on the provider, or that had silently failed to get there.
+ */
+describe("partialIntegrationNotice", () => {
+  const base = {
+    integrated: ["solow/task-1"],
+    failed: [{ branch: "solow/task-1-docs", error: "commit refused" }],
+  };
+
+  it("names the requests already opened for the repositories that did integrate", () => {
+    const text = partialIntegrationNotice({
+      ...base,
+      delivered: ["gate: pull request #7 opened (https://forge.example/acme/gate/pull/7)"],
+      undelivered: [],
+    });
+    expect(text).toContain("Committed and recorded: solow/task-1.");
+    expect(text).toContain("Not integrated: solow/task-1-docs (commit refused).");
+    expect(text).toContain("pull request #7 opened");
+  });
+
+  it("names a committed branch that could not be shipped, and why", () => {
+    const text = partialIntegrationNotice({
+      ...base,
+      delivered: [],
+      undelivered: [{ branch: "solow/task-1", error: "Could not push solow/task-1 to acme/gate." }],
+    });
+    expect(text).toContain("Committed but not shipped: solow/task-1");
+    expect(text).toContain("Could not push");
+  });
+
+  it("says nothing about shipping when nothing had a remote", () => {
+    const text = partialIntegrationNotice({ ...base, delivered: [], undelivered: [] });
+    expect(text).not.toContain("hipped");
   });
 });
