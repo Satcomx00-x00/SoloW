@@ -26,12 +26,30 @@ SOLOW_SQLITE_PATH="$GC_DIR/solow.db"
 SOLOW_SECRET_KEY="$(cat "$KEY_FILE")"
 export SOLOW_SQLITE_PATH SOLOW_SECRET_KEY
 export SOLOW_DB_DRIVER="${SOLOW_DB_DRIVER:-sqlite}"
-# Dev-owner mode skips sign-in and binds to the seeded Workspace.
-# Set SOLOW_DEV_OWNER=off to exercise the real BetterAuth flow: the first visit to
-# /sign-in creates the single Owner account. Feature flags default ON, so nothing has to be
-# switched on after that; `bun run flag list` shows them and `bun run flag disable <key>` is the
-# kill switch.
-export SOLOW_DEV_OWNER="${SOLOW_DEV_OWNER:-on}"
+# Sign-in is on: the first visit to /sign-in creates the single Owner account. Feature flags
+# default ON, so nothing has to be switched on after that; `bun run flag list` shows them and
+# `bun run flag disable <key>` is the kill switch.
+# Dev-owner mode (every visitor is the Owner, no sign-in) exists only for development and is
+# never a default here: opt in with SOLOW_DEV_OWNER=on, and only on a machine nobody else can reach.
+export SOLOW_DEV_OWNER="${SOLOW_DEV_OWNER:-off}"
+# Which interface the web app, the orchestrator and Inngest listen on. Loopback by default; set
+# SOLOW_BIND_HOST=0.0.0.0 to reach the stack from the network, which is only sensible behind
+# sign-in (and a reverse proxy with TLS).
+export SOLOW_BIND_HOST="${SOLOW_BIND_HOST:-127.0.0.1}"
+case "$SOLOW_BIND_HOST" in
+    127.* | localhost | ::1) ;;
+    *) echo "[dev] WARNING: SOLOW_BIND_HOST=$SOLOW_BIND_HOST exposes SoloW to the network; anyone who can reach it can attempt to sign in." >&2 ;;
+esac
+if [ "$SOLOW_DEV_OWNER" = "on" ]; then
+    echo "[dev] WARNING: SOLOW_DEV_OWNER=on — there is no sign-in and every visitor is the Owner." >&2
+    case "$SOLOW_BIND_HOST" in
+        127.* | localhost | ::1) ;;
+        *)
+            echo "[dev] refusing to start: dev-owner mode on a non-loopback SOLOW_BIND_HOST would hand the machine to the network." >&2
+            exit 1
+            ;;
+    esac
+fi
 # Signs the session cookie; the env module refuses anything under 32 characters.
 export SOLOW_AUTH_SECRET="${SOLOW_AUTH_SECRET:-dev-insecure-session-secret-32ch}"
 # Shared by web (signs stream tickets) and orchestrator (verifies them) — same value, both sides.
@@ -49,7 +67,7 @@ export SOLOW_WEB_URL="${SOLOW_WEB_URL:-http://localhost:5000}"
 # Where the web app's emit() POSTs task-run/review events (apps/web/src/server/orchestrator-
 # client.ts) — the orchestrator's own /events route, which forwards them into a real
 # inngest.send() (Decision 0004). Without this, enqueueTaskRun()/applyReview() silently no-op
-# in dev-owner mode instead of ever reaching a harness.
+# with sign-in off, or dev-owner mode, instead of ever reaching a harness.
 export SOLOW_ORCHESTRATOR_URL="${SOLOW_ORCHESTRATOR_URL:-http://localhost:$SOLOW_WS_PORT}"
 export SOLOW_INNGEST_PORT="${SOLOW_INNGEST_PORT:-8288}"
 # Inngest's own env var (not SoloW's — see apps/orchestrator/src/inngest/client.ts): a URL
@@ -105,12 +123,12 @@ echo "[dev] inngest      → http://localhost:$SOLOW_INNGEST_PORT  (Dev Server, 
 # app DB and the secret key are already persisted a few lines up for the same reason.
 bunx inngest-cli dev --no-discovery --persist \
     -u "http://localhost:$SOLOW_WS_PORT/api/inngest" \
-    -p "$SOLOW_INNGEST_PORT" &
+    -p "$SOLOW_INNGEST_PORT" --host "$SOLOW_BIND_HOST" &
 PIDS="$PIDS $!"
 
-echo "[dev] web          → http://localhost:5000  (dev-owner mode)"
+echo "[dev] web          → http://localhost:5000  (listening on $SOLOW_BIND_HOST)"
 # `bun --bun` forces the Bun runtime so the DAL's bun:sqlite import resolves.
-(cd apps/web && exec bun --bun run dev) &
+(cd apps/web && exec bun --bun run dev --hostname "$SOLOW_BIND_HOST") &
 PIDS="$PIDS $!"
 
 # Wait for any service to exit, then cleanup runs via the trap.

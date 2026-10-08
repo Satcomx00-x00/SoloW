@@ -3,6 +3,13 @@ import { z } from "zod";
 /** Validated orchestrator env (no bare process.env). */
 const schema = z.object({
   SOLOW_WS_PORT: z.coerce.number().int().default(5001),
+  /**
+   * Interface the orchestrator listens on. Loopback unless a deployment names otherwise: the
+   * hub, `/events` and the terminal socket are the keys to every Task's working copy, so reaching
+   * them from the network is a choice made on purpose (`SOLOW_BIND_HOST=0.0.0.0`), never a side
+   * effect of leaving something unset.
+   */
+  SOLOW_BIND_HOST: z.string().min(1).default("127.0.0.1"),
   SOLOW_WORKTREE_ROOT: z.string().min(1).default(".solow/worktrees"),
   SOLOW_REPO_CACHE_ROOT: z.string().min(1).default(".solow/repos"),
   /**

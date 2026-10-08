@@ -37,6 +37,12 @@ protected and how the boundary between harnesses and credentials is kept safe.
 - **FR-7** Shared exports are redacted so secrets never appear in them (see [F13](./F13-collaboration-sharing.md)).
 - **FR-8** In hosted deployment, access to a Workspace's secrets follows its access control
   (see [F16](./F16-platform-deployment.md)).
+- **FR-9** Sign-in is on by default in every launcher: a fresh install asks for the Owner
+  account. The "every visitor is the Owner" mode (`SOLOW_DEV_OWNER=on`) is development-only,
+  never a launcher default, and is refused when the services are exposed to the network.
+- **FR-10** The web app, the orchestrator and the run engine listen on `127.0.0.1` by default.
+  `SOLOW_BIND_HOST=0.0.0.0` (or another interface) is the explicit, warned-about way to reach
+  them from the network.
 
 ## Non-functional requirements
 
