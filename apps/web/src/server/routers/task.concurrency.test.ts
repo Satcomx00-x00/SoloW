@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { TaskErrorCode, type TaskState } from "@solow/contracts";
 import { harnessProfile, session as sessionTable, task as taskTable } from "@solow/db";
 import { createTestDb, type TestDb } from "@solow/db/testing";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { seedIssue, seedWorkspaceGraph } from "../dal/test-fixtures.js";
 import { resetRateLimits } from "../rate-limit.js";
 import type { BaseContext } from "../trpc.js";
@@ -202,6 +202,28 @@ describe("concurrency cap under simultaneous starts (F5)", () => {
       // Out of the way for the next exit.
       await db.update(taskTable).set({ state: "done" }).where(eq(taskTable.id, waiting));
     }
+  });
+
+  it("gives the slot back when the Session cannot be opened after the claim", async () => {
+    const fx = await seedWorkspaceGraph(db, "no-session");
+    await setCap(db, fx.agentProfileId, 1);
+    const [first, second] = await seedTasks(db, fx, 2, "ready");
+    if (!first || !second) throw new Error("seed");
+    const c = caller(db, fx.workspaceId);
+    // The claim is its own write, so any failure between it and the enqueue strands a `running`
+    // row with no harness behind it unless the rollback covers it.
+    db.run(sql`CREATE TRIGGER no_session BEFORE INSERT ON session
+      BEGIN SELECT RAISE(ABORT, 'session insert refused'); END`);
+
+    await expect(c.task.launch({ id: first })).rejects.toThrow();
+
+    expect((await db.select().from(taskTable).where(eq(taskTable.id, first)))[0]?.state).toBe(
+      "ready",
+    );
+    expect(await runningFor(db, fx.agentProfileId)).toBe(0);
+    db.run(sql`DROP TRIGGER no_session`);
+    await c.task.launch({ id: second });
+    expect(await runningFor(db, fx.agentProfileId)).toBe(1);
   });
 });
 
