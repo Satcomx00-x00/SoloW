@@ -8,6 +8,7 @@ export * from "./flag.js";
 export * from "./harness-catalog.js";
 export * from "./harness-config.js";
 export * from "./harness-library.js";
+export * from "./history-retention.js";
 export * from "./identity.js";
 export * from "./integration-provider.js";
 export * from "./issue.js";

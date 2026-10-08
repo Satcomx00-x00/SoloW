@@ -344,6 +344,13 @@
       "when": 1791466489696,
       "tag": "0048_change_request_link",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "6",
+      "when": 1791485272322,
+      "tag": "0049_history_retention",
+      "breakpoints": true
     }
   ]
 }

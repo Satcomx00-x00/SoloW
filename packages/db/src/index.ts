@@ -97,6 +97,15 @@ export {
 } from "./harness-catalog-defaults.js";
 export { type HarnessConfigForRun, loadHarnessConfigForRun } from "./harness-config-run.js";
 export { loadHarnessLibrariesForRun } from "./harness-library-run.js";
+export {
+  HISTORY_PRUNE_BATCH,
+  HISTORY_PRUNE_MAX_EVENTS,
+  type HistoryPruneOptions,
+  type HistoryPruneReport,
+  historyPruneCutoff,
+  previewHistoryPrune,
+  pruneHistory,
+} from "./history-prune.js";
 export { DEFAULT_MCP_SERVER, DEFAULT_SKILL, ensureDefaultLibraries } from "./library-defaults.js";
 export {
   type GeneratedMcpToken,
