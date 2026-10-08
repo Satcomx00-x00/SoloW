@@ -65,5 +65,10 @@ In force until 1.0 ([0031](./decisions/0031-focus-on-the-solo-power-user.md)).
 - **Weekly releases.** A release is cut once a week, not per merge. Database migrations and API
   changes are batched into those planned releases, and dependencies are upgraded on purpose, in
   their own change, never as a side effect.
-- **A green main.** Do not merge on red; the release is gated on the verify run
-  ([0021](./decisions/0021-commits-decide-the-version.md)).
+- **Main is always green.** Do not merge on red; the release is gated on the verify run
+  ([0021](./decisions/0021-commits-decide-the-version.md)), which includes the full end-to-end
+  suite and the control check. When main goes red anyway, fixing it — or reverting the change
+  that broke it — comes before any other merge. A known-failing test is not left on main to be
+  read past: it is fixed, or removed with the reason in the commit. A flaky test counts as a
+  failing one. Run the web app's unit tests with `make test` (batched by
+  `scripts/test-batches.ts`), the same way the pipeline does.
