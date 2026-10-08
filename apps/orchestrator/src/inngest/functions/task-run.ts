@@ -1,47 +1,22 @@
-import {
-  reviewDecisionSchema,
-  type SessionEventPayload,
-  stopReasonMeansTruncated,
-} from "@solow/contracts";
-import { createDb } from "@solow/db";
-import {
-  captureException,
-  createLogger,
-  logWorktreeBinding,
-  withRunContext,
-} from "@solow/observability";
+import { reviewDecisionSchema, stopReasonMeansTruncated } from "@solow/contracts";
+import { captureException, logWorktreeBinding, withRunContext } from "@solow/observability";
 import { z } from "zod";
 import {
-  appendSessionEvent,
   compactSession,
-  forgetHarnessConversations,
   loadTaskRunContext,
-  nextSessionEventSeq,
   recordWorktree,
   takeUpReviewDecision,
 } from "../../data.js";
-import { orchestratorEnv } from "../../env.js";
-import { createExecutorFor, probeExecutorFor } from "../../executor/factory.js";
-import { harnessRegistry } from "../../harness/registry.js";
-import { createHarnessRunner } from "../../harness/runners.js";
-import {
-  adoptWorktree,
-  cleanupWorktree,
-  commitWorktree,
-  diffWorktree,
-  discardWorktreeChanges,
-  hasChanges,
-  prepareRepository,
-  provisionWorktree,
-  publishWorktreeBranch,
-  pushWorktreeBranch,
-} from "../../worktree/manager.js";
-import { seedSetupFiles } from "../../worktree/setup-files.js";
-import { hub } from "../../ws/hub.js";
-import { toTaskEvent } from "../../ws/replay.js";
 import { inngest } from "../client.js";
 import type { StepTransition } from "./task-run/advance.js";
+import {
+  continueTruncated,
+  MAX_AUTO_CONTINUE_ROUNDS,
+  MAX_REVIEW_ROUNDS,
+  restartLostConversation,
+} from "./task-run/budgets.js";
 import { applyDecision } from "./task-run/decision.js";
+import { defaultDeps } from "./task-run/deps.js";
 import { finishRound } from "./task-run/finish.js";
 import { prepareWorkspace, resolveEntry, TASK_RUN_RETRIES } from "./task-run/prepare.js";
 import { runHarnessRound } from "./task-run/round.js";
@@ -55,6 +30,7 @@ export {
   harnessBrief,
   widgetAnswerMessage,
 } from "./task-run/brief.js";
+export { defaultDeps } from "./task-run/deps.js";
 export {
   allowlistToolInput,
   readTodoWrite,
@@ -105,76 +81,6 @@ const launchData = z.object({
     .optional(),
 });
 
-const MAX_REVIEW_ROUNDS = 5;
-
-/**
- * How many extra rounds a harness may have to carry on a conversation its own budget cut short.
- *
- * A separate budget from `MAX_REVIEW_ROUNDS` because it answers a different question.
- * `roundsOnStep` is the *reviewer's* patience: how many times a person is willing to send work
- * back before the run gives up on them. This is the *model's*: how many times a harness that ran
- * out of turns or context mid-task may pick the same conversation up and keep going. Spending one
- * out of the other is how a Task that simply had a lot to do arrives at review with the reviewer's
- * rounds already gone, and how a Task the reviewer keeps rejecting quietly gets extra attempts.
- *
- * Three. One is not a budget — a harness that hits `max_turns` has usually only just started, and
- * the first continuation is the ordinary case this whole mechanism exists for. Ten would let a
- * `max_tokens` stop — a conversation whose context is genuinely full, and which will therefore
- * truncate again a few turns after every resume — spend the run going round in a circle nobody is
- * watching. Three is enough for a long job to finish and few enough that a conversation which is
- * not converging reaches a person while there is still something for them to decide.
- *
- * Exhausting it is not a failure and never throws: the round falls through to exactly the path a
- * finished round takes, with a notice saying the budget was spent, so the operator is given the
- * work and the reason rather than a stall.
- */
-const MAX_AUTO_CONTINUE_ROUNDS = 3;
-
-/** Production wiring. */
-export function defaultDeps(): TaskRunDeps {
-  const env = orchestratorEnv();
-  return {
-    db: createDb(),
-    // The executor is no longer built here (issue #96). It cannot be: the Executor Profile
-    // belongs to the Task, and no Task exists yet at this point — which is exactly why every
-    // consumer below now takes one rather than closing over one.
-    executorFor: createExecutorFor,
-    preflight: probeExecutorFor,
-    runner: (protocol, settings, executor) =>
-      createHarnessRunner(protocol, {
-        executor,
-        permissionMode: settings.permissionMode,
-        ...(settings.model ? { model: settings.model } : {}),
-        ...(settings.modeId ? { modeId: settings.modeId } : {}),
-        ...(settings.checkpoints ? { checkpoints: settings.checkpoints } : {}),
-        ...(settings.version ? { version: settings.version } : {}),
-        ...(settings.autoApprove ? { autoApprove: true } : {}),
-        unattendedPermissionPosture: env.SOLOW_ACP_UNATTENDED_PERMISSION,
-      }),
-    worktreeRoot: env.SOLOW_WORKTREE_ROOT,
-    repoCacheRoot: env.SOLOW_REPO_CACHE_ROOT,
-    logger: createLogger({ service: "orchestrator" }),
-    worktree: (executor) => ({
-      prepare: (params) => prepareRepository(executor, params),
-      provision: (params) => provisionWorktree(executor, params),
-      adopt: (repoPath, reportedPath) => adoptWorktree(executor, repoPath, reportedPath),
-      seed: (params) => seedSetupFiles(executor, params),
-      commit: (path, message, patterns) => commitWorktree(executor, path, message, patterns),
-      discard: (path) => discardWorktreeChanges(executor, path),
-      publish: (repoPath, upstreamPath, branch) =>
-        publishWorktreeBranch(executor, repoPath, upstreamPath, branch),
-      push: (upstreamPath, remoteUrl, branch, credential) =>
-        pushWorktreeBranch(executor, upstreamPath, remoteUrl, branch, credential),
-      cleanup: (repoPath, worktree, ownRepository) =>
-        cleanupWorktree(executor, repoPath, worktree, { ownRepository }),
-      hasChanges: (path, patterns) => hasChanges(executor, path, patterns),
-      diff: (path, patterns) => diffWorktree(executor, path, patterns),
-    }),
-    hub,
-    registry: harnessRegistry,
-  };
-}
-
 export async function runTaskLifecycle(
   deps: TaskRunDeps,
   { event, step, attempt = 0 }: TaskRunArgs,
@@ -201,7 +107,6 @@ export async function runTaskLifecycle(
   }
 
   const scope = createRunScope({ deps, step, log, workspaceId, taskId, sessionId, ctx });
-  const { channel } = scope;
 
   const entry = await resolveEntry(scope, decidedReview);
   if (!entry.ok) return entry.result;
@@ -348,38 +253,8 @@ export async function runTaskLifecycle(
       }
 
       if (run.kind === "resume-lost") {
-        /*
-         * The conversation this round tried to carry on is gone. Once: the ids are forgotten, the
-         * operator is told, and the same round is run again from the brief in the same worktree.
-         * A second such failure means something else is wrong, and is filed as one.
-         */
-        if (loop.resumeLost) {
-          return await failRun(
-            scope,
-            `resume-lost-twice-${round}`,
-            "fail",
-            loop.leg.stepId,
-            "running",
-          );
-        }
-        loop.resumeLost = true;
-        loop.resumeLostRetry = true;
-        await step.run(`resume-lost-${round}`, async () => {
-          await forgetHarnessConversations(db, workspaceId, taskId);
-          const payload: SessionEventPayload = {
-            kind: "notice",
-            text: "The previous conversation could not be found, so this run is starting again from the brief in the same worktree.",
-          };
-          const seq = await nextSessionEventSeq(db, workspaceId, sessionId);
-          await appendSessionEvent(db, workspaceId, {
-            sessionId,
-            seq,
-            workflowStepId: loop.leg.stepId,
-            payload,
-          });
-          const frame = toTaskEvent(payload, taskId, sessionId, seq, loop.leg.stepId);
-          if (frame) deps.hub.publish(channel, frame);
-        });
+        const lostTwice = await restartLostConversation(scope, round, loop);
+        if (lostTwice) return lostTwice;
         continue;
       }
       if (run.kind === "failed") {
@@ -395,63 +270,8 @@ export async function runTaskLifecycle(
         return { taskId, result: run.cls };
       }
 
-      /*
-       * The harness ran out; it did not finish. So the run gives it more rather than presenting a
-       * half-done change to a reviewer as "changes ready".
-       *
-       * Both halves of the condition carry weight. `stopReasonMeansTruncated` is the *process*
-       * saying it hit a turn or token budget with work still to do; `run.outcome === null` is the
-       * *harness* never having declared a `task_complete`. A harness that declared and then hit a
-       * budget has said what it thinks it did, and that declaration belongs to the operator —
-       * only a round that ran out with nothing to say for itself is one this run may continue on
-       * its own authority. That pairing is the disagreement `agent_done` records and this is the
-       * one place that acts on it.
-       *
-       * Nothing is recorded and nothing moves: no completion row, no `awaiting_review`, no
-       * gate. The Task stays `running`, the worktrees stay where they are, and the next
-       * round picks the same conversation back up — `harness_session_id` was written mid-run by
-       * the round that just stopped, so `resolveResumeHarnessSessionId` finds it with no extra
-       * plumbing and the brief becomes "carry straight on" rather than the whole thing again.
-       */
       if (stopReasonMeansTruncated(run.stopReason) && run.outcome === null) {
-        const spent = loop.autoContinues >= MAX_AUTO_CONTINUE_ROUNDS;
-        // The word the harness would use for what it ran out of. `max_tokens` is a full context,
-        // not a spent turn allowance, and telling an operator the wrong one sends them looking at
-        // the wrong setting.
-        const budget = run.stopReason === "max_tokens" ? "context budget" : "turn budget";
-        /*
-         * One step id for both outcomes, because exactly one of them fires per round — which is
-         * what keeps the `agent-run-N` / `auto-continue-N` / `to-review-N` sequence identical on
-         * every replay of the same history. Published as well as appended: an operator watching
-         * live must see "the harness hit its budget; continuing" at the moment it happens, not a
-         * mysterious second round with the explanation waiting for them on a reconnect.
-         */
-        await step.run(`auto-continue-${round}`, async () => {
-          const payload: SessionEventPayload = {
-            kind: "notice",
-            text: spent
-              ? `The harness hit its ${budget} again after ${MAX_AUTO_CONTINUE_ROUNDS} continuations. This run has stopped continuing it and is putting the work in front of you as it stands — it is unfinished, whatever the summary says.`
-              : `The harness hit its ${budget} with work still to do, so this run is continuing the same conversation instead of sending it for review (continuation ${loop.autoContinues + 1} of ${MAX_AUTO_CONTINUE_ROUNDS}).`,
-          };
-          const seq = await nextSessionEventSeq(db, workspaceId, sessionId);
-          await appendSessionEvent(db, workspaceId, {
-            sessionId,
-            seq,
-            workflowStepId: loop.leg.stepId,
-            payload,
-          });
-          const frame = toTaskEvent(payload, taskId, sessionId, seq, loop.leg.stepId);
-          if (frame) deps.hub.publish(channel, frame);
-        });
-        if (!spent) {
-          loop.autoContinues += 1;
-          loop.continuingTruncated = true;
-          continue;
-        }
-        // Budget spent: fall through to exactly the path a finished round takes. Never a throw and
-        // never a stall — the operator gets the work, the declaration `to-review` writes for it,
-        // and the notice above saying why it is only this far along (a legible outcome they can
-        // act on: approve what is there, or send it back for another five rounds of their own).
+        if (await continueTruncated(scope, round, loop, run.stopReason)) continue;
       }
       // Whatever happens below, this stretch of work is over. The next one that runs out of budget
       // starts with its own continuations rather than the remains of this one's.
