@@ -14,21 +14,26 @@ const schema = z.object({
   SOLOW_REPO_CACHE_ROOT: z.string().min(1).default(".solow/repos"),
   /**
    * Where the SQLite database is, read here (as `@solow/db` does, same default) only so the
-   * container driver can refuse to mount it. Not `dbEnv()`, which also demands the secret key.
+   * container driver can refuse to mount the directory it and the keys beside it live in. Not
+   * `dbEnv()`, which also demands the secret key.
    */
   SOLOW_DB_DRIVER: z.enum(["sqlite", "postgres"]).default("sqlite"),
   SOLOW_SQLITE_PATH: z.string().min(1).default(".solow/solow.db"),
+  /** The CLI's data directory (default `~/.solow`), protected from mounts for the same reason. */
+  SOLOW_HOME: z.string().min(1).optional(),
   /**
    * HMAC key for stream subscription tickets (TASK-018) — the same value the web app signs
    * with. Required: without it the hub could not authenticate a subscriber at all.
    */
   SOLOW_STREAM_SECRET: z.string().min(1),
   /**
-   * Bearer secret the web app presents on `POST /events` (FINDINGS B3). Optional so a process
-   * that never serves `/events` still boots, but without it that route refuses every request.
-   * The launchers generate one into `.solow/orchestrator.secret`.
+   * Bearer secret the web app presents on `POST /events` (FINDINGS B3). Read raw: its rule is
+   * `readOrchestratorSecret` in `@solow/contracts`, shared with the web app and applied by
+   * `handleEventPost`, so a missing or short value refuses that route with a 503 rather than
+   * failing this parse and with it the whole server. The launchers generate one into
+   * `.solow/orchestrator.secret`.
    */
-  SOLOW_ORCHESTRATOR_SECRET: z.string().min(16).optional(),
+  SOLOW_ORCHESTRATOR_SECRET: z.string().optional(),
   /**
    * What an ACP permission nobody answered decays to (issue #58, AC-4). Refusal unless a
    * deployment names the permissive posture — a deployment can widen its own posture on

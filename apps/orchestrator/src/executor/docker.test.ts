@@ -492,6 +492,50 @@ describe("creation — the docker run line", () => {
     expect(await verdict("/srv/solow/repos/app", roots)).toBe("mounted");
   });
 
+  it("refuses the whole state directory and its keys, and still mounts the worktrees kept in it", async () => {
+    // The CLI keeps everything in one directory: the database, `secret.key`, the orchestrator,
+    // stream and auth secrets, the engine's keys — and the worktree and cache roots. Protecting
+    // only the database file left every key beside it mountable.
+    const state = "/srv/solow/state";
+    const roots: MountRoots = {
+      worktreeRoot: `${state}/worktrees`,
+      repoCacheRoot: `${state}/repos`,
+      protectedPaths: [state],
+    };
+    for (const source of [
+      state,
+      `${state}/`,
+      "/srv/solow",
+      `${state}/secret.key`,
+      `${state}/orchestrator.secret`,
+      `${state}/inngest-signing.key`,
+      `${state}/backups`,
+    ]) {
+      await expect(guardMountSource(source, roots, LEXICAL), source).rejects.toThrow(
+        /SoloW's own state/,
+      );
+    }
+    expect(await verdict(`${state}/worktrees/task-1`, roots)).toBe("mounted");
+    expect(await verdict(`${state}/repos/app`, roots)).toBe("mounted");
+
+    // Reached through a symlink, it is the same directory to the daemon.
+    const dir = mkdtempSync(join(tmpdir(), "solow-state-"));
+    const link = join(dir, "..", `${basename(dir)}-link`);
+    try {
+      symlinkSync(dir, link);
+      const real: ResolveLinks = async (path) =>
+        path === link || path.startsWith(`${link}/`) ? dir + path.slice(link.length) : path;
+      const tmpRoots: MountRoots = { ...SRV, protectedPaths: [dir] };
+      await expect(guardMountSource(link, tmpRoots, real)).rejects.toThrow(/SoloW's own state/);
+      await expect(guardMountSource(`${link}/secret.key`, tmpRoots, real)).rejects.toThrow(
+        /SoloW's own state/,
+      );
+    } finally {
+      rmSync(link, { force: true });
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("refuses every source that would hand the harness the host", async () => {
     const verdicts = await Promise.all(
       REFUSED.map(async ([source, roots, why]) => `${why} → ${await verdict(source, roots)}`),

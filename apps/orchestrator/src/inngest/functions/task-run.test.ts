@@ -579,9 +579,10 @@ function makeDeps(
     // Stands in for git confirming the harness's worktree really belongs to the repository.
     adopt: async (repoPath, reported) => {
       if (!reported) throw new Error("harness did not report a workspace");
-      // `claude --worktree <name>` names the branch after the worktree, and the real `adopt`
-      // reads whatever git reports; the fake mirrors that shape.
-      return { path: reported, branch: reported.split("/").pop() ?? "", repoPath };
+      // `claude --worktree <name>` puts the worktree on branch `worktree-<name>`, and the real
+      // `adopt` reads whatever git reports; the fake mirrors that shape, because delivery pushes
+      // that exact name and refuses any other (`taskOwnsBranch`).
+      return { path: reported, branch: `worktree-${reported.split("/").pop() ?? ""}`, repoPath };
     },
     seed: async (params) => {
       spies.seeded.push(params);
@@ -1546,7 +1547,7 @@ describe("the diff a reviewer is shown", () => {
     ).filter((e) => e.kind === "diff");
     expect(captured).toBeDefined();
     expect(captured?.payload).toMatchObject({
-      diffRef: `solow-task-${ids.taskId}`,
+      diffRef: `worktree-solow-task-${ids.taskId}`,
       files: [{ path: "src/latch.ts", status: "modified", additions: 4, deletions: 1 }],
       truncated: false,
     });
@@ -1596,7 +1597,7 @@ describe("the diff a reviewer is shown", () => {
     const firstDiff = events.find((e) => e.kind === "diff");
     const finished = events.find((e) => e.kind === "agent_done");
     expect(firstDiff?.payload).toMatchObject({
-      diffRef: `solow-task-${ids.taskId}`,
+      diffRef: `worktree-solow-task-${ids.taskId}`,
       files: [{ path: "src/latch.ts", status: "modified", additions: 4, deletions: 1 }],
     });
     // Before the marker that says the harness finished — which is the whole point: the record
@@ -2244,7 +2245,7 @@ describe("the worktree a Task runs in", () => {
       expect(rows).toHaveLength(1);
       expect(rows[0]).toMatchObject({
         path: `/wt/${worktreeNameForTask(ids.taskId)}`,
-        branch: worktreeNameForTask(ids.taskId),
+        branch: `worktree-${worktreeNameForTask(ids.taskId)}`,
         status: "active",
       });
     });
@@ -2852,7 +2853,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
   it("names in the brief the branch the harness is on, not the one the attachment stores", async () => {
     // The brief is the *only* mechanism by which a multi-repository harness learns its layout, so
     // a branch line it cannot act on is worse than none. A `--worktree` harness names its own
-    // branch (`solow-task-<id>`), which the attachment's `solow/task-<id>` is not.
+    // branch (`worktree-solow-task-<id>`), which the attachment's `solow/task-<id>` is not.
     const ids = freshIds();
     await seedRun(db, ids, {
       extraRepositories: [{ key: "lib", name: "shared-lib", checkoutBranch: "feature/lib" }],
@@ -2877,7 +2878,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
     expect(runner.prompts[0]).not.toContain(`solow/task-${ids.taskId}`);
     // Round two: the worktree has been adopted, so the brief can name what git reported.
     expect(runner.prompts[1]).toContain(
-      `- repo (branch solow-task-${ids.taskId}) — you are working here`,
+      `- repo (branch worktree-solow-task-${ids.taskId}) — you are working here`,
     );
     // The secondary's branch is SoloW's own, and is named from the first round.
     expect(runner.prompts[0]).toContain("- shared-lib (branch feature/lib)");
@@ -3010,7 +3011,10 @@ describe("a Task spanning several Repositories (issue #7)", () => {
     expect(diffs.map((d) => d.repositoryName)).toEqual(["repo", "shared-lib"]);
     expect(new Set(diffs.map((d) => d.repositoryId)).size).toBe(2);
     // Each group names the branch its own worktree sits on, not one branch for the whole Task.
-    expect(diffs.map((d) => d.diffRef)).toEqual([`solow-task-${ids.taskId}`, "solow/lib-only"]);
+    expect(diffs.map((d) => d.diffRef)).toEqual([
+      `worktree-solow-task-${ids.taskId}`,
+      "solow/lib-only",
+    ]);
     // Each worktree was diffed once — a reviewer sees both changes, not the primary's twice.
     expect(new Set(spies.diffed).size).toBe(2);
   });
@@ -3063,7 +3067,7 @@ describe("a Task spanning several Repositories (issue #7)", () => {
     // is the branch the adoption check read back from git; the secondary's is the branch
     // SoloW checked its worktree out on.
     expect(attachments.map((a) => a.resultBranch)).toEqual([
-      `solow-task-${ids.taskId}`,
+      `worktree-solow-task-${ids.taskId}`,
       `solow/task-${ids.taskId}`,
     ]);
   });
@@ -6883,13 +6887,13 @@ describe("approve ships (A1)", () => {
       {
         upstreamPath: `/cache/${encodeURIComponent(remote.location)}`,
         remoteUrl: remote.location,
-        branch: `solow-task-${ids.taskId}`,
+        branch: `worktree-solow-task-${ids.taskId}`,
         token: "forge-token",
       },
     ]);
     expect(upserts).toHaveLength(1);
     expect(upserts[0]?.repo).toBe("acme/gate");
-    expect(upserts[0]?.head).toBe(`solow-task-${ids.taskId}`);
+    expect(upserts[0]?.head).toBe(`worktree-solow-task-${ids.taskId}`);
     const row = await attachmentRow(ids);
     expect(row?.changeRequestUrl).toBe("https://forge.example/acme/gate/pull/7");
     expect(row?.changeRequestNumber).toBe(7);
@@ -6921,7 +6925,7 @@ describe("approve ships (A1)", () => {
     expect(spies.pushed).toEqual([]);
     expect(upserts).toEqual([]);
     const row = await attachmentRow(ids);
-    expect(row?.resultBranch).toBe(`solow-task-${ids.taskId}`);
+    expect(row?.resultBranch).toBe(`worktree-solow-task-${ids.taskId}`);
     expect(row?.changeRequestUrl).toBeNull();
   });
 
@@ -6948,7 +6952,7 @@ describe("approve ships (A1)", () => {
     // The token never reaches the session log (Principle IV).
     expect(notice).not.toContain("forge-token");
     // The commit and its record are kept: only the remote half is missing.
-    expect((await attachmentRow(ids))?.resultBranch).toBe(`solow-task-${ids.taskId}`);
+    expect((await attachmentRow(ids))?.resultBranch).toBe(`worktree-solow-task-${ids.taskId}`);
     expect((await attachmentRow(ids))?.changeRequestUrl).toBeNull();
   });
 

@@ -14,6 +14,7 @@ export * from "./issue.js";
 export * from "./issue-create.js";
 export * from "./issue-write.js";
 export * from "./mcp.js";
+export * from "./orchestrator-secret.js";
 export * from "./page.js";
 export * from "./profile.js";
 export * from "./project.js";

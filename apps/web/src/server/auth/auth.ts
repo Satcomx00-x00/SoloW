@@ -1,6 +1,5 @@
 import "server-only";
-import { randomUUID } from "node:crypto";
-import { authSchema, createDb, type Db, ensureDefaultHarnessCatalog, workspace } from "@solow/db";
+import { authSchema, createDb, type Db, provisionOwnerWorkspace, workspace } from "@solow/db";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { count, eq } from "drizzle-orm";
@@ -18,9 +17,10 @@ import { webEnv } from "../env.js";
  * the port create an account on someone else's machine, so the *second* sign-up is refused at
  * the database hook — the closest point to the write, where no route can route around it.
  *
- * **The Workspace is created with the Owner.** `workspaceId` must exist before the first request
+ * **The Workspace is settled with the Owner.** `workspaceId` must exist before the first request
  * resolves, and creating it lazily inside session resolution would make a read path write. So it
- * is created in the same user-creation hook, and a user without one cannot get a session at all.
+ * is settled in the same user-creation hook — the local Workspace taken over, or a new one made —
+ * and a user without one cannot get a session at all.
  */
 
 /** Model names are remapped: BetterAuth's `session` would collide with our *harness* session. */
@@ -64,19 +64,10 @@ export function createAuth(db: Db = createDb()) {
               throw new Error("SoloW is single-Owner: an account already exists.");
             }
           },
+          // The local Workspace bootstrap made, when it is still unclaimed — that is where an
+          // install's existing work lives — or a new one seeded the same way bootstrap seeds it.
           after: async (user) => {
-            const workspaceId = randomUUID();
-            await db.insert(workspace).values({
-              id: workspaceId,
-              name: `${user.name || user.email}'s workspace`,
-              ownerUserId: user.id,
-              // Flags stay at their registry default (OFF) for a new Workspace — the core loop
-              // is enabled deliberately, not by signing up (constitution: feature flags).
-              enabledFlags: null,
-            });
-            // Harness identity is a catalog row, not an enum (issue #10) — without this, a
-            // brand-new Workspace could not create even the one harness SoloW ships.
-            await ensureDefaultHarnessCatalog(db, workspaceId);
+            await provisionOwnerWorkspace(db, user);
           },
         },
       },

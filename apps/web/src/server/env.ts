@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { orchestratorSecretProblem, readOrchestratorSecret } from "@solow/contracts";
 import { z } from "zod";
 
 /**
@@ -60,16 +61,31 @@ export function devOwnerMode(): boolean {
  */
 const orchestratorEnvSchema = z.object({
   SOLOW_ORCHESTRATOR_URL: z.string().url().optional(),
-  SOLOW_ORCHESTRATOR_SECRET: z.string().min(1).optional(),
+  SOLOW_ORCHESTRATOR_SECRET: z.string().optional(),
 });
 
 export function orchestratorUrl(): string | undefined {
   return orchestratorEnvSchema.parse(process.env).SOLOW_ORCHESTRATOR_URL;
 }
 
-/** Bearer secret the orchestrator's `POST /events` requires (FINDINGS B3). */
+let secretProblemLogged = false;
+
+/**
+ * Bearer secret the orchestrator's `POST /events` requires (FINDINGS B3), under the rule the
+ * orchestrator applies (`readOrchestratorSecret`). A value it would refuse is not sent: the
+ * request goes without one, the orchestrator answers 503 naming the problem, and this side says
+ * the same thing once in its own log.
+ */
 export function orchestratorSecret(): string | undefined {
-  return orchestratorEnvSchema.parse(process.env).SOLOW_ORCHESTRATOR_SECRET;
+  const reading = readOrchestratorSecret(
+    orchestratorEnvSchema.parse(process.env).SOLOW_ORCHESTRATOR_SECRET,
+  );
+  if (reading.ok) return reading.secret;
+  if (reading.problem === "too_short" && !secretProblemLogged) {
+    secretProblemLogged = true;
+    console.error(`[orchestrator] ${orchestratorSecretProblem(reading.problem)}; not sending it.`);
+  }
+  return undefined;
 }
 
 /**

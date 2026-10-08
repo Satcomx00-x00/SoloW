@@ -1,6 +1,7 @@
-import { resolve } from "node:path";
+import { homedir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import type { ExecutorConfig } from "@solow/contracts";
-import { orchestratorEnv } from "../env.js";
+import { type OrchestratorEnv, orchestratorEnv } from "../env.js";
 import {
   type CommandProbes,
   createDockerExecutor,
@@ -157,14 +158,32 @@ export function dockerHost(opts: Pick<ExecutorFactoryOpts, "host">): Executor {
  * for configuration.
  */
 /**
- * The control plane's own files, which no container may be handed (B5). SQLite only: a Postgres
- * database is reached over the network and has no path to mount.
+ * The control plane's own directories, which no container may be handed (B5).
+ *
+ * Directories, not the database file: every launcher keeps the keys beside it — `secret.key` or
+ * `dev-secret.key` (which decrypts every stored Secret), `orchestrator.secret`, `stream.secret`,
+ * `auth.secret` and the engine's `inngest-*.key` — and a guard that named only the database
+ * left a source that holds all of them mountable. And whatever the database driver: a Postgres
+ * deployment has no database file, but its keys are still files on this disk. Named by where
+ * they are rather than listed by file name, so a key a later launcher adds is covered too.
+ *
+ * Three places, because three launchers decide it: the database's own directory (the CLI puts
+ * it in its data directory, the dev scripts in the checkout's `.solow`), `.solow` under the
+ * working directory the launcher scripts run from, and the CLI's data directory (`SOLOW_HOME`,
+ * default `~/.solow`) for a deployment whose database is not in it. The worktree and cache
+ * roots the CLI keeps inside its data directory stay mountable — `guardMountSource` exempts the
+ * deployment's own roots nested in a protected directory.
  */
-function orchestratorStatePaths(): string[] {
-  const db = orchestratorEnv();
-  if (db.SOLOW_DB_DRIVER !== "sqlite") return [];
-  const path = resolve(db.SOLOW_SQLITE_PATH);
-  return [path, `${path}-wal`, `${path}-shm`, `${path}-journal`];
+export function orchestratorStatePaths(
+  env: Pick<OrchestratorEnv, "SOLOW_DB_DRIVER" | "SOLOW_SQLITE_PATH" | "SOLOW_HOME">,
+  home: string = homedir(),
+): string[] {
+  const dirs = [
+    dirname(resolve(env.SOLOW_SQLITE_PATH)),
+    resolve(".solow"),
+    resolve(env.SOLOW_HOME ?? join(home, ".solow")),
+  ];
+  return [...new Set(dirs)];
 }
 
 export function dockerOpts(opts: ExecutorFactoryOpts): PreflightOpts {
@@ -173,7 +192,7 @@ export function dockerOpts(opts: ExecutorFactoryOpts): PreflightOpts {
     jailRoot: opts.jailRoot,
     worktreeRoot: opts.worktreeRoot,
     repoCacheRoot: opts.repoCacheRoot,
-    protectedPaths: orchestratorStatePaths(),
+    protectedPaths: orchestratorStatePaths(env),
     bindPaths: opts.bindPaths ?? [],
     ...(opts.transcriptStore ? { transcriptStore: opts.transcriptStore } : {}),
     ...(opts.checkpointStore ? { checkpointStore: opts.checkpointStore } : {}),

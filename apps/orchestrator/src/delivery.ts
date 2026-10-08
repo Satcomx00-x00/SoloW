@@ -1,7 +1,8 @@
 import { decryptForScmSync } from "@solow/db";
 import { cloneUsernameFor, providerManifest, providerWith } from "@solow/scm";
 import type { TaskRepositoryBinding } from "./data.js";
-import type { CloneCredential } from "./worktree/manager.js";
+import { worktreeNameForTask } from "./harness/claude-code-runner.js";
+import { type CloneCredential, worktreeBranch } from "./worktree/manager.js";
 
 /**
  * Shipping an approved branch: push it, then open or refresh its pull request (A1).
@@ -42,9 +43,15 @@ const SHA_LIKE = /^[0-9a-f]{7,40}$/i;
 /** Strip the token from any text about to be shown or logged (Principle IV). */
 function scrub(text: string, token: string): string {
   const clean = token ? text.split(token).join("***") : text;
-  // What is useful in a git or provider error is its first lines; the rest is usually a hint
-  // block or a repeated command line.
-  return clean.trim().split("\n").slice(0, 3).join(" ").slice(0, 300);
+  // What is useful in a git or provider error is its first few lines — git's `remote:` and
+  // `fatal:` ones. Its `hint:` block is advice about git, not about this repository.
+  return clean
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith("hint:"))
+    .slice(0, 4)
+    .join(" ")
+    .slice(0, 500);
 }
 
 /**
@@ -62,6 +69,25 @@ export function deliverable(binding: TaskRepositoryBinding): boolean {
     repository.externalFullName !== null &&
     providerWith(scmClone.provider, "changeRequests") !== null
   );
+}
+
+/**
+ * Whether `branch` is one this Task owns outright, and so one delivery may force-push.
+ *
+ * Exactly two names qualify, both derived from the Task id: the branch SoloW provisions
+ * (`worktreeBranch`) and the one Claude Code creates for the worktree SoloW asks it for
+ * (`worktree-<worktreeNameForTask>`, its own naming). Nothing else, and in particular not an
+ * attachment's `checkoutBranch` the Owner named: that may be `main`, or a branch another Task
+ * works on too, and a forced push there would rewrite history no one asked SoloW to touch.
+ *
+ * Refusing those rather than pushing them more carefully is deliberate. Making a forced push safe
+ * on a shared name needs the repository's default branch (a provider call) and the last commit
+ * SoloW itself pushed there (state nobody records), and still leaves two Tasks racing for one
+ * branch. A Task's own name has a single writer by construction, so the force is safe as it is,
+ * and a hand-named branch stays a local commit for the Owner to push.
+ */
+export function taskOwnsBranch(taskId: string, branch: string): boolean {
+  return branch === worktreeBranch(taskId) || branch === `worktree-${worktreeNameForTask(taskId)}`;
 }
 
 export async function deliverBranch(args: {
@@ -83,6 +109,12 @@ export async function deliverBranch(args: {
     };
   }
   const { repository, scmClone, attachment } = binding;
+  if (!taskOwnsBranch(attachment.taskId, branch)) {
+    throw new DeliveryError(
+      "push",
+      `Did not push ${branch}: SoloW only pushes the branch it created for this task (${worktreeBranch(attachment.taskId)}), and ${branch} was named by hand, so it may be shared with other work. The change is committed on ${branch} locally; push it yourself if that is where it belongs.`,
+    );
+  }
   // `deliverable` established all three; re-read for the type system rather than asserting.
   const driver = scmClone && providerWith(scmClone.provider, "changeRequests");
   const repoRef = repository.externalFullName;

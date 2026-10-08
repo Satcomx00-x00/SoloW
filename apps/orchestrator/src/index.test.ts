@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 
 import { beforeAll, beforeEach, describe, expect, it } from "bun:test";
-import { chmod, mkdtemp, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { HarnessProtocol } from "@solow/contracts";
@@ -187,6 +187,36 @@ describe("handleProbePost", () => {
 
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ ok: true, reason: null });
+  });
+
+  it("launches the harness without the orchestrator's own secrets in its environment", async () => {
+    // The probe spawns an Owner-named binary; the environment it inherits must be the same
+    // scrubbed base a run gets (`Executor.baseEnv()`), not `process.env` with the key that
+    // decrypts every stored Secret still in it.
+    const planted = {
+      SOLOW_ORCHESTRATOR_SECRET: "orch-secret-value",
+      SOLOW_STREAM_SECRET: "stream-secret-value",
+      SOLOW_AUTH_SECRET: "auth-secret-value",
+      INNGEST_SIGNING_KEY: "signing-key-value",
+      INNGEST_EVENT_KEY: "event-key-value",
+    };
+    Object.assign(process.env, planted);
+    const out = join(await mkdtemp(join(tmpdir(), "solow-probe-env-")), "env");
+    try {
+      const command = await fakeHarness(`env > '${out}'\nsleep 5`);
+      const id = await seedProfile("ws-1", { command, protocol: "cli_passthrough" });
+
+      const res = await post({ ticket: ticketFor("ws-1"), agentProfileId: id });
+
+      expect(res.status).toBe(200);
+      const seen = await readFile(out, "utf8");
+      expect(seen).toContain("SUB_TOKEN=oauth-token");
+      for (const name of ["SOLOW_SECRET_KEY", ...Object.keys(planted)]) {
+        expect(seen).not.toContain(`${name}=`);
+      }
+    } finally {
+      for (const name of Object.keys(planted)) delete process.env[name];
+    }
   });
 
   it("answers with a readable reason rather than an error status when the harness is missing", async () => {

@@ -1,4 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
+import { orchestratorSecretProblem, readOrchestratorSecret } from "@solow/contracts";
+import { createLogger } from "@solow/observability";
 import { z } from "zod";
 import { orchestratorEnv } from "../env.js";
 import { inngest } from "./client.js";
@@ -27,9 +29,10 @@ const eventEnvelopeSchema = z.object({
 export interface EventPostDeps {
   send: (payload: { name: string; data: Record<string, unknown> }) => Promise<unknown>;
   /**
-   * The secret the web app must present as `Authorization: Bearer <secret>`. Unset means the
-   * deployment never configured one, and the route then refuses everything: an open `/events`
-   * lets anyone who can reach the port start a run (FINDINGS B3).
+   * The secret the web app must present as `Authorization: Bearer <secret>`, as configured.
+   * Unset, or failing the shared rule (`readOrchestratorSecret`), and the route refuses
+   * everything with a 503: an open `/events` lets anyone who can reach the port start a run
+   * (FINDINGS B3).
    */
   secret?: string | undefined;
 }
@@ -40,6 +43,9 @@ function defaultEventPostDeps(): EventPostDeps {
     secret: orchestratorEnv().SOLOW_ORCHESTRATOR_SECRET,
   };
 }
+
+/** Said once per process: the 503 repeats on every request, the log line need not. */
+let secretProblemLogged = false;
 
 /** Constant-time compare, so the secret cannot be recovered a byte at a time from response timing. */
 function bearerMatches(header: string | null, secret: string): boolean {
@@ -60,10 +66,18 @@ export async function handleEventPost(
   req: Request,
   deps: EventPostDeps = defaultEventPostDeps(),
 ): Promise<Response> {
-  if (!deps.secret) {
-    return new Response("SOLOW_ORCHESTRATOR_SECRET is not configured", { status: 503 });
+  const configured = readOrchestratorSecret(deps.secret);
+  if (!configured.ok) {
+    const reason = orchestratorSecretProblem(configured.problem);
+    if (!secretProblemLogged) {
+      secretProblemLogged = true;
+      createLogger({ service: "orchestrator" }).error(
+        `POST /events refuses every request: ${reason}. Runs cannot be started until it is set.`,
+      );
+    }
+    return new Response(reason, { status: 503 });
   }
-  if (!bearerMatches(req.headers.get("authorization"), deps.secret)) {
+  if (!bearerMatches(req.headers.get("authorization"), configured.secret)) {
     return new Response("unauthorized", { status: 401 });
   }
 

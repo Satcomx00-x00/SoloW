@@ -1,5 +1,5 @@
 import "server-only";
-import { createDb, LOCAL_WORKSPACE_ID } from "@solow/db";
+import { createDb, LOCAL_OWNER_ID, LOCAL_WORKSPACE_ID } from "@solow/db";
 import { resolveSession } from "./auth/session.js";
 import { getWorkspaceFlags } from "./dal/workspace.js";
 import { devOwnerMode } from "./env.js";
@@ -24,7 +24,7 @@ export async function createContext({ req }: { req: Request }): Promise<BaseCont
     return {
       db,
       requestHost,
-      session: { workspaceId: LOCAL_WORKSPACE_ID, userId: "local-owner" },
+      session: { workspaceId: LOCAL_WORKSPACE_ID, userId: LOCAL_OWNER_ID },
       flagOverrides: {
         "ff-core-program": true,
         "ff-integrations": true,
