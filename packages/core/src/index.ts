@@ -11,6 +11,7 @@ export * from "./project-filter.js";
 export * from "./project-hierarchy.js";
 export * from "./registry.js";
 export * from "./review-brief.js";
+export * from "./run-attention.js";
 export * from "./run-links.js";
 export * from "./skill.js";
 export * from "./skill-locator.js";

@@ -2,6 +2,7 @@ import "server-only";
 import { router } from "../trpc.js";
 import { flagRouter } from "./flag.js";
 import { libraryRouter } from "./harness-library.js";
+import { healthRouter } from "./health.js";
 import { historyRouter } from "./history.js";
 import { identityRouter } from "./identity.js";
 import { integrationRouter } from "./integration.js";
@@ -22,6 +23,7 @@ import { workspaceRouter } from "./workspace.js";
 /** The core-program API surface (Decision 0011). openapi.json is generated from this. */
 export const appRouter = router({
   flag: flagRouter,
+  health: healthRouter,
   history: historyRouter,
   identity: identityRouter,
   issue: issueRouter,

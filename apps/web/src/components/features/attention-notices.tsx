@@ -1,0 +1,91 @@
+"use client";
+
+import type { AttentionItemDto } from "@solow/contracts";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useRef } from "react";
+import { useToast } from "@/components/ui/toast";
+import { attentionNotice } from "@/lib/run-health";
+import { taskHref } from "@/lib/task-href";
+import { useWorkspaceEvents } from "@/lib/workspace-events";
+import { trpc } from "@/trpc/react";
+
+/**
+ * A notice when a run fails or gets stuck (FINDINGS F3), in the app and nowhere else — notices
+ * outside it are Later (decision 0031).
+ *
+ * Driven by the "needs attention" list rather than by the frames themselves, because a frame
+ * says only that a Task changed state: a stranded park is announced as `parked`, which is also
+ * what an ordinary park says. So a frame is a reason to re-read the list, and a notice is a Task
+ * that is on the list now and was not before. The list as first read is the baseline — opening
+ * the app does not replay every failure already on the board.
+ *
+ * Two things re-read it: any `status` frame, and the moment the list itself says a Task would
+ * join by the clock alone (`recheckAt`). A run going quiet is not an event, so that moment is the
+ * only signal there is, and waiting for it costs nothing in between.
+ */
+
+/** Past this many at once, one notice says how many rather than a stack of them. */
+const NOTICE_EACH_UP_TO = 3;
+
+/** `setTimeout` holds a signed 32-bit delay; anything longer fires at once. */
+const MAX_DELAY_MS = 2 ** 31 - 1;
+
+const keyOf = (item: AttentionItemDto) => `${item.taskId}:${item.cause}`;
+
+export function AttentionNotices() {
+  const utils = trpc.useUtils();
+  const router = useRouter();
+  const { toast } = useToast();
+  const attention = trpc.health.attention.useQuery();
+  const seen = useRef<Set<string> | null>(null);
+
+  const reread = useCallback(() => void utils.health.attention.invalidate(), [utils]);
+  useWorkspaceEvents(
+    useCallback(
+      (event) => {
+        if (event.kind === "status") reread();
+      },
+      [reread],
+    ),
+  );
+
+  const recheckAt = attention.data?.recheckAt ?? null;
+  useEffect(() => {
+    if (!recheckAt) return;
+    // A second late, so the clock has passed the threshold when the server compares against it.
+    const delay = Math.min(Math.max(Date.parse(recheckAt) - Date.now() + 1_000, 0), MAX_DELAY_MS);
+    const timer = setTimeout(reread, delay);
+    return () => clearTimeout(timer);
+  }, [recheckAt, reread]);
+
+  const items = attention.data?.items;
+  useEffect(() => {
+    if (!items) return;
+    const previous = seen.current;
+    seen.current = new Set(items.map(keyOf));
+    if (!previous) return;
+
+    const joined = items.filter((item) => !previous.has(keyOf(item)));
+    if (joined.length === 0) return;
+    if (joined.length > NOTICE_EACH_UP_TO) {
+      toast({
+        title: `${joined.length} runs need attention`,
+        description: "They are listed under “need attention” on the status bar.",
+        tone: joined.some((i) => i.kind === "failed") ? "error" : "caution",
+      });
+      return;
+    }
+    for (const item of joined) {
+      const notice = attentionNotice(item);
+      toast({
+        ...notice,
+        action: {
+          label: "Open",
+          onClick: () => router.push(taskHref({ id: item.taskId, state: item.state })),
+        },
+      });
+    }
+  }, [items, toast, router]);
+
+  return null;
+}

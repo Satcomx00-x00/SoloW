@@ -8,6 +8,7 @@
  * the same list, discovered at runtime instead of written down.
  */
 import "@/components/features/settings/settings-commands";
+import "@/components/features/status-bar/health-items";
 import "@/components/features/status-bar/status-items";
 import "@/lib/navigation-commands";
 import "@/lib/notification-channels";

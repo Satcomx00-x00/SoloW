@@ -92,7 +92,8 @@ describe("StatusBarSection", () => {
 
     await waitFor(() => expect(preferences.saved().order.length).toBeGreaterThan(0));
     const { order } = preferences.saved();
-    expect(order.indexOf("status.sync")).toBeLessThan(order.indexOf("status.tasks"));
+    // The health reading (priority 30) is the next right-hand item after the task count (10).
+    expect(order.indexOf("status.health")).toBeLessThan(order.indexOf("status.tasks"));
   });
 
   it("cannot move the first item of a side up, or the last one down", () => {

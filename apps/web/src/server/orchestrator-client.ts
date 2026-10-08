@@ -6,8 +6,10 @@ import {
   type HarnessProbeReport,
   harnessExplainReport,
   harnessProbeReport,
+  orchestratorHealthReport,
   REPOSITORY_SYNC_REQUESTED,
   type ReviewDecision,
+  type SystemHealthDto,
   TASK_PURGE_REQUESTED,
   TASK_REDELIVER_REQUESTED,
   type TaskState,
@@ -107,6 +109,13 @@ export interface OrchestratorClient {
     workspaceId: string;
     agentProfileId: string;
   }): Promise<HarnessProbeReport>;
+  /**
+   * Whether the orchestrator answers, and whether the engine behind it does (FINDINGS F3).
+   *
+   * Resolves whatever happens — the answer *is* the report, and a status bar that threw on an
+   * outage would go blank in exactly the moment it exists for.
+   */
+  health(): Promise<SystemHealthDto>;
   /** Whether the orchestrator's host has a reachable Docker daemon (roadmap B4). */
   dockerAvailability(input: { workspaceId: string }): Promise<DockerAvailabilityReport | null>;
   /** Ask the Task's own harness for one answer — the Brief tab's Explain (see dal/explain-criterion.ts). */
@@ -119,6 +128,12 @@ export interface OrchestratorClient {
 }
 
 const UNWIRED = "orchestrator not configured (SOLOW_ORCHESTRATOR_URL unset)";
+
+/**
+ * How long the health read waits for the orchestrator. Longer than its own two-second engine
+ * probe, so a slow engine is reported as the engine's problem rather than the orchestrator's.
+ */
+const HEALTH_TIMEOUT_MS = 3_000;
 
 async function emit(name: string, data: unknown): Promise<void> {
   const base = orchestratorUrl();
@@ -226,6 +241,48 @@ export const orchestrator: OrchestratorClient = {
       throw new Error(`orchestrator rejected explain: ${res.status} ${await res.text()}`);
     }
     return harnessExplainReport.parse(await res.json());
+  },
+  async health() {
+    const checkedAt = new Date().toISOString();
+    const base = orchestratorUrl();
+    if (!base) {
+      return {
+        orchestrator: { state: "not_configured", detail: "SOLOW_ORCHESTRATOR_URL is not set" },
+        engine: { state: "unknown", detail: null },
+        checkedAt,
+      };
+    }
+    // Only the orchestrator knows where the engine is, so an orchestrator that cannot be asked
+    // leaves the engine unknown rather than down.
+    const unasked = { state: "unknown" as const, detail: null };
+    let res: Response;
+    try {
+      res = await fetch(new URL("/health", base), {
+        cache: "no-store",
+        signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS),
+      });
+    } catch {
+      return {
+        orchestrator: { state: "unreachable", detail: `no answer from ${base}` },
+        engine: unasked,
+        checkedAt,
+      };
+    }
+    if (!res.ok) {
+      return {
+        orchestrator: { state: "unreachable", detail: `orchestrator answered ${res.status}` },
+        engine: unasked,
+        checkedAt,
+      };
+    }
+    // An orchestrator that answers without the report (one older than it) is up; it just has
+    // not said anything about the engine.
+    const report = orchestratorHealthReport.safeParse(await res.json().catch(() => null));
+    return {
+      orchestrator: { state: "ok", detail: null },
+      engine: report.success ? report.data.engine : unasked,
+      checkedAt,
+    };
   },
   async dockerAvailability(input) {
     const base = orchestratorUrl();

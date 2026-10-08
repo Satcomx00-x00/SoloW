@@ -1,6 +1,14 @@
 import type { HarnessStopReason, TaskCompletionOutcome } from "@solow/contracts";
 import { parseSessionEventPayload, stopReasonMeansTruncated } from "@solow/contracts";
-import { INTERRUPTED_REASON, STRANDED_REVIEW_REASON } from "@solow/core";
+import {
+  INTERRUPTED_REASON,
+  PARK_WINDOW_MS,
+  parkOverdue,
+  RECLAIM_STALE_MS,
+  STRANDED_PARK_REASON,
+  STRANDED_REVIEW_REASON,
+  silentPastReclaim,
+} from "@solow/core";
 import { type Db, review, session, sessionEvent, task } from "@solow/db";
 import { and, desc, eq, gte, isNull, ne, sql } from "drizzle-orm";
 import {
@@ -69,14 +77,12 @@ import type { EventHub } from "./ws/hub.js";
  */
 
 /**
- * How quiet a `running` Task has to have gone before the sweep will call it orphaned.
- *
- * Sized against the widest legitimate gap between two durable steps, not against how long a tool
- * call takes — a long tool call happens *inside* `agent-run`, where the registry check settles it
- * first. Ten minutes is far beyond any observed step scheduling delay and still bounds how long
- * an Owner stares at a dead Task.
+ * How quiet a `running` Task has to have gone before the sweep will call it orphaned — defined in
+ * `@solow/core`'s `run-attention.ts` beside the rest of the clock rules, so the "needs attention"
+ * list the web app shows measures by the same numbers this sweep acts on (FINDINGS F3).
+ * Re-exported for `executor/reap.ts` and the tests that import it from here.
  */
-export const RECLAIM_STALE_MS = 10 * 60 * 1000;
+export { PARK_WINDOW_MS, RECLAIM_STALE_MS, STRANDED_PARK_REASON };
 export async function reclaimOrphanedRuns(
   db: Db,
   registry: Pick<HarnessRegistry, "get">,
@@ -154,7 +160,7 @@ export async function reclaimOrphanedRuns(
     // the Task's last write for a `running` Task carrying no Session at all — which should not
     // happen, and if it does the Task is orphaned by definition.
     const lastSpoke = live ? await latestActivity(db, live.id, live.startedAt) : row.updatedAt;
-    if (now().getTime() - Date.parse(lastSpoke) < RECLAIM_STALE_MS) continue;
+    if (!silentPastReclaim(Date.parse(lastSpoke), now().getTime())) continue;
 
     /*
      * Orphaned mid-work, or orphaned having finished — and, in between, orphaned having done
@@ -347,7 +353,7 @@ export async function reportStrandedReviews(
   let reported = 0;
   for (const row of inReview) {
     if (registry.get(row.workspaceId, row.id)) continue;
-    if (now().getTime() - Date.parse(row.updatedAt) < RECLAIM_STALE_MS) continue;
+    if (!silentPastReclaim(Date.parse(row.updatedAt), now().getTime())) continue;
 
     /*
      * Only a decision on *this* gate counts. A Session accrues one review per gate it passes —
@@ -390,25 +396,13 @@ export async function reportStrandedReviews(
   return reported;
 }
 
-/**
- * The `failureReason` a Task carries when the run sleeping out its quota window never came back.
- *
- * Not a failure of the work: the worktree and its commits are untouched, and one Retry starts the
- * round the sleep was supposed to start. What it names is that nothing will happen on its own —
- * a Task showing `parked` says "waiting for a quota window", and this is the row saying that
- * window closed hours ago with nobody there to notice.
- *
- * Written beside its writer rather than in `@solow/core` next to `STRANDED_REVIEW_REASON`, which
- * is there because the board matches on it and gives it its own words. This one has no card
- * treatment yet and falls into the generic reason badge; move it across in the change that gives
- * it one, so there is never a reason string the board can render only as a machine name.
- *
- * Cleared by the park step itself when its sleep returns (`park-woke-` in task-run.ts, through
- * `clearStrandedPark` below), so a run that was merely late is not still carrying a verdict that
- * has been overtaken. Nothing else in the orchestrator clears it: `updateTaskState` in the web DAL
- * does, when an operator moves the card, and that used to be the only thing that did.
+/*
+ * `STRANDED_PARK_REASON` (re-exported above, defined in `@solow/core`) is the `failureReason` a
+ * Task carries when the run sleeping out its quota window never came back. Not a failure of the
+ * work: one Retry starts the round the sleep was supposed to start. Cleared by the park step when
+ * its sleep returns (`clearStrandedPark` below); the web app's DAL clears it when an operator
+ * moves the card. In core rather than here since the board and the "needs attention" list read it.
  */
-export const STRANDED_PARK_REASON = "park_never_resumed";
 
 /**
  * Take that verdict back — but only from a row that is still the one it was written about.
@@ -447,21 +441,12 @@ export async function clearStrandedPark(
   return cleared.length > 0;
 }
 
-/**
- * How long a parked run sleeps before it wakes itself up.
- *
- * The literal from `task-run.ts`'s park step — `step.sleepUntil(..., now + PARK_SLEEP_MS)` —
- * restated here rather than imported, because the reconciler must not pull the durable workflow
- * module (and everything it drags with it) into a sweep that runs every sixty seconds. That makes
- * this a second copy of a value with one real owner, and the drift that matters has a direction:
- * if the park step's window ever *grows* and this does not, the tell below starts firing on runs
- * that are still legitimately asleep.
- *
- * So the duplication is pinned rather than trusted: the park step exports `PARK_SLEEP_MS`, and
- * `reconcile.test.ts` asserts the two are equal. Changing one alone is a red test, not a sweep
- * that starts condemning sleepers — which is the guarantee the comment on its own could not give.
+/*
+ * `PARK_WINDOW_MS` (re-exported above, defined in `@solow/core`) is how long a parked run sleeps
+ * before it wakes itself up: the park step's `PARK_SLEEP_MS`, restated because the reconciler must
+ * not import the durable workflow module. `reconcile.test.ts` asserts the two are equal, so
+ * changing one alone is a red test rather than a sweep that starts condemning sleepers.
  */
-export const PARK_WINDOW_MS = 5 * 60 * 60 * 1000;
 
 /**
  * The third way a run goes missing, and the one nothing at all was watching for.
@@ -554,7 +539,7 @@ export async function reportStrandedParks(
     const spokeAt = newest ? await latestActivity(db, newest.id, newest.startedAt) : row.updatedAt;
     const lastSpoke = Math.max(Date.parse(spokeAt), Date.parse(row.updatedAt));
     if (newest?.state === "awaiting_review") continue;
-    if (now().getTime() - lastSpoke < PARK_WINDOW_MS + RECLAIM_STALE_MS) continue;
+    if (!parkOverdue(lastSpoke, now().getTime())) continue;
 
     await setTaskState(db, row.workspaceId, row.id, "parked", {
       failureReason: STRANDED_PARK_REASON,

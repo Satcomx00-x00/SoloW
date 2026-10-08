@@ -219,6 +219,289 @@
         }
       }
     },
+    "/health.status": {
+      "get": {
+        "operationId": "health-status",
+        "summary": "Whether the orchestrator answers, and whether the durable engine behind it does. Never fails: an outage is reported in the answer.",
+        "tags": [
+          "health"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "orchestrator": {
+                      "type": "object",
+                      "properties": {
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "ok",
+                            "unreachable",
+                            "not_configured",
+                            "unknown"
+                          ]
+                        },
+                        "detail": {
+                          "type": "string",
+                          "nullable": true
+                        }
+                      },
+                      "required": [
+                        "state",
+                        "detail"
+                      ]
+                    },
+                    "engine": {
+                      "type": "object",
+                      "properties": {
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "ok",
+                            "unreachable",
+                            "not_configured",
+                            "unknown"
+                          ]
+                        },
+                        "detail": {
+                          "type": "string",
+                          "nullable": true
+                        }
+                      },
+                      "required": [
+                        "state",
+                        "detail"
+                      ]
+                    },
+                    "checkedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "orchestrator",
+                    "engine",
+                    "checkedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.NOT_FOUND"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health.attention": {
+      "get": {
+        "operationId": "health-attention",
+        "summary": "Tasks whose run failed or is stuck (running and silent, parked past its wake-up, a review decision never applied), newest first, with when the list next changes by the clock alone.",
+        "tags": [
+          "health"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "taskId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "title": {
+                            "type": "string"
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": [
+                              "backlog",
+                              "ready",
+                              "running",
+                              "review",
+                              "parked",
+                              "failed",
+                              "done"
+                            ]
+                          },
+                          "failureReason": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "failed",
+                              "stuck"
+                            ]
+                          },
+                          "cause": {
+                            "type": "string",
+                            "enum": [
+                              "failed",
+                              "decision_not_applied",
+                              "park_never_resumed",
+                              "park_overdue",
+                              "run_silent"
+                            ]
+                          },
+                          "since": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        },
+                        "required": [
+                          "taskId",
+                          "title",
+                          "state",
+                          "failureReason",
+                          "kind",
+                          "cause",
+                          "since"
+                        ]
+                      }
+                    },
+                    "truncated": {
+                      "type": "boolean"
+                    },
+                    "recheckAt": {
+                      "type": "string",
+                      "nullable": true,
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "truncated",
+                    "recheckAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.NOT_FOUND"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/history.list": {
       "get": {
         "operationId": "history-list",
