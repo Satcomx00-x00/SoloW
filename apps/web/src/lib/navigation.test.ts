@@ -30,6 +30,7 @@ describe("the destinations", () => {
       "/unassigned",
       "/workflows",
       "/history",
+      "/outcomes",
       "/settings",
     ]);
   });

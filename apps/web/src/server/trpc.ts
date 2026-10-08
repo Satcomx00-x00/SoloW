@@ -115,6 +115,15 @@ export const libraryProcedure = publicProcedure
   .use(requireFlag("ff-agent-libraries"));
 
 /**
+ * The Outcomes page (finding A4). Under the core switch as well as its own: what it reports is the
+ * core loop's record, and a kill switch on that loop should leave nothing of it answering.
+ */
+export const outcomesProcedure = publicProcedure
+  .use(requireSession)
+  .use(requireFlag("ff-core-program"))
+  .use(requireFlag("ff-outcomes"));
+
+/**
  * Emptying a Workspace, and the per-user theme and new-Task defaults Settings writes (spec F16).
  *
  * On `sessionProcedure`'s footing rather than `ownerProcedure`'s, with only its own switch: the

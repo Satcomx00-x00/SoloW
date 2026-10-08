@@ -101,7 +101,7 @@ describe("Sidebar — the same destinations everywhere", () => {
       within(workspace)
         .getAllByRole("link")
         .map((l) => l.getAttribute("href")),
-    ).toEqual(["/unassigned", "/workflows", "/history"]);
+    ).toEqual(["/unassigned", "/workflows", "/history", "/outcomes"]);
     expect(current().map((l) => l.textContent)).toEqual(["History"]);
   });
 

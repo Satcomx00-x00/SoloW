@@ -4,6 +4,7 @@ import {
   BookOpen,
   Bot,
   Building2,
+  ChartNoAxesColumn,
   CircleDot,
   Columns3,
   Eraser,
@@ -41,7 +42,7 @@ import {
  * Two lists, because there are genuinely two kinds of destination:
  *
  *  - `WORKSPACE_SECTIONS` — the things that exist without a Project: the Project list itself,
- *    the unassigned escape hatch, Workflows, History and Settings.
+ *    the unassigned escape hatch, Workflows, History, Outcomes and Settings.
  *  - `PROJECT_SECTIONS` — everything inside one, resolved against a Project id.
  *
  * **Workflows is in the first list, not the second.** It sat under `/projects/:id/workflows` for
@@ -86,6 +87,9 @@ export const WORKSPACE_SECTIONS: readonly Section[] = [
   // Project, so nothing about this entry may imply a scope the data does not have.
   { href: "/workflows", label: "Workflows", icon: Workflow, wip: true },
   { href: "/history", label: "History", icon: History },
+  // Whether the loop works, read from what it recorded (finding A4). After History because both
+  // look back at finished work; Outcomes adds it up.
+  { href: "/outcomes", label: "Outcomes", icon: ChartNoAxesColumn },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
