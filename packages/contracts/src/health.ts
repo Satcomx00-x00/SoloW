@@ -91,5 +91,11 @@ export const attentionListDto = z.object({
    * polling: nothing announces a run that has gone quiet, because going quiet is not an event.
    */
   recheckAt: z.string().datetime().nullable(),
+  /**
+   * The same moment as a delay from when the server answered, in milliseconds. This is what a
+   * client should wait: `recheckAt` is on the server's clock, and a browser comparing it against
+   * its own would re-read early, or late, by however far the two disagree.
+   */
+  recheckInMs: z.number().int().nonnegative().nullable(),
 });
 export type AttentionListDto = z.infer<typeof attentionListDto>;

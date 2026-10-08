@@ -20,12 +20,18 @@ import { trpc } from "@/trpc/react";
  * the app does not replay every failure already on the board.
  *
  * Two things re-read it: any `status` frame, and the moment the list itself says a Task would
- * join by the clock alone (`recheckAt`). A run going quiet is not an event, so that moment is the
- * only signal there is, and waiting for it costs nothing in between.
+ * join by the clock alone (`recheckInMs`). A run going quiet is not an event, so that moment is
+ * the only signal there is, and waiting for it costs nothing in between.
  */
 
 /** Past this many at once, one notice says how many rather than a stack of them. */
 const NOTICE_EACH_UP_TO = 3;
+
+/**
+ * Past the server's delay before asking. The timer starts once the answer has arrived, already
+ * later than the server's "now", so this only has to cover timer granularity.
+ */
+const RECHECK_MARGIN_MS = 250;
 
 /** `setTimeout` holds a signed 32-bit delay; anything longer fires at once. */
 const MAX_DELAY_MS = 2 ** 31 - 1;
@@ -49,14 +55,18 @@ export function AttentionNotices() {
     ),
   );
 
-  const recheckAt = attention.data?.recheckAt ?? null;
+  // A delay measured on the server's clock, not an instant compared against this browser's: a
+  // browser running ahead would re-read at once, get the same answer back, and never look again.
+  // Re-armed on every answer (`dataUpdatedAt`), because an identical answer is the normal case
+  // and is still a reason to look again later.
+  const recheckInMs = attention.data?.recheckInMs ?? null;
+  const answeredAt = attention.dataUpdatedAt;
   useEffect(() => {
-    if (!recheckAt) return;
-    // A second late, so the clock has passed the threshold when the server compares against it.
-    const delay = Math.min(Math.max(Date.parse(recheckAt) - Date.now() + 1_000, 0), MAX_DELAY_MS);
+    if (recheckInMs === null || answeredAt === 0) return;
+    const delay = Math.min(recheckInMs + RECHECK_MARGIN_MS, MAX_DELAY_MS);
     const timer = setTimeout(reread, delay);
     return () => clearTimeout(timer);
-  }, [recheckAt, reread]);
+  }, [recheckInMs, answeredAt, reread]);
 
   const items = attention.data?.items;
   useEffect(() => {

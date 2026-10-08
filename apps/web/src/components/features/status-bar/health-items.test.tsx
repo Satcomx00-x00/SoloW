@@ -59,7 +59,12 @@ function renderBar(handlers: Record<string, (input: unknown) => unknown>) {
         stale: 0,
         staleReason: null,
       }),
-      "health.attention": () => ({ items: [], truncated: false, recheckAt: null }),
+      "health.attention": () => ({
+        items: [],
+        truncated: false,
+        recheckAt: null,
+        recheckInMs: null,
+      }),
       ...preferenceFixture().handlers,
       ...handlers,
     },
@@ -154,6 +159,7 @@ describe("the needs-attention segment", () => {
         ],
         truncated: false,
         recheckAt: null,
+        recheckInMs: null,
       }),
     });
 
@@ -171,7 +177,12 @@ describe("the needs-attention segment", () => {
   it("uses the singular for one", async () => {
     renderBar({
       "health.status": () => HEALTHY,
-      "health.attention": () => ({ items: [item({})], truncated: false, recheckAt: null }),
+      "health.attention": () => ({
+        items: [item({})],
+        truncated: false,
+        recheckAt: null,
+        recheckInMs: null,
+      }),
     });
     expect(await screen.findByText(/1 needs attention/)).toBeDefined();
   });

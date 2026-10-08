@@ -75,7 +75,7 @@ function renderNotices(initial: AttentionListDto) {
   };
 }
 
-const empty: AttentionListDto = { items: [], truncated: false, recheckAt: null };
+const empty: AttentionListDto = { items: [], truncated: false, recheckAt: null, recheckInMs: null };
 
 /** Push a `status` frame through the shared socket, as the hub does when a Task changes. */
 async function announce(state: "failed" | "parked" | "review") {
@@ -124,9 +124,9 @@ describe("AttentionNotices", () => {
   });
 
   it("looks again when the list says a quiet run is due, with no frame at all", async () => {
-    // Due almost at once; the notices wait a second past it before asking.
+    // Due almost at once; the notices wait a moment past it before asking.
     const soon = new Date(Date.now() + 200).toISOString();
-    const view = renderNotices({ ...empty, recheckAt: soon });
+    const view = renderNotices({ ...empty, recheckAt: soon, recheckInMs: 200 });
     await waitFor(() => expect(view.reads()).toBe(1));
 
     view.setList({
@@ -134,6 +134,30 @@ describe("AttentionNotices", () => {
       items: [item({ state: "running", failureReason: null, kind: "stuck", cause: "run_silent" })],
     });
 
+    expect(
+      await screen.findByText("No activity: Fix the login form", {}, { timeout: 3_000 }),
+    ).toBeDefined();
+  });
+
+  it("keeps looking on the server's schedule when the browser's clock disagrees with it", async () => {
+    // The browser runs ten minutes ahead of the server: by its own clock every `recheckAt` is
+    // already past. And the list does not change between reads, so each answer is identical.
+    const skewed: AttentionListDto = {
+      ...empty,
+      recheckAt: new Date(Date.now() - 10 * 60_000 + 200).toISOString(),
+      recheckInMs: 200,
+    };
+    const view = renderNotices(skewed);
+    await waitFor(() => expect(view.reads()).toBe(1));
+
+    // It waits the server's delay rather than firing at once, and an identical answer still
+    // arms the next look.
+    await waitFor(() => expect(view.reads()).toBeGreaterThanOrEqual(3), { timeout: 3_000 });
+
+    view.setList({
+      ...skewed,
+      items: [item({ state: "running", failureReason: null, kind: "stuck", cause: "run_silent" })],
+    });
     expect(
       await screen.findByText("No activity: Fix the login form", {}, { timeout: 3_000 }),
     ).toBeDefined();

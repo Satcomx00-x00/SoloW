@@ -438,12 +438,18 @@
                       "type": "string",
                       "nullable": true,
                       "format": "date-time"
+                    },
+                    "recheckInMs": {
+                      "type": "integer",
+                      "nullable": true,
+                      "minimum": 0
                     }
                   },
                   "required": [
                     "items",
                     "truncated",
-                    "recheckAt"
+                    "recheckAt",
+                    "recheckInMs"
                   ]
                 }
               }
