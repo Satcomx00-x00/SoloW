@@ -3,9 +3,10 @@ import { DELIVERY_FAILED_REASON } from "@solow/core";
 import type { Db } from "@solow/db";
 import {
   appendSessionEvent,
+  finishRedelivery,
   loadTaskDeliveryContext,
   nextSessionEventSeq,
-  setTaskState,
+  readTaskState,
 } from "./data.js";
 import {
   changeRequestBody,
@@ -101,14 +102,17 @@ export async function redeliverTask(
     });
   };
 
+  // The pushes take seconds, and a Retry may have claimed the Task meanwhile: its own run owns
+  // the log and the board from then on. A link a push recorded stays — the request does exist.
   if (undelivered.length > 0) {
+    if ((await readTaskState(db, workspaceId, taskId)) !== "failed") return "not_applicable";
     await log({ kind: "notice", text: deliveryFailedNotice({ undelivered, delivered }) });
     deps.announce?.(workspaceId, taskId, "failed");
     return DELIVERY_FAILED_REASON;
   }
 
+  if (!(await finishRedelivery(db, workspaceId, taskId))) return "not_applicable";
   if (delivered.length > 0) await log({ kind: "notice", text: shippedNotice(delivered) });
-  await setTaskState(db, workspaceId, taskId, "done", { failureReason: null });
   await log({ kind: "state", from: "failed", to: "done" });
   deps.announce?.(workspaceId, taskId, "done");
   return "done";
