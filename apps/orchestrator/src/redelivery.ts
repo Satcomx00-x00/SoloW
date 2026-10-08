@@ -14,7 +14,7 @@ import {
   shipAttachment,
   shippedNotice,
 } from "./delivery.js";
-import { repositoryHostPath } from "./inngest/functions/task-run.js";
+import { repositoryHostPath } from "./inngest/functions/task-run/prepare.js";
 import type { CloneCredential } from "./worktree/manager.js";
 
 /**
