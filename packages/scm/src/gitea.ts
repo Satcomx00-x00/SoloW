@@ -129,7 +129,8 @@ interface GiteaPull {
   state: "open" | "closed";
   merged: boolean;
   html_url: string;
-  head: { ref: string };
+  /** `repo` is null when the fork a request came from has since been deleted. */
+  head: { ref: string; repo?: { full_name: string } | null };
   base: { ref: string };
   user: { login: string } | null;
 }
@@ -197,16 +198,20 @@ function normalizeColor(color: string | null): string | null {
 const PULL_PAGE_SIZE = 50;
 
 /**
- * The open pull request whose head is `head`, read page by page.
+ * The open pull request whose head is `head` *in `repo` itself*, read page by page.
  *
  * Gitea's list has no head filter, so the open ones are matched here, and one page was not
  * enough: a repository with more open requests than a page holds got a duplicate for a branch
  * whose request sat on the next page. The walk stops on an *empty* page rather than a short one,
  * because an instance caps `limit` at its own maximum whatever the client asks for.
+ *
+ * The head repository is compared as well as the branch name: anyone may open a request from a
+ * fork's branch of the same name, and taking that for ours links the Task to someone else's code.
  */
 async function findOpenPull(
   root: string,
   headers: Record<string, string>,
+  repo: RepoRef,
   head: string,
 ): Promise<GiteaPull | undefined> {
   for (let page = 1; page <= ISSUE_PAGE_CAP; page++) {
@@ -216,7 +221,9 @@ async function findOpenPull(
       headers,
     )) as GiteaPull[];
     if (!Array.isArray(rows) || rows.length === 0) return undefined;
-    const match = rows.find((r) => r.head.ref === head);
+    const match = rows.find(
+      (r) => r.head.ref === head && r.head.repo?.full_name.toLowerCase() === repo.toLowerCase(),
+    );
     if (match) return match;
   }
   return undefined;
@@ -455,7 +462,7 @@ export class GiteaProvider implements ChangeProvider {
       baseRef: r.base.ref,
       authorLogin: r.user?.login ?? null,
     });
-    const existing = await findOpenPull(root, headers, input.head);
+    const existing = await findOpenPull(root, headers, repo, input.head);
     // Already open: the push that preceded this is the update. Its title and description are
     // left as they are, because by now they may be a reviewer's words rather than ours.
     if (existing) return { changeRequest: toExternal(existing), created: false };
