@@ -2,10 +2,16 @@ import "server-only";
 import {
   CommonErrorCode,
   err,
+  HISTORY_RETENTION_DAY_OPTIONS,
+  HISTORY_RETENTION_DEFAULT_DAYS,
+  type HistoryRetentionDto,
+  type HistoryRetentionPreviewDto,
   ok,
+  type PreviewHistoryRetentionInput,
   type RenameWorkspaceInput,
   type ResetWorkspaceInput,
   type Result,
+  type SetHistoryRetentionInput,
   type SetupStepDto,
   type SyncRequestDto,
   type SyncStatusDto,
@@ -20,6 +26,7 @@ import {
   type FlagKey,
   harnessCatalog,
   harnessProfile,
+  previewHistoryPrune,
   repository,
   resetWorkspace,
   secret,
@@ -196,6 +203,52 @@ export async function renameWorkspace(
   const row = updated[0];
   if (!row) return err(CommonErrorCode.NotFound);
   return ok({ id: row.id, name: row.name, createdAt: row.createdAt });
+}
+
+/**
+ * How long a finished Task keeps its transcript (Decision 0032). The orchestrator's hourly
+ * retention sweep is what acts on it; this only reads and writes the Workspace's choice.
+ */
+export async function getHistoryRetention(
+  ctx: RequestContext,
+): Promise<Result<HistoryRetentionDto>> {
+  const [row] = await ctx.db
+    .select({ days: workspace.historyRetentionDays })
+    .from(workspace)
+    .where(eq(workspace.id, ctx.workspaceId))
+    .limit(1);
+  if (!row) return err(CommonErrorCode.NotFound);
+  return ok({
+    // A value outside the offered list can only have been written by hand; reading it as the
+    // default rather than failing keeps Settings usable, and the next save puts it right.
+    days:
+      row.days === null || (HISTORY_RETENTION_DAY_OPTIONS as readonly number[]).includes(row.days)
+        ? (row.days as HistoryRetentionDto["days"])
+        : HISTORY_RETENTION_DEFAULT_DAYS,
+    defaultDays: HISTORY_RETENTION_DEFAULT_DAYS,
+    options: [...HISTORY_RETENTION_DAY_OPTIONS],
+  });
+}
+
+export async function setHistoryRetention(
+  ctx: RequestContext,
+  input: SetHistoryRetentionInput,
+): Promise<Result<HistoryRetentionDto>> {
+  const updated = await ctx.db
+    .update(workspace)
+    .set({ historyRetentionDays: input.days, updatedAt: new Date().toISOString() })
+    .where(eq(workspace.id, ctx.workspaceId))
+    .returning({ id: workspace.id });
+  if (updated.length === 0) return err(CommonErrorCode.NotFound);
+  return getHistoryRetention(ctx);
+}
+
+/** What a window would remove if the sweep ran now — read by Settings before a save. */
+export async function previewHistoryRetention(
+  ctx: RequestContext,
+  input: PreviewHistoryRetentionInput,
+): Promise<Result<HistoryRetentionPreviewDto>> {
+  return ok(previewHistoryPrune(ctx.db, ctx.workspaceId, input.days));
 }
 
 /** How many rows of one kind this Workspace has. */

@@ -1,7 +1,11 @@
 import "server-only";
 import {
+  historyRetentionDto,
+  historyRetentionPreviewDto,
+  previewHistoryRetentionInput,
   renameWorkspaceInput,
   resetWorkspaceInput,
+  setHistoryRetentionInput,
   syncRequestDto,
   syncStatusDto,
   workspaceCountsDto,
@@ -11,12 +15,15 @@ import {
 } from "@solow/contracts";
 import { workspaceCounts } from "../dal/counts.js";
 import {
+  getHistoryRetention,
   getSyncStatus,
   getWorkspace,
   getWorkspaceSetup,
+  previewHistoryRetention,
   renameWorkspace,
   requestWorkspaceSync,
   resetWorkspaceData,
+  setHistoryRetention,
 } from "../dal/workspace.js";
 import {
   rateLimit,
@@ -63,6 +70,56 @@ export const workspaceRouter = router({
     .input(renameWorkspaceInput)
     .output(workspaceDto)
     .mutation(async ({ ctx, input }) => unwrap(await renameWorkspace(ctx.rctx, input))),
+
+  /** How long a finished Task keeps its transcript (Decision 0032). */
+  historyRetention: sessionProcedure
+    .meta({
+      openapi: {
+        method: "GET",
+        path: "/workspace.historyRetention",
+        tags: ["workspace"],
+        protect: true,
+        summary:
+          "How many days a finished (Done or deleted) Task keeps its transcript before the hourly retention sweep removes it; null keeps it forever. Sessions, reviews, decisions, state changes and token usage are always kept.",
+      },
+    })
+    .input(workspaceDto.pick({}).optional())
+    .output(historyRetentionDto)
+    .query(async ({ ctx }) => unwrap(await getHistoryRetention(ctx.rctx))),
+
+  setHistoryRetention: sessionProcedure
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/workspace.setHistoryRetention",
+        tags: ["workspace"],
+        protect: true,
+        summary:
+          "Choose how many days a finished Task keeps its transcript — one of the offered windows, or null to keep it forever. Takes effect on the next hourly retention sweep.",
+      },
+    })
+    .input(setHistoryRetentionInput)
+    .output(historyRetentionDto)
+    .mutation(async ({ ctx, input }) => unwrap(await setHistoryRetention(ctx.rctx, input))),
+
+  /**
+   * What a window would remove if the sweep ran now. A query, and a cheap one: it counts, it
+   * never deletes, so Settings can ask it for each window the Owner considers before saving.
+   */
+  previewHistoryRetention: sessionProcedure
+    .meta({
+      openapi: {
+        method: "GET",
+        path: "/workspace.previewHistoryRetention",
+        tags: ["workspace"],
+        protect: true,
+        summary:
+          "Count what a retention window would remove if the sweep ran now: the finished Tasks and Sessions affected, the transcript events deleted, the captured diffs whose patch text is emptied, and the approximate bytes freed.",
+      },
+    })
+    .input(previewHistoryRetentionInput)
+    .output(historyRetentionPreviewDto)
+    .query(async ({ ctx, input }) => unwrap(await previewHistoryRetention(ctx.rctx, input))),
 
   /**
    * What this Workspace still needs before it can run anything, derived from the rows that

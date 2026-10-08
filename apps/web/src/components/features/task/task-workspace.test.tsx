@@ -838,6 +838,18 @@ describe("TaskWorkspace in History (Decision 0025)", () => {
     await waitFor(() => expect(log.calls.filter((c) => c.path === "task.restore")).toHaveLength(1));
   });
 
+  it("says a long-finished run's transcript was removed by retention (Decision 0032)", async () => {
+    const prunedAt = new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString();
+    renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
+      "task.get": () => task({ state: "done" }),
+      "session.listForTask": () => [{ ...session, state: "closed", eventsPrunedAt: prunedAt }],
+      "session.get": () => detail([]),
+    });
+
+    const notice = await screen.findByText(/transcript was removed by the Workspace's history/);
+    expect(notice.closest("[data-transcript-pruned]")).not.toBeNull();
+  });
+
   it("lists the sub-tasks a Restore brought back, even if the list's first read was in flight", async () => {
     // Restored moments after the page opened: the rail's first read of its sub-tasks began while
     // the Task — and so its children — were in History, and answers late with nothing.

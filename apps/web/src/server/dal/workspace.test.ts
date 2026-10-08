@@ -13,11 +13,14 @@ import { createTestDb, type TestDb } from "@solow/db/testing";
 import { eq } from "drizzle-orm";
 import { ctxFor, seedWorkspaceGraph } from "./test-fixtures.js";
 import {
+  getHistoryRetention,
   getSyncStatus,
   getWorkspace,
   getWorkspaceFlags,
   getWorkspaceSetup,
+  previewHistoryRetention,
   renameWorkspace,
+  setHistoryRetention,
 } from "./workspace.js";
 
 /**
@@ -416,5 +419,48 @@ describe("getWorkspaceFlags", () => {
 
   it("reads a Workspace that does not exist as no overrides", async () => {
     expect(await getWorkspaceFlags(db, "no-such-workspace")).toEqual({});
+  });
+});
+
+describe("history retention (Decision 0032)", () => {
+  it("starts at the default window, and stores a new one or forever for this Workspace only", async () => {
+    const mine = await bareWorkspace("Mine");
+    const theirs = await bareWorkspace("Theirs");
+
+    const initial = await getHistoryRetention(ctxFor(db, mine));
+    expect(initial.ok && initial.data).toEqual({
+      days: 30,
+      defaultDays: 30,
+      options: [7, 30, 90, 365],
+    });
+
+    const forever = await setHistoryRetention(ctxFor(db, mine), { days: null });
+    expect(forever.ok && forever.data.days).toBeNull();
+    const week = await setHistoryRetention(ctxFor(db, theirs), { days: 7 });
+    expect(week.ok && week.data.days).toBe(7);
+
+    const reread = await getHistoryRetention(ctxFor(db, mine));
+    expect(reread.ok && reread.data.days).toBeNull();
+  });
+
+  it("reads a hand-written value outside the offered windows as the default", async () => {
+    const id = await bareWorkspace();
+    await db.update(workspace).set({ historyRetentionDays: 12 }).where(eq(workspace.id, id));
+
+    const result = await getHistoryRetention(ctxFor(db, id));
+    expect(result.ok && result.data.days).toBe(30);
+  });
+
+  it("previews nothing for a Workspace with no finished work", async () => {
+    const id = await bareWorkspace();
+
+    const result = await previewHistoryRetention(ctxFor(db, id), { days: 7 });
+    expect(result.ok && result.data).toEqual({
+      tasks: 0,
+      sessions: 0,
+      events: 0,
+      diffs: 0,
+      bytes: 0,
+    });
   });
 });
