@@ -6,11 +6,12 @@ import {
   closeGate,
   connectRepository,
   createTask,
+  deleteWorkflow,
+  expectTaskDeleted,
   gateButton,
   openTask,
   openTaskReadyToDelete,
   stepHeader,
-  trpcSettled,
 } from "../support/flows.js";
 
 /**
@@ -387,18 +388,14 @@ test.describe("branching control check — conditions, a loop, and a gate in the
       // harness or a dependant, and this Task has neither. Its Issue is in no Project, so the
       // delete lands on the unassigned list — a route this check has not visited until now.
       await openTaskReadyToDelete(page, { taskId, title: taskTitle, destination: "/unassigned" });
-      const deleted = trpcSettled(page, "task.delete");
       await page.getByRole("button", { name: `Delete ${taskTitle}` }).click();
-      await deleted;
+      await expectTaskDeleted(page, taskId, true);
       await expect(page).not.toHaveURL(new RegExp(`/task/${taskId}$`), { timeout: 90_000 });
       await page.goto(`/issues/${issueId}`);
       await page.getByRole("button", { name: "Delete issue" }).click();
       await page.getByRole("alertdialog").getByRole("button", { name: "Delete issue" }).click();
       await expect(page).not.toHaveURL(new RegExp(`/issues/${issueId}$`));
-      await page.goto(`/workflows/${workflowId}`);
-      await page.getByRole("button", { name: "Delete workflow", exact: true }).click();
-      await page.getByRole("alertdialog").getByRole("button", { name: "Delete workflow" }).click();
-      await expect(page.getByRole("link", { name: new RegExp(workflowName) })).toHaveCount(0);
+      await deleteWorkflow(page, workflowId, workflowName);
       const branch = `solow-task-${taskId}`;
       await expect.poll(() => git(["worktree", "list"])).not.toContain(branch);
       git(["branch", "-D", branch]);

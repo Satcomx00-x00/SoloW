@@ -126,33 +126,20 @@ export async function openTask(page: Page, issueId: string, title: string): Prom
 }
 
 /**
- * Resolves once a call the SPA itself makes to `procedure` has finished on the server — the
- * whole streamed body, not just the headers, which `httpBatchStreamLink` sends before the
- * procedure has run. Start it before the click that makes the call.
- *
- * What the delete specs wait on instead of the page: an Undo pressed and then navigated away
- * from can be aborted before it reaches the server, and a slow navigation after a delete reads
- * the same as a delete that never happened unless the call is awaited first.
+ * Wait until the server says the Task is in History (`deleted`) or live again — the outcome,
+ * not the network. A tRPC batch's body is cancelled by the client once it has parsed every
+ * result, so a call the server answered can still read as aborted to the browser, and no
+ * request event tells "done" from "never reached the server".
  */
-export function trpcSettled(page: Page, procedure: string): Promise<void> {
-  /*
-   * `requestfinished`, not the first matching response: React Query cancels and re-issues a
-   * batch while a page settles, and an aborted streamed response's `finished()` never resolves —
-   * the spec would wait on a call that was replaced. `requestfinished` fires only for a request
-   * whose whole body arrived; an aborted one fires `requestfailed` and is skipped here.
-   */
-  return page
-    .waitForEvent("requestfinished", {
-      predicate: async (req) => {
-        const { pathname } = new URL(req.url());
-        // A batch names every procedure in one path: `/api/trpc/task.get,project.forIssue`.
-        if (!pathname.startsWith("/api/trpc/")) return false;
-        if (!pathname.slice("/api/trpc/".length).split(",").includes(procedure)) return false;
-        return (await req.response())?.ok() ?? false;
-      },
-      timeout: 60_000,
-    })
-    .then(() => undefined);
+export async function expectTaskDeleted(page: Page, taskId: string, deleted: boolean) {
+  await expect
+    .poll(
+      async () =>
+        (await trpc<{ deletedAt: string | null }>(page, "task.get", { id: taskId }, "query"))
+          .deletedAt !== null,
+      { timeout: 30_000 },
+    )
+    .toBe(deleted);
 }
 
 /**
@@ -161,19 +148,33 @@ export function trpcSettled(page: Page, procedure: string): Promise<void> {
  * Two things make that navigation slow enough to fail a spec, and both are settled here. Under
  * the e2e `next dev` a route not visited in the last minute is compiled again on the next visit
  * (10–20 s, longer on a loaded runner), which can outlast the toast's ten seconds and the
- * default expect — so the destination is visited first. And where the delete goes is read from
- * `project.forIssue`, which the page asks only once the Task has loaded: pressed before it
- * answers, the delete goes to `/projects` instead of the destination that was warmed.
+ * default expect — so the destination is visited first. And where the delete goes depends on
+ * the Task's Project, which the page reads only once the Task has loaded: pressed before that,
+ * the delete goes to `/projects` — so the button's own `data-after-delete` is waited on.
  */
 export async function openTaskReadyToDelete(
   page: Page,
   opts: { taskId: string; title: string; destination: string },
 ): Promise<void> {
   await page.goto(opts.destination);
-  const destinationKnown = trpcSettled(page, "project.forIssue");
   await page.goto(`/task/${opts.taskId}`);
   await expect(page.getByRole("heading", { name: opts.title })).toBeVisible();
-  await destinationKnown;
+  await expect(
+    page.getByRole("button", { name: `Delete ${opts.title}`, exact: true }),
+  ).toHaveAttribute("data-after-delete", opts.destination);
+}
+
+/**
+ * Delete a Workflow from its own page. The control is in the inspector's Properties tab — the
+ * panel opens on the Outline, which holds the Steps — and the confirm is the alertdialog's own.
+ */
+export async function deleteWorkflow(page: Page, workflowId: string, name: string): Promise<void> {
+  await page.goto(`/workflows/${workflowId}`);
+  const inspector = page.getByRole("complementary", { name: "Workflow" });
+  await inspector.getByRole("tab", { name: "Properties" }).click();
+  await inspector.getByRole("button", { name: "Delete workflow", exact: true }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Delete workflow" }).click();
+  await expect(page.getByRole("link", { name: new RegExp(name) })).toHaveCount(0);
 }
 
 /**

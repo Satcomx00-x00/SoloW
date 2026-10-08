@@ -1862,6 +1862,9 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
                 trigger={(press, busy) => (
                   <Button
                     aria-label={`Delete ${t.title}`}
+                    // Where the delete will land — `back` changes once the Task's Project is
+                    // known, and the end-to-end checks wait on it rather than on the network.
+                    data-after-delete={back.href}
                     className="text-muted-foreground hover:text-destructive"
                     onClick={press}
                     loading={busy}

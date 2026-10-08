@@ -5,6 +5,8 @@ import {
   awaitWorkflowGate,
   connectRepository,
   createTask,
+  deleteWorkflow,
+  expectTaskDeleted,
   gateButton,
   openTask,
   openTaskReadyToDelete,
@@ -13,7 +15,6 @@ import {
   showStepOnBoard,
   stepHeader,
   trpc,
-  trpcSettled,
 } from "../support/flows.js";
 
 /**
@@ -102,9 +103,7 @@ test.describe("control check — the main line of the product, end to end", () =
       await page.getByRole("button", { name: "Create a project" }).first().click();
       const dialog = page.getByRole("dialog", { name: "Create a project" });
       await dialog.getByLabel("Project name").fill(projectTitle);
-      const created = trpcSettled(page, "project.createLocal");
       await dialog.getByRole("button", { name: "Create" }).click();
-      await created;
       await expect(page).toHaveURL(/\/projects\/[0-9a-f-]+/, { timeout: 90_000 });
       projectId = new URL(page.url()).pathname.split("/")[2] ?? "";
       expect(projectId).not.toBe("");
@@ -355,19 +354,16 @@ test.describe("control check — the main line of the product, end to end", () =
       // once, to prove the toast means it; then delete for real.
       const ready = { taskId, title: taskTitle, destination: `/projects/${projectId}/board` };
       await openTaskReadyToDelete(page, ready);
-      const deleted = trpcSettled(page, "task.delete");
       await page.getByRole("button", { name: `Delete ${taskTitle}` }).click();
-      await deleted;
+      await expectTaskDeleted(page, taskId, true);
       const toast = page.getByRole("status").filter({ hasText: `Deleted "${taskTitle}"` });
-      // Settled before the next `goto`, which would otherwise abort the restore in flight.
-      const restored = trpcSettled(page, "task.restore");
       await toast.getByRole("button", { name: "Undo" }).click();
-      await restored;
+      // Settled on the server before the next `goto`, so the restore is not left in flight.
+      await expectTaskDeleted(page, taskId, false);
       await openTaskReadyToDelete(page, ready);
       await expect(page.locator("[data-task-deleted]")).toHaveCount(0);
-      const deletedForReal = trpcSettled(page, "task.delete");
       await page.getByRole("button", { name: `Delete ${taskTitle}` }).click();
-      await deletedForReal;
+      await expectTaskDeleted(page, taskId, true);
       // The board was compiled moments ago, but a loaded runner can still be slow to serve it.
       await expect(page).not.toHaveURL(new RegExp(`/task/${taskId}$`), { timeout: 90_000 });
 
@@ -376,12 +372,7 @@ test.describe("control check — the main line of the product, end to end", () =
       await page.getByRole("alertdialog").getByRole("button", { name: "Delete issue" }).click();
       await expect(page).not.toHaveURL(new RegExp(`/issues/${issueId}$`));
 
-      await page.goto(`/workflows/${workflowId}`);
-      // The sidebar's own control for the pipeline; the inspector's is behind a panel that may
-      // still be loading the Steps.
-      await page.getByRole("button", { name: "Delete workflow", exact: true }).click();
-      await page.getByRole("alertdialog").getByRole("button", { name: "Delete workflow" }).click();
-      await expect(page.getByRole("link", { name: new RegExp(workflowName) })).toHaveCount(0);
+      await deleteWorkflow(page, workflowId, workflowName);
 
       await page.goto(`/projects/${projectId}`);
       await page.getByRole("button", { name: "Delete", exact: true }).click();

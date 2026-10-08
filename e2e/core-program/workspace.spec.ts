@@ -9,6 +9,7 @@ import {
   closeGate,
   connectRepository,
   createTask,
+  expectTaskDeleted,
   gateButton,
   launchTask,
   launchToReview,
@@ -18,7 +19,6 @@ import {
   openWorkspaceTab,
   sessionLog,
   taskIdOnPage,
-  trpcSettled,
 } from "../support/flows.js";
 import { seedIssue, seedIssueWithBrief } from "../support/seed.js";
 
@@ -306,21 +306,19 @@ test.describe("the Task page", () => {
     // No dialog for a Task with no run and nothing waiting on it: it goes on the press, with
     // Undo on the toast — and Undo means it. Undo is pressed before the navigation is waited
     // out: the toast's ten seconds run from the delete, not from the arrival.
-    const deleted = trpcSettled(page, "task.delete");
     await page.getByRole("button", { name: `Delete ${taskTitle}` }).click();
-    await deleted;
+    await expectTaskDeleted(page, taskId, true);
     const toast = page.getByRole("status").filter({ hasText: `Deleted "${taskTitle}"` });
-    const restored = trpcSettled(page, "task.restore");
     await toast.getByRole("button", { name: "Undo" }).click();
-    await restored;
+    // Settled on the server before the next `goto`, so the restore is not left in flight.
+    await expectTaskDeleted(page, taskId, false);
     await expect(page).not.toHaveURL(new RegExp(`/task/${taskId}$`), { timeout: 90_000 });
     await openTaskReadyToDelete(page, ready);
     await expect(page.locator("[data-task-deleted]")).toHaveCount(0);
 
     // Deleted for real, the page says so and offers Restore, and nothing else acts on it.
-    const deletedForReal = trpcSettled(page, "task.delete");
     await page.getByRole("button", { name: `Delete ${taskTitle}` }).click();
-    await deletedForReal;
+    await expectTaskDeleted(page, taskId, true);
     await expect(page).not.toHaveURL(new RegExp(`/task/${taskId}$`), { timeout: 90_000 });
     await page.goto(`/task/${taskId}`);
     await expect(page.locator("[data-task-deleted]")).toBeVisible();
