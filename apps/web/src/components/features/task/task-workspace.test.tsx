@@ -1816,7 +1816,7 @@ describe("TaskWorkspace todo checklist", () => {
     );
   });
 
-  it("opens on the board in every state, and takes a pick back to it when the gate opens", async () => {
+  it("opens on the board while running, and takes a pick to the review when the gate opens", async () => {
     let state: TaskDto["state"] = "running";
     const diff: SessionEventPayload = {
       kind: "diff",
@@ -1845,7 +1845,7 @@ describe("TaskWorkspace todo checklist", () => {
     fireEvent.mouseDown(screen.getByRole("tab", { name: /Changes/ }), { button: 0 });
     expect(screen.getByRole("tab", { name: /Changes/ }).getAttribute("aria-selected")).toBe("true");
 
-    // The run reaches its gate: the page goes back to the board, where the gate now is.
+    // The run reaches its gate: the page moves to the review (E7), whatever was picked.
     state = "review";
     payloads = [...payloads, diff];
     await waitFor(() => expect(sockets[0]).toBeDefined());
@@ -1857,9 +1857,26 @@ describe("TaskWorkspace todo checklist", () => {
         at: "2026-01-01T00:00:00.000Z",
       }),
     );
-    await waitFor(() => expect(board.getAttribute("aria-selected")).toBe("true"));
-    await openGate();
-    expect(await screen.findByRole("button", { name: "Approve" })).toBeDefined();
+    await waitFor(() =>
+      expect(screen.getByRole("tab", { name: /Changes/ }).getAttribute("aria-selected")).toBe(
+        "true",
+      ),
+    );
+    expect(board.getAttribute("aria-selected")).toBe("false");
+  });
+
+  it("opens a Task that is already waiting at its gate on the review", async () => {
+    renderWithTrpc(<TaskWorkspace taskId={TASK_ID} />, {
+      "task.get": () => task({ state: "review" }),
+      "session.listForTask": () => [session],
+      "session.get": () => detail([]),
+      "stream.ticket": () => ({
+        url: "ws://hub.test/?ticket=t",
+        expiresAt: "2026-01-01T00:01:00.000Z",
+      }),
+    });
+    const changes = await screen.findByRole("tab", { name: /Changes/ });
+    await waitFor(() => expect(changes.getAttribute("aria-selected")).toBe("true"));
   });
 
   it("follows the run: a list published mid-run lands without a reload", async () => {

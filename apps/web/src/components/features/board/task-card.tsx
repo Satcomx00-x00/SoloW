@@ -4,6 +4,7 @@ import { CheckCircle2, CornerDownRight, GitBranch, Library, Lock, Workflow } fro
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { taskHref } from "@/lib/task-href";
 import { failureReasonLabel, needsAttention, STATE_STYLE } from "@/lib/task-states";
 import { cn } from "@/lib/utils";
 import { waitingOn } from "./blockers";
@@ -178,7 +179,7 @@ export function TaskCard({
         ) : null}
         <div className="flex items-start gap-1.5">
           <Link
-            href={`/task/${task.id}`}
+            href={taskHref(task)}
             className="min-w-0 flex-1 font-medium text-sm leading-snug decoration-muted-foreground/50 underline-offset-2 hover:underline"
           >
             {task.title}

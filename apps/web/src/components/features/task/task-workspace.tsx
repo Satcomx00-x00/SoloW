@@ -866,9 +866,9 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   /**
    * Which view is showing, when the operator has said.
    *
-   * The board by default, in every state: the run, its questions and its gate are all on it. A
+   * The board by default, the Changes view when the Task waits at its gate (E7). A
    * manual pick sticks until the Task changes state — a reviewer who opened the change during the
-   * run is taken back to the board when the gate opens on it. The pick is also in the URL
+   * run is taken to the review when the gate opens. The pick is also in the URL
    * (`?tab=`), so a refresh stays put and a link to the Changes view is a link to the Changes
    * view; it is read once, on arrival, and written on every pick. An old `?tab=run` or `?tab=plan`
    * is not a view any more, and reads as no pick at all — which lands on the board, where both went.
@@ -1268,8 +1268,9 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   const branch = primary?.resultBranch ?? latest?.diffRef ?? null;
   // The gate's scope is always the latest capture; the tab may be showing an older round.
   const diffs = shownRound && shownRound.index !== latestRound ? shownRound.diffs : capturedDiffs;
-  // The board, whatever the state: the gate is a node on it (see `TaskBoard`).
-  const autoTab: WorkspaceTab = "board";
+  // The board, except at the gate: a Task waiting for a decision opens on its Changes, where the
+  // footer's Approve / Request changes already sit (E7). A pick still wins until the state moves.
+  const autoTab: WorkspaceTab = t.state === "review" ? "changes" : "board";
   // A pick from the URL has no state yet: it holds until the first state change after arrival.
   const tab =
     tabPick && (tabPick.state === null || tabPick.state === t.state) ? tabPick.tab : autoTab;
