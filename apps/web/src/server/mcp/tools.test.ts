@@ -73,17 +73,25 @@ describe("the MCP surface", () => {
     expect(exposed.some((n) => n.startsWith("stream_"))).toBe(false);
   });
 
-  it("does not let a token erase evidence", () => {
+  it("does not let a token erase evidence, finish its own Task or empty the Workspace", () => {
     const exposed = names();
     for (const withheld of [
       // Shortening the transcript window is the subject erasing its own evidence, the reason
       // `history` is withheld; the preview walks every finished transcript to size it.
       "workspace_setHistoryRetention",
       "workspace_previewHistoryRetention",
+      // Ship again and Keep local both mark an undelivered Task Done — a person's call.
+      "task_redeliver",
+      "task_keepLocal",
+      // The only write with no undo.
+      "workspace_reset",
     ]) {
       expect(exposed).not.toContain(withheld);
       expect(findMcpTool(withheld)).toBeUndefined();
     }
+    // Spend and every Task's title across the Workspace: reporting for a person, not work
+    // management, so nothing of the namespace is offered.
+    expect(exposed.some((n) => n.startsWith("outcomes_"))).toBe(false);
     // Reading the window stays exposed: it changes nothing and costs one row.
     expect(exposed).toContain("workspace_historyRetention");
   });
