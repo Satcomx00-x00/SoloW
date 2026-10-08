@@ -26,6 +26,18 @@ its own git worktree, and nothing merges without you approving the diff.
 Everything runs on your machine. The database is a local SQLite file, harness credentials are
 encrypted at rest, and nothing is sent anywhere you did not configure.
 
+## Signing in and network access
+
+A fresh install asks you to create the Owner account on your first visit, and every service
+listens on this machine only (`127.0.0.1`). Both are defaults you have to change on purpose:
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `SOLOW_BIND_HOST` | `127.0.0.1` | Interface the web app, orchestrator and Inngest listen on. `0.0.0.0` makes SoloW reachable from the network and prints a warning; put it behind TLS. |
+| `SOLOW_DEV_OWNER` | `off` | `on` skips sign-in and treats every visitor as the Owner. Development only; it is refused together with a non-loopback `SOLOW_BIND_HOST`. |
+
+The same two variables apply to `bun run dev` and `bun run start` in a source checkout.
+
 ## Requirements
 
 - **Node.js 20+** — to run `npx`.

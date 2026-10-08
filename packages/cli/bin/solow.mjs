@@ -117,6 +117,11 @@ function usage() {
     SOLOW_FETCH_BINARIES  Set to 1 to let this command download the Bun and Inngest
                           binaries when your npm skipped their install hooks. Off by
                           default: starting the app never fetches anything on its own.
+    SOLOW_BIND_HOST       Interface the web app, orchestrator and Inngest listen on
+                          (default 127.0.0.1, this machine only). Set it to 0.0.0.0 to reach
+                          SoloW from the network; a warning is printed.
+    SOLOW_DEV_OWNER       Set to on to skip sign-in (development only; refused together with
+                          a non-loopback SOLOW_BIND_HOST).
 
   On first run this creates the database, applies migrations, creates your workspace and
   generates the encryption keys — all under the data directory. Nothing leaves the machine.
@@ -377,6 +382,27 @@ function secret(dataDir, name, make) {
   return value;
 }
 
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
+
+/** The interface every service listens on. Network exposure is a choice, so it is named once. */
+function bindHost() {
+  return process.env.SOLOW_BIND_HOST || "127.0.0.1";
+}
+
+/** Called once at start: says out loud what leaving the machine means, and refuses the worst case. */
+function checkExposure() {
+  const host = bindHost();
+  if (LOOPBACK_HOSTS.has(host) || host.startsWith("127.")) return;
+  if (process.env.SOLOW_DEV_OWNER === "on") {
+    fail(
+      `SOLOW_DEV_OWNER=on with SOLOW_BIND_HOST=${host} would give everyone on the network the Owner's access. Turn one of them off.`,
+    );
+  }
+  console.warn(
+    `solow: WARNING: SOLOW_BIND_HOST=${host} exposes SoloW to the network. Anyone who can reach it can try to sign in; put it behind TLS.`,
+  );
+}
+
 function buildEnv(opts) {
   mkdirSync(opts.dataDir, { recursive: true });
   return {
@@ -398,9 +424,12 @@ function buildEnv(opts) {
     SOLOW_WEB_URL: `http://localhost:${opts.webPort}`,
     SOLOW_ORCHESTRATOR_URL: `http://localhost:${opts.wsPort}`,
     SOLOW_INNGEST_PORT: String(opts.inngestPort),
-    // Single-user local install: there is one person at this machine and they own it, so the
-    // stack binds them to the local Workspace instead of asking them to invent an account.
-    SOLOW_DEV_OWNER: process.env.SOLOW_DEV_OWNER ?? "on",
+    // Sign-in is on unless the environment says otherwise: a fresh install asks the person for
+    // an Owner account on first visit. The "every visitor is the Owner" stand-in is for
+    // development and is opt-in (SOLOW_DEV_OWNER=on), never inherited as a default.
+    SOLOW_DEV_OWNER: process.env.SOLOW_DEV_OWNER ?? "off",
+    // Loopback unless SOLOW_BIND_HOST names another interface; see bindHost() below.
+    SOLOW_BIND_HOST: bindHost(),
     SOLOW_AGENT_COMMAND: process.env.SOLOW_AGENT_COMMAND ?? "claude",
     // Inngest's own variable: a URL points the SDK at the local Dev Server below rather than
     // Inngest Cloud. Spelled out rather than left as "1", which falls back to the SDK's
@@ -518,6 +547,7 @@ async function main() {
   // so it is cheap, and without it an upgraded `npx solow` would open an old database and 500 on
   // tables that do not exist yet. Seeding stays first-run only.
   const fresh = !existsSync(env.SOLOW_SQLITE_PATH);
+  checkExposure();
   console.log(`solow ${pkg.version}  ·  data ${opts.dataDir}`);
   console.log(fresh ? "initializing database…" : "applying migrations…");
 
@@ -552,6 +582,8 @@ async function main() {
       `http://localhost:${opts.wsPort}/api/inngest`,
       "-p",
       String(opts.inngestPort),
+      "--host",
+      bindHost(),
     ],
     env,
   );
@@ -560,7 +592,7 @@ async function main() {
   start("web", bun, [join(DIST, "web", "apps", "web", "server.js")], {
     ...env,
     PORT: String(opts.webPort),
-    HOSTNAME: "127.0.0.1",
+    HOSTNAME: bindHost(),
   });
 
   const url = `http://localhost:${opts.webPort}`;

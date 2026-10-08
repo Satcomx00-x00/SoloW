@@ -125,28 +125,6 @@ curl -fsS --max-time 20 "http://localhost:$WEB_PORT/" > /dev/null || {
     exit 1
 }
 
-# And that the page it serves is the one a new install actually lands on (issue #17: "a smoke test
-# that runs the launcher in a clean container and reaches the sign-in page"). Serving *something*
-# on `/` is the weaker question, and this stack has answered it while being unusable: a 200 that
-# is a Next error boundary, or a redirect chain that never terminates, both pass the check above.
-#
-# What a new install lands on is *the app*, not a sign-in form: the launcher runs as a
-# single-user local install (`SOLOW_DEV_OWNER=on` in `bin/solow.mjs`), which binds the person at
-# the machine to the local Workspace instead of asking them to invent an account. So the first
-# check asserts the shell — its breadcrumb is server-rendered and appears on no other page — and
-# the sign-in form is exercised separately, below, with that switch off. The assertion on the
-# markup rather than the status code is what "a person can start using it" means.
-echo "==> the local owner lands on the app"
-LANDING="$(curl -fsSL --max-time 20 "http://localhost:$WEB_PORT/" || true)"
-case "$LANDING" in
-    *'aria-label="Breadcrumb"'*) ;;
-    *)
-        echo "smoke-tarball: / did not render the app shell for the local owner — a new install" >&2
-        echo "  lands on nothing usable, whatever the status code on / said." >&2
-        exit 1
-        ;;
-esac
-
 echo "==> orchestrator responds"
 # `/api/inngest` is the introspection route the Dev Server itself polls, so a 200 here means the
 # orchestrator is not merely listening but has its functions registered.
@@ -161,26 +139,63 @@ curl -fsS --max-time 20 "http://localhost:$INNGEST_PORT/" > /dev/null || {
     exit 1
 }
 
-# The other way in. A deployment that is not one person at one machine turns the local-owner
-# stand-in off, and then a fresh data directory has no Owner yet: `/sign-in` is the one-time
-# setup form — the path the deployment view says exists instead of printed credentials. Same
-# tarball, same data directory, one switch, so what is asserted is the packaged auth path and
-# nothing else.
+# And that the page it serves is the one a new install actually lands on (issue #17: "a smoke test
+# that runs the launcher in a clean container and reaches the sign-in page"). Serving *something*
+# on `/` is the weaker question, and this stack has answered it while being unusable: a 200 that
+# is a Next error boundary, or a redirect chain that never terminates, both pass the check above.
 #
-# `id="auth-password"` rather than a `name=` attribute: the field is a controlled React input with
-# no `name`, so that is the stable handle in the markup. It is server-rendered even though the
-# form is a client component, which is what makes it visible to curl at all.
-stop_stack
-BOOT_NOTE=" — sign-in on"
-boot_stack SOLOW_DEV_OWNER=off
-
-echo "==> the sign-in page renders its form"
+# A fresh install has no Owner and sign-in is on by default, so `/sign-in` is the one-time setup
+# form. `id="auth-password"` rather than a `name=` attribute: the field is a controlled React
+# input with no `name`, so that is the stable handle in the markup. It is server-rendered even
+# though the form is a client component, which is what makes it visible to curl at all.
+echo "==> a fresh install asks for the Owner account"
 SIGNIN="$(curl -fsSL --max-time 20 "http://localhost:$WEB_PORT/sign-in" || true)"
 case "$SIGNIN" in
     *'id="auth-password"'*) ;;
     *)
         echo "smoke-tarball: /sign-in did not render its password field — an install with sign-in" >&2
         echo "  on cannot be signed into, whatever the status code on / said." >&2
+        exit 1
+        ;;
+esac
+
+# The app shell must not be reachable without that account: `/projects` has to send an
+# unauthenticated visitor to `/sign-in` instead of rendering the shell.
+echo "==> the app is not open without signing in"
+GATED="$(curl -sS --max-time 20 -o /dev/null -w '%{redirect_url}' "http://localhost:$WEB_PORT/projects" || true)"
+case "$GATED" in
+    */sign-in*) ;;
+    *)
+        echo "smoke-tarball: /projects did not redirect to /sign-in on a fresh install (got: '$GATED')." >&2
+        exit 1
+        ;;
+esac
+
+# Nothing may listen beyond loopback unless asked to (B2). `ss` is Linux; skipped where absent.
+if command -v ss > /dev/null 2>&1; then
+    echo "==> services listen on loopback only"
+    for port in "$WEB_PORT" "$WS_PORT" "$INNGEST_PORT"; do
+        if ss -ltn "sport = :$port" | grep LISTEN | grep -qvE '127\.0\.0\.1:|\[::1\]:'; then
+            echo "smoke-tarball: port $port listens beyond loopback by default." >&2
+            ss -ltn "sport = :$port" >&2
+            exit 1
+        fi
+    done
+fi
+
+# The other way in. A single-user machine can opt into the development stand-in that binds the
+# person at the keyboard to the local Workspace (`SOLOW_DEV_OWNER=on`). Same tarball, same data
+# directory, one switch, so what is asserted is that the opt-in still works and nothing else.
+stop_stack
+BOOT_NOTE=" — dev owner on"
+boot_stack SOLOW_DEV_OWNER=on
+
+echo "==> the local owner lands on the app"
+LANDING="$(curl -fsSL --max-time 20 "http://localhost:$WEB_PORT/" || true)"
+case "$LANDING" in
+    *'aria-label="Breadcrumb"'*) ;;
+    *)
+        echo "smoke-tarball: / did not render the app shell with SOLOW_DEV_OWNER=on." >&2
         exit 1
         ;;
 esac

@@ -699,6 +699,7 @@ export function startWebSocketServer(
 
   return Bun.serve<WsData | TerminalWsData>({
     port,
+    hostname: orchestratorEnv().SOLOW_BIND_HOST,
     async fetch(req, server) {
       const { pathname } = new URL(req.url);
       // The two HTTP routes the durable engine needs (Decision 0004), handled before the
