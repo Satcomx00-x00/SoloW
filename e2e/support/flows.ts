@@ -135,8 +135,14 @@ export async function expectTaskDeleted(page: Page, taskId: string, deleted: boo
   await expect
     .poll(
       async () =>
-        (await trpc<{ deletedAt: string | null }>(page, "task.get", { id: taskId }, "query"))
-          .deletedAt !== null,
+        (
+          await trpc<{ deletedAt: string | null }>(
+            page,
+            "task.get",
+            { id: taskId, includeDeleted: true },
+            "query",
+          )
+        ).deletedAt !== null,
       { timeout: 30_000 },
     )
     .toBe(deleted);
