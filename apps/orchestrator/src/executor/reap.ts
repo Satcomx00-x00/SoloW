@@ -236,9 +236,9 @@ export async function reapOrphanedContainers(
  * for a `parked` Task, carrying this process's epoch and the newest Session's id, survived a sweep
  * that returned 0 and was removed by the next one after `reportStrandedParks` had spoken.
  *
- * **A `parked` row is never moved by its own run**, so pairing the state with the reason is not
- * cover on its own. A woken run does its next round with the row still reading `parked`
- * throughout, and nothing in the orchestrator used to clear `failureReason` for a parked Task —
+ * **A `parked` row is not moved by its own run until it gets a slot**, so pairing the state with
+ * the reason is not cover on its own. A woken run reads `parked` for as long as its Profile is
+ * full (a row that left `parked` while it slept makes it stand down), and nothing in the orchestrator used to clear `failureReason` for a parked Task —
  * so an overtaken stamp stayed readable here across every gap between durable steps, for as long
  * as it took an operator to move the card.
  *

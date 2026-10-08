@@ -6,8 +6,10 @@ import type { OrchestratorHealthReport, ServiceHealthDto } from "@solow/contract
  * engine is down looks healthy everywhere else until a run never starts.
  *
  * Unauthenticated on purpose, like any liveness route: a supervisor or the web app must be able
- * to ask without a ticket, and the answer carries no Task data and no secret — only whether two
- * services answered, and the engine's error in a few words.
+ * to ask without a ticket, and the answer carries no Task data, no secret and no address — only
+ * whether two services answered, and the engine's error in a few words. Being open is also why
+ * the engine probe is shared for a few seconds: one outbound request per inbound one would let
+ * anyone who can reach the port make this process hammer the engine.
  */
 
 /** How long the engine gets to answer before it is reported unreachable. */
@@ -51,9 +53,30 @@ export async function probeEngine(
       state: "unreachable",
       detail: timedOut
         ? `engine did not answer within ${timeoutMs / 1000}s`
-        : `engine refused the connection (${url})`,
+        : "engine refused the connection",
     };
   }
+}
+
+/** How long one engine probe answers for every `/health` request. */
+export const ENGINE_PROBE_CACHE_MS = 5_000;
+
+/**
+ * Share one probe's answer for `ttlMs`, and one in-flight probe among the callers that arrive
+ * while it runs. Five seconds is shorter than any supervisor's interval, so a check still sees
+ * an outage within one tick of it starting.
+ */
+export function cachedProbe(
+  probe: () => Promise<ServiceHealthDto>,
+  ttlMs = ENGINE_PROBE_CACHE_MS,
+  now: () => number = Date.now,
+): () => Promise<ServiceHealthDto> {
+  let last: { at: number; answer: Promise<ServiceHealthDto> } | null = null;
+  return () => {
+    if (last && now() - last.at < ttlMs) return last.answer;
+    last = { at: now(), answer: probe() };
+    return last.answer;
+  };
 }
 
 export async function handleHealthGet(probe: () => Promise<ServiceHealthDto>): Promise<Response> {

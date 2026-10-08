@@ -14,7 +14,15 @@ import { GitlabProvider } from "./gitlab.js";
 type Call = { method: string; path: string; body: unknown };
 let calls: Call[] = [];
 /** Open requests the fixture holds, in the neutral shape; each route maps it to its own. */
-let open: Array<{ n: number; head: string; base: string; title: string; body: string }> = [];
+let open: Array<{
+  n: number;
+  head: string;
+  base: string;
+  title: string;
+  body: string;
+  /** The repository the head branch lives in; a fork's request names its own. */
+  headRepo?: string;
+}> = [];
 let server: ReturnType<typeof Bun.serve>;
 
 const row = (r: (typeof open)[number], base: string) => ({
@@ -28,7 +36,7 @@ const row = (r: (typeof open)[number], base: string) => ({
   merged_at: null,
   html_url: `${base}/pr/${r.n}`,
   web_url: `${base}/pr/${r.n}`,
-  head: { ref: r.head },
+  head: { ref: r.head, repo: { full_name: r.headRepo ?? "acme/gate" } },
   base: { ref: r.base },
   source_branch: r.head,
   target_branch: r.base,
@@ -155,6 +163,25 @@ for (const d of drivers) {
       expect(calls.some((c) => c.method === "POST")).toBe(false);
       expect(calls.some((c) => c.method === d.update)).toBe(false);
     });
+
+    if (d.name === "gitea") {
+      it("does not take a fork's request for a branch of the same name as its own", async () => {
+        // Anyone can open a request from their fork's `solow/task-1`. Taken for ours, the link
+        // would point at their code, and the push to our branch would never reach a request.
+        open.push({
+          n: 1,
+          head: input.head,
+          base: "trunk",
+          title: "Theirs",
+          body: "",
+          headRepo: "mallory/gate",
+        });
+        const out = await d.make().upsertChangeRequest(credential(), "acme/gate", input);
+        expect(out.created).toBe(true);
+        expect(out.changeRequest.number).toBe(2);
+        expect(calls.some((c) => c.method === "POST")).toBe(true);
+      });
+    }
 
     it("finds the open one when many other requests are open", async () => {
       for (let n = 1; n <= 120; n++) {

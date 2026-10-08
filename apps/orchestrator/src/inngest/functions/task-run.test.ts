@@ -20,6 +20,7 @@ import {
 import { CREDENTIAL_EXPIRED_REASON, STRANDED_REVIEW_REASON } from "@solow/core";
 import { type SessionCursor, sessionCursorAt } from "@solow/core/session-log";
 import {
+  claimTaskRunSlot,
   encryptSecret,
   executorProfile,
   harnessCatalog,
@@ -756,8 +757,8 @@ describe("runTaskLifecycle (integration)", () => {
      * this run was asleep, that it was never coming back — which an engine backed up past the
      * sweep's window is enough to produce, and the sweep says as much.
      *
-     * Nothing used to take it off again. The Task stays `parked` for the whole of the round this
-     * wakes into (only an operator opening the gate moves it), and `resume-` is reached only by a
+     * Nothing used to take it off again. The Task stayed `parked` for the whole of the round this
+     * woke into (only an operator opening the gate moved it), and `resume-` is reached only by a
      * Task that got as far as `review` — so the stamp stayed readable to the container reaper
      * across every gap between this round's durable steps, and `reap.ts` reads `parked` + that
      * reason as "no run is in here". Verified on Docker 29.7.2 what that costs when the run is in
@@ -873,10 +874,14 @@ describe("runTaskLifecycle (integration)", () => {
     };
     const { deps, spies } = makeDeps(db, watched, nullStream());
 
-    await lifecycle(deps, { event: { data: ids }, step: operatorMoved });
+    const result = await lifecycle(deps, { event: { data: ids }, step: operatorMoved });
 
-    expect(runner.starts).toBe(2);
-    expect(await Promise.all(atStart)).toEqual(["running", "done"]);
+    // The operator owns the Task now: the woken run stands down instead of working a round on
+    // a Task that reads `done` (ADR 0030, one run per Task).
+    expect(runner.starts).toBe(1);
+    expect(await Promise.all(atStart)).toEqual(["running"]);
+    expect(result.result).toBe("stood_down");
+    expect(await taskState(db, ids.taskId)).toBe("done");
 
     // And the board is told once, by the park itself. The announce that follows the wake-up is
     // there to take a stranded badge off a card that is still parked; on a card the operator has
@@ -886,6 +891,167 @@ describe("runTaskLifecycle (integration)", () => {
       (p) => p.channel === `ws:${ids.workspaceId}:board` && p.event["state"] === "parked",
     );
     expect(parkedOnBoard).toHaveLength(1);
+  });
+
+  it("a run woken from a Park stands down when a Retry started another run while it slept", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const runner = new ScriptedRunner([
+      { kind: "failed", stopReason: "error", signal: { quotaExhausted: true } },
+      { kind: "completed", stopReason: "end_turn" },
+    ]);
+    const { deps, spies } = makeDeps(db, runner, nullStream());
+    const sessionB = `${ids.sessionId}-b`;
+
+    // Run A parks. While it sleeps the operator presses Retry, which is what `startTaskRun` does:
+    // claim the Task out of `parked` under the cap and open a fresh Session for run B.
+    const sleepsThroughRetry: StepLike = {
+      ...scriptedStep([]),
+      sleepUntil: async () => {
+        expect(claimTaskRunSlot(db, ids.workspaceId, ids.taskId, ["parked"]).kind).toBe("claimed");
+        await db.insert(session).values({
+          id: sessionB,
+          workspaceId: ids.workspaceId,
+          taskId: ids.taskId,
+          state: "active",
+        });
+      },
+    };
+    const announcedBefore = () =>
+      spies.published.filter((p) => p.channel.endsWith(":board")).length;
+
+    const a = await lifecycle(deps, { event: { data: ids }, step: sleepsThroughRetry });
+    const announcedByA = announcedBefore();
+
+    // A ends without a harness round, without writing the Task, and without telling the board.
+    expect(a.result).toBe("stood_down");
+    expect(runner.starts).toBe(1);
+    expect(await taskState(db, ids.taskId)).toBe("running");
+    const logOf = async (sessionId: string) =>
+      (await db.select().from(sessionEvent).where(eq(sessionEvent.sessionId, sessionId))).map(
+        (row) => row.payload as { kind: string; text?: string; from?: string; to?: string },
+      );
+    const aLog = await logOf(ids.sessionId);
+    expect(aLog.some((p) => p.kind === "state" && p.from === "parked")).toBe(false);
+    expect(aLog.filter((p) => p.kind === "notice" && p.text?.includes("stood down"))).toHaveLength(
+      1,
+    );
+    expect(await logOf(sessionB)).toEqual([]);
+
+    // B is the only run: it works its round and reaches the gate.
+    const b = await lifecycle(deps, {
+      event: { data: { ...ids, sessionId: sessionB } },
+      step: scriptedStep(["approve"]),
+    });
+    expect(runner.starts).toBe(2);
+    expect(b.result).toBe("done");
+    expect(announcedByA).toBe(1); // A's park, and nothing after it.
+  });
+
+  it("a run woken from a Park takes its concurrency slot back before its next round", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const runner = new ScriptedRunner([
+      { kind: "failed", stopReason: "error", signal: { quotaExhausted: true } },
+      { kind: "completed", stopReason: "end_turn" },
+    ]);
+    // A slot is a row reading `running`. A woken round that kept reading `parked` ran a whole
+    // harness that no other start counted, so the cap held for every Task but this one.
+    const atStart: Array<Promise<string>> = [];
+    const watched: HarnessRunner = {
+      start: (opts) => {
+        atStart.push(taskState(db, ids.taskId));
+        return runner.start(opts);
+      },
+    };
+    const { deps, spies } = makeDeps(db, watched, nullStream());
+
+    const result = await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    expect(await Promise.all(atStart)).toEqual(["running", "running"]);
+    const transitions = (
+      await db
+        .select()
+        .from(sessionEvent)
+        .where(eq(sessionEvent.sessionId, ids.sessionId))
+        .orderBy(asc(sessionEvent.seq))
+    )
+      .map((row) => row.payload as { kind: string; from?: string; to?: string })
+      .filter((p) => p.kind === "state")
+      .map((p) => `${p.from}->${p.to}`);
+    expect(transitions).toContain("parked->running");
+    expect(
+      spies.published.some(
+        (p) => p.channel === `ws:${ids.workspaceId}:board` && p.event["state"] === "running",
+      ),
+    ).toBe(true);
+    expect(result.result).toBe("done");
+  });
+
+  it("a run woken from a Park while its Profile is full waits for a slot, then runs", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    await db
+      .update(harnessProfile)
+      .set({ concurrencyCap: 1 })
+      .where(eq(harnessProfile.id, `harness-${ids.taskId}`));
+    const other = `${ids.taskId}-other`;
+    const runner = new ScriptedRunner([
+      { kind: "failed", stopReason: "error", signal: { quotaExhausted: true } },
+      { kind: "completed", stopReason: "end_turn" },
+    ]);
+    const runningOnProfile = async () =>
+      (
+        await db
+          .select({ id: task.id })
+          .from(task)
+          .where(and(eq(task.agentProfileId, `harness-${ids.taskId}`), eq(task.state, "running")))
+      ).length;
+
+    // Another Task of the same Profile takes the only slot while this one sleeps out its quota
+    // window, and finishes during the first short retry.
+    const sleeps: string[] = [];
+    const step: StepLike = {
+      ...scriptedStep(["approve"]),
+      sleepUntil: async (id) => {
+        sleeps.push(id);
+        if (id.startsWith("park-wait-")) {
+          await db.insert(task).values({
+            id: other,
+            workspaceId: ids.workspaceId,
+            issueId: `issue-${ids.taskId}`,
+            title: "the other one",
+            state: "running",
+            agentProfileId: `harness-${ids.taskId}`,
+            executorProfileId: `exec-${ids.taskId}`,
+          });
+        } else {
+          expect(await taskState(db, ids.taskId)).toBe("parked");
+          await db.update(task).set({ state: "done" }).where(eq(task.id, other));
+        }
+      },
+    };
+    const atStart: Array<Promise<number>> = [];
+    const watched: HarnessRunner = {
+      start: (opts) => {
+        atStart.push(runningOnProfile());
+        return runner.start(opts);
+      },
+    };
+    const { deps } = makeDeps(db, watched, nullStream());
+
+    const result = await lifecycle(deps, { event: { data: ids }, step });
+
+    expect(sleeps).toEqual(["park-wait-0", "park-claim-wait-0-0"]);
+    // Never more harnesses on the Profile than its cap, the woken round included.
+    expect(await Promise.all(atStart)).toEqual([1, 1]);
+    const notices = (
+      await db.select().from(sessionEvent).where(eq(sessionEvent.sessionId, ids.sessionId))
+    )
+      .map((row) => row.payload as { kind: string; text?: string })
+      .filter((p) => p.kind === "notice" && p.text?.includes("concurrency cap"));
+    expect(notices).toHaveLength(1);
+    expect(result.result).toBe("done");
   });
 
   it("hard failure → Task Failed with the worktree preserved (not cleaned)", async () => {

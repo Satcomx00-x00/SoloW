@@ -248,7 +248,8 @@
                             "ok",
                             "unreachable",
                             "not_configured",
-                            "unknown"
+                            "unknown",
+                            "outdated"
                           ]
                         },
                         "detail": {
@@ -270,7 +271,8 @@
                             "ok",
                             "unreachable",
                             "not_configured",
-                            "unknown"
+                            "unknown",
+                            "outdated"
                           ]
                         },
                         "detail": {

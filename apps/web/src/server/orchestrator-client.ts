@@ -268,6 +268,15 @@ export const orchestrator: OrchestratorClient = {
         checkedAt,
       };
     }
+    // An orchestrator from before its health route answers every plain GET with 426 ("websocket
+    // only"). That is a process that is up and older than this web app, not one that is down.
+    if (res.status === 426) {
+      return {
+        orchestrator: { state: "outdated", detail: "orchestrator answered 426" },
+        engine: unasked,
+        checkedAt,
+      };
+    }
     if (!res.ok) {
       return {
         orchestrator: { state: "unreachable", detail: `orchestrator answered ${res.status}` },

@@ -299,6 +299,56 @@ describe("Ship again", () => {
     expect(await log()).toEqual([]);
   });
 
+  it("does not finish a Task that a Retry took into running while the push was in flight", async () => {
+    // The precondition is read before the pushes; a Retry claiming the Task during them must not
+    // be overwritten to done while its harness runs.
+    await seed({});
+    const push = deps().push;
+    const interleaved: RedeliveryDeps = {
+      ...deps(),
+      push: async (...args) => {
+        await db
+          .update(task)
+          .set({ state: "running", failureReason: null })
+          .where(eq(task.id, TASK));
+        await push(...args);
+      },
+    };
+
+    const result = await redeliverTask(interleaved, { workspaceId: WS, taskId: TASK });
+
+    expect(result).toBe("not_applicable");
+    expect((await taskRow())?.state).toBe("running");
+    const events = await log();
+    expect(events.some((e) => e.kind === "state")).toBe(false);
+    expect(events.some((e) => e.kind === "notice")).toBe(false);
+    expect(announced).toEqual([]);
+    // The push did land and the request exists on the forge, so its link stays recorded: dropping
+    // it would hide an open request, and the Retry's own approval re-points the same branch.
+    expect((await attachment())?.changeRequestUrl).toBe("https://forge.example/acme/gate/pull/7");
+  });
+
+  it("says nothing about a refused push for a Task that moved on meanwhile", async () => {
+    await seed({});
+    const interleaved: RedeliveryDeps = {
+      ...deps(),
+      push: async () => {
+        await db
+          .update(task)
+          .set({ state: "running", failureReason: null })
+          .where(eq(task.id, TASK));
+        throw new Error("remote: Permission denied");
+      },
+    };
+
+    const result = await redeliverTask(interleaved, { workspaceId: WS, taskId: TASK });
+
+    expect(result).toBe("not_applicable");
+    expect((await taskRow())?.state).toBe("running");
+    expect(await log()).toEqual([]);
+    expect(announced).toEqual([]);
+  });
+
   it("leaves a local attachment alone and ships the remote one", async () => {
     await seed({ withLocal: true });
 

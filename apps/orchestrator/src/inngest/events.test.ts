@@ -145,7 +145,11 @@ describe("handleEventPost", () => {
 
       const res = await handleEventPost(post(valid, "Bearer short"), weak);
       expect(res.status).toBe(503);
-      expect(await res.text()).toContain("at least 16 characters");
+      // The rule a secret must meet goes to the log, not to an unauthenticated caller.
+      const text = await res.text();
+      expect(text).not.toContain("16");
+      expect(text).not.toContain("SOLOW_ORCHESTRATOR_SECRET");
+      expect(text).toBe("not accepting events");
       expect(calls).toEqual([]);
     });
   });

@@ -1,4 +1,5 @@
-import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
+import { integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 /**
  * BetterAuth tables (task TASK-011, plan §"Auth"). Shape dictated by BetterAuth's core schema —
@@ -17,15 +18,28 @@ import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 /** Millisecond timestamps — what BetterAuth's SQLite adapter reads and writes as `Date`. */
 const timestamp = (column: string) => integer(column, { mode: "timestamp_ms" });
 
-export const authUser = sqliteTable("auth_user", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  email: text("email").notNull().unique(),
-  emailVerified: integer("email_verified", { mode: "boolean" }).notNull().default(false),
-  image: text("image"),
-  createdAt: timestamp("created_at").notNull(),
-  updatedAt: timestamp("updated_at").notNull(),
-});
+export const authUser = sqliteTable(
+  "auth_user",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    email: text("email").notNull().unique(),
+    emailVerified: integer("email_verified", { mode: "boolean" }).notNull().default(false),
+    image: text("image"),
+    createdAt: timestamp("created_at").notNull(),
+    updatedAt: timestamp("updated_at").notNull(),
+  },
+  () => [
+    /*
+     * One Owner per instance, held by the database rather than only by the sign-up hook. Every
+     * row indexes the same constant, so a second row is a unique violation inside the INSERT
+     * itself. The hook's count is read before BetterAuth inserts; a second process on the file,
+     * or a driver whose answers arrive late, could fit another sign-up between the two, and the
+     * first of a pair through `provisionOwnerWorkspace` took the local Workspace.
+     */
+    uniqueIndex("auth_user_single_owner").on(sql`(1)`),
+  ],
+);
 
 export const authSession = sqliteTable("auth_session", {
   id: text("id").primaryKey(),

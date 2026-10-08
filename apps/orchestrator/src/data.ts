@@ -6,6 +6,7 @@ import type {
   TaskState,
 } from "@solow/contracts";
 import { parseSessionEventPayload, sessionEventPayloadSchema } from "@solow/contracts";
+import { DELIVERY_FAILED_REASON } from "@solow/core";
 import {
   type CompactionRange,
   planCompaction,
@@ -340,6 +341,35 @@ export async function setTaskState(
       updatedAt: new Date().toISOString(),
     })
     .where(and(eq(task.workspaceId, workspaceId), eq(task.id, taskId)));
+}
+
+/**
+ * Move an approval that was waiting to ship (`failed` + `delivery_failed`) to `done`, or answer
+ * false when the Task is no longer waiting.
+ *
+ * One conditional write rather than `setTaskState`: Ship again checks the Task before its pushes,
+ * and a Retry can claim the Task into `running` while they are in flight. An unconditional write
+ * here would mark that running Task done under its own harness.
+ */
+export async function finishRedelivery(
+  db: Db,
+  workspaceId: string,
+  taskId: string,
+): Promise<boolean> {
+  const moved = await db
+    .update(task)
+    .set({ state: "done", failureReason: null, updatedAt: new Date().toISOString() })
+    .where(
+      and(
+        eq(task.workspaceId, workspaceId),
+        eq(task.id, taskId),
+        eq(task.state, "failed"),
+        eq(task.failureReason, DELIVERY_FAILED_REASON),
+        isNull(task.deletedAt),
+      ),
+    )
+    .returning({ id: task.id });
+  return moved.length > 0;
 }
 
 /**

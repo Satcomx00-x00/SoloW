@@ -61,6 +61,19 @@ describe("healthSummary", () => {
     );
     expect(summary).toMatchObject({ tone: "caution", label: "no orchestrator" });
   });
+
+  it("is a caution, not an outage, for an orchestrator older than this web app", () => {
+    // It is running and runs still start; it only predates the health check.
+    const summary = healthSummary(
+      health({
+        orchestrator: { state: "outdated", detail: "orchestrator answered 426" },
+        engine: { state: "unknown", detail: null },
+      }),
+    );
+    expect(summary).toMatchObject({ tone: "caution", label: "orchestrator outdated" });
+    expect(summary.services[0]?.text).toContain("older");
+    expect(summary.services[0]?.text).not.toContain("Not answering");
+  });
 });
 
 describe("attentionCopy", () => {

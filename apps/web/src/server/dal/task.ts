@@ -35,6 +35,7 @@ import {
   withinRetention,
 } from "@solow/core";
 import {
+  claimTaskRunSlot,
   harnessProfile,
   projectItem,
   session,
@@ -45,19 +46,7 @@ import {
   workflowStep,
   worktree,
 } from "@solow/db";
-import {
-  and,
-  asc,
-  count,
-  desc,
-  eq,
-  inArray,
-  isNotNull,
-  isNull,
-  like,
-  notInArray,
-  sql,
-} from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, like, notInArray } from "drizzle-orm";
 import type { RequestContext } from "./context.js";
 import { taskToDto } from "./mappers.js";
 import { pageAfter, pageLimit, pageOrder, pageProbe, toPage } from "./page.js";
@@ -644,18 +633,8 @@ export async function keepUndeliveredLocal(
  * Move a Task into `running` from one of `from`, but only while its Harness Profile has a slot
  * left under its concurrency cap (spec FR-017) — in one statement, or not at all.
  *
- * `claimTaskState` with the cap folded into the same conditional write. The cap used to be a
- * count read first and compared in JavaScript, then the claim; every start between the two reads
- * the same count, so N launches fired together all saw room for one more and all started (F5).
- * Here the count and the cap are subqueries of the UPDATE that takes the row, so the write that
- * fills the last slot is the one every later write's count already includes.
- *
- * A slot is a live Task of this Profile reading `running` — the row itself, not a counter beside
- * it — so there is nothing to release: every way out of `running` (the review gate, parked,
- * failed, done, ready again, History) gives the slot back by being that write, and no path can
- * forget to. `BEGIN IMMEDIATE` is for the read of the Task's Profile and the verdict on a loss:
- * it takes SQLite's write lock up front, so the other process sharing the file (the
- * orchestrator) cannot move the row between that read and the claim.
+ * The rule itself is `claimTaskRunSlot` in `@solow/db`, shared with the orchestrator's wake from
+ * a quota park so there is one cap, not two. This is the Workspace-scoped wrapper the routers use.
  *
  * On a loss, the row says which race was lost: still in `from` means the cap refused it, anything
  * else means another start or the run itself moved it first.
@@ -672,68 +651,12 @@ export async function claimTaskRun(
     | typeof TaskErrorCode.ConcurrencyCapReached
   >
 > {
-  const claimed = ctx.db.transaction(
-    (
-      tx,
-    ): Result<
-      typeof task.$inferSelect,
-      | typeof CommonErrorCode.NotFound
-      | typeof TaskErrorCode.AlreadyStarted
-      | typeof TaskErrorCode.ConcurrencyCapReached
-    > => {
-      const [current] = tx
-        .select({ state: task.state, agentProfileId: task.agentProfileId })
-        .from(task)
-        .where(and(eq(task.workspaceId, ctx.workspaceId), eq(task.id, id), liveTask()))
-        .limit(1)
-        .all();
-      if (!current) return err(CommonErrorCode.NotFound);
-
-      const holding = tx
-        .select({ n: count() })
-        .from(task)
-        .where(
-          and(
-            eq(task.workspaceId, ctx.workspaceId),
-            eq(task.agentProfileId, current.agentProfileId),
-            eq(task.state, "running"),
-            liveTask(),
-          ),
-        );
-      const cap = tx
-        .select({ cap: harnessProfile.concurrencyCap })
-        .from(harnessProfile)
-        .where(
-          and(
-            eq(harnessProfile.workspaceId, ctx.workspaceId),
-            eq(harnessProfile.id, current.agentProfileId),
-          ),
-        );
-      const [row] = tx
-        .update(task)
-        .set({ state: "running", failureReason: null, updatedAt: new Date().toISOString() })
-        .where(
-          and(
-            eq(task.workspaceId, ctx.workspaceId),
-            eq(task.id, id),
-            inArray(task.state, [...from]),
-            sql`(${holding}) < (${cap})`,
-          ),
-        )
-        .returning()
-        .all();
-      if (row) return ok(row);
-      return err(
-        from.includes(current.state)
-          ? TaskErrorCode.ConcurrencyCapReached
-          : TaskErrorCode.AlreadyStarted,
-      );
-    },
-    { behavior: "immediate" },
-  );
-  if (!claimed.ok) return claimed;
-  const attachments = await attachmentsForTasks(ctx, [claimed.data.id]);
-  return ok(taskToDto(claimed.data, attachments.get(claimed.data.id) ?? []));
+  const claimed = claimTaskRunSlot(ctx.db, ctx.workspaceId, id, from);
+  if (claimed.kind === "missing") return err(CommonErrorCode.NotFound);
+  if (claimed.kind === "cap_reached") return err(TaskErrorCode.ConcurrencyCapReached);
+  if (claimed.kind === "moved") return err(TaskErrorCode.AlreadyStarted);
+  const attachments = await attachmentsForTasks(ctx, [claimed.row.id]);
+  return ok(taskToDto(claimed.row, attachments.get(claimed.row.id) ?? []));
 }
 
 /**

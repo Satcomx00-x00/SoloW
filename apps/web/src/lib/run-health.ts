@@ -38,6 +38,12 @@ export function healthSummary(health: SystemHealthDto): HealthSummary {
       ok: false,
       text: `This web app was started without one, so runs cannot start. ${RESTART}`,
     });
+  } else if (orchestrator.state === "outdated") {
+    services.push({
+      name: "Orchestrator",
+      ok: false,
+      text: `Running, but an older version than this web app, so it cannot report on itself or the run engine. ${RESTART}`,
+    });
   } else {
     services.push({
       name: "Orchestrator",
@@ -74,6 +80,9 @@ export function healthSummary(health: SystemHealthDto): HealthSummary {
 
   if (orchestrator.state === "not_configured") {
     return { tone: "caution", label: "no orchestrator", services };
+  }
+  if (orchestrator.state === "outdated") {
+    return { tone: "caution", label: "orchestrator outdated", services };
   }
   if (orchestrator.state !== "ok") return { tone: "error", label: "orchestrator down", services };
   if (engine.state === "unreachable") return { tone: "error", label: "engine down", services };

@@ -124,6 +124,7 @@ export { schema } from "./schema.js";
 export { decryptForHarnessRun, decryptForScmSync, encryptSecret } from "./secret-store.js";
 export { allTables } from "./tables.js";
 export { cascadeDeleteTasks } from "./task-cascade.js";
+export { claimTaskRunSlot, type TaskRunClaim } from "./task-claim.js";
 export { DEFAULT_WORKFLOWS, ensureDefaultWorkflows } from "./workflow-defaults.js";
 export {
   advanceTaskWorkflow,

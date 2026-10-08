@@ -74,6 +74,19 @@ billing. This is a primary differentiator from comparable tools.
   [Domain Model](../product/04-domain-model.md)); it is recoverable, not a failure.
 - Subscription concurrency caps are enforced by orchestration alongside global concurrency
   limits.
+- A slot is a live Task reading Running, counted against the Harness Profile the *Task* names.
+  Every move into Running takes one under the cap in the same write — a start, a retry, a
+  review decision that sends the harness back to work, and a Parked run waking from its quota
+  window. A Parked Task holds no slot; on waking with its Profile full it stays Parked, says so
+  in its Session, and tries again a minute later, backing off to every ten minutes. A Parked
+  run that wakes to find its Task moved while it slept — retried, failed, deleted — stands down
+  without writing the Task: whatever moved it owns it now (one run per Task).
+- **Known limit:** a Workflow Step that names its own Harness Profile still runs on the Task's
+  Profile's slot, not the Step's. A Step boundary reached on the harness's own signal moves the
+  Step with the Task already Running, so there is no move into Running at which to claim the
+  Step's Profile; capping it there would mean a run waiting mid-pipeline while holding the
+  previous Step's slot. Until that is designed, a pipeline whose Steps use other Profiles can
+  exceed those Profiles' caps by the number of such pipelines running.
 
 ## Edge cases & failure handling
 

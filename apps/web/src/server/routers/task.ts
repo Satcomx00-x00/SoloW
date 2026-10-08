@@ -136,12 +136,15 @@ export async function startTaskRun(rctx: RequestContext, taskId: string): Promis
   // part of the same write rather than a count read before it — see `claimTaskRun` for the race
   // that let simultaneous starts all pass (F5). Clears the last run's `failureReason` as it goes.
   const updated = unwrap(await claimTaskRun(rctx, existing.id, [existing.state]));
-  const session = unwrap(await createSession(rctx, existing.id));
+  // Everything after the claim is inside the rollback: the claim holds a cap slot, and a Session
+  // that cannot be opened leaves a `running` row no harness will ever release.
+  let sessionId: string | null = null;
   try {
+    sessionId = unwrap(await createSession(rctx, existing.id)).id;
     await orchestrator.enqueueTaskRun({
       workspaceId: rctx.workspaceId,
       taskId: existing.id,
-      sessionId: session.id,
+      sessionId,
     });
   } catch (cause) {
     // Nothing will run, so the Task must not say something is. Put it back where it was and
@@ -149,7 +152,9 @@ export async function startTaskRun(rctx: RequestContext, taskId: string): Promis
     await updateTaskState(rctx, existing.id, existing.state, {
       failureReason: existing.failureReason ?? null,
     });
-    await setSessionState(rctx, session.id, "closed", { endedAt: new Date().toISOString() });
+    if (sessionId) {
+      await setSessionState(rctx, sessionId, "closed", { endedAt: new Date().toISOString() });
+    }
     throw cause;
   }
   await orchestrator.announceTask({

@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX `auth_user_single_owner` ON `auth_user` ((1));

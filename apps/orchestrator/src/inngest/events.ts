@@ -75,7 +75,9 @@ export async function handleEventPost(
         `POST /events refuses every request: ${reason}. Runs cannot be started until it is set.`,
       );
     }
-    return new Response(reason, { status: 503 });
+    // The caller is not authenticated yet, so it learns only that the route is closed; the rule
+    // the secret broke is in the log above, for the operator.
+    return new Response("not accepting events", { status: 503 });
   }
   if (!bearerMatches(req.headers.get("authorization"), configured.secret)) {
     return new Response("unauthorized", { status: 401 });

@@ -74,6 +74,9 @@ const WITHHELD_NAMESPACES = new Set([
   // below: a Step names library items by id, so a builder has to be able to read the ids — and
   // a listing carries commands, URLs and Secret *references*, never a Secret's value.
   "library",
+  // `outcomes` — spend, cycle times and every Task's title across the Workspace. Reporting for a
+  // person, not work management; a read token held by one harness has no use for the others'.
+  "outcomes",
 ]);
 
 /** Withheld one procedure at a time, inside a namespace that is otherwise exposed. */
@@ -89,6 +92,18 @@ const WITHHELD_PROCEDURES = new Set([
   "profile.harnessConfig.duplicate",
   "profile.harnessConfig.delete",
   "profile.harnessConfig.import",
+  // The transcript window is how long the evidence of a run survives: a token shortening it is
+  // the subject erasing its own evidence, the `history` reasoning above. The preview goes with
+  // it — it sizes every finished transcript, and only the Settings screen needs the answer.
+  "workspace.setHistoryRetention",
+  "workspace.previewHistoryRetention",
+  // Ship again and Keep local both end an approved, undelivered Task as Done. A harness must not
+  // mark its own Task finished; that is a person's call after the approval, like the approval.
+  "task.redeliver",
+  "task.keepLocal",
+  // Empties the Workspace, with no undo. The typed name is no protection against a client that
+  // can read the name through `workspace.get`.
+  "workspace.reset",
 ]);
 
 /** Exposed one procedure at a time, inside a namespace that is otherwise withheld. */
