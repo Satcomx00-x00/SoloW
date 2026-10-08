@@ -23,6 +23,7 @@ import type {
   task,
   taskRepository,
 } from "@solow/db";
+import { changeRequestNounFor } from "@solow/scm";
 
 type IssueRow = typeof issue.$inferSelect;
 type TaskRow = typeof task.$inferSelect;
@@ -194,6 +195,7 @@ export function repositoryToDto(
     externalFullName: row.externalFullName,
     provider: enrichment.provider,
     integrationBaseUrl: enrichment.integrationBaseUrl,
+    changeRequestNoun: changeRequestNounFor({ ...row, provider: enrichment.provider }),
     issueCount: enrichment.issueCount,
     usage: enrichment.usage ?? NO_REPOSITORY_USAGE,
     // Coalesced because the column was added to a populated table (issue #52): a row written

@@ -59,6 +59,8 @@ async function seed(opts: {
   resultBranch?: string | null;
   /** A second attachment, on a local folder with nothing to push to. */
   withLocal?: boolean;
+  /** A request an earlier approval opened, which this one's changes never reached. */
+  staleLink?: boolean;
 }): Promise<void> {
   await db.insert(workspace).values({ id: WS, name: "WS", ownerUserId: "owner" });
   await db.insert(secret).values([
@@ -138,6 +140,8 @@ async function seed(opts: {
     repositoryId: "repo",
     checkoutBranch: BRANCH,
     resultBranch: opts.resultBranch === undefined ? BRANCH : opts.resultBranch,
+    changeRequestUrl: opts.staleLink ? "https://forge.example/acme/gate/pull/3" : null,
+    changeRequestNumber: opts.staleLink ? 3 : null,
     position: 0,
   });
   if (opts.withLocal) {
@@ -271,6 +275,17 @@ describe("Ship again", () => {
     expect(pushed).toEqual([]);
     expect(upserts).toEqual([]);
     expect((await log()).find((e) => e.kind === "notice")?.text).toContain("Did not push main");
+  });
+
+  it("drops an earlier approval's link when this one did not reach it", async () => {
+    // The link says where the latest approval went; left in place it reads as shipped.
+    await seed({ staleLink: true });
+    pushFails = "remote: Permission denied";
+
+    await redeliverTask(deps(), { workspaceId: WS, taskId: TASK });
+
+    expect((await attachment())?.changeRequestUrl).toBeNull();
+    expect((await attachment())?.changeRequestNumber).toBeNull();
   });
 
   it("does nothing for a Task that is not an approval waiting to ship", async () => {

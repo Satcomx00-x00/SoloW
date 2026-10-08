@@ -283,6 +283,7 @@ describe("mappers", () => {
         externalFullName: null,
         provider: null,
         integrationBaseUrl: null,
+        changeRequestNoun: null,
         issueCount: 0,
         usage: { taskCount: 0, projectCount: 0, changeRequestCount: 0 },
         setupFilePatterns: [".env"],
@@ -315,6 +316,8 @@ describe("mappers", () => {
       expect(dto.provider).toBe("gitlab");
       expect(dto.integrationBaseUrl).toBe("https://gitlab.example.com");
       expect(dto.issueCount).toBe(7);
+      // What approval opens there, in the provider's own word — the Task page says "merge request".
+      expect(dto.changeRequestNoun).toBe("merge request");
     });
   });
 

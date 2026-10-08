@@ -1,5 +1,5 @@
 import { type Db, decryptForScmSync } from "@solow/db";
-import { cloneUsernameFor, providerManifest, providerWith } from "@solow/scm";
+import { changeRequestNounFor, cloneUsernameFor, providerWith } from "@solow/scm";
 import { setTaskRepositoryChangeRequest, type TaskRepositoryBinding } from "./data.js";
 import { worktreeNameForTask } from "./harness/claude-code-runner.js";
 import { type CloneCredential, worktreeBranch } from "./worktree/manager.js";
@@ -63,12 +63,7 @@ function scrub(text: string, token: string): string {
  */
 export function deliverable(binding: TaskRepositoryBinding): boolean {
   const { repository, scmClone } = binding;
-  return (
-    repository.source === "remote_url" &&
-    scmClone !== null &&
-    repository.externalFullName !== null &&
-    providerWith(scmClone.provider, "changeRequests") !== null
-  );
+  return changeRequestNounFor({ ...repository, provider: scmClone?.provider ?? null }) !== null;
 }
 
 /**
@@ -121,7 +116,7 @@ export async function deliverBranch(args: {
   if (!scmClone || !driver || !repoRef) throw new Error("unreachable: checked by deliverable()");
 
   const token = decryptForScmSync(scmClone.secretCiphertext);
-  const noun = providerManifest(scmClone.provider)?.changeRequestNoun ?? "pull request";
+  const noun = changeRequestNounFor({ ...repository, provider: scmClone.provider }) ?? "";
 
   try {
     await args.push(repository.location, { username: cloneUsernameFor(scmClone.provider), token });
@@ -207,6 +202,10 @@ export async function shipAttachment(
     };
   } catch (cause) {
     if (!(cause instanceof DeliveryError)) args.report?.(cause);
+    // The link says where the latest approval went. A request an earlier approval opened does
+    // not hold this one's change, and left in place it reads as shipped; Ship again finds the
+    // same request and puts the link back.
+    await setTaskRepositoryChangeRequest(db, workspaceId, args.binding.attachment.id, null);
     return {
       kind: "failed",
       branch: args.branch,

@@ -5,6 +5,7 @@ import { Copy } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { WHOLE_PAGE } from "@/lib/paged";
 import { relativeAge } from "@/lib/relative-time";
+import { DELIVERY_FAILED_REASON } from "@/lib/task-states";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
 import { DeliveryStatus } from "./delivery-status";
@@ -64,6 +65,12 @@ export function TaskMetaList({ task, session }: { task: TaskDto; session: Sessio
 /** The Task's attachments: each repository's branch, from which base, and which one is primary. */
 export function TaskRepositories({ task }: { task: TaskDto }) {
   const attachments = [...task.repositories].sort((a, b) => a.position - b.position);
+  // Already in React Query's cache on any page that has shown a repository picker.
+  const repositories = trpc.repository.list.useQuery(
+    { ...WHOLE_PAGE },
+    { enabled: attachments.some((a) => a.resultBranch !== null) },
+  );
+  const unshipped = task.state === "failed" && task.failureReason === DELIVERY_FAILED_REASON;
   if (attachments.length === 0) {
     return <p className="text-muted-foreground text-xs">No repository attached.</p>;
   }
@@ -80,7 +87,11 @@ export function TaskRepositories({ task }: { task: TaskDto }) {
             {index === 0 && attachments.length > 1 ? " · primary" : ""}
           </Muted>
           <div>
-            <DeliveryStatus attachment={attachment} />
+            <DeliveryStatus
+              attachment={attachment}
+              repository={repositories.data?.items.find((r) => r.id === attachment.repositoryId)}
+              unshipped={unshipped}
+            />
           </div>
         </li>
       ))}

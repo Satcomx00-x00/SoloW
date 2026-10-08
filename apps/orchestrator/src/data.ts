@@ -390,19 +390,19 @@ export async function setTaskRepositoryResultBranch(
  * Record the pull or merge request approval opened for an attachment's result branch (A1).
  *
  * Idempotent by construction: a redelivered approval finds the same open request and writes the
- * same url, so the replay changes nothing.
+ * same url, so the replay changes nothing. Null clears it, for an approval that did not ship.
  */
 export async function setTaskRepositoryChangeRequest(
   db: Db,
   workspaceId: string,
   attachmentId: string,
-  changeRequest: { url: string; number: number },
+  changeRequest: { url: string; number: number } | null,
 ): Promise<void> {
   await db
     .update(taskRepository)
     .set({
-      changeRequestUrl: changeRequest.url,
-      changeRequestNumber: changeRequest.number,
+      changeRequestUrl: changeRequest?.url ?? null,
+      changeRequestNumber: changeRequest?.number ?? null,
       updatedAt: new Date().toISOString(),
     })
     .where(and(eq(taskRepository.workspaceId, workspaceId), eq(taskRepository.id, attachmentId)));
