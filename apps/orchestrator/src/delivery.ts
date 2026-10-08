@@ -43,9 +43,15 @@ const SHA_LIKE = /^[0-9a-f]{7,40}$/i;
 /** Strip the token from any text about to be shown or logged (Principle IV). */
 function scrub(text: string, token: string): string {
   const clean = token ? text.split(token).join("***") : text;
-  // What is useful in a git or provider error is its first lines; the rest is usually a hint
-  // block or a repeated command line.
-  return clean.trim().split("\n").slice(0, 3).join(" ").slice(0, 300);
+  // What is useful in a git or provider error is its first few lines — git's `remote:` and
+  // `fatal:` ones. Its `hint:` block is advice about git, not about this repository.
+  return clean
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith("hint:"))
+    .slice(0, 4)
+    .join(" ")
+    .slice(0, 500);
 }
 
 /**

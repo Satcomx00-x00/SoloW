@@ -588,6 +588,6 @@ describe("pushWorktreeBranch (A1)", () => {
         username: "git",
         token: "t",
       }),
-    ).rejects.toThrow();
+    ).rejects.toThrow(/^(fatal|error): /);
   });
 });

@@ -1,11 +1,17 @@
 /// <reference types="bun-types" />
 
 import { beforeAll, describe, expect, it } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { taskCheckoutBranch } from "@solow/core";
 import { encryptSecret } from "@solow/db";
+import { $ } from "bun";
 import type { TaskRepositoryBinding } from "./data.js";
 import { DeliveryError, deliverBranch } from "./delivery.js";
+import { createLocalExecutor } from "./executor/local.js";
 import { worktreeNameForTask } from "./harness/claude-code-runner.js";
+import { pushWorktreeBranch } from "./worktree/manager.js";
 
 /**
  * Delivery's one write to someone else's server is a forced push, so which branch it may name is
@@ -96,6 +102,40 @@ describe("deliverBranch — which branch it may push", () => {
 
       await expect(attempt).rejects.toThrow(/stop here/);
       expect(calls).toEqual(["https://github.com/acme/app.git"]);
+    }
+  });
+});
+
+describe("deliverBranch — a refused push says why", () => {
+  it("shows git's own reason, not the command line that was run", async () => {
+    // A 403 or "repository not found" is the one sentence the Owner needs. The argv in front of
+    // it (credential helper and all) used to fill the space the message is cut to, leaving it out.
+    const repo = await mkdtemp(join(tmpdir(), "solow-deliver-"));
+    try {
+      await $`git -C ${repo} init -q`.quiet();
+      await $`git -C ${repo} -c user.email=t@e.com -c user.name=T commit -q --allow-empty -m init`.quiet();
+      const branch = taskCheckoutBranch(TASK_ID);
+      await $`git -C ${repo} branch ${branch}`.quiet();
+      const target = binding(branch);
+      target.repository = { ...target.repository, location: join(repo, "no-such-remote.git") };
+
+      const attempt = deliverBranch({
+        binding: target,
+        branch,
+        title: "t",
+        body: "b",
+        push: (remoteUrl, credential) =>
+          pushWorktreeBranch(createLocalExecutor(repo), repo, remoteUrl, branch, credential),
+      });
+
+      await expect(attempt).rejects.toMatchObject({ stage: "push" });
+      const message = await attempt.catch((cause: Error) => cause.message);
+      expect(message).toContain("does not appear to be a git repository");
+      expect(message).toContain("Could not read from remote repository");
+      expect(message).not.toContain("credential.");
+      expect(message).not.toContain("--no-verify");
+    } finally {
+      await rm(repo, { recursive: true, force: true });
     }
   });
 });

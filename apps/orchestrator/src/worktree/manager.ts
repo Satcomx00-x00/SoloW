@@ -640,6 +640,10 @@ export async function publishWorktreeBranch(
  * caller must hand it one the Task owns, and `deliverBranch` refuses any other (`taskOwnsBranch`)
  * — an attachment's hand-named `checkoutBranch` may be `main` or another Task's. The refspec names
  * one branch; nothing else on the remote moves.
+ *
+ * A failure throws git's stderr and nothing else. `run` would lead with the argv — the credential
+ * helper, the paths, the refspec — and the Owner is shown only the first few hundred characters,
+ * which that line alone used up before git's "403" or "repository not found" was reached.
  */
 export async function pushWorktreeBranch(
   executor: Executor,
@@ -649,8 +653,7 @@ export async function pushWorktreeBranch(
   credential: CloneCredential,
 ): Promise<void> {
   const auth = credentialArgs(credential, remoteUrl);
-  await run(
-    executor,
+  const result = await executor.exec(
     [
       "git",
       ...auth.args,
@@ -661,8 +664,11 @@ export async function pushWorktreeBranch(
       remoteUrl,
       `+refs/heads/${branch}:refs/heads/${branch}`,
     ],
-    auth.env,
+    { env: auth.env },
   );
+  if (result.exitCode !== 0) {
+    throw new Error(result.stderr.trim() || `git push exited with status ${result.exitCode}`);
+  }
 }
 
 /** Discard uncommitted changes (reject). */
