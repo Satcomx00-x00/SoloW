@@ -11,6 +11,12 @@ const schema = z.object({
    */
   SOLOW_STREAM_SECRET: z.string().min(1),
   /**
+   * Bearer secret the web app presents on `POST /events` (FINDINGS B3). Optional so a process
+   * that never serves `/events` still boots, but without it that route refuses every request.
+   * The launchers generate one into `.solow/orchestrator.secret`.
+   */
+  SOLOW_ORCHESTRATOR_SECRET: z.string().min(16).optional(),
+  /**
    * What an ACP permission nobody answered decays to (issue #58, AC-4). Refusal unless a
    * deployment names the permissive posture — a deployment can widen its own posture on
    * purpose, and none can widen it by leaving this unset. See `harness/permissions.ts`.

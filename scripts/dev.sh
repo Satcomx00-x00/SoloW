@@ -3,7 +3,7 @@
 #   - web app (Next.js SPA + tRPC API)          → http://localhost:5000
 #   - orchestrator (WebSocket hub + /events +
 #     /api/inngest, Decision 0004)               → http://localhost:5001
-#   - Inngest Dev Server (the durable engine
+#   - Inngest server (inngest start) (the durable engine
 #     Decision 0004 chose, run locally)          → http://localhost:8288
 # All three share one SQLite database and a persistent encryption key so stored secrets stay
 # decryptable across runs. First run migrates + seeds automatically. Ctrl-C stops all three.
@@ -52,14 +52,9 @@ export SOLOW_WEB_URL="${SOLOW_WEB_URL:-http://localhost:5000}"
 # in dev-owner mode instead of ever reaching a harness.
 export SOLOW_ORCHESTRATOR_URL="${SOLOW_ORCHESTRATOR_URL:-http://localhost:$SOLOW_WS_PORT}"
 export SOLOW_INNGEST_PORT="${SOLOW_INNGEST_PORT:-8288}"
-# Inngest's own env var (not SoloW's — see apps/orchestrator/src/inngest/client.ts): a URL
-# routes the orchestrator's Inngest client at this local Dev Server instead of Inngest Cloud.
-# Pointed at $SOLOW_INNGEST_PORT explicitly rather than left as the bare "1" the SDK also
-# accepts — "1" falls back to the SDK's own hardcoded default of :8288, which silently breaks
-# registration the moment SOLOW_INNGEST_PORT is overridden to anything else (reproduced
-# while verifying this wiring: the orchestrator kept POSTing registration at :8288 while the Dev
-# Server listened on the overridden port, and the two never found each other).
-export INNGEST_DEV="${INNGEST_DEV:-http://localhost:$SOLOW_INNGEST_PORT}"
+# Signing + event keys for `inngest start` and the web->orchestrator secret (B3, F6).
+# shellcheck source=scripts/lib/engine-env.sh
+. "$ROOT/scripts/lib/engine-env.sh"
 
 # Database setup. Migrations run on every start, not just the first: drizzle skips the ones
 # already recorded, so this is cheap, and without it an existing dev database silently drifts
@@ -96,14 +91,13 @@ echo "[dev] orchestrator → ws://localhost:$SOLOW_WS_PORT  (+ /events, /api/inn
 bun run apps/orchestrator/src/main.ts &
 PIDS="$PIDS $!"
 
-echo "[dev] inngest      → http://localhost:$SOLOW_INNGEST_PORT  (Dev Server, Decision 0004)"
-# `--persist` keeps the durable engine's state (queued events AND in-flight runs)
-# across restarts. Without it the Dev Server holds everything in memory, so a run
-# mid-round — a harness working, a park sleeping out a quota window — is lost the
-# moment the server restarts. (A review gate no longer depends on it: a run ends at
-# the gate, and the decision is a row in the app DB that starts the next run.) The
-# app DB and the secret key are already persisted a few lines up for the same reason.
-bunx inngest-cli dev --no-discovery --persist \
+echo "[dev] inngest      → http://localhost:$SOLOW_INNGEST_PORT  (self-hosted, signed, Decision 0004)"
+# `inngest start` persists queued events AND in-flight runs to --sqlite-dir (what `dev --persist`
+# did), so a run mid-round survives a restart. Keys come from the environment, not argv, so they
+# stay out of `ps`. (A review gate no longer depends on this: a run ends at the gate, and the
+# decision is a row in the app DB that starts the next run.)
+bunx inngest-cli start \
+    --sqlite-dir "$GC_DIR/inngest" \
     -u "http://localhost:$SOLOW_WS_PORT/api/inngest" \
     -p "$SOLOW_INNGEST_PORT" &
 PIDS="$PIDS $!"

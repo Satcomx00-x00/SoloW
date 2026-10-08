@@ -18,10 +18,15 @@ import { type EventPostDeps, handleEventPost } from "./events.js";
  * envelope reach `send()` unchanged, and does a malformed one not reach it at all.
  */
 
-function post(body: unknown): Request {
+const SECRET = "test-orchestrator-secret";
+
+function post(body: unknown, authorization: string | null = `Bearer ${SECRET}`): Request {
   return new Request("http://orchestrator.local/events", {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      ...(authorization === null ? {} : { authorization }),
+    },
     body: typeof body === "string" ? body : JSON.stringify(body),
   });
 }
@@ -31,6 +36,7 @@ function fakeDeps(): { deps: EventPostDeps; calls: Array<{ name: string; data: u
   return {
     calls,
     deps: {
+      secret: SECRET,
       send: async (payload) => {
         calls.push(payload);
         return { ids: ["evt_test"] };
@@ -80,6 +86,7 @@ describe("handleEventPost", () => {
   it("reports a send failure as 502 rather than a silent drop", async () => {
     const { calls } = fakeDeps();
     const deps: EventPostDeps = {
+      secret: SECRET,
       send: async () => {
         throw new Error("dev server unreachable");
       },
@@ -92,5 +99,42 @@ describe("handleEventPost", () => {
     expect(res.status).toBe(502);
     expect(await res.text()).toContain("dev server unreachable");
     expect(calls).toEqual([]);
+  });
+
+  describe("authentication (B3)", () => {
+    const valid = { name: "task.launch.requested", data: { taskId: "t-1" } };
+
+    it("refuses a request with no Authorization header", async () => {
+      const { deps, calls } = fakeDeps();
+      const res = await handleEventPost(post(valid, null), deps);
+
+      expect(res.status).toBe(401);
+      expect(calls).toEqual([]);
+    });
+
+    it("refuses a wrong secret and a non-Bearer scheme", async () => {
+      const { deps, calls } = fakeDeps();
+
+      expect((await handleEventPost(post(valid, "Bearer nope"), deps)).status).toBe(401);
+      expect((await handleEventPost(post(valid, `Basic ${SECRET}`), deps)).status).toBe(401);
+      expect((await handleEventPost(post(valid, SECRET), deps)).status).toBe(401);
+      expect(calls).toEqual([]);
+    });
+
+    it("authenticates before reading the body, so garbage gets 401 not 400", async () => {
+      const { deps } = fakeDeps();
+      const res = await handleEventPost(post("not json", null), deps);
+
+      expect(res.status).toBe(401);
+    });
+
+    it("fails closed when no secret is configured, even for a matching empty header", async () => {
+      const { deps, calls } = fakeDeps();
+      const unconfigured: EventPostDeps = { ...deps, secret: undefined };
+
+      expect((await handleEventPost(post(valid), unconfigured)).status).toBe(503);
+      expect((await handleEventPost(post(valid, "Bearer "), unconfigured)).status).toBe(503);
+      expect(calls).toEqual([]);
+    });
   });
 });

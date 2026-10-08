@@ -60,10 +60,16 @@ export function devOwnerMode(): boolean {
  */
 const orchestratorEnvSchema = z.object({
   SOLOW_ORCHESTRATOR_URL: z.string().url().optional(),
+  SOLOW_ORCHESTRATOR_SECRET: z.string().min(1).optional(),
 });
 
 export function orchestratorUrl(): string | undefined {
   return orchestratorEnvSchema.parse(process.env).SOLOW_ORCHESTRATOR_URL;
+}
+
+/** Bearer secret the orchestrator's `POST /events` requires (FINDINGS B3). */
+export function orchestratorSecret(): string | undefined {
+  return orchestratorEnvSchema.parse(process.env).SOLOW_ORCHESTRATOR_SECRET;
 }
 
 /**

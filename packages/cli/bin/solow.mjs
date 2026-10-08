@@ -402,10 +402,21 @@ function buildEnv(opts) {
     // stack binds them to the local Workspace instead of asking them to invent an account.
     SOLOW_DEV_OWNER: process.env.SOLOW_DEV_OWNER ?? "on",
     SOLOW_AGENT_COMMAND: process.env.SOLOW_AGENT_COMMAND ?? "claude",
-    // Inngest's own variable: a URL points the SDK at the local Dev Server below rather than
-    // Inngest Cloud. Spelled out rather than left as "1", which falls back to the SDK's
-    // hardcoded :8288 and silently breaks registration whenever the port is overridden.
-    INNGEST_DEV: `http://localhost:${opts.inngestPort}`,
+    // Web -> orchestrator bearer secret for /events (B3), and the keys that make the self-hosted
+    // engine (`inngest start`) accept only signed requests (F6). Hex because the engine insists.
+    SOLOW_ORCHESTRATOR_SECRET: secret(opts.dataDir, "orchestrator.secret", () =>
+      randomBytes(32).toString("base64"),
+    ),
+    INNGEST_SIGNING_KEY: secret(opts.dataDir, "inngest-signing.key", () =>
+      randomBytes(32).toString("hex"),
+    ),
+    INNGEST_EVENT_KEY: secret(opts.dataDir, "inngest-event.key", () =>
+      randomBytes(32).toString("hex"),
+    ),
+    // Any INNGEST_DEV (even inherited) would put the SDK in dev mode and skip signature checks;
+    // INNGEST_BASE_URL is what points the non-dev SDK at the local engine instead of Cloud.
+    INNGEST_BASE_URL: `http://localhost:${opts.inngestPort}`,
+    INNGEST_DEV: undefined,
   };
 }
 
@@ -545,9 +556,9 @@ async function main() {
     "inngest",
     resolveInngest(),
     [
-      "dev",
-      "--no-discovery",
-      "--persist",
+      "start",
+      "--sqlite-dir",
+      join(opts.dataDir, "inngest"),
       "-u",
       `http://localhost:${opts.wsPort}/api/inngest`,
       "-p",

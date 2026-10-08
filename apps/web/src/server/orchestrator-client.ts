@@ -10,7 +10,7 @@ import {
   type TaskState,
 } from "@solow/contracts";
 import { signStreamTicket } from "@solow/core/stream";
-import { devOwnerMode, orchestratorUrl, webEnv } from "./env.js";
+import { devOwnerMode, orchestratorSecret, orchestratorUrl, webEnv } from "./env.js";
 
 /**
  * Thin client the API uses to hand work to the orchestrator service (Decision 0002).
@@ -113,7 +113,10 @@ async function emit(name: string, data: unknown): Promise<void> {
   const base = orchestratorUrl();
   const res = await fetch(new URL("/events", base), {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      ...(orchestratorSecret() ? { authorization: `Bearer ${orchestratorSecret()}` } : {}),
+    },
     body: JSON.stringify({ name, data }),
   });
   if (!res.ok) {
