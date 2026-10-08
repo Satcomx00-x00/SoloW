@@ -1,7 +1,9 @@
-import type { TaskState } from "@solow/contracts";
+import type { SessionEventPayload, TaskState } from "@solow/contracts";
+import { claimTaskRunSlot } from "@solow/db";
 import { captureException, logStateTransition } from "@solow/observability";
-import { setTaskState } from "../../../data.js";
+import { appendSessionEvent, nextSessionEventSeq, setTaskState } from "../../../data.js";
 import { clearStrandedPark } from "../../../reconcile.js";
+import { toTaskEvent } from "../../../ws/replay.js";
 import type { RunScope } from "./scope.js";
 
 /*
@@ -97,10 +99,11 @@ export async function parkRound(
   /*
    * Awake — and the row has to say so before this round touches an executor.
    *
-   * Nothing else in the orchestrator clears `failureReason` for a `parked` Task. The state
-   * stays `parked` for the whole of the round this wakes into (only an operator opening the
-   * gate moves it), and the resume path at `resume-` below is reached only by a Task that
-   * got as far as `review`. So a `park_never_resumed` written by `reportStrandedParks`
+   * Nothing else in the orchestrator clears `failureReason` for a `parked` Task, and the
+   * resume path at `resume-` below is reached only by a Task that got as far as `review`.
+   * The row stays `parked` until `park-claim-` below takes a concurrency slot, and with the
+   * Profile full that can be minutes of retries. So a `park_never_resumed` written by
+   * `reportStrandedParks`
    * while this run was asleep — an engine backed up past the sweep's window is enough —
    * stayed readable to the container reaper across every gap between durable steps of the
    * round it woke into, and the reaper reads that pairing as "no run is in here". Verified
@@ -130,10 +133,79 @@ export async function parkRound(
   const stillParked = await step.run(`park-woke-${round}`, () =>
     clearStrandedPark(db, workspaceId, taskId),
   );
-  // The card may be showing a stranded badge that is no longer true; this is what takes it
-  // off without a reload. Skipped when the row moved, where `parked` is not the state to
-  // publish and whoever moved it has already announced what they did.
-  if (stillParked) announce("parked");
+  // Skipped when the row moved: whoever moved it has already announced what they did.
+  if (stillParked) await claimWokenSlot(scope, round, workflowStepId);
+}
+
+/**
+ * How long a woken run waits before asking for a slot again: one minute, doubling, at most ten.
+ *
+ * Short, because a slot is usually freed by a round ending, which is minutes. Bounded, because
+ * every attempt is two durable steps and a Profile can stay full for hours: at ten minutes the
+ * wait costs a dozen steps an hour, well inside the engine's per-run step budget.
+ */
+export function slotRetryDelayMs(attempt: number): number {
+  return Math.min(60_000 * 2 ** attempt, 10 * 60_000);
+}
+
+/**
+ * Take a concurrency slot for the round a woken park is about to run (spec F06, FINDINGS F5).
+ *
+ * A parked Task holds no slot — a sleep of five hours must not keep others of its Profile waiting
+ * — so waking has to take one back, under the same rule a person's start does
+ * (`claimTaskRunSlot`). A woken round that skipped this ran a full harness while the row read
+ * `parked`, which no other start counted: the cap held for everyone except the runs it most
+ * exists for, the ones coming back from a quota window together.
+ *
+ * With the Profile full, the run stays `parked`, says why once, and asks again after a short
+ * sleep. Each refusal also refreshes the row through `clearStrandedPark`, so the stranded-park
+ * sweep reads a run that is waiting as alive rather than lost.
+ *
+ * A row that is no longer `parked` (an operator moved it while the run slept) is left alone, and
+ * the round goes on as it did before this existed — what a run should do when its Task is taken
+ * out from under it is a lifecycle question, not this step's.
+ */
+async function claimWokenSlot(
+  scope: RunScope,
+  round: number,
+  workflowStepId: string | null,
+): Promise<void> {
+  const { deps, step, db, log, workspaceId, taskId, sessionId, channel } = scope;
+  const { recordTransition, announce } = scope;
+  for (let attempt = 0; ; attempt += 1) {
+    const claim = await step.run(`park-claim-${round}-${attempt}`, async () => {
+      const claimed = claimTaskRunSlot(db, workspaceId, taskId, ["parked"]);
+      if (claimed.kind === "claimed") {
+        await recordTransition("parked", "running", workflowStepId);
+        return "claimed" as const;
+      }
+      if (claimed.kind !== "cap_reached") return "moved" as const;
+      await clearStrandedPark(db, workspaceId, taskId);
+      if (attempt === 0) {
+        const payload: SessionEventPayload = {
+          kind: "notice",
+          text: "The quota window is over, but this Harness Profile is already running as many Tasks as its concurrency cap allows. The Task stays parked and starts as soon as one of them finishes.",
+        };
+        const seq = await nextSessionEventSeq(db, workspaceId, sessionId);
+        await appendSessionEvent(db, workspaceId, { sessionId, seq, workflowStepId, payload });
+        const frame = toTaskEvent(payload, taskId, sessionId, seq, workflowStepId);
+        if (frame) deps.hub.publish(channel, frame);
+      }
+      return "full" as const;
+    });
+    if (claim === "claimed") {
+      logStateTransition(log, { workspaceId, taskId, from: "parked", to: "running" });
+      announce("running");
+      return;
+    }
+    if (claim === "moved") return;
+    // Once: it takes a stranded badge off the card, and later refusals change nothing on it.
+    if (attempt === 0) announce("parked");
+    await step.sleepUntil(
+      `park-claim-wait-${round}-${attempt}`,
+      new Date(Date.now() + slotRetryDelayMs(attempt)),
+    );
+  }
 }
 
 /**

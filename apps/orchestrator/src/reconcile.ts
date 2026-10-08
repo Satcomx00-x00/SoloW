@@ -465,11 +465,11 @@ export async function clearStrandedPark(
  *
  * 1. **Not in `harnessRegistry`.** Conclusive when it answers: registration spans the whole
  *    `agent-run` step, so a run that woke and is working is always present. It matters more here
- *    than in either neighbour, because the park step moves the Task out of `running` and nothing
- *    ever moves it back — a woken run does its next round with the row still reading `parked`.
- * 2. **Its Session is not at the review gate.** Same row, later in that round: a run that woke,
- *    worked and finished leaves the Session `awaiting_review` while the Task still reads `parked`
- *    (only an operator opening the gate moves it), and ends. That is work waiting for a *person*,
+ *    than in either neighbour, because a woken run reads `parked` until it takes a concurrency
+ *    slot back (`park-claim-`), and a run whose row an operator moved meanwhile never takes one.
+ * 2. **Its Session is not at the review gate.** Same row, later in that round: a run that woke
+ *    into a row an operator had moved, worked and finished leaves the Session `awaiting_review`
+ *    whatever the Task reads, and ends. That is work waiting for a *person*,
  *    which is never stranded — the same distinction `reportStrandedReviews` draws. It no longer
  *    leaks either: the run that opened the gate released its executor on the way out, so there is
  *    no container behind the row for the reaper to miss.
@@ -491,8 +491,8 @@ export async function clearStrandedPark(
  * two things now stand between a stamp and a removal.** A `docker rm -f` issued while an exec is
  * running in the container kills that exec with 137 — verified on 29.7.2 — and a prepare script
  * killed that way becomes an `ExecutorUnavailableError` that fails the round. Nothing rebuilds
- * anything in that story. The exposure was not "until the round ends" either: the Task stays
- * `parked` for the whole of the round a woken run does, and only an operator moving the card
+ * anything in that story. The exposure was not "until the round ends" either: the Task used to
+ * stay `parked` for the whole of the round a woken run did, and only an operator moving the card
  * cleared `failureReason`, so an overtaken stamp stayed readable to the reaper across every gap
  * between that round's durable steps.
  *
