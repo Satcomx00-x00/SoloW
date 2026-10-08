@@ -1,7 +1,7 @@
 {
   "$schema": "https://v2-11-7.turborepo.dev/schema.json",
   "ui": "stream",
-  "globalPassThroughEnv": ["SOLOW_*", "GITHUB_TOKEN", "GH_TOKEN"],
+  "globalPassThroughEnv": ["SOLOW_*", "GITHUB_TOKEN", "GH_TOKEN", "GITHUB_ACTIONS"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
@@ -17,6 +17,7 @@
     },
     "test": {
       "dependsOn": ["^test"],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/scripts/test-batches.ts"],
       "outputs": []
     },
     "openapi:check": {

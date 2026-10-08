@@ -8,7 +8,9 @@ import {
   createTask,
   gateButton,
   openTask,
+  openTaskReadyToDelete,
   stepHeader,
+  trpcSettled,
 } from "../support/flows.js";
 
 /**
@@ -381,11 +383,14 @@ test.describe("branching control check — conditions, a loop, and a gate in the
     });
 
     await test.step("cleanup", async () => {
-      await page.goto(`/task/${taskId}`);
       // Straight to History on the press (Undo on a toast); the dialog is for a running
-      // harness or a dependant, and this Task has neither.
+      // harness or a dependant, and this Task has neither. Its Issue is in no Project, so the
+      // delete lands on the unassigned list — a route this check has not visited until now.
+      await openTaskReadyToDelete(page, { taskId, title: taskTitle, destination: "/unassigned" });
+      const deleted = trpcSettled(page, "task.delete");
       await page.getByRole("button", { name: `Delete ${taskTitle}` }).click();
-      await expect(page).not.toHaveURL(new RegExp(`/task/${taskId}$`));
+      await deleted;
+      await expect(page).not.toHaveURL(new RegExp(`/task/${taskId}$`), { timeout: 90_000 });
       await page.goto(`/issues/${issueId}`);
       await page.getByRole("button", { name: "Delete issue" }).click();
       await page.getByRole("alertdialog").getByRole("button", { name: "Delete issue" }).click();

@@ -21,7 +21,8 @@ name: Release
 # tag it pushes points at that very commit — so the Verify run it triggers finds an empty range and
 # cuts nothing.
 #
-# Gated on Verify rather than on the push, so a red main cannot ship. `workflow_run` is what makes
+# Gated on Verify rather than on the push, so a red main cannot ship — every job of it, the
+# end-to-end suite and, on a push to main, the control check included. `workflow_run` is what makes
 # that expressible: it fires after Verify finishes and carries its conclusion and its commit.
 #
 # Publish is *dispatched* rather than left to its own `push: tags` trigger, and that is not a

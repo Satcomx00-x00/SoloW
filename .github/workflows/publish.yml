@@ -36,6 +36,8 @@ permissions:
   # Lets npm attach a provenance attestation — a signed, public record tying the published
   # tarball to this workflow run and this commit. Without it `npm publish --provenance` fails.
   id-token: write
+  # Read Verify's runs, to refuse a commit it has not passed.
+  actions: read
 
 env:
   # Keep in sync with `packageManager` in package.json.
@@ -110,6 +112,29 @@ jobs:
             exit 1
           fi
           echo "publishing version $manifest"
+
+      # The gates below are the fast ones; the end-to-end suite and the control check run only in
+      # Verify, on a push to main. Release asks for a green Verify before it tags, but a tag pushed
+      # by hand skips Release — so the commit being shipped must have one too. Release's own
+      # commit (`chore(release)`, version and changelog only) is pushed with the workflow token and
+      # gets no Verify run of its own; the tree Verify passed is its parent's.
+      - name: Verify passed on main for this commit
+        if: steps.mode.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sha="$(git rev-parse HEAD)"
+          if git log -1 --format=%s | grep -q '^chore(release): ' &&
+            [ "$(git diff --name-only HEAD^ HEAD | sort | tr '\n' ' ')" = "CHANGELOG.md packages/cli/package.json " ]; then
+            sha="$(git rev-parse HEAD^)"
+          fi
+          passed="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/verify.yml/runs?head_sha=${sha}&event=push&status=success" --jq .total_count)"
+          if [ "$passed" = "0" ]; then
+            echo "::error::No successful Verify run on a push to main for ${sha}; push it to main and let Verify pass first."
+            exit 1
+          fi
+          echo "Verify passed on ${sha}"
 
       # The same gates `verify.yml` runs on every PR. Repeated here rather than assumed: a tag
       # can be pushed at any commit, including one that never went through a pull request.

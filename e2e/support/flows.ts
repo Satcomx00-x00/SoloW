@@ -126,6 +126,54 @@ export async function openTask(page: Page, issueId: string, title: string): Prom
 }
 
 /**
+ * Resolves once a call the SPA itself makes to `procedure` has finished on the server — the
+ * whole streamed body, not just the headers, which `httpBatchStreamLink` sends before the
+ * procedure has run. Start it before the click that makes the call.
+ *
+ * What the delete specs wait on instead of the page: an Undo pressed and then navigated away
+ * from can be aborted before it reaches the server, and a slow navigation after a delete reads
+ * the same as a delete that never happened unless the call is awaited first.
+ */
+export function trpcSettled(page: Page, procedure: string): Promise<void> {
+  return page
+    .waitForResponse(
+      (res) => {
+        const { pathname } = new URL(res.url());
+        // A batch names every procedure in one path: `/api/trpc/task.get,project.forIssue`.
+        return (
+          pathname.startsWith("/api/trpc/") &&
+          pathname.slice("/api/trpc/".length).split(",").includes(procedure)
+        );
+      },
+      { timeout: 60_000 },
+    )
+    .then(async (res) => {
+      await res.finished();
+    });
+}
+
+/**
+ * Open a Task's page ready for its delete button, which navigates to `destination`.
+ *
+ * Two things make that navigation slow enough to fail a spec, and both are settled here. Under
+ * the e2e `next dev` a route not visited in the last minute is compiled again on the next visit
+ * (10–20 s, longer on a loaded runner), which can outlast the toast's ten seconds and the
+ * default expect — so the destination is visited first. And where the delete goes is read from
+ * `project.forIssue`, which the page asks only once the Task has loaded: pressed before it
+ * answers, the delete goes to `/projects` instead of the destination that was warmed.
+ */
+export async function openTaskReadyToDelete(
+  page: Page,
+  opts: { taskId: string; title: string; destination: string },
+): Promise<void> {
+  await page.goto(opts.destination);
+  const destinationKnown = trpcSettled(page, "project.forIssue");
+  await page.goto(`/task/${opts.taskId}`);
+  await expect(page.getByRole("heading", { name: opts.title })).toBeVisible();
+  await destinationKnown;
+}
+
+/**
  * Launch the Task from its own page: Backlog → Ready → Running, on the lifecycle arrows.
  *
  * `Move to Running` *is* the launch — `task.move` routes the transition into `running` through

@@ -220,3 +220,59 @@ jobs:
             test-results/
           retention-days: 7
           if-no-files-found: ignore
+
+  # The control check (`make control-check`, FINDINGS C1): each spec walks the product's main
+  # line end to end — Project, Issue, a Workflow drawn on the canvas, a Task through every Step,
+  # approval onto a branch, cleanup — against the same servers and fixture as the suite above.
+  # It ran only by hand on one host, so main could break without anyone seeing it; it runs here
+  # on every push to main, and Release (`release.yml`) waits for this whole workflow, so a red
+  # check blocks the release.
+  #
+  # Not on pull requests: the two walks take 8–10 minutes each and the suite above already gates
+  # the merge. One spec per runner: run back to back on one host, the second has died on its own
+  # budget at the last cleanup step while passing alone, and apart they share nothing anyway.
+  # It needs what the e2e job needs and nothing more — bun, git and Chromium; the fixture
+  # orchestrator runs the Task lifecycle inline, so there is no Inngest binary to start.
+  control-check:
+    name: Control check (${{ matrix.spec }})
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        spec: [control-check, branching-check]
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Cache Bun install cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+          restore-keys: bun-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # The browser binary only, for the reason given in the e2e job above.
+      - name: Install Chromium for Playwright
+        run: bunx playwright install chromium
+
+      - name: Control check, ${{ matrix.spec }}
+        run: make control-check CONTROL_SPEC=e2e/control/${{ matrix.spec }}.spec.ts
+
+      - name: Upload Playwright artefacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ matrix.spec }}
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+          if-no-files-found: ignore
