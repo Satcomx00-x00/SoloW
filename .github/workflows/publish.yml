@@ -118,16 +118,50 @@ jobs:
       # by hand skips Release — so the commit being shipped must have one too. Release's own
       # commit (`chore(release)`, version and changelog only) is pushed with the workflow token and
       # gets no Verify run of its own; the tree Verify passed is its parent's.
+      #
+      # That exemption is only safe for a commit that cannot change what runs, so it is earned
+      # rather than claimed: a subject and two file names are anyone's to type, and a "release"
+      # commit that also moved a dependency or a script in packages/cli/package.json would ship a
+      # tree no Verify run has seen. So the manifest must be identical to its parent's apart from
+      # `version`, compared as parsed JSON; the parent must be the only one; and the author and
+      # committer must be the identity release.yml commits as. The identity is forgeable by
+      # anyone who can push, which is why it is the last check and not the only one.
       - name: Verify passed on main for this commit
         if: steps.mode.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          # release.yml's `git config user.*` — keep the two in step.
+          RELEASE_IDENTITY: "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
         run: |
           set -euo pipefail
           sha="$(git rev-parse HEAD)"
-          if git log -1 --format=%s | grep -q '^chore(release): ' &&
-            [ "$(git diff --name-only HEAD^ HEAD | sort | tr '\n' ' ')" = "CHANGELOG.md packages/cli/package.json " ]; then
-            sha="$(git rev-parse HEAD^)"
+          if git log -1 --format=%s | grep -q '^chore(release): '; then
+            why=""
+            if [ "$(git rev-list --parents -n1 HEAD | wc -w)" != 2 ]; then
+              why="it is not a single-parent commit"
+            elif [ "$(git log -1 --format='%an <%ae>')" != "$RELEASE_IDENTITY" ] ||
+              [ "$(git log -1 --format='%cn <%ce>')" != "$RELEASE_IDENTITY" ]; then
+              why="it was not authored and committed as ${RELEASE_IDENTITY}"
+            elif [ "$(git diff --name-only HEAD^ HEAD | sort | tr '\n' ' ')" != "CHANGELOG.md packages/cli/package.json " ]; then
+              why="it touches more than CHANGELOG.md and packages/cli/package.json"
+            elif ! node -e '
+              const { execFileSync } = require("node:child_process");
+              const sansVersion = (rev) => {
+                const manifest = JSON.parse(
+                  execFileSync("git", ["show", rev + ":packages/cli/package.json"], { encoding: "utf8" }),
+                );
+                delete manifest.version;
+                return JSON.stringify(manifest);
+              };
+              process.exit(sansVersion("HEAD^") === sansVersion("HEAD") ? 0 : 1);
+            '; then
+              why="its packages/cli/package.json changes more than \"version\""
+            fi
+            if [ -z "$why" ]; then
+              sha="$(git rev-parse HEAD^)"
+            else
+              echo "::warning::HEAD says chore(release) but is not exempt from Verify: ${why}."
+            fi
           fi
           passed="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/verify.yml/runs?head_sha=${sha}&event=push&status=success" --jq .total_count)"
           if [ "$passed" = "0" ]; then
