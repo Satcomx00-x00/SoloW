@@ -327,6 +327,14 @@
                                   "type": "string",
                                   "nullable": true
                                 },
+                                "changeRequestUrl": {
+                                  "type": "string",
+                                  "nullable": true
+                                },
+                                "changeRequestNumber": {
+                                  "type": "integer",
+                                  "nullable": true
+                                },
                                 "position": {
                                   "type": "integer",
                                   "minimum": 0
@@ -8414,6 +8422,10 @@
                       "type": "string",
                       "nullable": true
                     },
+                    "changeRequestNoun": {
+                      "type": "string",
+                      "nullable": true
+                    },
                     "issueCount": {
                       "type": "integer",
                       "minimum": 0
@@ -11856,6 +11868,14 @@
                             "type": "string",
                             "nullable": true
                           },
+                          "changeRequestUrl": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "changeRequestNumber": {
+                            "type": "integer",
+                            "nullable": true
+                          },
                           "position": {
                             "type": "integer",
                             "minimum": 0
@@ -12154,6 +12174,14 @@
                             "type": "string",
                             "nullable": true
                           },
+                          "changeRequestUrl": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "changeRequestNumber": {
+                            "type": "integer",
+                            "nullable": true
+                          },
                           "position": {
                             "type": "integer",
                             "minimum": 0
@@ -12407,6 +12435,14 @@
                           },
                           "resultBranch": {
                             "type": "string",
+                            "nullable": true
+                          },
+                          "changeRequestUrl": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "changeRequestNumber": {
+                            "type": "integer",
                             "nullable": true
                           },
                           "position": {
@@ -12684,6 +12720,14 @@
                           },
                           "resultBranch": {
                             "type": "string",
+                            "nullable": true
+                          },
+                          "changeRequestUrl": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "changeRequestNumber": {
+                            "type": "integer",
                             "nullable": true
                           },
                           "position": {
@@ -12995,6 +13039,14 @@
                                   "type": "string",
                                   "nullable": true
                                 },
+                                "changeRequestUrl": {
+                                  "type": "string",
+                                  "nullable": true
+                                },
+                                "changeRequestNumber": {
+                                  "type": "integer",
+                                  "nullable": true
+                                },
                                 "position": {
                                   "type": "integer",
                                   "minimum": 0
@@ -13249,6 +13301,14 @@
                                 },
                                 "resultBranch": {
                                   "type": "string",
+                                  "nullable": true
+                                },
+                                "changeRequestUrl": {
+                                  "type": "string",
+                                  "nullable": true
+                                },
+                                "changeRequestNumber": {
+                                  "type": "integer",
                                   "nullable": true
                                 },
                                 "position": {
@@ -13532,6 +13592,14 @@
                             "type": "string",
                             "nullable": true
                           },
+                          "changeRequestUrl": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "changeRequestNumber": {
+                            "type": "integer",
+                            "nullable": true
+                          },
                           "position": {
                             "type": "integer",
                             "minimum": 0
@@ -13791,6 +13859,14 @@
                             "type": "string",
                             "nullable": true
                           },
+                          "changeRequestUrl": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "changeRequestNumber": {
+                            "type": "integer",
+                            "nullable": true
+                          },
                           "position": {
                             "type": "integer",
                             "minimum": 0
@@ -13870,6 +13946,290 @@
                     "deletedAt",
                     "createdAt",
                     "updatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/task.quickStart": {
+      "post": {
+        "operationId": "task-quickStart",
+        "summary": "Quick task: from one sentence, create a local Issue and a Task under it and start the harness, using the Owner's default Harness and Executor Profiles. Names the Repository only when the Workspace has several.",
+        "tags": [
+          "task"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "prompt": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 5000
+                  },
+                  "repositoryId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "prompt"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "task": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "issueId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "parentTaskId": {
+                          "type": "string",
+                          "nullable": true,
+                          "minLength": 1
+                        },
+                        "forkedFrom": {
+                          "type": "object",
+                          "nullable": true,
+                          "properties": {
+                            "sessionId": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "seq": {
+                              "type": "integer",
+                              "minimum": 0
+                            },
+                            "hash": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": [
+                            "sessionId",
+                            "seq",
+                            "hash"
+                          ]
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "backlog",
+                            "ready",
+                            "running",
+                            "review",
+                            "parked",
+                            "failed",
+                            "done"
+                          ]
+                        },
+                        "agentProfileId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "executorProfileId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "repositories": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "repositoryId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "baseRef": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "checkoutBranch": {
+                                "type": "string"
+                              },
+                              "resultBranch": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "changeRequestUrl": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "changeRequestNumber": {
+                                "type": "integer",
+                                "nullable": true
+                              },
+                              "position": {
+                                "type": "integer",
+                                "minimum": 0
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "repositoryId",
+                              "baseRef",
+                              "checkoutBranch",
+                              "resultBranch",
+                              "position"
+                            ]
+                          }
+                        },
+                        "failureReason": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "completedAt": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "completedOutcome": {
+                          "type": "string",
+                          "nullable": true,
+                          "enum": [
+                            "changes_ready",
+                            "nothing_to_do",
+                            "blocked",
+                            null
+                          ]
+                        },
+                        "completedSummary": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "workflowId": {
+                          "type": "string",
+                          "nullable": true,
+                          "minLength": 1
+                        },
+                        "workflowStepId": {
+                          "type": "string",
+                          "nullable": true,
+                          "minLength": 1
+                        },
+                        "deletedAt": {
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "updatedAt": {
+                          "type": "string",
+                          "format": "date-time"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "issueId",
+                        "parentTaskId",
+                        "forkedFrom",
+                        "title",
+                        "state",
+                        "agentProfileId",
+                        "executorProfileId",
+                        "repositories",
+                        "failureReason",
+                        "completedAt",
+                        "completedOutcome",
+                        "completedSummary",
+                        "workflowId",
+                        "workflowStepId",
+                        "deletedAt",
+                        "createdAt",
+                        "updatedAt"
+                      ]
+                    },
+                    "issueId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "started": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  },
+                  "required": [
+                    "task",
+                    "issueId",
+                    "started",
+                    "reason"
                   ]
                 }
               }
@@ -14051,6 +14411,14 @@
                           },
                           "resultBranch": {
                             "type": "string",
+                            "nullable": true
+                          },
+                          "changeRequestUrl": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "changeRequestNumber": {
+                            "type": "integer",
                             "nullable": true
                           },
                           "position": {
@@ -14302,6 +14670,14 @@
                             "type": "string",
                             "nullable": true
                           },
+                          "changeRequestUrl": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "changeRequestNumber": {
+                            "type": "integer",
+                            "nullable": true
+                          },
                           "position": {
                             "type": "integer",
                             "minimum": 0
@@ -14551,6 +14927,14 @@
                             "type": "string",
                             "nullable": true
                           },
+                          "changeRequestUrl": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "changeRequestNumber": {
+                            "type": "integer",
+                            "nullable": true
+                          },
                           "position": {
                             "type": "integer",
                             "minimum": 0
@@ -14798,6 +15182,528 @@
                           },
                           "resultBranch": {
                             "type": "string",
+                            "nullable": true
+                          },
+                          "changeRequestUrl": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "changeRequestNumber": {
+                            "type": "integer",
+                            "nullable": true
+                          },
+                          "position": {
+                            "type": "integer",
+                            "minimum": 0
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "repositoryId",
+                          "baseRef",
+                          "checkoutBranch",
+                          "resultBranch",
+                          "position"
+                        ]
+                      }
+                    },
+                    "failureReason": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "completedAt": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "completedOutcome": {
+                      "type": "string",
+                      "nullable": true,
+                      "enum": [
+                        "changes_ready",
+                        "nothing_to_do",
+                        "blocked",
+                        null
+                      ]
+                    },
+                    "completedSummary": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "workflowId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
+                    "workflowStepId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
+                    "deletedAt": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "issueId",
+                    "parentTaskId",
+                    "forkedFrom",
+                    "title",
+                    "state",
+                    "agentProfileId",
+                    "executorProfileId",
+                    "repositories",
+                    "failureReason",
+                    "completedAt",
+                    "completedOutcome",
+                    "completedSummary",
+                    "workflowId",
+                    "workflowStepId",
+                    "deletedAt",
+                    "createdAt",
+                    "updatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/task.redeliver": {
+      "post": {
+        "operationId": "task-redeliver",
+        "summary": "Ship again: for a Task whose approval committed but could not be pushed or have its pull request opened, push the committed branch and open (or find) the request. Runs no harness and makes no commit; the Task moves to done when every branch has shipped.",
+        "tags": [
+          "task"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "issueId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "parentTaskId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
+                    "forkedFrom": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "sessionId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "seq": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "hash": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "sessionId",
+                        "seq",
+                        "hash"
+                      ]
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "backlog",
+                        "ready",
+                        "running",
+                        "review",
+                        "parked",
+                        "failed",
+                        "done"
+                      ]
+                    },
+                    "agentProfileId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "executorProfileId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "repositories": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "repositoryId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "baseRef": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "checkoutBranch": {
+                            "type": "string"
+                          },
+                          "resultBranch": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "changeRequestUrl": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "changeRequestNumber": {
+                            "type": "integer",
+                            "nullable": true
+                          },
+                          "position": {
+                            "type": "integer",
+                            "minimum": 0
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "repositoryId",
+                          "baseRef",
+                          "checkoutBranch",
+                          "resultBranch",
+                          "position"
+                        ]
+                      }
+                    },
+                    "failureReason": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "completedAt": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "completedOutcome": {
+                      "type": "string",
+                      "nullable": true,
+                      "enum": [
+                        "changes_ready",
+                        "nothing_to_do",
+                        "blocked",
+                        null
+                      ]
+                    },
+                    "completedSummary": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "workflowId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
+                    "workflowStepId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
+                    "deletedAt": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "issueId",
+                    "parentTaskId",
+                    "forkedFrom",
+                    "title",
+                    "state",
+                    "agentProfileId",
+                    "executorProfileId",
+                    "repositories",
+                    "failureReason",
+                    "completedAt",
+                    "completedOutcome",
+                    "completedSummary",
+                    "workflowId",
+                    "workflowStepId",
+                    "deletedAt",
+                    "createdAt",
+                    "updatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/task.keepLocal": {
+      "post": {
+        "operationId": "task-keepLocal",
+        "summary": "Keep local: finish a Task whose approval committed but could not ship, with the branch committed on this machine as its result. Nothing is pushed.",
+        "tags": [
+          "task"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "issueId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "parentTaskId": {
+                      "type": "string",
+                      "nullable": true,
+                      "minLength": 1
+                    },
+                    "forkedFrom": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "sessionId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "seq": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "hash": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "sessionId",
+                        "seq",
+                        "hash"
+                      ]
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "backlog",
+                        "ready",
+                        "running",
+                        "review",
+                        "parked",
+                        "failed",
+                        "done"
+                      ]
+                    },
+                    "agentProfileId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "executorProfileId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "repositories": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "repositoryId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "baseRef": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "checkoutBranch": {
+                            "type": "string"
+                          },
+                          "resultBranch": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "changeRequestUrl": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "changeRequestNumber": {
+                            "type": "integer",
                             "nullable": true
                           },
                           "position": {
@@ -24550,6 +25456,10 @@
                       "type": "string",
                       "nullable": true
                     },
+                    "changeRequestNoun": {
+                      "type": "string",
+                      "nullable": true
+                    },
                     "issueCount": {
                       "type": "integer",
                       "minimum": 0
@@ -24727,6 +25637,10 @@
                             "nullable": true
                           },
                           "integrationBaseUrl": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "changeRequestNoun": {
                             "type": "string",
                             "nullable": true
                           },
@@ -24927,6 +25841,10 @@
                       "type": "string",
                       "nullable": true
                     },
+                    "changeRequestNoun": {
+                      "type": "string",
+                      "nullable": true
+                    },
                     "issueCount": {
                       "type": "integer",
                       "minimum": 0
@@ -25110,6 +26028,10 @@
                       "nullable": true
                     },
                     "integrationBaseUrl": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "changeRequestNoun": {
                       "type": "string",
                       "nullable": true
                     },
@@ -26381,6 +27303,11 @@
                         "type": "string",
                         "nullable": true,
                         "format": "date-time"
+                      },
+                      "eventsPrunedAt": {
+                        "type": "string",
+                        "nullable": true,
+                        "format": "date-time"
                       }
                     },
                     "required": [
@@ -26646,6 +27573,11 @@
                           "format": "date-time"
                         },
                         "endedAt": {
+                          "type": "string",
+                          "nullable": true,
+                          "format": "date-time"
+                        },
+                        "eventsPrunedAt": {
                           "type": "string",
                           "nullable": true,
                           "format": "date-time"
@@ -38789,6 +39721,322 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workspace.historyRetention": {
+      "get": {
+        "operationId": "workspace-historyRetention",
+        "summary": "How many days a finished (Done or deleted) Task keeps its transcript before the hourly retention sweep removes it; null keeps it forever. Sessions, reviews, decisions, state changes and token usage are always kept.",
+        "tags": [
+          "workspace"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "days": {
+                      "type": "integer",
+                      "nullable": true
+                    },
+                    "defaultDays": {
+                      "type": "integer"
+                    },
+                    "options": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer"
+                      }
+                    }
+                  },
+                  "required": [
+                    "days",
+                    "defaultDays",
+                    "options"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.NOT_FOUND"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workspace.setHistoryRetention": {
+      "post": {
+        "operationId": "workspace-setHistoryRetention",
+        "summary": "Choose how many days a finished Task keeps its transcript — one of the offered windows, or null to keep it forever. Takes effect on the next hourly retention sweep.",
+        "tags": [
+          "workspace"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "days": {
+                    "type": "integer",
+                    "nullable": true
+                  }
+                },
+                "required": [
+                  "days"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "days": {
+                      "type": "integer",
+                      "nullable": true
+                    },
+                    "defaultDays": {
+                      "type": "integer"
+                    },
+                    "options": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer"
+                      }
+                    }
+                  },
+                  "required": [
+                    "days",
+                    "defaultDays",
+                    "options"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.INTERNAL_SERVER_ERROR"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/workspace.previewHistoryRetention": {
+      "get": {
+        "operationId": "workspace-previewHistoryRetention",
+        "summary": "Count what a retention window would remove if the sweep ran now: the finished Tasks and Sessions affected, the transcript events deleted, the captured diffs whose patch text is emptied, and the approximate bytes freed.",
+        "tags": [
+          "workspace"
+        ],
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "days",
+            "schema": {
+              "type": "integer"
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "tasks": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "sessions": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "events": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "diffs": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "bytes": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "tasks",
+                    "sessions",
+                    "events",
+                    "diffs",
+                    "bytes"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input data",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.BAD_REQUEST"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authorization not provided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.UNAUTHORIZED"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Insufficient access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.FORBIDDEN"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/error.NOT_FOUND"
                 }
               }
             }

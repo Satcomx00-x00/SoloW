@@ -25,6 +25,7 @@ import { ExecutorProfilesSection } from "./executor-profiles-section";
 import { FlagsSection } from "./flags-section";
 import { HarnessConfigsSection } from "./harness-configs-section";
 import { HarnessProfilesSection } from "./harness-profiles-section";
+import { HistoryRetentionSection } from "./history-retention-section";
 import { IntegrationsSection } from "./integrations-section";
 import { McpSection } from "./mcp-section";
 import { McpServersSection } from "./mcp-servers-section";
@@ -212,6 +213,7 @@ function captionFor(group: SettingsGroup): string {
  */
 const SECTION_COMPONENTS: Record<string, () => React.ReactNode> = {
   workspace: () => <WorkspaceSection />,
+  "history-retention": () => <HistoryRetentionSection />,
   "danger-zone": () => <DangerZoneSection />,
   integrations: () => <IntegrationsSection />,
   repositories: () => <RepositoriesSection />,

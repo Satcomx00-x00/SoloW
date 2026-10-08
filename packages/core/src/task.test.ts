@@ -1,5 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import {
+  HISTORY_RETENTION_DAY_OPTIONS,
+  HISTORY_RETENTION_DEFAULT_DAYS,
   TaskDependencyErrorCode,
   TaskErrorCode,
   TaskParentErrorCode,
@@ -19,6 +21,7 @@ import {
   parseDependencyCycleMessage,
   previousTaskState,
   primaryTaskRepository,
+  TASK_RETENTION_DAYS,
   type TaskDependencyEdge,
   taskCheckoutBranch,
   taskSubtree,
@@ -384,5 +387,13 @@ describe("taskSubtree (issue #56)", () => {
   it("terminates on a cyclic chain", () => {
     const graph = chain(["a", null], ["b", "a"], ["x", "y"], ["y", "x"]);
     expect(taskSubtree(graph, ["a"]).sort()).toEqual(["a", "b"]);
+  });
+});
+
+describe("history retention windows (Decision 0032)", () => {
+  it("never offers a transcript window shorter than a Task's week in History", () => {
+    // A Task restored or reopened inside its week must come back with its conversation.
+    expect(Math.min(...HISTORY_RETENTION_DAY_OPTIONS)).toBeGreaterThanOrEqual(TASK_RETENTION_DAYS);
+    expect(HISTORY_RETENTION_DAY_OPTIONS).toContain(HISTORY_RETENTION_DEFAULT_DAYS);
   });
 });

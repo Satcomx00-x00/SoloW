@@ -1,4 +1,5 @@
 import {
+  Archive,
   Blocks,
   BookOpen,
   Bot,
@@ -237,6 +238,13 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
     caption: "Its name, and what it still needs before it can run anything",
     group: "Workspace",
     icon: Building2,
+  },
+  {
+    id: "history-retention",
+    label: "History retention",
+    caption: "How long a finished Task keeps its transcript",
+    group: "Workspace",
+    icon: Archive,
   },
   {
     id: "danger-zone",

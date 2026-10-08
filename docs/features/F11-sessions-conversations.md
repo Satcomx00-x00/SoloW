@@ -47,6 +47,9 @@ Harness did, resume its work with full context, and revisit it later.
   stands in for a closed range of the record, and the range it stands for stays readable. Reading
   a Session returns the summary in place of the range it covers; the range itself is read back on
   request, which is what keeps a long run's cost bounded for the reader as well as the writer.
+  The one exception comes after the Task is finished: history retention removes a finished Task's
+  transcript once its Workspace's window has passed, and says so where it was
+  ([0032](../decisions/0032-transcript-retention.md)).
 - **FR-9** A Session exposes a fork point another run can start from. The fork point is refused
   if the history behind it has changed since it was issued. What it proves is a claim about the
   stored records — the hash covers the payload as written, including anything the current event

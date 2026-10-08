@@ -123,6 +123,7 @@ import {
   type TaskCompleteWidget,
 } from "./todo-list";
 import { buildTranscript, inStepScope } from "./transcript";
+import { TranscriptPrunedNotice } from "./transcript-pruned-notice";
 import { useStepScope, WorkflowPosition } from "./workflow-steps";
 
 /**
@@ -2074,6 +2075,10 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
                   </span>
                 ) : null}
               </div>
+            ) : null}
+
+            {viewing?.eventsPrunedAt ? (
+              <TranscriptPrunedNotice at={viewing.eventsPrunedAt} />
             ) : null}
 
             {moveMessage ? (

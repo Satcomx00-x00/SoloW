@@ -71,6 +71,15 @@ export const workspace = sqliteTable("workspace", {
    * clearing the column is the kill switch.
    */
   enabledFlags: text("enabled_flags", { mode: "json" }).$type<Record<string, boolean>>(),
+  /**
+   * How many days a finished Task keeps its transcript before the retention sweep removes it
+   * (Decision 0032); null keeps it forever. One of `HISTORY_RETENTION_DAY_OPTIONS`.
+   *
+   * The literal default is `HISTORY_RETENTION_DEFAULT_DAYS` — spelled out because drizzle-kit
+   * reads this file on its own and the default has to land in the generated SQL. A test in
+   * `history-prune.test.ts` holds the two together.
+   */
+  historyRetentionDays: integer("history_retention_days").default(30),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -1307,6 +1316,13 @@ export const session = sqliteTable(
     harnessSessionStepId: text("harness_session_step_id"),
     startedAt: createdAt(),
     endedAt: text("ended_at"),
+    /**
+     * When the retention sweep removed this Session's transcript (Decision 0032), or null while
+     * it still has one. Set only once every transcript event is gone, so a sweep cut short by
+     * its batch bound picks the Session up again; and read by the terminal, which says the
+     * transcript was removed rather than showing a log that looks like a run that said nothing.
+     */
+    eventsPrunedAt: text("events_pruned_at"),
   },
   (t) => ({ byTask: index("session_task_started").on(t.taskId, t.startedAt) }),
 );
@@ -1372,10 +1388,15 @@ export const sessionEvent = sqliteTable(
  * `session_event` also keeps that table exactly what it claims to be — what the harness produced,
  * with nothing derived mixed in.
  *
- * Compaction can only ever insert here. There is no code path that deletes or updates a
- * `session_event` row, which is what makes "replay stays lossless" a structural property rather
- * than a discipline: a summary is an index into history, never a replacement for it, and the
- * review gate keeps its evidence (Principle I).
+ * Compaction can only ever insert here. Nothing in a run, a compaction or a review deletes or
+ * updates a `session_event` row, which is what makes "replay stays lossless" a structural
+ * property rather than a discipline: a summary is an index into history, never a replacement for
+ * it, and the review gate keeps its evidence (Principle I).
+ *
+ * The one exception is deliberate and comes after the evidence has served: history retention
+ * (Decision 0032) removes the transcript of a Task finished longer ago than its Workspace's
+ * window — Done or deleted, so long past any gate — and marks the Session `events_pruned_at`.
+ * Summaries stay; the range one stands for may then read back shorter than `event_count` says.
  *
  * `(session_id, from_seq)` is the idempotency key, the same way `session_event_seq` and
  * `session_usage_turn` are theirs: a durable step that re-runs after an orchestrator restart
