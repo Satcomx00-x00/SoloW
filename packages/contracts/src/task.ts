@@ -504,3 +504,23 @@ export type HistoryEntryDto = z.infer<typeof historyEntryDto>;
 
 export const historyListDto = z.array(historyEntryDto);
 export type HistoryListDto = z.infer<typeof historyListDto>;
+
+/**
+ * Quick task: one sentence becomes an Issue, a Task and a running harness (roadmap E2).
+ *
+ * Deliberately not a new kind of record. The server composes the existing Issue and Task writes,
+ * so everything downstream (board, review, Approve) sees an ordinary Task under an ordinary local
+ * Issue. `repositoryId` is optional only because a Workspace with exactly one Repository has no
+ * question to ask; with several, the server refuses rather than guessing which one to run in.
+ * Harness and Executor Profiles are never asked for: the Owner's stored defaults apply, then the
+ * oldest Profile of each kind.
+ */
+export const quickTaskInput = z.object({
+  prompt: z.string().trim().min(1).max(5_000),
+  repositoryId: idSchema.optional(),
+});
+export type QuickTaskInput = z.infer<typeof quickTaskInput>;
+
+/** What `task.quickStart` answers: the Task that is now running, and the Issue made for it. */
+export const quickTaskDto = z.object({ task: taskDto, issueId: idSchema });
+export type QuickTaskDto = z.infer<typeof quickTaskDto>;

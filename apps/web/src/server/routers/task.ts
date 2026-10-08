@@ -10,6 +10,8 @@ import {
   listTaskDependenciesInput,
   listTasksInput,
   moveTaskInput,
+  quickTaskDto,
+  quickTaskInput,
   recentTaskListDto,
   removeTaskDependencyInput,
   restoreTaskInput,
@@ -39,10 +41,16 @@ import {
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import type { RequestContext } from "../dal/context.js";
-import { getIssueById } from "../dal/issue.js";
-import { getExecutorProfile, getHarnessProfile } from "../dal/profile.js";
+import { createIssue, getIssueById } from "../dal/issue.js";
+import { getTaskDefaults } from "../dal/preference.js";
+import {
+  getExecutorProfile,
+  getHarnessProfile,
+  listExecutorProfiles,
+  listHarnessProfiles,
+} from "../dal/profile.js";
 import { listRecentTasks } from "../dal/recent-tasks.js";
-import { getRepository } from "../dal/repository.js";
+import { getRepository, listRepositories } from "../dal/repository.js";
 import {
   createSession,
   getLatestSession,
@@ -200,6 +208,23 @@ async function forkCursorFor(
   if (cursor.ok) return cursor.data;
   if (input.forkSeq !== undefined) unwrap(cursor);
   return null;
+}
+
+/** The longest Issue/Task title a Quick task derives from its sentence. */
+const QUICK_TITLE_MAX = 120;
+
+/**
+ * A title for the Issue and Task a Quick task creates: the first non-empty line of the prompt,
+ * cut on a word boundary. The full text is kept as the Issue's description, so nothing the Owner
+ * typed is lost to the shortening.
+ */
+export function quickTaskTitle(prompt: string): string {
+  const first = prompt.split("\n").find((line) => line.trim().length > 0) ?? prompt;
+  const line = first.trim();
+  if (line.length <= QUICK_TITLE_MAX) return line;
+  const cut = line.slice(0, QUICK_TITLE_MAX - 1);
+  const space = cut.lastIndexOf(" ");
+  return `${(space > QUICK_TITLE_MAX / 2 ? cut.slice(0, space) : cut).trimEnd()}\u2026`;
 }
 
 export const taskRouter = router({
@@ -393,6 +418,82 @@ export const taskRouter = router({
         });
       }
       return startTaskRun(ctx.rctx, task.id);
+    }),
+
+  quickStart: ownerProcedure
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/task.quickStart",
+        tags: ["task"],
+        protect: true,
+        summary:
+          "Quick task: from one sentence, create a local Issue and a Task under it and start the harness, using the Owner's default Harness and Executor Profiles. Names the Repository only when the Workspace has several.",
+      },
+    })
+    .use(rateLimit("task.launch"))
+    .input(quickTaskInput)
+    .output(quickTaskDto)
+    .mutation(async ({ ctx, input }) => {
+      const rctx = ctx.rctx;
+      // Everything that can be refused is resolved before the first write, so a Workspace that
+      // cannot run the work does not accumulate an Issue per attempt.
+      const repositories = unwrap(await listRepositories(rctx, { limit: 2 })).items;
+      let repositoryId = input.repositoryId;
+      if (repositoryId) {
+        unwrap(await getRepository(rctx, repositoryId));
+      } else if (repositories.length === 1) {
+        repositoryId = repositories[0]?.id;
+      }
+      if (!repositoryId) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message:
+            repositories.length === 0
+              ? TaskErrorCode.RepositoryUnreachable
+              : TaskErrorCode.QuickNeedsRepository,
+        });
+      }
+
+      const stored = unwrap(await getTaskDefaults(rctx)).defaults;
+      const agentProfileId =
+        stored.harnessProfileId ??
+        unwrap(await listHarnessProfiles(rctx, { limit: 1 })).items[0]?.id;
+      const executorProfileId =
+        stored.executorProfileId ??
+        unwrap(await listExecutorProfiles(rctx, { limit: 1 })).items[0]?.id;
+      if (!agentProfileId || !executorProfileId) {
+        throw new TRPCError({ code: "BAD_REQUEST", message: TaskErrorCode.QuickNeedsProfiles });
+      }
+
+      const title = quickTaskTitle(input.prompt);
+      const issue = unwrap(
+        await createIssue(rctx, {
+          title,
+          description: input.prompt,
+          repositoryId,
+          labels: [],
+        }),
+      );
+      const payload = unwrap(
+        buildCreateTaskPayload(
+          {
+            issueId: issue.id,
+            title,
+            agentProfileId,
+            executorProfileId,
+            repositories: [{ repositoryId }],
+          },
+          { workspaceId: rctx.workspaceId },
+        ),
+      );
+      const created = unwrap(await createTaskRecord(rctx, payload));
+      // Backlog to Ready is the one step the board makes the Owner take by hand; a Quick task
+      // exists to skip it. If the start below is refused (the profile's concurrency cap, say),
+      // the Task is left Ready on the board where Launch retries it.
+      unwrap(await updateTaskState(rctx, created.id, "ready"));
+      const started = await startTaskRun(rctx, created.id);
+      return { task: started, issueId: issue.id };
     }),
 
   move: ownerProcedure

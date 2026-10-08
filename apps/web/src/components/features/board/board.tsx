@@ -13,6 +13,7 @@ import {
   KeyRound,
   Link2,
   Play,
+  Plus,
   RotateCcw,
   Trash2,
   TriangleAlert,
@@ -46,8 +47,10 @@ import { BlockedByDialog } from "./blocked-by-dialog";
 import { moveRefusal, stepMoveRefusal, waitingOn } from "./blockers";
 import { type BoardReferences, BoardReferencesProvider } from "./board-references";
 import { Column } from "./column";
+import { CreateTaskDialog } from "./create-task-dialog";
 import { DependencyCycleDialog } from "./dependency-cycle-dialog";
 import { DndBoard } from "./dnd-board";
+import { QuickTaskDialog } from "./quick-task-dialog";
 
 /** Pure presentational board — groups Tasks into lifecycle columns (used by tests). */
 export function BoardView({
@@ -123,14 +126,17 @@ function BoardSkeleton() {
 const LIFECYCLE_MODE = "lifecycle";
 
 /** Shown when the Workspace has no Tasks at all, rather than seven empty columns. */
-function BoardEmpty() {
+function BoardEmpty({ onNewTask }: { onNewTask: () => void }) {
   return (
-    <div className="flex flex-col items-start gap-2 px-6 py-16">
+    <div className="flex flex-col items-start gap-3 px-6 py-16">
       <h2 className="font-medium text-sm">No tasks yet</h2>
       <p className="max-w-md text-muted-foreground text-sm leading-relaxed">
-        Create an issue to describe the work, then a task to hand a slice of it to a harness. It
-        runs in its own worktree and comes back here for your review.
+        Describe what you want done and an agent starts on it in its own worktree. When it finishes,
+        the work comes back here for your review.
       </p>
+      <Button size="sm" onClick={onNewTask}>
+        <Plus aria-hidden /> New task
+      </Button>
     </div>
   );
 }
@@ -159,6 +165,8 @@ export function Board({
   unassigned?: boolean | undefined;
 } = {}) {
   const utils = trpc.useUtils();
+  // `quick` is the one-sentence dialog, `full` the complete form it can hand over to.
+  const [newTask, setNewTask] = useState<"quick" | "full" | null>(null);
   // Which lifecycle column to scroll to on arrival, from the sidebar's `?column=` links — see
   // the effect near the return below.
   const targetColumn = useSearchParams().get("column");
@@ -594,31 +602,36 @@ export function Board({
 
   return (
     <BoardReferencesProvider value={references}>
-      {workflows.length > 0 ? (
-        <div className="flex items-center gap-2 px-4 pt-3">
-          <span className="text-2xs text-muted-foreground uppercase tracking-[0.12em]">
-            Columns
-          </span>
-          <Select
-            value={pickerValue}
-            onValueChange={(value) =>
-              setSelectedWorkflowId(value === LIFECYCLE_MODE ? null : value)
-            }
-          >
-            <SelectTrigger size="sm" className="w-56" aria-label="Board columns">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={LIFECYCLE_MODE}>Lifecycle</SelectItem>
-              {workflows.map((workflow) => (
-                <SelectItem key={workflow.id} value={workflow.id}>
-                  {workflow.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      ) : null}
+      <div className="flex items-center gap-2 px-4 pt-3">
+        {workflows.length > 0 ? (
+          <>
+            <span className="text-2xs text-muted-foreground uppercase tracking-[0.12em]">
+              Columns
+            </span>
+            <Select
+              value={pickerValue}
+              onValueChange={(value) =>
+                setSelectedWorkflowId(value === LIFECYCLE_MODE ? null : value)
+              }
+            >
+              <SelectTrigger size="sm" className="w-56" aria-label="Board columns">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={LIFECYCLE_MODE}>Lifecycle</SelectItem>
+                {workflows.map((workflow) => (
+                  <SelectItem key={workflow.id} value={workflow.id}>
+                    {workflow.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </>
+        ) : null}
+        <Button size="sm" className="ml-auto" onClick={() => setNewTask("quick")}>
+          <Plus aria-hidden /> New task
+        </Button>
+      </div>
       {errorMessage ? (
         <div
           className="mx-4 mt-3 flex items-start gap-2 rounded-lg border border-state-failed/30 bg-state-failed/10 py-2 pr-2 pl-3 text-state-failed text-sm"
@@ -640,7 +653,7 @@ export function Board({
         </div>
       ) : null}
       {tasks.length === 0 ? (
-        <BoardEmpty />
+        <BoardEmpty onNewTask={() => setNewTask("quick")} />
       ) : (
         <DndBoard
           tasks={tasks}
@@ -656,6 +669,16 @@ export function Board({
           submittingOn={pendingOn}
         />
       )}
+      <QuickTaskDialog
+        open={newTask === "quick"}
+        onOpenChange={(open) => setNewTask(open ? "quick" : null)}
+        onFullForm={() => setNewTask("full")}
+      />
+      <CreateTaskDialog
+        trigger={null}
+        open={newTask === "full"}
+        onOpenChange={(open) => setNewTask(open ? "full" : null)}
+      />
       <ConfirmDialog
         open={pendingMove !== null}
         onOpenChange={(open) => {

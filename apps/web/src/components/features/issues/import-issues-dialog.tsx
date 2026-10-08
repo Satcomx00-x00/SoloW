@@ -91,6 +91,7 @@ export function ImportIssuesDialog({
   const importIssues = trpc.integration.importIssues.useMutation({
     onSuccess: () => {
       utils.issue.list.invalidate();
+      utils.project.allItems.invalidate();
       // An imported Issue arrives with the provider's labels on it, so the filter's vocabulary
       // has just grown.
       utils.issue.labels.invalidate();
