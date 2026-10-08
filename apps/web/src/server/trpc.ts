@@ -158,6 +158,7 @@ export function unwrap<T>(result: Result<T, string>): T {
     // Lost a race for the row: the request was fine, the state moved under it.
     [TaskErrorCode.AlreadyStarted]: "CONFLICT",
     [ReviewErrorCode.NotInReview]: "CONFLICT",
+    [TaskErrorCode.ConcurrencyCapReached]: "TOO_MANY_REQUESTS",
   };
   throw new TRPCError({ code: map[code] ?? "BAD_REQUEST", message: code });
 }
