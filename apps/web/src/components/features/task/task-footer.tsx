@@ -6,11 +6,13 @@ import {
   Check,
   CheckCircle2,
   CircleDashed,
+  HardDrive,
   KeyRound,
   Loader2,
   Play,
   RotateCcw,
   ShieldQuestion,
+  Upload,
   X,
 } from "lucide-react";
 import Link from "next/link";
@@ -20,7 +22,12 @@ import { ConfirmAction } from "@/components/features/confirm-action";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
-import { CREDENTIAL_EXPIRED_REASON, failureReasonLabel, STATE_STYLE } from "@/lib/task-states";
+import {
+  CREDENTIAL_EXPIRED_REASON,
+  DELIVERY_FAILED_REASON,
+  failureReasonLabel,
+  STATE_STYLE,
+} from "@/lib/task-states";
 import { cn } from "@/lib/utils";
 
 /**
@@ -67,6 +74,8 @@ export function TaskFooter({
   onRetry,
   onOpenReview,
   onReopen,
+  onShipAgain,
+  onKeepLocal,
   nextStepName = null,
   criteria = null,
   onOpenChanges,
@@ -116,6 +125,10 @@ export function TaskFooter({
   onOpenReview: () => void;
   /** Take a Done Task back to Ready (history: resume it from there). */
   onReopen: () => void;
+  /** Push an approval that committed and did not ship, without running anything (A1). */
+  onShipAgain?: (() => void) | undefined;
+  /** Finish that approval with the local commit as its result. */
+  onKeepLocal?: (() => void) | undefined;
   /** The Workflow Step an approval moves on to, or null when approving finishes the Task. */
   nextStepName?: string | null;
   /** Acceptance criteria the reviewer has verified, when the Issue lists any. */
@@ -152,6 +165,8 @@ export function TaskFooter({
     onRetry,
     onOpenReview,
     onReopen,
+    onShipAgain,
+    onKeepLocal,
     nextStepName,
     criteria,
     onOpenChanges,
@@ -651,7 +666,14 @@ function Choice({
  * immediately, so that one gets Renew instead (spec AC-013, issue #63). A parked Task resumes by
  * itself when the quota window resets; Retry there is "don't wait".
  */
-function FailedOrParked({ task, actionPending, onRetry, renewHref }: FooterInput) {
+function FailedOrParked({
+  task,
+  actionPending,
+  onRetry,
+  onShipAgain,
+  onKeepLocal,
+  renewHref,
+}: FooterInput) {
   const reason = task.failureReason ? failureReasonLabel(task.failureReason) : null;
   const parked = task.state === "parked";
   const tone = reason?.tone ?? task.state;
@@ -663,6 +685,9 @@ function FailedOrParked({ task, actionPending, onRetry, renewHref }: FooterInput
       ? "The run resumes by itself when the quota window resets. Retry to start it now instead."
       : "Retry starts a fresh run from the task brief.");
   const renew = task.failureReason === CREDENTIAL_EXPIRED_REASON;
+  // An approval that committed and did not ship: the work is approved, so Retry — a harness round
+  // over it — is the wrong door. Ship again pushes what is committed; Keep local accepts it.
+  const unshipped = task.failureReason === DELIVERY_FAILED_REASON;
 
   return (
     <Row
@@ -688,6 +713,15 @@ function FailedOrParked({ task, actionPending, onRetry, renewHref }: FooterInput
             <KeyRound /> Renew
           </Link>
         </Button>
+      ) : unshipped ? (
+        <div className="flex flex-wrap gap-2">
+          <Button size="lg" variant="outline" disabled={actionPending} onClick={onKeepLocal}>
+            <HardDrive /> Keep local
+          </Button>
+          <Button size="lg" loading={actionPending} onClick={onShipAgain}>
+            <Upload /> Ship again
+          </Button>
+        </div>
       ) : (
         <Button size="lg" loading={actionPending} onClick={onRetry}>
           <RotateCcw /> Retry

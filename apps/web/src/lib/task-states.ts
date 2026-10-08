@@ -193,13 +193,14 @@ const FAILURE_REASONS: Record<
     detail:
       "A decision was recorded here and never applied. Decide again — the decision starts the run that applies it; nothing was lost.",
   },
-  // Approved and committed, but the push or the pull request did not go through (A1).
+  // Approved and committed, but the push or the pull request did not go through (A1). Not a
+  // failure of the work, so it is not retried: Ship again pushes what is committed.
   [DELIVERY_FAILED_REASON]: {
     label: "Not shipped",
     tone: "failed",
     icon: TriangleAlert,
     detail:
-      "The change is approved and committed on its branch, but it could not be pushed or its pull request could not be opened. The session log says why.",
+      "Approved and committed, but not pushed, or its request was not opened — the session log says why. Fix that, then Ship again; nothing is run again. Keep local finishes it without shipping.",
   },
   // The one failure where the work is *partly landed* (issue #70 AC-4).
   [PARTIAL_INTEGRATION_REASON]: {

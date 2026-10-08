@@ -13,6 +13,7 @@ import {
   quickTaskDto,
   quickTaskInput,
   recentTaskListDto,
+  redeliverTaskInput,
   removeTaskDependencyInput,
   restoreTaskInput,
   retryTaskInput,
@@ -33,6 +34,7 @@ import {
   buildCreateTaskPayload,
   canOpenReview,
   canTransitionTask,
+  DELIVERY_FAILED_REASON,
   formatDependencyCycle,
   isLaunchable,
   unsatisfiedDependencies,
@@ -64,6 +66,7 @@ import {
   createTaskRecord,
   deleteTask,
   getTaskById,
+  keepUndeliveredLocal,
   listTaskDependencies,
   listTasks,
   removeTaskDependencyEdge,
@@ -581,6 +584,56 @@ export const taskRouter = router({
     .input(retryTaskInput)
     .output(taskDto)
     .mutation(async ({ ctx, input }) => resumeTask(ctx.rctx, input.id)),
+
+  redeliver: ownerProcedure
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/task.redeliver",
+        tags: ["task"],
+        protect: true,
+        summary:
+          "Ship again: for a Task whose approval committed but could not be pushed or have its pull request opened, push the committed branch and open (or find) the request. Runs no harness and makes no commit; the Task moves to done when every branch has shipped.",
+      },
+    })
+    .input(redeliverTaskInput)
+    .output(taskDto)
+    .mutation(async ({ ctx, input }) => {
+      const task = unwrap(await getTaskById(ctx.rctx, input.id));
+      if (task.state !== "failed" || task.failureReason !== DELIVERY_FAILED_REASON) {
+        throw new TRPCError({ code: "CONFLICT", message: TaskErrorCode.NotUndelivered });
+      }
+      if (!orchestrator.isWired()) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: TaskErrorCode.NoOrchestrator });
+      }
+      // Not claimed here: the Task stays as it is until the push lands, and the orchestrator
+      // re-checks it before touching the remote. A second click repeats an idempotent push.
+      await orchestrator.redeliverTask({ workspaceId: ctx.rctx.workspaceId, taskId: task.id });
+      return task;
+    }),
+
+  keepLocal: ownerProcedure
+    .meta({
+      openapi: {
+        method: "POST",
+        path: "/task.keepLocal",
+        tags: ["task"],
+        protect: true,
+        summary:
+          "Keep local: finish a Task whose approval committed but could not ship, with the branch committed on this machine as its result. Nothing is pushed.",
+      },
+    })
+    .input(redeliverTaskInput)
+    .output(taskDto)
+    .mutation(async ({ ctx, input }) => {
+      const kept = unwrap(await keepUndeliveredLocal(ctx.rctx, input.id));
+      await orchestrator.announceTask({
+        workspaceId: ctx.rctx.workspaceId,
+        taskId: kept.id,
+        state: kept.state,
+      });
+      return kept;
+    }),
 
   dependencies: ownerProcedure
     .meta({

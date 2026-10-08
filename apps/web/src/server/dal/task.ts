@@ -27,6 +27,7 @@ import {
   CREDENTIAL_EXPIRED_REASON,
   checkDependencyEdge,
   checkParentEdge,
+  DELIVERY_FAILED_REASON,
   resumeWorkflowCursor,
   taskCheckoutBranch,
   taskSubtree,
@@ -606,6 +607,35 @@ export async function claimTaskState(
     )
     .returning();
   if (!row) return err(TaskErrorCode.AlreadyStarted);
+  const attachments = await attachmentsForTasks(ctx, [row.id]);
+  return ok(taskToDto(row, attachments.get(row.id) ?? []));
+}
+
+/**
+ * Keep local (A1): finish a Task whose approval committed and could not ship, with the commit on
+ * this machine as its result — the outcome every approval had before shipping existed, and the
+ * only one available to a token that may read the repository but not write to it.
+ *
+ * Conditional on the Task still being that failure, in the same statement, so it cannot finish a
+ * Task that Ship again moved on, or one that failed for a reason Retry is for.
+ */
+export async function keepUndeliveredLocal(
+  ctx: RequestContext,
+  id: string,
+): Promise<Result<TaskDto, typeof TaskErrorCode.NotUndelivered>> {
+  const [row] = await ctx.db
+    .update(task)
+    .set({ state: "done", failureReason: null, updatedAt: new Date().toISOString() })
+    .where(
+      and(
+        eq(task.workspaceId, ctx.workspaceId),
+        eq(task.id, id),
+        eq(task.state, "failed"),
+        eq(task.failureReason, DELIVERY_FAILED_REASON),
+      ),
+    )
+    .returning();
+  if (!row) return err(TaskErrorCode.NotUndelivered);
   const attachments = await attachmentsForTasks(ctx, [row.id]);
   return ok(taskToDto(row, attachments.get(row.id) ?? []));
 }

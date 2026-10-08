@@ -155,35 +155,7 @@ export async function loadTaskRunContext(
     .limit(1);
   if (!ep) throw new Error(`executor profile ${t.executorProfileId} not found`);
 
-  // Ordered by position, so index 0 is the primary attachment and `primaryTaskRepository` and
-  // this list agree about which worktree the harness is started in (issue #7).
-  const attachments = await db
-    .select({ attachment: taskRepository, repository })
-    .from(taskRepository)
-    .innerJoin(repository, eq(repository.id, taskRepository.repositoryId))
-    .where(
-      and(
-        eq(taskRepository.workspaceId, workspaceId),
-        eq(taskRepository.taskId, taskId),
-        eq(repository.workspaceId, workspaceId),
-      ),
-    )
-    .orderBy(asc(taskRepository.position));
-  // A Task with no attachment cannot be run at all, and every write path creates one with the
-  // Task itself. Refused here, by name, rather than letting an index return undefined and the
-  // failure surface three steps later as "cannot read property location of undefined".
-  if (attachments.length === 0) {
-    throw new Error(`task ${taskId} has no repository attached`);
-  }
-
-  const repositories: TaskRepositoryBinding[] = [];
-  for (const row of attachments) {
-    repositories.push({
-      attachment: row.attachment,
-      repository: row.repository,
-      scmClone: await loadScmClone(db, workspaceId, row.repository),
-    });
-  }
+  const repositories = await loadRepositoryBindings(db, workspaceId, taskId);
 
   const [ws] = await db
     .select({ flags: workspace.enabledFlags })
@@ -230,6 +202,89 @@ export async function loadTaskRunContext(
     librariesEnabled: flagFor("ff-agent-libraries"),
     workflowsEnabled: flagFor("ff-workflows"),
     secretCiphertext: sec?.ciphertext ?? null,
+  };
+}
+
+/** A Task's attachments in position order, each with its Repository and clone credential. */
+async function loadRepositoryBindings(
+  db: Db,
+  workspaceId: string,
+  taskId: string,
+): Promise<TaskRepositoryBinding[]> {
+  // Ordered by position, so index 0 is the primary attachment and `primaryTaskRepository` and
+  // this list agree about which worktree the harness is started in (issue #7).
+  const attachments = await db
+    .select({ attachment: taskRepository, repository })
+    .from(taskRepository)
+    .innerJoin(repository, eq(repository.id, taskRepository.repositoryId))
+    .where(
+      and(
+        eq(taskRepository.workspaceId, workspaceId),
+        eq(taskRepository.taskId, taskId),
+        eq(repository.workspaceId, workspaceId),
+      ),
+    )
+    .orderBy(asc(taskRepository.position));
+  // A Task with no attachment cannot be run at all, and every write path creates one with the
+  // Task itself. Refused here, by name, rather than letting an index return undefined and the
+  // failure surface three steps later as "cannot read property location of undefined".
+  if (attachments.length === 0) {
+    throw new Error(`task ${taskId} has no repository attached`);
+  }
+
+  const repositories: TaskRepositoryBinding[] = [];
+  for (const row of attachments) {
+    repositories.push({
+      attachment: row.attachment,
+      repository: row.repository,
+      scmClone: await loadScmClone(db, workspaceId, row.repository),
+    });
+  }
+  return repositories;
+}
+
+/**
+ * What shipping an approved Task again needs (A1), and no more: the Task, its Issue (the
+ * request's title and body), its attachments with their credentials, and the Session its log
+ * goes on. Not `loadTaskRunContext`, which also requires a Harness and an Executor Profile a push
+ * has no use for: a Profile deleted since the approval must not make the branch unshippable.
+ */
+export interface TaskDeliveryContext {
+  task: typeof task.$inferSelect;
+  issue: typeof issue.$inferSelect;
+  repositories: TaskRepositoryBinding[];
+  /** The newest Session, where the approval's own notices already are; null if none exists. */
+  sessionId: string | null;
+}
+
+export async function loadTaskDeliveryContext(
+  db: Db,
+  workspaceId: string,
+  taskId: string,
+): Promise<TaskDeliveryContext | null> {
+  const [t] = await db
+    .select()
+    .from(task)
+    .where(and(eq(task.workspaceId, workspaceId), eq(task.id, taskId)))
+    .limit(1);
+  if (!t) return null;
+  const [iss] = await db
+    .select()
+    .from(issue)
+    .where(and(eq(issue.workspaceId, workspaceId), eq(issue.id, t.issueId)))
+    .limit(1);
+  if (!iss) return null;
+  const [newest] = await db
+    .select({ id: session.id })
+    .from(session)
+    .where(and(eq(session.workspaceId, workspaceId), eq(session.taskId, taskId)))
+    .orderBy(desc(session.startedAt))
+    .limit(1);
+  return {
+    task: t,
+    issue: iss,
+    repositories: await loadRepositoryBindings(db, workspaceId, taskId),
+    sessionId: newest?.id ?? null,
   };
 }
 

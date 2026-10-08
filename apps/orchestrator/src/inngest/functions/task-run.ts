@@ -79,7 +79,6 @@ import {
   resolveResumeHarnessSessionId,
   retainedWorktree,
   setSessionState,
-  setTaskRepositoryChangeRequest,
   setTaskRepositoryResultBranch,
   setTaskState,
   type TaskRepositoryBinding,
@@ -88,7 +87,12 @@ import {
   unsatisfiedDependencyIds,
   updateHarnessCatalogCapabilities,
 } from "../../data.js";
-import { changeRequestBody, DeliveryError, deliverBranch } from "../../delivery.js";
+import {
+  changeRequestBody,
+  deliveryFailedNotice,
+  shipAttachment,
+  shippedNotice,
+} from "../../delivery.js";
 import { orchestratorEnv } from "../../env.js";
 import { hasDriver, missingDriverReason } from "../../executor/drivers.js";
 import {
@@ -2129,38 +2133,22 @@ export async function runTaskLifecycle(
            * from a failed commit: the branch is committed and recorded either way, and what to do
            * about it differs. A Repository with no remote falls through as a local commit.
            */
-          try {
-            const outcome = await deliverBranch({
-              binding: entry.binding,
-              branch: entry.worktree.branch,
-              title: ctx.issue.title,
-              body: changeRequestBody(taskId, ctx.issue.description),
-              push: (remoteUrl, credential) =>
-                repoAdmin.push(
-                  upstreamPathFor(entry.binding),
-                  remoteUrl,
-                  entry.worktree.branch,
-                  credential,
-                ),
-            });
-            if (outcome.kind !== "local") {
-              await setTaskRepositoryChangeRequest(db, workspaceId, entry.binding.attachment.id, {
-                url: outcome.url,
-                number: outcome.number,
-              });
-              delivered.push(
-                `${entry.binding.repository.name}: ${outcome.noun} #${outcome.number} ${outcome.kind === "opened" ? "opened" : "updated"} (${outcome.url})`,
-              );
-            }
-          } catch (cause) {
-            if (!(cause instanceof DeliveryError)) {
-              captureException(log, cause, { stage: "delivery" });
-            }
-            undelivered.push({
-              branch: entry.worktree.branch,
-              error: cause instanceof Error ? cause.message : String(cause),
-            });
-          }
+          const shipped = await shipAttachment(db, workspaceId, {
+            binding: entry.binding,
+            branch: entry.worktree.branch,
+            title: ctx.issue.title,
+            body: changeRequestBody(taskId, ctx.issue.description),
+            push: (remoteUrl, credential) =>
+              repoAdmin.push(
+                upstreamPathFor(entry.binding),
+                remoteUrl,
+                entry.worktree.branch,
+                credential,
+              ),
+            report: (cause) => captureException(log, cause, { stage: "delivery" }),
+          });
+          if (shipped.kind === "shipped") delivered.push(shipped.line);
+          if (shipped.kind === "failed") undelivered.push(shipped);
         }
 
         if (failed.length > 0) {
@@ -2198,8 +2186,8 @@ export async function runTaskLifecycle(
            * Committed, approved, and not shipped (A1). Never `done`: a Task that says it shipped
            * when the remote has nothing is the failure this feature exists to remove. Failed, with
            * its own reason and the cause in words, so the approval is visibly unfinished instead
-           * of silently dropped. Re-approving after the cause is fixed pushes again and refreshes
-           * the same request rather than opening another.
+           * of silently dropped. Ship again (`redelivery.ts`) pushes the committed branch and
+           * finds the same request; Keep local accepts the commit as the result.
            */
           await appendSessionEvent(db, workspaceId, {
             sessionId,
@@ -2207,12 +2195,7 @@ export async function runTaskLifecycle(
             workflowStepId: leg.stepId,
             payload: {
               kind: "notice",
-              text: [
-                "Your approval is recorded and the change is committed, but it was not shipped.",
-                ...undelivered.map((u) => `${u.branch}: ${u.error}`),
-                ...(delivered.length > 0 ? [`Shipped: ${delivered.join("; ")}.`] : []),
-                "The branch holds the change in the repository on this machine. Fix the cause above, then approve again to push and open the request.",
-              ].join(" "),
+              text: deliveryFailedNotice({ undelivered, delivered }),
             },
           });
           await setTaskState(db, workspaceId, taskId, "failed", {
@@ -2230,7 +2213,7 @@ export async function runTaskLifecycle(
             sessionId,
             seq: await nextSessionEventSeq(db, workspaceId, sessionId),
             workflowStepId: leg.stepId,
-            payload: { kind: "notice", text: `Shipped: ${delivered.join("; ")}.` },
+            payload: { kind: "notice", text: shippedNotice(delivered) },
           });
         }
 
@@ -3831,7 +3814,7 @@ function handoffWith(summary: string | null, feedback: string | null | undefined
  * root, which is the isolation defect this replaces. If the cache layout ever moves, both halves
  * move together or a container mounts a directory the clone did not land in.
  */
-function repositoryHostPath(
+export function repositoryHostPath(
   repoCacheRoot: string,
   repository: TaskRepositoryBinding["repository"],
 ): string {

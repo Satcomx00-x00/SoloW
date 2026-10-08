@@ -1,6 +1,6 @@
-import { decryptForScmSync } from "@solow/db";
+import { type Db, decryptForScmSync } from "@solow/db";
 import { cloneUsernameFor, providerManifest, providerWith } from "@solow/scm";
-import type { TaskRepositoryBinding } from "./data.js";
+import { setTaskRepositoryChangeRequest, type TaskRepositoryBinding } from "./data.js";
 import { worktreeNameForTask } from "./harness/claude-code-runner.js";
 import { type CloneCredential, worktreeBranch } from "./worktree/manager.js";
 
@@ -162,4 +162,79 @@ export function changeRequestBody(taskId: string, issueDescription: string | nul
   return [`Opened by SoloW after the change from task \`${taskId}\` was approved.`, brief]
     .filter(Boolean)
     .join("\n\n");
+}
+
+/** What shipping one attachment came to, in the terms the notices below are written in. */
+export type ShipResult =
+  /** No remote: the commit is the result, and there is nothing to say about shipping it. */
+  | { kind: "local" }
+  /** The request is open; `line` names it for the session log. */
+  | { kind: "shipped"; line: string }
+  /** Committed, not shipped; `error` is already in words a person can act on. */
+  | { kind: "failed"; branch: string; error: string };
+
+/**
+ * Ship one attachment's committed branch and record where it went (A1).
+ *
+ * The one place both callers go through — the approval that commits the branch, and Ship again,
+ * which only ships one that is already committed — so the two cannot record a request
+ * differently or describe a failure in different words. Never throws: a refusal is a result the
+ * caller reports, and `report` hears about anything that was not a `DeliveryError`, which is a
+ * bug rather than a provider saying no.
+ */
+export async function shipAttachment(
+  db: Db,
+  workspaceId: string,
+  args: {
+    binding: TaskRepositoryBinding;
+    branch: string;
+    title: string;
+    body: string;
+    push: (remoteUrl: string, credential: CloneCredential) => Promise<void>;
+    report?: (cause: unknown) => void;
+  },
+): Promise<ShipResult> {
+  try {
+    const outcome = await deliverBranch(args);
+    if (outcome.kind === "local") return { kind: "local" };
+    await setTaskRepositoryChangeRequest(db, workspaceId, args.binding.attachment.id, {
+      url: outcome.url,
+      number: outcome.number,
+    });
+    return {
+      kind: "shipped",
+      line: `${args.binding.repository.name}: ${outcome.noun} #${outcome.number} ${outcome.kind} (${outcome.url})`,
+    };
+  } catch (cause) {
+    if (!(cause instanceof DeliveryError)) args.report?.(cause);
+    return {
+      kind: "failed",
+      branch: args.branch,
+      error: cause instanceof Error ? cause.message : String(cause),
+    };
+  }
+}
+
+/** The session-log line for an approval whose every remote half landed. */
+export function shippedNotice(delivered: readonly string[]): string {
+  return `Shipped: ${delivered.join("; ")}.`;
+}
+
+/**
+ * The session-log line for an approval that committed and did not ship.
+ *
+ * It names the way out, because the Task page puts it beside this failure: Ship again pushes the
+ * committed branch and opens the request without running anything, and Keep local finishes the
+ * Task with the commit on this machine as its result — the answer for a token that may only read.
+ */
+export function deliveryFailedNotice(args: {
+  undelivered: ReadonlyArray<{ branch: string; error: string }>;
+  delivered: readonly string[];
+}): string {
+  return [
+    "Your approval is recorded and the change is committed, but it was not shipped.",
+    ...args.undelivered.map((u) => `${u.branch}: ${u.error}`),
+    ...(args.delivered.length > 0 ? [shippedNotice(args.delivered)] : []),
+    "The branch holds the change in the repository on this machine. Fix the cause above, then choose Ship again to push it and open the request — nothing is run again. Or choose Keep local to finish the task without shipping.",
+  ].join(" ");
 }

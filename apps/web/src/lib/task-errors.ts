@@ -48,6 +48,10 @@ const MESSAGES: Record<string, string> = {
   [TaskErrorCode.QuickNeedsRepository]: "Choose which repository the agent should work in.",
   [TaskErrorCode.QuickNeedsProfiles]:
     "Add a harness profile and an executor profile in Settings before starting a task.",
+  [TaskErrorCode.NotUndelivered]:
+    "This task is no longer waiting to be shipped. The page has been refreshed.",
+  [TaskErrorCode.NoOrchestrator]:
+    "No orchestrator is running, so nothing can be pushed. Start the stack, then try again.",
   [CommonErrorCode.RateLimited]: "Too many launches in a row. Wait a moment and try again.",
   [CommonErrorCode.Forbidden]: "You do not have permission to do that.",
   [CommonErrorCode.NotFound]: "That task no longer exists — this page may be out of date.",

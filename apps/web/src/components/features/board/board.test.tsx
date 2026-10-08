@@ -453,6 +453,31 @@ describe("Board (wired)", () => {
       expect(screen.queryByRole("button", { name: /Retry/ })).toBeNull();
     });
 
+    it("offers no Retry for an approval that did not ship — that would re-run approved work", async () => {
+      renderWithTrpc(
+        <Live>
+          <Board />
+        </Live>,
+        {
+          ...handlers,
+          "task.list": () => ({
+            items: [
+              makeTask({
+                id: "ship-1",
+                state: "failed",
+                title: "Approved, not pushed",
+                failureReason: "delivery_failed",
+              }),
+            ],
+            nextCursor: null,
+          }),
+        },
+      );
+
+      await screen.findByText("Approved, not pushed");
+      expect(screen.queryByRole("button", { name: /Retry/ })).toBeNull();
+    });
+
     it("offers no Retry button for a Task that has not failed", async () => {
       renderWithTrpc(
         <Live>

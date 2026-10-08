@@ -1122,6 +1122,23 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
     },
   });
   /**
+   * The two ways out of an approval that committed and did not ship (A1). Ship again only hands
+   * the push to the orchestrator, which moves the Task when it lands and announces it, so the
+   * Task is re-read then; Keep local is a state write and answers with the Task.
+   */
+  const shipAgain = trpc.task.redeliver.useMutation({
+    onSuccess: () => {
+      utils.task.get.invalidate({ id: taskId });
+      utils.task.list.invalidate();
+    },
+  });
+  const keepLocal = trpc.task.keepLocal.useMutation({
+    onSuccess: () => {
+      utils.task.get.invalidate({ id: taskId });
+      utils.task.list.invalidate();
+    },
+  });
+  /**
    * Which Secret a credential-expired Task's "Renew" should open (spec AC-013, issue #63), the
    * way the board finds it. Both lists are fetched only when there is a Renew to point somewhere:
    * every other Task pays nothing for a control it will never show.
@@ -1330,9 +1347,13 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
         onDismissError={() => {
           retry.reset();
           decide.reset();
+          shipAgain.reset();
+          keepLocal.reset();
         }}
         onLaunch={() => requestMove("running")}
         onRetry={() => retry.mutate({ id: t.id })}
+        onShipAgain={() => shipAgain.mutate({ id: t.id })}
+        onKeepLocal={() => keepLocal.mutate({ id: t.id })}
         onOpenReview={() => submitForReview.mutate({ id: t.id })}
         onReopen={() => requestMove("ready")}
         nextStepName={nextStepName}
@@ -1350,7 +1371,13 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
           pickTab("brief");
         }}
         openReviewPending={submitForReview.isPending}
-        actionPending={move.isPending || launch.isPending || retry.isPending}
+        actionPending={
+          move.isPending ||
+          launch.isPending ||
+          retry.isPending ||
+          shipAgain.isPending ||
+          keepLocal.isPending
+        }
         renewHref={renewHref}
         error={footerMessage}
       />
@@ -1693,7 +1720,12 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   };
   // Refusals from the foot of the page, through the same mapping as the banner above: a wire
   // code is never the sentence an operator reads.
-  const footerMessage = taskActionMessage(retry.error?.message ?? decide.error?.message);
+  const footerMessage = taskActionMessage(
+    retry.error?.message ??
+      decide.error?.message ??
+      shipAgain.error?.message ??
+      keepLocal.error?.message,
+  );
 
   /**
    * One step along the lifecycle, from the arrows beside the state badge.

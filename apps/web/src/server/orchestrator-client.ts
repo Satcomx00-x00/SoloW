@@ -9,6 +9,7 @@ import {
   REPOSITORY_SYNC_REQUESTED,
   type ReviewDecision,
   TASK_PURGE_REQUESTED,
+  TASK_REDELIVER_REQUESTED,
   type TaskState,
 } from "@solow/contracts";
 import { signStreamTicket } from "@solow/core/stream";
@@ -51,6 +52,12 @@ export interface OrchestratorClient {
     sessionId: string;
     review: { id: string; decision: ReviewDecision; feedback: string | null };
   }): Promise<void>;
+  /**
+   * Ship again (A1): push a Task's committed result branches and open or find their requests,
+   * without running anything. Thrown when nothing could do it, so the button says so instead of
+   * looking like it worked.
+   */
+  redeliverTask(input: { workspaceId: string; taskId: string }): Promise<void>;
   /**
    * Tell every client watching that a Task changed, for a change this API made itself.
    *
@@ -154,6 +161,11 @@ export const orchestrator: OrchestratorClient = {
   async applyReview(input) {
     if (orchestratorUrl()) return emit("task.launch.requested", input);
     throw new Error(`${UNWIRED}: a review decision needs a run to apply it`);
+  },
+
+  async redeliverTask(input) {
+    if (orchestratorUrl()) return emit(TASK_REDELIVER_REQUESTED, input);
+    throw new Error(`${UNWIRED}: shipping a branch needs the orchestrator`);
   },
 
   async requestMirrorSync(input) {

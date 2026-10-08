@@ -133,6 +133,19 @@ export const taskPurgeRequestedData = z.object({
 export type TaskPurgeRequestedData = z.infer<typeof taskPurgeRequestedData>;
 
 /**
+ * Ship an approved Task's branches again (A1): push each committed result branch and open or find
+ * its pull request, and nothing else — no harness, no new commit. Sent by `task.redeliver` for a
+ * Task whose approval committed but could not ship; the orchestrator re-checks that it still is
+ * one before touching the remote.
+ */
+export const TASK_REDELIVER_REQUESTED = "task.redeliver.requested";
+export const taskRedeliverRequestedData = z.object({
+  workspaceId: z.string().min(1),
+  taskId: z.string().min(1),
+});
+export type TaskRedeliverRequestedData = z.infer<typeof taskRedeliverRequestedData>;
+
+/**
  * How much of a Workspace "clean up the database" removes.
  *
  * Two scopes rather than one, because the two things people mean by it are genuinely different

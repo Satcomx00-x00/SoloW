@@ -159,6 +159,7 @@ export function unwrap<T>(result: Result<T, string>): T {
     [TaskErrorCode.AlreadyStarted]: "CONFLICT",
     [ReviewErrorCode.NotInReview]: "CONFLICT",
     [TaskErrorCode.ConcurrencyCapReached]: "TOO_MANY_REQUESTS",
+    [TaskErrorCode.NotUndelivered]: "CONFLICT",
   };
   throw new TRPCError({ code: map[code] ?? "BAD_REQUEST", message: code });
 }

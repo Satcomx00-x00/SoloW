@@ -64,6 +64,8 @@ function renderFooter(
         onRetry={() => calls.push("retry")}
         onOpenReview={() => calls.push("open-review")}
         onReopen={() => calls.push("reopen")}
+        onShipAgain={() => calls.push("ship-again")}
+        onKeepLocal={() => calls.push("keep-local")}
         renewHref="/settings?section=secrets&renewSecret=anthropic"
         error={null}
         {...extra}
@@ -117,6 +119,16 @@ describe("TaskFooter", () => {
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
     const renew = screen.getByRole("link", { name: "Renew" });
     expect(renew.getAttribute("href")).toContain("renewSecret=anthropic");
+  });
+
+  it("ships an approval that did not ship again, instead of re-running the approved work", () => {
+    const calls = renderFooter({ state: "failed", failureReason: "delivery_failed" });
+    expect(screen.getByText("Not shipped")).toBeDefined();
+    // Retry starts a harness round over work a person already approved.
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Ship again" }));
+    fireEvent.click(screen.getByRole("button", { name: "Keep local" }));
+    expect(calls).toEqual(["ship-again", "keep-local"]);
   });
 
   it("lets a parked task be resumed now rather than when the window resets", () => {

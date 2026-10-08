@@ -237,6 +237,13 @@ export const retryTaskInput = z.object({ id: idSchema });
 export type RetryTaskInput = z.infer<typeof retryTaskInput>;
 
 /**
+ * The two ways out of an approval that committed and did not ship (A1): `task.redeliver` pushes
+ * and opens the request again, `task.keepLocal` accepts the commit on this machine as the result.
+ */
+export const redeliverTaskInput = z.object({ id: idSchema });
+export type RedeliverTaskInput = z.infer<typeof redeliverTaskInput>;
+
+/**
  * Delete a Task outright — the board and the Task page both offer it, so a Task no longer has to
  * be deleted by way of the Issue above it.
  *

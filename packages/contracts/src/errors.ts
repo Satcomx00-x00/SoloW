@@ -71,6 +71,13 @@ export const TaskErrorCode = {
    * the work with, and the fix lives in Settings, not in the sentence the Owner typed.
    */
   QuickNeedsProfiles: "TASK_QUICK_NEEDS_PROFILES",
+  /**
+   * Ship again, or Keep local, on a Task that is not an approval waiting to ship — it shipped in
+   * the meantime, or it failed for another reason, which Retry is for.
+   */
+  NotUndelivered: "TASK_NOT_UNDELIVERED",
+  /** Ship again with no orchestrator running: nothing could push the branch. */
+  NoOrchestrator: "TASK_NO_ORCHESTRATOR",
 } as const;
 export type TaskErrorCode = (typeof TaskErrorCode)[keyof typeof TaskErrorCode];
 

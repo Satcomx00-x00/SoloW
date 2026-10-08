@@ -39,7 +39,11 @@ import { type BoardColumn, lifecycleColumns, workflowColumns } from "@/lib/board
 import { settingsHref } from "@/lib/navigation";
 import { WHOLE_PAGE } from "@/lib/paged";
 import { taskActionMessage } from "@/lib/task-errors";
-import { BOARD_COLUMNS, CREDENTIAL_EXPIRED_REASON } from "@/lib/task-states";
+import {
+  BOARD_COLUMNS,
+  CREDENTIAL_EXPIRED_REASON,
+  DELIVERY_FAILED_REASON,
+} from "@/lib/task-states";
 import { useWorkspaceEvents } from "@/lib/workspace-events";
 import { trpc } from "@/trpc/react";
 import { LaunchTaskDialog, useWorkflowChoices } from "../task/launch-task-dialog";
@@ -497,7 +501,15 @@ export function Board({
    * retry here is a fresh harness process picking the same work back up, not a restart from zero.
    */
   const retryAction = (task: TaskDto): ReactNode => {
-    if (task.state !== "failed" || task.failureReason === CREDENTIAL_EXPIRED_REASON) return null;
+    // Nor for an approval that committed and did not ship: a retry would run the harness over
+    // approved work. Its way out — Ship again, or Keep local — is on the Task's own page.
+    if (
+      task.state !== "failed" ||
+      task.failureReason === CREDENTIAL_EXPIRED_REASON ||
+      task.failureReason === DELIVERY_FAILED_REASON
+    ) {
+      return null;
+    }
     return (
       <Button
         key={`retry-${task.id}`}
