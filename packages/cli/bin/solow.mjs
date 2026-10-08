@@ -25,6 +25,7 @@ import {
   readdirSync,
   readFileSync,
   readSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -384,14 +385,19 @@ function resolveInngest() {
  *
  * An exported value wins, as it does in `scripts/lib/engine-env.sh`: a deployment that manages
  * its own secrets must not have them silently replaced by the files.
+ *
+ * An empty file, which an interrupted first run or a full disk leaves, is no key and is replaced —
+ * the same `[ -s ]` rule as the shell launchers. Read as it was, it set an empty key.
  */
 function secret(dataDir, name, make, envName) {
   const exported = process.env[envName];
   if (exported) return exported;
   const file = join(dataDir, name);
-  if (existsSync(file)) return readFileSync(file, "utf8").trim();
+  if (existsSync(file) && statSync(file).size > 0) return readFileSync(file, "utf8").trim();
   const value = make();
   writeFileSync(file, `${value}\n`, { mode: 0o600 });
+  // The mode above only applies to a file this call creates, not to the empty one it replaced.
+  chmodSync(file, 0o600);
   return value;
 }
 

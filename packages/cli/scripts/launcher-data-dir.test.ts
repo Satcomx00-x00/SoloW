@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -93,6 +94,27 @@ test("tightens a folder an earlier version left readable, and only SoloW's files
   expect(mode(join(home, "inngest", "main.db"))).toBe("600");
   expect(mode(join(home, "backups"))).toBe("700");
   expect(mode(join(home, "notes.txt"))).toBe("664");
+});
+
+test("replaces an empty key file instead of starting with an empty key", () => {
+  // What an interrupted first run, or a full disk, leaves behind. `scripts/lib/engine-env.sh`
+  // already treats it as missing (`[ -s ]`); an empty SOLOW_SECRET_KEY is no key at all.
+  const home = scratch();
+  writeFileSync(join(home, "secret.key"), "");
+  writeFileSync(join(home, "auth.secret"), "");
+  startUntilPortCheck(home);
+
+  for (const name of ["secret.key", "auth.secret"]) {
+    expect(readFileSync(join(home, name), "utf8").trim()).toMatch(/^[A-Za-z0-9+/]{43}=$/);
+    expect(mode(join(home, name))).toBe("600");
+  }
+});
+
+test("keeps a key file that has a key in it", () => {
+  const home = scratch();
+  writeFileSync(join(home, "secret.key"), "kept-as-it-is\n");
+  startUntilPortCheck(home);
+  expect(readFileSync(join(home, "secret.key"), "utf8")).toBe("kept-as-it-is\n");
 });
 
 /** A port nothing listens on: the kernel picks one and it is released straight away. */

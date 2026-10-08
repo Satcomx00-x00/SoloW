@@ -7,6 +7,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -158,6 +159,34 @@ test("a second launcher refuses while anything the first one started is still ru
   const third = claim(home);
   expect(await third.exited).toBe(0);
 }, 15_000);
+
+test("the launchers replace an empty master key, as they do every other key", () => {
+  // Stopped at their first `bun`, which a stand-in on PATH fails: by then every key is made.
+  const shims = scratch();
+  writeFileSync(join(shims, "bun"), "#!/bin/sh\nexit 3\n", { mode: 0o755 });
+  chmodSync(join(shims, "bun"), 0o755);
+  for (const launcher of ["dev.sh", "start.sh"]) {
+    const home = scratch();
+    writeFileSync(join(home, "dev-secret.key"), "");
+    writeFileSync(join(home, "auth.secret"), "");
+    const result = Bun.spawnSync(["sh", join(ROOT, "scripts", launcher)], {
+      // SOLOW_AUTH_SECRET blank: the root test preload exports one, and an exported key wins.
+      env: {
+        ...process.env,
+        PATH: `${shims}:${process.env.PATH}`,
+        SOLOW_HOME: home,
+        SOLOW_AUTH_SECRET: "",
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    expect([launcher, result.exitCode]).toEqual([launcher, 3]);
+    for (const name of ["dev-secret.key", "auth.secret"]) {
+      const key = readFileSync(join(home, name), "utf8").trim();
+      expect([launcher, name, key.length]).toEqual([launcher, name, 44]);
+    }
+  }
+});
 
 test("a restore refuses while anything the stack started still holds the folder", async () => {
   const home = scratch();

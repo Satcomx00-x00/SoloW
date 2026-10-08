@@ -26,9 +26,10 @@ LOG_TAG=start
 # shellcheck source=/dev/null
 . "$ROOT/scripts/lib/supervise.sh"
 
-# Persistent 32-byte base64 key (kept out of git via .gitignore's /.solow/).
+# Persistent 32-byte base64 key (kept out of git via .gitignore's /.solow/). An empty file, which an
+# interrupted first run leaves, is no key: replaced, as engine-env.sh and `npx solow` do.
 KEY_FILE="$GC_DIR/dev-secret.key"
-if [ ! -f "$KEY_FILE" ]; then
+if [ ! -s "$KEY_FILE" ]; then
     openssl rand -base64 32 > "$KEY_FILE"
     echo "[start] generated $KEY_FILE"
 fi
