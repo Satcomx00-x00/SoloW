@@ -15,7 +15,8 @@ import { webEnv } from "../env.js";
  * **One Owner per instance.** A self-hosted SoloW is one person's control plane, and its
  * Workspace holds their harness credentials. Leaving sign-up open would let anyone who can reach
  * the port create an account on someone else's machine, so the *second* sign-up is refused at
- * the database hook — the closest point to the write, where no route can route around it.
+ * the database hook — the closest point to the write, where no route can route around it — and,
+ * for two sign-ups that both pass the hook's count, by `auth_user_single_owner` in the INSERT.
  *
  * **The Workspace is settled with the Owner.** `workspaceId` must exist before the first request
  * resolves, and creating it lazily inside session resolution would make a read path write. So it

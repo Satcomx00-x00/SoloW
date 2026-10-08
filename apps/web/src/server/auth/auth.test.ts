@@ -39,6 +39,38 @@ async function signUpOwner(): Promise<{ cookie: string; userId: string }> {
   return { cookie, userId: response.response.user.id };
 }
 
+/**
+ * The same database, with every `select` answering `ms` after it was read: the query runs when
+ * awaited, and its rows are handed back later — what a read looks like over a network driver,
+ * or from a process that another one is writing beside.
+ */
+function lateReads(target: TestDb, ms: number): TestDb {
+  const late = (builder: object): object =>
+    new Proxy(builder, {
+      get(obj, prop) {
+        const value = Reflect.get(obj, prop);
+        if (prop === "then" && typeof value === "function") {
+          return (resolve: (v: unknown) => unknown, reject: (e: unknown) => unknown) =>
+            (value as PromiseLike<unknown>["then"])
+              .call(obj, (rows) => new Promise((r) => setTimeout(() => r(rows), ms)))
+              .then(resolve, reject);
+        }
+        if (typeof value !== "function") return value;
+        return (...args: unknown[]) => {
+          const out = (value as (...a: unknown[]) => unknown).apply(obj, args);
+          return out !== null && typeof out === "object" ? late(out) : out;
+        };
+      },
+    });
+  return new Proxy(target, {
+    get(obj, prop) {
+      const value = Reflect.get(obj, prop);
+      if (prop !== "select" || typeof value !== "function") return value;
+      return (...args: unknown[]) => late((value as (...a: unknown[]) => object).apply(obj, args));
+    },
+  });
+}
+
 /** The headers a browser would send back with that cookie. */
 const withCookie = (cookie: string) => new Headers({ cookie });
 
@@ -68,6 +100,29 @@ describe("owner account creation", () => {
 
     const users = await db.select().from(authSchema.authUser);
     expect(users).toHaveLength(1);
+  });
+
+  it("lets exactly one of two simultaneous sign-ups through", async () => {
+    // The check is a count read before the insert. With the synchronous driver nothing else in
+    // this process runs between the two, but a second process on the same file can, and so can
+    // any driver whose answers arrive later than they were read — modelled here by delaying every
+    // read's answer. Two sign-ups then both counted zero, both became Owners, and the first one
+    // through `provisionOwnerWorkspace` took the local Workspace.
+    await bootstrapWorkspace(db);
+    auth = createAuth(lateReads(db, 100));
+
+    const results = await Promise.allSettled([
+      auth.api.signUpEmail({ body: OWNER }),
+      auth.api.signUpEmail({
+        body: { email: "intruder@example.test", password: "another-long-password", name: "X" },
+      }),
+    ]);
+
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    const users = await db.select().from(authSchema.authUser);
+    expect(users).toHaveLength(1);
+    const owners = await db.select({ owner: workspace.ownerUserId }).from(workspace);
+    expect(owners.map((w) => w.owner)).toEqual([users[0]?.id ?? "no user"]);
   });
 
   it("starts a new Workspace with no flag overrides — every flag at its registry default", async () => {

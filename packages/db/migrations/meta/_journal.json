@@ -351,6 +351,13 @@
       "when": 1791485272322,
       "tag": "0049_history_retention",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "6",
+      "when": 1791495464141,
+      "tag": "0050_single_owner",
+      "breakpoints": true
     }
   ]
 }
