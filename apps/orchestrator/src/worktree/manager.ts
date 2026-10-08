@@ -607,9 +607,11 @@ export async function publishWorktreeBranch(
  * travels the way a clone's does, in the environment and read back by an inline helper, so it is
  * in neither argv nor `.git/config`.
  *
- * Forced, and only ever for the Task's own derived branch name: a second review round may rewrite
- * the branch it published the first time, exactly as `publishWorktreeBranch` allows, and a pull
- * request follows its branch. The refspec names one branch; nothing else on the remote moves.
+ * Forced, because a second review round may rewrite the branch it published the first time and a
+ * pull request follows its branch. This function does not know which branch is safe to force: the
+ * caller must hand it one the Task owns, and `deliverBranch` refuses any other (`taskOwnsBranch`)
+ * — an attachment's hand-named `checkoutBranch` may be `main` or another Task's. The refspec names
+ * one branch; nothing else on the remote moves.
  */
 export async function pushWorktreeBranch(
   executor: Executor,
