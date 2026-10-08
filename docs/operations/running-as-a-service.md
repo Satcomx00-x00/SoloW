@@ -31,6 +31,12 @@ The launcher log shows each restart:
 | `SOLOW_RESTART_LIMIT` | 5 | Failures in a row before the launcher gives up |
 | `SOLOW_RESTART_STABLE_SECS` | 60 | A run this long resets the count |
 | `SOLOW_RESTART_MAX_DELAY` | 30 | Longest wait between restarts, in seconds |
+| `SOLOW_STOP_GRACE` | 10 | Seconds a service has to exit after `TERM` before it gets `KILL` |
+
+Each service runs in a process group of its own (where `setsid` exists, so not on macOS), and the
+supervisor signals the whole group. A restart or a stop therefore also reaches the server that a
+service's first process started, such as the Next.js server under `bun run dev` or the engine
+under `bunx inngest-cli`, instead of leaving it holding the port.
 
 A clean stop (Ctrl-C, or `TERM` from a service manager) stops all three and exits 0. While any
 process of the stack runs, it holds a lock on `solow.lock` in the data folder, so a second launcher

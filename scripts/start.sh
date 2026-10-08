@@ -153,32 +153,28 @@ done
 # Each service under its own supervisor (scripts/lib/supervise.sh): one that crashes is started
 # again after a short backoff while the other two keep running, and the engine redrives the run
 # it was in the middle of (docs/operations/running-as-a-service.md). Only a service that keeps
-# crashing takes the stack down, so that a service manager above this script sees it.
-run_orchestrator() {
-    exec bun run apps/orchestrator/src/main.ts
-}
+# crashing takes the stack down, so that a service manager above this script sees it. Each is a
+# command, not a shell function: it runs in a process group of its own, so that a restart or a stop
+# reaches the server it starts as well.
+echo "[start] orchestrator → ws://localhost:$SOLOW_WS_PORT  (+ /events, /api/inngest)"
+supervise orchestrator bun run apps/orchestrator/src/main.ts
+
 # `inngest start` persists to --sqlite-dir (what `dev --persist` did), shared with dev.sh. The
 # signing/event keys come from the environment, not argv, so they stay out of `ps`.
 # SOLOW_INNGEST_ARGS appends flags — e.g. `--connect-gateway-port` and the two gRPC ports, which
 # bind fixed ports on every interface and so collide when a second stack runs on this machine.
-run_inngest() {
-    # shellcheck disable=SC2086 # SOLOW_INNGEST_ARGS is a list of flags
-    exec bunx inngest-cli start \
-        --sqlite-dir "$GC_DIR/inngest" \
-        -u "$SOLOW_INNGEST_SDK_URL" \
-        -p "$SOLOW_INNGEST_PORT" --host "$SOLOW_BIND_HOST" ${SOLOW_INNGEST_ARGS:-}
-}
-# `bun --bun` forces the Bun runtime so the DAL's bun:sqlite import resolves.
-run_web() {
-    cd apps/web && exec bun --bun run start --port "$SOLOW_WEB_PORT" --hostname "$SOLOW_BIND_HOST"
-}
-
-echo "[start] orchestrator → ws://localhost:$SOLOW_WS_PORT  (+ /events, /api/inngest)"
-supervise orchestrator run_orchestrator
 echo "[start] inngest      → http://localhost:$SOLOW_INNGEST_PORT  (self-hosted, signed, Decision 0004)"
-supervise inngest run_inngest
+# shellcheck disable=SC2086 # SOLOW_INNGEST_ARGS is a list of flags
+supervise inngest bunx inngest-cli start \
+    --sqlite-dir "$GC_DIR/inngest" \
+    -u "$SOLOW_INNGEST_SDK_URL" \
+    -p "$SOLOW_INNGEST_PORT" --host "$SOLOW_BIND_HOST" ${SOLOW_INNGEST_ARGS:-}
+
+# `bun --bun` forces the Bun runtime so the DAL's bun:sqlite import resolves.
 echo "[start] web           → http://localhost:$SOLOW_WEB_PORT  (built, listening on $SOLOW_BIND_HOST)"
-supervise web run_web
+# shellcheck disable=SC2016 # expanded by that shell, from the arguments after it
+supervise web sh -c 'cd apps/web && exec "$@"' web \
+    bun --bun run start --port "$SOLOW_WEB_PORT" --hostname "$SOLOW_BIND_HOST"
 echo "[start] data         → $GC_DIR"
 
 # Until a supervisor gives up. A bare `wait` would wait for all three, which is what once let a
