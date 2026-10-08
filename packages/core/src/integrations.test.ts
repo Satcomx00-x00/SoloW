@@ -22,6 +22,7 @@ interface FakeDriver {
   getRepository?(): Promise<string | null>;
   listBranches?(): Promise<string[]>;
   listChangeRequests?(): Promise<string[]>;
+  upsertChangeRequest?(): Promise<string>;
   createIssue?(): Promise<string>;
   createEpic?(): Promise<string>;
   createParentPlanningItem?(): Promise<string>;
@@ -41,6 +42,7 @@ const forge = (over: Partial<FakeDriver> = {}): FakeDriver => ({
   getRepository: async () => null,
   listBranches: async () => [],
   listChangeRequests: async () => [],
+  upsertChangeRequest: async () => "",
   ...over,
 });
 

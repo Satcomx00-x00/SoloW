@@ -168,6 +168,14 @@ export const STRANDED_REVIEW_REASON = "review_decision_not_applied";
  */
 export const PARTIAL_INTEGRATION_REASON = "partial_integration";
 
+/**
+ * An approval whose work is committed but could not be shipped (A1): the push was refused, or the
+ * pull request could not be opened. The branch exists locally and the approval is on record; what
+ * is missing is the remote half, so the Task ends `failed` rather than `done` and the session log
+ * says in plain words which half is missing and why.
+ */
+export const DELIVERY_FAILED_REASON = "delivery_failed";
+
 export interface FailureSignal {
   quotaExhausted?: boolean;
   credentialInvalid?: boolean;

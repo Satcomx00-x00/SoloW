@@ -1,6 +1,7 @@
 import type { TaskState } from "@solow/contracts";
 import {
   CREDENTIAL_EXPIRED_REASON,
+  DELIVERY_FAILED_REASON,
   INTERRUPTED_REASON,
   PARTIAL_INTEGRATION_REASON,
   STRANDED_REVIEW_REASON,
@@ -21,6 +22,7 @@ import {
 
 export {
   CREDENTIAL_EXPIRED_REASON,
+  DELIVERY_FAILED_REASON,
   INTERRUPTED_REASON,
   PARTIAL_INTEGRATION_REASON,
   STRANDED_REVIEW_REASON,
@@ -190,6 +192,14 @@ const FAILURE_REASONS: Record<
     icon: TriangleAlert,
     detail:
       "A decision was recorded here and never applied. Decide again — the decision starts the run that applies it; nothing was lost.",
+  },
+  // Approved and committed, but the push or the pull request did not go through (A1).
+  [DELIVERY_FAILED_REASON]: {
+    label: "Not shipped",
+    tone: "failed",
+    icon: TriangleAlert,
+    detail:
+      "The change is approved and committed on its branch, but it could not be pushed or its pull request could not be opened. The session log says why.",
   },
   // The one failure where the work is *partly landed* (issue #70 AC-4).
   [PARTIAL_INTEGRATION_REASON]: {

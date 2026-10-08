@@ -597,6 +597,44 @@ export async function publishWorktreeBranch(
   ]);
 }
 
+/**
+ * Push a branch to the remote the Repository was imported from, so a pull request can be opened
+ * for it (A1).
+ *
+ * Pushes to the Repository's location URL directly rather than to a configured `origin`: a cached
+ * clone has one, but a Repository the Owner pointed SoloW at may not, and a push that depended on
+ * ambient remote configuration would work on one machine and not on the next. The credential
+ * travels the way a clone's does, in the environment and read back by an inline helper, so it is
+ * in neither argv nor `.git/config`.
+ *
+ * Forced, and only ever for the Task's own derived branch name: a second review round may rewrite
+ * the branch it published the first time, exactly as `publishWorktreeBranch` allows, and a pull
+ * request follows its branch. The refspec names one branch; nothing else on the remote moves.
+ */
+export async function pushWorktreeBranch(
+  executor: Executor,
+  upstreamPath: string,
+  remoteUrl: string,
+  branch: string,
+  credential: CloneCredential,
+): Promise<void> {
+  const auth = credentialArgs(credential);
+  await run(
+    executor,
+    [
+      "git",
+      ...auth.args,
+      "-C",
+      upstreamPath,
+      "push",
+      "--no-verify",
+      remoteUrl,
+      `+refs/heads/${branch}:refs/heads/${branch}`,
+    ],
+    auth.env,
+  );
+}
+
 /** Discard uncommitted changes (reject). */
 export async function discardWorktreeChanges(executor: Executor, path: string): Promise<void> {
   await run(executor, ["git", "-C", path, "reset", "--hard"]);

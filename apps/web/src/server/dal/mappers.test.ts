@@ -189,6 +189,8 @@ describe("mappers", () => {
       baseRef: "main",
       checkoutBranch: "solow/task-task-1",
       resultBranch: null,
+      changeRequestUrl: null,
+      changeRequestNumber: null,
       position: 0,
       createdAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-01T00:00:00.000Z",
