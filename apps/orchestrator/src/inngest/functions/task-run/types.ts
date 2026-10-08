@@ -225,3 +225,25 @@ export interface TaskRunArgs {
    */
   attempt?: number;
 }
+
+/**
+ * The run loop's own bindings — what a Step boundary, a review decision and a round read and
+ * rebind. The lifecycle owns them; a part is handed accessors over them.
+ */
+export interface LoopState {
+  /** The primary worktree, once the harness reported it and git confirmed it. */
+  wt: Worktree | null;
+  /** The harness binding and brief this round runs under. */
+  leg: RunLeg;
+  runner: HarnessRunner;
+  /** Rounds this Step has had — the reviewer's budget, per Step. */
+  roundsOnStep: number;
+  /** Rounds this Step has spent carrying on a truncated conversation. */
+  autoContinues: number;
+  /** Whether the round about to start is one of those. */
+  continuingTruncated: boolean;
+  /** Feedback from the previous review round; it becomes the next round's brief. */
+  pendingFeedback: string | undefined;
+  /** The decisions a reviewer settled when approving this Step, while the harness applies them. */
+  applyingDecisions: string | null;
+}
