@@ -6,7 +6,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { migrate } from "drizzle-orm/bun-sqlite/migrator";
+import { backupBeforeMigrate } from "./backup.js";
 import { dbEnv } from "./env.js";
+
+const MIGRATIONS_FOLDER = join(dirname(fileURLToPath(import.meta.url)), "..", "migrations");
 
 /**
  * Apply generated migrations to the configured SQLite file using Bun's built-in SQLite
@@ -24,8 +27,7 @@ export function runMigrations(): void {
   // makes sure the migration did not actually leave a dangling reference behind.
   sqlite.exec("PRAGMA foreign_keys = OFF;");
   const db = drizzle(sqlite);
-  const migrationsFolder = join(dirname(fileURLToPath(import.meta.url)), "..", "migrations");
-  migrate(db, { migrationsFolder });
+  migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
   const violations = sqlite.query("PRAGMA foreign_key_check;").all();
   if (violations.length > 0) {
     sqlite.close();
@@ -66,6 +68,13 @@ function loadDevEnv(): void {
 
 if (import.meta.main) {
   loadDevEnv();
+  // The safety net for an upgrade (FINDINGS F1): a consistent copy of the database, and the keys
+  // that read it, before the first statement that changes its schema. Here rather than inside
+  // `runMigrations`, which tests call on scratch databases; this is the entry point every
+  // launcher runs. A copy that cannot be taken stops the migration — upgrading without the net
+  // is the thing this exists to prevent.
+  const copy = backupBeforeMigrate(dbEnv().SOLOW_SQLITE_PATH, MIGRATIONS_FOLDER);
+  if (copy) console.log(`backed up the database to ${copy} before migrating`);
   runMigrations();
   console.log(`migrations applied to ${process.env.SOLOW_SQLITE_PATH}`);
 }
