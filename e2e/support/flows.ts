@@ -135,21 +135,24 @@ export async function openTask(page: Page, issueId: string, title: string): Prom
  * the same as a delete that never happened unless the call is awaited first.
  */
 export function trpcSettled(page: Page, procedure: string): Promise<void> {
+  /*
+   * `requestfinished`, not the first matching response: React Query cancels and re-issues a
+   * batch while a page settles, and an aborted streamed response's `finished()` never resolves —
+   * the spec would wait on a call that was replaced. `requestfinished` fires only for a request
+   * whose whole body arrived; an aborted one fires `requestfailed` and is skipped here.
+   */
   return page
-    .waitForResponse(
-      (res) => {
-        const { pathname } = new URL(res.url());
+    .waitForEvent("requestfinished", {
+      predicate: async (req) => {
+        const { pathname } = new URL(req.url());
         // A batch names every procedure in one path: `/api/trpc/task.get,project.forIssue`.
-        return (
-          pathname.startsWith("/api/trpc/") &&
-          pathname.slice("/api/trpc/".length).split(",").includes(procedure)
-        );
+        if (!pathname.startsWith("/api/trpc/")) return false;
+        if (!pathname.slice("/api/trpc/".length).split(",").includes(procedure)) return false;
+        return (await req.response())?.ok() ?? false;
       },
-      { timeout: 60_000 },
-    )
-    .then(async (res) => {
-      await res.finished();
-    });
+      timeout: 60_000,
+    })
+    .then(() => undefined);
 }
 
 /**
