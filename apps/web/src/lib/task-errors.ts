@@ -45,6 +45,9 @@ const MESSAGES: Record<string, string> = {
   [TaskErrorCode.AwaitingReview]:
     "This task is waiting for your review. Approve, request changes or reject it from the gate.",
   [TaskErrorCode.AlreadyStarted]: "This task has just been started. The page has been refreshed.",
+  [TaskErrorCode.QuickNeedsRepository]: "Choose which repository the agent should work in.",
+  [TaskErrorCode.QuickNeedsProfiles]:
+    "Add a harness profile and an executor profile in Settings before starting a task.",
   [CommonErrorCode.RateLimited]: "Too many launches in a row. Wait a moment and try again.",
   [CommonErrorCode.Forbidden]: "You do not have permission to do that.",
   [CommonErrorCode.NotFound]: "That task no longer exists — this page may be out of date.",

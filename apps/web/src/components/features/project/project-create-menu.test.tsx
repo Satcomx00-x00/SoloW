@@ -1,7 +1,12 @@
 /// <reference types="bun-types" />
 
 import { describe, expect, it } from "bun:test";
-import { issueItemState, parentPlanningItemState } from "./project-create-menu";
+import {
+  importItemState,
+  issueItemState,
+  newIssueTarget,
+  parentPlanningItemState,
+} from "./project-create-menu";
 
 /**
  * The two gates behind the `＋ New` menu (F23a Parts 1 and 3). Both are pure — the component
@@ -130,5 +135,28 @@ describe("parentPlanningItemState", () => {
     expect(
       parentPlanningItemState({ integrationId: "int-2", integrations, manifests }).epicsSupported,
     ).toBe(false);
+  });
+});
+
+describe("newIssueTarget", () => {
+  it("goes to the provider when a repository is provider-backed", () => {
+    expect(newIssueTarget([repo("int-1"), repo(null)])).toBe("provider");
+  });
+
+  it("falls through to a local issue instead of a dead end for local-only projects", () => {
+    expect(newIssueTarget([repo(null)])).toBe("local");
+    expect(newIssueTarget([])).toBe("local");
+  });
+});
+
+describe("importItemState", () => {
+  it("enables with a provider-backed repository", () => {
+    expect(importItemState([repo("int-1")])).toEqual({ enabled: true, reason: null });
+  });
+
+  it("stays present but disabled, with a reason, for local-only projects", () => {
+    const state = importItemState([repo(null)]);
+    expect(state.enabled).toBe(false);
+    expect(state.reason).toContain("provider");
   });
 });

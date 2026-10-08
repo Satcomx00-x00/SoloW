@@ -1,0 +1,149 @@
+"use client";
+
+import { useState } from "react";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { WHOLE_PAGE } from "@/lib/paged";
+import { taskActionMessage } from "@/lib/task-errors";
+import { trpc } from "@/trpc/react";
+
+/**
+ * Quick task (roadmap E2): one sentence in, a running agent out.
+ *
+ * It calls `task.quickStart`, which makes the Issue and the Task and starts the run in one
+ * request, so the Owner is never asked for an Issue, a Harness Profile or an Executor Profile
+ * before seeing any work happen. The full form stays one click away for the cases that need those
+ * choices; it is a link in the footer rather than a second button because it is the exception.
+ *
+ * The Repository is asked for only when there is more than one. With a single Repository the
+ * question has one answer, and the server resolves it the same way.
+ */
+export function QuickTaskDialog({
+  open,
+  onOpenChange,
+  onFullForm,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  /** Hand over to the full create form. Omitted where there is no such form to offer. */
+  onFullForm?: (() => void) | undefined;
+}) {
+  const utils = trpc.useUtils();
+  const repos = trpc.repository.list.useQuery({ ...WHOLE_PAGE }, { enabled: open });
+  const [prompt, setPrompt] = useState("");
+  const [chosenRepositoryId, setChosenRepositoryId] = useState("");
+
+  const repositories = repos.data?.items ?? [];
+  const askRepository = repositories.length > 1;
+  const repositoryId = chosenRepositoryId || repositories[0]?.id || "";
+
+  const start = trpc.task.quickStart.useMutation({
+    onSuccess: () => {
+      utils.task.list.invalidate();
+      utils.issue.list.invalidate();
+      utils.project.allItems.invalidate();
+      setPrompt("");
+      onOpenChange(false);
+    },
+  });
+
+  const canSubmit = prompt.trim().length > 0 && (!askRepository || repositoryId.length > 0);
+  const submit = () => {
+    if (!canSubmit || start.isPending) return;
+    start.mutate({
+      prompt: prompt.trim(),
+      ...(askRepository ? { repositoryId } : {}),
+    });
+  };
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) start.reset();
+        onOpenChange(next);
+      }}
+    >
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>New task</DialogTitle>
+          <DialogDescription>
+            Describe the work. SoloW creates the issue, the task and its worktree, and starts the
+            agent.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="quick-task-prompt">What should the agent do?</Label>
+            <Textarea
+              id="quick-task-prompt"
+              autoFocus
+              rows={5}
+              maxLength={5000}
+              value={prompt}
+              placeholder="Add a /health endpoint that returns the build version"
+              onChange={(event) => setPrompt(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) submit();
+              }}
+            />
+          </div>
+
+          {askRepository ? (
+            <div className="space-y-1.5">
+              <Label htmlFor="quick-task-repository">Repository</Label>
+              <Select value={repositoryId} onValueChange={setChosenRepositoryId}>
+                <SelectTrigger id="quick-task-repository">
+                  <SelectValue placeholder="Choose a repository" />
+                </SelectTrigger>
+                <SelectContent>
+                  {repositories.map((repo) => (
+                    <SelectItem key={repo.id} value={repo.id}>
+                      {repo.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ) : null}
+
+          {start.error ? (
+            <p role="alert" className="text-destructive text-sm">
+              {taskActionMessage(start.error.message)}
+            </p>
+          ) : null}
+        </div>
+
+        <DialogFooter className="sm:justify-between">
+          {onFullForm ? (
+            <Button type="button" variant="ghost" onClick={onFullForm}>
+              More options
+            </Button>
+          ) : (
+            <span />
+          )}
+          <Button type="button" disabled={!canSubmit} loading={start.isPending} onClick={submit}>
+            Start task
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
