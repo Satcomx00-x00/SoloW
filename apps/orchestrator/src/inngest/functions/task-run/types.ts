@@ -228,26 +228,92 @@ export interface TaskRunArgs {
 
 /**
  * The run loop's own bindings — what a Step boundary, a review decision and a round read and
- * rebind. The lifecycle owns them; a part is handed accessors over them.
+ * rebind. One object, owned by the lifecycle and handed to each part, so a part and the loop can
+ * never disagree about which Step is in force.
  */
 export interface LoopState {
-  /** The primary worktree, once the harness reported it and git confirmed it. */
+  /**
+   * The worktree every later step — diff, commit, discard, cleanup — acts on. Read back from
+   * the harness (Claude Code makes its own) or set from what SoloW provisioned (ACP), and
+   * confirmed with git either way before anything is written into it.
+   */
   wt: Worktree | null;
-  /** The harness binding and brief this round runs under. */
+  /**
+   * The harness binding and brief this round runs under (issue #5, AC-3).
+   *
+   * Rebound, and so is the runner beside it — that pair is the whole of what a Step boundary
+   * changes. Everything else the loop touches is per *round*, which is why there is no nested
+   * Step loop: a nested one would reset `round` and Inngest would hand Step 2 back Step 1's
+   * memoized `agent-run-0` and `approve-0`, silently skipping Step 2's harness run and replaying
+   * Step 1's review decision. A monotonic counter makes that impossible to write.
+   */
   leg: RunLeg;
   runner: HarnessRunner;
-  /** Rounds this Step has had — the reviewer's budget, per Step. */
+  /**
+   * How many rounds this Step has had. `MAX_REVIEW_ROUNDS` is per Step, not per run: a
+   * five-Step pipeline that spent its whole budget on Step 1 would otherwise reach Step 2 with
+   * no rounds left and stop without saying why.
+   */
   roundsOnStep: number;
-  /** Rounds this Step has spent carrying on a truncated conversation. */
+  /**
+   * How many rounds this Step has spent carrying on a conversation the harness's own budget cut
+   * short, since the last round a reviewer was shown (`MAX_AUTO_CONTINUE_ROUNDS`).
+   *
+   * Reset wherever `roundsOnStep` is — at a Step boundary — and also on any round that does not
+   * auto-continue: reaching the review gate is the harness having finished a stretch of work,
+   * and the next stretch starts with its own budget rather than the remains of the last one's.
+   */
   autoContinues: number;
-  /** Whether the round about to start is one of those. */
+  /**
+   * Whether the round about to start is one of those, rather than one the reviewer asked for.
+   *
+   * A flag rather than a comparison against `autoContinues`, because the loop has to answer two
+   * different questions from it: whether to spend one of the reviewer's rounds (it must not),
+   * and what to tell the harness about why it is being started again.
+   */
   continuingTruncated: boolean;
   /** Feedback from the previous review round; it becomes the next round's brief. */
   pendingFeedback: string | undefined;
-  /** The decisions a reviewer settled when approving this Step, while the harness applies them. */
+  /**
+   * The decisions a reviewer settled when approving this Step, while the harness applies them.
+   *
+   * Approving a Step whose harness asked decisions does not move the Workflow on at once. The
+   * reviewer's answers are instructions to *this* Step's harness — a choice it made may have
+   * been overturned, and the spec or plan it wrote still says otherwise — so the harness gets
+   * one more round on the same Step to bring its work in line, and the approval is spent only
+   * once that round has finished. Moving on at the click handed the next Step work that did not
+   * yet reflect the answers it was being briefed with.
+   *
+   * Set by the approval, read by the round it starts (its brief) and by that round's end (the
+   * advance), cleared there and at every Step boundary.
+   */
   applyingDecisions: string | null;
-  /** A round's `--resume` named a conversation the harness no longer has; set once per run. */
+  /**
+   * The round about to start follows one whose `--resume` named a conversation the harness no
+   * longer has (history: a transcript purged, or its worktree gone). Set once per run — the
+   * second such failure is a real one — and what keeps the retry from asking to resume again.
+   */
   resumeLost: boolean;
   /** The very next round is that retry, and does not spend a reviewer's round. */
   resumeLostRetry: boolean;
+}
+
+/** The loop's bindings as a run starts: on the entry Step, nothing spent, nothing pending. */
+export function createLoopState(entry: {
+  wt: Worktree | null;
+  leg: RunLeg;
+  runner: HarnessRunner;
+}): LoopState {
+  return {
+    wt: entry.wt,
+    leg: entry.leg,
+    runner: entry.runner,
+    roundsOnStep: 0,
+    autoContinues: 0,
+    continuingTruncated: false,
+    pendingFeedback: undefined,
+    applyingDecisions: null,
+    resumeLost: false,
+    resumeLostRetry: false,
+  };
 }

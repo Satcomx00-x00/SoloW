@@ -23,7 +23,6 @@ import {
 import { orchestratorEnv } from "../../env.js";
 import { createExecutorFor, probeExecutorFor } from "../../executor/factory.js";
 import { harnessRegistry } from "../../harness/registry.js";
-import type { HarnessRunner } from "../../harness/runner.js";
 import { createHarnessRunner } from "../../harness/runners.js";
 import {
   adoptWorktree,
@@ -36,7 +35,6 @@ import {
   provisionWorktree,
   publishWorktreeBranch,
   pushWorktreeBranch,
-  type Worktree,
 } from "../../worktree/manager.js";
 import { seedSetupFiles } from "../../worktree/setup-files.js";
 import { hub } from "../../ws/hub.js";
@@ -49,7 +47,7 @@ import { prepareWorkspace, resolveEntry, TASK_RUN_RETRIES } from "./task-run/pre
 import { runHarnessRound } from "./task-run/round.js";
 import { createRunScope } from "./task-run/scope.js";
 import { failRound, failRun, parkRound } from "./task-run/terminal.js";
-import type { LoopState, TaskRunArgs, TaskRunDeps } from "./task-run/types.js";
+import { createLoopState, type TaskRunArgs, type TaskRunDeps } from "./task-run/types.js";
 
 export {
   type BriefContinuation,
@@ -224,139 +222,8 @@ export async function runTaskLifecycle(
       retainedPrimary,
     } = workspace;
 
-    /**
-     * The worktree every later step — diff, commit, discard, cleanup — acts on. Read back from
-     * the harness (Claude Code makes its own) or set from what SoloW provisioned (ACP), and
-     * confirmed with git either way before anything is written into it.
-     */
-    let wt: Worktree | null = provisioned;
-
-    /** Feedback from the previous review round; it becomes the next round's brief. */
-    let pendingFeedback: string | undefined;
-    /**
-     * The decisions a reviewer settled when approving this Step, while the harness applies them.
-     *
-     * Approving a Step whose harness asked decisions does not move the Workflow on at once. The
-     * reviewer's answers are instructions to *this* Step's harness — a choice it made may have
-     * been overturned, and the spec or plan it wrote still says otherwise — so the harness gets
-     * one more round on the same Step to bring its work in line, and the approval is spent only
-     * once that round has finished. Moving on at the click handed the next Step work that did not
-     * yet reflect the answers it was being briefed with.
-     *
-     * Set by the approval, read by the round it starts (its brief) and by that round's end (the
-     * advance), cleared there and at every Step boundary.
-     */
-    let applyingDecisions: string | null = null;
-
-    /**
-     * The harness binding and brief this round runs under (issue #5, AC-3).
-     *
-     * `let`, and so is the runner beside it — that pair is the whole of what a Step boundary
-     * changes. Everything else the loop touches is per *round*, which is why there is no nested
-     * Step loop: a nested one would reset `round` and Inngest would hand Step 2 back Step 1's
-     * memoized `agent-run-0` and `approve-0`, silently skipping Step 2's harness run and replaying
-     * Step 1's review decision. A monotonic counter makes that impossible to write.
-     */
-    let leg = entryLeg;
-    let runner: HarnessRunner = entryRunner;
-    /**
-     * How many rounds this Step has had. `MAX_REVIEW_ROUNDS` is per Step, not per run: a
-     * five-Step pipeline that spent its whole budget on Step 1 would otherwise reach Step 2 with
-     * no rounds left and stop without saying why.
-     */
-    let roundsOnStep = 0;
-    /**
-     * How many rounds this Step has spent carrying on a conversation the harness's own budget cut
-     * short, since the last round a reviewer was shown (`MAX_AUTO_CONTINUE_ROUNDS`).
-     *
-     * Reset wherever `roundsOnStep` is — at a Step boundary — and also on any round that does not
-     * auto-continue: reaching the review gate is the harness having finished a stretch of work,
-     * and the next stretch starts with its own budget rather than the remains of the last one's.
-     */
-    let autoContinues = 0;
-    /**
-     * Whether the round about to start is one of those, rather than one the reviewer asked for.
-     *
-     * A flag rather than a comparison against `autoContinues`, because the loop has to answer two
-     * different questions from it: whether to spend one of the reviewer's rounds (it must not),
-     * and what to tell the harness about why it is being started again.
-     */
-    let continuingTruncated = false;
-    /**
-     * The round about to start follows one whose `--resume` named a conversation the harness no
-     * longer has (history: a transcript purged, or its worktree gone). Set once per run — the
-     * second such failure is a real one — and what keeps the retry from asking to resume again.
-     */
-    let resumeLost = false;
-    /** The very next round is that retry, and does not spend a reviewer's round. */
-    let resumeLostRetry = false;
-
-    /**
-     * The loop's bindings as the parts that read or rebind them see them — accessors rather than
-     * a copy, so a part and the loop can never disagree about which Step is in force.
-     */
-    const loop: LoopState = {
-      get wt() {
-        return wt;
-      },
-      set wt(value) {
-        wt = value;
-      },
-      get leg() {
-        return leg;
-      },
-      set leg(value) {
-        leg = value;
-      },
-      get runner() {
-        return runner;
-      },
-      set runner(value) {
-        runner = value;
-      },
-      get roundsOnStep() {
-        return roundsOnStep;
-      },
-      set roundsOnStep(value) {
-        roundsOnStep = value;
-      },
-      get autoContinues() {
-        return autoContinues;
-      },
-      set autoContinues(value) {
-        autoContinues = value;
-      },
-      get continuingTruncated() {
-        return continuingTruncated;
-      },
-      set continuingTruncated(value) {
-        continuingTruncated = value;
-      },
-      get pendingFeedback() {
-        return pendingFeedback;
-      },
-      set pendingFeedback(value) {
-        pendingFeedback = value;
-      },
-      get resumeLost() {
-        return resumeLost;
-      },
-      set resumeLost(value) {
-        resumeLost = value;
-      },
-      get resumeLostRetry() {
-        return resumeLostRetry;
-      },
-      set resumeLostRetry(value) {
-        resumeLostRetry = value;
-      },
-      get applyingDecisions() {
-        return applyingDecisions;
-      },
-      set applyingDecisions(value) {
-        applyingDecisions = value;
-      },
-    };
+    /** The loop's bindings — what a Step boundary, a decision and a round read and rebind. */
+    const loop = createLoopState({ wt: provisioned, leg: entryLeg, runner: entryRunner });
     const transition: StepTransition = { wf, legForStep, checkpointStore, executor };
 
     /**
@@ -411,22 +278,22 @@ export async function runTaskLifecycle(
        */
       // Nor is the retry of a round whose `--resume` found nothing (`resumeLostRetry`): the
       // reviewer has not seen that round either.
-      if (!continuingTruncated && !resumeLostRetry) {
-        if (roundsOnStep >= MAX_REVIEW_ROUNDS) break;
-        roundsOnStep += 1;
+      if (!loop.continuingTruncated && !loop.resumeLostRetry) {
+        if (loop.roundsOnStep >= MAX_REVIEW_ROUNDS) break;
+        loop.roundsOnStep += 1;
       }
-      resumeLostRetry = false;
+      loop.resumeLostRetry = false;
       /*
        * Read once and cleared here, so nothing below can mistake "the round that just started was
        * a continuation" for "the round that just ended asked for one". Run-local rather than
        * durable, and deterministic under replay for the same reason the loop itself is: it is
        * derived only from the memoized results of earlier rounds.
        */
-      const continuation = continuingTruncated;
-      continuingTruncated = false;
+      const continuation = loop.continuingTruncated;
+      loop.continuingTruncated = false;
       // Captured, because `leg` is rebound at the next Step boundary while this round's harness
       // may still be reporting its conversation id on a detached chain.
-      const roundStepId = leg.stepId;
+      const roundStepId = loop.leg.stepId;
       const run = await step.run(`agent-run-${round}`, () =>
         runHarnessRound(scope, round, loop, {
           wf,
@@ -453,7 +320,7 @@ export async function runTaskLifecycle(
       await step.run(`compact-${round}`, () => compactSession(db, workspaceId, sessionId));
 
       if (run.worktree) {
-        wt = run.worktree;
+        loop.wt = run.worktree;
         // The audit line binding a worktree to its Task (Principle IV) is emitted on adoption,
         // because that is the first moment SoloW knows which directory the harness used.
         logWorktreeBinding(log, { workspaceId, taskId, worktreePath: run.worktree.path });
@@ -486,11 +353,17 @@ export async function runTaskLifecycle(
          * operator is told, and the same round is run again from the brief in the same worktree.
          * A second such failure means something else is wrong, and is filed as one.
          */
-        if (resumeLost) {
-          return await failRun(scope, `resume-lost-twice-${round}`, "fail", leg.stepId, "running");
+        if (loop.resumeLost) {
+          return await failRun(
+            scope,
+            `resume-lost-twice-${round}`,
+            "fail",
+            loop.leg.stepId,
+            "running",
+          );
         }
-        resumeLost = true;
-        resumeLostRetry = true;
+        loop.resumeLost = true;
+        loop.resumeLostRetry = true;
         await step.run(`resume-lost-${round}`, async () => {
           await forgetHarnessConversations(db, workspaceId, taskId);
           const payload: SessionEventPayload = {
@@ -501,24 +374,24 @@ export async function runTaskLifecycle(
           await appendSessionEvent(db, workspaceId, {
             sessionId,
             seq,
-            workflowStepId: leg.stepId,
+            workflowStepId: loop.leg.stepId,
             payload,
           });
-          const frame = toTaskEvent(payload, taskId, sessionId, seq, leg.stepId);
+          const frame = toTaskEvent(payload, taskId, sessionId, seq, loop.leg.stepId);
           if (frame) deps.hub.publish(channel, frame);
         });
         continue;
       }
       if (run.kind === "failed") {
         if (run.cls === "park") {
-          await parkRound(scope, round, leg.stepId);
+          await parkRound(scope, round, loop.leg.stepId);
           continue;
         }
         // credential_expired or hard failure: pause/stop with the reason preserved. A verdict the
         // transport put in words (a harness below its catalog pin) is the reason itself — "fail"
         // would leave the operator guessing what to upgrade.
         const reason = ("verdict" in run && run.verdict) || run.cls;
-        await failRound(scope, round, reason, leg.stepId);
+        await failRound(scope, round, reason, loop.leg.stepId);
         return { taskId, result: run.cls };
       }
 
@@ -541,7 +414,7 @@ export async function runTaskLifecycle(
        * plumbing and the brief becomes "carry straight on" rather than the whole thing again.
        */
       if (stopReasonMeansTruncated(run.stopReason) && run.outcome === null) {
-        const spent = autoContinues >= MAX_AUTO_CONTINUE_ROUNDS;
+        const spent = loop.autoContinues >= MAX_AUTO_CONTINUE_ROUNDS;
         // The word the harness would use for what it ran out of. `max_tokens` is a full context,
         // not a spent turn allowance, and telling an operator the wrong one sends them looking at
         // the wrong setting.
@@ -558,21 +431,21 @@ export async function runTaskLifecycle(
             kind: "notice",
             text: spent
               ? `The harness hit its ${budget} again after ${MAX_AUTO_CONTINUE_ROUNDS} continuations. This run has stopped continuing it and is putting the work in front of you as it stands — it is unfinished, whatever the summary says.`
-              : `The harness hit its ${budget} with work still to do, so this run is continuing the same conversation instead of sending it for review (continuation ${autoContinues + 1} of ${MAX_AUTO_CONTINUE_ROUNDS}).`,
+              : `The harness hit its ${budget} with work still to do, so this run is continuing the same conversation instead of sending it for review (continuation ${loop.autoContinues + 1} of ${MAX_AUTO_CONTINUE_ROUNDS}).`,
           };
           const seq = await nextSessionEventSeq(db, workspaceId, sessionId);
           await appendSessionEvent(db, workspaceId, {
             sessionId,
             seq,
-            workflowStepId: leg.stepId,
+            workflowStepId: loop.leg.stepId,
             payload,
           });
-          const frame = toTaskEvent(payload, taskId, sessionId, seq, leg.stepId);
+          const frame = toTaskEvent(payload, taskId, sessionId, seq, loop.leg.stepId);
           if (frame) deps.hub.publish(channel, frame);
         });
         if (!spent) {
-          autoContinues += 1;
-          continuingTruncated = true;
+          loop.autoContinues += 1;
+          loop.continuingTruncated = true;
           continue;
         }
         // Budget spent: fall through to exactly the path a finished round takes. Never a throw and
@@ -582,7 +455,7 @@ export async function runTaskLifecycle(
       }
       // Whatever happens below, this stretch of work is over. The next one that runs out of budget
       // starts with its own continuations rather than the remains of this one's.
-      autoContinues = 0;
+      loop.autoContinues = 0;
 
       const finished = await finishRound(scope, round, loop, run, {
         transition,
@@ -611,7 +484,7 @@ export async function runTaskLifecycle(
       scope,
       "rounds-exhausted",
       "round_budget_exhausted",
-      leg.stepId,
+      loop.leg.stepId,
       "running",
     );
   } finally {
