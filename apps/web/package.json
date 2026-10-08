@@ -8,7 +8,7 @@
     "build": "bun --bun next build",
     "start": "bun --bun next start --port 5000 --hostname 127.0.0.1",
     "typecheck": "tsc --noEmit",
-    "test": "bun test",
+    "test": "bun run ../../scripts/test-batches.ts",
     "lint": "biome check .",
     "openapi:gen": "bun --preload ./scripts/stub-server-only.ts scripts/gen-openapi.ts",
     "openapi:check": "bun --preload ./scripts/stub-server-only.ts scripts/gen-openapi.ts --check"

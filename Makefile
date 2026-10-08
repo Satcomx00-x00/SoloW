@@ -3,7 +3,7 @@
 
 SHELL := bash
 .DEFAULT_GOAL := help
-.PHONY: help install clean build lint format typecheck test smoke smoke-tarball smoke-docker \
+.PHONY: help install clean build lint format typecheck test test-web smoke smoke-tarball smoke-docker \
 	test-docker-live e2e e2e-critical control-check \
 	audit audit-executor-boundary secretscan verify dev dev-web flags \
 	dev-orchestrator update db-generate db-migrate db-bootstrap openapi openapi-check \
@@ -38,6 +38,9 @@ build: install store-sync lint typecheck db-generate openapi-check ## Install, s
 
 test: ## Run all unit tests (per-package, picks up each bunfig preload)
 	bun run test
+
+test-web: ## Run only the web app's unit tests, in the memory-safe batches `make test` uses
+	bun run scripts/test-batches.ts apps/web
 
 smoke: ## Run the smoke tests: the core loop (in-memory DB, fake agent, temp git repo), then the API's navigation path
 	bun run scripts/smoke.ts
