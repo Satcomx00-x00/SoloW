@@ -44,12 +44,23 @@ SOLOW_SKILLS_ROOT="${SOLOW_SKILLS_ROOT:-$GC_DIR/skills}"
 export SOLOW_HOME SOLOW_WORKTREE_ROOT SOLOW_REPO_CACHE_ROOT SOLOW_SKILLS_ROOT
 
 SOLOW_PID_FILE="$GC_DIR/solow.pid"
+SOLOW_LOCK_FILE="$GC_DIR/solow.lock"
 
-# Marks the folder as in use for as long as this launcher runs. `restore` refuses while it names a
-# live process, and a second launcher on the same folder refuses to start: two stacks on one SQLite
+# Marks the folder as in use for as long as anything this launcher starts is running. `restore`
+# refuses while it is, and so does a second launcher on the same folder: two stacks on one SQLite
 # file and one engine directory would each run the other's Tasks.
+#
+# The mark is a flock(2) on fd 9, which every process started from here inherits — the supervisors
+# and the first process of each service — and the kernel drops it only when the last of them is
+# gone. A pid file named this script alone, so a launcher killed with SIGKILL left services running
+# on the folder that a restore then could not see. Bun and Node do not pass fd 9 on to the
+# processes they start; the supervisor takes those down with their process group, and a restore
+# also refuses while anything has the database open. Helpers that may outlive a stop (timers,
+# sleeps) close fd 9, or they would hold the folder after the stack is down.
+#
+# Where there is no flock(1) (macOS), the pid file is all there is, with that weakness.
 claim_data_dir() {
-    if [ -s "$SOLOW_PID_FILE" ]; then
+    if ! lock_data_dir && [ -s "$SOLOW_PID_FILE" ]; then
         _dd_pid="$(cat "$SOLOW_PID_FILE")"
         if [ "$_dd_pid" != "$$" ] && kill -0 "$_dd_pid" 2> /dev/null; then
             echo "[$LOG_TAG] SoloW is already running on $GC_DIR (pid $_dd_pid) — stop it first." >&2
@@ -58,6 +69,19 @@ claim_data_dir() {
         fi
     fi
     echo "$$" > "$SOLOW_PID_FILE"
+}
+
+# The lock alone, on fd 9 of this shell and whatever it execs: exits if something else holds it,
+# returns 1 where there is no flock(1). `scripts/backup.sh` takes it for a restore, which the stack
+# must not be running through, and which a launcher must not start during.
+lock_data_dir() {
+    command -v flock > /dev/null 2>&1 || return 1
+    exec 9>> "$SOLOW_LOCK_FILE"
+    if ! flock -n 9; then
+        echo "[$LOG_TAG] SoloW is already running on $GC_DIR — stop it first." >&2
+        echo "[$LOG_TAG]   Its processes hold $SOLOW_LOCK_FILE; \`fuser -v $SOLOW_LOCK_FILE\` lists them." >&2
+        exit 1
+    fi
 }
 
 release_data_dir() {

@@ -32,9 +32,10 @@ The launcher log shows each restart:
 | `SOLOW_RESTART_STABLE_SECS` | 60 | A run this long resets the count |
 | `SOLOW_RESTART_MAX_DELAY` | 30 | Longest wait between restarts, in seconds |
 
-A clean stop (Ctrl-C, or `TERM` from a service manager) stops all three and exits 0. The launcher
-holds `solow.pid` in the data folder while it runs, so a second launcher on the same folder, or a
-[restore](./backup-and-restore.md), is refused.
+A clean stop (Ctrl-C, or `TERM` from a service manager) stops all three and exits 0. While any
+process of the stack runs, it holds a lock on `solow.lock` in the data folder, so a second launcher
+on the same folder, or a [restore](./backup-and-restore.md), is refused. A service left running
+after its launcher was killed still holds it.
 
 ## Runs in flight
 

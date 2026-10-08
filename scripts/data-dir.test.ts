@@ -1,7 +1,16 @@
 /// <reference types="bun-types" />
 
+import { Database } from "bun:sqlite";
 import { afterEach, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -102,3 +111,88 @@ test("tightens a folder an earlier version left readable, and only SoloW's files
   expect(mode(join(home, "backups", "20261008T000000Z-manual", "secret.key"))).toBe("600");
   expect(mode(join(home, "chrome-debug.log"))).toBe("664");
 });
+
+/** Run the library's claim in `sh`, as a launcher does right before it starts anything. */
+function claim(home: string, after = ":") {
+  const script = `set -eu\nLOG_TAG=test\n. "$ROOT/scripts/lib/data-dir.sh"\nclaim_data_dir\n${after}\n`;
+  return Bun.spawn(["sh", "-c", script], {
+    env: { ...process.env, ROOT, SOLOW_HOME: home },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+}
+
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+test("a second launcher refuses while anything the first one started is still running", async () => {
+  const home = scratch();
+  // A launcher that starts a service and is then killed outright: the service is reparented and
+  // keeps running on the folder, which a pid file naming the launcher could not say.
+  const first = claim(home, "sleep 60 &\necho $!\nwait");
+  const reader = first.stdout.getReader();
+  const { value } = await reader.read();
+  const service = Number(new TextDecoder().decode(value).trim());
+  expect(alive(service)).toBe(true);
+  first.kill("SIGKILL");
+  await first.exited;
+
+  try {
+    const second = claim(home);
+    expect(await second.exited).toBe(1);
+    const stderr = await new Response(second.stderr).text();
+    expect(stderr).toContain(`SoloW is already running on ${home}`);
+  } finally {
+    process.kill(service, "SIGKILL");
+  }
+
+  // Once the last of it is gone, so is the lock.
+  const deadline = Date.now() + 5_000;
+  while (alive(service) && Date.now() < deadline) await Bun.sleep(50);
+  const third = claim(home);
+  expect(await third.exited).toBe(0);
+}, 15_000);
+
+test("a restore refuses while anything the stack started still holds the folder", async () => {
+  const home = scratch();
+  const db = new Database(join(home, "solow.db"), { create: true });
+  db.exec("PRAGMA journal_mode = WAL; CREATE TABLE note (body TEXT);");
+  db.close();
+  const backupSh = (...args: string[]) =>
+    Bun.spawnSync(["sh", join(ROOT, "scripts", "backup.sh"), ...args], {
+      env: { ...process.env, SOLOW_HOME: home },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+  expect(backupSh("backup").exitCode).toBe(0);
+  const [name] = readdirSync(join(home, "backups"));
+
+  // As in the case above: a launcher killed outright, one of its services still running.
+  const launcher = claim(home, "sleep 60 &\necho $!\nwait");
+  const reader = launcher.stdout.getReader();
+  const service = Number(new TextDecoder().decode((await reader.read()).value).trim());
+  launcher.kill("SIGKILL");
+  await launcher.exited;
+
+  try {
+    const refused = backupSh("restore", name as string);
+    expect(refused.exitCode).toBe(1);
+    expect(refused.stderr.toString()).toContain(`SoloW is already running on ${home}`);
+    // Listing what there is to restore needs no lock, and is no reason to stop anything.
+    expect(backupSh("restore").stdout.toString()).toContain(name as string);
+  } finally {
+    process.kill(service, "SIGKILL");
+  }
+
+  const deadline = Date.now() + 5_000;
+  while (alive(service) && Date.now() < deadline) await Bun.sleep(50);
+  const restored = backupSh("restore", name as string);
+  expect(restored.stderr.toString()).toBe("");
+  expect(restored.exitCode).toBe(0);
+}, 30_000);

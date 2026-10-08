@@ -26,6 +26,7 @@ Everything SoloW keeps lives in one folder:
 | `repos/` | Clones of each Repository that the worktrees are made from | no |
 | `skills/` | Repositories that imported Skills were fetched from | no |
 | `backups/` | Backups, the automatic ones included | no |
+| `solow.lock` | Locked by the stack's processes while it runs, and by a restore | no |
 | `solow.pid` | Present while the stack runs on this folder | no |
 
 The checkout's launchers used to leave the last three roots to each service's own default, which
@@ -69,8 +70,13 @@ npx @satcomx00-x00/solow restore 20261008T140402Z-manual   # by name, or a path
 bun run restore 20261008T140402Z-manual                    # a checkout; or: make restore FROM=...
 ```
 
-- **SoloW must be stopped.** Restore refuses while `solow.pid` names a live process. If SoloW is
-  not running and the refusal persists, the file is stale; remove it.
+- **SoloW must be stopped.** Restore refuses while any process of the stack still holds
+  `solow.lock`, including a service left running after its launcher was killed, and while any
+  process has `solow.db` open, including a service started on its own with `make dev-web` or
+  `bun run dev:orchestrator`. `fuser -v <file>` names what holds either. The lock is released by
+  the kernel when its last holder exits, so it cannot go stale. Where there is no `flock` command
+  (macOS), restore falls back to `solow.pid`: if SoloW is not running and the refusal persists,
+  that file is stale; remove it.
 - **A restore can be undone.** What was there before is backed up first, as `<time>-pre-restore`.
   Restoring that backup puts things back.
 - The database, the keys and, when the backup has it, the engine's state are replaced. A backup

@@ -18,6 +18,9 @@
 # the engine retries its calls into the orchestrator, and the orchestrator re-reads its state from
 # the database on boot.
 
+# Every helper here closes fd 9 (`9>&-`): it carries the data folder's lock (scripts/lib/data-dir.sh),
+# and a sleep that outlived a stop would keep the folder locked after the stack is down.
+
 SUPERVISORS=""
 SOLOW_RESTART_LIMIT="${SOLOW_RESTART_LIMIT:-5}"
 SOLOW_RESTART_STABLE_SECS="${SOLOW_RESTART_STABLE_SECS:-60}"
@@ -37,7 +40,7 @@ supervise() {
         # A service that ignores TERM gets KILL ten seconds later, so a stop is bounded. The timer
         # is its own process with no output: a subshell here would keep the launcher's stdout open
         # for those ten seconds, and whatever reads it would wait for nothing.
-        trap 'stopping=1; [ -n "$child" ] && kill -TERM "$child" 2> /dev/null && sh -c "sleep 10; kill -KILL $child" > /dev/null 2>&1 < /dev/null &' TERM
+        trap 'stopping=1; [ -n "$child" ] && kill -TERM "$child" 2> /dev/null && sh -c "sleep 10; kill -KILL $child" > /dev/null 2>&1 < /dev/null 9>&- &' TERM
         trap '' INT
         failures=0
         while :; do
@@ -71,7 +74,7 @@ supervise() {
             [ "$delay" -gt "$SOLOW_RESTART_MAX_DELAY" ] && delay="$SOLOW_RESTART_MAX_DELAY"
             echo "[supervise] $_sv_name exited (status $code) — restarting in ${delay}s (attempt $failures of $SOLOW_RESTART_LIMIT)" >&2
             # In the background so a stop does not wait out the backoff.
-            sleep "$delay" &
+            sleep "$delay" 9>&- &
             child=$!
             wait "$child" || :
             kill -TERM "$child" 2> /dev/null || :
@@ -92,7 +95,7 @@ supervise_wait() {
             fi
         done
         # In the background, so the launcher's own TERM/INT trap runs at once rather than after it.
-        sleep 1 &
+        sleep 1 9>&- &
         wait $! || :
     done
 }

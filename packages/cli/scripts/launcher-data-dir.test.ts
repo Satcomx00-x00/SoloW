@@ -94,3 +94,49 @@ test("tightens a folder an earlier version left readable, and only SoloW's files
   expect(mode(join(home, "backups"))).toBe("700");
   expect(mode(join(home, "notes.txt"))).toBe("664");
 });
+
+/** A port nothing listens on: the kernel picks one and it is released straight away. */
+function freePort(): number {
+  const server = Bun.serve({ port: 0, fetch: () => new Response("") });
+  const { port } = server;
+  server.stop(true);
+  return port as number;
+}
+
+test("refuses to start while anything of another stack holds the data folder's lock", async () => {
+  const home = scratch();
+  // What `scripts/dev.sh` leaves behind when it is killed outright: a service still holding the
+  // descriptor the lock is on.
+  const holder = Bun.spawn(
+    ["sh", "-c", 'exec 9>>"$0/solow.lock" && flock -n 9 && echo ready && exec sleep 60', home],
+    { stdout: "pipe" },
+  );
+  try {
+    const reader = holder.stdout.getReader();
+    expect(new TextDecoder().decode((await reader.read()).value)).toContain("ready");
+
+    const ports = ["--port", "--ws-port", "--inngest-port"].flatMap((flag) => [
+      flag,
+      String(freePort()),
+    ]);
+    const result = spawnSync(process.execPath, [LAUNCHER, ...ports, "--no-open"], {
+      encoding: "utf8",
+      timeout: 30_000,
+      env: { ...process.env, SOLOW_HOME: home },
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(`SoloW is already running on ${home}`);
+    expect(result.stderr).toContain("solow.lock");
+
+    // `solow restore` refuses on the same lock, before it touches anything.
+    const restore = spawnSync(process.execPath, [LAUNCHER, "restore", "some-backup"], {
+      encoding: "utf8",
+      timeout: 30_000,
+      env: { ...process.env, SOLOW_HOME: home },
+    });
+    expect(restore.status).not.toBe(0);
+    expect(restore.stderr).toContain(`SoloW is already running on ${home}`);
+  } finally {
+    holder.kill("SIGKILL");
+  }
+});

@@ -566,6 +566,8 @@ async function waitForPort(p, timeoutMs) {
 
 /** The running process of each service, replaced on every restart. */
 const children = new Map();
+/** The descriptor the data folder's lock is on (`claimDataDir`), or null without `flock(1)`. */
+let dataDirLock = null;
 let shuttingDown = false;
 
 function envInt(name, fallback) {
@@ -600,7 +602,9 @@ function start(name, bin, args, env, extra = {}) {
   let failures = 0;
   const launch = () => {
     const startedAt = Date.now();
-    const child = spawn(bin, args, { env, stdio: ["ignore", "pipe", "pipe"], ...extra });
+    // The data folder's lock as the child's fd 3, so it is held for as long as any service runs.
+    const stdio = ["ignore", "pipe", "pipe", ...(dataDirLock === null ? [] : [dataDirLock])];
+    const child = spawn(bin, args, { env, stdio, ...extra });
     relay(child.stdout, process.stdout);
     relay(child.stderr, process.stderr);
     child.on("exit", (code, signal) => {
@@ -658,11 +662,25 @@ function openBrowser(url) {
 
 /**
  * Marks the data folder as in use while the stack runs (FINDINGS F1). `solow restore` refuses
- * while this names a live process, and a second `solow` on the same folder refuses to start — two
- * stacks on one SQLite file and one engine directory would each run the other's Tasks. Same file
- * and same rule as `scripts/lib/data-dir.sh`.
+ * while it is, and a second `solow` on the same folder refuses to start — two stacks on one SQLite
+ * file and one engine directory would each run the other's Tasks. Same files and same rule as
+ * `scripts/lib/data-dir.sh`.
+ *
+ * The mark is a flock(2) on `solow.lock`. Node cannot take one, so `flock(1)` takes it on a
+ * descriptor this process opened and hands in: the lock belongs to the open file, so it stays
+ * after the helper exits. Each service is then given the same descriptor (`start`), so the folder
+ * stays locked until the last of them is gone, not just this process — a launcher killed outright
+ * leaves its services running, and a pid file naming the launcher could not say so.
+ *
+ * Returns that descriptor, or null where there is no `flock(1)` (macOS) and a pid file is all
+ * there is to go on.
  */
 function claimDataDir(dataDir) {
+  const lockFd = lockDataDir(dataDir);
+  if (lockFd !== null) {
+    writePidFile(dataDir);
+    return lockFd;
+  }
   const file = join(dataDir, "solow.pid");
   if (existsSync(file)) {
     const pid = Number.parseInt(readFileSync(file, "utf8").trim(), 10);
@@ -673,6 +691,35 @@ function claimDataDir(dataDir) {
       );
     }
   }
+  writePidFile(dataDir);
+  return null;
+}
+
+/**
+ * The data folder's lock alone (see `claimDataDir`): the descriptor it is on, or null where there
+ * is no `flock(1)`. Exits if something else holds it.
+ */
+function lockDataDir(dataDir) {
+  mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+  const lockFile = join(dataDir, "solow.lock");
+  const lockFd = openSync(lockFile, "a", 0o600);
+  const locked = spawnSync("flock", ["-n", "3"], { stdio: ["ignore", "ignore", "pipe", lockFd] });
+  if (locked.error?.code === "ENOENT") {
+    closeSync(lockFd);
+    return null;
+  }
+  if (locked.status !== 0) {
+    fail(
+      `SoloW is already running on ${dataDir} — stop it first.\n` +
+        `  Its processes hold ${lockFile}; \`fuser -v ${lockFile}\` lists them.`,
+    );
+  }
+  return lockFd;
+}
+
+/** For a person looking at the folder, and the check where there is no `flock(1)`. */
+function writePidFile(dataDir) {
+  const file = join(dataDir, "solow.pid");
   writeFileSync(file, `${process.pid}\n`);
   process.on("exit", () => {
     try {
@@ -701,8 +748,24 @@ function runBackupCommand(command, rest) {
   if (!args.includes("--data-dir")) {
     args.push("--data-dir", process.env.SOLOW_HOME || join(homedir(), ".solow"));
   }
+  // A restore replaces the database under anything running on it: refused while a stack holds the
+  // data folder's lock, and holding it until done so that no `solow` starts meanwhile. The lock
+  // goes to the restore as its fd 3, since Bun cannot take one itself. Without a backup named,
+  // `restore` only lists them, which is fine while SoloW runs.
+  const stdio = ["inherit", "inherit", "inherit"];
+  const env = { ...process.env };
+  const at = args.indexOf("--data-dir");
+  const named = rest.some((arg, i) => !arg.startsWith("-") && rest[i - 1] !== "--data-dir");
+  if (command === "restore" && named) {
+    const lockFd = lockDataDir(resolve(args[at + 1] ?? ""));
+    if (lockFd !== null) {
+      stdio.push(lockFd);
+      env.SOLOW_DATA_DIR_LOCKED = "1";
+    }
+  }
   const result = spawnSync(resolveBun(), [join(DIST, "db", "backup.js"), command, ...args], {
-    stdio: "inherit",
+    stdio,
+    env,
   });
   process.exit(result.status ?? 1);
 }
@@ -739,7 +802,7 @@ async function main() {
       fail(`port ${p} (${label}) is already in use — free it or pass a different port.`);
     }
   }
-  claimDataDir(opts.dataDir);
+  dataDirLock = claimDataDir(opts.dataDir);
 
   // Migrations run on every start, not just the first: drizzle skips the ones already recorded,
   // so it is cheap, and without it an upgraded `npx solow` would open an old database and 500 on
