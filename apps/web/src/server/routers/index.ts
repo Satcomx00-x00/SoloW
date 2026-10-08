@@ -7,6 +7,7 @@ import { identityRouter } from "./identity.js";
 import { integrationRouter } from "./integration.js";
 import { issueRouter } from "./issue.js";
 import { mcpTokenRouter } from "./mcp-token.js";
+import { outcomesRouter } from "./outcomes.js";
 import { preferenceRouter } from "./preference.js";
 import { profileRouter } from "./profile.js";
 import { projectRouter } from "./project.js";
@@ -28,6 +29,7 @@ export const appRouter = router({
   library: libraryRouter,
   integration: integrationRouter,
   mcpToken: mcpTokenRouter,
+  outcomes: outcomesRouter,
   preference: preferenceRouter,
   task: taskRouter,
   profile: profileRouter,
