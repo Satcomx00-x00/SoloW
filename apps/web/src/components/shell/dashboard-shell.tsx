@@ -1,6 +1,7 @@
 "use client";
 
 import { type ReactNode, useMemo } from "react";
+import { AttentionNotices } from "@/components/features/attention-notices";
 import { StatusBar } from "@/components/features/status-bar/status-bar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppContextProvider } from "@/lib/app-context";
@@ -110,6 +111,9 @@ export function DashboardShell({
                   </div>
                 </div>
                 <StatusBar />
+                {/* Beside the bar, not in it: a segment the user hides must not silence the
+                    notice that a run failed (FINDINGS F3). */}
+                <AttentionNotices />
               </div>
               <CommandPalette />
             </SecondarySidebarProvider>
