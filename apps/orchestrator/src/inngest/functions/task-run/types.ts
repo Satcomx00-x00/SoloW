@@ -246,4 +246,8 @@ export interface LoopState {
   pendingFeedback: string | undefined;
   /** The decisions a reviewer settled when approving this Step, while the harness applies them. */
   applyingDecisions: string | null;
+  /** A round's `--resume` named a conversation the harness no longer has; set once per run. */
+  resumeLost: boolean;
+  /** The very next round is that retry, and does not spend a reviewer's round. */
+  resumeLostRetry: boolean;
 }
