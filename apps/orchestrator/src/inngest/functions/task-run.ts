@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { isAbsolute, join, resolve } from "node:path";
 import {
-  type ExecutorConfig,
   type HarnessProtocol,
   parseSessionEventPayload,
   reviewDecisionSchema,
@@ -17,10 +16,8 @@ import {
   type Widget,
   type WidgetResponse,
   type WorkflowAdvanceOn,
-  type WorkflowAdvanceStatus,
   WorkflowErrorCode,
   type WorkflowStepDto,
-  type WorkflowStepGate,
   widgetExpectsResponse,
   widgetOptions,
 } from "@solow/contracts";
@@ -40,7 +37,6 @@ import {
   advanceTaskWorkflow,
   clearTaskWorkflowPendingHandoff,
   createDb,
-  type Db,
   decryptForScmSync,
   loadHarnessLibrariesForRun,
   loadTaskWorkflowRun,
@@ -48,7 +44,6 @@ import {
 import {
   captureException,
   createLogger,
-  type Logger,
   logStateTransition,
   logWorktreeBinding,
   withRunContext,
@@ -63,7 +58,6 @@ import {
   forgetHarnessConversations,
   hasEarlierSession,
   isMissingParentRow,
-  latestStateTransition,
   loadForkOrigin,
   loadHarnessProbeContext,
   loadTaskRunContext,
@@ -101,8 +95,6 @@ import {
   type ExecutorFactoryOpts,
   probeExecutorFor,
 } from "../../executor/factory.js";
-import type { PreflightResult } from "../../executor/preflight.js";
-import type { Executor } from "../../executor/types.js";
 import { worktreeNameForTask } from "../../harness/claude-code-runner.js";
 import { clientDirectives } from "../../harness/client-directives.js";
 import { profileHarnessConfig } from "../../harness/harness-config.js";
@@ -113,7 +105,7 @@ import {
   hasHarnessRunner,
   missingHarnessRunnerReason,
 } from "../../harness/protocols.js";
-import { type HarnessRegistry, harnessRegistry } from "../../harness/registry.js";
+import { harnessRegistry } from "../../harness/registry.js";
 import type { HarnessRunner, HarnessTextChannel } from "../../harness/runner.js";
 import {
   createHarnessRunner,
@@ -121,7 +113,6 @@ import {
   unsupportedLaunchSettings,
 } from "../../harness/runners.js";
 import { WIDGET_BRIEF_INSTRUCTIONS, WidgetFenceScanner } from "../../harness/widget-fence.js";
-import { clearStrandedPark } from "../../reconcile.js";
 import {
   adoptWorktree,
   type CloneCredential,
@@ -141,13 +132,30 @@ import {
   pushWorktreeBranch,
   taskRepositoryPath,
   type Worktree,
-  type WorktreeDiff,
   worktreePath,
 } from "../../worktree/manager.js";
-import { type SetupFileSeedResult, seedSetupFiles } from "../../worktree/setup-files.js";
+import { seedSetupFiles } from "../../worktree/setup-files.js";
 import { hub } from "../../ws/hub.js";
 import { toTaskEvent } from "../../ws/replay.js";
 import { inngest } from "../client.js";
+import { createRunScope } from "./task-run/scope.js";
+import { failRound, failRun, parkRound } from "./task-run/terminal.js";
+import type {
+  LegAdvance,
+  RunLeg,
+  TaskRunArgs,
+  TaskRunDeps,
+  WorktreeBinding,
+} from "./task-run/types.js";
+
+export { PARK_SLEEP_MS } from "./task-run/terminal.js";
+export type {
+  HubLike,
+  StepLike,
+  TaskRunArgs,
+  TaskRunDeps,
+  WorktreeOps,
+} from "./task-run/types.js";
 
 /**
  * The credential for cloning one of the Task's Repositories, or undefined when it needs none.
@@ -166,66 +174,6 @@ function cloneCredentialFor(binding: TaskRepositoryBinding): CloneCredential | u
     token: decryptForScmSync(binding.scmClone.secretCiphertext),
   };
 }
-
-/**
- * One attached Repository, paired with the worktree the lifecycle is acting on for it.
- *
- * Every plural step — diff, commit, discard, cleanup — walks a list of these rather than a list
- * of paths, because each one needs the Repository's own setup-file allowlist and its own
- * attachment id to write a result branch back to.
- */
-interface WorktreeBinding {
-  binding: TaskRepositoryBinding;
-  worktree: Worktree;
-}
-
-/**
- * The harness binding and brief in force for the round about to run (issue #5, AC-3).
- *
- * A *leg* rather than a Step, because a Step is not the unit this loop counts. The round counter
- * stays monotonic across Step boundaries — see the loop — so what actually changes at a boundary
- * is which harness is launched and which brief it is given, and this is exactly those two things.
- *
- * Every field is null for a Task on no Workflow, and the two that are not — the Profile and the
- * catalog row — are then the Task's own. That is why the leg exists at all instead of the Step's
- * Profile being written over `ctx.harnessProfile` in `loadTaskRunContext`: roughly a quarter of
- * this file reads `ctx.harnessProfile`, and a Task with no Workflow must not move at all.
- */
-interface RunLeg {
-  /** The Workflow Step this leg runs, or null for a Task following no Workflow. */
-  stepId: string | null;
-  stepName: string | null;
-  gate: WorkflowStepGate | null;
-  /** Which signal finishes this Step. Read at both advance call sites — never a literal. */
-  advanceOn: WorkflowAdvanceOn | null;
-  harnessProfile: TaskRunContext["harnessProfile"];
-  harnessCatalog: TaskRunContext["harnessCatalog"];
-  /**
-   * What the Step said about how much its harness may do without asking, or null for "whatever
-   * the Profile says". On the leg beside the Profile because it is resolved against it — see
-   * `launchSettingsFor` — and because a Step boundary has to be able to change it.
-   */
-  permissionMode: WorkflowStepDto["permissionMode"];
-  /** What this Step's harness stops for (`harness/checkpoints.ts`); none on a Task with no Step. */
-  checkpoints: WorkflowStepDto["checkpoints"];
-  /**
-   * The Step's prompt with the previous Step's handoff already prepended — `buildStepBrief`'s
-   * output, carried from `loadTaskWorkflowRun` or from the advance DTO and never re-derived here.
-   * One string, built in one place, so the API's preview and the harness's prompt cannot drift.
-   */
-  stepBrief: string | null;
-}
-
-/**
- * What reporting a Step finished came back as, from the loop's point of view.
- *
- * `failed` folds every error the shared transaction can return *except* `StaleCursor`, which is
- * resolved into one of the other two before it gets here — see `reportStepFinished`.
- */
-type LegAdvance =
-  | { kind: "advanced"; stepId: string; brief: string }
-  | { kind: "status"; status: WorkflowAdvanceStatus }
-  | { kind: "failed" };
 
 /**
  * What a Harness Profile asked its harness to be launched with (issue #94).
@@ -344,19 +292,6 @@ const MAX_AUTO_CONTINUE_ROUNDS = 3;
 const MAX_WORKFLOW_STEPS = 20;
 
 /**
- * How long a run parked on an exhausted quota sleeps before it wakes itself up.
- *
- * Roughly one quota window; a real budget check would replace the guess rather than tune it.
- *
- * Exported for one reason, and it is not reuse: `reconcile.ts` keeps a second copy of this value
- * (`PARK_WINDOW_MS`) because a sweep that runs every sixty seconds must not import this module and
- * everything it drags in, and that copy decides when a parked run is called lost. The drift has a
- * direction — grow this without growing that, and the sweep starts condemning runs that are still
- * legitimately asleep — so `reconcile.test.ts` pins the two equal, and this export is what lets it.
- */
-export const PARK_SLEEP_MS = 5 * 60 * 60 * 1000;
-
-/**
  * How many times Inngest re-runs the function after a failure. Declared once and read by the
  * prepare step, which has to know whether there is another attempt left before it decides
  * between rethrowing a transient failure and reporting it.
@@ -382,122 +317,6 @@ const HOST_EXECUTOR_CONFIG = { kind: "local", env: {} } as const;
  * *silence* budget rather than a deadline on the harness.
  */
 const COMPLETION_GRACE_MS = 15_000;
-
-/**
- * Worktree operations the lifecycle depends on (real impls in `defaultDeps`), already bound to
- * an `Executor` (issue #1) — the lifecycle itself stays executor-agnostic.
- */
-export interface WorktreeOps {
-  /**
-   * Resolve the repository the harness will run in. Claude Code creates the Task's worktree
-   * itself (`--worktree`), so for that protocol this is all the preparation there is.
-   */
-  prepare(params: ProvisionParams): Promise<string>;
-  /**
-   * Create the Task's worktree, for a protocol whose harness cannot (issue #58). ACP has no
-   * notion of a worktree: the harness works in the `cwd` it is handed, so SoloW makes the
-   * directory and points it there. The isolation guarantee is unchanged (Principle II) — only
-   * who runs `git worktree add` moves.
-   */
-  provision(params: ProvisionParams): Promise<Worktree>;
-  /** Confirm with git that the path the harness reported really is a worktree of the repository. */
-  adopt(repoPath: string, reportedPath: string | null): Promise<Worktree>;
-  /** Copy the Repository's allowlisted setup files into a freshly created worktree (issue #52). */
-  seed(params: {
-    repoPath: string;
-    worktreePath: string;
-    patterns: string[];
-  }): Promise<SetupFileSeedResult>;
-  commit(path: string, message: string, setupFilePatterns: string[]): Promise<void>;
-  discard(path: string): Promise<void>;
-  /**
-   * Move the branch an approved Task committed into the Repository the Owner has (issue #96
-   * round 2). A no-op for a Task that worked in that Repository directly; the one write to it
-   * for a Task given a clone of its own.
-   */
-  publish(repoPath: string, upstreamPath: string, branch: string): Promise<void>;
-  /**
-   * Push the approved branch to the remote its Repository was imported from (A1). Only called for
-   * a Repository that has one; a local-only Repository never reaches it.
-   */
-  push(
-    upstreamPath: string,
-    remoteUrl: string,
-    branch: string,
-    credential: CloneCredential,
-  ): Promise<void>;
-  /** Remove the Task's worktree, and — when it was given one — the clone it was added onto. */
-  cleanup(repoPath: string, worktree: string, ownRepository?: boolean): Promise<void>;
-  hasChanges(path: string, setupFilePatterns: string[]): Promise<boolean>;
-  diff(path: string, setupFilePatterns: string[]): Promise<WorktreeDiff>;
-}
-
-/** The bits of the WS hub the lifecycle uses. */
-export interface HubLike {
-  taskChannel(workspaceId: string, taskId: string): string;
-  boardChannel(workspaceId: string): string;
-  publish(channel: string, event: unknown): void;
-}
-
-/** Injected collaborators for the Task lifecycle. */
-export interface TaskRunDeps {
-  db: Db;
-  /**
-   * The adapter for a protocol, or null when this build cannot drive it (issue #58, AC-3). A
-   * function rather than a runner because the protocol comes from the Task's own Harness catalog
-   * row: two Tasks in one Workspace can be driven over two different protocols.
-   */
-  /**
-   * Built per run, not once per process: a Harness Profile carries its own permission mode
-   * (spec F05), so two Tasks in the same Workspace can run the same harness under different
-   * postures — one that may reach the shell, one that may not.
-   */
-  runner: (
-    protocol: HarnessProtocol,
-    settings: HarnessLaunchSettings,
-    executor: Executor,
-  ) => HarnessRunner | null;
-  worktreeRoot: string;
-  repoCacheRoot: string;
-  logger: Logger;
-  /**
-   * Where this Task runs, built from its own Executor Profile (issue #96, spec F07 AC-5).
-   *
-   * A function of the profile, because the profile is a property of the *Task*: two Tasks in one
-   * Workspace can be pointed at two different execution hosts, and `defaultDeps()` is built
-   * before either Task is known. One executor per process was what made `AVAILABLE_EXECUTOR_KINDS`
-   * necessary in the first place — nothing downstream read the kind, so a Docker-profiled Task
-   * would have run on the orchestrator's own host and reported success.
-   */
-  executorFor: (profile: { config: ExecutorConfig }, opts: ExecutorFactoryOpts) => Executor;
-  /**
-   * Whether that execution host can actually be provided, asked once per run inside a durable
-   * step. Injected beside `executorFor` rather than reached for directly so a test can drive the
-   * lifecycle's failure path without a daemon; both are handed the *same* options object, which
-   * is how the probe's findings reach `spawn` (see `probeExecutorFor`).
-   */
-  preflight: (
-    profile: { config: ExecutorConfig },
-    opts: ExecutorFactoryOpts,
-  ) => Promise<PreflightResult>;
-  /**
-   * The worktree operations, bound to the executor built for this run.
-   *
-   * A function of the executor, for the same reason `runner` is: every git command these issue
-   * has to run *where the Task runs*. Bound once per run at the point the executor exists, so
-   * the lifecycle below still calls `worktreeOps.commit(...)` and stays executor-agnostic.
-   */
-  worktree: (executor: Executor) => WorktreeOps;
-  hub: HubLike;
-  /** Where the hub finds the harness belonging to a Task, to deliver input or a stop. */
-  registry: HarnessRegistry;
-  /**
-   * How long a declared-finished harness may stay silent before the round is ended
-   * (`COMPLETION_GRACE_MS`). Injected only so a test can shorten it — the wait is real time, and
-   * a test that spent fifteen seconds proving a timer fired would be a test nobody runs.
-   */
-  completionGraceMs?: number;
-}
 
 /** Production wiring. */
 export function defaultDeps(): TaskRunDeps {
@@ -542,23 +361,6 @@ export function defaultDeps(): TaskRunDeps {
     hub,
     registry: harnessRegistry,
   };
-}
-
-/** Minimal shape of the Inngest step tools the lifecycle uses (also satisfied by test fakes). */
-export interface StepLike {
-  run<T>(id: string, fn: () => T | Promise<T>): Promise<T>;
-  sleepUntil(id: string, until: Date): Promise<void>;
-}
-
-export interface TaskRunArgs {
-  event: { data: unknown };
-  step: StepLike;
-  /**
-   * Which attempt of the function this is, counted from 0 — Inngest supplies it on every run.
-   * The lifecycle needs it to tell "retry this" from "give up and say why": see the prepare
-   * step, which is the one place a failure is worth waiting on rather than reporting at once.
-   */
-  attempt?: number;
 }
 
 /**
@@ -798,115 +600,8 @@ export async function runTaskLifecycle(
     if (!taken) return { taskId, result: "decision_already_applied" };
   }
 
-  const channel = deps.hub.taskChannel(workspaceId, taskId);
-  const boardChannel = deps.hub.boardChannel(workspaceId);
-
-  /**
-   * Announce a Task state change to everyone watching it.
-   *
-   * Both channels, and the second one is the bug this replaces. It published to the board channel
-   * alone, on the reasoning that the board is what shows Task states — but the Task page shows
-   * one too, and it subscribes to the *task* channel. So a run that finished, failed or parked
-   * updated the board instantly and left the page dedicated to that very Task claiming the harness
-   * was still writing, until somebody reloaded. Every `diff` on the line below already went to
-   * both; the status was the one that did not.
-   *
-   * Published twice rather than having the page subscribe to the board channel as well: a Task
-   * page would then receive every state change in the Workspace and filter for its own, which is
-   * a subscription to other people's work in order to learn about your own.
-   */
-  const announce = (state: TaskState) => {
-    const message = { kind: "status" as const, taskId, state, at: new Date().toISOString() };
-    deps.hub.publish(boardChannel, message);
-    deps.hub.publish(channel, message);
-  };
-
-  /**
-   * Record a transition in the session log as well as announcing it (issue #2).
-   *
-   * Three audiences, one fact, and only one durable home: the board publish is ephemeral
-   * transport, `logStateTransition` is operational and rotates, and this is the *record* — what a
-   * reviewer reads afterwards to understand why the transcript has the shape it has, and what a
-   * snapshot carries (Principle I). The sequence is read back from the database rather than taken
-   * from the run's in-memory counter, because transitions happen outside the durable step that
-   * counter lives in — the same pattern the diff capture below already uses. Every call site is
-   * *inside* the durable step that applies the transition, so an Inngest replay after a restart
-   * re-records nothing (Principle III); calling it beside the step instead would append a second
-   * copy on every retry. Failure to record is swallowed: a Task must not fail because its
-   * narration did not land.
-   */
-  const recordTransition = async (
-    from: TaskState,
-    to: TaskState,
-    /**
-     * The Workflow Step in force when the Task moved, or null for a Task on no Workflow.
-     *
-     * Passed at every call site rather than read from a variable this helper closes over, and
-     * that is not fastidiousness: `recordTransition` is defined before the run has resolved a
-     * Step at all — the first transitions it writes are entry failures — while `leg`, the run
-     * loop's own binding, is rebound in place at each Step boundary and does not exist in this
-     * scope. A captured copy would therefore be either unreachable or a second, staler answer to
-     * a question `leg` already answers. Naming it here makes each call state which Step its
-     * transition belongs to, and the compiler ask.
-     */
-    workflowStepId: string | null,
-    reason?: string,
-  ) => {
-    try {
-      // `seq` is read back as max+1, so the `(session_id, seq)` unique index cannot make a
-      // second attempt a no-op the way it does for the harness's own events — a retry would simply
-      // land at a new seq. Inngest retries a step *body* from the top when anything in it
-      // throws, and every call site here is followed by more work that can (the session write,
-      // the diff capture, the publish), so the guard is the log itself: an identical transition
-      // already at the head of the state records is this same transition being replayed. Two
-      // genuinely identical transitions can never be adjacent, because reaching a state twice
-      // means leaving it in between and that departure is recorded too.
-      const previous = await latestStateTransition(db, workspaceId, sessionId);
-      const same =
-        previous?.from === from &&
-        previous?.to === to &&
-        // Normalised on both sides: an empty reason is not written, so it reads back as absent.
-        (previous?.reason ?? "") === (reason ?? "");
-      if (previous && same) return;
-      await appendSessionEvent(db, workspaceId, {
-        sessionId,
-        seq: await nextSessionEventSeq(db, workspaceId, sessionId),
-        workflowStepId,
-        payload: { kind: "state", from, to, ...(reason ? { reason } : {}) },
-      });
-    } catch (cause) {
-      captureException(log, cause, { stage: "session-state-record" });
-    }
-  };
-
-  /**
-   * Fail the run, say why, and stop — the shape `prepare-failed` and `executor-unavailable`
-   * already use, factored out because the Workflow entry adds three more of them.
-   *
-   * The state write and the transition record stay inside one `step.run` for the reason those
-   * two do: split apart, an Inngest retry appends a second copy of the transition.
-   */
-  const failRun = async (
-    stepId: string,
-    reason: string,
-    /**
-     * The Workflow Step being failed under. Ahead of `from` in the list on purpose: `from` has a
-     * default that most call sites take, and a required parameter behind it would force every one
-     * of them to restate the default just to reach this.
-     */
-    workflowStepId: string | null,
-    /** The state being left. The row's own at entry; `running` once the loop is turning. */
-    from: TaskState = ctx.task.state,
-  ): Promise<{ taskId: string; result: string }> => {
-    await step.run(stepId, async () => {
-      await setTaskState(db, workspaceId, taskId, "failed", { failureReason: reason });
-      await recordTransition(from, "failed", workflowStepId, reason);
-    });
-    logStateTransition(log, { workspaceId, taskId, from, to: "failed" });
-    announce("failed");
-    captureException(log, new Error(reason), { failureReason: reason });
-    return { taskId, result: reason };
-  };
+  const scope = createRunScope({ deps, step, log, workspaceId, taskId, sessionId, ctx });
+  const { channel, announce, recordTransition } = scope;
 
   /**
    * Which Step of its Workflow this Task picks up on (issue #5, AC-5).
@@ -938,13 +633,13 @@ export async function runTaskLifecycle(
      */
     // No Step: the cursor names one this Workflow no longer contains, so there is no Step this
     // failure honestly belongs to.
-    return await failRun("workflow-unresumable", "workflow_unresumable", null);
+    return await failRun(scope, "workflow-unresumable", "workflow_unresumable", null);
   }
   const wf = resumedWorkflow?.ok ? resumedWorkflow.data : null;
   if (wf && wf.steps.length > MAX_WORKFLOW_STEPS) {
     // Refused, never truncated: running the first `MAX_WORKFLOW_STEPS` of a longer pipeline
     // would drop the rest of an Owner's process and report the Task done.
-    return await failRun("workflow-too-long", "workflow_too_long", wf.currentStep.id);
+    return await failRun(scope, "workflow-too-long", "workflow_too_long", wf.currentStep.id);
   }
 
   /**
@@ -967,6 +662,7 @@ export async function runTaskLifecycle(
     // A Profile or catalog row a Step names is gone. Failing by name beats launching the Step
     // under some other harness, which is the only alternative that keeps the run going.
     return await failRun(
+      scope,
       "workflow-agents-missing",
       "workflow_step_agent_missing",
       wf?.currentStep.id ?? null,
@@ -1018,6 +714,7 @@ export async function runTaskLifecycle(
   const entryLeg = wf ? legForStep(wf.currentStep, wf.brief) : legForTask();
   if (!entryLeg) {
     return await failRun(
+      scope,
       "workflow-agents-missing",
       "workflow_step_agent_missing",
       wf?.currentStep.id ?? null,
@@ -1770,6 +1467,7 @@ export async function runTaskLifecycle(
         // what this run could not do, so filing the failure under its id would put the record in
         // a transcript that is otherwise empty.
         return await failRun(
+          scope,
           `workflow-step-unknown-${round}`,
           "workflow_step_unknown",
           leg.stepId,
@@ -1786,6 +1484,7 @@ export async function runTaskLifecycle(
         // but `hasHarnessRunner` is the contracts' claim and this call is the fact, so the two are
         // allowed to disagree here rather than in a null dereference three lines on.
         return await failRun(
+          scope,
           `workflow-runner-missing-${round}`,
           missingHarnessRunnerReason(nextLeg.harnessCatalog.protocol),
           nextLeg.stepId,
@@ -1957,7 +1656,13 @@ export async function runTaskLifecycle(
       if (wt === null) {
         // The directory the decision is about is gone (removed by hand, or past retention).
         // Nothing can be committed or discarded, and saying so beats a `done` with no branch.
-        return await failRun("decision-worktree-missing", "worktree_missing", leg.stepId, "review");
+        return await failRun(
+          scope,
+          "decision-worktree-missing",
+          "worktree_missing",
+          leg.stepId,
+          "review",
+        );
       }
       const gate = worktreeBindings(wt);
 
@@ -2043,6 +1748,7 @@ export async function runTaskLifecycle(
         });
         if (reported.kind === "failed") {
           return await failRun(
+            scope,
             "decision-advance-failed",
             "workflow_advance_failed",
             leg.stepId,
@@ -3327,7 +3033,7 @@ export async function runTaskLifecycle(
          * A second such failure means something else is wrong, and is filed as one.
          */
         if (resumeLost) {
-          return await failRun(`resume-lost-twice-${round}`, "fail", leg.stepId, "running");
+          return await failRun(scope, `resume-lost-twice-${round}`, "fail", leg.stepId, "running");
         }
         resumeLost = true;
         resumeLostRetry = true;
@@ -3351,90 +3057,14 @@ export async function runTaskLifecycle(
       }
       if (run.kind === "failed") {
         if (run.cls === "park") {
-          await step.run(`park-${round}`, async () => {
-            /*
-             * The reason is cleared as the Task parks, and that clearing is load-bearing rather
-             * than tidiness.
-             *
-             * `setTaskState` writes `failureReason` only when it is passed one, so a Task that
-             * carried a reason from an earlier round kept it across the park. That made
-             * `parked` + a reason ambiguous, and both readers resolved the ambiguity the unsafe
-             * way: `heldByRun` reads any reason that is not `STRANDED_PARK_REASON` as a run still
-             * sitting in here, so it held for ever, and `reportStrandedParks` selects
-             * `isNull(failure_reason)`, so the sweep that would have stamped it never saw the row.
-             * Between them the container was unreachable by every path that removes one.
-             *
-             * Clearing it here rather than relaxing `heldByRun` is the half that is provably safe.
-             * A sleeper writes nothing for `PARK_SLEEP_MS`, so a reader that treated any reason as
-             * "no run in here" would watch the quiet cushion expire under a perfectly live run and
-             * tear its container down — the failure this reaper has already been corrected for
-             * once. Writing the row is something only the run does, and at this instant the run is
-             * the thing that knows there is no failure outstanding.
-             *
-             * What remains uncovered is a reason that arrives on an already-`parked` row, which
-             * today only an operator can cause. That is their write, not the sleeper's, and
-             * guessing at it here would be the same overreach in the other direction.
-             */
-            await setTaskState(db, workspaceId, taskId, "parked", { failureReason: null });
-            await recordTransition("running", "parked", leg.stepId);
-          });
-          logStateTransition(log, { workspaceId, taskId, from: "running", to: "parked" });
-          announce("parked");
-          // Resume when the quota window resets. A budget/quota check would refine this.
-          await step.sleepUntil(`park-wait-${round}`, new Date(Date.now() + PARK_SLEEP_MS));
-          /*
-           * Awake — and the row has to say so before this round touches an executor.
-           *
-           * Nothing else in the orchestrator clears `failureReason` for a `parked` Task. The state
-           * stays `parked` for the whole of the round this wakes into (only an operator opening the
-           * gate moves it), and the resume path at `resume-` below is reached only by a Task that
-           * got as far as `review`. So a `park_never_resumed` written by `reportStrandedParks`
-           * while this run was asleep — an engine backed up past the sweep's window is enough —
-           * stayed readable to the container reaper across every gap between durable steps of the
-           * round it woke into, and the reaper reads that pairing as "no run is in here". Verified
-           * on Docker 29.7.2 what removal costs when it is wrong: `docker rm -f` on a container
-           * with a running exec kills it with 137, and `ensureContainer` turns that into an
-           * `ExecutorUnavailableError` that fails the round.
-           *
-           * A durable step of its own, so the write survives a restart between the sleep and the
-           * work, and so a replay does not repeat it. It also refreshes `updatedAt`, which is what
-           * stops the same sweep reaching the same conclusion again while this round runs.
-           *
-           * Conditional on the row still reading `parked`, which is the other half of the fix and
-           * not a refinement of it. `setTaskState` has no precondition, so writing `parked` here
-           * reverted whatever an operator did during the five hours this run was asleep — a Task
-           * they finished went back to `parked`, and the `announce` below published the reverted
-           * state to the board — after which the row was out of `reclaimOrphanedRuns`' reach (it
-           * selects only `running`) and inside `reportStrandedParks`' window. A Task that moved
-           * while this run slept is the operator's call, not the sleeper's, so `clearStrandedPark`
-           * takes back only the verdict written about the sleep and leaves the state alone.
-           *
-           * What it does not do is stop this run: the loop carries on into another round against a
-           * Task the operator may have called finished. That is the pre-existing shape of a woken
-           * park — the run owns the worktree and nothing else can commit it — and narrowing it
-           * means deciding what a run should do when its Task is taken out from under it, which is
-           * a lifecycle question and not this step's.
-           */
-          const stillParked = await step.run(`park-woke-${round}`, () =>
-            clearStrandedPark(db, workspaceId, taskId),
-          );
-          // The card may be showing a stranded badge that is no longer true; this is what takes it
-          // off without a reload. Skipped when the row moved, where `parked` is not the state to
-          // publish and whoever moved it has already announced what they did.
-          if (stillParked) announce("parked");
+          await parkRound(scope, round, leg.stepId);
           continue;
         }
         // credential_expired or hard failure: pause/stop with the reason preserved. A verdict the
         // transport put in words (a harness below its catalog pin) is the reason itself — "fail"
         // would leave the operator guessing what to upgrade.
         const reason = ("verdict" in run && run.verdict) || run.cls;
-        await step.run(`fail-${round}`, async () => {
-          await setTaskState(db, workspaceId, taskId, "failed", { failureReason: reason });
-          await recordTransition("running", "failed", leg.stepId, reason);
-        });
-        logStateTransition(log, { workspaceId, taskId, from: "running", to: "failed" });
-        announce("failed");
-        captureException(log, new Error(`task run failed: ${reason}`), { failureReason: reason });
+        await failRound(scope, round, reason, leg.stepId);
         return { taskId, result: run.cls };
       }
 
@@ -3626,6 +3256,7 @@ export async function runTaskLifecycle(
           );
           if (reported.kind === "failed") {
             return await failRun(
+              scope,
               `workflow-advance-failed-${round}`,
               "workflow_advance_failed",
               stepId,
@@ -3675,6 +3306,7 @@ export async function runTaskLifecycle(
         );
         if (reported.kind === "failed") {
           return await failRun(
+            scope,
             `workflow-advance-failed-${round}`,
             "workflow_advance_failed",
             leg.stepId,
@@ -3757,7 +3389,13 @@ export async function runTaskLifecycle(
      * other way out of the loop returns. That is a run going round in circles, and it is said
      * rather than reported as `done` over a Task nobody has looked at.
      */
-    return await failRun("rounds-exhausted", "round_budget_exhausted", leg.stepId, "running");
+    return await failRun(
+      scope,
+      "rounds-exhausted",
+      "round_budget_exhausted",
+      leg.stepId,
+      "running",
+    );
   } finally {
     /*
      * Tear the execution host down on the way out (issue #96).
