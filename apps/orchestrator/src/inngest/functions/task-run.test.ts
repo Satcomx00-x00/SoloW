@@ -24,6 +24,7 @@ import {
   executorProfile,
   harnessCatalog,
   harnessProfile,
+  integration,
   issue,
   mcpServer,
   repository,
@@ -43,6 +44,7 @@ import {
 } from "@solow/db";
 import { createTestDb, type TestDb } from "@solow/db/testing";
 import { createLogger } from "@solow/observability";
+import { type ExternalChangeRequest, type ScmCredential, testing as scmTesting } from "@solow/scm";
 import { and, asc, eq } from "drizzle-orm";
 import { listTaskEventsSince, setTaskState } from "../../data.js";
 import type { ExecutorFactoryOpts } from "../../executor/factory.js";
@@ -137,6 +139,11 @@ async function seedRun(
      * **one** Repository has to say so, because that is the case the mount set gets wrong.
      */
     repositoryLocation?: string;
+    /**
+     * Import the primary Repository from an Integration (A1), so approval has a remote to ship
+     * to. Absent, it is a local path with nothing to push to.
+     */
+    remote?: { provider: string; location: string; fullName: string };
   } = {},
 ): Promise<void> {
   await db.insert(workspace).values({ id: ids.workspaceId, name: "WS", ownerUserId: "owner" });
@@ -179,12 +186,30 @@ async function seedRun(
     config: executorConfig,
   });
   const repoId = `repo-${ids.taskId}`;
+  if (opts.remote) {
+    await db.insert(secret).values({
+      id: `scm-${ids.taskId}`,
+      workspaceId: ids.workspaceId,
+      name: "forge-pat",
+      kind: "scm_pat",
+      ciphertext: encryptSecret("forge-token"),
+    });
+    await db.insert(integration).values({
+      id: `int-${ids.taskId}`,
+      workspaceId: ids.workspaceId,
+      provider: opts.remote.provider,
+      secretId: `scm-${ids.taskId}`,
+    });
+  }
   await db.insert(repository).values({
     id: repoId,
     workspaceId: ids.workspaceId,
     name: "repo",
-    source: "local_path",
-    location: opts.repositoryLocation ?? `/srv/${ids.taskId}`,
+    source: opts.remote ? "remote_url" : "local_path",
+    location: opts.remote?.location ?? opts.repositoryLocation ?? `/srv/${ids.taskId}`,
+    ...(opts.remote
+      ? { integrationId: `int-${ids.taskId}`, externalFullName: opts.remote.fullName }
+      : {}),
     ...(opts.setupFilePatterns ? { setupFilePatterns: opts.setupFilePatterns } : {}),
   });
   const issueId = `issue-${ids.taskId}`;
@@ -459,6 +484,8 @@ interface Spies {
   discarded: string[];
   cleaned: string[];
   diffed: string[];
+  /** Every push to a remote (A1), with the token it was handed. */
+  pushed: Array<{ upstreamPath: string; remoteUrl: string; branch: string; token: string }>;
 }
 
 /**
@@ -522,6 +549,7 @@ function makeDeps(
     discarded: [],
     cleaned: [],
     diffed: [],
+    pushed: [],
   };
   /*
    * One operations object, handed back so a test can still reach in and make `provision` throw.
@@ -570,6 +598,9 @@ function makeDeps(
     },
     publish: async (repoPath, upstreamPath, branch) => {
       spies.publishedBranches.push({ repoPath, upstreamPath, branch });
+    },
+    push: async (upstreamPath, remoteUrl, branch, credential) => {
+      spies.pushed.push({ upstreamPath, remoteUrl, branch, token: credential.token });
     },
     cleanup: async (_repoPath, worktree) => {
       spies.cleanup += 1;
@@ -6747,5 +6778,197 @@ describe("the catalog row's --auto (opencode)", () => {
 
     expect(runner.argv[0]?.slice(0, 1)).toEqual(["acp"]);
     expect(asked[0]?.autoApprove).toBeUndefined();
+  });
+});
+
+/**
+ * Approve ships (A1): pushing the branch and opening or refreshing its pull request on the
+ * Repository's provider, recorded on the attachment. Driven through a fixture provider registered
+ * for the test, so the lifecycle meets the same capability lookup it does for a real forge
+ * without a network.
+ */
+describe("approve ships (A1)", () => {
+  let db: TestDb;
+
+  beforeAll(() => {
+    process.env.SOLOW_SECRET_KEY ??= Buffer.alloc(32, 3).toString("base64");
+  });
+
+  beforeEach(() => {
+    db = createTestDb();
+  });
+
+  const FORGE = "fixture.forge";
+  let upserts: Array<{ credential: ScmCredential; repo: string; head: string; base?: string }>;
+  let forgeBehaviour: { requestFails?: boolean; existing?: boolean };
+
+  beforeEach(() => {
+    upserts = [];
+    forgeBehaviour = {};
+    const result = scmTesting.register({
+      id: FORGE,
+      name: "Fixture Forge",
+      capabilities: ["changeRequests"] as const,
+      fields: [],
+      changeRequestNoun: "pull request",
+      driver: {
+        provider: FORGE,
+        authenticate: async () => ({ ok: true as const }),
+        listChangeRequests: async () => [],
+        upsertChangeRequest: async (
+          credential: ScmCredential,
+          repo: string,
+          input: { head: string; base?: string; title: string; body: string },
+        ) => {
+          if (forgeBehaviour.requestFails) throw new Error("fixture.forge refused: 422");
+          upserts.push({
+            credential,
+            repo,
+            head: input.head,
+            ...(input.base ? { base: input.base } : {}),
+          });
+          const changeRequest: ExternalChangeRequest = {
+            externalId: "9",
+            number: 7,
+            title: input.title,
+            state: "open",
+            url: `https://forge.example/${repo}/pull/7`,
+            headRef: input.head,
+            baseRef: input.base ?? "main",
+            authorLogin: null,
+          };
+          return { changeRequest, created: !forgeBehaviour.existing };
+        },
+      },
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  afterEach(() => scmTesting.unregister(FORGE));
+
+  const remote = {
+    provider: FORGE,
+    location: "https://forge.example/acme/gate.git",
+    fullName: "acme/gate",
+  };
+  const attachmentRow = async (ids: Ids) => {
+    const [row] = await db
+      .select()
+      .from(taskRepository)
+      .where(eq(taskRepository.taskId, ids.taskId));
+    return row;
+  };
+  const notices = async (ids: Ids) =>
+    (
+      await db
+        .select()
+        .from(sessionEvent)
+        .where(eq(sessionEvent.sessionId, ids.sessionId))
+        .orderBy(asc(sessionEvent.seq))
+    ).map((row) => JSON.stringify(row.payload));
+  const completes = () => new ScriptedRunner([{ kind: "completed", stopReason: "end_turn" }]);
+
+  it("pushes the branch, opens the request and stores its link on the attachment", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids, { agentProtocol: "acp", remote });
+    const { deps, spies } = makeDeps(db, completes(), nullStream());
+
+    const result = await lifecycle(deps, {
+      event: { data: ids },
+      step: scriptedStep(["approve"]),
+    });
+
+    expect(result.result).toBe("done");
+    expect(spies.pushed).toEqual([
+      {
+        upstreamPath: `/cache/${encodeURIComponent(remote.location)}`,
+        remoteUrl: remote.location,
+        branch: `solow-task-${ids.taskId}`,
+        token: "forge-token",
+      },
+    ]);
+    expect(upserts).toHaveLength(1);
+    expect(upserts[0]?.repo).toBe("acme/gate");
+    expect(upserts[0]?.head).toBe(`solow-task-${ids.taskId}`);
+    const row = await attachmentRow(ids);
+    expect(row?.changeRequestUrl).toBe("https://forge.example/acme/gate/pull/7");
+    expect(row?.changeRequestNumber).toBe(7);
+    expect((await notices(ids)).some((n) => n.includes("pull request #7 opened"))).toBe(true);
+  });
+
+  it("says updated, not opened, when the request already existed", async () => {
+    forgeBehaviour.existing = true;
+    const ids = freshIds();
+    await seedRun(db, ids, { agentProtocol: "acp", remote });
+    const { deps } = makeDeps(db, completes(), nullStream());
+
+    await lifecycle(deps, { event: { data: ids }, step: scriptedStep(["approve"]) });
+
+    expect((await notices(ids)).some((n) => n.includes("pull request #7 updated"))).toBe(true);
+  });
+
+  it("keeps a repository with no remote as a local commit: no push, no request, still done", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids, { agentProtocol: "acp" });
+    const { deps, spies } = makeDeps(db, completes(), nullStream());
+
+    const result = await lifecycle(deps, {
+      event: { data: ids },
+      step: scriptedStep(["approve"]),
+    });
+
+    expect(result.result).toBe("done");
+    expect(spies.pushed).toEqual([]);
+    expect(upserts).toEqual([]);
+    const row = await attachmentRow(ids);
+    expect(row?.resultBranch).toBe(`solow-task-${ids.taskId}`);
+    expect(row?.changeRequestUrl).toBeNull();
+  });
+
+  it("fails visibly, not done, when the push is refused", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids, { agentProtocol: "acp", remote });
+    const { deps, ops } = makeDeps(db, completes(), nullStream());
+    ops.push = async (_upstream, _remote, _branch, credential) => {
+      throw new Error(`remote: Permission denied (${credential.token})`);
+    };
+
+    const result = await lifecycle(deps, {
+      event: { data: ids },
+      step: scriptedStep(["approve"]),
+    });
+
+    expect(result.result).toBe("delivery_failed");
+    expect(await taskState(db, ids.taskId)).toBe("failed");
+    expect(await taskFailureReason(db, ids.taskId)).toBe("delivery_failed");
+    expect(upserts).toEqual([]);
+    const notice = (await notices(ids)).find((n) => n.includes("was not shipped"));
+    expect(notice).toContain("Could not push");
+    expect(notice).toContain("Permission denied");
+    // The token never reaches the session log (Principle IV).
+    expect(notice).not.toContain("forge-token");
+    // The commit and its record are kept: only the remote half is missing.
+    expect((await attachmentRow(ids))?.resultBranch).toBe(`solow-task-${ids.taskId}`);
+    expect((await attachmentRow(ids))?.changeRequestUrl).toBeNull();
+  });
+
+  it("fails visibly, not done, when the request cannot be opened after a good push", async () => {
+    forgeBehaviour.requestFails = true;
+    const ids = freshIds();
+    await seedRun(db, ids, { agentProtocol: "acp", remote });
+    const { deps, spies } = makeDeps(db, completes(), nullStream());
+
+    const result = await lifecycle(deps, {
+      event: { data: ids },
+      step: scriptedStep(["approve"]),
+    });
+
+    expect(result.result).toBe("delivery_failed");
+    expect(spies.pushed).toHaveLength(1);
+    expect(await taskState(db, ids.taskId)).toBe("failed");
+    const notice = (await notices(ids)).find((n) => n.includes("was not shipped"));
+    expect(notice).toContain("Pushed");
+    expect(notice).toContain("could not open the pull request");
+    expect(notice).toContain("422");
   });
 });

@@ -7,6 +7,7 @@ import { WHOLE_PAGE } from "@/lib/paged";
 import { relativeAge } from "@/lib/relative-time";
 import { cn } from "@/lib/utils";
 import { trpc } from "@/trpc/react";
+import { DeliveryStatus } from "./delivery-status";
 
 /**
  * Everything about a Task that is true but not urgent, as a list in the page's rail.
@@ -78,6 +79,9 @@ export function TaskRepositories({ task }: { task: TaskDto }) {
             from {attachment.baseRef ?? "HEAD"}
             {index === 0 && attachments.length > 1 ? " · primary" : ""}
           </Muted>
+          <div>
+            <DeliveryStatus attachment={attachment} />
+          </div>
         </li>
       ))}
     </ul>

@@ -1,18 +1,20 @@
 import { ISSUE_PAGE_SIZE, isNotFound, scmFetch, scmFetchPaged, scmSend } from "./http.js";
-import type {
-  ChangeProvider,
-  ExternalBranch,
-  ExternalChangeRequest,
-  ExternalComment,
-  ExternalIssue,
-  ExternalLabel,
-  ExternalMilestone,
-  ExternalRepository,
-  ExternalUser,
-  IssuePatch,
-  ListIssuesOptions,
-  RepoRef,
-  ScmCredential,
+import {
+  type ChangeProvider,
+  type ChangeRequestInput,
+  type ExternalBranch,
+  type ExternalChangeRequest,
+  type ExternalComment,
+  type ExternalIssue,
+  type ExternalLabel,
+  type ExternalMilestone,
+  type ExternalRepository,
+  type ExternalUser,
+  type IssuePatch,
+  type ListIssuesOptions,
+  type RepoRef,
+  type ScmCredential,
+  ScmProviderError,
 } from "./types.js";
 
 /**
@@ -398,6 +400,53 @@ export class GiteaProvider implements ChangeProvider {
       baseRef: r.base.ref,
       authorLogin: r.user?.login ?? null,
     }));
+  }
+
+  async upsertChangeRequest(
+    credential: ScmCredential,
+    repo: RepoRef,
+    input: ChangeRequestInput,
+  ): Promise<{ changeRequest: ExternalChangeRequest; created: boolean }> {
+    const root = `${apiRoot(credential.baseUrl)}/repos/${repo}`;
+    const headers = authHeaders(credential);
+    const toExternal = (r: GiteaPull): ExternalChangeRequest => ({
+      externalId: String(r.id),
+      number: r.number,
+      title: r.title,
+      state: r.merged ? "merged" : r.state,
+      url: r.html_url,
+      headRef: r.head.ref,
+      baseRef: r.base.ref,
+      authorLogin: r.user?.login ?? null,
+    });
+    // Gitea's list has no head filter, so the open ones are read and matched here.
+    const open = (await scmFetch(
+      "gitea",
+      `${root}/pulls?state=open&limit=100`,
+      headers,
+    )) as GiteaPull[];
+    const existing = open.find((r) => r.head.ref === input.head);
+    if (existing) {
+      const updated = (await scmSend(
+        "gitea",
+        `${root}/pulls/${existing.number}`,
+        headers,
+        "PATCH",
+        { title: input.title, body: input.body },
+      )) as GiteaPull;
+      return { changeRequest: toExternal(updated), created: false };
+    }
+    const base = input.base ?? (await this.getRepository(credential, repo))?.defaultBranch;
+    if (!base) {
+      throw new ScmProviderError("gitea", `could not tell which branch ${repo} merges into`);
+    }
+    const made = (await scmSend("gitea", `${root}/pulls`, headers, "POST", {
+      title: input.title,
+      body: input.body,
+      head: input.head,
+      base,
+    })) as GiteaPull;
+    return { changeRequest: toExternal(made), created: true };
   }
 
   async listLabels(credential: ScmCredential, repo: RepoRef): Promise<ExternalLabel[]> {

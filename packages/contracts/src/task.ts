@@ -323,6 +323,13 @@ export const taskRepositoryDto = z.object({
   baseRef: z.string().nullable(),
   checkoutBranch: z.string(),
   resultBranch: z.string().nullable(),
+  /**
+   * The pull or merge request approval opened for `resultBranch` (A1). Absent or null on a
+   * Repository with no remote, where approval is a local commit and the UI says so. Optional so a
+   * client built before the field existed still parses a row.
+   */
+  changeRequestUrl: z.string().nullable().optional(),
+  changeRequestNumber: z.number().int().nullable().optional(),
   position: z.number().int().nonnegative(),
 });
 export type TaskRepositoryDto = z.infer<typeof taskRepositoryDto>;

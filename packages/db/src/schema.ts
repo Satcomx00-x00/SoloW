@@ -897,6 +897,14 @@ export const taskRepository = sqliteTable(
     checkoutBranch: text("checkout_branch").notNull(),
     /** Set on approval, once the change has actually been committed onto a branch. */
     resultBranch: text("result_branch"),
+    /**
+     * The pull or merge request approval opened (or refreshed) for `resultBranch` on the
+     * Repository's provider (A1). Per attachment, not per Task, because a Task spanning two
+     * Repositories ships two requests. Null for a Repository with no remote, whose approval is a
+     * local commit and nothing more — the UI labels that case, it does not hide it.
+     */
+    changeRequestUrl: text("change_request_url"),
+    changeRequestNumber: integer("change_request_number"),
     position: integer("position").notNull().default(0),
     createdAt: createdAt(),
     updatedAt: updatedAt(),

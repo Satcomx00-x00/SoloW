@@ -61,7 +61,7 @@ export interface TaskRepositoryBinding {
    * — this module reads rows, and a plaintext token on a context object would be one more place
    * it could be logged from (Principle IV).
    */
-  scmClone: { provider: ScmProvider; secretCiphertext: string } | null;
+  scmClone: { provider: ScmProvider; secretCiphertext: string; baseUrl: string | null } | null;
 }
 
 export interface TaskRunContext {
@@ -246,11 +246,15 @@ async function loadScmClone(
   db: Db,
   workspaceId: string,
   repo: typeof repository.$inferSelect,
-): Promise<{ provider: ScmProvider; secretCiphertext: string } | null> {
+): Promise<{ provider: ScmProvider; secretCiphertext: string; baseUrl: string | null } | null> {
   if (repo.source !== "remote_url" || !repo.integrationId) return null;
 
   const [row] = await db
-    .select({ provider: integration.provider, ciphertext: secret.ciphertext })
+    .select({
+      provider: integration.provider,
+      baseUrl: integration.baseUrl,
+      ciphertext: secret.ciphertext,
+    })
     .from(integration)
     .innerJoin(secret, eq(secret.id, integration.secretId))
     .where(
@@ -261,7 +265,9 @@ async function loadScmClone(
       ),
     )
     .limit(1);
-  return row ? { provider: row.provider, secretCiphertext: row.ciphertext } : null;
+  return row
+    ? { provider: row.provider, secretCiphertext: row.ciphertext, baseUrl: row.baseUrl }
+    : null;
 }
 
 export async function setTaskState(
@@ -322,6 +328,28 @@ export async function setTaskRepositoryResultBranch(
   await db
     .update(taskRepository)
     .set({ resultBranch, updatedAt: new Date().toISOString() })
+    .where(and(eq(taskRepository.workspaceId, workspaceId), eq(taskRepository.id, attachmentId)));
+}
+
+/**
+ * Record the pull or merge request approval opened for an attachment's result branch (A1).
+ *
+ * Idempotent by construction: a redelivered approval finds the same open request and writes the
+ * same url, so the replay changes nothing.
+ */
+export async function setTaskRepositoryChangeRequest(
+  db: Db,
+  workspaceId: string,
+  attachmentId: string,
+  changeRequest: { url: string; number: number },
+): Promise<void> {
+  await db
+    .update(taskRepository)
+    .set({
+      changeRequestUrl: changeRequest.url,
+      changeRequestNumber: changeRequest.number,
+      updatedAt: new Date().toISOString(),
+    })
     .where(and(eq(taskRepository.workspaceId, workspaceId), eq(taskRepository.id, attachmentId)));
 }
 

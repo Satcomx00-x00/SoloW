@@ -94,6 +94,8 @@ export function taskRepositoryToDto(row: TaskRepositoryRow): TaskRepositoryDto {
     baseRef: row.baseRef,
     checkoutBranch: row.checkoutBranch,
     resultBranch: row.resultBranch,
+    changeRequestUrl: row.changeRequestUrl,
+    changeRequestNumber: row.changeRequestNumber,
     position: row.position,
   };
 }

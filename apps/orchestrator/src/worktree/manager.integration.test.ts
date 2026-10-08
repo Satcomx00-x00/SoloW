@@ -15,6 +15,7 @@ import {
   listWorktrees,
   prepareRepository,
   provisionWorktree,
+  pushWorktreeBranch,
   type Worktree,
 } from "./manager.js";
 
@@ -504,5 +505,52 @@ describe("one Task, two Repository attachments", () => {
 
     await cleanupWorktree(executor, first.repoPath, first.path);
     await cleanupWorktree(executor, second.repoPath, second.path);
+  });
+});
+
+describe("pushWorktreeBranch (A1)", () => {
+  it("puts exactly the Task's branch on the remote, and a rewritten branch replaces it", async () => {
+    const remote = mkdtempSync(join(tmpdir(), "gc-remote-"));
+    try {
+      await $`git init -q --bare ${remote}`.quiet();
+      await $`git -C ${repoDir} branch -f solow/push-test HEAD`.quiet();
+      const credential = { username: "x-access-token", token: "not-needed-for-a-path-remote" };
+
+      await pushWorktreeBranch(executor, repoDir, remote, "solow/push-test", credential);
+      const first = (await $`git -C ${remote} rev-parse refs/heads/solow/push-test`.text()).trim();
+      expect(first).toBe((await $`git -C ${repoDir} rev-parse solow/push-test`.text()).trim());
+      // Nothing else on the remote moved: the push names one refspec.
+      const heads = (await $`git -C ${remote} for-each-ref --format=${"%(refname)"}`.text()).trim();
+      expect(heads).toBe("refs/heads/solow/push-test");
+
+      // A second review round rewrites the branch; the request follows it.
+      const rewritten = (
+        await $`git -C ${repoDir} commit-tree HEAD^{tree} -m rewritten`
+          .env({
+            ...process.env,
+            GIT_AUTHOR_NAME: "T",
+            GIT_AUTHOR_EMAIL: "t@e.com",
+            GIT_COMMITTER_NAME: "T",
+            GIT_COMMITTER_EMAIL: "t@e.com",
+          })
+          .text()
+      ).trim();
+      await $`git -C ${repoDir} branch -f solow/push-test ${rewritten}`.quiet();
+      await pushWorktreeBranch(executor, repoDir, remote, "solow/push-test", credential);
+      const second = (await $`git -C ${remote} rev-parse refs/heads/solow/push-test`.text()).trim();
+      expect(second).not.toBe(first);
+      expect(second).toBe((await $`git -C ${repoDir} rev-parse solow/push-test`.text()).trim());
+    } finally {
+      rmSync(remote, { recursive: true, force: true });
+    }
+  });
+
+  it("fails with git's own words when the remote does not exist", async () => {
+    await expect(
+      pushWorktreeBranch(executor, repoDir, "/nonexistent/remote.git", "solow/push-test", {
+        username: "git",
+        token: "t",
+      }),
+    ).rejects.toThrow();
   });
 });
