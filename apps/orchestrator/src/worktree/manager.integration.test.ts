@@ -9,6 +9,7 @@ import {
   adoptWorktree,
   cleanupWorktree,
   commitWorktree,
+  credentialArgs,
   DIFF_PATCH_LIMIT,
   diffWorktree,
   hasChanges,
@@ -505,6 +506,42 @@ describe("one Task, two Repository attachments", () => {
 
     await cleanupWorktree(executor, first.repoPath, first.path);
     await cleanupWorktree(executor, second.repoPath, second.path);
+  });
+});
+
+describe("credentialArgs — the token answers only for the remote it belongs to (#15)", () => {
+  /** What git's own credential machinery would hand a request for `url`, under these args. */
+  async function fill(url: string): Promise<{ exitCode: number; stdout: string }> {
+    const auth = credentialArgs(
+      { username: "x-access-token", token: "tok-for-forge" },
+      "https://forge.example:8443/acme/app.git",
+    );
+    const { protocol, host } = new URL(url);
+    const proc = Bun.spawn(["git", ...auth.args, "credential", "fill"], {
+      stdin: new TextEncoder().encode(`protocol=${protocol.slice(0, -1)}\nhost=${host}\n\n`),
+      env: { ...process.env, ...auth.env },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+    return { exitCode, stdout };
+  }
+
+  it("gives the token to the remote's own origin", async () => {
+    const result = await fill("https://forge.example:8443/acme/other.git");
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("password=tok-for-forge");
+  });
+
+  it("gives nothing to any other host, port or scheme a redirect or submodule might name", async () => {
+    for (const url of [
+      "https://evil.example/acme/app.git",
+      "https://forge.example/acme/app.git",
+      "http://forge.example:8443/acme/app.git",
+    ]) {
+      const result = await fill(url);
+      expect(result.stdout).not.toContain("tok-for-forge");
+    }
   });
 });
 

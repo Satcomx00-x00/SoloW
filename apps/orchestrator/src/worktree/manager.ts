@@ -178,20 +178,46 @@ const TOKEN_VAR = "SOLOW_SCM_TOKEN";
  * it from `git remote -v` forever; `http.extraHeader` puts it in argv, where any user on the box
  * can read it out of `ps`; a `.git-credentials` file leaves it on disk after the clone.
  *
- * The empty `credential.helper=` first clears any helper the host has configured, so a stale
- * cached credential cannot take precedence over the one for this Integration. `GIT_TERMINAL_PROMPT=0`
+ * The empty `credential.helper=` first clears any helper the host has configured — URL-scoped
+ * ones included, since git resets the whole list it has gathered so far — so a stale cached
+ * credential cannot take precedence over the one for this Integration. `GIT_TERMINAL_PROMPT=0`
  * turns an auth failure into a failure — without it git blocks on a username prompt that no one
  * is there to answer, and the Task hangs instead of reporting the problem.
+ *
+ * The helper itself is scoped to the remote's origin (`credential.<origin>.helper`). Unscoped, it
+ * answers every host git asks about during the command — a redirect, a submodule, an LFS server
+ * elsewhere — and hands each the Integration's token. A remote that is not http(s) gets no helper
+ * at all: there is no origin to scope it to, and ssh or a local path never asks one.
  */
-function credentialArgs(credential: CloneCredential): {
+export function credentialArgs(
+  credential: CloneCredential,
+  remoteUrl: string,
+): {
   args: string[];
   env: Record<string, string>;
 } {
   const helper = `!f() { echo username=${credential.username}; echo "password=$${TOKEN_VAR}"; }; f`;
+  const origin = httpOrigin(remoteUrl);
   return {
-    args: ["-c", "credential.helper=", "-c", `credential.helper=${helper}`],
+    args: [
+      "-c",
+      "credential.helper=",
+      ...(origin ? ["-c", `credential.${origin}.helper=${helper}`] : []),
+    ],
     env: { [TOKEN_VAR]: credential.token, GIT_TERMINAL_PROMPT: "0" },
   };
+}
+
+/** `scheme://host[:port]` of an http(s) URL — the part git matches a scoped credential on. */
+function httpOrigin(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" || parsed.protocol === "http:"
+      ? `${parsed.protocol}//${parsed.host}`
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 export interface Worktree {
@@ -208,7 +234,9 @@ async function upstreamRepoPath(executor: Executor, params: ProvisionParams): Pr
   const cachePath = join(params.repoCacheRoot, encodeURIComponent(params.repository.location));
   const marker = await executor.exec(["test", "-f", join(cachePath, ".git", "HEAD")]);
   if (marker.exitCode !== 0) {
-    const auth = params.cloneCredential ? credentialArgs(params.cloneCredential) : null;
+    const auth = params.cloneCredential
+      ? credentialArgs(params.cloneCredential, params.repository.location)
+      : null;
     await run(
       executor,
       ["git", ...(auth?.args ?? []), "clone", params.repository.location, cachePath],
@@ -620,7 +648,7 @@ export async function pushWorktreeBranch(
   branch: string,
   credential: CloneCredential,
 ): Promise<void> {
-  const auth = credentialArgs(credential);
+  const auth = credentialArgs(credential, remoteUrl);
   await run(
     executor,
     [
