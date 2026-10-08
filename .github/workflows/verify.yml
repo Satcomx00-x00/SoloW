@@ -15,10 +15,14 @@ on:
   push:
     branches: [main]
 
-# Only the newest run per ref matters; supersede the rest.
+# On a pull request only the newest push matters; supersede the rest. Never on main: Release
+# fires on a *completed* Verify run, and with the control check taking 8–25 minutes, pushes
+# that land closer together than that would cancel each other in turn and none would ever
+# finish — main would go on merging with nothing released. There, the run in progress finishes
+# and GitHub keeps only the newest one waiting behind it, which contains every push before it.
 concurrency:
   group: verify-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # A `permissions:` block replaces the defaults rather than extending them.
 permissions:
