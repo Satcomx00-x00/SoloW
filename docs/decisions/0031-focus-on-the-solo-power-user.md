@@ -17,10 +17,12 @@ to the technology. Breadth before depth is the cause of the first.
    judged by whether it shortens the path from an Issue to a reviewed pull request for that person.
 2. **Moved to "Later", after 1.0 and only if the numbers justify it:** hosted teams, remote (SSH)
    and cloud environments, notifications, sharing and analytics.
-3. **Unfinished surfaces are hidden, not deleted.** Remote and cloud environment kinds and the
-   areas marked WIP sit behind `ff-remote-environments` and `ff-wip-areas`, which ship OFF — the
-   one exception to the default-ON rule of the flag registry. The code stays; turning the flag on
-   brings it back.
+3. **Unfinished surfaces are hidden, not deleted.** Remote and cloud environment kinds sit behind
+   `ff-remote-environments`, which ships OFF — the one exception to the default-ON rule of the
+   flag registry. The code stays; turning the flag on brings it back. Workflows are *not* hidden:
+   they are on the 1.0 main line (the control check walks one, and Phase 3's A3 proves them on
+   real work), and they already have their own `ff-workflows` flag — a second flag for the same
+   surface would be two sources of truth for one decision.
 4. **Until 1.0 only fixes and the roadmap's own items ship**, on a weekly release cadence (see
    [Conventions](../CONVENTIONS.md#contribution-and-release-rules)).
 

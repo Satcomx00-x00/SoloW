@@ -57,7 +57,6 @@ const PIPELINE: WorkflowWithStepsDto = {
 
 function handlersFor(overrides: Record<string, (input: unknown) => unknown> = {}) {
   return {
-    "flag.list": () => [{ key: "ff-wip-areas", description: "", default: false, enabled: true }],
     "workflow.list": () => [
       {
         id: "wf-1",
@@ -554,20 +553,5 @@ describe("branching on the harness's outcome", () => {
         branch: { when: { kind: "outcome", is: "blocked" }, thenStepId: "s2", elseStepId: null },
       });
     });
-  });
-});
-
-describe("WorkflowsView — hidden until ff-wip-areas is on", () => {
-  it("shows the flag-off notice instead of the designer, and never asks for Workflows", async () => {
-    const { log } = renderWithTrpc(
-      <WorkflowsView />,
-      handlersFor({
-        "flag.list": () => [
-          { key: "ff-wip-areas", description: "", default: false, enabled: false },
-        ],
-      }),
-    );
-    expect(await screen.findByText("The Workflows designer is not available yet")).toBeTruthy();
-    expect(log.calls.some((c) => c.path === "workflow.list")).toBe(false);
   });
 });

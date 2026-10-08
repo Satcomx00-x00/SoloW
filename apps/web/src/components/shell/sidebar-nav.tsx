@@ -37,7 +37,6 @@ import {
 } from "@/lib/navigation";
 import { taskHref } from "@/lib/task-href";
 import { STATE_STYLE } from "@/lib/task-states";
-import { useFlag } from "@/lib/use-flag";
 import { cn } from "@/lib/utils";
 import { useWorkspaceEvents } from "@/lib/workspace-events";
 import { trpc } from "@/trpc/react";
@@ -361,11 +360,7 @@ function ProjectRow({
 function WorkspaceGroup({ place }: { place: Place }) {
   const counts = trpc.workspace.counts.useQuery();
   const unassignedCount = counts.data?.unassignedIssues ?? 0;
-  // Sections marked WIP are hidden until `ff-wip-areas` is turned on (decision 0031).
-  const showWip = useFlag("ff-wip-areas");
-  const rows = WORKSPACE_SECTIONS.filter(
-    (s) => s.href !== "/projects" && s.href !== "/settings" && (showWip || !s.wip),
-  );
+  const rows = WORKSPACE_SECTIONS.filter((s) => s.href !== "/projects" && s.href !== "/settings");
   const onWorkflows = place.section?.href === "/workflows";
   // Only asked for while Workflows is open, on the same key the page itself reads.
   const workflows = trpc.workflow.list.useQuery({}, { enabled: onWorkflows });

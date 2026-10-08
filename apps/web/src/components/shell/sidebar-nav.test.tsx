@@ -72,9 +72,6 @@ function handlers(extra: Record<string, (input: unknown) => unknown> = {}) {
     "task.recent": () => [],
     "preference.recordRecentTask": () => RECENTS([]),
     "workflow.list": () => [],
-    // WIP areas are hidden by default (decision 0031); most of this file is about the Workflows
-    // entry, so it opts in here and the hidden case below opts out.
-    "flag.list": () => [{ key: "ff-wip-areas", description: "", default: false, enabled: true }],
     ...extra,
   };
 }
@@ -535,29 +532,8 @@ describe("Sidebar — the foot of the column", () => {
   it("marks Workflows as work in progress for a screen reader as well as by eye", async () => {
     pathname = "/projects";
     renderWithTrpc(<SidebarNav workspaceName="Acme" signedIn={false} />, handlers());
-    const workflows = await screen.findByRole("link", { name: /Workflows/ });
+    const workflows = screen.getByRole("link", { name: /Workflows/ });
     expect(workflows.getAttribute("title")).toBe("Workflows (work in progress)");
     expect(workflows.textContent).toContain("WIP");
-  });
-});
-
-describe("Sidebar — WIP areas are hidden by default", () => {
-  it("leaves Workflows out while ff-wip-areas is off", async () => {
-    pathname = "/projects";
-    renderWithTrpc(
-      <SidebarNav workspaceName="Acme" signedIn={false} />,
-      handlers({
-        "flag.list": () => [
-          { key: "ff-wip-areas", description: "", default: false, enabled: false },
-        ],
-      }),
-    );
-    await screen.findByRole("link", { name: /GlabTest/ });
-    const workspace = screen.getByRole("navigation", { name: "Workspace" });
-    expect(
-      within(workspace)
-        .getAllByRole("link")
-        .map((l) => l.getAttribute("href")),
-    ).toEqual(["/unassigned", "/history"]);
   });
 });

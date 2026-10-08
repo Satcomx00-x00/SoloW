@@ -34,8 +34,7 @@ export type FlagKey =
   | "ff-agent-widgets"
   | "ff-agent-libraries"
   | "ff-workspace-controls"
-  | "ff-remote-environments"
-  | "ff-wip-areas";
+  | "ff-remote-environments";
 
 export interface FlagDefinition {
   key: FlagKey;
@@ -100,13 +99,6 @@ export const FLAGS: Record<FlagKey, FlagDefinition> = {
     default: false,
     granularity: "workspace",
   },
-  "ff-wip-areas": {
-    key: "ff-wip-areas",
-    description:
-      "Unfinished areas marked WIP, such as the Workflows designer. Hidden for 1.0 (decision 0031).",
-    default: false,
-    granularity: "workspace",
-  },
 };
 
 /**
@@ -114,7 +106,7 @@ export const FLAGS: Record<FlagKey, FlagDefinition> = {
  * They hide unfinished surfaces for the 1.0 focus; the code behind them stays. Listing them here,
  * rather than loosening the registry test, keeps a stray `default: false` a failure.
  */
-export const HIDDEN_UNTIL_READY: readonly FlagKey[] = ["ff-remote-environments", "ff-wip-areas"];
+export const HIDDEN_UNTIL_READY: readonly FlagKey[] = ["ff-remote-environments"];
 
 /** Every registered flag key — the one list callers should iterate or validate against. */
 export function flagKeys(): FlagKey[] {
