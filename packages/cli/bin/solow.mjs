@@ -16,12 +16,16 @@
 import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import {
+  chmodSync,
   closeSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   openSync,
+  readdirSync,
   readFileSync,
   readSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -381,14 +385,19 @@ function resolveInngest() {
  *
  * An exported value wins, as it does in `scripts/lib/engine-env.sh`: a deployment that manages
  * its own secrets must not have them silently replaced by the files.
+ *
+ * An empty file, which an interrupted first run or a full disk leaves, is no key and is replaced —
+ * the same `[ -s ]` rule as the shell launchers. Read as it was, it set an empty key.
  */
 function secret(dataDir, name, make, envName) {
   const exported = process.env[envName];
   if (exported) return exported;
   const file = join(dataDir, name);
-  if (existsSync(file)) return readFileSync(file, "utf8").trim();
+  if (existsSync(file) && statSync(file).size > 0) return readFileSync(file, "utf8").trim();
   const value = make();
   writeFileSync(file, `${value}\n`, { mode: 0o600 });
+  // The mode above only applies to a file this call creates, not to the empty one it replaced.
+  chmodSync(file, 0o600);
   return value;
 }
 
@@ -424,8 +433,48 @@ function checkExposure() {
   );
 }
 
+/**
+ * The data folder holds the master key and a database with every session token in it, so nobody
+ * else on the machine may read any of it — the same rule as `scripts/lib/data-dir.sh`.
+ *
+ * Created 0700, and an existing one tightened on every start: an earlier version made it 0755 and
+ * left the database 0644. Only what SoloW put there — the folder, its keys, its database and the
+ * engine's state and backups (copies of both); anything else in it keeps the mode it has. The
+ * process umask (set in `main`) covers what is created later, by the services as well.
+ */
+function prepareDataDir(dataDir) {
+  mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+  try {
+    chmodSync(dataDir, 0o700);
+  } catch {
+    console.warn(`solow: WARNING: could not make ${dataDir} private (chmod 700)`);
+  }
+  for (const name of readdirSync(dataDir)) {
+    if (/\.(key|secret)$/.test(name) || name === "solow.db" || name.startsWith("solow.db-")) {
+      makePrivate(join(dataDir, name), false);
+    }
+  }
+  makePrivate(join(dataDir, "inngest"), true);
+  makePrivate(join(dataDir, "backups"), true);
+}
+
+/** `chmod go=` on a file, or with `recursive` on a whole tree. Symlinks are left alone. */
+function makePrivate(path, recursive) {
+  try {
+    const stat = lstatSync(path);
+    if (stat.isSymbolicLink()) return;
+    if (stat.isDirectory() && !recursive) return;
+    chmodSync(path, stat.mode & 0o700);
+    if (stat.isDirectory()) {
+      for (const name of readdirSync(path)) makePrivate(join(path, name), true);
+    }
+  } catch {
+    // Missing, or not ours to change: neither is a reason not to start.
+  }
+}
+
 function buildEnv(opts) {
-  mkdirSync(opts.dataDir, { recursive: true });
+  prepareDataDir(opts.dataDir);
   return {
     ...process.env,
     NODE_ENV: "production",
@@ -523,6 +572,8 @@ async function waitForPort(p, timeoutMs) {
 
 /** The running process of each service, replaced on every restart. */
 const children = new Map();
+/** The descriptor the data folder's lock is on (`claimDataDir`), or null without `flock(1)`. */
+let dataDirLock = null;
 let shuttingDown = false;
 
 function envInt(name, fallback) {
@@ -557,7 +608,9 @@ function start(name, bin, args, env, extra = {}) {
   let failures = 0;
   const launch = () => {
     const startedAt = Date.now();
-    const child = spawn(bin, args, { env, stdio: ["ignore", "pipe", "pipe"], ...extra });
+    // The data folder's lock as the child's fd 3, so it is held for as long as any service runs.
+    const stdio = ["ignore", "pipe", "pipe", ...(dataDirLock === null ? [] : [dataDirLock])];
+    const child = spawn(bin, args, { env, stdio, ...extra });
     relay(child.stdout, process.stdout);
     relay(child.stderr, process.stderr);
     child.on("exit", (code, signal) => {
@@ -615,11 +668,25 @@ function openBrowser(url) {
 
 /**
  * Marks the data folder as in use while the stack runs (FINDINGS F1). `solow restore` refuses
- * while this names a live process, and a second `solow` on the same folder refuses to start — two
- * stacks on one SQLite file and one engine directory would each run the other's Tasks. Same file
- * and same rule as `scripts/lib/data-dir.sh`.
+ * while it is, and a second `solow` on the same folder refuses to start — two stacks on one SQLite
+ * file and one engine directory would each run the other's Tasks. Same files and same rule as
+ * `scripts/lib/data-dir.sh`.
+ *
+ * The mark is a flock(2) on `solow.lock`. Node cannot take one, so `flock(1)` takes it on a
+ * descriptor this process opened and hands in: the lock belongs to the open file, so it stays
+ * after the helper exits. Each service is then given the same descriptor (`start`), so the folder
+ * stays locked until the last of them is gone, not just this process — a launcher killed outright
+ * leaves its services running, and a pid file naming the launcher could not say so.
+ *
+ * Returns that descriptor, or null where there is no `flock(1)` (macOS) and a pid file is all
+ * there is to go on.
  */
 function claimDataDir(dataDir) {
+  const lockFd = lockDataDir(dataDir);
+  if (lockFd !== null) {
+    writePidFile(dataDir);
+    return lockFd;
+  }
   const file = join(dataDir, "solow.pid");
   if (existsSync(file)) {
     const pid = Number.parseInt(readFileSync(file, "utf8").trim(), 10);
@@ -630,6 +697,35 @@ function claimDataDir(dataDir) {
       );
     }
   }
+  writePidFile(dataDir);
+  return null;
+}
+
+/**
+ * The data folder's lock alone (see `claimDataDir`): the descriptor it is on, or null where there
+ * is no `flock(1)`. Exits if something else holds it.
+ */
+function lockDataDir(dataDir) {
+  mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+  const lockFile = join(dataDir, "solow.lock");
+  const lockFd = openSync(lockFile, "a", 0o600);
+  const locked = spawnSync("flock", ["-n", "3"], { stdio: ["ignore", "ignore", "pipe", lockFd] });
+  if (locked.error?.code === "ENOENT") {
+    closeSync(lockFd);
+    return null;
+  }
+  if (locked.status !== 0) {
+    fail(
+      `SoloW is already running on ${dataDir} — stop it first.\n` +
+        `  Its processes hold ${lockFile}; \`fuser -v ${lockFile}\` lists them.`,
+    );
+  }
+  return lockFd;
+}
+
+/** For a person looking at the folder, and the check where there is no `flock(1)`. */
+function writePidFile(dataDir) {
+  const file = join(dataDir, "solow.pid");
   writeFileSync(file, `${process.pid}\n`);
   process.on("exit", () => {
     try {
@@ -658,13 +754,32 @@ function runBackupCommand(command, rest) {
   if (!args.includes("--data-dir")) {
     args.push("--data-dir", process.env.SOLOW_HOME || join(homedir(), ".solow"));
   }
+  // A restore replaces the database under anything running on it: refused while a stack holds the
+  // data folder's lock, and holding it until done so that no `solow` starts meanwhile. The lock
+  // goes to the restore as its fd 3, since Bun cannot take one itself. Without a backup named,
+  // `restore` only lists them, which is fine while SoloW runs.
+  const stdio = ["inherit", "inherit", "inherit"];
+  const env = { ...process.env };
+  const at = args.indexOf("--data-dir");
+  const named = rest.some((arg, i) => !arg.startsWith("-") && rest[i - 1] !== "--data-dir");
+  if (command === "restore" && named) {
+    const lockFd = lockDataDir(resolve(args[at + 1] ?? ""));
+    if (lockFd !== null) {
+      stdio.push(lockFd);
+      env.SOLOW_DATA_DIR_LOCKED = "1";
+    }
+  }
   const result = spawnSync(resolveBun(), [join(DIST, "db", "backup.js"), command, ...args], {
-    stdio: "inherit",
+    stdio,
+    env,
   });
   process.exit(result.status ?? 1);
 }
 
 async function main() {
+  // Before anything is created, and inherited by every service: the database's -wal and -shm, the
+  // engine's files and the backups are written by them, long after this file stopped writing.
+  process.umask(0o077);
   const [command, ...rest] = process.argv.slice(2);
   if (command === "backup" || command === "restore") runBackupCommand(command, rest);
   const opts = parseArgs(process.argv.slice(2));
@@ -693,7 +808,7 @@ async function main() {
       fail(`port ${p} (${label}) is already in use — free it or pass a different port.`);
     }
   }
-  claimDataDir(opts.dataDir);
+  dataDirLock = claimDataDir(opts.dataDir);
 
   // Migrations run on every start, not just the first: drizzle skips the ones already recorded,
   // so it is cheap, and without it an upgraded `npx solow` would open an old database and 500 on

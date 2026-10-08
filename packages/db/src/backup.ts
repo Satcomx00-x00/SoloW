@@ -39,7 +39,10 @@ export const DATABASE_FILE = "solow.db";
 /** `inngest start --sqlite-dir`: queued events and in-flight runs (Decision 0004). */
 export const ENGINE_DIR = "inngest";
 export const BACKUPS_DIR = "backups";
-/** Written by the launchers while the stack is up; what `restore` refuses on. */
+/**
+ * Written by the launchers while the stack is up. Only consulted by a restore whose caller could
+ * not take the data folder's lock (`RestoreOptions.locked`).
+ */
 export const PID_FILE = "solow.pid";
 export const MANIFEST_FILE = "manifest.json";
 /** Automatic copies kept per kind. Manual backups are never pruned: the person made them. */
@@ -308,6 +311,31 @@ function processAlive(pid: number): boolean {
   }
 }
 
+/**
+ * Whether another process has this database open.
+ *
+ * Every connection to a WAL database holds a shared lock on the file for as long as it is open,
+ * idle or not, so an exclusive lock that cannot be had means somebody is using it. That covers
+ * what the data folder's lock cannot: a service started on its own (`make dev-web`, `bun run
+ * dev:orchestrator`), which takes no lock, or a `sqlite3` someone left open.
+ */
+export function databaseInUse(path: string): boolean {
+  if (!existsSync(path)) return false;
+  const db = new Database(path, { readwrite: true, create: false });
+  try {
+    db.exec("PRAGMA busy_timeout = 0;");
+    db.exec("PRAGMA locking_mode = EXCLUSIVE;");
+    db.exec("BEGIN EXCLUSIVE;");
+    db.exec("COMMIT;");
+    return false;
+  } catch (error) {
+    if ((error as { code?: string }).code === "SQLITE_BUSY") return true;
+    throw error;
+  } finally {
+    db.close();
+  }
+}
+
 /** The pid of the stack running on this data folder, or null when none is. */
 export function runningStackPid(
   dataDir: string,
@@ -339,6 +367,12 @@ export interface RestoreOptions {
   now?: Date | undefined;
   keep?: number | undefined;
   alive?: ((pid: number) => boolean) | undefined;
+  /**
+   * The caller holds the data folder's lock (`solow.lock`) for as long as this runs, as
+   * `scripts/backup.sh` and `solow restore` do, so no launcher's processes are running on it and
+   * none can start. Without it the pid file is the only sign of a running stack.
+   */
+  locked?: boolean | undefined;
 }
 
 export interface RestoreResult {
@@ -353,6 +387,11 @@ export interface RestoreResult {
  * hold the database open and would keep writing into the file being replaced, and the engine
  * would carry on with runs the restored database knows nothing about.
  *
+ * "Runs" is two checks. The data folder's lock, which every process a launcher started holds
+ * until the last of them exits, is the caller's to take (`options.locked`): it is a flock(2), which
+ * neither Bun nor Node can take, so the wrappers take it with flock(1) and this process inherits
+ * it. And the database itself, which every process using it holds open, launcher or not.
+ *
  * What was there before is backed up first (`pre-restore`), so a restore can itself be undone.
  * Worktrees, the repository cache and imported Skills are left where they are; they are not in a
  * backup (see `docs/operations/backup-and-restore.md`).
@@ -362,11 +401,21 @@ export function restoreDataDir(
   ref: string,
   options: RestoreOptions = {},
 ): RestoreResult {
-  const pid = runningStackPid(dataDir, options.alive);
-  if (pid !== null) {
+  if (!options.locked) {
+    const pid = runningStackPid(dataDir, options.alive);
+    if (pid !== null) {
+      throw new BackupError(
+        `SoloW is running on ${dataDir} (pid ${pid}). Stop it before restoring.\n` +
+          `If nothing is running, the pid file is stale: remove ${join(dataDir, PID_FILE)}.`,
+      );
+    }
+  }
+  const database = join(dataDir, DATABASE_FILE);
+  if (databaseInUse(database)) {
     throw new BackupError(
-      `SoloW is running on ${dataDir} (pid ${pid}). Stop it before restoring.\n` +
-        `If nothing is running, the pid file is stale: remove ${join(dataDir, PID_FILE)}.`,
+      `${database} is open in another process. Stop it before restoring: a SoloW service ` +
+        "started on its own (`make dev-web`, `bun run dev:orchestrator`), or a tool with the " +
+        `database open (\`fuser -v ${database}\` lists them).`,
     );
   }
 
@@ -374,8 +423,7 @@ export function restoreDataDir(
   const manifest = readManifest(source);
   verifySqlite(join(source, DATABASE_FILE));
 
-  mkdirSync(dataDir, { recursive: true });
-  const database = join(dataDir, DATABASE_FILE);
+  mkdirSync(dataDir, { recursive: true, mode: 0o700 });
   const previous = existsSync(database)
     ? backupDataDir(dataDir, { kind: "pre-restore", now: options.now })
     : null;

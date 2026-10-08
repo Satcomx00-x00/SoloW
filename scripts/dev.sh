@@ -20,9 +20,10 @@ LOG_TAG=dev
 # shellcheck source=/dev/null
 . "$ROOT/scripts/lib/supervise.sh"
 
-# Persistent 32-byte base64 key (kept out of git via .gitignore's /.solow/).
+# Persistent 32-byte base64 key (kept out of git via .gitignore's /.solow/). An empty file, which an
+# interrupted first run leaves, is no key: replaced, as engine-env.sh and `npx solow` do.
 KEY_FILE="$GC_DIR/dev-secret.key"
-if [ ! -f "$KEY_FILE" ]; then
+if [ ! -s "$KEY_FILE" ]; then
     openssl rand -base64 32 > "$KEY_FILE"
     echo "[dev] generated $KEY_FILE"
 fi
@@ -101,8 +102,9 @@ bun run db:bootstrap
 
 # Each service under its own supervisor (scripts/lib/supervise.sh): one that crashes is started
 # again after a short backoff while the other two keep running. Only a service that keeps crashing
-# takes the stack down.
-#
+# takes the stack down. Each is a command, not a shell function: it runs in a process group of its
+# own, so that a restart or a stop reaches the server it starts as well.
+
 # Deliberately **not** `--hot`, where the web app below is.
 #
 # Hot-reloading the orchestrator reloads the module graph an in-flight run is executing in, and
@@ -111,32 +113,26 @@ bun run db:bootstrap
 # re-render — so it keeps the fast loop, and this one trades an edit-time restart for runs that
 # survive being edited around. Restart the stack after changing anything under `apps/orchestrator`
 # or `packages/` for it to take effect.
-run_orchestrator() {
-    exec bun run apps/orchestrator/src/main.ts
-}
+echo "[dev] orchestrator → ws://localhost:$SOLOW_WS_PORT  (+ /events, /api/inngest)"
+supervise orchestrator bun run apps/orchestrator/src/main.ts
+
 # `inngest start` persists queued events AND in-flight runs to --sqlite-dir (what `dev --persist`
 # did), so a run mid-round survives a restart. Keys come from the environment, not argv, so they
 # stay out of `ps`. (A review gate no longer depends on this: a run ends at the gate, and the
 # decision is a row in the app DB that starts the next run.) SOLOW_INNGEST_ARGS appends flags,
 # e.g. to move the connect gateway and gRPC ports a second stack on this machine would share.
-run_inngest() {
-    # shellcheck disable=SC2086 # SOLOW_INNGEST_ARGS is a list of flags
-    exec bunx inngest-cli start \
-        --sqlite-dir "$GC_DIR/inngest" \
-        -u "$SOLOW_INNGEST_SDK_URL" \
-        -p "$SOLOW_INNGEST_PORT" --host "$SOLOW_BIND_HOST" ${SOLOW_INNGEST_ARGS:-}
-}
-# `bun --bun` forces the Bun runtime so the DAL's bun:sqlite import resolves.
-run_web() {
-    cd apps/web && exec bun --bun run dev --port "$SOLOW_WEB_PORT" --hostname "$SOLOW_BIND_HOST"
-}
-
-echo "[dev] orchestrator → ws://localhost:$SOLOW_WS_PORT  (+ /events, /api/inngest)"
-supervise orchestrator run_orchestrator
 echo "[dev] inngest      → http://localhost:$SOLOW_INNGEST_PORT  (self-hosted, signed, Decision 0004)"
-supervise inngest run_inngest
+# shellcheck disable=SC2086 # SOLOW_INNGEST_ARGS is a list of flags
+supervise inngest bunx inngest-cli start \
+    --sqlite-dir "$GC_DIR/inngest" \
+    -u "$SOLOW_INNGEST_SDK_URL" \
+    -p "$SOLOW_INNGEST_PORT" --host "$SOLOW_BIND_HOST" ${SOLOW_INNGEST_ARGS:-}
+
+# `bun --bun` forces the Bun runtime so the DAL's bun:sqlite import resolves.
 echo "[dev] web          → http://localhost:$SOLOW_WEB_PORT  (listening on $SOLOW_BIND_HOST)"
-supervise web run_web
+# shellcheck disable=SC2016 # expanded by that shell, from the arguments after it
+supervise web sh -c 'cd apps/web && exec "$@"' web \
+    bun --bun run dev --port "$SOLOW_WEB_PORT" --hostname "$SOLOW_BIND_HOST"
 echo "[dev] data         → $GC_DIR"
 
 supervise_wait || {

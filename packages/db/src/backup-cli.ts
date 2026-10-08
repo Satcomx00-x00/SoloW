@@ -84,7 +84,11 @@ export function main(argv: string[]): number {
         printList(args.dataDir);
         return 1;
       }
-      const result = restoreDataDir(args.dataDir, ref);
+      // Set by `scripts/backup.sh` and `solow restore`, which took the data folder's lock on a
+      // descriptor this process inherited and holds until it exits.
+      const result = restoreDataDir(args.dataDir, ref, {
+        locked: process.env.SOLOW_DATA_DIR_LOCKED === "1",
+      });
       console.log(`restored ${result.source} into ${args.dataDir}`);
       if (result.previous) console.log(`what was there before is in ${result.previous}`);
       if (!result.manifest.engine) {

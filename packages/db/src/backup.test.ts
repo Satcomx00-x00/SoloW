@@ -183,8 +183,49 @@ describe("listBackups and pruneBackups", () => {
   });
 });
 
+/** A process that stays up until killed, once `ready` has appeared on its stdout. */
+async function holder(argv: string[]): Promise<Bun.Subprocess<"ignore", "pipe", "inherit">> {
+  const proc = Bun.spawn(argv, { stdin: "ignore", stdout: "pipe", stderr: "inherit" });
+  holders.push(proc);
+  const reader = proc.stdout.getReader();
+  let seen = "";
+  while (!seen.includes("ready")) {
+    const { value, done } = await reader.read();
+    if (done) throw new Error(`${argv.join(" ")} exited before it was ready`);
+    seen += new TextDecoder().decode(value);
+  }
+  reader.releaseLock();
+  return proc;
+}
+
+const holders: Bun.Subprocess[] = [];
+afterEach(() => {
+  for (const proc of holders.splice(0)) proc.kill("SIGKILL");
+});
+
 describe("restoreDataDir", () => {
-  it("refuses while the stack is running on the folder, and changes nothing", () => {
+  it("refuses while a service started without a launcher has the database open", async () => {
+    // `make dev-web` and `bun run dev:orchestrator` take no lock; what they do hold is the
+    // database, open and idle.
+    const dir = dataFolder(["current"]);
+    const backup = backupDataDir(dir);
+    const script = `const { Database } = require("bun:sqlite");
+const db = new Database(${JSON.stringify(join(dir, "solow.db"))});
+db.exec("PRAGMA journal_mode = WAL;");
+db.query("SELECT count(*) FROM note").get();
+console.log("ready");
+setInterval(() => {}, 1000);`;
+    await holder([process.execPath, "-e", script]);
+
+    // Even with the data folder's lock in hand: a service started on its own takes no lock.
+    expect(() => restoreDataDir(dir, backup, { locked: true })).toThrow(
+      /solow\.db is open in another process/,
+    );
+    expect(notes(join(dir, "solow.db"))).toEqual(["current"]);
+    expect(listBackups(join(dir, BACKUPS_DIR))).toHaveLength(1);
+  });
+
+  it("falls back on the pid file when the caller could not take the lock", () => {
     const dir = dataFolder(["current"]);
     const backup = backupDataDir(dir);
     writeFileSync(join(dir, PID_FILE), "4242\n");
@@ -193,6 +234,16 @@ describe("restoreDataDir", () => {
       /running .*pid 4242.*Stop it/s,
     );
     expect(listBackups(join(dir, BACKUPS_DIR))).toHaveLength(1);
+  });
+
+  it("goes by the lock rather than the pid file when the caller holds it", () => {
+    // A launcher killed outright leaves its pid file behind, and the pid can be anyone's by now.
+    const dir = dataFolder(["current"]);
+    const backup = backupDataDir(dir);
+    writeFileSync(join(dir, PID_FILE), "4242\n");
+
+    const result = restoreDataDir(dir, backup, { alive: () => true, locked: true });
+    expect(result.manifest.kind).toBe("manual");
   });
 
   it("treats a pid file whose process is gone as stale", () => {
@@ -208,17 +259,26 @@ describe("restoreDataDir", () => {
     const dir = dataFolder(["before"]);
     const backup = backupDataDir(dir, { now: at("2026-10-01T00:00:00Z") });
 
-    // Everything moves on after the backup, including a WAL that must not survive the restore.
-    const live = new Database(join(dir, "solow.db"));
-    live.exec("PRAGMA wal_autocheckpoint = 0;");
-    live.query("INSERT INTO note (body) VALUES ('after')").run();
+    // Everything moves on after the backup, including a WAL that must not survive the restore:
+    // left behind by a service that was killed rather than stopped, since one still running would
+    // make the restore refuse.
+    const crashed = Bun.spawnSync([
+      process.execPath,
+      "-e",
+      `const { Database } = require("bun:sqlite");
+const db = new Database(${JSON.stringify(join(dir, "solow.db"))});
+db.exec("PRAGMA wal_autocheckpoint = 0;");
+db.query("INSERT INTO note (body) VALUES ('after')").run();
+process.kill(process.pid, "SIGKILL");`,
+    ]);
+    expect(crashed.signalCode).toBe("SIGKILL");
+    expect(existsSync(join(dir, "solow.db-wal"))).toBe(true);
     writeFileSync(join(dir, "secret.key"), "key-b\n");
     rmSync(join(dir, "inngest"), { recursive: true });
     mkdirSync(join(dir, "inngest"));
     writeFileSync(join(dir, "inngest", "later.txt"), "x");
 
     const result = restoreDataDir(dir, backup, { now: at("2026-10-02T00:00:00Z") });
-    live.close();
 
     expect(notes(join(dir, "solow.db"))).toEqual(["before"]);
     expect(readFileSync(join(dir, "secret.key"), "utf8")).toBe("key-a\n");
