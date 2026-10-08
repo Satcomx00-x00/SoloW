@@ -33,6 +33,7 @@ import {
   type PermissionAnswerResult,
   type WidgetAnswerResult,
 } from "./harness/registry.js";
+import { engineHealthUrl, handleHealthGet, probeEngine } from "./health.js";
 import { inngest } from "./inngest/client.js";
 import { handleEventPost } from "./inngest/events.js";
 import { INNGEST_FUNCTIONS, inngestServeHandler } from "./inngest/serve.js";
@@ -733,6 +734,10 @@ export function startWebSocketServer(
     hostname: orchestratorEnv().SOLOW_BIND_HOST,
     async fetch(req, server) {
       const { pathname } = new URL(req.url);
+      // Liveness, and the engine's behind it (FINDINGS F3) — see `health.ts`.
+      if (pathname === "/health" && req.method === "GET") {
+        return handleHealthGet(() => probeEngine(engineHealthUrl(orchestratorEnv())));
+      }
       // The two HTTP routes the durable engine needs (Decision 0004), handled before the
       // upgrade check below so they never fall into the "websocket only" 426: `/events` is
       // where `orchestrator-client.ts`'s `emit()` lands, and `/api/inngest` is what the

@@ -67,6 +67,14 @@ const schema = z.object({
     .string()
     .regex(/^\d+:\d+$/, "SOLOW_DOCKER_USER must be a numeric uid:gid pair, e.g. 1000:1000")
     .optional(),
+  /**
+   * Where the durable engine is, read only so `GET /health` can say whether it answers (FINDINGS
+   * F3). These are the Inngest SDK's own variables, which it reads itself to decide where events
+   * go; the health probe asks the same address rather than a second, `SOLOW_`-named one. Raw
+   * strings: `INNGEST_DEV` is either a flag or a Dev Server URL, and the SDK decides which.
+   */
+  INNGEST_BASE_URL: z.string().optional(),
+  INNGEST_DEV: z.string().optional(),
 });
 export type OrchestratorEnv = z.infer<typeof schema>;
 let cached: OrchestratorEnv | undefined;
