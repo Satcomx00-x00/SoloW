@@ -842,13 +842,9 @@ export class GitlabProvider implements ChangeProvider, ProjectsCapability, Issue
       headers,
     )) as GitlabMergeRequest[];
     const existing = open[0];
-    if (existing) {
-      const updated = (await scmSend("gitlab", `${root}/${existing.iid}`, headers, "PUT", {
-        title: input.title,
-        description: input.body,
-      })) as GitlabMergeRequest;
-      return { changeRequest: toExternal(updated), created: false };
-    }
+    // Already open: the push that preceded this is the update. Its title and description are
+    // left as they are, because by now they may be a reviewer's words rather than ours.
+    if (existing) return { changeRequest: toExternal(existing), created: false };
     const base = input.base ?? (await this.getRepository(credential, repo))?.defaultBranch;
     if (!base) {
       throw new ScmProviderError("gitlab", `could not tell which branch ${repo} merges into`);

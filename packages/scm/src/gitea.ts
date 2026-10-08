@@ -1,4 +1,11 @@
-import { ISSUE_PAGE_SIZE, isNotFound, scmFetch, scmFetchPaged, scmSend } from "./http.js";
+import {
+  ISSUE_PAGE_CAP,
+  ISSUE_PAGE_SIZE,
+  isNotFound,
+  scmFetch,
+  scmFetchPaged,
+  scmSend,
+} from "./http.js";
 import {
   type ChangeProvider,
   type ChangeRequestInput,
@@ -184,6 +191,35 @@ function authHeaders(credential: ScmCredential): Record<string, string> {
 function normalizeColor(color: string | null): string | null {
   if (!color) return null;
   return color.startsWith("#") ? color : `#${color}`;
+}
+
+/** Gitea's own default maximum page size, so a default instance answers in full pages. */
+const PULL_PAGE_SIZE = 50;
+
+/**
+ * The open pull request whose head is `head`, read page by page.
+ *
+ * Gitea's list has no head filter, so the open ones are matched here, and one page was not
+ * enough: a repository with more open requests than a page holds got a duplicate for a branch
+ * whose request sat on the next page. The walk stops on an *empty* page rather than a short one,
+ * because an instance caps `limit` at its own maximum whatever the client asks for.
+ */
+async function findOpenPull(
+  root: string,
+  headers: Record<string, string>,
+  head: string,
+): Promise<GiteaPull | undefined> {
+  for (let page = 1; page <= ISSUE_PAGE_CAP; page++) {
+    const rows = (await scmFetch(
+      "gitea",
+      `${root}/pulls?state=open&limit=${PULL_PAGE_SIZE}&page=${page}`,
+      headers,
+    )) as GiteaPull[];
+    if (!Array.isArray(rows) || rows.length === 0) return undefined;
+    const match = rows.find((r) => r.head.ref === head);
+    if (match) return match;
+  }
+  return undefined;
 }
 
 export class GiteaProvider implements ChangeProvider {
@@ -419,23 +455,10 @@ export class GiteaProvider implements ChangeProvider {
       baseRef: r.base.ref,
       authorLogin: r.user?.login ?? null,
     });
-    // Gitea's list has no head filter, so the open ones are read and matched here.
-    const open = (await scmFetch(
-      "gitea",
-      `${root}/pulls?state=open&limit=100`,
-      headers,
-    )) as GiteaPull[];
-    const existing = open.find((r) => r.head.ref === input.head);
-    if (existing) {
-      const updated = (await scmSend(
-        "gitea",
-        `${root}/pulls/${existing.number}`,
-        headers,
-        "PATCH",
-        { title: input.title, body: input.body },
-      )) as GiteaPull;
-      return { changeRequest: toExternal(updated), created: false };
-    }
+    const existing = await findOpenPull(root, headers, input.head);
+    // Already open: the push that preceded this is the update. Its title and description are
+    // left as they are, because by now they may be a reviewer's words rather than ours.
+    if (existing) return { changeRequest: toExternal(existing), created: false };
     const base = input.base ?? (await this.getRepository(credential, repo))?.defaultBranch;
     if (!base) {
       throw new ScmProviderError("gitea", `could not tell which branch ${repo} merges into`);

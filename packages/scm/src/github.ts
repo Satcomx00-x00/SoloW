@@ -867,16 +867,9 @@ export class GithubProvider implements ChangeProvider, ProjectsCapability, Issue
       authorLogin: r.user?.login ?? null,
     });
     const existing = open[0];
-    if (existing) {
-      const updated = (await scmSend(
-        "github",
-        `${root}/pulls/${existing.number}`,
-        headers,
-        "PATCH",
-        { title: input.title, body: input.body },
-      )) as GithubPull;
-      return { changeRequest: toExternal(updated), created: false };
-    }
+    // Already open: the push that preceded this is the update. Its title and description are
+    // left as they are, because by now they may be a reviewer's words rather than ours.
+    if (existing) return { changeRequest: toExternal(existing), created: false };
     const base = input.base ?? (await this.getRepository(credential, repo))?.defaultBranch;
     if (!base) {
       throw new ScmProviderError("github", `could not tell which branch ${repo} merges into`);

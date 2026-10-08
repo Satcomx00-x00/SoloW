@@ -70,7 +70,12 @@ beforeAll(() => {
       if (list && req.method === "GET") {
         const head =
           url.searchParams.get("head")?.split(":")[1] ?? url.searchParams.get("source_branch");
-        return json(open.filter((r) => !head || r.head === head).map((r) => row(r, origin)));
+        const rows = open.filter((r) => !head || r.head === head).map((r) => row(r, origin));
+        // Gitea pages with `limit`/`page`, and a server caps `limit` at its own maximum (50 by
+        // default) whatever the client asked for, so the fixture does too.
+        const limit = Math.min(Number(url.searchParams.get("limit") ?? 0), 50);
+        const page = Number(url.searchParams.get("page") ?? 1);
+        return json(limit ? rows.slice((page - 1) * limit, page * limit) : rows);
       }
       if (list && req.method === "POST") {
         const b = body as Record<string, string>;
@@ -131,17 +136,35 @@ for (const d of drivers) {
       expect(out.changeRequest.baseRef).toBe("release");
     });
 
-    it("updates the open one instead of opening a second", async () => {
+    it("finds the open one instead of opening a second, and leaves what people wrote on it", async () => {
       await d.make().upsertChangeRequest(credential(), "acme/gate", input);
+      // A reviewer retitles the request and rewrites its description on the provider.
+      const [first] = open;
+      if (!first) throw new Error("fixture did not record the request");
+      first.title = "Fix it (edited by a human)";
+      first.body = "Hand-written notes.";
       calls = [];
       const out = await d
         .make()
         .upsertChangeRequest(credential(), "acme/gate", { ...input, title: "Fix it again" });
       expect(out.created).toBe(false);
-      expect(out.changeRequest.title).toBe("Fix it again");
+      expect(out.changeRequest.number).toBe(1);
+      expect(out.changeRequest.title).toBe("Fix it (edited by a human)");
+      expect(first.body).toBe("Hand-written notes.");
       expect(open).toHaveLength(1);
       expect(calls.some((c) => c.method === "POST")).toBe(false);
-      expect(calls.some((c) => c.method === d.update)).toBe(true);
+      expect(calls.some((c) => c.method === d.update)).toBe(false);
+    });
+
+    it("finds the open one when many other requests are open", async () => {
+      for (let n = 1; n <= 120; n++) {
+        open.push({ n, head: `feature/${n}`, base: "trunk", title: `Other ${n}`, body: "" });
+      }
+      open.push({ n: 121, head: input.head, base: "trunk", title: "Ours", body: "" });
+      const out = await d.make().upsertChangeRequest(credential(), "acme/gate", input);
+      expect(out.created).toBe(false);
+      expect(out.changeRequest.number).toBe(121);
+      expect(calls.some((c) => c.method === "POST")).toBe(false);
     });
   });
 }

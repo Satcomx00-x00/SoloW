@@ -653,7 +653,10 @@ export interface ChangeRequestInput {
   /** The branch to merge into; the repository's default branch when absent. */
   base?: string;
   title: string;
-  /** Markdown. Replaces the description of an existing request. */
+  /**
+   * Markdown. Written only when the request is opened: the title and description of a request
+   * that is already open are left alone, because by then a reviewer may have edited them.
+   */
   body: string;
 }
 
