@@ -46,7 +46,7 @@ smoke: ## Run the smoke tests: the core loop (in-memory DB, fake agent, temp git
 	bun run scripts/smoke.ts
 	cd apps/web && bun test src/server/api.smoke.test.ts
 
-smoke-tarball: ## Pack the CLI, install the tarball into a clean dir, and boot it (needs a build first)
+smoke-tarball: ## Pack the CLI (or take SMOKE_TARBALL), install it into a clean dir, and boot it (needs a build first)
 	./scripts/smoke-tarball.sh
 
 smoke-docker: ## Drive the Docker executor against a live daemon (SMOKE_DOCKER_REQUIRED=1 to forbid the skip)

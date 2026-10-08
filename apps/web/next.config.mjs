@@ -17,6 +17,20 @@ const nextConfig = {
    * Left at `.next` for every ordinary build; the suite sets this to a directory of its own.
    */
   distDir: process.env.SOLOW_NEXT_DIST_DIR ?? ".next",
+  /**
+   * Keep every route `next dev` has compiled for the life of the server, when asked to.
+   *
+   * By default `next dev` throws away a route nobody has asked for in the last minute
+   * (`maxInactiveAge`, outside a short buffer of the latest pages), and the next visit compiles it
+   * again — 10–20 s here, longer on a loaded runner. An e2e walk goes back and forth between a few
+   * routes with harness runs of a minute or more in between, so it paid that compile over and over
+   * inside its own budget, and warming a route before a walk bought nothing past the first minute.
+   * The suite turns this on (`e2e/support/fixture.ts`); `bun run dev` keeps Next's default, which
+   * is the cheaper one in memory for a person who visits one page at a time.
+   */
+  ...(process.env.SOLOW_NEXT_KEEP_ROUTES === "1"
+    ? { onDemandEntries: { maxInactiveAge: 24 * 60 * 60_000, pagesBufferLength: 100 } }
+    : {}),
   // `npx solow` ships a prebuilt web app, and standalone is what makes that shippable: Next
   // traces the server's real imports and copies just those into `.next/standalone`, turning a
   // 1.1 GB build directory into a few megabytes that run without the monorepo around them.

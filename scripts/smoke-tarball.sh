@@ -47,12 +47,24 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-echo "==> packing"
-cd "$ROOT/packages/cli"
-# Packed into the scratch directory rather than the repo: this runs on a developer's checkout as
-# well as CI, and a gate that leaves a 100MB tarball lying in the source tree is a gate people
-# stop running. `npm pack` prints the filename on stdout; everything else goes to stderr.
-TARBALL="$WORK/$(npm pack --silent --pack-destination "$WORK")"
+# `SMOKE_TARBALL` names one already packed — CI's publish workflow passes the very file it is
+# about to publish, so what is booted here and what reaches npm are the same bytes.
+if [ -n "${SMOKE_TARBALL:-}" ]; then
+    echo "==> using $SMOKE_TARBALL"
+    # Absolute, because the install below runs from the scratch directory.
+    TARBALL="$(CDPATH='' cd -- "$(dirname -- "$SMOKE_TARBALL")" && pwd)/$(basename -- "$SMOKE_TARBALL")"
+    [ -f "$TARBALL" ] || {
+        echo "smoke-tarball: SMOKE_TARBALL=$SMOKE_TARBALL is not a file." >&2
+        exit 1
+    }
+else
+    echo "==> packing"
+    cd "$ROOT/packages/cli"
+    # Packed into the scratch directory rather than the repo: this runs on a developer's checkout
+    # as well as CI, and a gate that leaves a 100MB tarball lying in the source tree is a gate
+    # people stop running. `npm pack` prints the filename on stdout; everything else goes to stderr.
+    TARBALL="$WORK/$(npm pack --silent --pack-destination "$WORK")"
+fi
 echo "    $TARBALL"
 
 echo "==> installing into a clean directory (no install scripts)"

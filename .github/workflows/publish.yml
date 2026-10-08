@@ -14,7 +14,16 @@ name: Publish
 # hand-pushed tag still works exactly as it always did — that path is the fallback, not the plan.
 #
 # Dry runs are available from the Actions tab (workflow_dispatch) and go all the way through
-# packing without publishing, so the build can be exercised without burning a version number.
+# packing and the tarball smoke without publishing, so the build can be exercised without burning
+# a version number.
+#
+# Four jobs, split by what each one is trusted with. `build` and `smoke` run the repository's
+# code and every dependency's — `bun install`, the tests, the build, a booted stack — so they get
+# a read-only token and keep no git credentials. The two publish jobs run none of it: they
+# download the tarballs `build` packed and hand them to npm, and only the last one can write to
+# the repository or mint the OIDC token npm's provenance needs. The order is the one the single
+# job had: the Inngest packages reach npm before the smoke installs the CLI (which resolves them
+# from there), and the CLI reaches npm only after the smoke has run what is about to ship.
 
 on:
   push:
@@ -30,31 +39,33 @@ concurrency:
   group: publish-${{ github.ref }}
   cancel-in-progress: false
 
-permissions:
-  # Create the GitHub Release at the end. Read would be enough for the build itself.
-  contents: write
-  # Lets npm attach a provenance attestation — a signed, public record tying the published
-  # tarball to this workflow run and this commit. Without it `npm publish --provenance` fails.
-  id-token: write
-  # Read Verify's runs, to refuse a commit it has not passed.
-  actions: read
+# Nothing by default; each job asks for what it uses. A `permissions:` block replaces the
+# defaults rather than extending them.
+permissions: {}
 
 env:
   # Keep in sync with `packageManager` in package.json.
   BUN_VERSION: "1.3.14"
 
 jobs:
-  publish:
-    name: Build and publish to npm
+  build:
+    name: Gates, build and pack
     runs-on: ubuntu-latest
-    # Room for the tarball smoke below: it installs a ~100MB vendored binary and boots the stack.
-    timeout-minutes: 45
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      # Read Verify's runs, to refuse a commit it has not passed.
+      actions: read
+    outputs:
+      publish: ${{ steps.mode.outputs.publish }}
     steps:
       # The whole history and its tags: the Release notes below are written from the commits
-      # since the previous tag, which a shallow clone does not have.
+      # since the previous tag, which a shallow clone does not have. No credentials left in
+      # .git/config: nothing here pushes, and every install script and test below could read them.
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       # Whether this run ships, decided once and read by every step that would.
       #
@@ -81,12 +92,11 @@ jobs:
         with:
           bun-version: ${{ env.BUN_VERSION }}
 
-      # npm itself does the publishing: Bun's publish does not support provenance, and
-      # `setup-node` is what writes the .npmrc that authenticates NODE_AUTH_TOKEN.
+      # npm packs here, with the same npm that publishes from the tarball later: Bun's publish
+      # does not support provenance. No registry auth in this job — it only reads from npm.
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-          registry-url: "https://registry.npmjs.org"
 
       - name: Cache Bun install cache
         uses: actions/cache@v4
@@ -118,16 +128,50 @@ jobs:
       # by hand skips Release — so the commit being shipped must have one too. Release's own
       # commit (`chore(release)`, version and changelog only) is pushed with the workflow token and
       # gets no Verify run of its own; the tree Verify passed is its parent's.
+      #
+      # That exemption is only safe for a commit that cannot change what runs, so it is earned
+      # rather than claimed: a subject and two file names are anyone's to type, and a "release"
+      # commit that also moved a dependency or a script in packages/cli/package.json would ship a
+      # tree no Verify run has seen. So the manifest must be identical to its parent's apart from
+      # `version`, compared as parsed JSON; the parent must be the only one; and the author and
+      # committer must be the identity release.yml commits as. The identity is forgeable by
+      # anyone who can push, which is why it is the last check and not the only one.
       - name: Verify passed on main for this commit
         if: steps.mode.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          # release.yml's `git config user.*` — keep the two in step.
+          RELEASE_IDENTITY: "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
         run: |
           set -euo pipefail
           sha="$(git rev-parse HEAD)"
-          if git log -1 --format=%s | grep -q '^chore(release): ' &&
-            [ "$(git diff --name-only HEAD^ HEAD | sort | tr '\n' ' ')" = "CHANGELOG.md packages/cli/package.json " ]; then
-            sha="$(git rev-parse HEAD^)"
+          if git log -1 --format=%s | grep -q '^chore(release): '; then
+            why=""
+            if [ "$(git rev-list --parents -n1 HEAD | wc -w)" != 2 ]; then
+              why="it is not a single-parent commit"
+            elif [ "$(git log -1 --format='%an <%ae>')" != "$RELEASE_IDENTITY" ] ||
+              [ "$(git log -1 --format='%cn <%ce>')" != "$RELEASE_IDENTITY" ]; then
+              why="it was not authored and committed as ${RELEASE_IDENTITY}"
+            elif [ "$(git diff --name-only HEAD^ HEAD | sort | tr '\n' ' ')" != "CHANGELOG.md packages/cli/package.json " ]; then
+              why="it touches more than CHANGELOG.md and packages/cli/package.json"
+            elif ! node -e '
+              const { execFileSync } = require("node:child_process");
+              const sansVersion = (rev) => {
+                const manifest = JSON.parse(
+                  execFileSync("git", ["show", rev + ":packages/cli/package.json"], { encoding: "utf8" }),
+                );
+                delete manifest.version;
+                return JSON.stringify(manifest);
+              };
+              process.exit(sansVersion("HEAD^") === sansVersion("HEAD") ? 0 : 1);
+            '; then
+              why="its packages/cli/package.json changes more than \"version\""
+            fi
+            if [ -z "$why" ]; then
+              sha="$(git rev-parse HEAD^)"
+            else
+              echo "::warning::HEAD says chore(release) but is not exempt from Verify: ${why}."
+            fi
           fi
           passed="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/verify.yml/runs?head_sha=${sha}&event=push&status=success" --jq .total_count)"
           if [ "$passed" = "0" ]; then
@@ -162,69 +206,177 @@ jobs:
       - name: Build the package
         run: bun run --filter '@satcomx00-x00/solow' build
 
-      - name: Inspect the tarball
+      # The tarball that ships, packed once: the smoke installs this file and the publish job
+      # uploads this file, so what was booted and what reaches npm cannot drift apart. `npm pack`
+      # lists the contents as it goes, which is the inspection the dry run used to be.
+      - name: Pack the tarball
         working-directory: packages/cli
-        run: npm pack --dry-run
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/release"
+          tarball="$(npm pack --pack-destination "$RUNNER_TEMP/release" | tail -n1)"
+          mv "$RUNNER_TEMP/release/$tarball" "$RUNNER_TEMP/release/solow.tgz"
 
-      # Must run *before* the CLI is published: the CLI declares these as optionalDependencies,
-      # and an install would find nothing if the CLI landed on npm first.
-      #
       # They carry the Inngest Dev Server binary inside the tarball, one package per platform,
       # so the CLI installs from npm alone — no postinstall, no download, works airgapped.
-      # Versioned on Inngest rather than on SoloW, so this is a no-op on every release that does
-      # not move the Inngest version (the script checks npm and skips what is already there).
-      - name: Publish the Inngest binaries
+      # Versioned on Inngest rather than on SoloW, so this packs nothing on every release that
+      # does not move the Inngest version (the script asks npm and skips what is already there),
+      # and `publish-inngest` then has nothing to do.
+      - name: Pack the Inngest binaries npm does not have yet
         if: steps.mode.outputs.publish == 'true'
-        run: bun run packages/cli/scripts/build-inngest-packages.ts --publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: bun run packages/cli/scripts/build-inngest-packages.ts --pack-into "$RUNNER_TEMP/release/inngest"
 
-      # The gate every other one in this file cannot be: it installs the tarball into an empty
-      # directory and boots the whole stack. `npm pack --dry-run` above lists what is inside;
-      # this is the only step that asks whether what is inside runs.
-      #
-      # Both npm releases that shipped broken passed every check above. `npm pack` strips
-      # symlinks, so the traced Next.js build arrived without its dependencies ("Cannot find
-      # package 'next'"); and the Inngest binary arrived as a Node stub rather than an
-      # executable ("inngest cli binary not found"). Neither is visible from the source tree.
-      #
-      # Placed after the Inngest packages are published because the CLI declares them as
-      # optionalDependencies and the install below resolves them from npm. They are versioned on
-      # Inngest rather than on SoloW, so on a dry run that does not move the Inngest version the
-      # already-published ones resolve fine.
-      - name: Install and run the packed tarball
-        run: make smoke-tarball
+      # Written here, where the history is, so the job that creates the Release needs no checkout.
+      # The notes are git-cliff's section for this tag — the same text the release commit wrote
+      # into CHANGELOG.md, grouped by what each commit is (cliff.toml) — so nothing has to be
+      # maintained by hand for them to be right. `--latest`: the range ending at the newest tag,
+      # which is the one this run is at.
+      - name: Write the Release notes
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: bunx git-cliff --latest --strip all > "$RUNNER_TEMP/release/notes.md"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release
+          path: ${{ runner.temp }}/release/
+          if-no-files-found: error
+          # Long enough to re-run a failed publish job by hand, which reuses this run's artifacts.
+          retention-days: 7
+
+  # Must run *before* the CLI is published: the CLI declares these as optionalDependencies, and
+  # an install would find nothing if the CLI landed on npm first. No checkout and no install:
+  # the npm token is the only credential here, and nothing runs beside it but `npm publish` on
+  # the tarballs `build` packed (which runs no lifecycle scripts for a tarball).
+  publish-inngest:
+    name: Publish the Inngest binaries
+    needs: build
+    if: needs.build.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions: {}
+    steps:
+      # `setup-node` is what writes the .npmrc that authenticates NODE_AUTH_TOKEN.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release
+          path: ${{ runner.temp }}/release
 
       - name: Publish
-        if: steps.mode.outputs.publish == 'true'
-        working-directory: packages/cli
-        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          packed=("$RUNNER_TEMP"/release/inngest/*.tgz)
+          if [ "${#packed[@]}" -eq 0 ]; then
+            echo "Every Inngest package for this version is already on npm."
+          fi
+          for tarball in "${packed[@]}"; do
+            npm publish "$tarball" --access public
+          done
+
+  # The gate every other one in this file cannot be: it installs the tarball into an empty
+  # directory and boots the whole stack. `npm pack` in `build` lists what is inside; this is the
+  # only job that asks whether what is inside runs.
+  #
+  # Both npm releases that shipped broken passed every check in `build`. `npm pack` strips
+  # symlinks, so the traced Next.js build arrived without its dependencies ("Cannot find package
+  # 'next'"); and the Inngest binary arrived as a Node stub rather than an executable ("inngest
+  # cli binary not found"). Neither is visible from the source tree.
+  #
+  # After `publish-inngest` because the CLI declares those packages as optionalDependencies and
+  # the install below resolves them from npm. They are versioned on Inngest rather than on SoloW,
+  # so on a dry run (where `publish-inngest` is skipped) that does not move the Inngest version
+  # the already-published ones resolve fine.
+  smoke:
+    name: Install and run the packed tarball
+    needs: [build, publish-inngest]
+    if: >-
+      !cancelled() &&
+      needs.build.result == 'success' &&
+      (needs.publish-inngest.result == 'success' || needs.publish-inngest.result == 'skipped')
+    runs-on: ubuntu-latest
+    # The install pulls a ~100MB vendored binary, and the stack is booted twice.
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      # For the smoke script only; the tarball under test comes from `build`.
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release
+          path: ${{ runner.temp }}/release
+
+      - name: Install and run the packed tarball
+        run: SMOKE_TARBALL="$RUNNER_TEMP/release/solow.tgz" make smoke-tarball
+
+  # The only job that can write to the repository or prove to npm where the tarball came from,
+  # and the only one that runs nothing from the repository: it uploads what `build` packed and
+  # `smoke` booted, then announces it.
+  publish:
+    name: Publish to npm
+    needs: [build, publish-inngest, smoke]
+    if: needs.build.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      # Create the GitHub Release at the end.
+      contents: write
+      # Lets npm attach a provenance attestation — a signed, public record tying the published
+      # tarball to this workflow run and this commit. Without it `npm publish --provenance` fails.
+      id-token: write
+    steps:
+      # npm itself does the publishing: Bun's publish does not support provenance, and
+      # `setup-node` is what writes the .npmrc that authenticates NODE_AUTH_TOKEN.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release
+          path: ${{ runner.temp }}/release
+
+      - name: Publish
+        run: npm publish "$RUNNER_TEMP/release/solow.tgz" --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       # The release the tag has been standing in for. Created last, and only once npm has the
       # version: a Release is an announcement, and one that outlives a failed publish tells every
-      # reader the opposite of what happened. The notes are git-cliff's section for this tag — the
-      # same text the release commit wrote into CHANGELOG.md, grouped by what each commit is
-      # (cliff.toml) — so nothing has to be maintained by hand for them to be right.
+      # reader the opposite of what happened.
       - name: Create the GitHub Release
-        if: steps.mode.outputs.publish == 'true' && startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
+          # No checkout here, so `gh` is told the repository rather than reading it from .git.
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          # A re-run of this workflow reaches here only if npm accepted the version again, which
-          # it will not — but a Release that already exists is still not a reason to fail the run
+          # A re-run of this job reaches here only if npm accepted the version again, which it
+          # will not — but a Release that already exists is still not a reason to fail the run
           # that produced the thing it announces.
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             echo "::notice::Release $GITHUB_REF_NAME already exists — leaving it as it is."
           else
-            # `--latest`: the range ending at the newest tag, which is the one this run is at.
-            bunx git-cliff --latest --strip all > "$RUNNER_TEMP/notes.md"
             gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" \
-              --notes-file "$RUNNER_TEMP/notes.md" --verify-tag
+              --notes-file "$RUNNER_TEMP/release/notes.md" --verify-tag
           fi
-
-      - name: Dry run complete
-        if: steps.mode.outputs.publish != 'true'
-        run: echo "Dry run — built and packed, nothing published."

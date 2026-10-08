@@ -37,6 +37,21 @@ export async function connectRepository(page: Page, name: string, location: stri
   await expect(row).toBeVisible();
 }
 
+/**
+ * Visit each route once so the e2e `next dev` has compiled it before a walk's clock starts.
+ *
+ * A first visit compiles the route (10–20 s, longer on a loaded runner), and inside a walk that
+ * time is spent from the test's own budget on work the walk is not about. A dynamic route
+ * compiles the same for any id, so a made-up one will do — see `NO_SUCH_ID`. The suite's server
+ * keeps what it compiled (`SOLOW_NEXT_KEEP_ROUTES`), so the warmth lasts the whole run.
+ */
+export async function warmRoutes(page: Page, paths: readonly string[]): Promise<void> {
+  for (const path of paths) await page.goto(path);
+}
+
+/** A well-formed id nothing has, for warming a dynamic route. */
+export const NO_SUCH_ID = "00000000-0000-4000-8000-000000000000";
+
 /** One tRPC call over HTTP, the way the SPA makes it (superjson envelope, dev-owner session). */
 export async function trpc<T>(
   page: Page,
@@ -152,9 +167,10 @@ export async function expectTaskDeleted(page: Page, taskId: string, deleted: boo
  * Open a Task's page ready for its delete button, which navigates to `destination`.
  *
  * Two things make that navigation slow enough to fail a spec, and both are settled here. Under
- * the e2e `next dev` a route not visited in the last minute is compiled again on the next visit
- * (10–20 s, longer on a loaded runner), which can outlast the toast's ten seconds and the
- * default expect — so the destination is visited first. And where the delete goes depends on
+ * the e2e `next dev` a route's first visit compiles it (10–20 s, longer on a loaded runner),
+ * which can outlast the toast's ten seconds and the default expect — so the destination is
+ * visited first. (A route idle for a minute used to be compiled again as well, until the suite
+ * set `SOLOW_NEXT_KEEP_ROUTES`.) And where the delete goes depends on
  * the Task's Project, which the page reads only once the Task has loaded: pressed before that,
  * the delete goes to `/projects` — so the button's own `data-after-delete` is waited on.
  */
