@@ -26,8 +26,10 @@ import {
   carryHarnessDecision,
   carryHarnessReview,
   classifyRunFailure,
+  handoffWith,
   primaryTaskRepository,
-  stepExits,
+  reopenAfterApplyingDecisions,
+  stepCanEndWorkflow,
   taskCheckoutBranch,
 } from "@solow/core";
 import { renderForkDigest } from "@solow/core/session-log";
@@ -3052,17 +3054,12 @@ export async function runTaskLifecycle(
         const settled = applyingDecisions;
         applyingDecisions = null;
         const stepId = leg.stepId;
-        const canEnd =
-          !wf ||
-          !stepId ||
-          (stepExits(wf.steps).get(stepId) ?? []).some((exit) => exit.stepId === null);
-        const reopenBecause = run.askedDecisions
-          ? "new-decisions"
-          : run.outcome === "blocked"
-            ? null
-            : canEnd
-              ? "last-step"
-              : null;
+        const canEnd = !wf || !stepId || stepCanEndWorkflow(wf.steps, stepId);
+        const reopenBecause = reopenAfterApplyingDecisions({
+          askedDecisions: run.askedDecisions,
+          outcome: run.outcome,
+          canEnd,
+        });
         if (wf && stepId && leg.advanceOn && run.outcome !== "blocked" && reopenBecause === null) {
           // What the next Step is briefed with: this round's summary — the work *after* the
           // answers — and the answers themselves, so it is told what was settled either way.
@@ -3242,21 +3239,6 @@ export async function runTaskLifecycle(
       captureException(log, cause, { stage: "executor-dispose" });
     });
   }
-}
-
-/**
- * The next Step's handoff: the harness's summary, and what the reviewer said when approving.
- *
- * Null when there is neither, so a Step with nothing to carry keeps carrying nothing. The
- * reviewer's part is headed, because the Build's harness reads the handoff as prose and has to
- * be able to tell "what the Plan said" from "what the person said about the Plan".
- */
-function handoffWith(summary: string | null, feedback: string | null | undefined): string | null {
-  const said = feedback?.trim();
-  const parts = [summary?.trim() || null, said ? `Reviewer's decisions:\n${said}` : null].filter(
-    (part): part is string => part !== null,
-  );
-  return parts.length > 0 ? parts.join("\n\n") : null;
 }
 
 /**

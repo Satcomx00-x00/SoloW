@@ -14,12 +14,15 @@ import {
   carryHarnessReview,
   describeWorkflowDecision,
   evaluateStepCondition,
+  handoffWith,
   rankBetween,
   rankForMove,
   readHarnessDecision,
   readHarnessReview,
+  reopenAfterApplyingDecisions,
   resumeWorkflowCursor,
   sortSteps,
+  stepCanEndWorkflow,
   stepExits,
   validateWorkflowGraph,
   type WorkflowDecisionRecord,
@@ -811,6 +814,69 @@ describe("branching on a condition", () => {
       outcome({ handoff: "Needs a design.\nDECISION: yes" }),
     );
     expect(result.ok ? null : result.error).toBe(WorkflowErrorCode.StepNotInWorkflow);
+  });
+});
+
+describe("which Steps can end the workflow", () => {
+  it("is only the last Step of a straight pipeline", () => {
+    const steps = pipeline();
+    expect(stepCanEndWorkflow(steps, "plan")).toBe(false);
+    expect(stepCanEndWorkflow(steps, "review")).toBe(true);
+  });
+
+  it("is a branching Step with an exit to the end, wherever it sits", () => {
+    const steps = branching();
+    expect(stepCanEndWorkflow(steps, "triage")).toBe(false);
+    expect(stepCanEndWorkflow(steps, "review")).toBe(true);
+  });
+
+  it("is no Step the workflow does not contain", () => {
+    expect(stepCanEndWorkflow(pipeline(), "gone")).toBe(false);
+  });
+});
+
+describe("the handoff to the next Step", () => {
+  it("is the summary, then the reviewer's decisions under their own heading", () => {
+    expect(handoffWith(" The plan. ", " Use Postgres. ")).toBe(
+      "The plan.\n\nReviewer's decisions:\nUse Postgres.",
+    );
+  });
+
+  it("carries whichever half there is", () => {
+    expect(handoffWith("The plan.", null)).toBe("The plan.");
+    expect(handoffWith(null, "Use Postgres.")).toBe("Reviewer's decisions:\nUse Postgres.");
+  });
+
+  it("is nothing when both are empty", () => {
+    expect(handoffWith(null, undefined)).toBeNull();
+    expect(handoffWith("  ", "  ")).toBeNull();
+  });
+});
+
+describe("after applying a reviewer's decisions", () => {
+  it("reopens the gate when the harness asked new ones, whatever else holds", () => {
+    expect(
+      reopenAfterApplyingDecisions({ askedDecisions: true, outcome: "blocked", canEnd: true }),
+    ).toBe("new-decisions");
+  });
+
+  it("reopens the gate on a Step that can end the workflow", () => {
+    expect(
+      reopenAfterApplyingDecisions({
+        askedDecisions: false,
+        outcome: "changes_ready",
+        canEnd: true,
+      }),
+    ).toBe("last-step");
+  });
+
+  it("names no reason for a harness that gave up, or for a middle Step", () => {
+    expect(
+      reopenAfterApplyingDecisions({ askedDecisions: false, outcome: "blocked", canEnd: true }),
+    ).toBeNull();
+    expect(
+      reopenAfterApplyingDecisions({ askedDecisions: false, outcome: null, canEnd: false }),
+    ).toBeNull();
   });
 });
 
