@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import type { ExecutorConfig } from "@solow/contracts";
 import { orchestratorEnv } from "../env.js";
 import {
@@ -155,12 +156,24 @@ export function dockerHost(opts: Pick<ExecutorFactoryOpts, "host">): Executor {
  * a test with no environment at all, and `env.ts` stays the one module that reads `process.env`
  * for configuration.
  */
+/**
+ * The control plane's own files, which no container may be handed (B5). SQLite only: a Postgres
+ * database is reached over the network and has no path to mount.
+ */
+function orchestratorStatePaths(): string[] {
+  const db = orchestratorEnv();
+  if (db.SOLOW_DB_DRIVER !== "sqlite") return [];
+  const path = resolve(db.SOLOW_SQLITE_PATH);
+  return [path, `${path}-wal`, `${path}-shm`, `${path}-journal`];
+}
+
 export function dockerOpts(opts: ExecutorFactoryOpts): PreflightOpts {
   const env = orchestratorEnv();
   return {
     jailRoot: opts.jailRoot,
     worktreeRoot: opts.worktreeRoot,
     repoCacheRoot: opts.repoCacheRoot,
+    protectedPaths: orchestratorStatePaths(),
     bindPaths: opts.bindPaths ?? [],
     ...(opts.transcriptStore ? { transcriptStore: opts.transcriptStore } : {}),
     ...(opts.checkpointStore ? { checkpointStore: opts.checkpointStore } : {}),

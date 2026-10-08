@@ -6,6 +6,7 @@ import { ChevronRight, ExternalLink, Plus } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { type UseFormReturn, useForm } from "react-hook-form";
 import { z } from "zod";
+import { HostRunWarning } from "@/components/features/host-run-warning";
 import { useProviderNames } from "@/components/hooks/use-provider-names";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -330,7 +331,10 @@ export function CreateTaskDialog({
     seed(
       "executorProfileId",
       currentExecutor,
-      inList(storedDefaults?.executorProfileId, executors.data?.items ?? []),
+      // No saved default: the container if the Workspace has one (roadmap B4). Isolation is what a
+      // Task starts as; running on the host is a pick the Owner makes in front of the warning.
+      inList(storedDefaults?.executorProfileId, executors.data?.items ?? []) ??
+        (executors.data?.items ?? []).find((x) => x.kind === "docker")?.id,
     );
   });
 
@@ -493,6 +497,12 @@ export function CreateTaskDialog({
                     (executors.data?.items ?? []).map((x) => ({ id: x.id, label: x.name })),
                   )}
                 </div>
+                <HostRunWarning
+                  executorKind={executors.data?.items.find((x) => x.id === currentExecutor)?.kind}
+                  permissionMode={
+                    harnesses.data?.items.find((h) => h.id === currentHarness)?.permissionMode
+                  }
+                />
                 {/*
                   The two escape hatches, folded away.
 

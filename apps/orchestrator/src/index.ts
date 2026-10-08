@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
   announceRequest,
+  dockerAvailabilityRequest,
   harnessExplainRequest,
   harnessProbeRequest,
   taskInputSchema,
@@ -17,6 +18,7 @@ import {
   updateHarnessCatalogCapabilities,
 } from "./data.js";
 import { orchestratorEnv } from "./env.js";
+import { probeDockerAvailability } from "./executor/availability.js";
 import { createLocalExecutor } from "./executor/local.js";
 import { reapOrphanedContainers } from "./executor/reap.js";
 import type { Executor } from "./executor/types.js";
@@ -272,6 +274,28 @@ export async function handleExplainPost(
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }
+}
+
+/**
+ * `POST /executor-availability` — can this host run the container executor (roadmap B4).
+ * Ticket-authenticated like the probe, though the answer is about the machine and not the tenant:
+ * an unauthenticated caller has no business learning what the orchestrator's host runs.
+ */
+export async function handleDockerAvailabilityPost(
+  req: Request,
+  deps: Pick<WsServerDeps, "now" | "streamSecret" | "dockerHost">,
+): Promise<Response> {
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return new Response("invalid_json", { status: 400 });
+  }
+  const parsed = dockerAvailabilityRequest.safeParse(body);
+  if (!parsed.success) return new Response("invalid_request", { status: 400 });
+  const verified = verifyStreamTicket(parsed.data.ticket, deps.streamSecret, deps.now());
+  if (!verified.ok) return new Response(verified.error, { status: 401 });
+  return Response.json(await probeDockerAvailability(deps.dockerHost));
 }
 
 export async function handleProbePost(
@@ -709,6 +733,8 @@ export function startWebSocketServer(
       if (pathname === "/api/inngest") return inngestServeHandler(req);
       if (pathname === "/announce" && req.method === "POST") return handleAnnouncePost(req, deps);
       if (pathname === "/probe-agent" && req.method === "POST") return handleProbePost(req, deps);
+      if (pathname === "/executor-availability" && req.method === "POST")
+        return handleDockerAvailabilityPost(req, deps);
       if (pathname === "/explain" && req.method === "POST") return handleExplainPost(req, deps);
       // The Task page's terminal: its own socket, its own ticket check (see `ws/terminal.ts`).
       if (pathname === "/terminal") {

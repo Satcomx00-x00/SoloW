@@ -59,6 +59,29 @@ has now been tested once, by the Container Executor (#96). It held: the call sit
 copy setup files and launch the harness were not rewritten for it, and `baseEnv()` above is the only
 member the interface gained. Remote SSH (#97) and Cloud (#107) follow the same shape.
 
+## Isolated by default, and the local executor is for trusted agents only (roadmap B4, B5)
+
+The Local Executor runs the harness as the orchestrator's own user, on the orchestrator's own
+machine. Nothing separates it from everything that user can read, change or send, and a Harness
+Profile whose permission mode is "never ask" does not stop before it acts. So the local
+executor is documented, and presented, as **for trusted agents only**.
+
+- **A new Executor starts as Docker whenever Docker is reachable.** The orchestrator answers
+  `POST /executor-availability` (a signed ticket, like the harness probe) by asking the daemon for
+  its version; the Executors page reads it through `profile.executor.dockerAvailability`. When the
+  orchestrator cannot be asked, the page does not read that as "no Docker" and says so.
+- **A new Task starts on the Docker executor** when the Owner has not saved a default and the
+  Workspace has one.
+- **Never-ask on the local executor is a deliberate choice.** Wherever a Task is created or a batch
+  launched, the pairing of a `bypassPermissions` Harness Profile with a `local` Executor shows an
+  alert ("This run is not isolated") before the Owner confirms. There is no server-side refusal:
+  the pairing is valid, and a refusal would break unattended runs the Owner has chosen on purpose.
+- **The control plane's secrets stay out of the harness's reach where this product can enforce
+  it.** The local executor's `baseEnv()` withholds `SOLOW_`, `INNGEST_` and `BETTER_AUTH_`
+  variables that read as secrets (the encryption key, database URL, signing keys). That is
+  hygiene, not isolation: a local harness can still read the database and key *files* its user can
+  read. The container is where "cannot" holds — see the next section.
+
 ## The Container Executor (issue #96)
 
 `docker.ts` runs **one long-lived container per Task, with every command a `docker exec` into
@@ -85,6 +108,13 @@ a user gets.
   environment a command runs under is delivered on that command's own stdin (Principle IV,
   [F17](./F17-security-secrets.md)), because `-e` would put it in a host-visible command line and
   in the container's inspectable configuration for as long as it exists.
+- **A container holds one credential and none of the control plane's state (B5).** Its
+  environment is the image's, the Profile's own variables, the app-owned configuration, and the
+  one credential the run needs (`SpawnOpts.env` replaces rather than merges, so nothing of the
+  orchestrator's environment — encryption key, database URL, signing keys — is inherited). The
+  orchestrator's SQLite database and its journal files are on a deny-list the mount guard checks
+  before its allow-list (`protectedPaths`): a Profile mount that is, contains or sits inside them
+  is refused even in a content area such as `/srv` or `/data` that the allow-list would admit.
 - **Health is the container's own, never the host's proxied.** CPU and memory come from the
   container's cgroup; no load average is reported at all, because `/proc/loadavg` inside a
   container is the *host's* figure and publishing it as the Task's would be a wrong number rather

@@ -7,6 +7,7 @@ import {
   deleteExecutorProfileInput,
   deleteHarnessConfigInput,
   deleteHarnessProfileInput,
+  dockerAvailabilityReport,
   duplicateHarnessConfigInput,
   executorProfileDto,
   executorProfileListDto,
@@ -319,6 +320,13 @@ export const profileRouter = router({
       .input(deleteExecutorProfileInput)
       .output(executorProfileDto)
       .mutation(async ({ ctx, input }) => unwrap(await deleteExecutorProfile(ctx.rctx, input))),
+    /**
+     * Whether a container runtime is reachable, so a new Executor starts as Docker when it can
+     * (roadmap B4). Null when the orchestrator could not be asked — not the same as "no Docker".
+     */
+    dockerAvailability: ownerProcedure
+      .output(dockerAvailabilityReport.nullable())
+      .query(({ ctx }) => orchestrator.dockerAvailability({ workspaceId: ctx.rctx.workspaceId })),
     list: ownerProcedure
       .meta({
         openapi: {

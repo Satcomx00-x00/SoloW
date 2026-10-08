@@ -281,3 +281,56 @@ describe("CreateTaskDialog — the chosen Issue", () => {
     expect((screen.getByLabelText("Title") as HTMLInputElement).value).toBe("My own name");
   });
 });
+
+describe("CreateTaskDialog — isolation by default (roadmap B4)", () => {
+  const server = (executors: Array<{ id: string; name: string; kind: string }>, mode: string) => ({
+    ...handlers,
+    "profile.agent.list": () => ({
+      items: [{ id: "harness-1", name: "Claude", permissionMode: mode }],
+      nextCursor: null,
+    }),
+    "profile.executor.list": () => ({ items: executors, nextCursor: null }),
+  });
+
+  it("opens on the Docker executor when nothing is saved as the default", async () => {
+    renderWithTrpc(
+      <CreateTaskDialog />,
+      server(
+        [
+          { id: "exec-1", name: "Local", kind: "local" },
+          { id: "exec-2", name: "Sandbox", kind: "docker" },
+        ],
+        "bypassPermissions",
+      ),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "New task" }));
+    await waitFor(async () => {
+      expect((await screen.findByRole("combobox", { name: "Executor" })).textContent).toContain(
+        "Sandbox",
+      );
+    });
+    expect(screen.queryByText("This run is not isolated")).toBeNull();
+  });
+
+  it("warns when never-ask is paired with the local executor", async () => {
+    renderWithTrpc(
+      <CreateTaskDialog />,
+      server([{ id: "exec-1", name: "Local", kind: "local" }], "bypassPermissions"),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "New task" }));
+    await pick("Harness profile", "Claude");
+    await pick("Executor", "Local");
+    expect(await screen.findByText("This run is not isolated")).toBeDefined();
+  });
+
+  it("says nothing for the local executor when the harness still asks first", async () => {
+    renderWithTrpc(
+      <CreateTaskDialog />,
+      server([{ id: "exec-1", name: "Local", kind: "local" }], "acceptEdits"),
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "New task" }));
+    await pick("Harness profile", "Claude");
+    await pick("Executor", "Local");
+    expect(screen.queryByText("This run is not isolated")).toBeNull();
+  });
+});
