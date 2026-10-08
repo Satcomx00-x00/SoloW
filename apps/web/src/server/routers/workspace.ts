@@ -88,6 +88,7 @@ export const workspaceRouter = router({
     .query(async ({ ctx }) => unwrap(await getHistoryRetention(ctx.rctx))),
 
   setHistoryRetention: sessionProcedure
+    .use(rateLimit("workspace.setHistoryRetention"))
     .meta({
       openapi: {
         method: "POST",
@@ -103,10 +104,12 @@ export const workspaceRouter = router({
     .mutation(async ({ ctx, input }) => unwrap(await setHistoryRetention(ctx.rctx, input))),
 
   /**
-   * What a window would remove if the sweep ran now. A query, and a cheap one: it counts, it
-   * never deletes, so Settings can ask it for each window the Owner considers before saving.
+   * What a window would remove if the sweep ran now. A query: it counts, it never deletes, so
+   * Settings can ask it for each window the Owner considers before saving. Not a cheap count —
+   * it sizes every finished transcript — hence the limit.
    */
   previewHistoryRetention: sessionProcedure
+    .use(rateLimit("workspace.previewHistoryRetention"))
     .meta({
       openapi: {
         method: "GET",

@@ -22,6 +22,13 @@ export const RATE_LIMITS = {
    * Workspace repeatedly and each pass would look like it succeeded.
    */
   "workspace.reset": { limit: 3, windowMs: 3_600_000 },
+  /*
+   * The transcript window moves the line the hourly sweep deletes up to; a looping client should
+   * run out of attempts. The preview walks every finished transcript to size it, and Settings
+   * asks it once per window chosen — a person never needs thirty a minute.
+   */
+  "workspace.setHistoryRetention": { limit: 10, windowMs: 60_000 },
+  "workspace.previewHistoryRetention": { limit: 30, windowMs: 60_000 },
 } as const satisfies Record<string, RateLimitRule>;
 
 export type RateLimitedProcedure = keyof typeof RATE_LIMITS;

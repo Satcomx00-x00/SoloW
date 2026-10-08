@@ -73,6 +73,21 @@ describe("the MCP surface", () => {
     expect(exposed.some((n) => n.startsWith("stream_"))).toBe(false);
   });
 
+  it("does not let a token erase evidence", () => {
+    const exposed = names();
+    for (const withheld of [
+      // Shortening the transcript window is the subject erasing its own evidence, the reason
+      // `history` is withheld; the preview walks every finished transcript to size it.
+      "workspace_setHistoryRetention",
+      "workspace_previewHistoryRetention",
+    ]) {
+      expect(exposed).not.toContain(withheld);
+      expect(findMcpTool(withheld)).toBeUndefined();
+    }
+    // Reading the window stays exposed: it changes nothing and costs one row.
+    expect(exposed).toContain("workspace_historyRetention");
+  });
+
   it("names a tool after the procedure it is, so the two cannot drift", () => {
     expect(toolNameFor("issue.setStatus")).toBe("issue_setStatus");
   });

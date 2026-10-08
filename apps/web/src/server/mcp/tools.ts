@@ -89,6 +89,11 @@ const WITHHELD_PROCEDURES = new Set([
   "profile.harnessConfig.duplicate",
   "profile.harnessConfig.delete",
   "profile.harnessConfig.import",
+  // The transcript window is how long the evidence of a run survives: a token shortening it is
+  // the subject erasing its own evidence, the `history` reasoning above. The preview goes with
+  // it — it sizes every finished transcript, and only the Settings screen needs the answer.
+  "workspace.setHistoryRetention",
+  "workspace.previewHistoryRetention",
 ]);
 
 /** Exposed one procedure at a time, inside a namespace that is otherwise withheld. */
