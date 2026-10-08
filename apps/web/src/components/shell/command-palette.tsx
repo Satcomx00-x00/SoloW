@@ -13,6 +13,7 @@ import {
   CommandList,
   CommandSeparator,
 } from "@/components/ui/command";
+import { useDebounced } from "@/hooks/use-debounced";
 import { useSurfaceLayout } from "@/hooks/use-surface-layout";
 import { useAppContext } from "@/lib/app-context";
 import { COMMAND_GROUPS, type CommandActions, commandRegistry } from "@/lib/contributions";
@@ -49,15 +50,6 @@ const OPEN_EVENT = "solow:open-command-palette";
 /** Opens the palette from anywhere — the rail's Search button, the header trigger. */
 export function openCommandPalette() {
   document.dispatchEvent(new CustomEvent(OPEN_EVENT));
-}
-
-function useDebounced<T>(value: T, ms: number): T {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const timer = setTimeout(() => setDebounced(value), ms);
-    return () => clearTimeout(timer);
-  }, [value, ms]);
-  return debounced;
 }
 
 export function CommandPalette() {

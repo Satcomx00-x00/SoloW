@@ -76,9 +76,22 @@ function dueSessions(workspaceId: string, cutoff: string): SQL {
   ) as SQL;
 }
 
+/** How many of a Session's events are of these kinds, answered from `session_event_kind` alone. */
+const eventsOf = (kinds: SQL) =>
+  sql<number>`(select count(*) from ${sessionEvent} where ${sessionEvent.sessionId} = ${session.id} and ${sessionEvent.kind} in (${kinds}))`;
+
 /**
  * What a window of `days` would remove from this Workspace if the sweep ran now. `null` — keep
  * forever — removes nothing, and is answered without a query.
+ *
+ * Settings asks this from the web process, synchronously, for each window the Owner considers,
+ * so it only counts: the due Sessions, then each one's events by kind through the
+ * `(session_id, kind)` index. No payload is read. That is also why there is no byte figure: the
+ * only honest one is the payloads' length, which means reading every one of them, and the file
+ * would not shrink by that amount anyway (no vacuum, Decision 0032 §8).
+ *
+ * Diffs are counted, not inspected: the sweep empties the patch of each one in a due Session
+ * that still holds one, so a diff captured with an empty patch is counted here and skipped there.
  */
 export function previewHistoryPrune(
   db: Db,
@@ -86,39 +99,20 @@ export function previewHistoryPrune(
   days: number | null,
   now: Date = new Date(),
 ): HistoryRetentionPreviewDto {
-  const none = { tasks: 0, sessions: 0, events: 0, diffs: 0, bytes: 0 };
+  const none = { tasks: 0, sessions: 0, events: 0, diffs: 0 };
   if (days === null) return none;
   const cutoff = historyPruneCutoff(days, now);
 
   const row = db
     .select({
       tasks: sql<number>`count(distinct ${session.taskId})`,
-      sessions: sql<number>`count(distinct ${session.id})`,
-      events: sql<number>`coalesce(sum(case when ${sessionEvent.kind} in (${prunedKinds}) then 1 else 0 end), 0)`,
-      diffs: sql<number>`coalesce(sum(case when ${sessionEvent.kind} = 'diff' then 1 else 0 end), 0)`,
-      bytes: sql<number>`coalesce(sum(case when ${sessionEvent.kind} = 'diff'
-        then length(json_extract(${sessionEvent.payload}, '$.patch'))
-        else length(${sessionEvent.payload}) end), 0)`,
+      sessions: sql<number>`count(*)`,
+      events: sql<number>`coalesce(sum(${eventsOf(prunedKinds)}), 0)`,
+      diffs: sql<number>`coalesce(sum(${eventsOf(sql`'diff'`)}), 0)`,
     })
-    .from(sessionEvent)
-    .innerJoin(
-      session,
-      and(
-        eq(session.id, sessionEvent.sessionId),
-        eq(session.workspaceId, sessionEvent.workspaceId),
-      ),
-    )
+    .from(session)
     .innerJoin(task, and(eq(task.id, session.taskId), eq(task.workspaceId, session.workspaceId)))
-    .where(
-      and(
-        eq(sessionEvent.workspaceId, workspaceId),
-        dueSessions(workspaceId, cutoff),
-        or(
-          sql`${sessionEvent.kind} in (${prunedKinds})`,
-          and(eq(sessionEvent.kind, "diff"), patchHeld),
-        ),
-      ),
-    )
+    .where(dueSessions(workspaceId, cutoff))
     .get();
 
   return row
@@ -127,7 +121,6 @@ export function previewHistoryPrune(
         sessions: Number(row.sessions),
         events: Number(row.events),
         diffs: Number(row.diffs),
-        bytes: Number(row.bytes),
       }
     : none;
 }

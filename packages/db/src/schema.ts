@@ -1388,6 +1388,13 @@ export const sessionEvent = sqliteTable(
      * Session's log, and the unique index above cannot serve it since `seq` sits between the two.
      */
     byStep: index("session_event_step").on(t.sessionId, t.workflowStepId),
+    /**
+     * History retention (Decision 0032): what a window would remove is a count of one Session's
+     * events by kind, asked synchronously by Settings in the web process. With `kind` in the
+     * index that count is answered from the index alone, without reading a row and its payload,
+     * which for a tool result can be kilobytes. The sweep's batched delete selects through it too.
+     */
+    byKind: index("session_event_kind").on(t.sessionId, t.kind),
   }),
 );
 

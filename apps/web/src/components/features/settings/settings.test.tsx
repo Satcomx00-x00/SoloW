@@ -90,7 +90,6 @@ const HANDLERS = {
     sessions: 0,
     events: 0,
     diffs: 0,
-    bytes: 0,
   }),
 };
 

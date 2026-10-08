@@ -25,8 +25,8 @@ function server(days: number | null, notice = false) {
     "workspace.previewHistoryRetention": (input: unknown) => {
       const asked = (input as { days: number }).days;
       return asked === 7
-        ? { tasks: 4, sessions: 6, events: 12_345, diffs: 3, bytes: 5 * 1024 * 1024 }
-        : { tasks: 0, sessions: 0, events: 0, diffs: 0, bytes: 0 };
+        ? { tasks: 4, sessions: 6, events: 12_345, diffs: 3 }
+        : { tasks: 0, sessions: 0, events: 0, diffs: 0 };
     },
     "workspace.setHistoryRetention": (input: unknown) => ({
       days: (input as { days: number | null }).days,
@@ -64,9 +64,25 @@ describe("the history retention section", () => {
     const preview = await screen.findByText(/Saving this would remove/);
     expect(preview.textContent).toContain("12,345 transcript events");
     expect(preview.textContent).toContain("6 sessions of 4 finished tasks");
-    expect(preview.textContent).toContain("3 diff patches");
-    expect(preview.textContent).toContain("5.0 MB");
+    expect(preview.textContent).toContain("3 captured diffs");
     expect(log.calls.some((c) => c.path === "workspace.setHistoryRetention")).toBe(false);
+  });
+
+  it("asks for one count once the picker settles, not one per window passed through", async () => {
+    const { log } = renderWithTrpc(<HistoryRetentionSection />, server(30));
+    await screen.findByText(/nothing would be removed today/);
+    const asked = () =>
+      log.calls
+        .filter((c) => c.path === "workspace.previewHistoryRetention")
+        .map((c) => (c.input as { days: number }).days);
+    const before = asked().length;
+
+    await pick("7 days");
+    await pick("90 days");
+    await pick("7 days");
+
+    await screen.findByText(/Saving this would remove/);
+    expect(asked().slice(before)).toEqual([7]);
   });
 
   it("writes the window only on Save", async () => {

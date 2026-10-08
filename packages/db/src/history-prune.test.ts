@@ -287,7 +287,6 @@ describe("which Sessions are due", () => {
       sessions: 0,
       events: 0,
       diffs: 0,
-      bytes: 0,
     });
   });
 });
@@ -390,12 +389,61 @@ describe("the preview", () => {
     const at30 = previewHistoryPrune(db, WS, 30, NOW);
     const at7 = previewHistoryPrune(db, WS, 7, NOW);
     expect(at30).toMatchObject({ tasks: 1, sessions: 1, events: TRANSCRIPT.length, diffs: 1 });
-    expect(at30.bytes).toBeGreaterThan(PATCH.length);
     expect(at7).toMatchObject({ tasks: 2, sessions: 2, events: 2 * TRANSCRIPT.length, diffs: 2 });
 
     const report = await pruneHistory(db, { now: NOW, pause: noPause });
     expect(report).toMatchObject({ events: at30.events, diffs: at30.diffs });
     expect(previewHistoryPrune(db, WS, 30, NOW).events).toBe(0);
+  });
+});
+
+describe("the preview's cost", () => {
+  /**
+   * Every statement the preview sends, captured on the way to SQLite. Settings asks for a preview
+   * from the web process, synchronously, for each window the Owner considers; it has to count
+   * rows from an index and never read a transcript's payload to do it.
+   */
+  function capture(run: () => void): Array<{ sql: string; params: unknown[] }> {
+    const client = db.$client;
+    const original = client.prepare.bind(client);
+    const seen: Array<{ sql: string; params: unknown[] }> = [];
+    client.prepare = ((query: string, ...rest: unknown[]) => {
+      const statement = original(query, ...(rest as []));
+      const record = { sql: query, params: [] as unknown[] };
+      seen.push(record);
+      for (const method of ["get", "all", "values", "run"] as const) {
+        const call = statement[method].bind(statement) as (...args: unknown[]) => unknown;
+        (statement as unknown as Record<string, unknown>)[method] = (...args: unknown[]) => {
+          record.params = args;
+          return call(...args);
+        };
+      }
+      return statement;
+    }) as typeof client.prepare;
+    try {
+      run();
+    } finally {
+      client.prepare = original;
+    }
+    return seen;
+  }
+
+  it("counts from an index and never reads an event's payload", async () => {
+    await seedTask("old", { updatedAt: ago(60 * DAY) });
+
+    const statements = capture(() => previewHistoryPrune(db, WS, 7, NOW));
+    expect(statements.length).toBeGreaterThan(0);
+
+    for (const { sql, params } of statements) {
+      expect(sql).not.toContain("payload");
+      const plan = db.$client
+        .query(`EXPLAIN QUERY PLAN ${sql}`)
+        .all(...(params as never[])) as Array<{ detail: string }>;
+      const onEvents = plan.map((p) => p.detail).filter((d) => / session_event\b/.test(d));
+      expect(onEvents.length).toBeGreaterThan(0);
+      // A covering index answers from the index alone: the row, and its payload, is never read.
+      for (const detail of onEvents) expect(detail).toContain("USING COVERING INDEX");
+    }
   });
 });
 

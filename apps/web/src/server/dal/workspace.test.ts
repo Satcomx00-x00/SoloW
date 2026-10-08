@@ -477,7 +477,6 @@ describe("history retention (Decision 0032)", () => {
       sessions: 0,
       events: 0,
       diffs: 0,
-      bytes: 0,
     });
   });
 });

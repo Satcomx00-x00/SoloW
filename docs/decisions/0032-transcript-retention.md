@@ -63,8 +63,12 @@ Two things limit what can go:
    0049 shipped in a release: the first version applied 30 days to existing Workspaces.)*
 5. **Shown and changed in Settings → Workspace → History retention.** The picker holds a draft,
    and the server counts what that draft *would* remove right now (`workspace.previewHistoryRetention`:
-   Tasks, Sessions, events, diffs and approximate bytes) before anything is saved. Nothing is
-   written until the Owner presses Save.
+   Tasks, Sessions, events and diffs) before anything is saved. Nothing is written until the
+   Owner presses Save. The count runs synchronously in the web process, so it only counts rows:
+   the due Sessions, then each one's events by kind through the `session_event_kind`
+   `(session_id, kind)` index, without reading a payload. There is no byte figure. The only
+   honest one would read every payload it measures, and by §8 the file does not shrink by that
+   amount anyway. The picker waits until it has been still for 300 ms before asking.
 6. **It runs as the third arm of the existing hourly retention sweep in the orchestrator**, after
    purge and expiry. It is not an Inngest cron, for three reasons. The sweep already runs hourly on
    the process that shares the database file. It already runs after the first reconcile pass, so a

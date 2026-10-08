@@ -114,7 +114,7 @@ export const workspaceRouter = router({
         tags: ["workspace"],
         protect: true,
         summary:
-          "Count what a retention window would remove if the sweep ran now: the finished Tasks and Sessions affected, the transcript events deleted, the captured diffs whose patch text is emptied, and the approximate bytes freed.",
+          "Count what a retention window would remove if the sweep ran now: the finished Tasks and Sessions affected, the transcript events deleted, and the captured diffs trimmed to their file lists. Counted from an index; no payload is read.",
       },
     })
     .input(previewHistoryRetentionInput)

@@ -110,14 +110,15 @@ export const previewHistoryRetentionInput = z.object({ days: historyRetentionDay
 export type PreviewHistoryRetentionInput = z.infer<typeof previewHistoryRetentionInput>;
 
 export const historyRetentionPreviewDto = z.object({
-  /** Finished Tasks with at least one Session still holding a transcript past the window. */
+  /** Finished Tasks with a Session past the window whose transcript has not been removed yet. */
   tasks: z.number().int().nonnegative(),
   sessions: z.number().int().nonnegative(),
   /** Transcript events that would be deleted. */
   events: z.number().int().nonnegative(),
-  /** Captured diffs whose patch text would be emptied. */
+  /**
+   * Captured diffs in those Sessions, each trimmed to its file list. Counted without reading
+   * them, so one captured with no patch at all is counted too.
+   */
   diffs: z.number().int().nonnegative(),
-  /** Approximate bytes of payload freed — the stored JSON's length, not pages on disk. */
-  bytes: z.number().int().nonnegative(),
 });
 export type HistoryRetentionPreviewDto = z.infer<typeof historyRetentionPreviewDto>;

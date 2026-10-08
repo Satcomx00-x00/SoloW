@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "03f5f14b-ae69-4861-9cad-7139d1c3fda8",
+  "id": "45461781-5707-450d-aa7e-0f705ead85aa",
   "prevId": "b77a95aa-ecb3-4d2e-a49d-dc816d73f0ec",
   "tables": {
     "change_request": {
@@ -2857,6 +2857,14 @@
           "columns": [
             "session_id",
             "workflow_step_id"
+          ],
+          "isUnique": false
+        },
+        "session_event_kind": {
+          "name": "session_event_kind",
+          "columns": [
+            "session_id",
+            "kind"
           ],
           "isUnique": false
         }
