@@ -36,7 +36,6 @@ import {
   formatDependencyCycle,
   isLaunchable,
   unsatisfiedDependencies,
-  withinConcurrencyCap,
 } from "@solow/core";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
@@ -60,8 +59,7 @@ import {
 import {
   activeSessionForTask,
   addTaskDependencyEdge,
-  claimTaskState,
-  countRunningForHarnessProfile,
+  claimTaskRun,
   createSubtaskRecord,
   createTaskRecord,
   deleteTask,
@@ -133,20 +131,12 @@ export async function startTaskRun(rctx: RequestContext, taskId: string): Promis
   unwrap(canTransitionTask(existing.state, "running"));
   await requireUnblocked(rctx, existing.id);
 
-  // The Harness Profile concurrency cap (spec FR-017), on every path into `running`.
-  const profile = unwrap(await getHarnessProfile(rctx, existing.agentProfileId));
-  const running = await countRunningForHarnessProfile(rctx, existing.agentProfileId);
-  if (!withinConcurrencyCap(profile.concurrencyCap, running)) {
-    throw new TRPCError({
-      code: "TOO_MANY_REQUESTS",
-      message: TaskErrorCode.ConcurrencyCapReached,
-    });
-  }
-
   // Claimed from the state it was read in, and nothing else: a second click, a second tab or the
   // run itself moving the row in between makes this one lose cleanly instead of starting a
-  // second harness on the same worktree. Clears the last run's `failureReason` as it goes.
-  const updated = unwrap(await claimTaskState(rctx, existing.id, [existing.state], "running"));
+  // second harness on the same worktree. The Harness Profile concurrency cap (spec FR-017) is
+  // part of the same write rather than a count read before it — see `claimTaskRun` for the race
+  // that let simultaneous starts all pass (F5). Clears the last run's `failureReason` as it goes.
+  const updated = unwrap(await claimTaskRun(rctx, existing.id, [existing.state]));
   const session = unwrap(await createSession(rctx, existing.id));
   try {
     await orchestrator.enqueueTaskRun({
@@ -408,15 +398,7 @@ export const taskRouter = router({
         throw new TRPCError({ code: "BAD_REQUEST", message: TaskErrorCode.NotReady });
       }
       await requireUnblocked(ctx.rctx, task.id);
-      // Enforce the Harness Profile concurrency cap (spec FR-017).
-      const profile = unwrap(await getHarnessProfile(ctx.rctx, task.agentProfileId));
-      const running = await countRunningForHarnessProfile(ctx.rctx, task.agentProfileId);
-      if (!withinConcurrencyCap(profile.concurrencyCap, running)) {
-        throw new TRPCError({
-          code: "TOO_MANY_REQUESTS",
-          message: TaskErrorCode.ConcurrencyCapReached,
-        });
-      }
+      // The concurrency cap is taken with the row, in `startTaskRun`.
       return startTaskRun(ctx.rctx, task.id);
     }),
 
