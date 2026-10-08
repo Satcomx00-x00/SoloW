@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "3dfa1740-cff4-4de2-9337-13b7d4e0721d",
-  "prevId": "0fe65990-f9ae-4d4f-a012-52cbbf6e9365",
+  "id": "e17975bf-a186-48c3-ab03-fe8f75de88e9",
+  "prevId": "45461781-5707-450d-aa7e-0f705ead85aa",
   "tables": {
     "change_request": {
       "name": "change_request",
@@ -2859,6 +2859,14 @@
             "workflow_step_id"
           ],
           "isUnique": false
+        },
+        "session_event_kind": {
+          "name": "session_event_kind",
+          "columns": [
+            "session_id",
+            "kind"
+          ],
+          "isUnique": false
         }
       },
       "foreignKeys": {
@@ -4317,6 +4325,14 @@
           "notNull": false,
           "autoincrement": false,
           "default": 30
+        },
+        "history_retention_notice": {
+          "name": "history_retention_notice",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
         },
         "created_at": {
           "name": "created_at",
