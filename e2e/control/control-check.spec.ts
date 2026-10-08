@@ -7,11 +7,13 @@ import {
   createTask,
   gateButton,
   openTask,
+  openTaskReadyToDelete,
   openWorkspaceTab,
   sessionLog,
   showStepOnBoard,
   stepHeader,
   trpc,
+  trpcSettled,
 } from "../support/flows.js";
 
 /**
@@ -90,12 +92,19 @@ test.describe("control check — the main line of the product, end to end", () =
     });
 
     await test.step("create a local Project and register the repository under it", async () => {
+      // The new Project's page is the first `/projects/<id>` this run visits, and under the e2e
+      // `next dev` the client navigation to a route still compiling has been seen to die (its
+      // RSC fetch at status -1) while the create had succeeded. A production build has no compile
+      // step, so the route is compiled first — any id compiles the same page.
+      await page.goto("/projects/00000000-0000-4000-8000-000000000000");
       await page.goto("/projects");
       await page.getByRole("button", { name: "Create a project" }).first().click();
       const dialog = page.getByRole("dialog", { name: "Create a project" });
       await dialog.getByLabel("Project name").fill(projectTitle);
+      const created = trpcSettled(page, "project.createLocal");
       await dialog.getByRole("button", { name: "Create" }).click();
-      await expect(page).toHaveURL(/\/projects\/[0-9a-f-]+/);
+      await created;
+      await expect(page).toHaveURL(/\/projects\/[0-9a-f-]+/, { timeout: 90_000 });
       projectId = new URL(page.url()).pathname.split("/")[2] ?? "";
       expect(projectId).not.toBe("");
 
@@ -340,23 +349,25 @@ test.describe("control check — the main line of the product, end to end", () =
 
     await test.step("remove everything the check created", async () => {
       // The Task first: an Issue with Tasks refuses to go, and a Workflow a Task follows too.
-      await page.goto(`/task/${taskId}`);
       // No dialog: a finished Task with nothing waiting on it goes to History on the press,
       // with Undo on a toast — the dialog is only for a running harness or a dependant. Undo
-      // once, to prove the toast means it; then delete for real. The board the delete lands on
-      // is visited first, so its first compile under `next dev` does not eat the toast's ten
-      // seconds.
-      await page.goto(`/projects/${projectId}/board`);
-      await page.goto(`/task/${taskId}`);
-      await expect(page.getByRole("heading", { name: taskTitle })).toBeVisible();
+      // once, to prove the toast means it; then delete for real.
+      const ready = { taskId, title: taskTitle, destination: `/projects/${projectId}/board` };
+      await openTaskReadyToDelete(page, ready);
+      const deleted = trpcSettled(page, "task.delete");
       await page.getByRole("button", { name: `Delete ${taskTitle}` }).click();
+      await deleted;
       const toast = page.getByRole("status").filter({ hasText: `Deleted "${taskTitle}"` });
+      // Settled before the next `goto`, which would otherwise abort the restore in flight.
+      const restored = trpcSettled(page, "task.restore");
       await toast.getByRole("button", { name: "Undo" }).click();
-      await page.goto(`/task/${taskId}`);
+      await restored;
+      await openTaskReadyToDelete(page, ready);
       await expect(page.locator("[data-task-deleted]")).toHaveCount(0);
+      const deletedForReal = trpcSettled(page, "task.delete");
       await page.getByRole("button", { name: `Delete ${taskTitle}` }).click();
-      // Leaving lands on the board, which the e2e `next dev` may be cold-compiling at this
-      // moment (10–20 s on this host); the default 30 s expect has timed out on that alone.
+      await deletedForReal;
+      // The board was compiled moments ago, but a loaded runner can still be slow to serve it.
       await expect(page).not.toHaveURL(new RegExp(`/task/${taskId}$`), { timeout: 90_000 });
 
       await page.goto(`/issues/${issueId}`);

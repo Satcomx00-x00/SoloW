@@ -14,9 +14,11 @@ import {
   launchToReview,
   openGate,
   openTask,
+  openTaskReadyToDelete,
   openWorkspaceTab,
   sessionLog,
   taskIdOnPage,
+  trpcSettled,
 } from "../support/flows.js";
 import { seedIssue, seedIssueWithBrief } from "../support/seed.js";
 
@@ -297,26 +299,29 @@ test.describe("the Task page", () => {
       repository: REPO_NAME,
     });
     const taskId = await openTask(page, issue.id, taskTitle);
-    // Where the delete lands is the unassigned list; visited once now so that, under the e2e
-    // `next dev`, its first compile (10–20s on this host) does not eat the toast's ten seconds.
-    await page.goto("/unassigned");
-    await page.goto(`/task/${taskId}`);
-    await expect(page.getByRole("heading", { name: taskTitle })).toBeVisible();
+    // Where the delete lands is the unassigned list (the Issue is in no Project).
+    const ready = { taskId, title: taskTitle, destination: "/unassigned" };
+    await openTaskReadyToDelete(page, ready);
 
     // No dialog for a Task with no run and nothing waiting on it: it goes on the press, with
-    // Undo on the toast — and Undo means it.
+    // Undo on the toast — and Undo means it. Undo is pressed before the navigation is waited
+    // out: the toast's ten seconds run from the delete, not from the arrival.
+    const deleted = trpcSettled(page, "task.delete");
     await page.getByRole("button", { name: `Delete ${taskTitle}` }).click();
-    await expect(page).not.toHaveURL(new RegExp(`/task/${taskId}$`));
+    await deleted;
     const toast = page.getByRole("status").filter({ hasText: `Deleted "${taskTitle}"` });
-    await expect(toast).toBeVisible();
+    const restored = trpcSettled(page, "task.restore");
     await toast.getByRole("button", { name: "Undo" }).click();
-    await page.goto(`/task/${taskId}`);
-    await expect(page.getByRole("heading", { name: taskTitle })).toBeVisible();
+    await restored;
+    await expect(page).not.toHaveURL(new RegExp(`/task/${taskId}$`), { timeout: 90_000 });
+    await openTaskReadyToDelete(page, ready);
     await expect(page.locator("[data-task-deleted]")).toHaveCount(0);
 
     // Deleted for real, the page says so and offers Restore, and nothing else acts on it.
+    const deletedForReal = trpcSettled(page, "task.delete");
     await page.getByRole("button", { name: `Delete ${taskTitle}` }).click();
-    await expect(page).not.toHaveURL(new RegExp(`/task/${taskId}$`));
+    await deletedForReal;
+    await expect(page).not.toHaveURL(new RegExp(`/task/${taskId}$`), { timeout: 90_000 });
     await page.goto(`/task/${taskId}`);
     await expect(page.locator("[data-task-deleted]")).toBeVisible();
     await expect(page.getByRole("button", { name: "Restore" })).toBeVisible();
