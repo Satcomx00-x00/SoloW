@@ -67,7 +67,13 @@ export function createDb() {
 export type Db = ReturnType<typeof createDb>;
 
 export * from "./auth-schema.js";
-export { bootstrapWorkspace, LOCAL_WORKSPACE_ID } from "./bootstrap.js";
+export {
+  bootstrapWorkspace,
+  LOCAL_OWNER_ID,
+  LOCAL_WORKSPACE_ID,
+  provisionOwnerWorkspace,
+  seedWorkspaceDefaults,
+} from "./bootstrap.js";
 export { dbEnv } from "./env.js";
 export {
   FLAGS,
