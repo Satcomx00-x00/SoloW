@@ -43,10 +43,11 @@ Rules for this log ([per our conventions](../CONVENTIONS.md)):
 | [0022](./0022-relicense-to-apache-2.md) | Relicense from AGPL-3.0-only to Apache-2.0 | Accepted |
 | [0023](./0023-docker-executor-cli.md) | Drive the container Executor through the `docker` CLI, one session container per Task | Accepted, amended 2026-09-03 |
 | [0024](./0024-agent-libraries-loading.md) | One library, three hand-overs: how each harness runtime is given MCP servers and Skills | Accepted |
-| [0025](./0025-history-retention.md) | Closed and deleted Tasks stay resumable for seven days | Accepted |
+| [0025](./0025-history-retention.md) | Closed and deleted Tasks stay resumable for seven days | Accepted, amended by 0032 |
 | [0026](./0026-checkpoints-through-harness-hooks.md) | Workflow checkpoints are enforced through the harness's own hooks, relayed over the filesystem | Accepted |
 | [0027](./0027-hermetic-harness-configuration.md) | A Task's harness runs against a blank, app-owned configuration | Accepted |
 | [0028](./0028-harness-configs-in-the-app.md) | Harness configuration is stored in the app and handed over at launch | Accepted |
 | [0029](./0029-one-sidebar-navigation.md) | One labelled sidebar replaces the activity rail and the navigator | Accepted |
 | [0030](./0030-review-gate-is-a-database-state.md) | A review gate is a database state, and a decision starts the next run | Accepted |
 | [0031](./0031-focus-on-the-solo-power-user.md) | Focus on the solo power user | Accepted |
+| [0032](./0032-transcript-retention.md) | A finished Task keeps its transcript for a window the Workspace chooses | Accepted |
