@@ -40,6 +40,11 @@ export interface WorktreeBinding {
   worktree: Worktree;
 }
 
+/** The setup-file allowlist of the Repository this worktree belongs to (issue #52). */
+export function patternsFor(entry: WorktreeBinding): string[] {
+  return entry.binding.repository.setupFilePatterns ?? [];
+}
+
 /**
  * The harness binding and brief in force for the round about to run (issue #5, AC-3).
  *
