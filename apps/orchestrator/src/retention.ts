@@ -1,5 +1,6 @@
 import { TASK_RETENTION_MS } from "@solow/core";
 import {
+  activeWorktreeOf,
   cascadeDeleteTasks,
   type Db,
   type HistoryPruneOptions,
@@ -104,13 +105,7 @@ async function removeWorktrees(
   const rows = await deps.db
     .select({ id: worktree.id, path: worktree.path })
     .from(worktree)
-    .where(
-      and(
-        eq(worktree.workspaceId, workspaceId),
-        eq(worktree.taskId, taskId),
-        eq(worktree.status, "active"),
-      ),
-    );
+    .where(activeWorktreeOf(workspaceId, taskId));
   const gone = await removeTaskFiles(
     deps.host,
     deps.worktreeRoot ?? null,
@@ -217,13 +212,7 @@ export async function retentionSweep(
       const held = await deps.db
         .select({ id: worktree.id })
         .from(worktree)
-        .where(
-          and(
-            eq(worktree.workspaceId, row.workspaceId),
-            eq(worktree.taskId, row.id),
-            eq(worktree.status, "active"),
-          ),
-        )
+        .where(activeWorktreeOf(row.workspaceId, row.id))
         .limit(1);
       if (held.length === 0) continue;
       if (await hasActiveSession(deps.db, row.workspaceId, row.id)) continue;

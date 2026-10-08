@@ -1,8 +1,4 @@
-import {
-  HISTORY_PRUNED_EVENT_KINDS,
-  type HistoryRetentionPreviewDto,
-  type SessionState,
-} from "@solow/contracts";
+import { HISTORY_PRUNED_EVENT_KINDS, type HistoryRetentionPreviewDto } from "@solow/contracts";
 import {
   and,
   eq,
@@ -11,13 +7,14 @@ import {
   isNotNull,
   isNull,
   lt,
-  notInArray,
+  ne,
   or,
   type SQL,
   sql,
 } from "drizzle-orm";
+import { activeWorktreeOf } from "./active-worktree.js";
 import type { Db } from "./index.js";
-import { session, sessionEvent, task, workspace } from "./schema.js";
+import { session, sessionEvent, task, workspace, worktree } from "./schema.js";
 
 /**
  * The transcript half of history retention (Decision 0032, FINDINGS F4).
@@ -60,14 +57,6 @@ const prunedKinds = sql.join(
   sql`, `,
 );
 
-/** A Session in these states may still be wanted whole, and so may every other one of its Task. */
-const HELD_SESSION_STATES = ["active", "resumable"] as const satisfies readonly SessionState[];
-
-const heldStates = sql.join(
-  HELD_SESSION_STATES.map((state) => sql`${state}`),
-  sql`, `,
-);
-
 /** A captured diff whose patch text has not been emptied yet. */
 const patchHeld = sql`coalesce(json_extract(${sessionEvent.payload}, '$.patch'), '') <> ''`;
 
@@ -79,10 +68,14 @@ const patchHeld = sql`coalesce(json_extract(${sessionEvent.payload}, '$.patch'),
  * the worktree half of retention reads (`retention.ts` in the orchestrator). A Done Task that is
  * touched again — reopened, retitled — moves its own clock forward, which errs towards keeping.
  *
- * Two things hold a Session back however old it is:
- *  - **a Session on the same Task that is live or can be resumed** (`HELD_SESSION_STATES`): a
- *    reopened Task running again is not finished, whatever its row said a moment ago, and a
- *    resumable one hands its conversation back when it is picked up;
+ * Three things hold a Session back however old it is:
+ *  - **an `active` Session on the same Task**: a reopened Task running again is not finished,
+ *    whatever its row said a moment ago, and a live run's log is never cut under it;
+ *  - **a `resumable` Session on the same Task, while the Task still holds a worktree**
+ *    (`activeWorktreeOf`, the expiry arm's own test): a resume carries on the harness's
+ *    conversation inside that worktree. Without one nothing can resume, so a Session that still
+ *    reads `resumable` (Done sets it; only expiry closes it, and only when it had a worktree to
+ *    take) does not hold its transcript forever;
  *  - **any sub-task forked from it that still exists**: a fork point is verified by hashing the
  *    events up to it (`loadForkOrigin`) on every full brief, not only the first, so a sub-task
  *    reopened from Done or restored from History would be refused as stale. Only the purge,
@@ -92,12 +85,16 @@ function dueSessions(workspaceId: string, cutoff: string): SQL {
   return and(
     eq(session.workspaceId, workspaceId),
     isNull(session.eventsPrunedAt),
-    notInArray(session.state, [...HELD_SESSION_STATES]),
+    ne(session.state, "active"),
     or(
       and(isNotNull(task.deletedAt), lt(task.deletedAt, cutoff)),
       and(isNull(task.deletedAt), eq(task.state, "done"), lt(task.updatedAt, cutoff)),
     ),
-    sql`not exists (select 1 from session held where held.task_id = ${task.id} and held.workspace_id = ${task.workspaceId} and held.state in (${heldStates}))`,
+    sql`not exists (select 1 from session live where live.task_id = ${task.id} and live.workspace_id = ${task.workspaceId} and live.state = 'active')`,
+    or(
+      sql`not exists (select 1 from session held where held.task_id = ${task.id} and held.workspace_id = ${task.workspaceId} and held.state = 'resumable')`,
+      sql`not exists (select 1 from ${worktree} where ${activeWorktreeOf(task.workspaceId, task.id)})`,
+    ),
     sql`not exists (select 1 from task child where child.fork_session_id = ${session.id} and child.workspace_id = ${session.workspaceId})`,
   ) as SQL;
 }

@@ -31,11 +31,14 @@ Two things limit what can go:
 1. **The rule.** A Session's transcript is removed once its Task has been *finished* for longer
    than the Workspace's window. Finished means Done (measured from `task.updated_at`) or deleted
    (measured from `task.deleted_at`), the same marks 0025's sweep uses. Running, review, parked,
-   failed and backlog Tasks are never touched, however old they are. Two more guards: no Session
-   of the Task is `active` or `resumable`, and no sub-task forked from the Session still exists.
-   A Done Task's Session is `resumable` until the expiry arm (0025) takes its worktree and closes
-   it, which happens before even the shortest window is up.
-   A fork point is verified by hashing the events behind it on every full brief, so a sub-task
+   failed and backlog Tasks are never touched, however old they are. Three more guards. No
+   Session of the Task is `active`. No Session of the Task is `resumable` *while the Task still
+   holds an active worktree*, the same test the expiry arm (0025) uses before it takes the
+   worktrees (`activeWorktreeOf` in `@solow/db`); a resume continues the harness's conversation
+   inside the worktree, so without one nothing can resume. That matters because Done sets a
+   Session `resumable` and only expiry closes it, and only when there is a worktree to take: a
+   Task that never had one, or lost it another way, would otherwise keep its transcript forever.
+   And no sub-task forked from the Session still exists. A fork point is verified by hashing the events behind it on every full brief, so a sub-task
    that is Done (and can be reopened) or deleted (and can be restored) still needs its parent's
    history; only the purge, which deletes the sub-task's row, releases it. The guards are asked
    again inside every delete and update the sweep makes, not only when it lists the due Sessions,

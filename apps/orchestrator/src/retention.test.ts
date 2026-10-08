@@ -261,12 +261,8 @@ describe("retentionSweep", () => {
 
   it("removes the transcript of a Task Done longer ago than its Workspace's window, and keeps the record", async () => {
     const db = createTestDb();
-    // Closed, as expiry leaves it once the worktree is gone; a `resumable` Session is held back.
-    await seed(db, "long-done", {
-      state: "done",
-      updatedAt: ago(31 * DAY),
-      sessionState: "closed",
-    });
+    // Its Session still reads `resumable`, but the Task holds no worktree, so nothing can resume.
+    await seed(db, "long-done", { state: "done", updatedAt: ago(31 * DAY) });
     await db.insert(sessionEvent).values({
       workspaceId: WS,
       sessionId: "sess-long-done",

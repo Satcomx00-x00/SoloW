@@ -12,6 +12,7 @@ import {
   harnessCatalog,
   harnessProfile,
   issue,
+  repository,
   review,
   secret,
   session,
@@ -20,6 +21,7 @@ import {
   sessionUsage,
   task,
   workspace,
+  worktree,
 } from "./schema.js";
 import { cascadeDeleteTasks } from "./task-cascade.js";
 import { createTestDb, type TestDb } from "./testing.js";
@@ -166,6 +168,28 @@ async function seedTask(
   return sessionId;
 }
 
+/** A worktree row for the Task, as the run loop writes one and the expiry arm marks it. */
+async function seedWorktree(taskId: string, status: "active" | "removed" = "active") {
+  await db
+    .insert(repository)
+    .values({
+      id: `repo-${WS}`,
+      workspaceId: WS,
+      name: "repo",
+      source: "local_path",
+      location: "/tmp/repo",
+    })
+    .onConflictDoNothing();
+  await db.insert(worktree).values({
+    workspaceId: WS,
+    taskId,
+    repositoryId: `repo-${WS}`,
+    path: `/tmp/worktrees/${taskId}`,
+    branch: `solow/${taskId}`,
+    status,
+  });
+}
+
 async function kindsOf(sessionId: string) {
   const rows = await db
     .select({ kind: sessionEvent.kind })
@@ -256,17 +280,19 @@ describe("which Sessions are due", () => {
     expect(await kindsOf(old)).toEqual(ALL_KINDS);
   });
 
-  it("leaves a Session that can still be resumed, and its Task's other Sessions", async () => {
-    // A resumable Session is one a reopen picks up where it stopped; its transcript is the
-    // context that resume hands back.
+  it("leaves a resumable Session, and its Task's others, while the Task still holds a worktree", async () => {
+    // A resume carries on the harness's conversation inside the worktree; while that is on disk,
+    // the transcript is the context the resume hands back.
     const resumable = await seedTask("resumable", {
       updatedAt: ago(60 * DAY),
       sessionState: "resumable",
     });
+    await seedWorktree("resumable");
     const older = await seedTask("two-sessions", { updatedAt: ago(60 * DAY) });
     await db
       .insert(session)
       .values({ id: "s-two-2", workspaceId: WS, taskId: "two-sessions", state: "resumable" });
+    await seedWorktree("two-sessions");
 
     const report = await pruneHistory(db, { now: NOW, pause: noPause });
 
@@ -274,6 +300,26 @@ describe("which Sessions are due", () => {
     expect(await kindsOf(resumable)).toEqual(ALL_KINDS);
     expect(await kindsOf(older)).toEqual(ALL_KINDS);
     expect(previewHistoryPrune(db, WS, 30, NOW).sessions).toBe(0);
+  });
+
+  it("prunes a Session that still reads resumable once its Task holds no worktree", async () => {
+    // Done leaves a Session `resumable` and only expiry closes it, when it has a worktree to take.
+    // Without one nothing can resume, so the row's state is no reason to keep the transcript.
+    const never = await seedTask("no-worktree", {
+      updatedAt: ago(60 * DAY),
+      sessionState: "resumable",
+    });
+    const taken = await seedTask("worktree-removed", {
+      updatedAt: ago(60 * DAY),
+      sessionState: "resumable",
+    });
+    await seedWorktree("worktree-removed", "removed");
+
+    const report = await pruneHistory(db, { now: NOW, pause: noPause });
+
+    expect(report.sessions).toBe(2);
+    expect(await kindsOf(never)).toEqual(KEPT_KINDS);
+    expect(await kindsOf(taken)).toEqual(KEPT_KINDS);
   });
 
   it("keeps a parent's transcript for as long as any sub-task forked from it exists", async () => {
