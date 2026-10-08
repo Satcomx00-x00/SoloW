@@ -75,6 +75,7 @@ export {
   type FlagDefinition,
   type FlagKey,
   flagKeys,
+  HIDDEN_UNTIL_READY,
   isEnabled,
   isFlagKey,
 } from "./flag-registry.js";

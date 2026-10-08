@@ -55,3 +55,15 @@ Every substantial document begins with a short header:
 - Decision records are reviewed roughly one month after acceptance to compare the
   expected consequences against reality.
 - Superseded content is marked with its replacement, never silently removed.
+
+## Contribution and release rules
+
+In force until 1.0 ([0031](./decisions/0031-focus-on-the-solo-power-user.md)).
+
+- **Feature freeze.** Only fixes and the items in the [Roadmap](./ROADMAP.md) ship. A new
+  capability waits for 1.0, however small.
+- **Weekly releases.** A release is cut once a week, not per merge. Database migrations and API
+  changes are batched into those planned releases, and dependencies are upgraded on purpose, in
+  their own change, never as a side effect.
+- **A green main.** Do not merge on red; the release is gated on the verify run
+  ([0021](./decisions/0021-commits-decide-the-version.md)).

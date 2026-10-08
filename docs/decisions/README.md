@@ -19,7 +19,7 @@ Rules for this log ([per our conventions](../CONVENTIONS.md)):
 
 | # | Decision | Status |
 |---|----------|--------|
-| [0001](./0001-scope-near-clone.md) | Build a near-clone rather than a narrower product | Accepted |
+| [0001](./0001-scope-near-clone.md) | Build a near-clone rather than a narrower product | Superseded by 0031 for the 1.0 scope |
 | [0002](./0002-technology-stack.md) | Application + long-lived orchestrator, local-first with a path to hosted | Accepted |
 | [0003](./0003-agent-connection-protocol.md) | Integrate harnesses via the Agent Client Protocol (ACP) | Accepted |
 | [0004](./0004-durable-orchestration-engine.md) | Use a durable orchestration engine for Workflows and Tasks | Accepted |
@@ -49,3 +49,4 @@ Rules for this log ([per our conventions](../CONVENTIONS.md)):
 | [0028](./0028-harness-configs-in-the-app.md) | Harness configuration is stored in the app and handed over at launch | Accepted |
 | [0029](./0029-one-sidebar-navigation.md) | One labelled sidebar replaces the activity rail and the navigator | Accepted |
 | [0030](./0030-review-gate-is-a-database-state.md) | A review gate is a database state, and a decision starts the next run | Accepted |
+| [0031](./0031-focus-on-the-solo-power-user.md) | Focus on the solo power user | Accepted |

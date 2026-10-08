@@ -6,6 +6,7 @@ import { FlagDisabled } from "@/components/features/shared/flag-disabled";
 import { WorkflowInspector } from "@/components/features/workflows/workflow-inspector";
 import { HeaderActions } from "@/components/shell/header-actions";
 import { SecondaryPanel } from "@/components/shell/secondary-sidebar";
+import { useFlagState } from "@/lib/use-flag";
 import { trpc } from "@/trpc/react";
 import { WorkflowCanvas } from "./workflow-canvas";
 import { WorkflowCreateActions } from "./workflow-create-actions";
@@ -26,7 +27,10 @@ import { WorkflowCreateActions } from "./workflow-create-actions";
  * of them.
  */
 export function WorkflowsView({ workflowId }: { workflowId?: string | undefined }) {
-  const workflows = trpc.workflow.list.useQuery({});
+  // The designer is marked WIP and ships hidden (decision 0031); a typed URL gets the same
+  // answer as the missing sidebar entry rather than a half-finished canvas.
+  const wipVisible = useFlagState("ff-wip-areas");
+  const workflows = trpc.workflow.list.useQuery({}, { enabled: wipVisible === true });
   const list = workflows.data ?? [];
 
   // The route names a Workflow; `/workflows` names none and opens on the first, so the surface is
@@ -43,6 +47,15 @@ export function WorkflowsView({ workflowId }: { workflowId?: string | undefined 
       <WorkflowCreateActions installed={list} />
     </HeaderActions>
   );
+
+  if (wipVisible === undefined) return null;
+  if (wipVisible === false) {
+    return (
+      <div className="mx-auto w-full max-w-3xl px-6 py-10">
+        <FlagDisabled flag="ff-wip-areas" title="The Workflows designer is not available yet" />
+      </div>
+    );
+  }
 
   if (workflows.error) {
     return workflows.error.message === CommonErrorCode.FlagDisabled ? (

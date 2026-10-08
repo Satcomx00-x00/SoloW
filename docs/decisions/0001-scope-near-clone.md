@@ -1,6 +1,6 @@
 # 0001 — Build a near-clone rather than a narrower product
 
-**Status:** Accepted · **Date:** 2026-08-17 · **Deciders:** Product
+**Status:** Superseded by [0031](./0031-focus-on-the-solo-power-user.md) for the 1.0 scope · **Date:** 2026-08-17 · **Deciders:** Product
 
 ## Context
 

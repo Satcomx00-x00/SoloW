@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { WHOLE_PAGE } from "@/lib/paged";
+import { useFlag } from "@/lib/use-flag";
 import { trpc } from "@/trpc/react";
 import { type EnvPair, EnvRows, fromEnvPairs, toEnvPairs } from "./env-rows";
 import { fromMountRows, type MountRow, MountRows, toMountRows } from "./mount-rows";
@@ -110,6 +111,7 @@ export function ExecutorProfilesSection() {
   const utils = trpc.useUtils();
   const list = trpc.profile.executor.list.useQuery({ ...WHOLE_PAGE });
   const secrets = trpc.secret.list.useQuery({});
+  const remoteEnvironments = useFlag("ff-remote-environments");
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState("");
@@ -304,12 +306,18 @@ export function ExecutorProfilesSection() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {(Object.keys(KIND_LABELS) as ExecutorKind[]).map((k) => (
-                  <SelectItem key={k} value={k}>
-                    {KIND_LABELS[k]}
-                    {RUNNABLE_KINDS.includes(k) ? "" : " · no driver yet"}
-                  </SelectItem>
-                ))}
+                {(Object.keys(KIND_LABELS) as ExecutorKind[])
+                  // Kinds without a driver stay out of the list unless `ff-remote-environments`
+                  // is on (decision 0031) — except the one a profile being edited already has.
+                  .filter(
+                    (k) => remoteEnvironments || RUNNABLE_KINDS.includes(k) || k === config.kind,
+                  )
+                  .map((k) => (
+                    <SelectItem key={k} value={k}>
+                      {KIND_LABELS[k]}
+                      {RUNNABLE_KINDS.includes(k) ? "" : " · no driver yet"}
+                    </SelectItem>
+                  ))}
               </SelectContent>
             </Select>
           </div>
