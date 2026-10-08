@@ -226,10 +226,14 @@ export async function handleExplainPost(
    */
   const cwd = await mkdtemp(join(tmpdir(), "solow-explain-"));
   try {
+    const executor = createLocalExecutor(cwd);
+    // The executor's base, not `process.env`: it is the one that withholds the orchestrator's
+    // own secrets (`isOrchestratorSecret`), and this launches the same harness a run does.
+    const hostEnv = await executor.baseEnv();
     const configEnv = await resolveHarnessConfigEnv({
       kind: "local",
       home: join(cwd, OUT_OF_BAND_HOME),
-      baseEnv: process.env,
+      baseEnv: hostEnv,
     });
     // The Profile's Harness Config travels as it does on a run (Decision 0028); one that cannot
     // be used is the run's problem to report, so an explanation simply goes without it.
@@ -242,7 +246,7 @@ export async function handleExplainPost(
     const shaped = prepareHarnessEnv({
       authMode: ctx.harnessProfile.authMode,
       secretCiphertext: ctx.secretCiphertext,
-      baseEnv: process.env,
+      baseEnv: hostEnv,
       subscriptionEnvVar: ctx.harnessCatalog.subscriptionEnvVar,
       meteredEnvVar: ctx.harnessCatalog.meteredEnvVar,
       profileEnv: ctx.executorProfile.config.env ?? {},
@@ -258,7 +262,7 @@ export async function handleExplainPost(
         failure: "credential",
       });
     }
-    const report = await explainWithHarness(createLocalExecutor(cwd), {
+    const report = await explainWithHarness(executor, {
       command: ctx.harnessCatalog.command,
       // Without `--auto` and its kind, which `opencode acp` refuses; an explanation runs in plan
       // mode, so the approval it stands for has nothing to apply to here.
@@ -332,10 +336,13 @@ export async function handleProbePost(
      * app-owned configuration of Decision 0027: a probe that passed only because the operator's
      * own `~/.claude` happened to be logged in would be answering for a Task that will not be.
      */
+    const executor = createLocalExecutor(cwd);
+    // The executor's base, not `process.env` — see `handleExplainPost`.
+    const hostEnv = await executor.baseEnv();
     const configEnv = await resolveHarnessConfigEnv({
       kind: "local",
       home: join(cwd, OUT_OF_BAND_HOME),
-      baseEnv: process.env,
+      baseEnv: hostEnv,
     });
     // A Harness Config a run would refuse is a failed probe, said by name (Decision 0028).
     const { config, launch } = await profileHarnessConfig(
@@ -357,7 +364,7 @@ export async function handleProbePost(
     const shaped = prepareHarnessEnv({
       authMode: ctx.harnessProfile.authMode,
       secretCiphertext: ctx.secretCiphertext,
-      baseEnv: process.env,
+      baseEnv: hostEnv,
       subscriptionEnvVar: ctx.harnessCatalog.subscriptionEnvVar,
       meteredEnvVar: ctx.harnessCatalog.meteredEnvVar,
       configEnv: { ...configEnv, ...launch.data.env },
@@ -373,7 +380,7 @@ export async function handleProbePost(
       });
     }
 
-    const report = await probeHarness(createLocalExecutor(cwd), {
+    const report = await probeHarness(executor, {
       command: ctx.harnessCatalog.command,
       // As a run launches it: `--auto` is SoloW's to apply, not the ACP harness's to parse.
       args: clientDirectives(ctx.harnessCatalog.protocol, ctx.harnessCatalog.argsTemplate).args,
