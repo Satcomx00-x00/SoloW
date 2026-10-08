@@ -12,9 +12,31 @@
 # `apps/web/.solow/skills`, outside the folder a backup or a `rm -rf .solow` reset was looking at.
 # Exported here, absolute, they are where the folder is. An exported value still wins.
 
+# The folder holds the master key and a database with every session token in it, so nobody else
+# on the machine may read any of it. The umask comes first, before anything is created, and it is
+# inherited: the services create the database's -wal and -shm, the engine's files and backups
+# themselves, long after this script has stopped writing anything. A key file written with
+# `umask 077` in one place and a database created 0664 by a service is how the folder ended up
+# group-readable in the first place.
+umask 077
+
 GC_DIR="${SOLOW_HOME:-$ROOT/.solow}"
+# No `-m 700`: with -p it would cover only the last directory, and the umask already makes every
+# directory this creates 0700.
 mkdir -p "$GC_DIR"
 GC_DIR="$(CDPATH='' cd -- "$GC_DIR" && pwd)"
+
+# A folder an earlier version made is tightened on every start, which also undoes a stray
+# `chmod`. Only what SoloW put there: the folder, its keys, its database and the engine's state and
+# backups (which hold copies of both). Anything else someone keeps in it keeps the mode they gave
+# it. Not fatal: a SOLOW_HOME on a filesystem without Unix modes is still a place to run from.
+chmod 700 "$GC_DIR" 2> /dev/null || echo "[$LOG_TAG] WARNING: could not make $GC_DIR private (chmod 700)" >&2
+for _dd_file in "$GC_DIR"/*.key "$GC_DIR"/*.secret "$GC_DIR"/solow.db "$GC_DIR"/solow.db-*; do
+    [ -f "$_dd_file" ] && chmod 600 "$_dd_file" 2> /dev/null || :
+done
+for _dd_tree in "$GC_DIR/inngest" "$GC_DIR/backups"; do
+    [ -d "$_dd_tree" ] && chmod -R go= "$_dd_tree" 2> /dev/null || :
+done
 SOLOW_HOME="$GC_DIR"
 SOLOW_WORKTREE_ROOT="${SOLOW_WORKTREE_ROOT:-$GC_DIR/worktrees}"
 SOLOW_REPO_CACHE_ROOT="${SOLOW_REPO_CACHE_ROOT:-$GC_DIR/repos}"

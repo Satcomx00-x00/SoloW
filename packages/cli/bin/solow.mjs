@@ -16,10 +16,13 @@
 import { spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import {
+  chmodSync,
   closeSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   openSync,
+  readdirSync,
   readFileSync,
   readSync,
   unlinkSync,
@@ -424,8 +427,48 @@ function checkExposure() {
   );
 }
 
+/**
+ * The data folder holds the master key and a database with every session token in it, so nobody
+ * else on the machine may read any of it — the same rule as `scripts/lib/data-dir.sh`.
+ *
+ * Created 0700, and an existing one tightened on every start: an earlier version made it 0755 and
+ * left the database 0644. Only what SoloW put there — the folder, its keys, its database and the
+ * engine's state and backups (copies of both); anything else in it keeps the mode it has. The
+ * process umask (set in `main`) covers what is created later, by the services as well.
+ */
+function prepareDataDir(dataDir) {
+  mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+  try {
+    chmodSync(dataDir, 0o700);
+  } catch {
+    console.warn(`solow: WARNING: could not make ${dataDir} private (chmod 700)`);
+  }
+  for (const name of readdirSync(dataDir)) {
+    if (/\.(key|secret)$/.test(name) || name === "solow.db" || name.startsWith("solow.db-")) {
+      makePrivate(join(dataDir, name), false);
+    }
+  }
+  makePrivate(join(dataDir, "inngest"), true);
+  makePrivate(join(dataDir, "backups"), true);
+}
+
+/** `chmod go=` on a file, or with `recursive` on a whole tree. Symlinks are left alone. */
+function makePrivate(path, recursive) {
+  try {
+    const stat = lstatSync(path);
+    if (stat.isSymbolicLink()) return;
+    if (stat.isDirectory() && !recursive) return;
+    chmodSync(path, stat.mode & 0o700);
+    if (stat.isDirectory()) {
+      for (const name of readdirSync(path)) makePrivate(join(path, name), true);
+    }
+  } catch {
+    // Missing, or not ours to change: neither is a reason not to start.
+  }
+}
+
 function buildEnv(opts) {
-  mkdirSync(opts.dataDir, { recursive: true });
+  prepareDataDir(opts.dataDir);
   return {
     ...process.env,
     NODE_ENV: "production",
@@ -665,6 +708,9 @@ function runBackupCommand(command, rest) {
 }
 
 async function main() {
+  // Before anything is created, and inherited by every service: the database's -wal and -shm, the
+  // engine's files and the backups are written by them, long after this file stopped writing.
+  process.umask(0o077);
   const [command, ...rest] = process.argv.slice(2);
   if (command === "backup" || command === "restore") runBackupCommand(command, rest);
   const opts = parseArgs(process.argv.slice(2));
