@@ -56,10 +56,6 @@ if [ "$SOLOW_DEV_OWNER" = "on" ]; then
             ;;
     esac
 fi
-# Signs the session cookie; the env module refuses anything under 32 characters.
-export SOLOW_AUTH_SECRET="${SOLOW_AUTH_SECRET:-dev-insecure-session-secret-32ch}"
-# Shared by web (signs stream tickets) and orchestrator (verifies them) — same value, both sides.
-export SOLOW_STREAM_SECRET="${SOLOW_STREAM_SECRET:-dev-insecure-stream}"
 # The Claude Code binary each run's agent_catalog row names (packages/db/src/harness-catalog-
 # defaults.ts seeds "claude"; these two are read by nothing in apps/orchestrator/src today, so
 # they do not override that — kept only for a deployment that wires its own catalog lookup to
@@ -70,13 +66,9 @@ export SOLOW_AGENT_ARGS="${SOLOW_AGENT_ARGS:-}"
 export SOLOW_WS_PORT="${SOLOW_WS_PORT:-5001}"
 export SOLOW_WS_URL="${SOLOW_WS_URL:-ws://localhost:5001}"
 export SOLOW_WEB_URL="${SOLOW_WEB_URL:-http://localhost:5000}"
-# Where the web app's emit() POSTs task-run/review events (apps/web/src/server/orchestrator-
-# client.ts) — the orchestrator's own /events route, which forwards them into a real
-# inngest.send() (Decision 0004). Without this, enqueueTaskRun()/applyReview() silently no-op
-# with sign-in off, or dev-owner mode, instead of ever reaching a harness.
-export SOLOW_ORCHESTRATOR_URL="${SOLOW_ORCHESTRATOR_URL:-http://localhost:$SOLOW_WS_PORT}"
 export SOLOW_INNGEST_PORT="${SOLOW_INNGEST_PORT:-8288}"
-# Signing + event keys for `inngest start` and the web->orchestrator secret (B3, F6).
+# The session and stream-ticket secrets, the signing + event keys for `inngest start`, the
+# web->orchestrator secret (B3, F6), and the loopback URLs the services reach each other on.
 # shellcheck source=/dev/null
 . "$ROOT/scripts/lib/engine-env.sh"
 
@@ -156,7 +148,7 @@ echo "[start] inngest      → http://localhost:$SOLOW_INNGEST_PORT  (self-hoste
 # signing/event keys come from the environment, not argv, so they stay out of `ps`.
 bunx inngest-cli start \
     --sqlite-dir "$GC_DIR/inngest" \
-    -u "http://localhost:$SOLOW_WS_PORT/api/inngest" \
+    -u "$SOLOW_INNGEST_SDK_URL" \
     -p "$SOLOW_INNGEST_PORT" --host "$SOLOW_BIND_HOST" &
 PIDS="$PIDS $!"
 

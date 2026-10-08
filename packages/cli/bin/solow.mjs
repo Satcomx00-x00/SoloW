@@ -373,8 +373,13 @@ function resolveInngest() {
  * Secrets are generated once and persisted, not derived per run: the database encrypts stored
  * provider tokens with `SOLOW_SECRET_KEY`, so a key that changed between runs would leave every
  * previously stored secret undecryptable. Written 0600 — they are the keys to that data.
+ *
+ * An exported value wins, as it does in `scripts/lib/engine-env.sh`: a deployment that manages
+ * its own secrets must not have them silently replaced by the files.
  */
-function secret(dataDir, name, make) {
+function secret(dataDir, name, make, envName) {
+  const exported = process.env[envName];
+  if (exported) return exported;
   const file = join(dataDir, name);
   if (existsSync(file)) return readFileSync(file, "utf8").trim();
   const value = make();
@@ -387,6 +392,17 @@ const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
 /** The interface every service listens on. Network exposure is a choice, so it is named once. */
 function bindHost() {
   return process.env.SOLOW_BIND_HOST || "127.0.0.1";
+}
+
+/**
+ * Where the services reach each other. Not `localhost`, which can resolve to ::1 while they listen
+ * on 127.0.0.1, and which a specific LAN bind address is not listening on at all. A wildcard bind
+ * is reachable on loopback. Same rule as `scripts/lib/engine-env.sh`.
+ */
+function internalHost() {
+  const host = bindHost();
+  if (host === "0.0.0.0" || host === "::" || host === "localhost") return "127.0.0.1";
+  return host.includes(":") ? `[${host}]` : host;
 }
 
 /** Called once at start: says out loud what leaving the machine means, and refuses the worst case. */
@@ -410,19 +426,33 @@ function buildEnv(opts) {
     NODE_ENV: "production",
     SOLOW_DB_DRIVER: "sqlite",
     SOLOW_SQLITE_PATH: join(opts.dataDir, "solow.db"),
-    SOLOW_SECRET_KEY: secret(opts.dataDir, "secret.key", () => randomBytes(32).toString("base64")),
-    SOLOW_AUTH_SECRET: secret(opts.dataDir, "auth.secret", () =>
-      randomBytes(32).toString("base64"),
+    SOLOW_SECRET_KEY: secret(
+      opts.dataDir,
+      "secret.key",
+      () => randomBytes(32).toString("base64"),
+      "SOLOW_SECRET_KEY",
     ),
-    SOLOW_STREAM_SECRET: secret(opts.dataDir, "stream.secret", () =>
-      randomBytes(32).toString("base64"),
+    SOLOW_AUTH_SECRET: secret(
+      opts.dataDir,
+      "auth.secret",
+      () => randomBytes(32).toString("base64"),
+      "SOLOW_AUTH_SECRET",
+    ),
+    SOLOW_STREAM_SECRET: secret(
+      opts.dataDir,
+      "stream.secret",
+      () => randomBytes(32).toString("base64"),
+      "SOLOW_STREAM_SECRET",
     ),
     SOLOW_WORKTREE_ROOT: join(opts.dataDir, "worktrees"),
     SOLOW_REPO_CACHE_ROOT: join(opts.dataDir, "repos"),
     SOLOW_WS_PORT: String(opts.wsPort),
-    SOLOW_WS_URL: `ws://localhost:${opts.wsPort}`,
-    SOLOW_WEB_URL: `http://localhost:${opts.webPort}`,
-    SOLOW_ORCHESTRATOR_URL: `http://localhost:${opts.wsPort}`,
+    // The two URLs a browser uses. An exported value wins: behind a LAN address or a proxy the
+    // browser's origin is not localhost, and the sign-in check rejects any origin but this one.
+    SOLOW_WS_URL: process.env.SOLOW_WS_URL || `ws://localhost:${opts.wsPort}`,
+    SOLOW_WEB_URL: process.env.SOLOW_WEB_URL || `http://localhost:${opts.webPort}`,
+    SOLOW_ORCHESTRATOR_URL:
+      process.env.SOLOW_ORCHESTRATOR_URL || `http://${internalHost()}:${opts.wsPort}`,
     SOLOW_INNGEST_PORT: String(opts.inngestPort),
     // Sign-in is on unless the environment says otherwise: a fresh install asks the person for
     // an Owner account on first visit. The "every visitor is the Owner" stand-in is for
@@ -433,18 +463,27 @@ function buildEnv(opts) {
     SOLOW_AGENT_COMMAND: process.env.SOLOW_AGENT_COMMAND ?? "claude",
     // Web -> orchestrator bearer secret for /events (B3), and the keys that make the self-hosted
     // engine (`inngest start`) accept only signed requests (F6). Hex because the engine insists.
-    SOLOW_ORCHESTRATOR_SECRET: secret(opts.dataDir, "orchestrator.secret", () =>
-      randomBytes(32).toString("base64"),
+    SOLOW_ORCHESTRATOR_SECRET: secret(
+      opts.dataDir,
+      "orchestrator.secret",
+      () => randomBytes(32).toString("base64"),
+      "SOLOW_ORCHESTRATOR_SECRET",
     ),
-    INNGEST_SIGNING_KEY: secret(opts.dataDir, "inngest-signing.key", () =>
-      randomBytes(32).toString("hex"),
+    INNGEST_SIGNING_KEY: secret(
+      opts.dataDir,
+      "inngest-signing.key",
+      () => randomBytes(32).toString("hex"),
+      "INNGEST_SIGNING_KEY",
     ),
-    INNGEST_EVENT_KEY: secret(opts.dataDir, "inngest-event.key", () =>
-      randomBytes(32).toString("hex"),
+    INNGEST_EVENT_KEY: secret(
+      opts.dataDir,
+      "inngest-event.key",
+      () => randomBytes(32).toString("hex"),
+      "INNGEST_EVENT_KEY",
     ),
     // Any INNGEST_DEV (even inherited) would put the SDK in dev mode and skip signature checks;
     // INNGEST_BASE_URL is what points the non-dev SDK at the local engine instead of Cloud.
-    INNGEST_BASE_URL: `http://localhost:${opts.inngestPort}`,
+    INNGEST_BASE_URL: `http://${internalHost()}:${opts.inngestPort}`,
     INNGEST_DEV: undefined,
   };
 }
@@ -590,7 +629,7 @@ async function main() {
       "--sqlite-dir",
       join(opts.dataDir, "inngest"),
       "-u",
-      `http://localhost:${opts.wsPort}/api/inngest`,
+      `http://${internalHost()}:${opts.wsPort}/api/inngest`,
       "-p",
       String(opts.inngestPort),
       "--host",
