@@ -5,7 +5,7 @@ import {
   HISTORY_PRUNED_EVENT_KINDS,
   HISTORY_RETENTION_DEFAULT_DAYS,
 } from "@solow/contracts";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { previewHistoryPrune, pruneHistory } from "./history-prune.js";
 import {
   executorProfile,
@@ -21,6 +21,7 @@ import {
   task,
   workspace,
 } from "./schema.js";
+import { cascadeDeleteTasks } from "./task-cascade.js";
 import { createTestDb, type TestDb } from "./testing.js";
 
 /**
@@ -255,7 +256,29 @@ describe("which Sessions are due", () => {
     expect(await kindsOf(old)).toEqual(ALL_KINDS);
   });
 
-  it("keeps a parent's transcript while a sub-task is still waiting to fork from it", async () => {
+  it("leaves a Session that can still be resumed, and its Task's other Sessions", async () => {
+    // A resumable Session is one a reopen picks up where it stopped; its transcript is the
+    // context that resume hands back.
+    const resumable = await seedTask("resumable", {
+      updatedAt: ago(60 * DAY),
+      sessionState: "resumable",
+    });
+    const older = await seedTask("two-sessions", { updatedAt: ago(60 * DAY) });
+    await db
+      .insert(session)
+      .values({ id: "s-two-2", workspaceId: WS, taskId: "two-sessions", state: "resumable" });
+
+    const report = await pruneHistory(db, { now: NOW, pause: noPause });
+
+    expect(report.sessions).toBe(0);
+    expect(await kindsOf(resumable)).toEqual(ALL_KINDS);
+    expect(await kindsOf(older)).toEqual(ALL_KINDS);
+    expect(previewHistoryPrune(db, WS, 30, NOW).sessions).toBe(0);
+  });
+
+  it("keeps a parent's transcript for as long as any sub-task forked from it exists", async () => {
+    // Every full brief re-verifies the fork point (`loadForkOrigin`), so a child that is
+    // reopened from Done, or restored from History, would be refused as stale.
     const parent = await seedTask("parent", { updatedAt: ago(60 * DAY) });
     await seedTask("child", {
       state: "review",
@@ -266,8 +289,22 @@ describe("which Sessions are due", () => {
     await pruneHistory(db, { now: NOW, pause: noPause });
     expect(await kindsOf(parent)).toEqual(ALL_KINDS);
 
-    // Once the child is done with it, the parent's ordinary window applies.
+    // Done, and reopenable.
     await db.update(task).set({ state: "done" }).where(eq(task.id, "child"));
+    await pruneHistory(db, { now: NOW, pause: noPause });
+    expect(await kindsOf(parent)).toEqual(ALL_KINDS);
+
+    // Deleted, and restorable until the purge.
+    await db
+      .update(task)
+      .set({ deletedAt: ago(DAY) })
+      .where(eq(task.id, "child"));
+    await pruneHistory(db, { now: NOW, pause: noPause });
+    expect(await kindsOf(parent)).toEqual(ALL_KINDS);
+    expect(previewHistoryPrune(db, WS, 30, NOW).sessions).toBe(0);
+
+    // Purged: nothing can fork from the parent any more, and its own window applies.
+    db.transaction((tx) => cascadeDeleteTasks(tx, WS, ["child"]));
     await pruneHistory(db, { now: NOW, pause: noPause });
     expect(await kindsOf(parent)).toEqual(KEPT_KINDS);
   });
@@ -378,6 +415,78 @@ describe("bounded batches", () => {
       diffs: 0,
       more: false,
     });
+  });
+});
+
+describe("a Task that changes during a sweep", () => {
+  /**
+   * The due list is read once per Workspace, and the sweep yields to the event loop between
+   * batches — the web app and the run loop write to the same file in the meantime. Each delete
+   * has to ask again whether its Session is still due.
+   */
+  it("stops removing a Task's transcript the moment it is reopened", async () => {
+    const id = await seedTask("reopened-mid-sweep", { updatedAt: ago(60 * DAY) });
+    let reopened = false;
+    const pause = async () => {
+      if (reopened) return;
+      reopened = true;
+      await db
+        .update(task)
+        .set({ state: "running", updatedAt: NOW.toISOString() })
+        .where(eq(task.id, "reopened-mid-sweep"));
+      await db.insert(session).values({
+        id: "s-reopened-mid-sweep-2",
+        workspaceId: WS,
+        taskId: "reopened-mid-sweep",
+        state: "active",
+      });
+    };
+
+    const report = await pruneHistory(db, { now: NOW, batchSize: 3, pause });
+
+    expect(reopened).toBe(true);
+    // The first batch went before the reopen; nothing after it did.
+    expect(report.events).toBe(3);
+    expect(report.sessions).toBe(0);
+    expect(report.diffs).toBe(0);
+    expect(await kindsOf(id)).toHaveLength(ALL_KINDS.length - 3);
+    expect(await prunedAt(id)).toBeNull();
+    const [diff] = await db
+      .select({ payload: sessionEvent.payload })
+      .from(sessionEvent)
+      .where(and(eq(sessionEvent.sessionId, id), eq(sessionEvent.kind, "diff")));
+    expect((diff?.payload as { patch?: string } | undefined)?.patch).toBe(PATCH);
+  });
+
+  it("skips a Session that stopped being due after the list was read", async () => {
+    const first = await seedTask("a-first", { updatedAt: ago(60 * DAY) });
+    const second = await seedTask("b-second", { updatedAt: ago(60 * DAY) });
+    let restored = false;
+    const pause = async () => {
+      if (restored) return;
+      restored = true;
+      // Whichever Session the sweep has not reached yet (the one with every event still there)
+      // is reopened while it waits.
+      const [current] = await db
+        .select({ sessionId: sessionEvent.sessionId })
+        .from(sessionEvent)
+        .where(inArray(sessionEvent.sessionId, [first, second]))
+        .groupBy(sessionEvent.sessionId)
+        .orderBy(sql`count(*)`)
+        .limit(1);
+      const other = current?.sessionId === first ? "b-second" : "a-first";
+      await db
+        .update(task)
+        .set({ state: "running", updatedAt: NOW.toISOString() })
+        .where(eq(task.id, other));
+    };
+
+    const report = await pruneHistory(db, { now: NOW, batchSize: 3, pause });
+
+    expect(restored).toBe(true);
+    expect(report.sessions).toBe(1);
+    const kinds = [await kindsOf(first), await kindsOf(second)].sort((a, b) => a.length - b.length);
+    expect(kinds).toEqual([KEPT_KINDS, ALL_KINDS]);
   });
 });
 

@@ -32,8 +32,14 @@ Two things limit what can go:
    than the Workspace's window. Finished means Done (measured from `task.updated_at`) or deleted
    (measured from `task.deleted_at`), the same marks 0025's sweep uses. Running, review, parked,
    failed and backlog Tasks are never touched, however old they are. Two more guards: no Session
-   of the Task is `active`, and no undeleted, unfinished sub-task is waiting to fork from the
-   Session, because a fork point is verified by hashing the events behind it.
+   of the Task is `active` or `resumable`, and no sub-task forked from the Session still exists.
+   A Done Task's Session is `resumable` until the expiry arm (0025) takes its worktree and closes
+   it, which happens before even the shortest window is up.
+   A fork point is verified by hashing the events behind it on every full brief, so a sub-task
+   that is Done (and can be reopened) or deleted (and can be restored) still needs its parent's
+   history; only the purge, which deletes the sub-task's row, releases it. The guards are asked
+   again inside every delete and update the sweep makes, not only when it lists the due Sessions,
+   because it yields between batches while the web app and the run loop keep writing.
 2. **What goes and what stays.** These are listed once in `@solow/contracts`
    (`HISTORY_PRUNED_EVENT_KINDS` / `HISTORY_KEPT_EVENT_KINDS`) and shown in Settings in plain words.
    - *Deleted rows:* `user_turn`, `assistant_turn`, `notice`, `tool_call`, `tool_result`, `todos`,
