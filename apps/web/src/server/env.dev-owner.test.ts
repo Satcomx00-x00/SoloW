@@ -1,5 +1,23 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { devOwnerMode } from "./env.js";
+import { devOwnerMode, orchestratorSecret } from "./env.js";
+
+describe("orchestratorSecret", () => {
+  const saved = process.env.SOLOW_ORCHESTRATOR_SECRET;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.SOLOW_ORCHESTRATOR_SECRET;
+    else process.env.SOLOW_ORCHESTRATOR_SECRET = saved;
+  });
+
+  it("applies the orchestrator's own rule, so a value one side refuses is never sent", () => {
+    process.env.SOLOW_ORCHESTRATOR_SECRET = "x";
+    expect(orchestratorSecret()).toBeUndefined();
+  });
+
+  it("returns a secret of the required length", () => {
+    process.env.SOLOW_ORCHESTRATOR_SECRET = "a-long-enough-orchestrator-secret";
+    expect(orchestratorSecret()).toBe("a-long-enough-orchestrator-secret");
+  });
+});
 
 describe("devOwnerMode", () => {
   const saved = process.env.SOLOW_DEV_OWNER;

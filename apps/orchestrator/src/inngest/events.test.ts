@@ -136,5 +136,17 @@ describe("handleEventPost", () => {
       expect((await handleEventPost(post(valid, "Bearer "), unconfigured)).status).toBe(503);
       expect(calls).toEqual([]);
     });
+
+    it("fails closed on a secret too short to be one, even when the caller presents it", async () => {
+      // The web app used to accept a one-character secret the orchestrator would not boot with;
+      // both now apply one rule, and a value that breaks it closes this route, not the server.
+      const { deps, calls } = fakeDeps();
+      const weak: EventPostDeps = { ...deps, secret: "short" };
+
+      const res = await handleEventPost(post(valid, "Bearer short"), weak);
+      expect(res.status).toBe(503);
+      expect(await res.text()).toContain("at least 16 characters");
+      expect(calls).toEqual([]);
+    });
   });
 });

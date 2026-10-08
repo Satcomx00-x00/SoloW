@@ -27,11 +27,13 @@ const schema = z.object({
    */
   SOLOW_STREAM_SECRET: z.string().min(1),
   /**
-   * Bearer secret the web app presents on `POST /events` (FINDINGS B3). Optional so a process
-   * that never serves `/events` still boots, but without it that route refuses every request.
-   * The launchers generate one into `.solow/orchestrator.secret`.
+   * Bearer secret the web app presents on `POST /events` (FINDINGS B3). Read raw: its rule is
+   * `readOrchestratorSecret` in `@solow/contracts`, shared with the web app and applied by
+   * `handleEventPost`, so a missing or short value refuses that route with a 503 rather than
+   * failing this parse and with it the whole server. The launchers generate one into
+   * `.solow/orchestrator.secret`.
    */
-  SOLOW_ORCHESTRATOR_SECRET: z.string().min(16).optional(),
+  SOLOW_ORCHESTRATOR_SECRET: z.string().optional(),
   /**
    * What an ACP permission nobody answered decays to (issue #58, AC-4). Refusal unless a
    * deployment names the permissive posture — a deployment can widen its own posture on

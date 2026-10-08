@@ -27,4 +27,11 @@ describe("SOLOW_BIND_HOST", () => {
   it("takes an explicit interface", async () => {
     expect(await probe({ SOLOW_BIND_HOST: "0.0.0.0" })).toBe("0.0.0.0");
   });
+
+  it("still boots when SOLOW_ORCHESTRATOR_SECRET is too short — only POST /events refuses", async () => {
+    // A short secret used to throw out of `orchestratorEnv()`, the first thing the WebSocket
+    // server reads, and took the hub, the terminal and every run down with the one route it
+    // guards. `handleEventPost` answers 503 for it instead (events.test.ts).
+    expect(await probe({ SOLOW_ORCHESTRATOR_SECRET: "short" })).toBe("127.0.0.1");
+  });
 });
