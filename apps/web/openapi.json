@@ -40599,6 +40599,9 @@
                       "type": "integer",
                       "nullable": true
                     },
+                    "notice": {
+                      "type": "boolean"
+                    },
                     "defaultDays": {
                       "type": "integer"
                     },
@@ -40611,6 +40614,7 @@
                   },
                   "required": [
                     "days",
+                    "notice",
                     "defaultDays",
                     "options"
                   ]
@@ -40714,6 +40718,9 @@
                       "type": "integer",
                       "nullable": true
                     },
+                    "notice": {
+                      "type": "boolean"
+                    },
                     "defaultDays": {
                       "type": "integer"
                     },
@@ -40726,6 +40733,7 @@
                   },
                   "required": [
                     "days",
+                    "notice",
                     "defaultDays",
                     "options"
                   ]

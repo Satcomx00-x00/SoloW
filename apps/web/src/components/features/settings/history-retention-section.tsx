@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { trpc } from "@/trpc/react";
+import { HistoryRetentionNotice } from "./history-retention-notice";
 import { SectionStatus, SettingsField, SettingsLoading, SettingsSection } from "./settings-shell";
 
 /**
@@ -85,7 +86,8 @@ export function HistoryRetentionSection() {
   });
 
   const data = retention.data;
-  const dirty = draft !== null && draft !== stored;
+  // While the upgrade notice is up, saving the window already shown is still an answer to it.
+  const dirty = draft !== null && (draft !== stored || data?.notice === true);
 
   return (
     <SettingsSection
@@ -104,6 +106,7 @@ export function HistoryRetentionSection() {
         <SettingsLoading rows={2} />
       ) : (
         <>
+          <HistoryRetentionNotice />
           <form
             className="flex flex-wrap items-end gap-2"
             onSubmit={(e) => {

@@ -213,7 +213,7 @@ export async function getHistoryRetention(
   ctx: RequestContext,
 ): Promise<Result<HistoryRetentionDto>> {
   const [row] = await ctx.db
-    .select({ days: workspace.historyRetentionDays })
+    .select({ days: workspace.historyRetentionDays, notice: workspace.historyRetentionNotice })
     .from(workspace)
     .where(eq(workspace.id, ctx.workspaceId))
     .limit(1);
@@ -225,6 +225,7 @@ export async function getHistoryRetention(
       row.days === null || (HISTORY_RETENTION_DAY_OPTIONS as readonly number[]).includes(row.days)
         ? (row.days as HistoryRetentionDto["days"])
         : HISTORY_RETENTION_DEFAULT_DAYS,
+    notice: row.notice,
     defaultDays: HISTORY_RETENTION_DEFAULT_DAYS,
     options: [...HISTORY_RETENTION_DAY_OPTIONS],
   });
@@ -236,7 +237,12 @@ export async function setHistoryRetention(
 ): Promise<Result<HistoryRetentionDto>> {
   const updated = await ctx.db
     .update(workspace)
-    .set({ historyRetentionDays: input.days, updatedAt: new Date().toISOString() })
+    // Any save is the Owner's answer to the upgrade notice, "keep forever" included.
+    .set({
+      historyRetentionDays: input.days,
+      historyRetentionNotice: false,
+      updatedAt: new Date().toISOString(),
+    })
     .where(eq(workspace.id, ctx.workspaceId))
     .returning({ id: workspace.id });
   if (updated.length === 0) return err(CommonErrorCode.NotFound);

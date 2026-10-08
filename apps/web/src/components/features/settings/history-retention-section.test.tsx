@@ -1,6 +1,6 @@
 /// <reference types="bun-types" />
 import { afterEach, describe, expect, it } from "bun:test";
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { renderWithTrpc } from "@/test/trpc-harness";
 import { HistoryRetentionSection } from "./history-retention-section";
 
@@ -14,9 +14,14 @@ import { HistoryRetentionSection } from "./history-retention-section";
 
 afterEach(cleanup);
 
-function server(days: number | null) {
+function server(days: number | null, notice = false) {
   return {
-    "workspace.historyRetention": () => ({ days, defaultDays: 30, options: [7, 30, 90, 365] }),
+    "workspace.historyRetention": () => ({
+      days,
+      notice,
+      defaultDays: 30,
+      options: [7, 30, 90, 365],
+    }),
     "workspace.previewHistoryRetention": (input: unknown) => {
       const asked = (input as { days: number }).days;
       return asked === 7
@@ -25,6 +30,7 @@ function server(days: number | null) {
     },
     "workspace.setHistoryRetention": (input: unknown) => ({
       days: (input as { days: number | null }).days,
+      notice: false,
       defaultDays: 30,
       options: [7, 30, 90, 365],
     }),
@@ -96,6 +102,31 @@ describe("the history retention section", () => {
     expect(log.calls.filter((c) => c.path === "workspace.previewHistoryRetention")).toHaveLength(
       previewsBefore,
     );
+  });
+
+  it("asks the Owner of a Workspace that predates retention to choose", async () => {
+    const { log } = renderWithTrpc(<HistoryRetentionSection />, server(null, true));
+
+    const notice = await screen.findByRole("status", { name: "Choose how long to keep history" });
+    expect(notice.textContent).toContain("keeps every transcript until you choose");
+    // Saving is the answer, so Save works even on the window already shown.
+    expect(screen.getByRole("button", { name: "Save" })).toHaveProperty("disabled", false);
+
+    fireEvent.click(within(notice).getByRole("button", { name: "Keep forever" }));
+    await waitFor(() => {
+      const writes = log.calls.filter((c) => c.path === "workspace.setHistoryRetention");
+      expect(writes.map((c) => c.input)).toEqual([{ days: null }]);
+    });
+    await waitFor(() =>
+      expect(screen.queryByRole("status", { name: "Choose how long to keep history" })).toBeNull(),
+    );
+    expect(screen.getByRole("button", { name: "Save" })).toHaveProperty("disabled", true);
+  });
+
+  it("does not ask a Workspace that started with the rule", async () => {
+    renderWithTrpc(<HistoryRetentionSection />, server(30));
+    await screen.findByText("Kept 30 days");
+    expect(screen.queryByRole("status", { name: "Choose how long to keep history" })).toBeNull();
   });
 
   it("opens on Forever for a Workspace that keeps everything", async () => {

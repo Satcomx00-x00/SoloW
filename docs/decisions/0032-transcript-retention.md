@@ -50,11 +50,17 @@ Two things limit what can go:
    90 or 365 days, or null for **keep forever**. There is no window shorter than
    `TASK_RETENTION_DAYS`: a Task restored or reopened within its week in History must come back
    with its conversation. A test in `@solow/core` checks this.
-4. **The default is 30 days, and it applies to existing Workspaces too.** The migration adds the
-   column with `DEFAULT 30`, so every Workspace that exists today gets the rule on upgrade. Thirty
-   days is four times the History window and long enough to look back over a month's work. A
-   default of "forever" would leave F4 open on every install that never visits the page, which is
-   nearly all of them.
+4. **The default is 30 days for a new Workspace. An existing Workspace keeps everything until its
+   Owner chooses.** The migration adds the column with `DEFAULT 30`, then sets every Workspace
+   that already exists to null (keep forever) and flags it (`workspace.history_retention_notice`).
+   Thirty days is four times the History window and long enough to look back over a month's work.
+   It is not applied on upgrade because nobody has seen it yet: the first hourly sweep after the
+   upgrade would delete every transcript finished more than a month ago, the pre-migrate backup
+   is pruned after five more upgrades, and the Owner would never have been told. Existing data is
+   never deleted silently. Instead, while the flag is set, Settings → History retention and the
+   History page show a one-time notice that transcripts are being kept and invite the Owner to
+   choose; saving any window, "keep forever" included, clears it. *(Amended 2026-10-08, before
+   0049 shipped in a release: the first version applied 30 days to existing Workspaces.)*
 5. **Shown and changed in Settings → Workspace → History retention.** The picker holds a draft,
    and the server counts what that draft *would* remove right now (`workspace.previewHistoryRetention`:
    Tasks, Sessions, events, diffs and approximate bytes) before anything is saved. Nothing is
@@ -90,8 +96,9 @@ Two things limit what can go:
 
 ## Consequences
 
-- The database stops growing without bound on every install, including ones whose Owner never
-  opens Settings.
+- A new install stops growing without bound even if its Owner never opens Settings. An install
+  that predates the rule keeps growing until its Owner answers the notice; that is the price of
+  never deleting what someone already had without asking.
 - A Task finished more than a window ago opens with its record, its decisions, its rounds and the
   file list of each change, but not the conversation. A summary still says what its range held,
   but expanding the range returns what is left of it. A fork cursor minted earlier from a pruned

@@ -80,6 +80,18 @@ export const workspace = sqliteTable("workspace", {
    * `history-prune.test.ts` holds the two together.
    */
   historyRetentionDays: integer("history_retention_days").default(30),
+  /**
+   * True while a Workspace that existed before retention arrived has not been asked about it.
+   *
+   * The migration that added the window gave every such Workspace null (keep forever) rather
+   * than the default, because a default applied on upgrade would delete a month of transcripts
+   * on the first hourly sweep, before anyone had seen the setting. This flag is how Settings and
+   * History invite the Owner to choose instead. Saving a window, any window, clears it. A new
+   * Workspace starts false: it gets the default from its first day.
+   */
+  historyRetentionNotice: integer("history_retention_notice", { mode: "boolean" })
+    .notNull()
+    .default(false),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
