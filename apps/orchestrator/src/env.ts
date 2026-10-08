@@ -14,10 +14,13 @@ const schema = z.object({
   SOLOW_REPO_CACHE_ROOT: z.string().min(1).default(".solow/repos"),
   /**
    * Where the SQLite database is, read here (as `@solow/db` does, same default) only so the
-   * container driver can refuse to mount it. Not `dbEnv()`, which also demands the secret key.
+   * container driver can refuse to mount the directory it and the keys beside it live in. Not
+   * `dbEnv()`, which also demands the secret key.
    */
   SOLOW_DB_DRIVER: z.enum(["sqlite", "postgres"]).default("sqlite"),
   SOLOW_SQLITE_PATH: z.string().min(1).default(".solow/solow.db"),
+  /** The CLI's data directory (default `~/.solow`), protected from mounts for the same reason. */
+  SOLOW_HOME: z.string().min(1).optional(),
   /**
    * HMAC key for stream subscription tickets (TASK-018) — the same value the web app signs
    * with. Required: without it the hub could not authenticate a subscriber at all.

@@ -103,14 +103,17 @@ export interface DockerExecutorOpts {
   /** The Task's checkpoint store, bound at its own path — the hook is named by absolute path. */
   checkpointStore?: string;
   /**
-   * Host files that must never be inside a container, however a mount source reaches them: the
-   * orchestrator's database (and its journal files). The decrypting key lives in the
-   * orchestrator's environment, which a container never inherits (`spawn` takes its env
-   * verbatim), so the database is the other half of "the key and the database stay outside" (B5).
+   * Host paths that must never be inside a container, however a mount source reaches them: the
+   * orchestrator's state directories (`orchestratorStatePaths`) — the database and the key files
+   * the launchers keep beside it. The keys are in the orchestrator's environment too, which a
+   * container never inherits (`spawn` takes its env verbatim); these are the copies on disk, the
+   * other half of "the key and the database stay outside" (B5).
    *
-   * A deny-list beside an allow-list, deliberately: a `/data` or `/srv/solow` deployment keeps the
-   * database *inside* a content area the allow-list admits, so only a named refusal can close it.
-   * A source is refused when it is one of these, inside one, or contains one.
+   * A deny-list beside an allow-list, deliberately: a `/data` or `/srv/solow` deployment keeps its
+   * state *inside* a content area the allow-list admits, so only a named refusal can close it.
+   * A source is refused when it is one of these, contains one, or is inside one — except inside a
+   * deployment root (`worktreeRoot`, `repoCacheRoot`) nested in it, which is where the CLI keeps
+   * its worktrees.
    */
   protectedPaths?: readonly string[];
   /** `SOLOW_DOCKER_BIN`. Named by the caller so a wrapper script is a deployment setting. */
@@ -581,19 +584,27 @@ export async function guardMountSource(
   // answer at all reports the path the operator actually named rather than one of the rules.
   const real = await resolveLinks(path);
   const canonical = await canonicalAllowList(roots, resolveLinks);
+  const ownRoots = [...lexicalAllowList(roots).roots, ...canonical.roots];
   for (const protectedPath of roots.protectedPaths ?? []) {
     const [lexical, canonicalProtected] = [
       resolve(protectedPath),
       await resolveLinks(protectedPath),
     ];
     const collides = [path, real].some((candidate) =>
-      [lexical, canonicalProtected].some(
-        (secret) => isWithin(candidate, secret) || isWithin(secret, candidate),
-      ),
+      [lexical, canonicalProtected].some((secret) => {
+        // It, or anything holding it, is refused outright.
+        if (isWithin(secret, candidate)) return true;
+        if (!isWithin(candidate, secret)) return false;
+        // Inside it only by way of a deployment root the operator nested there: the CLI keeps
+        // its worktrees and cache in the same data directory as its keys.
+        return !ownRoots.some(
+          (root) => root !== secret && isWithin(root, secret) && isWithin(candidate, root),
+        );
+      }),
     );
     if (collides) {
       throw new ExecutorUnavailableError(
-        `refusing to mount ${path} into the container: it is, or contains, SoloW's own database (${protectedPath}) — a harness is never given the control plane's state`,
+        `refusing to mount ${path} into the container: it is, holds, or is inside SoloW's own state (${protectedPath}) — the database and the keys that decrypt and sign everything; a harness is never given the control plane's state`,
       );
     }
   }
