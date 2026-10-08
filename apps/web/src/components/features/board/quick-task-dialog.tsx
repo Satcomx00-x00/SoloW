@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -21,6 +22,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { WHOLE_PAGE } from "@/lib/paged";
 import { taskActionMessage } from "@/lib/task-errors";
+import { taskHref } from "@/lib/task-href";
 import { trpc } from "@/trpc/react";
 
 /**
@@ -48,17 +50,30 @@ export function QuickTaskDialog({
   const repos = trpc.repository.list.useQuery({ ...WHOLE_PAGE }, { enabled: open });
   const [prompt, setPrompt] = useState("");
   const [chosenRepositoryId, setChosenRepositoryId] = useState("");
+  /**
+   * A Task this dialog created whose run was refused. Kept on screen with a way to it, and the
+   * sentence cleared, so the same click cannot make a second Issue and Task for the same work.
+   */
+  const [notStarted, setNotStarted] = useState<{
+    task: { id: string; state: string };
+    reason: string | null;
+  } | null>(null);
 
   const repositories = repos.data?.items ?? [];
   const askRepository = repositories.length > 1;
   const repositoryId = chosenRepositoryId || repositories[0]?.id || "";
 
   const start = trpc.task.quickStart.useMutation({
-    onSuccess: () => {
+    onSuccess: (out) => {
+      // Written either way, so every list that shows Issues or Tasks is stale either way.
       utils.task.list.invalidate();
       utils.issue.list.invalidate();
       utils.project.allItems.invalidate();
       setPrompt("");
+      if (!out.started) {
+        setNotStarted({ task: out.task, reason: out.reason });
+        return;
+      }
       onOpenChange(false);
     },
   });
@@ -76,7 +91,10 @@ export function QuickTaskDialog({
     <Dialog
       open={open}
       onOpenChange={(next) => {
-        if (!next) start.reset();
+        if (!next) {
+          start.reset();
+          setNotStarted(null);
+        }
         onOpenChange(next);
       }}
     >
@@ -99,7 +117,10 @@ export function QuickTaskDialog({
               maxLength={5000}
               value={prompt}
               placeholder="Add a /health endpoint that returns the build version"
-              onChange={(event) => setPrompt(event.target.value)}
+              onChange={(event) => {
+                setPrompt(event.target.value);
+                setNotStarted(null);
+              }}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) submit();
               }}
@@ -122,6 +143,21 @@ export function QuickTaskDialog({
                 </SelectContent>
               </Select>
             </div>
+          ) : null}
+
+          {notStarted ? (
+            <p role="alert" className="text-sm">
+              <span className="text-feedback-error">
+                Task created but not started: {taskActionMessage(notStarted.reason)}
+              </span>{" "}
+              <Link
+                href={taskHref(notStarted.task)}
+                className="underline underline-offset-2 hover:text-primary"
+                onClick={() => onOpenChange(false)}
+              >
+                Open the task
+              </Link>
+            </p>
           ) : null}
 
           {start.error ? (

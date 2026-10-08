@@ -51,7 +51,7 @@ const MESSAGES: Record<string, string> = {
   [TaskErrorCode.NotUndelivered]:
     "This task is no longer waiting to be shipped. The page has been refreshed.",
   [TaskErrorCode.NoOrchestrator]:
-    "No orchestrator is running, so nothing can be pushed. Start the stack, then try again.",
+    "The orchestrator is not running or did not take the request. Start the stack, then try again.",
   [CommonErrorCode.RateLimited]: "Too many launches in a row. Wait a moment and try again.",
   [CommonErrorCode.Forbidden]: "You do not have permission to do that.",
   [CommonErrorCode.NotFound]: "That task no longer exists — this page may be out of date.",

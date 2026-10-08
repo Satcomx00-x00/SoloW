@@ -76,7 +76,10 @@ export const TaskErrorCode = {
    * the meantime, or it failed for another reason, which Retry is for.
    */
   NotUndelivered: "TASK_NOT_UNDELIVERED",
-  /** Ship again with no orchestrator running: nothing could push the branch. */
+  /**
+   * No orchestrator is running, or it would not take the event: nothing could push a branch for
+   * Ship again, or start the run a Quick task asked for.
+   */
   NoOrchestrator: "TASK_NO_ORCHESTRATOR",
 } as const;
 export type TaskErrorCode = (typeof TaskErrorCode)[keyof typeof TaskErrorCode];

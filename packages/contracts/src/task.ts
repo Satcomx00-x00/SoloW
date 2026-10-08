@@ -535,6 +535,19 @@ export const quickTaskInput = z.object({
 });
 export type QuickTaskInput = z.infer<typeof quickTaskInput>;
 
-/** What `task.quickStart` answers: the Task that is now running, and the Issue made for it. */
-export const quickTaskDto = z.object({ task: taskDto, issueId: idSchema });
+/**
+ * What `task.quickStart` answers: the Task and the Issue made for it, and whether the run started.
+ *
+ * A start can be refused after both are written — the Harness Profile at its cap, a blocker, an
+ * orchestrator that is down — and then the Task is left Ready, where Launch retries it. That is an
+ * answer rather than an error, because a thrown error after the writes left the caller holding a
+ * Task it did not know existed, and its retry made a second one. `reason` is the refusal's wire
+ * code, null when the run started.
+ */
+export const quickTaskDto = z.object({
+  task: taskDto,
+  issueId: idSchema,
+  started: z.boolean(),
+  reason: z.string().nullable(),
+});
 export type QuickTaskDto = z.infer<typeof quickTaskDto>;

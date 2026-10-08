@@ -65,7 +65,7 @@ describe("Board New task", () => {
 
   it("starts a task from one sentence, naming no repository when there is only one", async () => {
     const { log } = renderBoard({
-      "task.quickStart": () => ({ task: { id: "t1" }, issueId: "i1" }),
+      "task.quickStart": () => ({ task: { id: "t1" }, issueId: "i1", started: true, reason: null }),
     });
     await screen.findByText("No tasks yet");
 
@@ -90,7 +90,7 @@ describe("Board New task", () => {
         items: [repo("repo-1", "gate"), repo("repo-2", "web")],
         nextCursor: null,
       }),
-      "task.quickStart": () => ({ task: { id: "t1" }, issueId: "i1" }),
+      "task.quickStart": () => ({ task: { id: "t1" }, issueId: "i1", started: true, reason: null }),
     });
     await screen.findByText("No tasks yet");
     fireEvent.click(screen.getAllByRole("button", { name: /New task/ })[0] as HTMLElement);

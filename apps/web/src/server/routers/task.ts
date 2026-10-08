@@ -475,10 +475,24 @@ export const taskRouter = router({
       const created = unwrap(await createTaskRecord(rctx, payload));
       // Backlog to Ready is the one step the board makes the Owner take by hand; a Quick task
       // exists to skip it. If the start below is refused (the profile's concurrency cap, say),
-      // the Task is left Ready on the board where Launch retries it.
-      unwrap(await updateTaskState(rctx, created.id, "ready"));
-      const started = await startTaskRun(rctx, created.id);
-      return { task: started, issueId: issue.id };
+      // the Task is left Ready on the board where Launch retries it — and the refusal is the
+      // answer, not a throw, because the Issue and the Task exist now either way.
+      const ready = unwrap(await updateTaskState(rctx, created.id, "ready"));
+      try {
+        const started = await startTaskRun(rctx, created.id);
+        return { task: started, issueId: issue.id, started: true, reason: null };
+      } catch (cause) {
+        // A refusal by code is passed on as one; anything else is the orchestrator failing to
+        // take the event (`startTaskRun` already put the Task back to Ready).
+        const reason = cause instanceof TRPCError ? cause.message : TaskErrorCode.NoOrchestrator;
+        const current = await getTaskById(rctx, created.id);
+        return {
+          task: current.ok ? current.data : ready,
+          issueId: issue.id,
+          started: false,
+          reason,
+        };
+      }
     }),
 
   move: ownerProcedure

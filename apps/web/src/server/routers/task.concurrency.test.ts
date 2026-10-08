@@ -79,12 +79,19 @@ async function runningFor(db: TestDb, profileId: string): Promise<number> {
 }
 
 /** Split settled starts into how many ran and why the rest were refused. */
+/**
+ * A refused start either throws or, for a Quick task, answers `started: false` with the reason:
+ * its Issue and Task are already written by then, so the refusal is part of the answer.
+ */
+function refusalOf(r: PromiseSettledResult<unknown>): string | null {
+  if (r.status === "rejected") return (r.reason as Error).message;
+  const out = r.value as { started?: boolean; reason?: string | null };
+  return out.started === false ? (out.reason ?? "") : null;
+}
+
 function tally(results: PromiseSettledResult<unknown>[]) {
-  const passed = results.filter((r) => r.status === "fulfilled").length;
-  const refusals = results
-    .filter((r): r is PromiseRejectedResult => r.status === "rejected")
-    .map((r) => (r.reason as Error).message);
-  return { passed, refusals };
+  const refusals = results.map(refusalOf).filter((x): x is string => x !== null);
+  return { passed: results.length - refusals.length, refusals };
 }
 
 describe("concurrency cap under simultaneous starts (F5)", () => {

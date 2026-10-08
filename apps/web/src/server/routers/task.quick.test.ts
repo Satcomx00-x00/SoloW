@@ -2,7 +2,14 @@
 
 import { beforeEach, describe, expect, it } from "bun:test";
 import { TaskErrorCode } from "@solow/contracts";
-import { issue as issueTable, repository, session as sessionTable, workspace } from "@solow/db";
+import {
+  harnessProfile,
+  issue as issueTable,
+  repository,
+  session as sessionTable,
+  task as taskTable,
+  workspace,
+} from "@solow/db";
 import { createTestDb, type TestDb } from "@solow/db/testing";
 import { eq } from "drizzle-orm";
 import { seedWorkspaceGraph } from "../dal/test-fixtures.js";
@@ -47,6 +54,8 @@ describe("task.quickStart", () => {
     const out = await c.task.quickStart({ prompt: "Add a farewell() helper" });
 
     expect(out.task.state).toBe("running");
+    expect(out.started).toBe(true);
+    expect(out.reason).toBeNull();
     expect(out.task.issueId).toBe(out.issueId);
     expect(out.task.agentProfileId).toBe(fx.agentProfileId);
     expect(out.task.repositories[0]?.repositoryId).toBe(fx.repositoryId);
@@ -75,6 +84,43 @@ describe("task.quickStart", () => {
 
     const out = await c.task.quickStart({ prompt: "Do it", repositoryId: fx.repositoryId });
     expect(out.task.state).toBe("running");
+  });
+
+  it("answers with the Task it created when the start is refused, rather than throwing", async () => {
+    // A throw after the writes left an Issue and a Ready Task the dialog knew nothing about, and
+    // the Owner's second click made a second pair.
+    const fx = await seedWorkspaceGraph(db, "capped");
+    await db
+      .update(harnessProfile)
+      .set({ concurrencyCap: 0 })
+      .where(eq(harnessProfile.id, fx.agentProfileId));
+    const c = caller(db, fx.workspaceId);
+
+    const out = await c.task.quickStart({ prompt: "Add a farewell() helper" });
+
+    expect(out.started).toBe(false);
+    expect(out.reason).toBe(TaskErrorCode.ConcurrencyCapReached);
+    expect(out.task.state).toBe("ready");
+    expect(out.task.issueId).toBe(out.issueId);
+    expect(await db.select().from(issueTable)).toHaveLength(1);
+    expect(await db.select().from(taskTable)).toHaveLength(1);
+  });
+
+  it("names the orchestrator when it would not take the run", async () => {
+    const fx = await seedWorkspaceGraph(db, "unreachable");
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response("down", { status: 503 })) as unknown as typeof fetch;
+    process.env["SOLOW_ORCHESTRATOR_URL"] = "http://orchestrator.test";
+    try {
+      const out = await caller(db, fx.workspaceId).task.quickStart({ prompt: "Do it" });
+      expect(out.started).toBe(false);
+      expect(out.reason).toBe(TaskErrorCode.NoOrchestrator);
+      expect(out.task.state).toBe("ready");
+    } finally {
+      globalThis.fetch = realFetch;
+      Reflect.deleteProperty(process.env, "SOLOW_ORCHESTRATOR_URL");
+    }
   });
 
   it("writes nothing when the Workspace has no profiles", async () => {
