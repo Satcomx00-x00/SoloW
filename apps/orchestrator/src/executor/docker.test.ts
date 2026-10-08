@@ -311,7 +311,7 @@ describe("creation — the docker run line", () => {
    * the cache root. `MountRoots` leaves it optional only so a driver can be built without one in
    * a test, and the row for that case is in `REFUSED` below.
    */
-  type Deployment = Required<MountRoots>;
+  type Deployment = Required<Omit<MountRoots, "protectedPaths">>;
 
   const SRV: Deployment = {
     worktreeRoot: "/srv/solow/worktrees",
@@ -478,6 +478,18 @@ describe("creation — the docker run line", () => {
       MOUNTABLE.map(async ([source, roots, why]) => `${why} → ${await verdict(source, roots)}`),
     );
     expect(verdicts).toEqual(MOUNTABLE.map(([, , why]) => `${why} → mounted`));
+  });
+
+  it("refuses the control plane's database even where the allow-list would admit it (B5)", async () => {
+    // A `/srv` deployment keeps the database inside an area the allow-list admits, so only the
+    // named refusal stops a profile mount from handing it over.
+    const roots: MountRoots = { ...SRV, protectedPaths: ["/srv/solow/data/solow.db"] };
+    expect(await verdict("/srv/solow/data/solow.db", SRV)).toBe("mounted");
+    for (const source of ["/srv/solow/data/solow.db", "/srv/solow/data"]) {
+      await expect(guardMountSource(source, roots, LEXICAL)).rejects.toThrow(/database/);
+    }
+    expect(await verdict("/srv/solow/data-other/repo", roots)).toBe("mounted");
+    expect(await verdict("/srv/solow/repos/app", roots)).toBe("mounted");
   });
 
   it("refuses every source that would hand the harness the host", async () => {

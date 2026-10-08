@@ -1,5 +1,7 @@
 import "server-only";
 import {
+  type DockerAvailabilityReport,
+  dockerAvailabilityReport,
   type HarnessExplainReport,
   type HarnessProbeReport,
   harnessExplainReport,
@@ -98,6 +100,8 @@ export interface OrchestratorClient {
     workspaceId: string;
     agentProfileId: string;
   }): Promise<HarnessProbeReport>;
+  /** Whether the orchestrator's host has a reachable Docker daemon (roadmap B4). */
+  dockerAvailability(input: { workspaceId: string }): Promise<DockerAvailabilityReport | null>;
   /** Ask the Task's own harness for one answer — the Brief tab's Explain (see dal/explain-criterion.ts). */
   explainWithHarness(input: {
     workspaceId: string;
@@ -210,6 +214,28 @@ export const orchestrator: OrchestratorClient = {
       throw new Error(`orchestrator rejected explain: ${res.status} ${await res.text()}`);
     }
     return harnessExplainReport.parse(await res.json());
+  },
+  async dockerAvailability(input) {
+    const base = orchestratorUrl();
+    // Null, not "unavailable": an orchestrator that cannot be asked has not said there is no
+    // Docker, and the Executors page must not turn a network blip into a default of Local.
+    if (!base) return null;
+    try {
+      const ticket = signStreamTicket(
+        { workspaceId: input.workspaceId, taskId: null },
+        webEnv().SOLOW_STREAM_SECRET,
+        Date.now(),
+      );
+      const res = await fetch(new URL("/executor-availability", base), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ticket }),
+      });
+      if (!res.ok) return null;
+      return dockerAvailabilityReport.parse(await res.json());
+    } catch {
+      return null;
+    }
   },
   async probeHarnessProfile(input) {
     const base = orchestratorUrl();

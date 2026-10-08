@@ -102,6 +102,17 @@ export interface DockerExecutorOpts {
   transcriptStore?: string;
   /** The Task's checkpoint store, bound at its own path — the hook is named by absolute path. */
   checkpointStore?: string;
+  /**
+   * Host files that must never be inside a container, however a mount source reaches them: the
+   * orchestrator's database (and its journal files). The decrypting key lives in the
+   * orchestrator's environment, which a container never inherits (`spawn` takes its env
+   * verbatim), so the database is the other half of "the key and the database stay outside" (B5).
+   *
+   * A deny-list beside an allow-list, deliberately: a `/data` or `/srv/solow` deployment keeps the
+   * database *inside* a content area the allow-list admits, so only a named refusal can close it.
+   * A source is refused when it is one of these, inside one, or contains one.
+   */
+  protectedPaths?: readonly string[];
   /** `SOLOW_DOCKER_BIN`. Named by the caller so a wrapper script is a deployment setting. */
   dockerBin?: string;
   /** `uid:gid` for everything inside the container. See `runArgs`. */
@@ -570,6 +581,22 @@ export async function guardMountSource(
   // answer at all reports the path the operator actually named rather than one of the rules.
   const real = await resolveLinks(path);
   const canonical = await canonicalAllowList(roots, resolveLinks);
+  for (const protectedPath of roots.protectedPaths ?? []) {
+    const [lexical, canonicalProtected] = [
+      resolve(protectedPath),
+      await resolveLinks(protectedPath),
+    ];
+    const collides = [path, real].some((candidate) =>
+      [lexical, canonicalProtected].some(
+        (secret) => isWithin(candidate, secret) || isWithin(secret, candidate),
+      ),
+    );
+    if (collides) {
+      throw new ExecutorUnavailableError(
+        `refusing to mount ${path} into the container: it is, or contains, SoloW's own database (${protectedPath}) — a harness is never given the control plane's state`,
+      );
+    }
+  }
   if (!isMountable(path, lexicalAllowList(roots)) || !isMountable(real, canonical)) {
     const via = real === path ? "" : ` (a symlink to ${real})`;
     throw new ExecutorUnavailableError(
@@ -669,7 +696,10 @@ function realpathOnHost(host: Executor, path: string): Promise<ExecResult> {
 }
 
 /** The deployment's own directories, as the operator set them. See `DockerExecutorOpts`. */
-export type MountRoots = Pick<DockerExecutorOpts, "worktreeRoot" | "repoCacheRoot">;
+export type MountRoots = Pick<
+  DockerExecutorOpts,
+  "worktreeRoot" | "repoCacheRoot" | "protectedPaths"
+>;
 
 /**
  * The three rules of the allow-list, in one spelling — lexical or canonical, never mixed.

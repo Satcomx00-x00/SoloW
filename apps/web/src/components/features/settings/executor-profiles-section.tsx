@@ -1,7 +1,13 @@
 "use client";
 
-import type { ExecutorConfig, ExecutorKind, ExecutorProfileDto } from "@solow/contracts";
-import { Pencil, Trash2 } from "lucide-react";
+import {
+  type ExecutorConfig,
+  type ExecutorKind,
+  type ExecutorProfileDto,
+  LOCAL_EXECUTOR_NOTE,
+  preferredExecutorKind,
+} from "@solow/contracts";
+import { Pencil, ShieldAlert, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { ConfirmAction } from "@/components/features/confirm-action";
 import { Button } from "@/components/ui/button";
@@ -115,7 +121,21 @@ export function ExecutorProfilesSection() {
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState("");
-  const [config, setConfig] = useState<ExecutorConfig>(blankConfig("local", {}));
+  /*
+   * What the Owner has chosen, or null while they have not chosen anything: a new Executor starts
+   * as Docker whenever a container runtime is reachable (roadmap B4), and the answer arrives after
+   * first paint, so the default is derived rather than copied into state once. `null` from the
+   * query means the orchestrator could not be asked, which is not the same as "no Docker" — but a
+   * form that cannot tell has to start somewhere, and the host is the only kind that needs no
+   * runtime to exist.
+   */
+  const availability = trpc.profile.executor.dockerAvailability.useQuery(undefined, {
+    staleTime: 30_000,
+    retry: false,
+  });
+  const preferredKind = preferredExecutorKind(availability.data?.available === true);
+  const [picked, setConfig] = useState<ExecutorConfig | null>(null);
+  const config = picked ?? blankConfig(preferredKind, {});
   const [envPairs, setEnvPairs] = useState<EnvPair[]>([]);
   // Beside the config rather than inside it, for the reason `mount-rows.tsx` states: a row being
   // typed is not yet a mount, and the contract would refuse a config carrying one.
@@ -124,7 +144,7 @@ export function ExecutorProfilesSection() {
   const reset = () => {
     setEditingId(null);
     setName("");
-    setConfig(blankConfig("local", {}));
+    setConfig(null);
     setEnvPairs([]);
     setMountRows([]);
   };
@@ -249,7 +269,11 @@ export function ExecutorProfilesSection() {
                   </>
                 }
                 key={p.id}
-                meta={KIND_LABELS[p.kind]}
+                meta={
+                  p.kind === "local"
+                    ? `${KIND_LABELS[p.kind]} · trusted agents only`
+                    : KIND_LABELS[p.kind]
+                }
                 status={
                   <SectionStatus tone={drivable ? "idle" : "waiting"}>
                     {drivable ? "ready" : "no driver yet"}
@@ -321,6 +345,22 @@ export function ExecutorProfilesSection() {
               </SelectContent>
             </Select>
           </div>
+
+          {config.kind === "local" && (
+            <p
+              className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs"
+              role="note"
+            >
+              <ShieldAlert aria-hidden className="mt-0.5 size-3.5 shrink-0 text-destructive" />
+              <span>
+                {LOCAL_EXECUTOR_NOTE} The harness shares your account, so it can read the files and
+                credentials you can.
+                {availability.data?.available === false
+                  ? ` Docker was not found${availability.data.reason ? ` (${availability.data.reason})` : ""}, which is why this is the default.`
+                  : " Docker is the isolated alternative."}
+              </span>
+            </p>
+          )}
 
           {config.kind === "docker" && (
             <>

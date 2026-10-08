@@ -47,6 +47,32 @@ describe("baseEnv — the base a caller shapes the child environment from", () =
   });
 });
 
+describe("baseEnv — the control plane's own secrets stay behind (B5)", () => {
+  it("withholds the encryption key, the database and the signing keys, and keeps the rest", async () => {
+    const secrets = {
+      SOLOW_SECRET_KEY: "k",
+      SOLOW_DATABASE_URL: "postgres://u:p@h/db",
+      SOLOW_SQLITE_PATH: "/x/solow.db",
+      SOLOW_STREAM_SECRET: "s",
+      INNGEST_SIGNING_KEY: "i",
+      INNGEST_EVENT_KEY: "e",
+      BETTER_AUTH_SECRET: "b",
+    };
+    const harmless = { SOLOW_WORKTREE_ROOT: "/w", GC_TEST_KEEP: "yes" };
+    Object.assign(process.env, secrets, harmless);
+    try {
+      const base = await createLocalExecutor(await freshRoot()).baseEnv();
+      for (const name of Object.keys(secrets)) expect(base[name]).toBeUndefined();
+      expect(base["SOLOW_WORKTREE_ROOT"]).toBe("/w");
+      expect(base["GC_TEST_KEEP"]).toBe("yes");
+    } finally {
+      for (const name of [...Object.keys(secrets), ...Object.keys(harmless)]) {
+        delete process.env[name];
+      }
+    }
+  });
+});
+
 describe("exec — the host's own environment is what gets merged into", () => {
   it("hands the child the host's PATH, not a container's", async () => {
     const executor = createLocalExecutor(await freshRoot());

@@ -25,6 +25,22 @@ import type {
  * or the host filesystem directly; `scripts/audit-executor-boundary.ts` enforces that everything
  * else reaches the host through the `Executor` it returns.
  */
+/**
+ * Variables that belong to SoloW itself and must not follow a harness into its shell (B5).
+ *
+ * A local harness runs as the orchestrator's uid, so it can still read whatever files that uid can
+ * — that is why the local executor is documented as "for trusted agents only" (F07). But the
+ * environment is a gift, not a theft: leaving `SOLOW_SECRET_KEY` in it hands over the key that
+ * decrypts every stored credential, and the database URL, without the agent lifting a finger.
+ * Matched by shape (a `SOLOW_`/`INNGEST_`/`BETTER_AUTH_` name that reads as a secret) rather than
+ * listed, so a variable a later change adds is covered by the sentence that covers the others.
+ * The diagnostic ones (`SOLOW_WORKTREE_ROOT`, ...) are kept; the harness may have use for them.
+ */
+export function isOrchestratorSecret(name: string): boolean {
+  if (!/^(SOLOW|INNGEST|BETTER_AUTH)_/.test(name)) return false;
+  return /(SECRET|KEY|TOKEN|PASSWORD|DATABASE_URL|SQLITE_PATH)/.test(name);
+}
+
 export function createLocalExecutor(root: string): Executor {
   const jailRoot = resolve(root);
 
@@ -159,7 +175,7 @@ export function createLocalExecutor(root: string): Executor {
       // environment a locally-run harness receives.
       const env: Record<string, string> = {};
       for (const [key, value] of Object.entries(process.env)) {
-        if (value !== undefined) env[key] = value;
+        if (value !== undefined && !isOrchestratorSecret(key)) env[key] = value;
       }
       return env;
     },

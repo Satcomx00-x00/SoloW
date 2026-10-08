@@ -2,6 +2,7 @@
 
 import { CheckCircle2, CircleAlert, GitBranch, Loader2, Play, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
+import { HostRunWarning } from "@/components/features/host-run-warning";
 import { useWorkflowChoices } from "@/components/features/task/launch-task-dialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -218,6 +219,14 @@ export function LaunchIssuesDialog({
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+              <div className="sm:col-span-2">
+                <HostRunWarning
+                  executorKind={executors.data?.items.find((e) => e.id === executorProfileId)?.kind}
+                  permissionMode={
+                    harnesses.data?.items.find((h) => h.id === agentProfileId)?.permissionMode
+                  }
+                />
               </div>
             </div>
           )}
