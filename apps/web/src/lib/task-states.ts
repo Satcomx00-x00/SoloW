@@ -4,6 +4,7 @@ import {
   DELIVERY_FAILED_REASON,
   INTERRUPTED_REASON,
   PARTIAL_INTEGRATION_REASON,
+  STRANDED_PARK_REASON,
   STRANDED_REVIEW_REASON,
 } from "@solow/core";
 import {
@@ -154,10 +155,8 @@ export const STATE_STYLE: Record<TaskState, StateStyle> = {
  * written to stop the banner making.
  *
  * `park_never_resumed` is not hypothetical: the orchestrator's sweep writes it onto a Task that
- * slept through its quota window, so the board really was rendering that string. Its literal is
- * repeated here rather than imported because it is defined in the orchestrator
- * (`apps/orchestrator/src/reconcile.ts`), which the web app does not depend on; `fail` and `park`
- * are `classifyRunFailure`'s own verdicts.
+ * slept through its quota window, so the board really was rendering that string. `fail` and
+ * `park` are `classifyRunFailure`'s own verdicts.
  *
  * The tone matters as much as the wording. A parked Task's reason painted in the failed red
  * would contradict the violet badge sitting next to it, so each reason names the state whose
@@ -170,7 +169,7 @@ const FAILURE_REASONS: Record<
 > = {
   fail: { label: "Run failed", tone: "failed" },
   park: { label: "Paused on quota", tone: "parked" },
-  park_never_resumed: { label: "Never resumed", tone: "parked" },
+  [STRANDED_PARK_REASON]: { label: "Never resumed", tone: "parked" },
   // Distinguished from a generic failure (spec AC-013, issue #63): this one has a one-click fix.
   [CREDENTIAL_EXPIRED_REASON]: {
     label: "Credential expired",
