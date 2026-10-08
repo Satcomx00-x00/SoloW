@@ -16,7 +16,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useDebounced } from "@/hooks/use-debounced";
 import { trpc } from "@/trpc/react";
+import { HistoryRetentionNotice } from "./history-retention-notice";
 import { SectionStatus, SettingsField, SettingsLoading, SettingsSection } from "./settings-shell";
 
 /**
@@ -49,12 +51,12 @@ function fromValue(value: string): HistoryRetentionDays | null {
 
 const count = new Intl.NumberFormat();
 
-function bytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
-  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(n / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-}
+/**
+ * How long the picker has to rest before the server is asked to count. The count is cheap but
+ * synchronous on the server, and someone stepping through the windows wants the last one counted,
+ * not each one they passed.
+ */
+const PREVIEW_DEBOUNCE_MS = 300;
 
 const plural = (n: number, one: string, many = `${one}s`) =>
   `${count.format(n)} ${n === 1 ? one : many}`;
@@ -72,10 +74,13 @@ export function HistoryRetentionSection() {
   }, [stored]);
 
   const draftDays = draft === null ? null : fromValue(draft);
+  const settledDays = useDebounced(draftDays, PREVIEW_DEBOUNCE_MS);
   const preview = trpc.workspace.previewHistoryRetention.useQuery(
-    { days: draftDays ?? HISTORY_RETENTION_DEFAULT_DAYS },
-    { enabled: draftDays !== null },
+    { days: settledDays ?? HISTORY_RETENTION_DEFAULT_DAYS },
+    { enabled: settledDays !== null && settledDays === draftDays },
   );
+  // A count for the window before the one now shown must not be read as this one's.
+  const counted = settledDays === draftDays ? preview.data : undefined;
 
   const save = trpc.workspace.setHistoryRetention.useMutation({
     onSuccess: (next) => {
@@ -85,7 +90,8 @@ export function HistoryRetentionSection() {
   });
 
   const data = retention.data;
-  const dirty = draft !== null && draft !== stored;
+  // While the upgrade notice is up, saving the window already shown is still an answer to it.
+  const dirty = draft !== null && (draft !== stored || data?.notice === true);
 
   return (
     <SettingsSection
@@ -104,6 +110,7 @@ export function HistoryRetentionSection() {
         <SettingsLoading rows={2} />
       ) : (
         <>
+          <HistoryRetentionNotice />
           <form
             className="flex flex-wrap items-end gap-2"
             onSubmit={(e) => {
@@ -138,15 +145,15 @@ export function HistoryRetentionSection() {
               <p className="text-muted-foreground">
                 Nothing is removed. Every transcript is kept, and the database grows with every run.
               </p>
-            ) : preview.data === undefined ? (
-              preview.error ? (
+            ) : counted === undefined ? (
+              settledDays === draftDays && preview.error ? (
                 <p className="text-destructive" role="alert">
                   Could not count what this would remove: {preview.error.message}
                 </p>
               ) : (
                 <Skeleton className="h-4 w-80" />
               )
-            ) : preview.data.events === 0 && preview.data.diffs === 0 ? (
+            ) : counted.events === 0 && counted.diffs === 0 ? (
               <p className="text-muted-foreground">
                 Nothing has been finished longer than {label(draftDays)} yet — nothing would be
                 removed today.
@@ -155,12 +162,11 @@ export function HistoryRetentionSection() {
               <p>
                 {dirty ? "Saving this would remove" : "The next sweep removes"}{" "}
                 <strong className="font-medium tabular-nums">
-                  {plural(preview.data.events, "transcript event")}
+                  {plural(counted.events, "transcript event")}
                 </strong>{" "}
-                from {plural(preview.data.sessions, "session")} of{" "}
-                {plural(preview.data.tasks, "finished task")}, and empty{" "}
-                {plural(preview.data.diffs, "diff patch", "diff patches")} — about{" "}
-                {bytes(preview.data.bytes)}.
+                from {plural(counted.sessions, "session")} of{" "}
+                {plural(counted.tasks, "finished task")}, and trim{" "}
+                {plural(counted.diffs, "captured diff")} to their file lists.
               </p>
             )}
           </div>

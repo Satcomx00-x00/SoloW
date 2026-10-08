@@ -84,6 +84,7 @@ export async function listRunsNeedingAttention(
     items: items.slice(0, ATTENTION_LIMIT),
     truncated: items.length > ATTENTION_LIMIT,
     recheckAt: recheckAt === null ? null : new Date(recheckAt).toISOString(),
+    recheckInMs: recheckAt === null ? null : Math.max(recheckAt - nowMs, 0),
   });
 }
 
@@ -103,11 +104,17 @@ async function newestSignOfLife(
     .orderBy(desc(session.startedAt))
     .limit(1);
   if (!newest) return { lastActivityAt: updatedAt, sessionState: null };
+  // Newest by `seq`, not by `at`: `seq` only grows within a Session and `at` is stamped on insert,
+  // so the last row is the latest one, and `session_event_seq` finds it without reading the rest
+  // of the log. Ordering by `at`, which no index carries, read and sorted every row the Session
+  // had, once per running or parked Task on every status frame.
   const [event] = await ctx.db
     .select({ at: sessionEvent.at })
     .from(sessionEvent)
-    .where(eq(sessionEvent.sessionId, newest.id))
-    .orderBy(desc(sessionEvent.at))
+    .where(
+      and(eq(sessionEvent.workspaceId, ctx.workspaceId), eq(sessionEvent.sessionId, newest.id)),
+    )
+    .orderBy(desc(sessionEvent.seq))
     .limit(1);
   return { lastActivityAt: event?.at ?? newest.startedAt, sessionState: newest.state };
 }

@@ -139,8 +139,50 @@ describe("listRunsNeedingAttention", () => {
 
     const list = await listed();
     expect(list.items).toEqual([]);
-    // And it says when to look again: the moment that last word is a whole quiet window old.
+    // And it says when to look again: the moment that last word is a whole quiet window old —
+    // as an instant, and as a delay from the server's own clock, which a browser can wait out
+    // without comparing against a clock of its own that may disagree.
     expect(list.recheckAt).toBe(new Date(NOW + 60_000).toISOString());
+    expect(list.recheckInMs).toBe(60_000);
+  });
+
+  it("says no delay when nothing would join by the clock", async () => {
+    await seedTask("Broke", "failed", { failureReason: INTERRUPTED_REASON });
+    const list = await listed();
+    expect(list.recheckAt).toBeNull();
+    expect(list.recheckInMs).toBeNull();
+  });
+
+  it("reads a run's newest event through the (session_id, seq) index, without sorting its log", async () => {
+    // Asked once per running or parked Task on every `status` frame; ordering by `at` would read
+    // and sort the Session's whole log, payloads and all, to find one row.
+    const id = await seedTask("Long run", "running", { updatedAt: ago(PARK_WINDOW_MS) });
+    await seedRun(id, { startedAt: ago(PARK_WINDOW_MS), lastAt: ago(30_000) });
+
+    const client = db.$client;
+    const original = client.prepare.bind(client);
+    const statements: string[] = [];
+    client.prepare = ((query: string, ...rest: unknown[]) => {
+      statements.push(query);
+      return original(query, ...(rest as []));
+    }) as typeof client.prepare;
+    try {
+      await listed();
+    } finally {
+      client.prepare = original;
+    }
+
+    const reads = statements.filter((s) => /from "session_event"/.test(s));
+    expect(reads).toHaveLength(1);
+    const plan = (
+      client
+        .query(`EXPLAIN QUERY PLAN ${reads[0]}`)
+        .all(...Array.from({ length: (reads[0]?.match(/\?/g) ?? []).length }, () => "x")) as Array<{
+        detail: string;
+      }>
+    ).map((p) => p.detail);
+    expect(plan.join("\n")).toContain("USING INDEX session_event_seq");
+    expect(plan.join("\n")).not.toContain("TEMP B-TREE");
   });
 
   it("falls back to the Session's start for a run that never said anything", async () => {

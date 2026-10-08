@@ -24,9 +24,9 @@ export const HISTORY_RETENTION_DAY_OPTIONS = [7, 30, 90, 365] as const;
 export type HistoryRetentionDays = (typeof HISTORY_RETENTION_DAY_OPTIONS)[number];
 
 /**
- * What a Workspace starts with — and what every existing Workspace got when the rule arrived
- * (the migration that added the column fills it with this). Four times the History window, long enough to look
- * back over a month's work; see Decision 0032 for why a default at all.
+ * What a new Workspace starts with. Four times the History window, long enough to look back over
+ * a month's work; see Decision 0032 for why a default at all. A Workspace that existed before the
+ * rule arrived did not get it: it keeps everything until its Owner chooses (`notice` below).
  */
 export const HISTORY_RETENTION_DEFAULT_DAYS: HistoryRetentionDays = 30;
 
@@ -87,6 +87,12 @@ export const historyRetentionSettingSchema = historyRetentionDaysSchema.nullable
 export const historyRetentionDto = z.object({
   /** The stored window, or null for "keep forever". */
   days: historyRetentionSettingSchema,
+  /**
+   * True for a Workspace that predates retention and whose Owner has not chosen a window yet.
+   * Such a Workspace was left on "keep forever" rather than given the default, and this is the
+   * invitation to choose. Saving any window, "keep forever" included, clears it.
+   */
+  notice: z.boolean(),
   defaultDays: z.number().int(),
   options: z.array(z.number().int()),
 });
@@ -104,14 +110,15 @@ export const previewHistoryRetentionInput = z.object({ days: historyRetentionDay
 export type PreviewHistoryRetentionInput = z.infer<typeof previewHistoryRetentionInput>;
 
 export const historyRetentionPreviewDto = z.object({
-  /** Finished Tasks with at least one Session still holding a transcript past the window. */
+  /** Finished Tasks with a Session past the window whose transcript has not been removed yet. */
   tasks: z.number().int().nonnegative(),
   sessions: z.number().int().nonnegative(),
   /** Transcript events that would be deleted. */
   events: z.number().int().nonnegative(),
-  /** Captured diffs whose patch text would be emptied. */
+  /**
+   * Captured diffs in those Sessions, each trimmed to its file list. Counted without reading
+   * them, so one captured with no patch at all is counted too.
+   */
   diffs: z.number().int().nonnegative(),
-  /** Approximate bytes of payload freed — the stored JSON's length, not pages on disk. */
-  bytes: z.number().int().nonnegative(),
 });
 export type HistoryRetentionPreviewDto = z.infer<typeof historyRetentionPreviewDto>;

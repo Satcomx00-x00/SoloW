@@ -1,7 +1,20 @@
 import { HISTORY_PRUNED_EVENT_KINDS, type HistoryRetentionPreviewDto } from "@solow/contracts";
-import { and, eq, inArray, isNotNull, isNull, lt, ne, or, type SQL, sql } from "drizzle-orm";
+import {
+  and,
+  eq,
+  exists,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  ne,
+  or,
+  type SQL,
+  sql,
+} from "drizzle-orm";
+import { activeWorktreeOf } from "./active-worktree.js";
 import type { Db } from "./index.js";
-import { session, sessionEvent, task, workspace } from "./schema.js";
+import { session, sessionEvent, task, workspace, worktree } from "./schema.js";
 
 /**
  * The transcript half of history retention (Decision 0032, FINDINGS F4).
@@ -55,12 +68,18 @@ const patchHeld = sql`coalesce(json_extract(${sessionEvent.payload}, '$.patch'),
  * the worktree half of retention reads (`retention.ts` in the orchestrator). A Done Task that is
  * touched again — reopened, retitled — moves its own clock forward, which errs towards keeping.
  *
- * Two things hold a Session back however old it is:
- *  - **a live Session on the same Task**: a reopened Task running again is not finished, whatever
- *    its row said a moment ago;
- *  - **a sub-task still waiting to fork from it**: a fork point is verified by hashing the events
- *    up to it (`loadForkOrigin`), and a sub-task that has not run yet would find its parent's
- *    history rewritten and start without it.
+ * Three things hold a Session back however old it is:
+ *  - **an `active` Session on the same Task**: a reopened Task running again is not finished,
+ *    whatever its row said a moment ago, and a live run's log is never cut under it;
+ *  - **a `resumable` Session on the same Task, while the Task still holds a worktree**
+ *    (`activeWorktreeOf`, the expiry arm's own test): a resume carries on the harness's
+ *    conversation inside that worktree. Without one nothing can resume, so a Session that still
+ *    reads `resumable` (Done sets it; only expiry closes it, and only when it had a worktree to
+ *    take) does not hold its transcript forever;
+ *  - **any sub-task forked from it that still exists**: a fork point is verified by hashing the
+ *    events up to it (`loadForkOrigin`) on every full brief, not only the first, so a sub-task
+ *    reopened from Done or restored from History would be refused as stale. Only the purge,
+ *    which deletes the sub-task's row, releases the parent.
  */
 function dueSessions(workspaceId: string, cutoff: string): SQL {
   return and(
@@ -71,14 +90,49 @@ function dueSessions(workspaceId: string, cutoff: string): SQL {
       and(isNotNull(task.deletedAt), lt(task.deletedAt, cutoff)),
       and(isNull(task.deletedAt), eq(task.state, "done"), lt(task.updatedAt, cutoff)),
     ),
-    sql`not exists (select 1 from session live where live.task_id = ${task.id} and live.state = 'active')`,
-    sql`not exists (select 1 from task child where child.fork_session_id = ${session.id} and child.deleted_at is null and child.state <> 'done')`,
+    sql`not exists (select 1 from session live where live.task_id = ${task.id} and live.workspace_id = ${task.workspaceId} and live.state = 'active')`,
+    or(
+      sql`not exists (select 1 from session held where held.task_id = ${task.id} and held.workspace_id = ${task.workspaceId} and held.state = 'resumable')`,
+      sql`not exists (select 1 from ${worktree} where ${activeWorktreeOf(task.workspaceId, task.id)})`,
+    ),
+    sql`not exists (select 1 from task child where child.fork_session_id = ${session.id} and child.workspace_id = ${session.workspaceId})`,
   ) as SQL;
 }
 
 /**
+ * The same question for one Session, asked inside each statement that removes from it.
+ *
+ * The due list is read once per Workspace and the sweep yields between batches, while the web app
+ * and the run loop keep writing to the file: a Task can be reopened, or a sub-task forked from it,
+ * after its Session was listed. Asking inside the DELETE or UPDATE itself, rather than in a query
+ * before it, leaves no gap between the answer and the write.
+ */
+function stillDue(db: Db, workspaceId: string, sessionId: string, cutoff: string): SQL {
+  return exists(
+    db
+      .select({ one: sql`1` })
+      .from(session)
+      .innerJoin(task, and(eq(task.id, session.taskId), eq(task.workspaceId, session.workspaceId)))
+      .where(and(eq(session.id, sessionId), dueSessions(workspaceId, cutoff))),
+  );
+}
+
+/** How many of a Session's events are of these kinds, answered from `session_event_kind` alone. */
+const eventsOf = (kinds: SQL) =>
+  sql<number>`(select count(*) from ${sessionEvent} where ${sessionEvent.sessionId} = ${session.id} and ${sessionEvent.kind} in (${kinds}))`;
+
+/**
  * What a window of `days` would remove from this Workspace if the sweep ran now. `null` — keep
  * forever — removes nothing, and is answered without a query.
+ *
+ * Settings asks this from the web process, synchronously, for each window the Owner considers,
+ * so it only counts: the due Sessions, then each one's events by kind through the
+ * `(session_id, kind)` index. No payload is read. That is also why there is no byte figure: the
+ * only honest one is the payloads' length, which means reading every one of them, and the file
+ * would not shrink by that amount anyway (no vacuum, Decision 0032 §8).
+ *
+ * Diffs are counted, not inspected: the sweep empties the patch of each one in a due Session
+ * that still holds one, so a diff captured with an empty patch is counted here and skipped there.
  */
 export function previewHistoryPrune(
   db: Db,
@@ -86,39 +140,20 @@ export function previewHistoryPrune(
   days: number | null,
   now: Date = new Date(),
 ): HistoryRetentionPreviewDto {
-  const none = { tasks: 0, sessions: 0, events: 0, diffs: 0, bytes: 0 };
+  const none = { tasks: 0, sessions: 0, events: 0, diffs: 0 };
   if (days === null) return none;
   const cutoff = historyPruneCutoff(days, now);
 
   const row = db
     .select({
       tasks: sql<number>`count(distinct ${session.taskId})`,
-      sessions: sql<number>`count(distinct ${session.id})`,
-      events: sql<number>`coalesce(sum(case when ${sessionEvent.kind} in (${prunedKinds}) then 1 else 0 end), 0)`,
-      diffs: sql<number>`coalesce(sum(case when ${sessionEvent.kind} = 'diff' then 1 else 0 end), 0)`,
-      bytes: sql<number>`coalesce(sum(case when ${sessionEvent.kind} = 'diff'
-        then length(json_extract(${sessionEvent.payload}, '$.patch'))
-        else length(${sessionEvent.payload}) end), 0)`,
+      sessions: sql<number>`count(*)`,
+      events: sql<number>`coalesce(sum(${eventsOf(prunedKinds)}), 0)`,
+      diffs: sql<number>`coalesce(sum(${eventsOf(sql`'diff'`)}), 0)`,
     })
-    .from(sessionEvent)
-    .innerJoin(
-      session,
-      and(
-        eq(session.id, sessionEvent.sessionId),
-        eq(session.workspaceId, sessionEvent.workspaceId),
-      ),
-    )
+    .from(session)
     .innerJoin(task, and(eq(task.id, session.taskId), eq(task.workspaceId, session.workspaceId)))
-    .where(
-      and(
-        eq(sessionEvent.workspaceId, workspaceId),
-        dueSessions(workspaceId, cutoff),
-        or(
-          sql`${sessionEvent.kind} in (${prunedKinds})`,
-          and(eq(sessionEvent.kind, "diff"), patchHeld),
-        ),
-      ),
-    )
+    .where(dueSessions(workspaceId, cutoff))
     .get();
 
   return row
@@ -127,7 +162,6 @@ export function previewHistoryPrune(
         sessions: Number(row.sessions),
         events: Number(row.events),
         diffs: Number(row.diffs),
-        bytes: Number(row.bytes),
       }
     : none;
 }
@@ -207,6 +241,7 @@ export async function pruneHistory(
                     eq(sessionEvent.workspaceId, workspaceId),
                     eq(sessionEvent.sessionId, sessionId),
                     inArray(sessionEvent.kind, [...HISTORY_PRUNED_EVENT_KINDS]),
+                    stillDue(db, workspaceId, sessionId, cutoff),
                   ),
                 )
                 .limit(limit),
@@ -237,17 +272,28 @@ export async function pruneHistory(
             eq(sessionEvent.sessionId, sessionId),
             eq(sessionEvent.kind, "diff"),
             patchHeld,
+            stillDue(db, workspaceId, sessionId, cutoff),
           ),
         )
         .returning({ id: sessionEvent.id })
         .all();
       report.diffs += stripped.length;
 
-      db.update(session)
+      // A Session that stopped being due part-way keeps what is left, unstamped; the next sweep
+      // that finds it due again finishes it.
+      const stamped = db
+        .update(session)
         .set({ eventsPrunedAt: now.toISOString() })
-        .where(and(eq(session.workspaceId, workspaceId), eq(session.id, sessionId)))
-        .run();
-      report.sessions += 1;
+        .where(
+          and(
+            eq(session.workspaceId, workspaceId),
+            eq(session.id, sessionId),
+            stillDue(db, workspaceId, sessionId, cutoff),
+          ),
+        )
+        .returning({ id: session.id })
+        .all();
+      report.sessions += stamped.length;
     }
   }
 

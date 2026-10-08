@@ -430,6 +430,7 @@ describe("history retention (Decision 0032)", () => {
     const initial = await getHistoryRetention(ctxFor(db, mine));
     expect(initial.ok && initial.data).toEqual({
       days: 30,
+      notice: false,
       defaultDays: 30,
       options: [7, 30, 90, 365],
     });
@@ -441,6 +442,22 @@ describe("history retention (Decision 0032)", () => {
 
     const reread = await getHistoryRetention(ctxFor(db, mine));
     expect(reread.ok && reread.data.days).toBeNull();
+  });
+
+  it("asks an upgraded Workspace to choose, and stops asking once anything is saved", async () => {
+    // What migration 0049 leaves an existing Workspace with: everything kept, and a question.
+    const id = await bareWorkspace();
+    await db
+      .update(workspace)
+      .set({ historyRetentionDays: null, historyRetentionNotice: true })
+      .where(eq(workspace.id, id));
+
+    const asked = await getHistoryRetention(ctxFor(db, id));
+    expect(asked.ok && asked.data).toMatchObject({ days: null, notice: true });
+
+    // Keeping forever is a choice too: saved, it answers the question without changing the window.
+    const kept = await setHistoryRetention(ctxFor(db, id), { days: null });
+    expect(kept.ok && kept.data).toMatchObject({ days: null, notice: false });
   });
 
   it("reads a hand-written value outside the offered windows as the default", async () => {
@@ -460,7 +477,6 @@ describe("history retention (Decision 0032)", () => {
       sessions: 0,
       events: 0,
       diffs: 0,
-      bytes: 0,
     });
   });
 });

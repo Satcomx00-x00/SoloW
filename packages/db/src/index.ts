@@ -66,6 +66,7 @@ export function createDb() {
 
 export type Db = ReturnType<typeof createDb>;
 
+export { activeWorktreeOf } from "./active-worktree.js";
 export * from "./auth-schema.js";
 export {
   bootstrapWorkspace,

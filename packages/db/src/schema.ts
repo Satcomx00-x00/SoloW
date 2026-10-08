@@ -80,6 +80,18 @@ export const workspace = sqliteTable("workspace", {
    * `history-prune.test.ts` holds the two together.
    */
   historyRetentionDays: integer("history_retention_days").default(30),
+  /**
+   * True while a Workspace that existed before retention arrived has not been asked about it.
+   *
+   * The migration that added the window gave every such Workspace null (keep forever) rather
+   * than the default, because a default applied on upgrade would delete a month of transcripts
+   * on the first hourly sweep, before anyone had seen the setting. This flag is how Settings and
+   * History invite the Owner to choose instead. Saving a window, any window, clears it. A new
+   * Workspace starts false: it gets the default from its first day.
+   */
+  historyRetentionNotice: integer("history_retention_notice", { mode: "boolean" })
+    .notNull()
+    .default(false),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -1376,6 +1388,13 @@ export const sessionEvent = sqliteTable(
      * Session's log, and the unique index above cannot serve it since `seq` sits between the two.
      */
     byStep: index("session_event_step").on(t.sessionId, t.workflowStepId),
+    /**
+     * History retention (Decision 0032): what a window would remove is a count of one Session's
+     * events by kind, asked synchronously by Settings in the web process. With `kind` in the
+     * index that count is answered from the index alone, without reading a row and its payload,
+     * which for a tool result can be kilobytes. The sweep's batched delete selects through it too.
+     */
+    byKind: index("session_event_kind").on(t.sessionId, t.kind),
   }),
 );
 

@@ -7,6 +7,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { TaskCard } from "@/components/features/board/task-card";
 import { ConfirmAction } from "@/components/features/confirm-action";
+import { HistoryRetentionNotice } from "@/components/features/settings/history-retention-notice";
 import {
   LaunchTaskDialog,
   useWorkflowChoices,
@@ -76,6 +77,8 @@ export function HistoryView() {
           it the harness's conversation — is removed.
         </p>
       </header>
+
+      <HistoryRetentionNotice linkToSettings />
 
       {error ? (
         <p className="text-destructive text-sm" role="alert">

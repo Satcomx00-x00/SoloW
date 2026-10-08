@@ -31,9 +31,18 @@ Two things limit what can go:
 1. **The rule.** A Session's transcript is removed once its Task has been *finished* for longer
    than the Workspace's window. Finished means Done (measured from `task.updated_at`) or deleted
    (measured from `task.deleted_at`), the same marks 0025's sweep uses. Running, review, parked,
-   failed and backlog Tasks are never touched, however old they are. Two more guards: no Session
-   of the Task is `active`, and no undeleted, unfinished sub-task is waiting to fork from the
-   Session, because a fork point is verified by hashing the events behind it.
+   failed and backlog Tasks are never touched, however old they are. Three more guards. No
+   Session of the Task is `active`. No Session of the Task is `resumable` *while the Task still
+   holds an active worktree*, the same test the expiry arm (0025) uses before it takes the
+   worktrees (`activeWorktreeOf` in `@solow/db`); a resume continues the harness's conversation
+   inside the worktree, so without one nothing can resume. That matters because Done sets a
+   Session `resumable` and only expiry closes it, and only when there is a worktree to take: a
+   Task that never had one, or lost it another way, would otherwise keep its transcript forever.
+   And no sub-task forked from the Session still exists. A fork point is verified by hashing the events behind it on every full brief, so a sub-task
+   that is Done (and can be reopened) or deleted (and can be restored) still needs its parent's
+   history; only the purge, which deletes the sub-task's row, releases it. The guards are asked
+   again inside every delete and update the sweep makes, not only when it lists the due Sessions,
+   because it yields between batches while the web app and the run loop keep writing.
 2. **What goes and what stays.** These are listed once in `@solow/contracts`
    (`HISTORY_PRUNED_EVENT_KINDS` / `HISTORY_KEPT_EVENT_KINDS`) and shown in Settings in plain words.
    - *Deleted rows:* `user_turn`, `assistant_turn`, `notice`, `tool_call`, `tool_result`, `todos`,
@@ -50,15 +59,25 @@ Two things limit what can go:
    90 or 365 days, or null for **keep forever**. There is no window shorter than
    `TASK_RETENTION_DAYS`: a Task restored or reopened within its week in History must come back
    with its conversation. A test in `@solow/core` checks this.
-4. **The default is 30 days, and it applies to existing Workspaces too.** The migration adds the
-   column with `DEFAULT 30`, so every Workspace that exists today gets the rule on upgrade. Thirty
-   days is four times the History window and long enough to look back over a month's work. A
-   default of "forever" would leave F4 open on every install that never visits the page, which is
-   nearly all of them.
+4. **The default is 30 days for a new Workspace. An existing Workspace keeps everything until its
+   Owner chooses.** The migration adds the column with `DEFAULT 30`, then sets every Workspace
+   that already exists to null (keep forever) and flags it (`workspace.history_retention_notice`).
+   Thirty days is four times the History window and long enough to look back over a month's work.
+   It is not applied on upgrade because nobody has seen it yet: the first hourly sweep after the
+   upgrade would delete every transcript finished more than a month ago, the pre-migrate backup
+   is pruned after five more upgrades, and the Owner would never have been told. Existing data is
+   never deleted silently. Instead, while the flag is set, Settings → History retention and the
+   History page show a one-time notice that transcripts are being kept and invite the Owner to
+   choose; saving any window, "keep forever" included, clears it. *(Amended 2026-10-08, before
+   0049 shipped in a release: the first version applied 30 days to existing Workspaces.)*
 5. **Shown and changed in Settings → Workspace → History retention.** The picker holds a draft,
    and the server counts what that draft *would* remove right now (`workspace.previewHistoryRetention`:
-   Tasks, Sessions, events, diffs and approximate bytes) before anything is saved. Nothing is
-   written until the Owner presses Save.
+   Tasks, Sessions, events and diffs) before anything is saved. Nothing is written until the
+   Owner presses Save. The count runs synchronously in the web process, so it only counts rows:
+   the due Sessions, then each one's events by kind through the `session_event_kind`
+   `(session_id, kind)` index, without reading a payload. There is no byte figure. The only
+   honest one would read every payload it measures, and by §8 the file does not shrink by that
+   amount anyway. The picker waits until it has been still for 300 ms before asking.
 6. **It runs as the third arm of the existing hourly retention sweep in the orchestrator**, after
    purge and expiry. It is not an Inngest cron, for three reasons. The sweep already runs hourly on
    the process that shares the database file. It already runs after the first reconcile pass, so a
@@ -90,8 +109,9 @@ Two things limit what can go:
 
 ## Consequences
 
-- The database stops growing without bound on every install, including ones whose Owner never
-  opens Settings.
+- A new install stops growing without bound even if its Owner never opens Settings. An install
+  that predates the rule keeps growing until its Owner answers the notice; that is the price of
+  never deleting what someone already had without asking.
 - A Task finished more than a window ago opens with its record, its decisions, its rounds and the
   file list of each change, but not the conversation. A summary still says what its range held,
   but expanding the range returns what is left of it. A fork cursor minted earlier from a pruned

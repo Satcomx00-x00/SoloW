@@ -5,13 +5,14 @@ import {
   HISTORY_PRUNED_EVENT_KINDS,
   HISTORY_RETENTION_DEFAULT_DAYS,
 } from "@solow/contracts";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { previewHistoryPrune, pruneHistory } from "./history-prune.js";
 import {
   executorProfile,
   harnessCatalog,
   harnessProfile,
   issue,
+  repository,
   review,
   secret,
   session,
@@ -20,7 +21,9 @@ import {
   sessionUsage,
   task,
   workspace,
+  worktree,
 } from "./schema.js";
+import { cascadeDeleteTasks } from "./task-cascade.js";
 import { createTestDb, type TestDb } from "./testing.js";
 
 /**
@@ -165,6 +168,28 @@ async function seedTask(
   return sessionId;
 }
 
+/** A worktree row for the Task, as the run loop writes one and the expiry arm marks it. */
+async function seedWorktree(taskId: string, status: "active" | "removed" = "active") {
+  await db
+    .insert(repository)
+    .values({
+      id: `repo-${WS}`,
+      workspaceId: WS,
+      name: "repo",
+      source: "local_path",
+      location: "/tmp/repo",
+    })
+    .onConflictDoNothing();
+  await db.insert(worktree).values({
+    workspaceId: WS,
+    taskId,
+    repositoryId: `repo-${WS}`,
+    path: `/tmp/worktrees/${taskId}`,
+    branch: `solow/${taskId}`,
+    status,
+  });
+}
+
 async function kindsOf(sessionId: string) {
   const rows = await db
     .select({ kind: sessionEvent.kind })
@@ -255,7 +280,51 @@ describe("which Sessions are due", () => {
     expect(await kindsOf(old)).toEqual(ALL_KINDS);
   });
 
-  it("keeps a parent's transcript while a sub-task is still waiting to fork from it", async () => {
+  it("leaves a resumable Session, and its Task's others, while the Task still holds a worktree", async () => {
+    // A resume carries on the harness's conversation inside the worktree; while that is on disk,
+    // the transcript is the context the resume hands back.
+    const resumable = await seedTask("resumable", {
+      updatedAt: ago(60 * DAY),
+      sessionState: "resumable",
+    });
+    await seedWorktree("resumable");
+    const older = await seedTask("two-sessions", { updatedAt: ago(60 * DAY) });
+    await db
+      .insert(session)
+      .values({ id: "s-two-2", workspaceId: WS, taskId: "two-sessions", state: "resumable" });
+    await seedWorktree("two-sessions");
+
+    const report = await pruneHistory(db, { now: NOW, pause: noPause });
+
+    expect(report.sessions).toBe(0);
+    expect(await kindsOf(resumable)).toEqual(ALL_KINDS);
+    expect(await kindsOf(older)).toEqual(ALL_KINDS);
+    expect(previewHistoryPrune(db, WS, 30, NOW).sessions).toBe(0);
+  });
+
+  it("prunes a Session that still reads resumable once its Task holds no worktree", async () => {
+    // Done leaves a Session `resumable` and only expiry closes it, when it has a worktree to take.
+    // Without one nothing can resume, so the row's state is no reason to keep the transcript.
+    const never = await seedTask("no-worktree", {
+      updatedAt: ago(60 * DAY),
+      sessionState: "resumable",
+    });
+    const taken = await seedTask("worktree-removed", {
+      updatedAt: ago(60 * DAY),
+      sessionState: "resumable",
+    });
+    await seedWorktree("worktree-removed", "removed");
+
+    const report = await pruneHistory(db, { now: NOW, pause: noPause });
+
+    expect(report.sessions).toBe(2);
+    expect(await kindsOf(never)).toEqual(KEPT_KINDS);
+    expect(await kindsOf(taken)).toEqual(KEPT_KINDS);
+  });
+
+  it("keeps a parent's transcript for as long as any sub-task forked from it exists", async () => {
+    // Every full brief re-verifies the fork point (`loadForkOrigin`), so a child that is
+    // reopened from Done, or restored from History, would be refused as stale.
     const parent = await seedTask("parent", { updatedAt: ago(60 * DAY) });
     await seedTask("child", {
       state: "review",
@@ -266,8 +335,22 @@ describe("which Sessions are due", () => {
     await pruneHistory(db, { now: NOW, pause: noPause });
     expect(await kindsOf(parent)).toEqual(ALL_KINDS);
 
-    // Once the child is done with it, the parent's ordinary window applies.
+    // Done, and reopenable.
     await db.update(task).set({ state: "done" }).where(eq(task.id, "child"));
+    await pruneHistory(db, { now: NOW, pause: noPause });
+    expect(await kindsOf(parent)).toEqual(ALL_KINDS);
+
+    // Deleted, and restorable until the purge.
+    await db
+      .update(task)
+      .set({ deletedAt: ago(DAY) })
+      .where(eq(task.id, "child"));
+    await pruneHistory(db, { now: NOW, pause: noPause });
+    expect(await kindsOf(parent)).toEqual(ALL_KINDS);
+    expect(previewHistoryPrune(db, WS, 30, NOW).sessions).toBe(0);
+
+    // Purged: nothing can fork from the parent any more, and its own window applies.
+    db.transaction((tx) => cascadeDeleteTasks(tx, WS, ["child"]));
     await pruneHistory(db, { now: NOW, pause: noPause });
     expect(await kindsOf(parent)).toEqual(KEPT_KINDS);
   });
@@ -287,7 +370,6 @@ describe("which Sessions are due", () => {
       sessions: 0,
       events: 0,
       diffs: 0,
-      bytes: 0,
     });
   });
 });
@@ -382,6 +464,78 @@ describe("bounded batches", () => {
   });
 });
 
+describe("a Task that changes during a sweep", () => {
+  /**
+   * The due list is read once per Workspace, and the sweep yields to the event loop between
+   * batches — the web app and the run loop write to the same file in the meantime. Each delete
+   * has to ask again whether its Session is still due.
+   */
+  it("stops removing a Task's transcript the moment it is reopened", async () => {
+    const id = await seedTask("reopened-mid-sweep", { updatedAt: ago(60 * DAY) });
+    let reopened = false;
+    const pause = async () => {
+      if (reopened) return;
+      reopened = true;
+      await db
+        .update(task)
+        .set({ state: "running", updatedAt: NOW.toISOString() })
+        .where(eq(task.id, "reopened-mid-sweep"));
+      await db.insert(session).values({
+        id: "s-reopened-mid-sweep-2",
+        workspaceId: WS,
+        taskId: "reopened-mid-sweep",
+        state: "active",
+      });
+    };
+
+    const report = await pruneHistory(db, { now: NOW, batchSize: 3, pause });
+
+    expect(reopened).toBe(true);
+    // The first batch went before the reopen; nothing after it did.
+    expect(report.events).toBe(3);
+    expect(report.sessions).toBe(0);
+    expect(report.diffs).toBe(0);
+    expect(await kindsOf(id)).toHaveLength(ALL_KINDS.length - 3);
+    expect(await prunedAt(id)).toBeNull();
+    const [diff] = await db
+      .select({ payload: sessionEvent.payload })
+      .from(sessionEvent)
+      .where(and(eq(sessionEvent.sessionId, id), eq(sessionEvent.kind, "diff")));
+    expect((diff?.payload as { patch?: string } | undefined)?.patch).toBe(PATCH);
+  });
+
+  it("skips a Session that stopped being due after the list was read", async () => {
+    const first = await seedTask("a-first", { updatedAt: ago(60 * DAY) });
+    const second = await seedTask("b-second", { updatedAt: ago(60 * DAY) });
+    let restored = false;
+    const pause = async () => {
+      if (restored) return;
+      restored = true;
+      // Whichever Session the sweep has not reached yet (the one with every event still there)
+      // is reopened while it waits.
+      const [current] = await db
+        .select({ sessionId: sessionEvent.sessionId })
+        .from(sessionEvent)
+        .where(inArray(sessionEvent.sessionId, [first, second]))
+        .groupBy(sessionEvent.sessionId)
+        .orderBy(sql`count(*)`)
+        .limit(1);
+      const other = current?.sessionId === first ? "b-second" : "a-first";
+      await db
+        .update(task)
+        .set({ state: "running", updatedAt: NOW.toISOString() })
+        .where(eq(task.id, other));
+    };
+
+    const report = await pruneHistory(db, { now: NOW, batchSize: 3, pause });
+
+    expect(restored).toBe(true);
+    expect(report.sessions).toBe(1);
+    const kinds = [await kindsOf(first), await kindsOf(second)].sort((a, b) => a.length - b.length);
+    expect(kinds).toEqual([KEPT_KINDS, ALL_KINDS]);
+  });
+});
+
 describe("the preview", () => {
   it("counts exactly what the sweep then removes", async () => {
     await seedTask("one", { updatedAt: ago(60 * DAY) });
@@ -390,12 +544,61 @@ describe("the preview", () => {
     const at30 = previewHistoryPrune(db, WS, 30, NOW);
     const at7 = previewHistoryPrune(db, WS, 7, NOW);
     expect(at30).toMatchObject({ tasks: 1, sessions: 1, events: TRANSCRIPT.length, diffs: 1 });
-    expect(at30.bytes).toBeGreaterThan(PATCH.length);
     expect(at7).toMatchObject({ tasks: 2, sessions: 2, events: 2 * TRANSCRIPT.length, diffs: 2 });
 
     const report = await pruneHistory(db, { now: NOW, pause: noPause });
     expect(report).toMatchObject({ events: at30.events, diffs: at30.diffs });
     expect(previewHistoryPrune(db, WS, 30, NOW).events).toBe(0);
+  });
+});
+
+describe("the preview's cost", () => {
+  /**
+   * Every statement the preview sends, captured on the way to SQLite. Settings asks for a preview
+   * from the web process, synchronously, for each window the Owner considers; it has to count
+   * rows from an index and never read a transcript's payload to do it.
+   */
+  function capture(run: () => void): Array<{ sql: string; params: unknown[] }> {
+    const client = db.$client;
+    const original = client.prepare.bind(client);
+    const seen: Array<{ sql: string; params: unknown[] }> = [];
+    client.prepare = ((query: string, ...rest: unknown[]) => {
+      const statement = original(query, ...(rest as []));
+      const record = { sql: query, params: [] as unknown[] };
+      seen.push(record);
+      for (const method of ["get", "all", "values", "run"] as const) {
+        const call = statement[method].bind(statement) as (...args: unknown[]) => unknown;
+        (statement as unknown as Record<string, unknown>)[method] = (...args: unknown[]) => {
+          record.params = args;
+          return call(...args);
+        };
+      }
+      return statement;
+    }) as typeof client.prepare;
+    try {
+      run();
+    } finally {
+      client.prepare = original;
+    }
+    return seen;
+  }
+
+  it("counts from an index and never reads an event's payload", async () => {
+    await seedTask("old", { updatedAt: ago(60 * DAY) });
+
+    const statements = capture(() => previewHistoryPrune(db, WS, 7, NOW));
+    expect(statements.length).toBeGreaterThan(0);
+
+    for (const { sql, params } of statements) {
+      expect(sql).not.toContain("payload");
+      const plan = db.$client
+        .query(`EXPLAIN QUERY PLAN ${sql}`)
+        .all(...(params as never[])) as Array<{ detail: string }>;
+      const onEvents = plan.map((p) => p.detail).filter((d) => / session_event\b/.test(d));
+      expect(onEvents.length).toBeGreaterThan(0);
+      // A covering index answers from the index alone: the row, and its payload, is never read.
+      for (const detail of onEvents) expect(detail).toContain("USING COVERING INDEX");
+    }
   });
 });
 
