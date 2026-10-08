@@ -87,6 +87,15 @@ describe("health.status", () => {
     });
   });
 
+  it("reads an orchestrator older than the health check as outdated, not down", async () => {
+    // Before F3 the orchestrator had no GET /health and refused every non-WebSocket request on
+    // that path with 426. It is running; it needs restarting on the current version.
+    orchestratorAnswers(() => new Response("websocket only", { status: 426 }));
+    const health = await caller(db, workspaceId).health.status();
+    expect(health.orchestrator.state).toBe("outdated");
+    expect(health.engine.state).toBe("unknown");
+  });
+
   it("counts an orchestrator answering without a report as up", async () => {
     // An orchestrator older than the report, or the E2E suite's stand-in, answers plain "ok".
     orchestratorAnswers(() => new Response("ok"));

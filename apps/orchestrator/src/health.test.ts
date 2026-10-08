@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { orchestratorHealthReport } from "@solow/contracts";
-import { engineHealthUrl, handleHealthGet, probeEngine } from "./health.js";
+import { cachedProbe, engineHealthUrl, handleHealthGet, probeEngine } from "./health.js";
 
 describe("engineHealthUrl", () => {
   it("asks the self-hosted server the launchers point the SDK at", () => {
@@ -42,6 +42,8 @@ describe("probeEngine", () => {
     });
     expect(health.state).toBe("unreachable");
     expect(health.detail).toContain("refused");
+    // The route is unauthenticated: where the engine lives is not something to tell a caller.
+    expect(health.detail).not.toContain("engine.test");
   });
 
   it("gives up on an engine that never answers", async () => {
@@ -55,6 +57,31 @@ describe("probeEngine", () => {
 
   it("says unknown, not down, when there is no address to ask", async () => {
     expect((await probeEngine(null)).state).toBe("unknown");
+  });
+});
+
+describe("cachedProbe", () => {
+  it("asks the engine once for every caller inside the window, then again after it", async () => {
+    let asked = 0;
+    let now = 1_000;
+    const probe = cachedProbe(
+      async () => {
+        asked += 1;
+        return { state: "ok" as const, detail: null };
+      },
+      5_000,
+      () => now,
+    );
+
+    // Unauthenticated, so a burst of requests must not become a burst of outbound probes.
+    await Promise.all([probe(), probe(), probe()]);
+    now += 4_999;
+    await probe();
+    expect(asked).toBe(1);
+
+    now += 2;
+    await probe();
+    expect(asked).toBe(2);
   });
 });
 

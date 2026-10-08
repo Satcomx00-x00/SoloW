@@ -14,8 +14,16 @@ import { idSchema, taskStateSchema } from "./common.js";
  * - `not_configured`: nothing says where it is (a dev stack started without an orchestrator).
  * - `unknown`: could not be asked — the engine, when the orchestrator in front of it is down, or
  *   a hosted engine this deployment has no address for.
+ * - `outdated`: answered, but as a version older than the question — an orchestrator from before
+ *   its health route refuses `GET /health` with 426. Running, and in need of a restart.
  */
-export const serviceStateSchema = z.enum(["ok", "unreachable", "not_configured", "unknown"]);
+export const serviceStateSchema = z.enum([
+  "ok",
+  "unreachable",
+  "not_configured",
+  "unknown",
+  "outdated",
+]);
 export type ServiceState = z.infer<typeof serviceStateSchema>;
 
 export const serviceHealthDto = z.object({
