@@ -466,12 +466,12 @@ export async function clearStrandedPark(
  * 1. **Not in `harnessRegistry`.** Conclusive when it answers: registration spans the whole
  *    `agent-run` step, so a run that woke and is working is always present. It matters more here
  *    than in either neighbour, because a woken run reads `parked` until it takes a concurrency
- *    slot back (`park-claim-`), and a run whose row an operator moved meanwhile never takes one.
- * 2. **Its Session is not at the review gate.** Same row, later in that round: a run that woke
- *    into a row an operator had moved, worked and finished leaves the Session `awaiting_review`
- *    whatever the Task reads, and ends. That is work waiting for a *person*,
- *    which is never stranded — the same distinction `reportStrandedReviews` draws. It no longer
- *    leaks either: the run that opened the gate released its executor on the way out, so there is
+ *    slot back (`park-claim-`), which with its Profile full can be a while of short sleeps.
+ * 2. **Its Session is not at the review gate.** A Session waiting at its gate is work waiting
+ *    for a *person*, whatever the Task row reads, and that is never stranded — the same
+ *    distinction `reportStrandedReviews` draws. (A woken run no longer works a round under a
+ *    `parked` row — it either claims `running` or stands down — but a row written by an older
+ *    run can still read this way.) It does not leak either: the run that opened the gate released its executor on the way out, so there is
  *    no container behind the row for the reaper to miss.
  * 3. **Silent for longer than a whole park window.** `PARK_WINDOW_MS + RECLAIM_STALE_MS` measured
  *    from the last thing this Task or its Session actually did. A run still inside its window has

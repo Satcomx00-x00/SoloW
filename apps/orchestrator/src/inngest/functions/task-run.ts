@@ -259,8 +259,9 @@ export async function runTaskLifecycle(
       }
       if (run.kind === "failed") {
         if (run.cls === "park") {
-          await parkRound(scope, round, loop.leg.stepId);
-          continue;
+          if (await parkRound(scope, round, loop.leg.stepId)) continue;
+          // The Task left `parked` while this run slept; whoever moved it owns it now.
+          return { taskId, result: "stood_down" };
         }
         // credential_expired or hard failure: pause/stop with the reason preserved. A verdict the
         // transport put in words (a harness below its catalog pin) is the reason itself — "fail"

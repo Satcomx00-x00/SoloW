@@ -20,6 +20,7 @@ import {
 import { CREDENTIAL_EXPIRED_REASON, STRANDED_REVIEW_REASON } from "@solow/core";
 import { type SessionCursor, sessionCursorAt } from "@solow/core/session-log";
 import {
+  claimTaskRunSlot,
   encryptSecret,
   executorProfile,
   harnessCatalog,
@@ -873,10 +874,14 @@ describe("runTaskLifecycle (integration)", () => {
     };
     const { deps, spies } = makeDeps(db, watched, nullStream());
 
-    await lifecycle(deps, { event: { data: ids }, step: operatorMoved });
+    const result = await lifecycle(deps, { event: { data: ids }, step: operatorMoved });
 
-    expect(runner.starts).toBe(2);
-    expect(await Promise.all(atStart)).toEqual(["running", "done"]);
+    // The operator owns the Task now: the woken run stands down instead of working a round on
+    // a Task that reads `done` (ADR 0030, one run per Task).
+    expect(runner.starts).toBe(1);
+    expect(await Promise.all(atStart)).toEqual(["running"]);
+    expect(result.result).toBe("stood_down");
+    expect(await taskState(db, ids.taskId)).toBe("done");
 
     // And the board is told once, by the park itself. The announce that follows the wake-up is
     // there to take a stranded badge off a card that is still parked; on a card the operator has
@@ -886,6 +891,61 @@ describe("runTaskLifecycle (integration)", () => {
       (p) => p.channel === `ws:${ids.workspaceId}:board` && p.event["state"] === "parked",
     );
     expect(parkedOnBoard).toHaveLength(1);
+  });
+
+  it("a run woken from a Park stands down when a Retry started another run while it slept", async () => {
+    const ids = freshIds();
+    await seedRun(db, ids);
+    const runner = new ScriptedRunner([
+      { kind: "failed", stopReason: "error", signal: { quotaExhausted: true } },
+      { kind: "completed", stopReason: "end_turn" },
+    ]);
+    const { deps, spies } = makeDeps(db, runner, nullStream());
+    const sessionB = `${ids.sessionId}-b`;
+
+    // Run A parks. While it sleeps the operator presses Retry, which is what `startTaskRun` does:
+    // claim the Task out of `parked` under the cap and open a fresh Session for run B.
+    const sleepsThroughRetry: StepLike = {
+      ...scriptedStep([]),
+      sleepUntil: async () => {
+        expect(claimTaskRunSlot(db, ids.workspaceId, ids.taskId, ["parked"]).kind).toBe("claimed");
+        await db.insert(session).values({
+          id: sessionB,
+          workspaceId: ids.workspaceId,
+          taskId: ids.taskId,
+          state: "active",
+        });
+      },
+    };
+    const announcedBefore = () =>
+      spies.published.filter((p) => p.channel.endsWith(":board")).length;
+
+    const a = await lifecycle(deps, { event: { data: ids }, step: sleepsThroughRetry });
+    const announcedByA = announcedBefore();
+
+    // A ends without a harness round, without writing the Task, and without telling the board.
+    expect(a.result).toBe("stood_down");
+    expect(runner.starts).toBe(1);
+    expect(await taskState(db, ids.taskId)).toBe("running");
+    const logOf = async (sessionId: string) =>
+      (await db.select().from(sessionEvent).where(eq(sessionEvent.sessionId, sessionId))).map(
+        (row) => row.payload as { kind: string; text?: string; from?: string; to?: string },
+      );
+    const aLog = await logOf(ids.sessionId);
+    expect(aLog.some((p) => p.kind === "state" && p.from === "parked")).toBe(false);
+    expect(aLog.filter((p) => p.kind === "notice" && p.text?.includes("stood down"))).toHaveLength(
+      1,
+    );
+    expect(await logOf(sessionB)).toEqual([]);
+
+    // B is the only run: it works its round and reaches the gate.
+    const b = await lifecycle(deps, {
+      event: { data: { ...ids, sessionId: sessionB } },
+      step: scriptedStep(["approve"]),
+    });
+    expect(runner.starts).toBe(2);
+    expect(b.result).toBe("done");
+    expect(announcedByA).toBe(1); // A's park, and nothing after it.
   });
 
   it("a run woken from a Park takes its concurrency slot back before its next round", async () => {

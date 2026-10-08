@@ -57,13 +57,14 @@ export async function failRun(
 
 /**
  * Park the Task on an exhausted quota, sleep for a quota window, and wake it — the `park-${round}`
- * branch of the run loop. The loop carries on into another round when this returns.
+ * branch of the run loop. True when the loop should carry on into another round; false when this
+ * run has stood down because the Task left `parked` while it slept (`standDown`).
  */
 export async function parkRound(
   scope: RunScope,
   round: number,
   workflowStepId: string | null,
-): Promise<void> {
+): Promise<boolean> {
   const { step, db, log, workspaceId, taskId, recordTransition, announce } = scope;
   await step.run(`park-${round}`, async () => {
     /*
@@ -124,17 +125,53 @@ export async function parkRound(
    * while this run slept is the operator's call, not the sleeper's, so `clearStrandedPark`
    * takes back only the verdict written about the sleep and leaves the state alone.
    *
-   * What it does not do is stop this run: the loop carries on into another round against a
-   * Task the operator may have called finished. That is the pre-existing shape of a woken
-   * park — the run owns the worktree and nothing else can commit it — and narrowing it
-   * means deciding what a run should do when its Task is taken out from under it, which is
-   * a lifecycle question and not this step's.
+   * A row that moved is also the end of this run, not just of the write: see `standDown`.
    */
   const stillParked = await step.run(`park-woke-${round}`, () =>
     clearStrandedPark(db, workspaceId, taskId),
   );
-  // Skipped when the row moved: whoever moved it has already announced what they did.
-  if (stillParked) await claimWokenSlot(scope, round, workflowStepId);
+  if (!stillParked) return await standDown(scope, round, workflowStepId);
+  return await claimWokenSlot(scope, round, workflowStepId);
+}
+
+/**
+ * End a woken run whose Task left `parked` while it slept, without touching the Task (ADR 0030:
+ * one run per Task).
+ *
+ * Every way out of `parked` belongs to someone else. Retry and a move to Running go through
+ * `startTaskRun`, which claims the row and enqueues a *new* run in a fresh Session — carrying on
+ * here would be a second harness in the same worktree beside it. A move to Failed, or the Task
+ * going to History or being purged, is a person ending the work. None of them expects the
+ * sleeper to come back: there is no "resume now" that relies on it.
+ *
+ * So it writes no state and announces nothing — whoever moved the row has already said what it
+ * reads — and holds no slot to give back, because a parked row counts for none. What it does
+ * leave is one line in its own Session's log, so that transcript says why it stops where it
+ * does. A Session that is gone with its Task has nowhere to say it, and that is not a failure.
+ */
+async function standDown(
+  scope: RunScope,
+  round: number,
+  workflowStepId: string | null,
+): Promise<false> {
+  const { step, db, log, workspaceId, taskId, sessionId } = scope;
+  await step.run(`park-stood-down-${round}`, async () => {
+    try {
+      await appendSessionEvent(db, workspaceId, {
+        sessionId,
+        seq: await nextSessionEventSeq(db, workspaceId, sessionId),
+        workflowStepId,
+        payload: {
+          kind: "notice",
+          text: "This run woke from its quota window to find the Task had been moved while it slept, and stood down: whatever moved it owns the Task now.",
+        },
+      });
+    } catch (cause) {
+      captureException(log, cause, { stage: "park-stood-down" });
+    }
+  });
+  log.info({ workspaceId, taskId }, "woken park stood down: the Task left parked while it slept");
+  return false;
 }
 
 /**
@@ -161,15 +198,14 @@ export function slotRetryDelayMs(attempt: number): number {
  * sleep. Each refusal also refreshes the row through `clearStrandedPark`, so the stranded-park
  * sweep reads a run that is waiting as alive rather than lost.
  *
- * A row that is no longer `parked` (an operator moved it while the run slept) is left alone, and
- * the round goes on as it did before this existed — what a run should do when its Task is taken
- * out from under it is a lifecycle question, not this step's.
+ * A row that is no longer `parked` by the time a slot is asked for — moved, deleted — makes this
+ * run stand down, the same as one found moved on waking.
  */
 async function claimWokenSlot(
   scope: RunScope,
   round: number,
   workflowStepId: string | null,
-): Promise<void> {
+): Promise<boolean> {
   const { deps, step, db, log, workspaceId, taskId, sessionId, channel } = scope;
   const { recordTransition, announce } = scope;
   for (let attempt = 0; ; attempt += 1) {
@@ -196,9 +232,9 @@ async function claimWokenSlot(
     if (claim === "claimed") {
       logStateTransition(log, { workspaceId, taskId, from: "parked", to: "running" });
       announce("running");
-      return;
+      return true;
     }
-    if (claim === "moved") return;
+    if (claim === "moved") return await standDown(scope, round, workflowStepId);
     // Once: it takes a stranded badge off the card, and later refusals change nothing on it.
     if (attempt === 0) announce("parked");
     await step.sleepUntil(

@@ -238,7 +238,7 @@ export async function reapOrphanedContainers(
  *
  * **A `parked` row is not moved by its own run until it gets a slot**, so pairing the state with
  * the reason is not cover on its own. A woken run reads `parked` for as long as its Profile is
- * full, and nothing in the orchestrator used to clear `failureReason` for a parked Task —
+ * full (a row that left `parked` while it slept makes it stand down), and nothing in the orchestrator used to clear `failureReason` for a parked Task —
  * so an overtaken stamp stayed readable here across every gap between durable steps, for as long
  * as it took an operator to move the card.
  *
