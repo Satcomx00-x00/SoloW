@@ -1,6 +1,6 @@
 # 7. Deployment View
 
-**Status:** Draft · **Owner:** Architecture / Operator · **Last reviewed:** 2026-09-04
+**Status:** Draft · **Owner:** Architecture / Operator · **Last reviewed:** 2026-10-08
 
 SoloW runs in two deployment modes from one product. This section describes both at a
 business-readable level. See [F16](../features/F16-platform-deployment.md) for the
@@ -37,14 +37,18 @@ launcher is the published `bin` of the npm package; it resolves a Bun runtime, b
 local processes named above, and prints the URL to open.
 
 **Everything it creates lives in one directory** — `~/.solow` by default, `$SOLOW_HOME` or
-`--data-dir` otherwise. That is the embedded database, the worktrees and repository clones harnesses
-work in, and the three generated keys (data encryption, session signing, stream signing). Deleting
-that directory is a full uninstall; copying it is a full backup. Nothing is written outside it and
-nothing leaves the machine.
+`--data-dir` otherwise. That is the embedded database, the engine's queue and runs in flight, the
+worktrees and repository clones harnesses work in, imported Skills, and the generated keys.
+Deleting that directory is a full uninstall. Copying it while SoloW runs is *not* a reliable
+backup, because the database is mid-write; `solow backup` takes a consistent one, and
+`solow restore` puts one back ([Backup and Restore](../operations/backup-and-restore.md)).
+Nothing is written outside it and nothing leaves the machine.
 
 **Restarting is safe and is the upgrade path.** Migrations run on every start rather than only the
 first — already-applied ones are skipped, so it is cheap, and without it an upgraded launcher would
-open an old database and fail on tables that do not exist yet. Workspace bootstrap is idempotent
+open an old database and fail on tables that do not exist yet. When a migration is pending, a copy
+of the database and its keys is taken first, and the migration does not run without it. Workspace
+bootstrap is idempotent
 for the same reason: an install upgraded from a build that had no harness catalog gets one, instead
 of a Settings page with an empty picker. Seeding is first-run only, so a restart never disturbs
 existing work.
@@ -61,7 +65,10 @@ checked by running it rather than by looking it up, because a broken shim or an 
 dynamic link passes a lookup and then fails on the first clone — long after the web UI has come up
 and the person has stopped suspecting their installation.
 
-Ctrl-C, or any termination signal, takes the whole stack down with it.
+Ctrl-C, or any termination signal, takes the whole stack down with it. A service that crashes is
+not a reason to: it is restarted on its own with increasing delays while the other two keep
+running, and only one that keeps failing stops the stack, so that a service manager can restart
+it ([Running as a Service](../operations/running-as-a-service.md)).
 
 > **Implementation note (2026-09-04):** ports default to 5000 (application), 5001 (orchestrator)
 > and 8288 (Inngest Dev Server), and each moves independently — `--port`, `--ws-port` and

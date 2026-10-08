@@ -1,0 +1,45 @@
+# SoloW as a systemd user service. See docs/operations/running-as-a-service.md.
+#
+#   mkdir -p ~/.config/systemd/user
+#   cp scripts/systemd/solow.service ~/.config/systemd/user/
+#   (edit ExecStart and PATH below)
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now solow
+#   loginctl enable-linger "$USER"     # keep it running with nobody logged in
+#
+# Two layers of restart. The launcher restarts a crashed web app, orchestrator or engine on its
+# own, with backoff, and leaves the other two running. It exits only when one of them keeps
+# failing, and that exit is what Restart= below acts on.
+
+[Unit]
+Description=SoloW (web app, orchestrator, workflow engine)
+Wants=network-online.target
+After=network-online.target
+# Five whole-stack restarts in ten minutes, then systemd stops trying and the unit shows failed.
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=simple
+# The npm package, pinned to a version so an upgrade is a choice you make (it takes a copy of the
+# database first). Find npx with `command -v npx`.
+ExecStart=/usr/bin/npx --yes @satcomx00-x00/solow@0.21.0 --no-open
+# Or a checkout, which builds the web app on start:
+#WorkingDirectory=%h/src/SoloW
+#ExecStart=/bin/sh scripts/start.sh
+
+# The data folder. The default for npx is ~/.solow, for a checkout its .solow/.
+Environment=SOLOW_HOME=%h/.solow
+# A user unit starts with a short PATH. node, git and each harness CLI you use (claude, …) must be
+# on it; for a checkout, bun as well.
+Environment=PATH=%h/.local/bin:%h/.bun/bin:/usr/local/bin:/usr/bin:/bin
+
+Restart=on-failure
+RestartSec=10
+# TERM goes to the launcher alone, which stops the three services in order and exits 0. Anything
+# still running after TimeoutStopSec is killed.
+KillMode=mixed
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

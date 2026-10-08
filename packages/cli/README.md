@@ -77,6 +77,8 @@ SOLOW_FETCH_BINARIES=1 npx @satcomx00-x00/solow
 
 ```
 npx @satcomx00-x00/solow [options]
+npx @satcomx00-x00/solow backup  [--out <dir>] [--no-engine] [--data-dir <path>]
+npx @satcomx00-x00/solow restore [<backup>] [--data-dir <path>]
 
   -p, --port <n>          Port for the web UI            (default 5000)
       --ws-port <n>       Port for the orchestrator      (default 5001)
@@ -91,19 +93,39 @@ npx @satcomx00-x00/solow [options]
 
 Everything is under `~/.solow` (override with `--data-dir` or `$SOLOW_HOME`):
 
-| Path            | What it holds                                            |
-| --------------- | -------------------------------------------------------- |
-| `solow.db`      | The SQLite database — issues, tasks, runs, transcripts    |
-| `secret.key`    | Encryption key for stored provider tokens                 |
-| `auth.secret`   | Signs the session cookie                                  |
-| `stream.secret` | Signs stream subscription tickets                         |
-| `worktrees/`    | One git worktree per running task                         |
-| `repos/`        | Cache of cloned repositories                              |
+| Path                  | What it holds                                          |
+| --------------------- | ------------------------------------------------------ |
+| `solow.db`            | The SQLite database — issues, tasks, runs, transcripts  |
+| `secret.key`          | Encryption key for stored provider tokens               |
+| `auth.secret`         | Signs the session cookie                                |
+| `stream.secret`       | Signs stream subscription tickets                       |
+| `orchestrator.secret` | Authenticates the web app to the orchestrator           |
+| `inngest-*.key`       | Signing and event keys for the workflow engine          |
+| `inngest/`            | The workflow engine's queue and runs in flight          |
+| `worktrees/`          | One git worktree per running task                       |
+| `repos/`              | Cache of cloned repositories                            |
+| `skills/`             | Repositories imported Skills were fetched from          |
+| `backups/`            | Backups, including the automatic ones before upgrades   |
 
-The three key files are generated on first run and written `0600`. **Back them up** — the
-database encrypts stored secrets with `secret.key`, so losing it makes those unrecoverable.
+The key files are generated on first run and written `0600`. An exported variable of the same
+name (`SOLOW_SECRET_KEY`, `SOLOW_AUTH_SECRET`, …) wins over the file. The database encrypts stored
+secrets with `secret.key`, so a backup without it is not a backup.
 
 To start completely fresh, stop SoloW and delete the directory.
+
+## Backup and restore
+
+```sh
+npx @satcomx00-x00/solow backup                  # into ~/.solow/backups, safe while running
+npx @satcomx00-x00/solow backup --out /mnt/usb
+npx @satcomx00-x00/solow restore                 # lists the backups
+npx @satcomx00-x00/solow restore <name or path>  # SoloW must be stopped
+```
+
+Copying the folder while SoloW runs is not a reliable backup, because the database is mid-write.
+`backup` takes a consistent copy of the database, the keys and the engine's state; worktrees and
+clones are not included. `restore` keeps what it replaces as a backup, so it can be undone.
+Details: [Backup and Restore](https://github.com/Satcomx00-x00/SoloW/blob/main/docs/operations/backup-and-restore.md).
 
 ## Upgrading
 
@@ -111,7 +133,18 @@ To start completely fresh, stop SoloW and delete the directory.
 npx @satcomx00-x00/solow@latest
 ```
 
-Migrations run on every start, so an existing database is brought up to date automatically.
+Migrations run on every start, so an existing database is brought up to date automatically. When
+one is pending, a copy of the database and its keys is taken into `backups/` first; the five
+newest are kept (`SOLOW_BACKUP_KEEP`). To roll back, reinstall the previous version and restore
+its `pre-migrate` copy.
+
+## Staying up
+
+A service that crashes is restarted after 1 s, 2 s, 4 s… while the other two keep running. One
+that fails five times in a row stops SoloW with an error, for a service manager to act on. For a
+long-running install, see
+[Running as a Service](https://github.com/Satcomx00-x00/SoloW/blob/main/docs/operations/running-as-a-service.md),
+which includes a systemd unit.
 
 ## Source and issues
 

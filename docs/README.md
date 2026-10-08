@@ -20,6 +20,7 @@ of information has one predictable home:
 | [`features/`](./features/) | Feature Specifications | The complete behaviour of every feature |
 | [`architecture/`](./architecture/) | [arc42](https://arc42.org) + [C4](https://c4model.com) | How the system is structured, at business-readable altitude |
 | [`decisions/`](./decisions/) | [MADR / Nygard ADRs](https://adr.github.io) | The significant choices and their trade-offs |
+| [`operations/`](./operations/) | How-to guides | Running a local install day to day: [backup and restore](./operations/backup-and-restore.md), [running as a service](./operations/running-as-a-service.md) |
 | [`glossary.md`](./glossary.md) | Ubiquitous Language | The shared vocabulary used everywhere |
 | [`CONVENTIONS.md`](./CONVENTIONS.md) | Docs-as-Code | How this documentation is written and maintained |
 

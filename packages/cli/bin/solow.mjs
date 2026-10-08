@@ -22,6 +22,7 @@ import {
   openSync,
   readFileSync,
   readSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
@@ -101,6 +102,8 @@ function usage() {
 
   Usage
     npx solow [options]
+    npx solow backup  [--out <dir>] [--no-engine] [--data-dir <path>]
+    npx solow restore [<backup>] [--data-dir <path>]   (lists backups without <backup>)
 
   Options
     -p, --port <n>        Port for the web UI          (default ${DEFAULTS.web})
@@ -125,6 +128,8 @@ function usage() {
 
   On first run this creates the database, applies migrations, creates your workspace and
   generates the encryption keys — all under the data directory. Nothing leaves the machine.
+  Before an upgrade changes the database, a copy of it and its keys is kept in
+  <data-dir>/backups. \`backup\` works while SoloW runs; \`restore\` needs it stopped.
 `);
 }
 
@@ -446,6 +451,8 @@ function buildEnv(opts) {
     ),
     SOLOW_WORKTREE_ROOT: join(opts.dataDir, "worktrees"),
     SOLOW_REPO_CACHE_ROOT: join(opts.dataDir, "repos"),
+    // Imported Skills. Left unset, the web app put them under whatever directory `npx` ran in.
+    SOLOW_SKILLS_ROOT: join(opts.dataDir, "skills"),
     SOLOW_WS_PORT: String(opts.wsPort),
     // The two URLs a browser uses. An exported value wins: behind a LAN address or a proxy the
     // browser's origin is not localhost, and the sign-in check rejects any origin but this one.
@@ -514,11 +521,29 @@ async function waitForPort(p, timeoutMs) {
 
 // ---------------------------------------------------------------------------- run
 
-const children = [];
+/** The running process of each service, replaced on every restart. */
+const children = new Map();
 let shuttingDown = false;
 
+function envInt(name, fallback) {
+  const n = Number(process.env[name]);
+  return Number.isInteger(n) && n > 0 ? n : fallback;
+}
+
+/**
+ * The same policy as `scripts/lib/supervise.sh` (FINDINGS F2), and the same variables: a service
+ * that exits is started again after 1s, 2s, 4s… up to 30s, while the other two keep running. The
+ * count resets once a run has lasted a minute; a service that fails five times in a row is broken
+ * rather than unlucky, and only then does the whole stack stop — so a service manager above this
+ * one (docs/operations/running-as-a-service.md) sees the failure instead of a stack half up.
+ */
+const RESTART = {
+  limit: envInt("SOLOW_RESTART_LIMIT", 5),
+  stableMs: envInt("SOLOW_RESTART_STABLE_SECS", 60) * 1000,
+  maxDelayS: envInt("SOLOW_RESTART_MAX_DELAY", 30),
+};
+
 function start(name, bin, args, env, extra = {}) {
-  const child = spawn(bin, args, { env, stdio: ["ignore", "pipe", "pipe"], ...extra });
   const tag = `[${name}]`;
   const relay = (stream, out) => {
     let buffer = "";
@@ -529,24 +554,47 @@ function start(name, bin, args, env, extra = {}) {
       for (const line of lines) out.write(`${tag} ${line}\n`);
     });
   };
-  relay(child.stdout, process.stdout);
-  relay(child.stderr, process.stderr);
-  child.on("exit", (code, signal) => {
-    if (shuttingDown) return;
-    console.error(`\nsolow: ${name} exited (${signal ?? `code ${code}`}) — stopping the rest.`);
-    shutdown(1);
-  });
-  children.push(child);
-  return child;
+  let failures = 0;
+  const launch = () => {
+    const startedAt = Date.now();
+    const child = spawn(bin, args, { env, stdio: ["ignore", "pipe", "pipe"], ...extra });
+    relay(child.stdout, process.stdout);
+    relay(child.stderr, process.stderr);
+    child.on("exit", (code, signal) => {
+      if (shuttingDown) return;
+      const how = signal ?? `code ${code}`;
+      if (Date.now() - startedAt >= RESTART.stableMs) failures = 0;
+      failures += 1;
+      if (failures > RESTART.limit) {
+        console.error(
+          `\nsolow: ${name} exited (${how}) ${RESTART.limit} times in a row — stopping the rest.`,
+        );
+        shutdown(1);
+        return;
+      }
+      const delay = Math.min(2 ** (failures - 1), RESTART.maxDelayS);
+      console.error(
+        `\nsolow: ${name} exited (${how}) — restarting in ${delay}s (attempt ${failures} of ${RESTART.limit})`,
+      );
+      setTimeout(() => {
+        if (!shuttingDown) launch();
+      }, delay * 1000);
+    });
+    children.set(name, child);
+  };
+  launch();
 }
 
 function shutdown(code) {
   if (shuttingDown) return;
   shuttingDown = true;
-  for (const child of children) child.kill("SIGTERM");
+  // Set rather than passed only to exit(): if every service is gone before the timer below, Node
+  // ends on its own, and would otherwise report success for a stack that failed.
+  process.exitCode = code;
+  for (const child of children.values()) child.kill("SIGTERM");
   // Give them a moment to close listeners, then make sure the process actually ends.
   setTimeout(() => {
-    for (const child of children) child.kill("SIGKILL");
+    for (const child of children.values()) child.kill("SIGKILL");
     process.exit(code);
   }, 2000).unref();
 }
@@ -565,7 +613,60 @@ function openBrowser(url) {
   }
 }
 
+/**
+ * Marks the data folder as in use while the stack runs (FINDINGS F1). `solow restore` refuses
+ * while this names a live process, and a second `solow` on the same folder refuses to start — two
+ * stacks on one SQLite file and one engine directory would each run the other's Tasks. Same file
+ * and same rule as `scripts/lib/data-dir.sh`.
+ */
+function claimDataDir(dataDir) {
+  const file = join(dataDir, "solow.pid");
+  if (existsSync(file)) {
+    const pid = Number.parseInt(readFileSync(file, "utf8").trim(), 10);
+    if (Number.isInteger(pid) && pid > 0 && pid !== process.pid && processAlive(pid)) {
+      fail(
+        `SoloW is already running on ${dataDir} (pid ${pid}) — stop it first.\n` +
+          `  If nothing is running, the pid file is stale: remove ${file}`,
+      );
+    }
+  }
+  writeFileSync(file, `${process.pid}\n`);
+  process.on("exit", () => {
+    try {
+      if (readFileSync(file, "utf8").trim() === String(process.pid)) unlinkSync(file);
+    } catch {
+      // already gone
+    }
+  });
+}
+
+function processAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM";
+  }
+}
+
+/**
+ * `solow backup` and `solow restore`: the same code as the repo's `scripts/backup.sh`, bundled as
+ * `dist/db/backup.js` and run under the same Bun as the stack. Neither starts anything.
+ */
+function runBackupCommand(command, rest) {
+  const args = [...rest];
+  if (!args.includes("--data-dir")) {
+    args.push("--data-dir", process.env.SOLOW_HOME || join(homedir(), ".solow"));
+  }
+  const result = spawnSync(resolveBun(), [join(DIST, "db", "backup.js"), command, ...args], {
+    stdio: "inherit",
+  });
+  process.exit(result.status ?? 1);
+}
+
 async function main() {
+  const [command, ...rest] = process.argv.slice(2);
+  if (command === "backup" || command === "restore") runBackupCommand(command, rest);
   const opts = parseArgs(process.argv.slice(2));
   const bun = resolveBun();
 
@@ -592,6 +693,7 @@ async function main() {
       fail(`port ${p} (${label}) is already in use — free it or pass a different port.`);
     }
   }
+  claimDataDir(opts.dataDir);
 
   // Migrations run on every start, not just the first: drizzle skips the ones already recorded,
   // so it is cheap, and without it an upgraded `npx solow` would open an old database and 500 on

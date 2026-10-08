@@ -1,6 +1,6 @@
 # F16 — Platform, Deployment & Multi-Tenancy
 
-**Status:** Draft · **Owner:** Product / Operator · **Maturity:** Core / Edge · **Last reviewed:** 2026-08-17
+**Status:** Draft · **Owner:** Product / Operator · **Maturity:** Core / Edge · **Last reviewed:** 2026-10-08
 
 ## Summary
 
@@ -85,6 +85,28 @@ service and no telemetry.
 - **FR-19** The Project a member is working in is chosen from the navigator's title, from any
   screen, and switching keeps the section they were on. The Project in view is carried in the
   address, so a reload, a shared link and the back button all resolve to the same Project.
+
+### Backups and safe upgrades (local)
+- **FR-20** All local state lives in one data folder: the database, the keys that read it, the
+  engine's queue and runs in flight, Task worktrees, repository clones and imported Skills.
+- **FR-21** Before an upgrade changes the database, a consistent copy of the database and its keys
+  is taken. If the copy cannot be taken, the database is not changed. A fixed number of these
+  copies is kept, five by default.
+- **FR-22** One command backs up the data folder and works while SoloW runs; the copy of each
+  database is consistent and verified.
+- **FR-23** One command restores a backup. It is refused while SoloW runs on that folder, and what
+  it replaces is kept as a backup, so a restore can be undone.
+- **FR-24** A backup does not include worktrees, repository clones or imported Skills, and says so
+  ([Backup and Restore](../operations/backup-and-restore.md)).
+
+### Staying up (local)
+- **FR-25** When one of the three local services exits, it is started again with increasing
+  delays while the other two keep running.
+- **FR-26** A service that keeps failing stops the stack with a failure status, so a service
+  manager can act on it; a requested stop exits cleanly.
+- **FR-27** A run in flight when a service restarts continues where the run engine's recovery
+  allows ([Running as a Service](../operations/running-as-a-service.md)). A ready-made system
+  service definition is provided for long-running installs.
 
 ## Non-functional requirements
 
