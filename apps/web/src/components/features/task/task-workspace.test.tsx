@@ -1816,7 +1816,7 @@ describe("TaskWorkspace todo checklist", () => {
     );
   });
 
-  it("opens on the board while running, and takes a pick to the review when the gate opens", async () => {
+  it("opens on the board while running, and takes a pick back to it when the gate opens in view", async () => {
     let state: TaskDto["state"] = "running";
     const diff: SessionEventPayload = {
       kind: "diff",
@@ -1845,7 +1845,9 @@ describe("TaskWorkspace todo checklist", () => {
     fireEvent.mouseDown(screen.getByRole("tab", { name: /Changes/ }), { button: 0 });
     expect(screen.getByRole("tab", { name: /Changes/ }).getAttribute("aria-selected")).toBe("true");
 
-    // The run reaches its gate: the page moves to the review (E7), whatever was picked.
+    // The run reaches its gate while the page is up: the pick ends with the state, and the view
+    // falls back to the board, where the gate now is — it does not jump to Changes by itself (E7
+    // is about arriving at a waiting Task, not moving the reader).
     state = "review";
     payloads = [...payloads, diff];
     await waitFor(() => expect(sockets[0]).toBeDefined());
@@ -1857,12 +1859,9 @@ describe("TaskWorkspace todo checklist", () => {
         at: "2026-01-01T00:00:00.000Z",
       }),
     );
-    await waitFor(() =>
-      expect(screen.getByRole("tab", { name: /Changes/ }).getAttribute("aria-selected")).toBe(
-        "true",
-      ),
-    );
-    expect(board.getAttribute("aria-selected")).toBe("false");
+    await waitFor(() => expect(board.getAttribute("aria-selected")).toBe("true"));
+    await openGate();
+    expect(await screen.findByRole("button", { name: "Approve" })).toBeDefined();
   });
 
   it("opens a Task that is already waiting at its gate on the review", async () => {

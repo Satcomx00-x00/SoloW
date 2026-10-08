@@ -866,9 +866,11 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   /**
    * Which view is showing, when the operator has said.
    *
-   * The board by default, the Changes view when the Task waits at its gate (E7). A
-   * manual pick sticks until the Task changes state — a reviewer who opened the change during the
-   * run is taken to the review when the gate opens. The pick is also in the URL
+   * The board by default; the Changes view when the Task is *already* waiting at its gate on
+   * arrival (E7), so a decision is one click from wherever the link came from. Only on arrival: a
+   * gate that opens while the page is up leaves the view where it is — the board is what the
+   * operator was watching, an intermediate Workflow gate lives on it, and a view that moves by
+   * itself loses the reader's place. A manual pick sticks until the Task changes state. The pick is also in the URL
    * (`?tab=`), so a refresh stays put and a link to the Changes view is a link to the Changes
    * view; it is read once, on arrival, and written on every pick. An old `?tab=run` or `?tab=plan`
    * is not a view any more, and reads as no pick at all — which lands on the board, where both went.
@@ -877,6 +879,9 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   const [tabPick, setTabPick] = useState<{ tab: WorkspaceTab; state: TaskState | null } | null>(
     () => (urlTab ? { tab: urlTab, state: null } : null),
   );
+  // Whether this Task was at its gate when the page first saw it — the only case that opens on
+  // Changes. Cleared once it leaves the gate, so a later gate opened in view does not move it.
+  const landedAtGate = useRef<{ taskId: string; atGate: boolean } | null>(null);
   /**
    * The terminal pane, beside the board rather than instead of it: the board stays in the middle
    * and in sync, and an answer typed in the terminal settles the node on the board as well,
@@ -1268,9 +1273,16 @@ export function TaskWorkspace({ taskId }: { taskId: string }) {
   const branch = primary?.resultBranch ?? latest?.diffRef ?? null;
   // The gate's scope is always the latest capture; the tab may be showing an older round.
   const diffs = shownRound && shownRound.index !== latestRound ? shownRound.diffs : capturedDiffs;
-  // The board, except at the gate: a Task waiting for a decision opens on its Changes, where the
-  // footer's Approve / Request changes already sit (E7). A pick still wins until the state moves.
-  const autoTab: WorkspaceTab = t.state === "review" ? "changes" : "board";
+  // The board, except a Task found waiting at its gate on arrival, which opens on its Changes,
+  // where the footer's Approve / Request changes already sit (E7). A pick still wins until the
+  // state moves.
+  if (landedAtGate.current?.taskId !== t.id) {
+    landedAtGate.current = { taskId: t.id, atGate: t.state === "review" };
+  } else if (t.state !== "review") {
+    landedAtGate.current.atGate = false;
+  }
+  const autoTab: WorkspaceTab =
+    landedAtGate.current.atGate && t.state === "review" ? "changes" : "board";
   // A pick from the URL has no state yet: it holds until the first state change after arrival.
   const tab =
     tabPick && (tabPick.state === null || tabPick.state === t.state) ? tabPick.tab : autoTab;
