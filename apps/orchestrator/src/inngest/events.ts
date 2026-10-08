@@ -1,4 +1,6 @@
+import { createHash, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
+import { orchestratorEnv } from "../env.js";
 import { inngest } from "./client.js";
 
 /**
@@ -24,10 +26,27 @@ const eventEnvelopeSchema = z.object({
  */
 export interface EventPostDeps {
   send: (payload: { name: string; data: Record<string, unknown> }) => Promise<unknown>;
+  /**
+   * The secret the web app must present as `Authorization: Bearer <secret>`. Unset means the
+   * deployment never configured one, and the route then refuses everything: an open `/events`
+   * lets anyone who can reach the port start a run (FINDINGS B3).
+   */
+  secret?: string | undefined;
 }
 
 function defaultEventPostDeps(): EventPostDeps {
-  return { send: (payload) => inngest.send(payload) };
+  return {
+    send: (payload) => inngest.send(payload),
+    secret: orchestratorEnv().SOLOW_ORCHESTRATOR_SECRET,
+  };
+}
+
+/** Constant-time compare, so the secret cannot be recovered a byte at a time from response timing. */
+function bearerMatches(header: string | null, secret: string): boolean {
+  const presented = header?.startsWith("Bearer ") ? header.slice("Bearer ".length) : "";
+  const a = createHash("sha256").update(presented).digest();
+  const b = createHash("sha256").update(secret).digest();
+  return timingSafeEqual(a, b);
 }
 
 /**
@@ -41,6 +60,13 @@ export async function handleEventPost(
   req: Request,
   deps: EventPostDeps = defaultEventPostDeps(),
 ): Promise<Response> {
+  if (!deps.secret) {
+    return new Response("SOLOW_ORCHESTRATOR_SECRET is not configured", { status: 503 });
+  }
+  if (!bearerMatches(req.headers.get("authorization"), deps.secret)) {
+    return new Response("unauthorized", { status: 401 });
+  }
+
   let body: unknown;
   try {
     body = await req.json();

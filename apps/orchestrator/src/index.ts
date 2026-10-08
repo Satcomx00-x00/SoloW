@@ -177,7 +177,7 @@ const OUT_OF_BAND_HOME = ".solow-harness-home";
  *
  * Why this lives here rather than in the web API: the API is forbidden to reach the execution
  * host at all (`scripts/audit-executor-boundary.ts`), and a probe is by definition a spawn. Why
- * it is authenticated by a signed ticket rather than left open like `/events`: it starts a binary
+ * it is authenticated by a signed ticket rather than a shared bearer secret like `/events`: it starts a binary
  * an Owner chose, with that Owner's credential in its environment, so an unauthenticated route
  * here would be a remote command execution with a stolen wallet attached.
  *
