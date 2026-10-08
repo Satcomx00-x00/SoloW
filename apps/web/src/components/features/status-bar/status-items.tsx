@@ -15,6 +15,7 @@ import {
 import { useAppContext } from "@/lib/app-context";
 import { contribute, statusItemRegistry } from "@/lib/contributions";
 import { countLabel, pageRows, WHOLE_PAGE } from "@/lib/paged";
+import { taskHref } from "@/lib/task-href";
 import { STATE_STYLE } from "@/lib/task-states";
 import { cn } from "@/lib/utils";
 import { useWorkspaceEvents } from "@/lib/workspace-events";
@@ -103,7 +104,7 @@ function TaskTab({ task }: { task: TaskDto }) {
   const number = issue.data?.externalNumber ?? null;
   return (
     <Link
-      href={`/task/${task.id}`}
+      href={taskHref(task)}
       title={task.title}
       className={cn(
         "flex min-w-0 items-center gap-1 transition-colors hover:text-foreground",

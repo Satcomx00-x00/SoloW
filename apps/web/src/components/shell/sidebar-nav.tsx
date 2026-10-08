@@ -35,6 +35,7 @@ import {
   WORKSPACE_SECTIONS,
   workflowIdFromPath,
 } from "@/lib/navigation";
+import { taskHref } from "@/lib/task-href";
 import { STATE_STYLE } from "@/lib/task-states";
 import { useFlag } from "@/lib/use-flag";
 import { cn } from "@/lib/utils";
@@ -477,7 +478,7 @@ function RecentTaskRow({
   const style = STATE_STYLE[t.state];
   return (
     <NavItem
-      href={`/task/${t.id}`}
+      href={taskHref(t)}
       label={t.title}
       title={project ? `${t.title} · ${project.title}` : t.title}
       active={false}
