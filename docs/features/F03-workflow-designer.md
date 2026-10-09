@@ -458,8 +458,8 @@ pipeline*, the badge says *what is happening to it*.
   `StaleCursor` replay guard relies on it moving. A Step another Step branches to cannot be
   deleted (`WORKFLOW_STEP_BRANCHED_TO`): nulling the reference would silently turn "go to X" into
   "the pipeline ends here".
-- **Concurrency caps are still checked against the Task's Profile only.** `withinConcurrencyCap` in
-  `apps/web/src/server/dal/task.ts` reads `task.agentProfileId`, so a Workflow walking onto a Step
+- **Concurrency caps are still checked against the Task's Profile only.** `claimTaskRunSlot` in
+  `packages/db/src/task-claim.ts` reads `task.agentProfileId`, so a Workflow walking onto a Step
   whose Harness Profile is already at its cap is not checked at all. This issue opens that hole; it
   closes when the cap check learns about the cursor.
 

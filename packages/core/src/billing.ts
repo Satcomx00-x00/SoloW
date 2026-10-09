@@ -112,11 +112,6 @@ export function resolveHarnessRunEnv(
   return ok(env);
 }
 
-/** Enforce a per-Harness-Profile concurrency cap (spec FR-017). */
-export function withinConcurrencyCap(cap: number, runningCount: number): boolean {
-  return runningCount < cap;
-}
-
 export type FailureClass = "fail" | "park" | "credential_expired" | "interrupted";
 
 /**
