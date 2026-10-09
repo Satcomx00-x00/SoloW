@@ -86,10 +86,17 @@ const failedWith = (failure: HarnessProbeReport["failure"]): HarnessProbeReport 
   answered: false,
 });
 
+/** Spaced a second apart: rows made in one millisecond would tie on `createdAt`, the setup's order. */
+let added = 0;
 async function addRepository(workspaceId: string, name: string) {
-  await db
-    .insert(repository)
-    .values({ workspaceId, name, source: "local_path", location: `/srv/repos/${name}` });
+  added += 1;
+  await db.insert(repository).values({
+    workspaceId,
+    name,
+    source: "local_path",
+    location: `/srv/repos/${name}`,
+    createdAt: new Date(Date.UTC(2026, 0, 1, 0, 0, added)).toISOString(),
+  });
 }
 
 describe("connectClaude", () => {
