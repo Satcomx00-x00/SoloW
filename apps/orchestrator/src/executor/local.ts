@@ -158,7 +158,18 @@ export function createLocalExecutor(root: string): Executor {
           if (!terminal.closed) terminal.write(data);
         },
         resize: (cols, rows) => {
-          if (!terminal.closed) terminal.resize(cols, rows);
+          if (terminal.closed) return;
+          terminal.resize(cols, rows);
+          /*
+           * Told, as well as resized. The kernel signals a resize to the foreground process group
+           * of the terminal's session, and the child is not in one: `Bun.spawn` does not make the
+           * pseudo-terminal its controlling terminal (verified on Bun 1.4.2 — `ps` shows no TTY,
+           * and a `trap … WINCH` never fires). Without this a TUI kept drawing at its first size,
+           * and `docker exec -t` — which forwards a resize only on its own `SIGWINCH` — never
+           * passed one into the container at all (`stty size` there stayed 24×80). Only the
+           * direct child is told; a program the shell started learns the size on its next read.
+           */
+          proc.kill("SIGWINCH");
         },
         kill: () => proc.kill("SIGHUP"),
         exited: proc.exited,
