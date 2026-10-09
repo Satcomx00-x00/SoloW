@@ -867,6 +867,15 @@ export function startWebSocketServer(
       if (pathname === "/events" && req.method === "POST") return handleEventPost(req);
       if (pathname === "/api/inngest") return inngestServeHandler(req);
       if (pathname === "/announce" && req.method === "POST") return handleAnnouncePost(req, deps);
+      /*
+       * Bun closes a request that has not been answered in ten seconds (`idleTimeout`), and these
+       * two hold one open while a harness starts and answers — in a container, after the
+       * container itself is made and preflighted. Under that clock an Explain the harness took
+       * eleven seconds over reached the web as a dropped socket, though the route allows it two
+       * minutes. Each bounds itself (`PROBE_TIMEOUT_MS`, `EXPLAIN_TIMEOUT_MS`, the preflight's
+       * pull timeout), so the server's clock is switched off for them alone.
+       */
+      if (pathname === "/probe-agent" || pathname === "/explain") server.timeout(req, 0);
       if (pathname === "/probe-agent" && req.method === "POST") return handleProbePost(req, deps);
       if (pathname === "/executor-availability" && req.method === "POST")
         return handleDockerAvailabilityPost(req, deps);
