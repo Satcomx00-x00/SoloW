@@ -65,6 +65,10 @@ In force until 1.0 ([0031](./decisions/0031-focus-on-the-solo-power-user.md)).
 - **Weekly releases.** A release is cut once a week, not per merge. Database migrations and API
   changes are batched into those planned releases, and dependencies are upgraded on purpose, in
   their own change, never as a side effect.
+- **The Task page layout is frozen.** It is the screen people return to most, and it changed
+  layout about five times in four weeks. Fixes and copy changes go in; moving, adding or
+  removing its panels, tabs or toolbars waits until measured use (the Outcomes page, the
+  findings from daily use) shows a need, and that change names the evidence in its commit.
 - **Main is always green.** Do not merge on red; the release is gated on the verify run
   ([0021](./decisions/0021-commits-decide-the-version.md)), which includes the full end-to-end
   suite and the control check. When main goes red anyway, fixing it — or reverting the change
